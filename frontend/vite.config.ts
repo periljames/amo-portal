@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { ServerOptions } from 'node:https'
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions, type ResolvedConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import type {} from 'vitest/config'
 
 import {
   DEV_API_PROXY_PATTERN,
@@ -265,6 +266,9 @@ export default defineConfig(({ mode }) => {
       __PDFJS_ASSET_VERSION__: JSON.stringify(pdfJsAssetVersion),
     },
     plugins: [platformSpaNavigationPlugin(), pdfJsRuntimeAssetsPlugin(), react(), portalPrecacheManifestPlugin()],
+    test: {
+      exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
+    },
     server: {
       https,
       allowedHosts,

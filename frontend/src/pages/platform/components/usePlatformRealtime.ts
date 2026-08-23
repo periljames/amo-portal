@@ -34,13 +34,18 @@ type ParsedSseBlock = {
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
 
 class PlatformRealtimeRequestError extends Error {
+  readonly status: number;
+  readonly terminal: boolean;
+
   constructor(
-    readonly status: number,
+    status: number,
     message: string,
-    readonly terminal: boolean,
+    terminal: boolean,
   ) {
     super(message);
     this.name = "PlatformRealtimeRequestError";
+    this.status = status;
+    this.terminal = terminal;
   }
 }
 
@@ -79,7 +84,8 @@ function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
   return { ...event, snapshot: normalizedSnapshot };
 }
 
-export function shouldUseShellOperationsStream(enabled: boolean, _pathname: string): boolean {
+export function shouldUseShellOperationsStream(enabled: boolean, pathname: string): boolean {
+  void pathname;
   return enabled;
 }
 

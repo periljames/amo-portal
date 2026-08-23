@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Archive, CheckCircle2, Copy, FileClock, Landmark, Play, Plus, ShieldCheck } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   completeDocumentReview,
@@ -297,12 +298,17 @@ function TemporaryRevisionActions({ detail, tenant, onChanged }: Omit<Props, "ac
 }
 
 function ControlledCopyActions({ detail, tenant, onChanged }: Omit<Props, "activeView">) {
+  const [searchParams] = useSearchParams();
   const published = detail.revisions.find((revision) => revision.status === "PUBLISHED");
   const mutation = useMutation(onChanged);
   const [copyNumber, setCopyNumber] = useState("");
   const [location, setLocation] = useState("");
   const [holderName, setHolderName] = useState("");
-  const [selectedId, setSelectedId] = useState(detail.controlled_copies[0]?.id || "");
+  const requestedCopyId = searchParams.get("copy") || searchParams.get("scan") || "";
+  const initialCopyId = detail.controlled_copies.some((row) => row.id === requestedCopyId)
+    ? requestedCopyId
+    : detail.controlled_copies[0]?.id || "";
+  const [selectedId, setSelectedId] = useState(initialCopyId);
   const selected = detail.controlled_copies.find((row) => row.id === selectedId) || detail.controlled_copies[0];
   const events = selected ? COPY_EVENTS[selected.status] || [] : [];
   const [eventType, setEventType] = useState(events[0] || "TRANSFER");

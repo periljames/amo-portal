@@ -1,4 +1,4 @@
-"""Independently scalable durable-job worker processes.
+r"""Independently scalable durable-job worker processes.
 
 The HTTP API must not share its SQLAlchemy pool with background queues.  This
 entry point runs each selected worker family in a spawned process with a small,

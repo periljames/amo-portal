@@ -1,20 +1,17 @@
 """Canonical Quality API composition.
 
-The established QMS endpoints remain in ``canonical_router_legacy`` while the
-modern planning and provider-governance surfaces are isolated in dedicated
-routers. Keeping composition in this module preserves every existing import path
-used by the application.
+Core QMS endpoints are composed with dedicated planning and provider-governance
+routers in this module.
 """
 
 from fastapi import APIRouter
 
-from .canonical_router_legacy import *  # noqa: F401,F403
-from .canonical_router_legacy import (
+from .canonical_core_router import *  # noqa: F401,F403
+from .canonical_core_router import (
     _pg_set_read_timeout,
     _recover_qms_read_session,
     _table_columns,
     core_router,
-    legacy_router,
     router,
 )
 from .planner_calendar_enrichment_router import planner_calendar_enrichment_router
@@ -117,10 +114,8 @@ def _install_calendar_override(api_router: APIRouter) -> None:
     _insert_before_catchalls(api_router, calendar_routes)
 
 
-# Direct core-router consumers and both public URL families must receive the same
-# specialist contract, ahead of every generic module-path catch-all. The calendar
-# override removes the older exact projection route, avoiding duplicate OpenAPI
-# operations while retaining all non-planner legacy endpoints.
-for _api_router in (core_router, router, legacy_router):
+# Direct core-router consumers and the public Quality router receive the same
+# specialist contract ahead of every generic module-path catch-all.
+for _api_router in (core_router, router):
     _install_calendar_override(_api_router)
     _install_specialist_routes(_api_router)

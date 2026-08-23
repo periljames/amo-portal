@@ -13,7 +13,7 @@ const QMSEventsPage: React.FC = () => {
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const [tick, setTick] = useState(Date.now());
+  const [tick, setTick] = useState(() => Date.now());
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -55,7 +55,7 @@ const QMSEventsPage: React.FC = () => {
                 <td>{a.audit_ref} · {a.title}</td>
                 <td>{a.planned_start}</td>
                 <td>{a.planned_end || "—"}</td>
-                <td><button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/${a.id}`)}>Open</button></td>
+                <td><button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/${a.id}/setup`)}>Open</button></td>
                 <td>
                   <button type="button" className="secondary-chip-btn" onClick={() => {
                     if (!a.planned_start) return;

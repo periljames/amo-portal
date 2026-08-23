@@ -63,7 +63,6 @@ def test_assignment_guard_exposes_preflight_and_authoritative_overrides() -> Non
 def test_assignment_overrides_are_unique_and_promoted_before_catchall() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         cases = (
             (f"{prefix}/integrations/calendar/audit-schedules", "POST", "create_guarded_planner_audit_schedule"),
@@ -87,7 +86,6 @@ def test_preparation_routes_are_governed_and_promoted() -> None:
 
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         path = f"{prefix}/audits/{{audit_id}}/preparation-revisions"
         matches = _matching(router, path, "POST")

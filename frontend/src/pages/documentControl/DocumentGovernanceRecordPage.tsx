@@ -306,7 +306,7 @@ export default function DocumentGovernanceRecordPage() {
           </section>
 
           <section className="dgov-panel">
-            <header><div><FolderTree size={18} /><span><strong>Controlled structure</strong><small>Stable hierarchy identity remains separate from immutable publication revisions.</small></span></div><button type="button" className="dc-button" onClick={() => navigate(`${basePath}/structure`)}>Open full structure</button></header>
+            <header><div><FolderTree size={18} /><span><strong>Controlled structure</strong><small>Stable hierarchy identity remains separate from immutable publication revisions.</small></span></div><button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library?sort=type&direction=asc`)}>Open library structure</button></header>
             {data.structure ? <div className="dgov-structure"><div className="dgov-breadcrumb">{data.structure.parent ? <><span>{data.structure.parent.code}</span><ChevronRight size={14} /></> : null}<strong>{data.structure.code}</strong></div><h3>{data.structure.title}</h3><p>{data.structure.path}</p><div className="dgov-child-grid">{data.structure.children.map((child) => <article key={child.id}><small>{label(child.node_type)}</small><strong>{child.code}</strong><span>{child.title}</span></article>)}</div>{!data.structure.children.length ? <DocumentControlEmpty title="No child nodes" message="This node has no governed child procedure, form, annex, template or record series." /> : null}</div> : <DocumentControlEmpty title="Structure unresolved" message="Run reconciliation or assign this document to a governed hierarchy node. No implicit folder is treated as authoritative." />}
           </section>
 

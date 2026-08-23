@@ -2,11 +2,8 @@
 // QMS (Quality Management System) API helpers.
 //
 // This module is intentionally small and uses fetch + the existing auth token.
-// Mature workflow helpers still use the legacy backend compatibility API
-// while the visible frontend route surface has been consolidated under
-// /maintenance/:amoCode/qms. Do not delete these compatibility calls until
-// the canonical /api/maintenance/:amoCode/qms endpoints have response-shape
-// parity for the detailed document, audit, CAR, AeroDoc, and manpower flows.
+// Mature workflow helpers use the active Quality API contracts for detailed
+// document, audit, CAR, AeroDoc, and manpower flows.
 
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";

@@ -1,3 +1,4 @@
+"""Active Manuals API routes and shared route helpers."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, date

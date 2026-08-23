@@ -34,7 +34,7 @@ from . import tenant_saas_job_router as _tenant_saas_job_router  # noqa: E402
 from .metrics_lifecycle import install_platform_metrics_lifecycle  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .resend_email_router import router as resend_email_router  # noqa: E402
-from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
+from .command_queue_install import install_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
 
 router.include_router(console_router)
@@ -47,7 +47,7 @@ router.include_router(tenant_saas_router)
 router.include_router(_tenant_saas_job_router.router)
 router.include_router(resend_email_router)
 
-install_legacy_command_queue()
+install_command_queue()
 install_usage_meter_hardening(router)
 install_platform_metrics_lifecycle(router)
 

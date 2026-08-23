@@ -47,23 +47,6 @@ const TABS: Array<[DocumentWorkspaceView, string, typeof BookOpen]> = [
   ["history", "History", History],
 ];
 
-const LEGACY_VIEW_TO_TAB: Record<string, DocumentWorkspaceView> = {
-  overview: "overview",
-  revisions: "content",
-  changes: "changes",
-  workflow: "workflow",
-  authority: "workflow",
-  "temporary-revisions": "changes",
-  distribution: "distribution",
-  copies: "distribution",
-  compliance: "compliance",
-  applicability: "compliance",
-  reviews: "compliance",
-  external: "compliance",
-  integrations: "relationships",
-  history: "history",
-};
-
 const WORKFLOW_ORDER = [
   "DRAFT",
   "TECHNICAL_REVIEW",
@@ -99,8 +82,8 @@ function currentRevisionLabel(detail: DocumentDetailResponse): string {
 }
 
 function activeTabFromParams(params: URLSearchParams): DocumentWorkspaceView {
-  const requested = params.get("tab") || params.get("view") || "overview";
-  return LEGACY_VIEW_TO_TAB[requested] || "overview";
+  const requested = params.get("tab") || "overview";
+  return TABS.some(([tab]) => tab === requested) ? requested as DocumentWorkspaceView : "overview";
 }
 
 export default function DocumentControlRecordPage() {

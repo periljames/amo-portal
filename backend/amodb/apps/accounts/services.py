@@ -2574,15 +2574,12 @@ def build_billing_audit_export_csv(logs: List[models.BillingAuditLog]) -> str:
 
 
 def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
-    try:
-        return (
-            db.query(models.BillingInvoice)
-            .filter(models.BillingInvoice.amo_id == amo_id)
-            .order_by(models.BillingInvoice.issued_at.desc())
-            .all()
-        )
-    except (OperationalError, ProgrammingError):
-        return []
+    return (
+        db.query(models.BillingInvoice)
+        .filter(models.BillingInvoice.amo_id == amo_id)
+        .order_by(models.BillingInvoice.issued_at.desc())
+        .all()
+    )
 
 
 def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:

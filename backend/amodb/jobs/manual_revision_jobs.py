@@ -111,7 +111,7 @@ def _process_ocr(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
     # Imported lazily to avoid making router initialization depend on optional
     # OCR libraries. The extraction routine itself produces a precise failure if
     # the deployment lacks its OCR adapter.
-    from amodb.apps.manuals.router_legacy import (
+    from amodb.apps.manuals.core_router import (
         _extract_first_date,
         _extract_kcaa_reference,
         _extract_text_from_pdf_bytes,

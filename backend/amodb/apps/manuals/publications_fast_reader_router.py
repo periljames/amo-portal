@@ -18,7 +18,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import models
-from .router_legacy import _audit, _tenant_by_slug
+from .core_router import _audit, _tenant_by_slug
 
 
 router = APIRouter(

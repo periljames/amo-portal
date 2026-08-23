@@ -7,7 +7,7 @@ from . import audit_occurrence_assignment_router
 from . import audit_occurrence_completion_router
 from . import audit_controlled_document_collaboration_router
 from . import audit_public_collaboration_scope_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import public_router as quality_public_router
 
 
@@ -67,7 +67,7 @@ def _promote_occurrence_routes(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:insertion_index], *occurrence_routes, *remaining[insertion_index:]]
 
 
-for api_router in (router, legacy_router):
+for api_router in (router,):
     if not any("/assignment-eligibility" in str(getattr(item, "path", "")) for item in api_router.routes):
         api_router.include_router(audit_occurrence_assignment_router.router)
     if not any("/governed-document-requests" in str(getattr(item, "path", "")) for item in api_router.routes):

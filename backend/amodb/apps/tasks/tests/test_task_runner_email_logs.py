@@ -10,6 +10,7 @@ from amodb.database import Base
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import models as audit_models
 from amodb.apps.notifications import models as notification_models
+from amodb.apps.realtime import models as realtime_models
 from amodb.apps.tasks import models as task_models
 from amodb.apps.tasks import services as task_services
 
@@ -27,6 +28,8 @@ def db_session():
             account_models.AccountSecurityEvent.__table__,
             audit_models.AuditEvent.__table__,
             notification_models.EmailLog.__table__,
+            realtime_models.NotificationPreference.__table__,
+            realtime_models.NotificationTenantPreference.__table__,
             task_models.Task.__table__,
         ],
     )
@@ -82,6 +85,25 @@ def test_task_runner_creates_email_logs(db_session):
         email="supervisor@example.com",
         role=account_models.AccountRole.QUALITY_MANAGER,
     )
+    db_session.add_all(
+        [
+            realtime_models.NotificationTenantPreference(
+                amo_id=amo.id,
+                routine_email_enabled=True,
+            ),
+            realtime_models.NotificationPreference(
+                amo_id=amo.id,
+                user_id=owner.id,
+                email_enabled=True,
+            ),
+            realtime_models.NotificationPreference(
+                amo_id=amo.id,
+                user_id=supervisor.id,
+                email_enabled=True,
+            ),
+        ]
+    )
+    db_session.commit()
 
     now = datetime.utcnow()
 
@@ -125,5 +147,5 @@ def test_task_runner_creates_email_logs(db_session):
     assert all(log.status == notification_models.EmailStatus.SKIPPED_NO_PROVIDER for log in logs)
 
     audit_events = db_session.query(audit_models.AuditEvent).all()
-    assert any(event.action == "task_reminder" for event in audit_events)
+    assert any(event.action == "REMINDER_PROCESSED" for event in audit_events)
     assert any(event.action == "ESCALATED" for event in audit_events)

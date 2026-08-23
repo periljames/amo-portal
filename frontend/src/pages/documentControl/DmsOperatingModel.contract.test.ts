@@ -45,28 +45,19 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain('label: "Assistant"');
   });
 
-  it("keeps canonical and specialist compatibility URLs addressable while converging legacy lists", () => {
+  it("exposes only the seven canonical Document Control workspaces", () => {
     for (const route of [
+      "/maintenance/:amoCode/document-control",
+      "/maintenance/:amoCode/document-control/library",
       "/maintenance/:amoCode/document-control/changes",
       "/maintenance/:amoCode/document-control/distribution",
       "/maintenance/:amoCode/document-control/compliance",
       "/maintenance/:amoCode/document-control/reports",
       "/maintenance/:amoCode/document-control/administration",
-      "/maintenance/:amoCode/document-control/controlled-copies",
-      "/maintenance/:amoCode/document-control/structure",
-      "/maintenance/:amoCode/document-control/records",
     ]) expect(router).toContain(`path="${route}"`);
-
-    expect(pageExports).toContain('suffix="/changes" view="in-review"');
-    expect(pageExports).toContain('suffix="/changes" view="requests"');
-    expect(pageExports).toContain('suffix="/changes" view="authority"');
-    expect(pageExports).toContain('suffix="/changes" view="temporary-revisions"');
-    expect(pageExports).toContain('suffix="/compliance" view="reviews"');
-    expect(pageExports).toContain('suffix="/compliance" view="external-sources"');
-    expect(pageExports).toContain('suffix="/compliance" view="relationships"');
-    expect(pageExports).toContain('query.set("status", "ARCHIVED")');
-    expect(pageExports).toContain('suffix="/reports"');
-    expect(pageExports).toContain('suffix="/administration"');
+    for (const removed of ["/drafts", "/change-proposals", "/authority", "/tr", "/reviews", "/registers", "/settings", "/archive", "/structure", "/records"]) {
+      expect(router).not.toContain(`document-control${removed}"`);
+    }
   });
 
   it("gives Library the MD preset views and bounded rich controlled-information discovery", () => {
@@ -114,8 +105,7 @@ describe("DMS frontend operating-model contract", () => {
   });
 
   it("routes canonical Compliance to the bounded assurance portfolio", () => {
-    expect(pageExports).toContain("function DocControlReviewsPage()");
-    expect(pageExports).toContain("<CompliancePage />");
+    expect(pageExports).toContain('DocControlCompliancePage } from "./documentControl/DocumentControlCompliancePortfolioPage"');
     expect(complianceService).toContain("compliance-portfolio");
     expect(complianceService).toContain("per_page");
     expect(compliancePortfolio).toContain('data-testid="document-control-compliance"');
@@ -133,8 +123,7 @@ describe("DMS frontend operating-model contract", () => {
   });
 
   it("makes Reports a bounded controlled-evidence catalogue instead of a master-register-only page", () => {
-    expect(pageExports).toContain("function DocControlRegistersPage()");
-    expect(pageExports).toContain("<ReportsPage />");
+    expect(pageExports).toContain('DocControlReportsPage } from "./documentControl/DocumentControlReportsPage"');
     expect(reportsService).toContain("reports-portfolio");
     expect(reportsService).toContain("reports-register");
     expect(reportsService).toContain("per_page");
@@ -148,8 +137,7 @@ describe("DMS frontend operating-model contract", () => {
   });
 
   it("makes Administration a backend-governed low-frequency policy workspace", () => {
-    expect(pageExports).toContain("function DocControlSettingsPage()");
-    expect(pageExports).toContain("<AdministrationPage />");
+    expect(pageExports).toContain('DocControlAdministrationPage } from "./documentControl/DocumentControlAdministrationPage"');
     expect(administrationPage).toContain('data-testid="document-control-administration"');
     for (const heading of ["Governance defaults", "Workflow policy", "Retention classes", "Indexing and integration policy", "Physical controlled-copy policy", "Administrative tools"]) {
       expect(administrationPage).toContain(heading);
@@ -175,15 +163,10 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain("?governance=assignments");
   });
 
-  it("exposes exactly eight operational document workspace tabs and maps legacy views into them", () => {
+  it("exposes exactly eight operational document workspace tabs", () => {
     for (const tab of ["Overview", "Content", "Changes", "Workflow", "Distribution", "Compliance", "Relationships", "History"]) expect(recordPage).toContain(`"${tab}"`);
-    expect(recordPage).toContain('revisions: "content"');
-    expect(recordPage).toContain('authority: "workflow"');
-    expect(recordPage).toContain('"temporary-revisions": "changes"');
-    expect(recordPage).toContain('copies: "distribution"');
-    expect(recordPage).toContain('reviews: "compliance"');
-    expect(recordPage).toContain('external: "compliance"');
-    expect(recordPage).toContain('integrations: "relationships"');
+    expect(recordPage).not.toContain("LEGACY_VIEW_TO_TAB");
+    expect(recordPage).not.toContain('params.get("view")');
     expect(recordPage).toContain('next.set("tab", tab)');
   });
 

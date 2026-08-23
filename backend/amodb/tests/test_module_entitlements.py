@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.accounts import schemas as account_schemas  # noqa: E402
 from amodb.apps.accounts import services as account_services  # noqa: E402
+from amodb import entitlements as entitlement_service  # noqa: E402
 from amodb.apps.fleet.router import router as fleet_router  # noqa: E402
 from amodb.apps.maintenance_program.api import router as maintenance_router  # noqa: E402
 from amodb.apps.quality.router import router as quality_router  # noqa: E402
@@ -43,7 +44,21 @@ def _module_guards() -> Tuple[Tuple[str, object], ...]:
     )
 
 
+def _allow_billing_and_defer_subscription_to_entitlements(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_services,
+        "get_billing_access_status",
+        lambda db, amo_id: SimpleNamespace(has_access=True, lock_reason=None),
+    )
+    monkeypatch.setattr(
+        entitlement_service,
+        "_has_module_subscription",
+        lambda db, amo_id, module_key: None,
+    )
+
+
 def test_module_guard_blocks_without_entitlement(monkeypatch):
+    _allow_billing_and_defer_subscription_to_entitlements(monkeypatch)
     monkeypatch.setattr(
         account_services,
         "resolve_entitlements",
@@ -59,6 +74,7 @@ def test_module_guard_blocks_without_entitlement(monkeypatch):
 
 
 def test_module_guard_allows_with_entitlement(monkeypatch):
+    _allow_billing_and_defer_subscription_to_entitlements(monkeypatch)
     entitlements: Dict[str, account_schemas.ResolvedEntitlement] = {
         key: _make_entitlement(key)
         for key, _ in _module_guards()

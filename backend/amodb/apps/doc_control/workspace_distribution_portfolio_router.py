@@ -162,7 +162,7 @@ def get_distribution_portfolio(
                 "issued_at": _iso(row.issued_at),
                 "acknowledgement_required": bool(row.acknowledgement_required),
                 "recipients": recipient_counts.get(row.id, {"total": 0, "acknowledged": 0, "pending": 0, "overdue": 0}),
-                "target_path": f"/maintenance/{tenant_slug}/document-control/distribution/{row.id}",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=distribution&campaign={row.id}",
             })
     elif view in {"pending-acknowledgements", "overdue-acknowledgements"}:
         query = db.query(
@@ -218,7 +218,7 @@ def get_distribution_portfolio(
                     "name": (user.full_name or user.email) if user else "Recipient unavailable",
                 },
                 "reminder_count": int(recipient.reminder_count or 0),
-                "target_path": f"/maintenance/{tenant_slug}/document-control/distribution/{campaign.id}",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=distribution&campaign={campaign.id}",
             })
     else:
         query = db.query(dm.DocumentControlledCopy, manual_models.Manual).join(
@@ -264,7 +264,7 @@ def get_distribution_portfolio(
                 "location": row.location_text,
                 "due_at": _iso(row.due_back_at),
                 "issued_at": _iso(row.issued_at),
-                "target_path": f"/maintenance/{tenant_slug}/document-control/controlled-copies?copy={row.id}",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=distribution&copy={row.id}",
             })
 
     return {

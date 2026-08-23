@@ -1,5 +1,5 @@
 import { apiRequest } from "./apiClient";
-import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsLegacy";
+import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsCore";
 
 function normalizedAuditKey(value: string): string {
   return value

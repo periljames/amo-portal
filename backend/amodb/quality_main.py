@@ -35,7 +35,7 @@ from .apps.accounts.router_onboarding import router as accounts_onboarding_route
 from .apps.bootstrap.router import router as bootstrap_router
 from .apps.training.router import router as training_router, public_router as training_public_router
 from .apps.quality import router as quality_router, public_router as quality_public_router
-from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
+from .apps.quality.canonical_router import router as canonical_quality_router
 from .apps.quality.planner_schedule_router import (
     start_quality_planner_scheduler,
     stop_quality_planner_scheduler,
@@ -250,7 +250,6 @@ def deployment_profile() -> dict[str, object]:
         "included_modules": PROFILE_MODULES,
         "omitted_operational_modules": OMITTED_OPERATIONAL_MODULES,
         "canonical_quality_prefix": "/api/maintenance/{amo_code}/quality",
-        "compatibility_prefix": "/api/maintenance/{amo_code}/qms",
         "direct_quality_prefix": "/quality",
         "schema_strict": _schema_strict_enabled(),
     }
@@ -267,7 +266,6 @@ app.include_router(bootstrap_router)
 app.include_router(quality_public_router)
 app.include_router(quality_router)
 app.include_router(canonical_quality_router)
-app.include_router(legacy_qms_router)
 
 # Required Quality dependencies and evidence sources.
 app.include_router(training_router)

@@ -363,7 +363,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     [findingRows, selectedFindingId]
   );
 
-  const [tick, setTick] = useState(Date.now());
+  const [tick, setTick] = useState(() => Date.now());
   useEffect(() => { const id = window.setInterval(() => setTick(Date.now()), 60_000); return () => window.clearInterval(id); }, []);
 
   const upcomingAudit = useMemo(
@@ -386,7 +386,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       .map(([label, value]) => ({ label: label.slice(5), value }));
   }, [findingRows]);
 
-  const [clockMs, setClockMs] = useState(Date.now());
+  const [clockMs, setClockMs] = useState(() => Date.now());
   useEffect(() => { const id = window.setInterval(() => setClockMs(Date.now()), 60_000); return () => window.clearInterval(id); }, []);
   const readiness = schedule ? computeReadiness(schedule, upcomingAudit) : null;
   const dueBanner = getDueMessage(new Date(clockMs), schedule?.next_due_date, upcomingAudit?.planned_start, upcomingAudit?.planned_end);

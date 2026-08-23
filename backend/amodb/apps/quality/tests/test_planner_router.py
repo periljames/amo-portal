@@ -178,7 +178,7 @@ def _catchall_index(api_router, method: str) -> int:
 
 @pytest.mark.parametrize(
     "api_router",
-    [canonical_router.core_router, canonical_router.router, canonical_router.legacy_router],
+    [canonical_router.core_router, canonical_router.router],
 )
 def test_planner_routes_precede_generic_catchalls(api_router) -> None:
     assert _route_index(api_router, qms_planner_calendar_enriched) < _catchall_index(api_router, "GET")
@@ -197,7 +197,7 @@ def test_planner_routes_precede_generic_catchalls(api_router) -> None:
 
 
 def test_router_cloning_does_not_copy_planner_lifecycle_handlers() -> None:
-    for api_router in (canonical_router.core_router, canonical_router.router, canonical_router.legacy_router):
+    for api_router in (canonical_router.core_router, canonical_router.router):
         lifecycle_names = {
             getattr(handler, "__name__", "")
             for handler in [*api_router.on_startup, *api_router.on_shutdown]
@@ -225,12 +225,10 @@ def test_deployed_apps_have_one_enriched_calendar_per_public_family(app_module: 
         by_path.setdefault(str(route_item.path), []).append(route_item)
 
     canonical_path = "/api/maintenance/{amo_code}/quality/integrations/calendar"
-    legacy_path = "/api/maintenance/{amo_code}/qms/integrations/calendar"
     assert len(by_path.get(canonical_path, [])) == 1
-    assert len(by_path.get(legacy_path, [])) == 1
     assert all(
         getattr(route_item, "endpoint", None) is qms_planner_calendar_enriched
-        for route_item in [*by_path[canonical_path], *by_path[legacy_path]]
+        for route_item in by_path[canonical_path]
     )
 
     operation_ids = [

@@ -248,7 +248,7 @@ def _my_work(
             "priority": "OVERDUE" if due and due < now else row.priority,
             "due_at": row.due_at.isoformat() if row.due_at else None,
             "action_label": "Review change",
-            "target_path": f"/maintenance/{tenant_slug}/document-control/change-proposals/{row.id}",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=changes&change={row.id}",
             "_sort_at": due,
         })
 
@@ -391,7 +391,7 @@ def _my_work(
             "priority": "OVERDUE" if due and due < now else "ACTION" if row.status == "RECALLED" else "DUE",
             "due_at": row.due_back_at.isoformat() if row.due_back_at else None,
             "action_label": "Return recalled copy" if row.status == "RECALLED" else "Open copy custody",
-            "target_path": f"/maintenance/{tenant_slug}/document-control/controlled-copies?copy={row.id}",
+            "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=distribution&copy={row.id}",
             "_sort_at": due,
         })
 

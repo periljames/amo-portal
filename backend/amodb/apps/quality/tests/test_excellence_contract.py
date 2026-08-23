@@ -48,19 +48,15 @@ def test_excellence_routes_cover_readiness_controls_evidence_and_governance() ->
     assert expected.issubset(methods)
 
 
-def test_excellence_routes_are_mounted_on_canonical_and_legacy_tenant_routers() -> None:
+def test_excellence_routes_are_mounted_on_canonical_tenant_router() -> None:
     canonical_paths = {str(route.path) for route in canonical_router.router.routes}
-    legacy_paths = {str(route.path) for route in canonical_router.legacy_router.routes}
     assert "/api/maintenance/{amo_code}/quality/excellence/overview" in canonical_paths
     assert "/api/maintenance/{amo_code}/quality/excellence/controls" in canonical_paths
-    assert "/api/maintenance/{amo_code}/qms/excellence/overview" in legacy_paths
 
 
 def test_excellence_routes_precede_the_generic_qms_catchall() -> None:
     canonical_overview = "/api/maintenance/{amo_code}/quality/excellence/overview"
-    legacy_overview = "/api/maintenance/{amo_code}/qms/excellence/overview"
     assert _route_index(canonical_router.router, canonical_overview) < _catchall_index(canonical_router.router)
-    assert _route_index(canonical_router.legacy_router, legacy_overview) < _catchall_index(canonical_router.legacy_router)
 
 
 def test_excellence_models_are_registered_in_shared_metadata() -> None:

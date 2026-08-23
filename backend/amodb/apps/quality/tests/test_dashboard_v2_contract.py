@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from starlette.routing import Match
 
-from amodb.apps.quality.canonical_router import legacy_router, router as canonical_router
+from amodb.apps.quality.canonical_router import router as canonical_router
 from amodb.apps.quality.dashboard_v2 import (
     DASHBOARD_V2_CONTRACT,
     _build_action_queue,
@@ -31,15 +31,12 @@ def _first_matching_endpoint(api_router, path: str):
 
 def test_operational_dashboard_route_is_registered() -> None:
     canonical_path = "/api/maintenance/SAF/quality/dashboard-v2"
-    legacy_path = "/api/maintenance/SAF/qms/dashboard-v2"
-
     assert _first_matching_endpoint(canonical_router, canonical_path) is qms_operational_dashboard_v2
-    assert _first_matching_endpoint(legacy_router, legacy_path) is qms_operational_dashboard_v2
     assert DASHBOARD_V2_CONTRACT == "qms-operational-dashboard.v2"
 
 
 def test_operational_dashboard_route_is_before_module_catchall() -> None:
-    for api_router in (canonical_router, legacy_router):
+    for api_router in (canonical_router,):
         dashboard_index = next(
             index
             for index, route in enumerate(api_router.routes)

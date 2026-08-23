@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import audit_live_completion_models as _audit_live_completion_models  # noqa: F401
 from . import audit_live_completion_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import public_router as quality_public_router
 
 
@@ -60,7 +60,7 @@ def _register_and_promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *selected, *remaining[catchall_index:]]
 
 
-for _api_router in (router, legacy_router):
+for _api_router in (router,):
     _register_and_promote(_api_router)
 
 if not any("/quality/audit-verification/" in str(getattr(item, "path", "")) for item in quality_public_router.routes):

@@ -1,4 +1,4 @@
-// src/pages/qms/QmsCanonicalPage.tsx
+// src/pages/qms/QmsModuleWorkspacePage.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -233,10 +233,9 @@ const QMS_MODULES: ModuleMeta[] = [
       { label: "Programme", path: "audits/program" },
       { label: "Schedule", path: "audits/schedule" },
       { label: "Checklists", path: "audits/checklists" },
-      { label: "Reports", path: "audits/reports" },
       { label: "New", path: "audits/new", tone: "success" },
     ],
-    taskHint: "Run the full audit lifecycle without jumping into a separate legacy quality area.",
+    taskHint: "Run the full audit lifecycle in the Quality assurance workspace.",
     createEnabled: true,
     lifecycle: [
       { label: "Programme", path: "audits/program", description: "Annual and risk-based audit programme." },
@@ -1657,7 +1656,7 @@ function CockpitWorkspace({ amoCode, dashboard, loading }: { amoCode: string; da
   );
 }
 
-export default function QmsCanonicalPage(): React.ReactElement {
+export default function QmsModuleWorkspacePage(): React.ReactElement {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -1776,7 +1775,6 @@ export default function QmsCanonicalPage(): React.ReactElement {
     const run = () => {
       void import("../TrainingCompetencePage");
       void import("../qualityAudits/QualityAuditPlanSchedulePage");
-      void import("../QualityAuditRunHubPage");
       void import("../../services/training");
       void import("../../services/qms");
     };

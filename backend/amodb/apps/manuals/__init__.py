@@ -16,6 +16,6 @@ __all__ = ["router"]
 def __getattr__(name: str) -> Any:
     if name == "router":
         return import_module(f"{__name__}.router").router
-    if name in {"models", "schemas", "router_legacy", "publications_router"}:
+    if name in {"models", "schemas", "core_router", "publications_router"}:
         return import_module(f"{__name__}.{name}")
     raise AttributeError(name)

@@ -289,18 +289,15 @@ The global Quality enhancement host mounts specialist governed controls for:
 
 Collection-route names are excluded from audit-record detection, preventing paths such as `program`, `schedule`, `register`, `checklists` or `reports` from being treated as audit IDs.
 
-### Compatibility collection routes
+### Collection routes
 
-The cleanup audit intentionally retains two bounded collection routes under the canonical dispatcher:
+The canonical dispatcher retains the checklist collection route:
 
 ```text
 /quality/audits/checklists
-/quality/audits/reports
 ```
 
-They still provide collection/register context beneath specialist governance. Removing them would delete working functionality. Specialist record-level workflows own revision/approval/issue behavior.
-
-This is intentional compatibility ownership, not an unfinished duplicate audit engine.
+The superseded `/quality/audits/reports` collection route has been removed. Specialist record-level workflows own report revision, approval, and issue behavior.
 
 ## 17. Database and isolation
 

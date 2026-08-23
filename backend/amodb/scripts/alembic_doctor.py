@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 alembic_doctor.py
 
 Fixes common Alembic/Postgres failures automatically:

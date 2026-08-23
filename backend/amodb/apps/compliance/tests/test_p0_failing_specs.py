@@ -11,6 +11,7 @@ from amodb.apps.doc_control.state_machine import (
     transition_revision_package,
 )
 from amodb.apps.quality.transitions import transition_car
+from amodb.apps.training import gates
 from amodb.apps.training.gates import ensure_revision_training_gate_satisfied
 from amodb.security import require_capability
 
@@ -116,7 +117,8 @@ def test_ledger_fail_closed_blocks_critical_transition() -> None:
         )
 
 
-def test_training_gate_blocks_release_and_finding_closure() -> None:
+def test_training_gate_blocks_release_and_finding_closure(monkeypatch) -> None:
+    monkeypatch.setattr(gates, "unresolved_training_gate_items", lambda *_args, **_kwargs: [{}])
     package = SimpleNamespace(package_id="PKG-1", requires_training=True, training_gate_policy="ALL_ASSIGNEES")
     with pytest.raises(HTTPException) as exc:
         ensure_revision_training_gate_satisfied(_DB(unresolved=1), amo_id="A1", package=package)

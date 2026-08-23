@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 
 
 def _is_assurance_case_route(route_item) -> bool:
@@ -51,4 +51,3 @@ def _promote_assurance_case_routes(api_router: APIRouter) -> None:
 
 
 _promote_assurance_case_routes(router)
-_promote_assurance_case_routes(legacy_router)

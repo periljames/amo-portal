@@ -50,7 +50,7 @@ def test_specialist_personal_work_has_explicit_kinds_and_canonical_targets() -> 
     assert '"kind": "CONTROLLED_COPY"' in source
     assert "?tab=workflow#document-control-record-actions" in source
     assert "?tab=changes#document-control-record-actions" in source
-    assert "/document-control/controlled-copies?copy=" in source
+    assert "?tab=distribution&copy=" in source
 
     external = _source("backend/amodb/apps/doc_control/workspace_external_assessment_router.py")
     assert '"kind": "EXTERNAL_SOURCE_ACTION"' in external

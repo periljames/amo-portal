@@ -12,7 +12,6 @@ import {
   FileCheck2,
   FileText,
   FilterX,
-  FolderTree,
   Heart,
   History,
   Link2,
@@ -284,8 +283,7 @@ export default function DocumentLibraryHubPage() {
     subtitle={selectedJob ? selectedJob.selectionPrompt : "Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."}
     canControl={canControl}
     actions={<>
-      <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/structure`)}><FolderTree size={14} /> Browse hierarchy</button>
-      {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/records`)}><Archive size={14} /> Retained records</button> : null}
+      {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/reports?view=retention`)}><Archive size={14} /> Retained records</button> : null}
     </>}
   >
     <section className="dlibrary" data-testid="integrated-document-library" aria-busy={refreshing}>

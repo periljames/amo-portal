@@ -206,7 +206,7 @@ def get_reports_register(
                 date_value=campaign.issued_at or campaign.created_at,
                 due_value=campaign.due_at,
                 context="Acknowledgement required" if campaign.acknowledgement_required else "No acknowledgement required",
-                target_path=f"distribution/{campaign.id}",
+                target_path=f"library/{manual.id}?tab=distribution&campaign={campaign.id}",
             ))
 
     elif view == "acknowledgements":
@@ -244,7 +244,7 @@ def get_reports_register(
                 date_value=recipient.acknowledged_at or recipient.notified_at,
                 due_value=recipient.due_at,
                 context=f"Reminders: {recipient.reminder_count}",
-                target_path=f"distribution/{campaign.id}",
+                target_path=f"library/{manual.id}?tab=distribution&campaign={campaign.id}",
             ))
 
     elif view == "controlled-copies":
@@ -280,7 +280,7 @@ def get_reports_register(
                 date_value=copy.issued_at,
                 due_value=copy.due_back_at,
                 context=copy.location_text,
-                target_path="controlled-copies",
+                target_path=f"library/{manual.id}?tab=distribution&copy={copy.id}",
                 details={"copy_number": copy.copy_number, "format": copy.format},
             ))
 
@@ -401,7 +401,7 @@ def get_reports_register(
                 date_value=tr.effective_date,
                 due_value=tr.expiry_date,
                 context=tr.approval_status,
-                target_path=f"tr/{tr.id}",
+                target_path=f"library/{manual.id}?tab=changes&temporary_revision={tr.id}",
             ))
 
     elif view == "authority":
@@ -547,7 +547,7 @@ def get_reports_register(
                 status=record.status,
                 date_value=record.submitted_at,
                 context=f"{record.retention_years or 'Default'} years · {record.retention_disposition}",
-                target_path="records",
+                target_path=f"library/{manual.id}?tab=history&record={record.id}",
                 details={"artifact_filename": record.artifact_filename, "retention_years": record.retention_years, "disposition": record.retention_disposition},
             ))
 
