@@ -62,6 +62,45 @@ services:
       retries: 5
       start_period: 30s
 
+  platform-ops-gateway:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - uvicorn
+      - amodb.platform_ops_main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --workers
+      - "1"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${FORWARDED_ALLOW_IPS:-*}
+    environment:
+      <<: *backend-environment
+      DB_POOL_SIZE: ${PLATFORM_OPS_DB_POOL_SIZE:-3}
+      DB_MAX_OVERFLOW: ${PLATFORM_OPS_DB_MAX_OVERFLOW:-2}
+      DB_POOL_TIMEOUT: ${PLATFORM_OPS_DB_POOL_TIMEOUT:-3}
+      DB_STATEMENT_TIMEOUT_MS: ${PLATFORM_OPS_DB_STATEMENT_TIMEOUT_MS:-15000}
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: ${PLATFORM_OPS_DB_IDLE_TX_TIMEOUT_MS:-30000}
+      DB_READ_ONLY_TRANSACTIONS: "true"
+      PLATFORM_OPS_POLL_INTERVAL_SEC: ${PLATFORM_OPS_POLL_INTERVAL_SEC:-2}
+      PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC: ${PLATFORM_OPS_SNAPSHOT_INTERVAL_SEC:-10}
+      PLATFORM_OPS_PROMETHEUS_URL: ${PLATFORM_OPS_PROMETHEUS_URL:-}
+    # Keep the control plane private. The frontend/reverse proxy owns public
+    # same-origin /ops/* routing and forwards it to this loopback service.
+    ports:
+      - "127.0.0.1:${PLATFORM_OPS_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   saas-worker:
     <<: *backend
     depends_on:

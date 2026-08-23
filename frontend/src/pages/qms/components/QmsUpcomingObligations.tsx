@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import type { QmsOperationalObligation } from "../../../types/qms";
 import {
   normaliseQmsCalendarEntries,
+  parseQmsDate,
   qmsDateLabel,
   qmsModuleLabel,
   qmsRelativeDateLabel,
@@ -15,10 +16,12 @@ type Props = {
   amoCode: string;
   items: QmsOperationalObligation[];
   fallbackRoute: string;
+  asOf?: string | null;
 };
 
-const QmsUpcomingObligations: React.FC<Props> = ({ amoCode, items, fallbackRoute }) => {
-  const rows = normaliseQmsCalendarEntries(items, new Date(), 10);
+const QmsUpcomingObligations: React.FC<Props> = ({ amoCode, items, fallbackRoute, asOf }) => {
+  const referenceNow = parseQmsDate(asOf) || new Date();
+  const rows = normaliseQmsCalendarEntries(items, referenceNow, 10);
 
   return (
     <section className="qms-overview-section" aria-labelledby="qms-upcoming-title">
@@ -37,7 +40,7 @@ const QmsUpcomingObligations: React.FC<Props> = ({ amoCode, items, fallbackRoute
               <Link to={safeQmsInternalLink(item.link, fallbackRoute, amoCode)}>
                 <time dateTime={item.date || undefined}>
                   <strong>{qmsDateLabel(item.date)}</strong>
-                  <small>{qmsRelativeDateLabel(item.date)}</small>
+                  <small>{qmsRelativeDateLabel(item.date, referenceNow)}</small>
                 </time>
                 <span className="qms-obligation-list__body">
                   <strong>{item.title}</strong>

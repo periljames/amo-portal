@@ -132,6 +132,7 @@ const QualityEnhancementsHost: React.FC = () => {
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
   const canonicalOccurrence = Boolean(route && auditSessionStage);
   const legacyOccurrence = Boolean(route && !auditSessionStage);
+  const checklistLibraryRoute = /^\/maintenance\/[^/]+\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname);
 
   useEffect(() => {
     document.documentElement.classList.toggle("quality-audit-canonical-occurrence", canonicalOccurrence);
@@ -151,7 +152,7 @@ const QualityEnhancementsHost: React.FC = () => {
       <QualityEffectivenessResponseHost amoCode={amoCode} />
       <QualityPlannerStrategicHost amoCode={amoCode} />
       <QualityProgrammeOccurrenceHost amoCode={amoCode} />
-      <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={auditSessionStage === "prepare" ? "checklist" : auditSessionStage ? null : route?.activeTab} />
+      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={auditSessionStage === "prepare" ? "checklist" : auditSessionStage ? null : route?.activeTab} /> : null}
     </Suspense> : null}
 
     {route ? <>
