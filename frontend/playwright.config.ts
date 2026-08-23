@@ -1,7 +1,19 @@
 import { defineConfig } from "@playwright/test";
+import { join } from "node:path";
 
 const liveDocumentGovernance = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const useStableChromiumChannel = process.env.E2E_CHROMIUM_CHANNEL === "1";
+const configuredAdminStorageState = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
+const generatedAdminStorageState = join(process.cwd(), "test-results", ".auth", "dms-admin-storage.json");
+const adminStorageState = configuredAdminStorageState || generatedAdminStorageState;
+
+// Test modules are collected before globalSetup executes. Publish the generated
+// storage-state path while the config is evaluated so authenticated suites do
+// not capture an empty value and fall back to per-test login restoration.
+if (liveDocumentGovernance && !configuredAdminStorageState) {
+  process.env.E2E_DMS_ADMIN_STORAGE_STATE = adminStorageState;
+  process.env.E2E_DMS_ADMIN_STORAGE_STATE_GENERATED = "1";
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -23,6 +35,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:4173",
     trace: "on-first-retry",
+    ...(liveDocumentGovernance ? { storageState: adminStorageState } : {}),
     // Keep the default project on the regular Chromium channel when a job opts
     // in. Jobs that explicitly select --project=chromium use the same regular
     // Chromium channel below so they never fall back to chromium-headless-shell.
