@@ -31,7 +31,9 @@ services:
       DB_POOL_TIMEOUT: "${PORTAL_DB_POOL_TIMEOUT:-5}"
       PORTAL_API_PROCESS_COUNT: "${PORTAL_API_PROCESS_COUNT:-2}"
       UVICORN_BACKLOG: "${UVICORN_BACKLOG:-4096}"
-      FORWARDED_ALLOW_IPS: "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+      # Must be the actual host NGINX / load-balancer source IPs or CIDRs.
+      # Production intentionally has no loopback/wildcard fallback.
+      FORWARDED_ALLOW_IPS: "${FORWARDED_ALLOW_IPS:?Set FORWARDED_ALLOW_IPS to the trusted reverse-proxy IPs or CIDRs}"
       AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
       AUTH_RATE_LIMIT_REDIS_URL: "redis://auth-rate-limit-redis:6379/0"
       PORTAL_WORKER_PROCESS_COUNT: "${PORTAL_WORKER_PROCESS_COUNT:-5}"
