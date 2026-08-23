@@ -24,6 +24,7 @@ from . import (
     generation_scale_policy,
     lifecycle_error_policy,
     lineage,
+    notification_resilience_policy,
     protected_rest_exact_policy,
     roster_control,
     shift_scheduling_policy,
@@ -98,6 +99,10 @@ configured_rule_policy.install_service_policy(rostering_route_module.services)
 # Large generated rosters must not repeatedly materialize every assignment in
 # the version simply to lock the parent row or return the current batch.
 generation_scale_policy.install(rostering_route_module.services)
+# Best-effort roster email must never poison the authoritative roster
+# transaction. Compact workflow correlation ids to the canonical 64-character
+# identifier contract and use a dedicated notification transaction.
+notification_resilience_policy.install()
 compliance_policy.install_validation_policy()
 # Replace candidate sampling with exact continuous interval coverage before any
 # validation request can run. The compatibility seam inside compliance_policy
