@@ -110,7 +110,9 @@ def ai_tenant_policy_update(
         raw_existing_status = getattr(existing, "status", "") if existing is not None else ""
         existing_status = str(getattr(raw_existing_status, "value", raw_existing_status) or "").strip().upper()
         requested_status = (
-            "DISABLED"
+            "SUSPENDED"
+            if existing_status == "SUSPENDED"
+            else "DISABLED"
             if not payload.enabled
             else "TRIAL"
             if existing_status == "TRIAL"
@@ -131,8 +133,8 @@ def ai_tenant_policy_update(
             },
         }
         # This endpoint edits AI policy, not commercial entitlement state or
-        # dates. Keep an existing trial state and scheduled/expiring window
-        # intact; operators must use module-subscription controls to change them.
+        # dates. Keep existing trial/suspended states and scheduled/expiring
+        # windows intact; module-subscription controls own entitlement changes.
         if existing is not None:
             change["effective_from"] = existing.effective_from
             change["effective_to"] = existing.effective_to
