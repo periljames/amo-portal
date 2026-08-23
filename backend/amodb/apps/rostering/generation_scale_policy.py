@@ -16,7 +16,7 @@ scoped to the target tenant/version.
 
 from typing import Any
 
-from sqlalchemy.orm import lazyload, selectinload
+from sqlalchemy.orm import lazyload, noload, selectinload
 
 from . import assignments as assignment_module
 from . import common, models, schemas
@@ -33,14 +33,26 @@ def _load_assignments_by_id(
 ) -> dict[str, models.RosterAssignment]:
     if not assignment_ids:
         return {}
+
+    # The root query is bounded by assignment id, but several related models
+    # define joined/selectin defaults whose backrefs can expand that small set
+    # into tenant-wide personnel, department or shift history. Serialization
+    # only needs scalar display fields plus task-link hours, so suppress every
+    # unrelated nested relationship explicitly.
     rows = (
         db.query(models.RosterAssignment)
         .options(
-            selectinload(models.RosterAssignment.user),
-            selectinload(models.RosterAssignment.department),
-            selectinload(models.RosterAssignment.base_station),
-            selectinload(models.RosterAssignment.shift_template),
-            selectinload(models.RosterAssignment.task_links),
+            noload(models.RosterAssignment.version),
+            selectinload(models.RosterAssignment.user).options(noload("*")),
+            selectinload(models.RosterAssignment.department).options(noload("*")),
+            selectinload(models.RosterAssignment.base_station).options(noload("*")),
+            selectinload(models.RosterAssignment.shift_template).options(noload("*")),
+            selectinload(models.RosterAssignment.task_links).options(
+                noload(models.RosterTaskAssignmentLink.roster_assignment),
+                selectinload(models.RosterTaskAssignmentLink.task_assignment).options(
+                    noload("*")
+                ),
+            ),
         )
         .filter(
             models.RosterAssignment.amo_id == amo_id,
@@ -237,11 +249,15 @@ def install(service_module) -> None:
         # lazyload keeps the lock query bounded while preserving correctness:
         # lifecycle/validation code that genuinely needs a collection can load
         # it later through the same session. The period remains immediately
-        # available because generation and validation both require it.
+        # available because generation and validation both require it, but its
+        # own versions backref must be suppressed or it recreates the entire
+        # period -> versions -> assignments/findings/exceptions graph.
         return (
             db.query(models.RosterVersion)
             .options(
-                selectinload(models.RosterVersion.period),
+                selectinload(models.RosterVersion.period).noload(
+                    models.RosterPeriod.versions
+                ),
                 lazyload(models.RosterVersion.source_version),
                 lazyload(models.RosterVersion.assignments),
                 lazyload(models.RosterVersion.validation_findings),
