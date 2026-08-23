@@ -253,7 +253,11 @@ const AdminSetupCentreResendPage: React.FC = () => {
     if (isSuperuser && !selectedAmo) return;
 
     const requestId = ++requestRef.current;
-    initial ? setLoading(true) : setRefreshing(true);
+    if (initial) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
 
     try {
       await syncContext(effectiveAmoId);
@@ -814,7 +818,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
           <Link to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=workforce`}>
             <BriefcaseBusiness size={18} /><span><strong>Workforce</strong><small>Contracts, bases and work patterns</small></span><ArrowRight size={15} />
           </Link>
-          <Link to={`/maintenance/${encodeURIComponent(amoCode)}/document-control/settings`}>
+          <Link to={`/maintenance/${encodeURIComponent(amoCode)}/document-control/administration`}>
             <BookOpenCheck size={18} /><span><strong>Document Control</strong><small>Ownership, workflows and registers</small></span><ArrowRight size={15} />
           </Link>
           <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/email-settings`}>

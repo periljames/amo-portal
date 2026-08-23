@@ -3,13 +3,13 @@
 from . import calculations, models, permissions, schemas, services
 from . import bulk_models, governance_models, hr_people_directory, hr_people_facets, hr_service
 from .leave_balance_locking import load_leave_balance_for_update
-from .legacy_guard import install_legacy_default_pattern_guard
+from .retired_pattern_guard import install_retired_default_pattern_guard
 from .work_pattern_assignment_locking import install_default_day_pattern_lock_scope
 
 services._leave_balance = load_leave_balance_for_update
 hr_people_directory.list_people_facets = hr_people_facets.list_people_facets
 install_default_day_pattern_lock_scope(hr_service)
-install_legacy_default_pattern_guard(hr_service)
+install_retired_default_pattern_guard(hr_service)
 
 # Route contract batches through the eligible-only snapshot wrapper. The
 # durable operation service remains shared for status, idempotency and retry.

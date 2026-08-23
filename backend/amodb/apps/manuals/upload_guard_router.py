@@ -17,7 +17,7 @@ from amodb.apps.doc_control.knowledge_indexer import index_revision_background
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
-from . import router_legacy as legacy
+from . import core_router as core
 from .pdf_reader_precompute import precompute_pdf_reader_assets
 
 
@@ -30,8 +30,8 @@ def _require_upload_scope(
     tenant_slug: str,
     current_user: account_models.User,
 ) -> None:
-    legacy._require_manual_control_user(current_user)
-    tenant = legacy._tenant_by_slug(db, tenant_slug)
+    core._require_manual_control_user(current_user)
+    tenant = core._tenant_by_slug(db, tenant_slug)
     if (
         not getattr(current_user, "is_superuser", False)
         and str(current_user.amo_id or "") != str(tenant.amo_id)
@@ -50,7 +50,7 @@ async def preview_docx_upload_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    return await legacy.preview_docx_upload(
+    return await core.preview_docx_upload(
         tenant_slug=tenant_slug,
         file=file,
         db=db,
@@ -66,7 +66,7 @@ async def preview_pdf_upload_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    return await legacy.preview_pdf_upload(
+    return await core.preview_pdf_upload(
         tenant_slug=tenant_slug,
         file=file,
         db=db,
@@ -92,7 +92,7 @@ async def upload_docx_revision_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    result = await legacy.upload_docx_revision(
+    result = await core.upload_docx_revision(
         tenant_slug=tenant_slug,
         request=request,
         code=code,
@@ -129,7 +129,7 @@ async def upload_pdf_revision_guarded(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_upload_scope(db, tenant_slug=tenant_slug, current_user=current_user)
-    result = await legacy.upload_pdf_revision(
+    result = await core.upload_pdf_revision(
         tenant_slug=tenant_slug,
         request=request,
         code=code,

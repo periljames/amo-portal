@@ -63,7 +63,7 @@ from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.aerodoc_router import router as aerodoc_router
 from .apps.doc_control.router import router as doc_control_router
 from .apps.technical_records.router import router as technical_records_router
-from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
+from .apps.quality.canonical_router import router as canonical_quality_router
 from .apps.quality.planner_schedule_router import (
     start_quality_planner_scheduler,
     stop_quality_planner_scheduler,
@@ -635,5 +635,4 @@ app.include_router(manuals_branding_router)
 app.include_router(doc_control_router)
 app.include_router(technical_records_router)
 app.include_router(canonical_quality_router)
-app.include_router(legacy_qms_router)
 app.include_router(aerodoc_router)

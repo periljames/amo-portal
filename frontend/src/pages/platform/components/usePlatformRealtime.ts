@@ -37,7 +37,11 @@ class PlatformRealtimeRequestError extends Error {
   readonly status: number;
   readonly terminal: boolean;
 
-  constructor(status: number, message: string, terminal: boolean) {
+  constructor(
+    status: number,
+    message: string,
+    terminal: boolean,
+  ) {
     super(message);
     this.name = "PlatformRealtimeRequestError";
     this.status = status;
@@ -80,7 +84,8 @@ function normalizedEvent(event: PlatformConsoleEvent): PlatformConsoleEvent {
   return { ...event, snapshot: normalizedSnapshot };
 }
 
-export function shouldUseShellOperationsStream(enabled: boolean, _pathname: string): boolean {
+export function shouldUseShellOperationsStream(enabled: boolean, pathname: string): boolean {
+  void pathname;
   return enabled;
 }
 

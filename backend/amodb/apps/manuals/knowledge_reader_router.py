@@ -23,7 +23,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .publications_fast_reader_router import _load_publication
-from .router_legacy import _tenant_by_slug
+from .core_router import _tenant_by_slug
 
 
 router = APIRouter(prefix="/manuals", tags=["Publications Knowledge Graph"])

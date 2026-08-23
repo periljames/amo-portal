@@ -217,10 +217,10 @@ export default function DocumentControlAdministrationPage() {
 
         <DocumentControlSection title="Administrative tools" description="Specialist configuration remains available without occupying permanent DMS navigation.">
           <div className="dms-home__quick-actions dms-admin__tools">
-            <button type="button" onClick={() => navigate(`${basePath}/structure`)}><FolderTree size={16} /><span><strong>Hierarchy & taxonomy</strong><small>Manage controlled document structure and aliases</small></span></button>
+            <button type="button" onClick={() => navigate(`${basePath}/library?sort=type&direction=asc`)}><FolderTree size={16} /><span><strong>Hierarchy & taxonomy</strong><small>Review controlled document structure and aliases</small></span></button>
             <button type="button" onClick={() => navigate(`${basePath}/library?type=FORM`)}><FileStack size={16} /><span><strong>Controlled templates</strong><small>Review form and template source documents</small></span></button>
-            <button type="button" onClick={() => navigate(`${basePath}/records`)}><Archive size={16} /><span><strong>Retained generated records</strong><small>Review retention and disposition evidence</small></span></button>
-            <button type="button" onClick={() => navigate(`${basePath}/controlled-copies`)}><Boxes size={16} /><span><strong>Physical copy operations</strong><small>Register, locate, recall and reconcile numbered copies</small></span></button>
+            <button type="button" onClick={() => navigate(`${basePath}/reports?view=retention`)}><Archive size={16} /><span><strong>Retained generated records</strong><small>Review retention and disposition evidence</small></span></button>
+            <button type="button" onClick={() => navigate(`${basePath}/distribution?view=physical-copies`)}><Boxes size={16} /><span><strong>Physical copy operations</strong><small>Register, locate, recall and reconcile numbered copies</small></span></button>
             <button type="button" onClick={() => navigate(`${basePath}/compliance?view=relationships`)}><Link2 size={16} /><span><strong>Integration mappings</strong><small>Review governed cross-module relationships</small></span></button>
             <button type="button" onClick={() => navigate(`${basePath}/library?indexing_status=FAILED`)}><FileCog size={16} /><span><strong>Indexing exceptions</strong><small>Resolve documents requiring indexing attention</small></span></button>
           </div>

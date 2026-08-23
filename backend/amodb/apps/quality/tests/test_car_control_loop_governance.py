@@ -91,7 +91,7 @@ def _registered_endpoint(api_router, *, suffix: str, method: str):
     return matches[0].endpoint
 
 
-@pytest.mark.parametrize("router_name", ["router", "legacy_router"])
+@pytest.mark.parametrize("router_name", ["router"])
 def test_registered_control_loop_routes_use_strict_authority_and_evidence_handlers(router_name: str) -> None:
     from amodb.apps.quality import canonical_router
     from amodb.apps.quality import car_control_loop_authority_guard as authority

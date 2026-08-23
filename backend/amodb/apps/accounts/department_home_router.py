@@ -75,8 +75,8 @@ QUICK_ACTIONS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "document-control": [
         ("Controlled library", "Open current controlled information", "/document-control/library"),
-        ("Drafts", "Review documents in workflow", "/document-control/drafts"),
-        ("Review planner", "Review upcoming document reviews", "/document-control/reviews"),
+        ("Changes", "Review documents in workflow", "/document-control/changes"),
+        ("Compliance", "Review upcoming document reviews", "/document-control/compliance?view=reviews"),
     ],
     "reliability": [
         ("Reliability reports", "Review fleet reliability analysis", "/reliability/reports"),

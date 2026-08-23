@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 
 
 def _is_guard_route(route_item) -> bool:
@@ -41,4 +41,3 @@ def _promote(api_router: APIRouter) -> None:
 
 
 _promote(router)
-_promote(legacy_router)

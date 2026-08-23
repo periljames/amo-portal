@@ -17,6 +17,7 @@ class PlatformCommandDefinition:
     safe_to_retry: bool
     rollback_supported: bool
     output_redaction_rules: list[str]
+    supported: bool = True
 
 
 _COMMANDS = [
@@ -32,10 +33,10 @@ _COMMANDS = [
     PlatformCommandDefinition("RUN_THROUGHPUT_PROBE", "Flush and summarize route throughput metrics.", "LOW", False, False, False, True, 20, 1, True, False, []),
     PlatformCommandDefinition("SEND_TEST_EMAIL", "Send or validate a bounded test email through configured SMTP.", "MEDIUM", False, True, False, True, 20, 0, False, False, ["smtp_password", "smtp_secret"]),
     PlatformCommandDefinition("RETRY_FAILED_WEBHOOKS", "Retry failed webhook deliveries where safe.", "MEDIUM", False, True, False, True, 30, 1, True, False, ["secret"]),
-    PlatformCommandDefinition("ROTATE_TENANT_API_KEY", "Rotate a tenant API key where key model exists.", "HIGH", True, True, True, True, 15, 0, False, False, ["raw_key", "key_hash"]),
-    PlatformCommandDefinition("CLEAR_TENANT_CACHE", "Clear a tenant cache if a cache layer exists.", "LOW", True, True, False, True, 10, 0, True, False, []),
+    PlatformCommandDefinition("ROTATE_TENANT_API_KEY", "Rotate a tenant API key where key model exists.", "HIGH", True, True, True, True, 15, 0, False, False, ["raw_key", "key_hash"], False),
+    PlatformCommandDefinition("CLEAR_TENANT_CACHE", "Clear a tenant cache if a cache layer exists.", "LOW", True, True, False, True, 10, 0, True, False, [], False),
     PlatformCommandDefinition("INFRA_RESET_GLOBAL_API_TOKENS", "Create a critical job to reset global platform API tokens.", "CRITICAL", False, True, True, True, 30, 0, False, False, ["raw_key", "token"]),
-    PlatformCommandDefinition("INFRA_FAILOVER_DATABASE", "Request database failover. Returns unsupported unless real failover is configured.", "CRITICAL", False, True, True, True, 30, 0, False, False, ["password", "dsn", "secret"]),
+    PlatformCommandDefinition("INFRA_FAILOVER_DATABASE", "Request database failover. Returns unsupported unless real failover is configured.", "CRITICAL", False, True, True, True, 30, 0, False, False, ["password", "dsn", "secret"], False),
 ]
 
 COMMANDS = {cmd.command_name: cmd for cmd in _COMMANDS}

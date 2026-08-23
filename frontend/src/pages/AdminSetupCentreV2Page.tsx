@@ -253,7 +253,11 @@ const AdminSetupCentreV2Page: React.FC = () => {
 
     const requestId = ++loadRequestRef.current;
     const requestedAmoId = effectiveAmoId;
-    mode === "initial" ? setLoading(true) : setRefreshing(true);
+    if (mode === "initial") {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
     setError(null);
 
     try {
@@ -738,7 +742,7 @@ const AdminSetupCentreV2Page: React.FC = () => {
           <div className="setup-centre__module-grid">
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users`}><Users size={21} /><div><strong>Users & access</strong><span>Create staff, assign departments, roles and permissions.</span></div><ArrowRight size={17} /></Link>
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=workforce`}><BriefcaseBusiness size={21} /><div><strong>Workforce & contracts</strong><span>Create contracts, assign primary bases and work patterns.</span></div><ArrowRight size={17} /></Link>
-            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/document-control/settings`}><BookOpenCheck size={21} /><div><strong>Document Control</strong><span>Configure controlled-document ownership, workflows and registers.</span></div><ArrowRight size={17} /></Link>
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/document-control/administration`}><BookOpenCheck size={21} /><div><strong>Document Control</strong><span>Configure controlled-document ownership, workflows and registers.</span></div><ArrowRight size={17} /></Link>
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/email-settings`}><Mail size={21} /><div><strong>Email delivery</strong><span>Review tenant notification delivery and sender readiness.</span></div><ArrowRight size={17} /></Link>
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/billing`}><Building2 size={21} /><div><strong>Subscription & modules</strong><span>Review the active plan and enabled portal modules.</span></div><ArrowRight size={17} /></Link>
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/overview`}><ShieldCheck size={21} /><div><strong>Admin overview</strong><span>Return to tenant administration and live operational status.</span></div><ArrowRight size={17} /></Link>

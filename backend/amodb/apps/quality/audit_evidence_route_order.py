@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import audit_evidence_models as _audit_evidence_models  # noqa: F401
 from . import audit_evidence_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import public_router as quality_public_router
 
 
@@ -52,7 +52,7 @@ def _register_and_promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall], *selected, *remaining[catchall:]]
 
 
-for _api_router in (router, legacy_router):
+for _api_router in (router,):
     _register_and_promote(_api_router)
 
 if not any("/quality/audit-access/findings/" in str(getattr(item, "path", "")) and "/evidence/" in str(getattr(item, "path", "")) for item in quality_public_router.routes):

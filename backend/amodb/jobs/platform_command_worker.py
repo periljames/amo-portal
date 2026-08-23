@@ -6,7 +6,7 @@ import os
 import socket
 import time
 
-from amodb.apps.platform import saas_lease, saas_legacy_bridge, saas_queue
+from amodb.apps.platform import platform_command_queue, saas_lease, saas_queue
 from amodb.database import WriteSessionLocal, close_session_safely
 
 
@@ -31,17 +31,12 @@ def run_once(*, batch_size: int = 1) -> dict:
         )
         for job in jobs:
             try:
-                payload = job.payload_json or {}
                 with saas_lease.LeaseHeartbeat(
                     job,
                     worker_id=current_worker,
                     lease_seconds=lease_seconds,
                 ) as heartbeat:
-                    result = saas_legacy_bridge.execute_legacy_command_in_worker(
-                        db,
-                        legacy_job_id=str(payload.get("legacy_job_id") or ""),
-                        actor_id=str(payload.get("actor_id") or job.created_by or ""),
-                    )
+                    result = platform_command_queue.process_leased_job(db, job)
                     heartbeat.raise_if_lost()
                 saas_queue.complete_job(db, job, result, worker_id=current_worker)
                 processed += 1

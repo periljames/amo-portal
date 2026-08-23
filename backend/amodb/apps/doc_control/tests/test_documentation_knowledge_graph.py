@@ -110,24 +110,24 @@ def test_knowledge_routes_are_registered_before_generic_compatibility_routes() -
     assert knowledge_index > generic_dashboard_index
 
 
-def test_frontend_reader_and_structure_surface_the_graph() -> None:
+def test_frontend_reader_and_canonical_library_surface_the_graph() -> None:
     root = Path(__file__).resolve().parents[5]
     pdf_viewer = (root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
     reader_core = (root / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx").read_text(encoding="utf-8")
     linked_panel = (root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
-    structure = (root / "frontend/src/pages/documentControl/DocumentControlStructurePage.tsx").read_text(encoding="utf-8")
+    library = (root / "frontend/src/pages/documentControl/DocumentLibraryHubPage.tsx").read_text(encoding="utf-8")
+    record_actions = (root / "frontend/src/pages/documentControl/DocumentControlRecordActions.tsx").read_text(encoding="utf-8")
     assert "publication-reference-hotspot" in pdf_viewer
     assert "getPublicationReferences" in pdf_viewer
     assert "PdfReaderCore" in pdf_viewer
     assert "renderForms={safeForm}" in reader_core
     assert "onSubmitWorkingCopy={canFill ?" in linked_panel
     assert "submitLinkedPdfResource" in linked_panel
-    assert "Reference monitor" in structure
-    assert "RECORD_SERIES" in structure
-    assert "Related documentation" in structure
-    assert "Work records, forms &amp; checklists" in structure
-    assert "Associated retained records" in structure
-    assert "getDocumentationNodeConnections" in structure
+    assert "item.library.structure_path" in library
+    assert "item.library.semantic_relationships" in library
+    assert "item.library.generated_records" in library
+    assert 'activeView === "relationships"' in record_actions
+    assert "DocumentControlIntegrationActions" in record_actions
 
 
 def test_node_connection_reader_is_access_filtered_and_record_scoped() -> None:

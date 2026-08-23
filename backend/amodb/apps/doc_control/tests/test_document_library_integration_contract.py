@@ -50,7 +50,7 @@ def test_company_library_exposes_real_document_categories_and_connected_state() 
     assert 'item.library.physical' in frontend
     assert 'physicalText(item)' in frontend
     assert 'physical.overdue' in frontend
-    assert 'Browse hierarchy' in frontend
+    assert 'item.library.structure_path' in frontend
     assert 'Read' in frontend
 
 
@@ -129,30 +129,26 @@ def test_qr_label_is_an_identifier_not_an_authorization_bypass() -> None:
 
 
 def test_physical_library_frontend_supports_shelf_scan_signoff_and_return() -> None:
-    page = _source("frontend/src/pages/documentControl/DocumentLibraryCopiesPage.tsx")
-    service = _source("frontend/src/services/documentLibrary.ts")
+    page = _source("frontend/src/pages/documentControl/DocumentControlDistributionPortfolioPage.tsx")
+    actions = _source("frontend/src/pages/documentControl/DocumentControlLifecycleActions.tsx")
     exports = _source("frontend/src/pages/DocControlPages.tsx")
 
-    assert 'title="Physical document library"' in page
-    assert 'Register copy' in page
-    assert 'QR label' in page
-    assert 'Check out to me' in page
-    assert 'I accept custody of this numbered controlled copy' in page
-    assert 'Sign in / return' in page
-    assert 'Verify location' in page
-    assert 'Custody history' in page
-    assert 'scanPhysicalCopy' in service
-    assert 'circulatePhysicalCopy' in service
-    assert 'downloadPhysicalCopyLabel' in service
-    assert 'serverUtcDate' in service
-    assert 'DocumentLibraryCopiesPage' in exports
-    assert 'DocumentLibraryHubPage' in exports
+    assert 'label: "Physical Copies"' in page
+    assert 'label: "Recalls"' in page
+    assert 'update("view", "physical-copies")' in page
+    assert 'activeView === "copies"' in actions
+    assert 'createControlledCopy' in actions
+    assert 'createControlledCopyEvent' in actions
+    assert 'searchParams.get("copy") || searchParams.get("scan")' in actions
+    assert 'DocControlDistributionPage' in exports
+    assert 'DocControlLibraryPage' in exports
 
 
 def test_existing_tree_relationships_and_generated_records_remain_authoritative() -> None:
     tree = _source("backend/amodb/apps/doc_control/knowledge_tree_reader.py")
     governance = _source("backend/amodb/apps/doc_control/governance_service.py")
-    records = _source("frontend/src/pages/documentControl/DocumentControlRecordsPage.tsx")
+    reports = _source("frontend/src/pages/documentControl/DocumentControlReportsPage.tsx")
+    report_backend = _source("backend/amodb/apps/doc_control/workspace_reports_register_router.py")
 
     assert 'read_only_hierarchy_payload' in tree
     assert 'can_read_manual(user, control_profiles.get(manual_id))' in tree
@@ -167,5 +163,6 @@ def test_existing_tree_relationships_and_generated_records_remain_authoritative(
         "LINKED_AIRCRAFT_OR_COMPONENT",
     ):
         assert f'"{relation}"' in governance
-    assert 'Immutable outputs created from controlled forms, checklists, and registers' in records
-    assert 'Checksum verified' in records
+    assert 'Retention / Disposition' in reports
+    assert 'km.DocumentationRecord' in report_backend
+    assert 'artifact_filename' in report_backend

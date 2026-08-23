@@ -702,7 +702,7 @@ export default function PublicationsReaderPage() {
               <button type="button" className="primary" disabled={downloadBusy} onClick={() => void downloadPdf()}><Download size={16} /> {downloadBusy ? "Preparing…" : `Download (${formatFileSize(metadata.rendered_pdf_size_bytes || metadata.source_size_bytes)})`}</button>
               <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>
               <button type="button" className={governanceOpen ? "active" : ""} onClick={() => setGovernanceOpen(true)}><ShieldCheck size={16} /> Governance</button>
-              <button type="button" onClick={() => navigate(`/maintenance/${amoCode || tenant}/document-control/change-proposals?publication=${encodeURIComponent(manualId || "")}&revision=${encodeURIComponent(revId || "")}`)}>Report problem</button>
+              <button type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || tenant)}/document-control/library/${encodeURIComponent(manualId || "")}?tab=changes`)}>Report problem</button>
             </div>
           </header>
 

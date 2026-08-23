@@ -59,6 +59,7 @@ const ProductionWorkspacePage: React.FC = () => {
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
   const [dirtyRows, setDirtyRows] = useState<DirtyRow[]>([]);
   const [messages, setMessages] = useState<string[]>([]);
+  const [clockMs, setClockMs] = useState(() => Date.now());
 
   const [ads, setAds] = useState<any[]>([]);
   const [sbs, setSbs] = useState<any[]>([]);
@@ -100,14 +101,19 @@ const ProductionWorkspacePage: React.FC = () => {
     listReconciliation().then(setExceptions).catch(() => setExceptions([]));
   }, []);
 
+  useEffect(() => {
+    const timerId = window.setInterval(() => setClockMs(Date.now()), 60_000);
+    return () => window.clearInterval(timerId);
+  }, []);
+
   const mergedUsage = useMemo(() => {
     const existing = usageRows.map((r) => ({ ...r }));
-    dirtyRows.forEach((d) => {
+    dirtyRows.forEach((d, dirtyIndex) => {
       if (d.id) {
         const idx = existing.findIndex((x) => x.id === d.id);
         if (idx >= 0) existing[idx] = { ...existing[idx], ...d } as UsageRow;
       } else {
-        existing.push({ ...(d as any), id: -Math.floor(Math.random() * 1_000_000), updated_at: new Date().toISOString() });
+        existing.push({ ...(d as any), id: -(usageRows.length + dirtyIndex + 1), updated_at: new Date().toISOString() });
       }
     });
     return existing.sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -232,7 +238,7 @@ const ProductionWorkspacePage: React.FC = () => {
                         const s = summary[ac.serial_number];
                         const rows = selectedTail === ac.serial_number ? mergedUsage : [];
                         const last = rows.at(-1);
-                        const miss = !last || (Date.now() - new Date(last.date).getTime()) / 86400000 > 1;
+                        const miss = !last || (clockMs - new Date(last.date).getTime()) / 86400000 > 1;
                         return (
                           <tr key={ac.serial_number} onClick={() => { setSelectedTail(ac.serial_number); navigate(`/production/fleet/${ac.serial_number}?tab=fleet`); }}>
                             <td className="production-grid__sticky">{ac.registration || ac.serial_number}</td><td>{ac.model || ""}</td><td>{ac.home_base || ""}</td><td>{ac.status || ""}</td><td>{s?.total_hours ?? ""}</td><td>{s?.total_cycles ?? ""}</td><td>{last?.date || ""}</td><td>{s?.seven_day_daily_average_hours ?? ""}</td><td>{""}</td><td><span className={miss ? "status-pill status-pill--warn" : "status-pill"}>{miss ? "Missing" : "OK"}</span></td>

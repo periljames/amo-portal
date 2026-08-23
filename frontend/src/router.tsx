@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import {
   fetchOnboardingStatus,
@@ -24,27 +24,11 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
 const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
-const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
-const DocControlGeneratedRecordsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordsPage })));
 const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
-const DocControlDraftsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftsPage })));
-const DocControlDraftDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftDetailPage })));
-const DocControlChangeProposalPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangeProposalPage })));
-const DocControlChangeProposalDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangeProposalDetailPage })));
-const DocControlRevisionsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlRevisionsPage })));
-const DocControlLEPPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLEPPage })));
-const DocControlAuthorityPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlAuthorityPage })));
-const DocControlTRPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlTRPage })));
-const DocControlTRDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlTRDetailPage })));
 const DocControlDistributionPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDistributionPage })));
-const DocControlDistributionDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDistributionDetailPage })));
-const DocControlArchivePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlArchivePage })));
-const DocControlReviewsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlReviewsPage })));
-const DocControlRegistersPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlRegistersPage })));
-const DocControlSettingsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlSettingsPage })));
-const DocumentControlCopiesPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlCopiesPage })));
-const DocumentControlExternalSourcesPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlExternalSourcesPage })));
-const DocumentControlIntegrationsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlIntegrationsPage })));
+const DocControlCompliancePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlCompliancePage })));
+const DocControlReportsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlReportsPage })));
+const DocControlAdministrationPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlAdministrationPage })));
 
 type GuardProps = { children: React.ReactElement };
 
@@ -52,7 +36,7 @@ function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean);
 }
 
-function isSegmentPath(pathname: string, segment: "manuals" | "publications"): boolean {
+function isSegmentPath(pathname: string, segment: "publications"): boolean {
   const parts = pathSegments(pathname);
   return (
     (parts[0] === "maintenance" && parts[2] === segment) ||
@@ -72,10 +56,7 @@ function isProcurementPath(pathname: string): boolean {
 function isDocumentControlPath(pathname: string): boolean {
   const parts = pathSegments(pathname);
   return Boolean(
-    parts[0] === "maintenance" && parts[1] && (
-      parts[2] === "document-control" ||
-      (parts[3] === "doc-control" && parts[2])
-    )
+    parts[0] === "maintenance" && parts[1] && parts[2] === "document-control"
   );
 }
 
@@ -132,19 +113,6 @@ function isSupportedAuditProgrammeSchedulePath(pathname: string): boolean {
   );
 }
 
-function rosteringWorkforceRedirect(pathname: string): string | null {
-  const parts = pathSegments(pathname);
-  if (parts[0] !== "maintenance" || !parts[1] || parts[2] !== "rostering" || parts[3] !== "workforce") return null;
-  return `/maintenance/${encodeURIComponent(parts[1])}/rostering/settings?section=workforce`;
-}
-
-function canonicaliseManualsPath(pathname: string): string {
-  const parts = pathname.split("/");
-  const index = parts.findIndex((part, partIndex) => part === "manuals" && (partIndex === 2 || partIndex === 3));
-  if (index >= 0) parts[index] = "publications";
-  return parts.join("/") || "/";
-}
-
 function workspaceSlugFromPath(pathname: string): string {
   const parts = pathSegments(pathname);
   if ((parts[0] === "maintenance" || parts[0] === "t") && parts[1]) return parts[1];
@@ -188,22 +156,6 @@ function WorkspaceRequireAuth({ children }: GuardProps) {
   }
 
   return children;
-}
-
-function PublicationsWorkspaceRedirect({ record = false, register = false }: { record?: boolean; register?: boolean }) {
-  const location = useLocation();
-  const params = useParams<{ amoCode?: string; tenantSlug?: string; manualId?: string }>();
-  const tenant = params.amoCode || params.tenantSlug || "system";
-  const suffix = register ? "/registers" : record && params.manualId ? `/library/${params.manualId}` : "/library";
-  return <Navigate to={`/maintenance/${tenant}/document-control${suffix}${location.search}${location.hash}`} replace />;
-}
-
-function CanonicalDocumentControlRedirect() {
-  const location = useLocation();
-  const parts = pathSegments(location.pathname);
-  if (parts[0] !== "maintenance" || !parts[1] || parts[3] !== "doc-control") return <Navigate to="/login" replace />;
-  const suffix = parts.slice(4).join("/");
-  return <Navigate to={`/maintenance/${parts[1]}/document-control${suffix ? `/${suffix}` : ""}${location.search}${location.hash}`} replace />;
 }
 
 function QmsOverviewRouteSurface() {
@@ -258,40 +210,14 @@ function DocumentControlRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
       <Routes>
-        <Route path="/maintenance/:amoCode/:department/doc-control/*" element={<CanonicalDocumentControlRedirect />} />
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
-
-        {/* Canonical daily-use DMS workspace entry points. Compatibility routes
-            remain separate until replacement workspaces have exact browser evidence. */}
         <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
-
-        {/* Compatibility routes retained until each replacement workspace has
-            exact browser-contract coverage. */}
-        <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/records" element={<WorkspaceRequireAuth><DocControlGeneratedRecordsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<WorkspaceRequireAuth><DocControlDraftDetailPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<WorkspaceRequireAuth><DocControlChangeProposalPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/change-proposals/:proposalId" element={<WorkspaceRequireAuth><DocControlChangeProposalDetailPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/revisions/:docId" element={<WorkspaceRequireAuth><DocControlRevisionsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/lep/:docId" element={<WorkspaceRequireAuth><DocControlLEPPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/authority" element={<WorkspaceRequireAuth><DocControlAuthorityPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/tr" element={<WorkspaceRequireAuth><DocControlTRPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/tr/:trId" element={<WorkspaceRequireAuth><DocControlTRDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/distribution/:eventId" element={<WorkspaceRequireAuth><DocControlDistributionDetailPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/reviews" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/controlled-copies" element={<WorkspaceRequireAuth><DocumentControlCopiesPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/external-sources" element={<WorkspaceRequireAuth><DocumentControlExternalSourcesPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/integrations" element={<WorkspaceRequireAuth><DocumentControlIntegrationsPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/archive" element={<WorkspaceRequireAuth><DocControlArchivePage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/registers" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/settings" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlReportsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlAdministrationPage /></WorkspaceRequireAuth>} />
         <Route path="*" element={<Navigate to="." replace />} />
       </Routes>
     </Suspense>
@@ -302,22 +228,16 @@ function PublicationsRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading publication…</div></div>}>
       <Routes>
-        <Route path="/maintenance/:amoCode/publications" element={<PublicationsWorkspaceRedirect />} />
-        <Route path="/maintenance/:amoCode/publications/master-list" element={<PublicationsWorkspaceRedirect register />} />
-        <Route path="/maintenance/:amoCode/publications/:manualId" element={<PublicationsWorkspaceRedirect record />} />
         <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/read" element={<WorkspaceRequireAuth><PublicationReaderPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/diff" element={<WorkspaceRequireAuth><PublicationDiffPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/workflow" element={<WorkspaceRequireAuth><PublicationWorkflowPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/exports" element={<WorkspaceRequireAuth><PublicationExportsPage /></WorkspaceRequireAuth>} />
 
-        <Route path="/t/:tenantSlug/publications" element={<PublicationsWorkspaceRedirect />} />
-        <Route path="/t/:tenantSlug/publications/master-list" element={<PublicationsWorkspaceRedirect register />} />
-        <Route path="/t/:tenantSlug/publications/:manualId" element={<PublicationsWorkspaceRedirect record />} />
         <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/read" element={<WorkspaceRequireAuth><PublicationReaderPage /></WorkspaceRequireAuth>} />
         <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/diff" element={<WorkspaceRequireAuth><PublicationDiffPage /></WorkspaceRequireAuth>} />
         <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/workflow" element={<WorkspaceRequireAuth><PublicationWorkflowPage /></WorkspaceRequireAuth>} />
         <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/exports" element={<WorkspaceRequireAuth><PublicationExportsPage /></WorkspaceRequireAuth>} />
-        <Route path="*" element={<PublicationsWorkspaceRedirect />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Suspense>
   );
@@ -325,18 +245,8 @@ function PublicationsRouteSurface() {
 
 export const AppRouter: React.FC = () => {
   const location = useLocation();
-  const workforceTarget = rosteringWorkforceRedirect(location.pathname);
   const qmsRoute = classifyQmsPath(location.pathname);
 
-  if (workforceTarget) {
-    return <Navigate to={`${workforceTarget}${location.hash}`} replace state={location.state} />;
-  }
-  if (isSegmentPath(location.pathname, "manuals")) {
-    return <Navigate to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`} replace state={location.state} />;
-  }
-  if (qmsRoute.kind === "legacy" && qmsRoute.canonicalTarget) {
-    return <Navigate to={`${qmsRoute.canonicalTarget}${location.search}${location.hash}`} replace state={location.state} />;
-  }
   if (isSupportedAuditProgrammeSchedulePath(location.pathname)) return <QmsAuditProgrammeScheduleRouteSurface />;
   if (isSupportedCarPerformanceReportPath(location.pathname)) return <QmsCarPerformanceReportRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;

@@ -17,7 +17,7 @@ type QmsRegisteredDestination = {
 type QmsWorkspaceTab = {
   id: string;
   label: string;
-  tab: "war-room" | "checklist" | "findings" | "cars" | "evidence" | "report" | "closeout";
+  stage: "setup" | "prepare" | "live" | "closing" | "follow-up" | "archive";
 };
 
 type QmsNavigationGroup = {
@@ -41,8 +41,7 @@ type NavigationLink = {
   path: string;
   keywords?: string;
   matchPrefixes?: readonly string[];
-  activeMode?: "exact" | "prefix" | "tab";
-  tab?: string;
+  activeMode?: "exact" | "prefix";
 };
 
 const QUALITY_NAV_SELECTOR = '.sidebar__qms-nav[aria-label="Quality modules"]';
@@ -54,7 +53,6 @@ const STATIC_AUDIT_SEGMENTS = new Set([
   "schedules",
   "register",
   "checklists",
-  "reports",
   "templates",
   "new",
   "plan",
@@ -77,7 +75,6 @@ export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
   { id: "audit-new", label: "Create audit", moduleId: "audits", view: "new", keywords: "new initiate" },
   { id: "audit-checklists", label: "Checklist library", moduleId: "audits", view: "checklists", keywords: "questions working paper" },
   { id: "audit-templates", label: "Audit templates", moduleId: "audits", view: "templates", keywords: "template notice checklist preparation" },
-  { id: "audit-reports", label: "Issued reports", moduleId: "audits", view: "reports", keywords: "report archive issued" },
   { id: "audit-bin", label: "Recycle bin", moduleId: "audits", view: "bin", keywords: "deleted restored audit" },
 ] as const;
 
@@ -92,14 +89,13 @@ export const QMS_CALENDAR_DESTINATIONS: readonly QmsRegisteredDestination[] = [
   { id: "calendar-review", label: "Management reviews", moduleId: "calendar", view: "management-review", keywords: "review meeting" },
 ] as const;
 
-export const QMS_AUDIT_WORKSPACE_TABS: readonly QmsWorkspaceTab[] = [
-  { id: "audit-war-room", label: "War room", tab: "war-room" },
-  { id: "audit-prep", label: "Prep & checklist", tab: "checklist" },
-  { id: "audit-findings", label: "Findings", tab: "findings" },
-  { id: "audit-cars", label: "CARs", tab: "cars" },
-  { id: "audit-evidence", label: "Evidence", tab: "evidence" },
-  { id: "audit-report", label: "Report", tab: "report" },
-  { id: "audit-closeout", label: "Closeout", tab: "closeout" },
+export const QMS_AUDIT_WORKSPACE_STAGES: readonly QmsWorkspaceTab[] = [
+  { id: "audit-setup", label: "Setup", stage: "setup" },
+  { id: "audit-prepare", label: "Prepare", stage: "prepare" },
+  { id: "audit-live", label: "Live audit", stage: "live" },
+  { id: "audit-closing", label: "Closing", stage: "closing" },
+  { id: "audit-follow-up", label: "Follow-up", stage: "follow-up" },
+  { id: "audit-archive", label: "Archive", stage: "archive" },
 ] as const;
 
 export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
@@ -150,15 +146,9 @@ function matchesPrefix(current: string, prefix: string): boolean {
   return current === clean || current.startsWith(`${clean}/`);
 }
 
-function matchesPath(pathname: string, link: NavigationLink, search: string): boolean {
+function matchesPath(pathname: string, link: NavigationLink): boolean {
   const current = pathWithoutTrailingSlash(pathname);
   const target = pathWithoutTrailingSlash(link.path.split("?")[0]);
-
-  if (link.activeMode === "tab") {
-    if (current !== target) return false;
-    const params = new URLSearchParams(search);
-    return (params.get("tab") || "war-room") === link.tab;
-  }
 
   if (link.activeMode === "prefix") {
     return matchesPrefix(current, target) || (link.matchPrefixes || []).some((prefix) => matchesPrefix(current, prefix));
@@ -186,15 +176,17 @@ function registeredDestinationLink(amoCode: string, destination: QmsRegisteredDe
 export function getActiveAuditWorkspace(pathname: string, amoCode: string): { auditKey: string; basePath: string } | null {
   const prefix = `${qmsBasePath(amoCode)}/audits/`;
   if (!pathname.startsWith(prefix)) return null;
-  const [auditKey] = pathname.slice(prefix.length).split("/").filter(Boolean);
+  const [auditKey, stage, ...tail] = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (!auditKey || STATIC_AUDIT_SEGMENTS.has(auditKey)) return null;
+  if (tail.length || !QMS_AUDIT_WORKSPACE_STAGES.some((item) => item.stage === stage)) return null;
   return { auditKey, basePath: `${prefix}${auditKey}` };
 }
 
-export function buildAuditWorkspaceTabPath(basePath: string, tab: QmsWorkspaceTab["tab"], search = ""): string {
+export function buildAuditWorkspaceStagePath(basePath: string, stage: QmsWorkspaceTab["stage"], search = ""): string {
   const params = new URLSearchParams(search);
-  params.set("tab", tab);
-  return `${basePath}?${params.toString()}`;
+  params.delete("tab");
+  const remaining = params.toString();
+  return `${basePath}/${stage}${remaining ? `?${remaining}` : ""}`;
 }
 
 export function isQualityNavigationPath(pathname: string, amoCode: string): boolean {
@@ -209,7 +201,6 @@ export function isQualityNavigationPath(pathname: string, amoCode: string): bool
 function createNavigationButton(
   link: NavigationLink,
   pathname: string,
-  search: string,
   onNavigate: (path: string) => void,
 ): HTMLButtonElement {
   const button = document.createElement("button");
@@ -220,7 +211,6 @@ function createNavigationButton(
   button.dataset.qmsActiveMode = link.activeMode || "exact";
   button.dataset.qmsSearch = normalise(`${link.label} ${link.keywords || ""}`);
   if (link.matchPrefixes?.length) button.dataset.qmsMatchPrefixes = link.matchPrefixes.join("\n");
-  if (link.tab) button.dataset.qmsTab = link.tab;
 
   const label = document.createElement("span");
   label.className = "qms-nav-link__label";
@@ -228,7 +218,7 @@ function createNavigationButton(
   button.append(label);
 
   button.onclick = () => onNavigate(link.path);
-  setButtonActive(button, matchesPath(pathname, link, search));
+  setButtonActive(button, matchesPath(pathname, link));
   return button;
 }
 
@@ -245,7 +235,6 @@ function linkFromButton(button: HTMLButtonElement): NavigationLink {
     path: button.dataset.qmsPath || "#",
     matchPrefixes: button.dataset.qmsMatchPrefixes?.split("\n").filter(Boolean),
     activeMode: (button.dataset.qmsActiveMode as NavigationLink["activeMode"]) || "exact",
-    tab: button.dataset.qmsTab,
   };
 }
 
@@ -255,14 +244,13 @@ function createSection(
   description: string,
   links: readonly NavigationLink[],
   pathname: string,
-  search: string,
   onNavigate: (path: string) => void,
   options: { prominent?: boolean; open?: boolean } = {},
 ): HTMLDetailsElement {
   const details = document.createElement("details");
   details.className = `qms-nav-section${options.prominent ? " qms-nav-section--prominent" : ""}`;
   details.dataset.qmsSection = id;
-  details.open = Boolean(options.open || links.some((link) => matchesPath(pathname, link, search)));
+  details.open = Boolean(options.open || links.some((link) => matchesPath(pathname, link)));
 
   const summary = document.createElement("summary");
   summary.className = "qms-nav-section__summary";
@@ -278,7 +266,7 @@ function createSection(
   const list = document.createElement("div");
   list.className = "qms-nav-section__links";
   for (const link of links) {
-    list.append(createNavigationButton(link, pathname, search, onNavigate));
+    list.append(createNavigationButton(link, pathname, onNavigate));
   }
 
   details.append(summary, list);
@@ -315,7 +303,7 @@ function moduleLinksForGroup(amoCode: string, group: QmsNavigationGroup, aerodoc
   return links;
 }
 
-function legacyAeroDocEnabled(nav: HTMLElement): boolean {
+function isAeroDocEnabled(nav: HTMLElement): boolean {
   return Array.from(nav.querySelectorAll<HTMLElement>(":scope > .sidebar__qms-node"))
     .some((node) => normalise(node.textContent).includes("aerodoc"));
 }
@@ -324,13 +312,12 @@ function currentAuditLinks(
   workspace: { auditKey: string; basePath: string },
   search: string,
 ): NavigationLink[] {
-  return QMS_AUDIT_WORKSPACE_TABS.map((item) => ({
+  return QMS_AUDIT_WORKSPACE_STAGES.map((item) => ({
     id: item.id,
     label: item.label,
-    path: buildAuditWorkspaceTabPath(workspace.basePath, item.tab, search),
+    path: buildAuditWorkspaceStagePath(workspace.basePath, item.stage, search),
     keywords: `current audit workflow ${item.label}`,
-    activeMode: "tab",
-    tab: item.tab,
+    activeMode: "exact",
   }));
 }
 
@@ -382,7 +369,7 @@ function createPanel(
   const quick = document.createElement("div");
   quick.className = "qms-navigation-quick";
   quick.setAttribute("aria-label", "Primary Quality destinations");
-  for (const link of quickLinks) quick.append(createNavigationButton(link, pathname, search, onNavigate));
+  for (const link of quickLinks) quick.append(createNavigationButton(link, pathname, onNavigate));
 
   const searchLabel = document.createElement("label");
   searchLabel.className = "qms-navigation-search";
@@ -404,7 +391,6 @@ function createPanel(
     "Programme, planning, preparation, execution and reporting",
     auditLinks,
     pathname,
-    search,
     onNavigate,
     { prominent: true },
   ));
@@ -417,7 +403,6 @@ function createPanel(
       "Move through the active audit without returning to the register",
       currentAuditLinks(activeAudit, search),
       pathname,
-      search,
       onNavigate,
       { prominent: true, open: true },
     ));
@@ -429,11 +414,10 @@ function createPanel(
     "Month, agenda, audit dates, CAR deadlines, training and reviews",
     QMS_CALENDAR_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination)),
     pathname,
-    search,
     onNavigate,
   ));
 
-  const aerodocEnabled = legacyAeroDocEnabled(nav);
+  const aerodocEnabled = isAeroDocEnabled(nav);
   for (const group of QMS_NAVIGATION_GROUPS) {
     sections.append(createSection(
       group.id,
@@ -441,7 +425,6 @@ function createPanel(
       group.description,
       moduleLinksForGroup(amoCode, group, aerodocEnabled),
       pathname,
-      search,
       onNavigate,
     ));
   }
@@ -481,14 +464,13 @@ function applySearch(panel: HTMLElement, query: string): void {
 function refreshPanel(
   panel: HTMLElement,
   pathname: string,
-  search: string,
   onNavigate: (path: string) => void,
 ): void {
   const currentQuery = panel.querySelector<HTMLInputElement>(".qms-navigation-search__input")?.value || "";
   for (const button of panel.querySelectorAll<HTMLButtonElement>(".qms-nav-link")) {
     const link = linkFromButton(button);
     button.onclick = () => onNavigate(link.path);
-    setButtonActive(button, matchesPath(pathname, link, search));
+    setButtonActive(button, matchesPath(pathname, link));
   }
 
   if (!currentQuery) {
@@ -536,5 +518,5 @@ export function enhanceQmsSidebarNavigation({
     nav.prepend(panel);
   }
 
-  refreshPanel(panel, pathname, search, onNavigate);
+  refreshPanel(panel, pathname, onNavigate);
 }

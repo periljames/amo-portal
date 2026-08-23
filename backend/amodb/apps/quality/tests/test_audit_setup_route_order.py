@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import pytest
-
 from amodb.apps.quality import audit_session_route_order as _audit_session_route_order  # noqa: F401
-from amodb.apps.quality.canonical_router import legacy_router, router
+from amodb.apps.quality.canonical_router import router
 
 
 def _route_index(api_router, predicate) -> int:
     return next(index for index, route_item in enumerate(api_router.routes) if predicate(route_item))
 
 
-@pytest.mark.parametrize("api_router", [router, legacy_router])
-def test_setup_patch_precedes_generic_catchall(api_router) -> None:
+def test_setup_patch_precedes_generic_catchall() -> None:
+    api_router = router
     setup_index = _route_index(
         api_router,
         lambda route_item: (

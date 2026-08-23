@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 
-from .canonical_router_legacy import _log_qms_activity
+from .canonical_core_router import _log_qms_activity
 from .tenant_security import (
     TenantContext,
     assert_quality_permission,

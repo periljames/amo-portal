@@ -1,8 +1,7 @@
-"""Narrow compatibility overrides for legacy manual revision contracts.
+"""Stable manual revision response and comparison contracts.
 
-These routes precede ``router_legacy`` so the Publications UI receives stable
-revision payloads and a non-error comparison contract while the historical API
-remains available for integrations that have not yet migrated.
+These routes precede the core router so Publications receives normalized revision
+payloads and a non-error comparison contract.
 """
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ from amodb.security import get_current_active_user, get_current_actor_id
 from amodb.apps.accounts import models as account_models
 
 from . import models
-from .router_legacy import _audit, _tenant_by_slug
+from .core_router import _audit, _tenant_by_slug
 from .schemas import RevisionCreate, RevisionOut
 
 

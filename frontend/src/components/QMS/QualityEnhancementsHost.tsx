@@ -21,23 +21,19 @@ const AuditClosingNarrativePanel = lazy(() => import("../../features/qms/auditSe
 const AuditClosingWorkspace = lazy(() => import("../../features/qms/auditSession/AuditClosingWorkspace"));
 const AuditFollowUpWorkspace = lazy(() => import("../../features/qms/auditSession/AuditFollowUpWorkspace"));
 const AuditArchiveWorkspace = lazy(() => import("../../features/qms/auditSession/AuditArchiveWorkspace"));
-const QualityChecklistPdfFormEditorHost = lazy(() => import("./QualityChecklistPdfFormEditorHost"));
-const QualityChecklistExecutionGovernanceHost = lazy(() => import("./QualityChecklistExecutionGovernanceHost"));
 const QualityAuditGovernancePanelHost = lazy(() => import("./QualityAuditGovernancePanelHost"));
-const QualityAuditPreparationContextHost = lazy(() => import("./QualityAuditPreparationContextHost"));
-const QualityAuditReportCloseoutHost = lazy(() => import("./QualityAuditReportCloseoutHost"));
 const QualityChecklistTemplateHost = lazy(() => import("./QualityChecklistTemplateHost"));
 const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
 const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
 const QualityPlannerStrategicHost = lazy(() => import("./QualityPlannerStrategicHost"));
 const QualityProgrammeOccurrenceHost = lazy(() => import("./QualityProgrammeOccurrenceHost"));
 
-type AuditRoute = { amoCode: string; auditKey: string; activeTab: string };
+type AuditRoute = { amoCode: string; auditKey: string };
 
 function useQualityAmoCode(): string | null {
   const location = useLocation();
   return useMemo(() => {
-    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)(?:\/|$)/i);
+    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/quality(?:\/|$)/i);
     return match ? decodeURIComponent(match[1]) : null;
   }, [location.pathname]);
 }
@@ -45,12 +41,11 @@ function useQualityAmoCode(): string | null {
 function useAuditRoute(): AuditRoute | null {
   const location = useLocation();
   return useMemo(() => {
-    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/(?:quality|qms)\/audits\/([^/]+)/i);
+    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/quality\/audits\/([^/]+)\/(?:setup|prepare|live|closing|follow-up|archive)\/?$/i);
     if (!match) return null;
     const auditKey = decodeURIComponent(match[2]);
-    if (["dashboard", "program", "programme", "schedule", "plan", "register", "checklists", "reports", "templates", "new", "bin", "schedules"].includes(auditKey.toLowerCase())) return null;
-    return { amoCode: decodeURIComponent(match[1]), auditKey, activeTab: new URLSearchParams(location.search).get("tab") || "war-room" };
-  }, [location.pathname, location.search]);
+    return { amoCode: decodeURIComponent(match[1]), auditKey };
+  }, [location.pathname]);
 }
 
 const CarInviteResponsiveStyleLoader: React.FC = () => {
@@ -131,8 +126,7 @@ const QualityEnhancementsHost: React.FC = () => {
   const route = useAuditRoute();
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
   const canonicalOccurrence = Boolean(route && auditSessionStage);
-  const legacyOccurrence = Boolean(route && !auditSessionStage);
-  const checklistLibraryRoute = /^\/maintenance\/[^/]+\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname);
+  const checklistLibraryRoute = /^\/maintenance\/[^/]+\/quality\/audits\/checklists\/?$/i.test(location.pathname);
 
   useEffect(() => {
     document.documentElement.classList.toggle("quality-audit-canonical-occurrence", canonicalOccurrence);
@@ -152,7 +146,7 @@ const QualityEnhancementsHost: React.FC = () => {
       <QualityEffectivenessResponseHost amoCode={amoCode} />
       <QualityPlannerStrategicHost amoCode={amoCode} />
       <QualityProgrammeOccurrenceHost amoCode={amoCode} />
-      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={auditSessionStage === "prepare" ? "checklist" : auditSessionStage ? null : route?.activeTab} /> : null}
+      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={auditSessionStage === "prepare" ? "checklist" : null} /> : null}
     </Suspense> : null}
 
     {route ? <>
@@ -160,14 +154,7 @@ const QualityEnhancementsHost: React.FC = () => {
       <WorkflowIntegrityGuard route={route} />
       <MobileAuditDeepLinkState />
 
-      {legacyOccurrence || auditSessionStage === "prepare" ? <Suspense fallback={null}><QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {legacyOccurrence ? <>
-        <Suspense fallback={null}>
-          <QualityAuditPreparationContextHost amoCode={route.amoCode} auditKey={route.auditKey} />
-          {route.activeTab === "report" || route.activeTab === "closeout" ? <QualityAuditReportCloseoutHost amoCode={route.amoCode} auditKey={route.auditKey} /> : null}
-        </Suspense>
-        {route.activeTab === "checklist" ? <Suspense fallback={null}><QualityChecklistExecutionGovernanceHost amoCode={route.amoCode} auditKey={route.auditKey} activeTab={route.activeTab} /><QualityChecklistPdfFormEditorHost /></Suspense> : null}
-      </> : null}
+      {auditSessionStage === "prepare" ? <Suspense fallback={null}><QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
 
       {auditSessionStage === "setup" ? <Suspense fallback={null}><AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
       {auditSessionStage === "prepare" ? <Suspense fallback={null}><AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /><AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}

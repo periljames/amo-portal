@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
 
-from .canonical_router_legacy import (
+from .canonical_core_router import (
     _append_calendar_rows,
     _as_date,
     _calendar_event_row,

@@ -91,6 +91,37 @@ def test_replay_events_since_persists_via_audit_store(db_session):
     assert [event.id for event in replay] == [str(second.id)]
 
 
+def test_replay_events_since_orders_events_with_the_same_timestamp(db_session):
+    amo, user = _create_amo_and_user(db_session, code="EVM04")
+    occurred_at = datetime.now(timezone.utc)
+
+    first = audit_services.log_event(
+        db_session,
+        amo_id=amo.id,
+        actor_user_id=user.id,
+        entity_type="tasks.task",
+        entity_id="T-1",
+        action="UPDATED",
+    )
+    second = audit_services.log_event(
+        db_session,
+        amo_id=amo.id,
+        actor_user_id=user.id,
+        entity_type="tasks.task",
+        entity_id="T-2",
+        action="UPDATED",
+    )
+    first.occurred_at = occurred_at
+    second.occurred_at = occurred_at
+    db_session.commit()
+
+    replay, reset = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(first.id))
+
+    assert reset is False
+    assert first.id < second.id
+    assert [event.id for event in replay] == [str(second.id)]
+
+
 def test_replay_events_since_requires_reset_for_unknown_or_expired_cursor(db_session):
     amo, user = _create_amo_and_user(db_session, code="EVM02")
     old_event = audit_services.log_event(

@@ -91,10 +91,6 @@ const AdminOverviewPage: React.FC = () => {
     navigate("/login", { replace: true });
   }, [currentUser, canAccessAdmin, amoCode, ctx.department, navigate]);
 
-  if (currentUser && !canAccessAdmin) {
-    return null;
-  }
-
   const clearPollingTimer = () => {
     if (pollingTimerRef.current) {
       window.clearTimeout(pollingTimerRef.current);
@@ -207,6 +203,10 @@ const AdminOverviewPage: React.FC = () => {
     ? activityItems
     : activityItems.slice(0, 5);
   const attentionItems = issues.slice(0, 3);
+
+  if (currentUser && !canAccessAdmin) {
+    return null;
+  }
 
   return (
     <DepartmentLayout

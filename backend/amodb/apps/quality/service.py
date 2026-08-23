@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import func, or_
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import models
@@ -268,6 +268,8 @@ def _rollback_session(db: Session) -> None:
 def _safe_count(query) -> int:
     try:
         return query.count()
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(query.session)
         return 0
@@ -282,6 +284,8 @@ def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: 
             .filter(models.QMSAudit.status == QMSAuditStatus.CLOSED, models.QMSAudit.actual_end.is_not(None))
             .all()
         )
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         return []
@@ -329,6 +333,8 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
             .order_by(func.count(models.QMSAuditFinding.id).desc())
             .first()
         )
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         return []
@@ -346,6 +352,8 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
             )
             .all()
         )
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         return []
@@ -413,6 +421,8 @@ def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code
             models.UserAvailability.effective_from <= now,
             or_(models.UserAvailability.effective_to.is_(None), models.UserAvailability.effective_to >= now),
         ).all()
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         availability_rows = []
@@ -472,11 +482,7 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
     cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
     if amo_id:
-        cars_q = (
-            cars_q.join(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id)
-            .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
-            .filter(models.QMSAudit.amo_id == amo_id)
-        )
+        cars_q = cars_q.filter(models.CorrectiveActionRequest.amo_id == amo_id)
     try:
         action_rows = (
             cars_q.order_by(
@@ -486,6 +492,8 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
             .limit(COCKPIT_ACTION_QUEUE_LIMIT)
             .all()
         )
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         action_rows = []
@@ -503,6 +511,8 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
 
     try:
         training_summary = training_record_summary(db, amo_id=amo_id, as_of=today, due_days=30) if amo_id else None
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         training_summary = None
@@ -551,6 +561,8 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
             .limit(max(1, COCKPIT_ACTION_QUEUE_LIMIT // 3))
             .all()
         )
+    except ProgrammingError:
+        raise
     except SQLAlchemyError:
         _rollback_session(db)
         compliance_rows = []

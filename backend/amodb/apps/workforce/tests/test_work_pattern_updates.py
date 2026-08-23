@@ -57,6 +57,16 @@ def test_existing_pattern_days_can_be_replaced_repeatedly(monkeypatch) -> None:
             counts_as_duty=True,
             is_active=True,
         )
+        rest_day = roster_models.ShiftTemplate(
+            id=_id(),
+            amo_id=amo_id,
+            code="RD",
+            label="Rest day",
+            kind=roster_models.ShiftTemplateKind.OFF,
+            duration_minutes=0,
+            counts_as_duty=False,
+            is_active=True,
+        )
         pattern = models.WorkPattern(
             id=_id(),
             amo_id=amo_id,
@@ -79,7 +89,7 @@ def test_existing_pattern_days_can_be_replaced_repeatedly(monkeypatch) -> None:
             )
             for index in range(7)
         ]
-        db.add_all([day_shift, pattern])
+        db.add_all([day_shift, rest_day, pattern])
         db.commit()
         original_day_ids = {day.id for day in pattern.days}
 
