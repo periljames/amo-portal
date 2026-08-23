@@ -118,7 +118,7 @@ test("real browsers prove two-party persistence, offline replay, exactly-once re
 
     await auditeePage.getByRole("button", { name: "Acknowledge finding" }).click();
     await expect(auditeePage.getByText(/Finding receipt recorded/)).toBeVisible();
-    await expect(auditeePage.getByText(/Receipt acknowledged/)).toBeVisible();
+    await expect(auditeePage.getByText(/Acknowledged ·/)).toBeVisible();
 
     const offlineNote = "Queued while offline and replayed after session revalidation.";
     await externalContext.setOffline(true);
@@ -171,7 +171,7 @@ test("real browsers prove two-party persistence, offline replay, exactly-once re
 
     await auditeePage.reload({ waitUntil: "domcontentloaded" });
     await expect(auditeePage.getByText("100%", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(auditeePage.getByText(/Receipt acknowledged/)).toBeVisible();
+    await expect(auditeePage.getByText(/Acknowledged ·/)).toBeVisible();
 
     expect(externalFailures).toEqual([]);
     expect(auditeeFailures).toEqual([]);
