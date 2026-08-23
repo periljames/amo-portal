@@ -135,12 +135,25 @@ def test_batch_cycle_start_route_is_tenant_scoped_and_audited():
     assert 'action="batch_cycle_start_update"' in source
 
 
-def test_batch_cycle_start_reuses_scope_validation_without_per_user_queries():
+def test_batch_cycle_start_reuses_scope_validation_without_user_entity_graphs():
     source = (ROOT / "generation_setup_router.py").read_text(encoding="utf-8")
+    assert "account_models.User.id," in source
+    assert "account_models.User.department_id," in source
     assert "account_models.User.id.in_(user_ids)" in source
     assert "account_models.User.is_active.is_(True)" in source
     assert "account_models.User.is_system_account.is_(False)" in source
+    assert "db.query(account_models.User).filter(" not in source
     assert "workforce_services._require_user(" not in source
     assert "workforce_services._validate_pattern_user_shift_scope(" in source
     assert "WORK_PATTERN_CYCLE_START_USER_INACTIVE" in source
     assert "WORK_PATTERN_CYCLE_START_SCOPE_INVALID" in source
+
+
+def test_batch_cycle_start_suppresses_unrelated_selectin_graphs():
+    source = (ROOT / "generation_setup_router.py").read_text(encoding="utf-8")
+    assert "noload(workforce_models.EmployeeWorkPatternAssignment.user)" in source
+    assert "noload(workforce_models.WorkPattern.employee_assignments)" in source
+    assert "noload(workforce_models.WorkPatternDay.work_pattern)" in source
+    assert "noload(rostering_models.ShiftTemplate.assignments)" in source
+    assert "selectinload(rostering_models.ShiftTemplate.departments)" in source
+    assert "noload(account_models.Department.users)" in source
