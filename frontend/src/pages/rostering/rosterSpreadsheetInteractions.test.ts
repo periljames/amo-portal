@@ -16,7 +16,8 @@ describe("roster spreadsheet interaction contract", () => {
     expect(interactions).toContain('addEventListener("pointerdown"');
     expect(interactions).toContain('addEventListener("pointermove"');
     expect(interactions).toContain("event.shiftKey || event.ctrlKey || event.metaKey");
-    expect(interactions).toContain("dispatchCellClick(cell, true)");
+    expect(interactions).toContain("dispatchSelection(cell, true)");
+    expect(interactions).toContain('addEventListener("focusin"');
     expect(interactions).toContain("MutationObserver");
   });
 
