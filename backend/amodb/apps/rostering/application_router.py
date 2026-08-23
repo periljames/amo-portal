@@ -42,6 +42,7 @@ from .commitments_router import router as commitments_router
 from .consent_router import router as consent_router
 from .exemption_router import router as exemption_router
 from .extended_duty_router import router as extended_duty_router
+from .generation_read_router import router as generation_read_router
 from .generation_setup_router import router as generation_setup_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
@@ -63,10 +64,22 @@ _LEGACY_CALENDAR_PATHS = {
     "/rostering/calendar/subscription",
     "/rostering/calendar/feed/{token}.ics",
 }
+_LEGACY_ASSIGNMENT_READ_PATH = "/rostering/versions/{version_id}/assignments"
+
+
+def _keep_legacy_route(route) -> bool:
+    path = getattr(route, "path", None)
+    if path in _LEGACY_CALENDAR_PATHS:
+        return False
+    if path == _LEGACY_ASSIGNMENT_READ_PATH and "GET" in (getattr(route, "methods", set()) or set()):
+        return False
+    return True
+
+
 rostering_route_module.router.routes = [
     route
     for route in rostering_route_module.router.routes
-    if getattr(route, "path", None) not in _LEGACY_CALENDAR_PATHS
+    if _keep_legacy_route(route)
 ]
 
 roster_control.ensure_assignment_lineages = lineage.ensure_assignment_lineages
@@ -155,6 +168,7 @@ structured_error_policy.install(rostering_route_module)
 router = APIRouter()
 router.include_router(calendar_subscription_status_router)
 router.include_router(roster_control_router)
+router.include_router(generation_read_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
 router.include_router(shift_semantics_router)
