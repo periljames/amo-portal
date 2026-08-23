@@ -31,8 +31,16 @@ def _signature(route_item) -> tuple[str, frozenset[str]]:
 
 
 def _register_and_promote(api_router: APIRouter) -> None:
-    if not any("/audit-webauthn/credentials" in str(getattr(item, "path", "")) for item in api_router.routes):
-        api_router.include_router(audit_live_completion_router.router)
+    """Mount the complete completion router and retain one exact route per method.
+
+    Quality extensions are composed in stages. Seeing one WebAuthn endpoint (for
+    example ``GET /audit-webauthn/credentials``) does not prove that sibling POST
+    registration or signing endpoints were mounted. Always clone the child router,
+    then de-duplicate the completion surface by path/method while keeping the most
+    recently mounted guarded handler ahead of broad legacy catch-alls.
+    """
+
+    api_router.include_router(audit_live_completion_router.router)
 
     completion = [item for item in api_router.routes if _is_completion_route(item)]
     if not completion:
