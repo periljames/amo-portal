@@ -65,11 +65,15 @@ class RuntimeMaintenanceCoordinator:
             for amo_id, quantity in payload.items():
                 if quantity <= 0:
                     continue
+                # The complete multi-tenant batch must commit exactly once. If a
+                # later tenant update fails, rollback + requeue must not duplicate
+                # earlier usage rows that were already persisted.
                 self.core.account_services.record_usage(
                     db,
                     amo_id=amo_id,
                     meter_key=self.core.account_services.METER_KEY_API_CALLS,
                     quantity=quantity,
+                    commit=False,
                 )
             db.commit()
         except Exception:
@@ -93,6 +97,9 @@ class RuntimeMaintenanceCoordinator:
     def _run(self) -> None:
         flush_interval = max(0.25, float(os.getenv("API_USAGE_FLUSH_INTERVAL_SEC", "5") or "5"))
         settings_interval = max(1.0, float(os.getenv("PLATFORM_SETTINGS_CACHE_TTL_SEC", "30") or "30"))
+        # Populate policy-backed settings immediately, but from this worker
+        # thread rather than the ASGI event loop.
+        self._refresh_platform_settings()
         next_flush = time.monotonic() + flush_interval
         next_settings = time.monotonic() + settings_interval
 
