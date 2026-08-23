@@ -8,7 +8,15 @@ from .canonical_router import legacy_router, router
 
 def _is_execution_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
-    return "checklist-execution-governance" in path or "/execution-governance" in path
+    return any(
+        marker in path
+        for marker in (
+            "checklist-execution-governance",
+            "/execution-governance",
+            "/fieldwork-mutations",
+            "/fieldwork-findings",
+        )
+    )
 
 
 def _is_generic_catchall(route_item) -> bool:
