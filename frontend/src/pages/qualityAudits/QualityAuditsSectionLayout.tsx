@@ -118,9 +118,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
     [amoCode, location.pathname]
   );
 
-  const primaryLinks = links.filter((link) => ["dashboard", "plan-schedule", "register", "evidence-library", "bin"].includes(link.id));
   const activeId = links.find((link) => link.active)?.id ?? "dashboard";
-  const activePrimaryId = primaryLinks.some((link) => link.id === activeId) ? activeId : "dashboard";
 
   const openDrawer = (tab: DrawerTab = "actions") => {
     setDrawerTab(tab);
@@ -185,8 +183,8 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       <div className="qa-workspace-mobile-tabs" aria-label="Audit workspace navigation">
         <ResponsiveSegmentedControl
           label="Audit workspace"
-          value={activePrimaryId}
-          options={primaryLinks.map((link) => ({
+          value={activeId}
+          options={links.map((link) => ({
             value: link.id,
             label: link.label,
             shortLabel: link.shortLabel,
@@ -194,7 +192,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
             ariaLabel: link.label,
           }))}
           onChange={(value: string) => {
-            const next = primaryLinks.find((link) => link.id === value);
+            const next = links.find((link) => link.id === value);
             if (next) navigate(next.href);
           }}
           compactIconsOnMobile
