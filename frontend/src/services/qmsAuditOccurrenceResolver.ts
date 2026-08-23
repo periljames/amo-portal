@@ -36,7 +36,15 @@ export function resolveAuditOccurrence(amoCode: string, auditKey: string, signal
   if (!key) return Promise.reject(new Error("Audit occurrence key is required."));
   return apiRequest<QMSAuditOut>(
     qmsPath(amoCode, `/audits/resolve/${encodeURIComponent(key)}`),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    {
+      timeoutMs: 15_000,
+      // React Query supplies a lifecycle AbortSignal. Do not put those
+      // cancellable requests into apiClient's shared in-flight GET map: a
+      // route unmount must never cancel a resolver request owned by the next
+      // audit stage during Setup -> Prepare navigation.
+      cacheTtlMs: signal ? 0 : 5_000,
+      signal,
+    },
   );
 }
 
