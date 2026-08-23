@@ -95,9 +95,17 @@ def ai_tenant_policy_update(
 
     try:
         existing = ai_gateway._ai_subscription(db, tenant_id)
+        existing_status = str(getattr(existing, "status", "") or "").strip().upper()
+        requested_status = (
+            "DISABLED"
+            if not payload.enabled
+            else "TRIAL"
+            if existing_status == "TRIAL"
+            else "ENABLED"
+        )
         change: dict[str, Any] = {
             "module_code": ai_gateway.AI_MODULE_CODE,
-            "status": "ENABLED" if payload.enabled else "DISABLED",
+            "status": requested_status,
             "plan_code": payload.plan_code,
             "metadata": {
                 "provider": ai_gateway.AI_PROVIDER,
@@ -109,9 +117,9 @@ def ai_tenant_policy_update(
                 "markup_bps": payload.markup_bps,
             },
         }
-        # This endpoint edits AI policy, not commercial entitlement dates. Keep
-        # an existing scheduled/expiring subscription window intact; operators
-        # must use the module-subscription control to change those bounds.
+        # This endpoint edits AI policy, not commercial entitlement state or
+        # dates. Keep an existing trial state and scheduled/expiring window
+        # intact; operators must use module-subscription controls to change them.
         if existing is not None:
             change["effective_from"] = existing.effective_from
             change["effective_to"] = existing.effective_to
