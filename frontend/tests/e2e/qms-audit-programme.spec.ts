@@ -31,6 +31,9 @@ function programme(id = "programme-1", status = "APPROVED") {
     programme_year: 2026,
     revision_no: 1,
     title: id === "programme-1" ? "2026 Approved Audit Programme" : "2026 Quality Audit Programme",
+    assurance_model: "HYBRID",
+    continuous_monitoring_enabled: true,
+    optimizer_version: "HYBRID_ASSURANCE_V1",
     objectives: ["Verify continuing conformity and Quality-system effectiveness."],
     regulatory_basis: ["MPM Quality Audit Programme"],
     status,
@@ -51,6 +54,17 @@ function programme(id = "programme-1", status = "APPROVED") {
       cancelled_audit_count: 0,
       follow_up_audit_count: 0,
       scheduled_audit_count: 0,
+      unscheduled_audit_count: 1,
+    },
+    readiness: {
+      ready_for_approval: true,
+      blockers: [],
+      requirement_count: 1,
+      mandatory_requirement_count: 1,
+      mandatory_unscheduled_count: 1,
+      high_risk_requirement_count: 1,
+      unscheduled_requirement_count: 1,
+      mandatory_coverage_gap_count: 0,
     },
     items: [{
       id: "programme-item-1",
@@ -67,7 +81,13 @@ function programme(id = "programme-1", status = "APPROVED") {
       target_start: "2026-08-15",
       target_end: "2026-08-15",
       state: "PLANNED",
-      prioritization_basis: [],
+      prioritization_basis: [{
+        driver: "HYBRID_ASSURANCE",
+        algorithm: "HYBRID_ASSURANCE_V1",
+        priority_score: 82,
+        priority_band: "HIGH",
+        components: { compliance: 85, risk: 75, performance: 46 },
+      }],
       deferral_reason: null,
       cancellation_reason: null,
       auditable_entity: universeItem(),
@@ -81,6 +101,55 @@ function programme(id = "programme-1", status = "APPROVED") {
       actor_user_id: "quality-user-a",
       created_at: "2026-01-02T10:00:00Z",
     }],
+  };
+}
+
+function optimizer() {
+  return {
+    algorithm: "HYBRID_ASSURANCE_V1",
+    weights: { compliance: 0.4, risk: 0.35, performance: 0.25 },
+    as_of: "2026-08-23T09:00:00Z",
+    assurance_model: "HYBRID",
+    continuous_monitoring_enabled: true,
+    recommendations: [{
+      universe_item_id: "universe-1",
+      auditable_entity: "Maintenance Department",
+      entity_type: "DEPARTMENT",
+      source_route: "/maintenance/tenant-a/rostering",
+      algorithm: "HYBRID_ASSURANCE_V1",
+      priority_score: 82,
+      priority_band: "HIGH",
+      recommended_interval_days: 90,
+      components: { compliance: 85, risk: 75, performance: 46 },
+      drivers: [],
+      signals: {
+        repeat_findings: 2,
+        open_findings: 1,
+        follow_up_required: 0,
+        deferred_audits: 0,
+        failed_controls: 0,
+        adverse_trends: 0,
+        last_audit_date: "2026-05-15",
+      },
+      mandatory_baseline: true,
+      recommend_in_programme: true,
+      recommended_in_current_programme: true,
+      in_programme: true,
+      programme_item_id: "programme-item-1",
+      next_recommended_due: "2026-08-15",
+      target_start: "2026-08-01",
+      target_end: "2026-08-29",
+      requires_amendment: false,
+    }],
+    summary: {
+      auditable_entities: 1,
+      recommended_current_period: 1,
+      mandatory_baseline_due: 1,
+      mandatory_coverage_gaps: 0,
+      adaptive_risk_performance_coverage: 0,
+      coverage_gaps: 0,
+      requires_amendment: 0,
+    },
   };
 }
 
@@ -151,6 +220,9 @@ async function prepare(page: Page): Promise<void> {
       return;
     }
     if (path === "/api/maintenance/tenant-a/quality/audit-programmes" && request.method() === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      expect(payload).not.toHaveProperty("programme_methodology");
+      expect(payload).not.toHaveProperty("methodology_rationale");
       current = programme("programme-created", "DRAFT");
       programmes = [...programmes, current];
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(current) });
@@ -162,6 +234,12 @@ async function prepare(page: Page): Promise<void> {
     }
     if (path === "/api/maintenance/tenant-a/quality/audit-programmes/universe/items") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [universeItem()], total: 1, limit: 200, offset: 0, has_more: false }) });
+      return;
+    }
+    const optimizerMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)\/optimizer(?:\/rebuild)?$/);
+    if (optimizerMatch) {
+      const result = optimizer();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(request.method() === "POST" ? { ...result, sync: { added: 0, updated: 1 } } : result) });
       return;
     }
     if (path === "/api/maintenance/tenant-a/quality/integrations/calendar/schedule-options") {
@@ -243,12 +321,15 @@ async function prepare(page: Page): Promise<void> {
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
-test("opens governed programme and keeps Audit Universe source lineage visible", async ({ page }) => {
+test("opens hybrid programme, optimizer and Audit Universe lineage", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Audit Programme", exact: true })).toBeVisible();
   await expect(page.getByText("AP-2026-BASE-R01", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
+  await expect(page.getByText("Hybrid · Always on", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Audit Universe", exact: true })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
@@ -256,12 +337,14 @@ test("opens governed programme and keeps Audit Universe source lineage visible",
   await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 });
 
-test("creates a draft programme and requires a reason before review transition", async ({ page }) => {
+test("creates a hybrid draft without a methodology choice and requires a reason before review", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "New programme" }).click();
-  await expect(page.getByText("Create programme revision", { exact: true })).toBeVisible();
+  await expect(page.getByText("Create continuous assurance programme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await expect(page.getByText("Compliance baseline", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
   const detailHeader = page.locator(".qms-audit-programme__detail-header");
