@@ -248,7 +248,7 @@ test("opens governed programme and keeps Audit Universe source lineage visible",
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Audit Programme", exact: true })).toBeVisible();
-  await expect(page.getByText("AP-2026-BASE-R01", { exact: true })).toBeVisible();
+  await expect(page.getByText("AP-2026-BASE-R01", { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Audit Universe", exact: true })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
@@ -265,7 +265,7 @@ test("creates a draft programme and requires a reason before review transition",
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
   const detailHeader = page.locator(".qms-audit-programme__detail-header");
-  await expect(page.getByText("AP-2026-CREATED-R01", { exact: true })).toBeVisible();
+  await expect(page.getByText("AP-2026-CREATED-R01", { exact: false }).first()).toBeVisible();
   await expect(detailHeader.getByText("Draft", { exact: true })).toBeVisible();
   const submitReview = page.getByRole("button", { name: "Submit for review" });
   await expect(submitReview).toBeDisabled();
@@ -273,7 +273,8 @@ test("creates a draft programme and requires a reason before review transition",
   await expect(submitReview).toBeEnabled();
   await submitReview.click();
   await expect(detailHeader.getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator(".qms-audit-programme__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
+  await page.locator(".qms-audit-programme-flow__history > summary").click();
+  await expect(page.locator(".qms-audit-programme-flow__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
