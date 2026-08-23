@@ -86,15 +86,27 @@ def ai_tenant_policy_update(
             detail="Enabled tenant AI with a hard limit requires a positive monthly budget",
         )
 
-    model = payload.model or ai_gateway.PLAN_DEFAULT_MODEL[payload.plan_code]
-    definition = ai_gateway.AI_MODELS.get(model)
-    if definition is None:
-        raise HTTPException(status_code=422, detail="Selected AI model is not in the approved portal catalogue")
-    if ai_gateway.AI_TIER_ORDER[definition.tier] > ai_gateway.AI_TIER_ORDER[payload.plan_code]:
-        raise HTTPException(status_code=422, detail="Selected AI model exceeds the tenant plan tier")
-
     try:
         existing = ai_gateway._ai_subscription(db, tenant_id)
+        existing_metadata = ai_gateway._subscription_metadata(existing)
+        existing_model = str(existing_metadata.get("model") or "").strip()
+        existing_definition = ai_gateway.AI_MODELS.get(existing_model)
+        if payload.model:
+            model = payload.model
+        elif (
+            existing_definition is not None
+            and ai_gateway.AI_TIER_ORDER[existing_definition.tier] <= ai_gateway.AI_TIER_ORDER[payload.plan_code]
+        ):
+            model = existing_model
+        else:
+            model = ai_gateway.PLAN_DEFAULT_MODEL[payload.plan_code]
+
+        definition = ai_gateway.AI_MODELS.get(model)
+        if definition is None:
+            raise HTTPException(status_code=422, detail="Selected AI model is not in the approved portal catalogue")
+        if ai_gateway.AI_TIER_ORDER[definition.tier] > ai_gateway.AI_TIER_ORDER[payload.plan_code]:
+            raise HTTPException(status_code=422, detail="Selected AI model exceeds the tenant plan tier")
+
         raw_existing_status = getattr(existing, "status", "") if existing is not None else ""
         existing_status = str(getattr(raw_existing_status, "value", raw_existing_status) or "").strip().upper()
         requested_status = (
