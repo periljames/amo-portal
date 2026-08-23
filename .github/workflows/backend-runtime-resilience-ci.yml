@@ -34,6 +34,7 @@ jobs:
     env:
       PYTHONPATH: backend
       APP_ENV: test
+      FORWARDED_ALLOW_IPS: "127.0.0.1"
       AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
       AUTH_RATE_LIMIT_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
