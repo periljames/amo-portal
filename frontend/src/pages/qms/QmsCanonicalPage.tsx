@@ -102,14 +102,11 @@ export default function QmsCanonicalPage(): React.ReactElement {
     return <QmsCarPerformanceReportPage />;
   }
 
-  const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
-  if (isEvidenceRegister) {
-    return assuranceWorkspace(
-      "Evidence Vault",
-      "Review objective evidence, retained records and governed assurance packages.",
-      <QmsRegisterPage embedded />
-    );
-  }
+  // Evidence Vault is a first-class Quality evidence workspace, not an Audit
+  // Assurance child. Keep its own bounded register header, navigation and
+  // permission contract intact rather than embedding it inside the audit shell.
+  const isEvidenceRegister = /\/(?:quality|qms)\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
+  if (isEvidenceRegister) return <QmsRegisterPage />;
 
   return <QmsCanonicalLegacyPage />;
 }
