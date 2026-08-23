@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from amodb.apps.rostering import generation_scale_policy, generation_setup_router
 
 
@@ -24,7 +26,17 @@ def test_scale_policy_never_reloads_the_complete_roster_to_return_one_batch():
     source = (ROOT / "generation_scale_policy.py").read_text(encoding="utf-8")
     assert "list_assignments(" not in source
     assert "models.RosterAssignment.id.in_(assignment_ids)" in source
+    assert "models.RosterAssignment.version_id == version_id" in source
+    assert "models.RosterAssignment.amo_id == amo_id" in source
     assert ".with_for_update(of=models.RosterVersion)" in source
+
+
+def test_locked_version_lookup_explicitly_defers_large_selectin_collections():
+    source = (ROOT / "generation_scale_policy.py").read_text(encoding="utf-8")
+    assert "lazyload(models.RosterVersion.assignments)" in source
+    assert "lazyload(models.RosterVersion.validation_findings)" in source
+    assert "lazyload(models.RosterVersion.exceptions)" in source
+    assert "selectinload(models.RosterVersion.period)" in source
 
 
 def test_generation_receipt_is_checked_before_canonical_revision_validation():
@@ -34,6 +46,35 @@ def test_generation_receipt_is_checked_before_canonical_revision_validation():
     assert wrapper.index("common.command_receipt(") < wrapper.index("return original_generate_from_patterns(")
     assert 'operation="GENERATE_PATTERN"' in wrapper
     assert "_result_from_receipt" in wrapper
+
+
+def test_receipt_replay_rejects_a_different_roster_version_before_loading_rows(monkeypatch):
+    receipt = SimpleNamespace(
+        response_json={
+            "version_id": "VERSION-A",
+            "assignment_ids": ["ASSIGNMENT-A"],
+            "skipped": [],
+            "conflicts": [],
+        }
+    )
+    loaded = False
+
+    def _unexpected_loader(*args, **kwargs):
+        nonlocal loaded
+        loaded = True
+        return {}
+
+    monkeypatch.setattr(generation_scale_policy, "_load_assignments_by_id", _unexpected_loader)
+
+    with pytest.raises(ValueError, match="different roster version"):
+        generation_scale_policy._result_from_receipt(
+            object(),
+            amo_id="AMO-A",
+            version_id="VERSION-B",
+            receipt=receipt,
+        )
+
+    assert loaded is False
 
 
 def test_batch_cycle_start_requires_the_complete_rotation_to_match():
