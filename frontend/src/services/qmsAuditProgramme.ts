@@ -1,6 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 
 export type AuditProgrammeStatus = "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "CLOSED";
+export type AuditProgrammeMethodology = "COMPLIANCE" | "PERFORMANCE" | "RISK";
 export type AuditRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AuditUniverseEntityType = "DEPARTMENT" | "FACILITY" | "STATION" | "SUPPLIER" | "CONTRACTOR" | "PROCESS" | "CAPABILITY" | "APPROVAL_RATING" | "AIRCRAFT_TYPE" | "PERSONNEL_GROUP" | "OTHER";
 export type AuditProgrammeItemState = "PLANNED" | "SCHEDULED" | "COMPLETED" | "DEFERRED" | "CANCELLED" | "FOLLOW_UP_REQUIRED";
@@ -43,6 +44,16 @@ export type AuditProgrammeItem = {
   auditable_entity?: AuditUniverseItem | null;
 };
 
+export type AuditProgrammeReadiness = {
+  ready_for_approval: boolean;
+  blockers: Array<{ code: string; message: string }>;
+  requirement_count: number;
+  mandatory_requirement_count: number;
+  mandatory_unscheduled_count: number;
+  high_risk_requirement_count: number;
+  unscheduled_requirement_count: number;
+};
+
 export type AuditProgramme = {
   id: string;
   programme_ref: string;
@@ -50,6 +61,8 @@ export type AuditProgramme = {
   programme_year: number;
   revision_no: number;
   title: string;
+  programme_methodology: AuditProgrammeMethodology;
+  methodology_rationale?: string | null;
   objectives: string[];
   regulatory_basis: Array<string | Record<string, unknown>>;
   status: AuditProgrammeStatus;
@@ -68,7 +81,9 @@ export type AuditProgramme = {
     cancelled_audit_count: number;
     follow_up_audit_count: number;
     scheduled_audit_count: number;
+    unscheduled_audit_count?: number;
   };
+  readiness?: AuditProgrammeReadiness;
   items?: AuditProgrammeItem[];
   events?: Array<{
     id: string;
@@ -215,8 +230,14 @@ export function getAuditProgramme(amoCode: string, programmeId: string, signal?:
 }
 
 export function createAuditProgramme(amoCode: string, payload: {
-  programme_year: number; title: string; objectives: string[]; regulatory_basis: string[];
-  period_start: string; period_end: string;
+  programme_year: number;
+  title: string;
+  programme_methodology: AuditProgrammeMethodology;
+  methodology_rationale?: string;
+  objectives: string[];
+  regulatory_basis: Array<string | Record<string, unknown>>;
+  period_start: string;
+  period_end: string;
 }): Promise<AuditProgramme> {
   return apiRequest(qmsPath(amoCode, "/audit-programmes"), jsonOptions("POST", payload));
 }
