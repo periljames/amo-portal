@@ -95,7 +95,8 @@ def ai_tenant_policy_update(
 
     try:
         existing = ai_gateway._ai_subscription(db, tenant_id)
-        existing_status = str(getattr(existing, "status", "") or "").strip().upper()
+        raw_existing_status = getattr(existing, "status", "") if existing is not None else ""
+        existing_status = str(getattr(raw_existing_status, "value", raw_existing_status) or "").strip().upper()
         requested_status = (
             "DISABLED"
             if not payload.enabled
