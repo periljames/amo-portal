@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import importlib
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
-from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai, ai_router
+from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai
+
+ai_router_module = importlib.import_module("amodb.apps.platform.ai_router")
 
 
 def test_catalog_defaults_to_luna_for_standard_tier() -> None:
@@ -133,10 +136,10 @@ def test_policy_update_preserves_existing_entitlement_window(monkeypatch) -> Non
         captured.update(kwargs)
         return [{"module_code": "ai"}]
 
-    monkeypatch.setattr(ai_router.saas_services, "update_tenant_modules", update_modules)
+    monkeypatch.setattr(ai_router_module.saas_services, "update_tenant_modules", update_modules)
     monkeypatch.setattr(ai_gateway, "tenant_policy", lambda *_args, **_kwargs: {"enabled": True})
 
-    payload = ai_router.AITenantPolicyRequest(
+    payload = ai_router_module.AITenantPolicyRequest(
         enabled=True,
         plan_code="STANDARD",
         model="gpt-5.6-luna",
@@ -146,7 +149,7 @@ def test_policy_update_preserves_existing_entitlement_window(monkeypatch) -> Non
         markup_bps=0,
         reason="Adjust monthly AI budget",
     )
-    ai_router.ai_tenant_policy_update(
+    ai_router_module.ai_tenant_policy_update(
         "tenant-1",
         payload,
         db=object(),
