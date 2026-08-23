@@ -119,7 +119,6 @@ def batch_work_pattern_cycle_starts(
         .options(
             selectinload(workforce_models.EmployeeWorkPatternAssignment.work_pattern)
             .selectinload(workforce_models.WorkPattern.days),
-            selectinload(workforce_models.EmployeeWorkPatternAssignment.user),
         )
         .filter(
             workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
@@ -137,12 +136,32 @@ def batch_work_pattern_cycle_starts(
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
+    # Match Workforce's canonical active-user/system-account guard without an
+    # N+1 query. This stays bounded even when a tenant selects thousands of
+    # assignments in first-time setup.
+    user_ids = sorted({str(row.user_id) for row in rows})
+    active_users = db.query(account_models.User).filter(
+        account_models.User.amo_id == amo_id,
+        account_models.User.id.in_(user_ids),
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).all()
+    active_users_by_id = {str(user.id): user for user in active_users}
+    if len(active_users_by_id) != len(user_ids):
+        db.rollback()
+        raise _error(
+            "Every selected work-pattern assignment must belong to an active, non-system user in this tenant.",
+            code="WORK_PATTERN_CYCLE_START_USER_INACTIVE",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
     # Permission checks are cached by department so a 1,000-person batch does
     # not repeat the same authorization query for every member of one team.
     checked_departments: set[str | None] = set()
     signatures: set[tuple[Any, ...]] = set()
     for row in rows:
-        department_id = getattr(row.user, "department_id", None)
+        active_user = active_users_by_id[str(row.user_id)]
+        department_id = getattr(active_user, "department_id", None)
         if department_id not in checked_departments:
             workforce_permissions.require_permission(
                 db,
@@ -159,18 +178,11 @@ def batch_work_pattern_cycle_starts(
                 code="WORK_PATTERN_CYCLE_START_PATTERN_INACTIVE",
             )
 
-        # Preserve the same governance enforced by the canonical Workforce
-        # assignment create/update paths. A person may have moved departments,
-        # been deactivated, or a shift may have been re-scoped after the
-        # original assignment was created. A cycle-anchor batch must not make an
-        # already-invalid assignment look newly configured.
+        # Preserve the canonical Workforce pattern-to-user shift-scope check. A
+        # person may have moved departments or a shift may have been re-scoped
+        # after the original assignment was created; an anchor update must not
+        # make that incompatible assignment look newly configured.
         try:
-            active_user = workforce_services._require_user(
-                db,
-                amo_id=amo_id,
-                user_id=row.user_id,
-                active_only=True,
-            )
             workforce_services._validate_pattern_user_shift_scope(
                 pattern,
                 user=active_user,
