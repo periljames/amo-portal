@@ -27,7 +27,7 @@ def _actor_id(user: account_models.User) -> str:
 
 def _bad(exc: Exception, default_code: int = 400) -> None:
     if isinstance(exc, PermissionError):
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     raise HTTPException(status_code=default_code, detail=str(exc)) from exc
 
 
