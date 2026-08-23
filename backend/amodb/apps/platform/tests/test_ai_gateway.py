@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from amodb.apps.platform import ai_gateway, ai_openai
+from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai
 
 
 def test_catalog_defaults_to_luna_for_standard_tier() -> None:
@@ -177,8 +177,10 @@ def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monke
     monkeypatch.setattr(ai_gateway, "_record_tenant_usage", record_usage)
     monkeypatch.setattr(ai_gateway, "_audit", lambda _db, **kwargs: audits.append(kwargs))
 
+    base_run_ai = ai_execution_policy._ORIGINAL_RUN_AI
+    assert base_run_ai is not None
     with pytest.raises(RuntimeError, match="does not match requested rated model"):
-        ai_gateway.run_ai(
+        base_run_ai(
             db,
             prompt="Test governed mismatch accounting.",
             instructions="Be concise.",
