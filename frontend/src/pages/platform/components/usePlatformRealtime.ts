@@ -34,13 +34,14 @@ type ParsedSseBlock = {
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
 
 class PlatformRealtimeRequestError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly terminal: boolean,
-  ) {
+  readonly status: number;
+  readonly terminal: boolean;
+
+  constructor(status: number, message: string, terminal: boolean) {
     super(message);
     this.name = "PlatformRealtimeRequestError";
+    this.status = status;
+    this.terminal = terminal;
   }
 }
 
