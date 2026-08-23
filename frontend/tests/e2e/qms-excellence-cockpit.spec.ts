@@ -5,6 +5,16 @@ function futureToken(): string {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
 }
 
+function futureDateOnly(daysAhead = 7): string {
+  const value = new Date();
+  value.setDate(value.getDate() + daysAhead);
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function controlRecord(approvalStatus: "PENDING_APPROVAL" | "APPROVED" = "PENDING_APPROVAL") {
   return {
     id: "control-1",
@@ -84,7 +94,7 @@ function operationalDashboard() {
         entity_type: "audit",
         entity_id: "audit-1",
         title: "Base maintenance audit",
-        date: "2026-08-20",
+        date: futureDateOnly(),
         event_type: "AUDIT_DUE",
         link: "/maintenance/tenant-a/quality/audits/schedule",
         due_state: "upcoming",
