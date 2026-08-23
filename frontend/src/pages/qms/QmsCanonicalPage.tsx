@@ -77,8 +77,8 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }
 
   // The controlled checklist library is mounted as the workspace content itself.
-  // The global QualityEnhancementsRouteGate explicitly skips this library route,
-  // so there is one authoritative host inside the persistent Assurance Workspace.
+  // QualityEnhancementsHost stays mounted for shared Quality support but omits its
+  // duplicate checklist-template child on this route.
   if (/\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname)) {
     return assuranceWorkspace(
       "Audit checklists",
@@ -104,11 +104,10 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
   if (isEvidenceRegister) {
-    return assuranceWorkspace(
-      "Evidence vault",
-      "Review objective evidence, retained records and governed assurance packages.",
-      <QmsRegisterPage />
-    );
+    // QmsRegisterPage already owns the Quality DepartmentLayout. Do not wrap it
+    // in another Assurance/QMS shell; that creates duplicate navigation and main
+    // landmarks. A future persistent rail must embed a shell-free register body.
+    return <QmsRegisterPage />;
   }
 
   return <QmsCanonicalLegacyPage />;
