@@ -44,12 +44,18 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
 def _forwarded_allow_ips() -> str:
     configured = (os.getenv("FORWARDED_ALLOW_IPS") or "").strip()
     app_env = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
-    if app_env in {"prod", "production"} and not configured:
-        raise RuntimeError(
-            "FORWARDED_ALLOW_IPS must explicitly list the trusted reverse-proxy/ingress IPs or CIDRs in production"
-        )
+    if app_env in {"prod", "production"}:
+        if not configured:
+            raise RuntimeError(
+                "FORWARDED_ALLOW_IPS must explicitly list the trusted reverse-proxy/ingress IPs or CIDRs in production"
+            )
+        trusted_entries = {entry.strip() for entry in configured.split(",") if entry.strip()}
+        if "*" in trusted_entries:
+            raise RuntimeError(
+                "FORWARDED_ALLOW_IPS must not trust '*' in production; list only the reverse-proxy/ingress IPs or CIDRs"
+            )
     # Development/test defaults may trust loopback only. Production must never
-    # silently collapse all users behind an untrusted proxy or use '*'.
+    # silently collapse all users behind an untrusted proxy or trust '*'.
     return configured or "127.0.0.1"
 
 
