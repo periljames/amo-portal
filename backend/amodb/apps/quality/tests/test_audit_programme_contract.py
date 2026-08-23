@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,8 @@ from amodb.apps.quality.audit_programme_router import (
     ProgrammeItemCreate,
     _TRANSITIONS,
     _assert_editable,
+    _programme_readiness,
+    _validate_item_window,
     router as audit_programme_router,
 )
 from amodb.apps.quality.audit_programme_schedule_router import (
@@ -36,6 +39,25 @@ def _catchall_index(router) -> int:
 
 def _matching(router, path: str, method: str):
     return [route for route in router.routes if str(route.path) == path and method in (getattr(route, "methods", None) or set())]
+
+
+def _readiness_programme(methodology: str, regulatory_basis: list | None = None):
+    item = SimpleNamespace(
+        title="Maintenance Department Audit",
+        target_start=date(2026, 8, 1),
+        target_end=date(2026, 8, 31),
+        criteria=["KCAR / MPM"],
+        mandatory_surveillance=True,
+        state="PLANNED",
+        universe_item=SimpleNamespace(risk_classification="HIGH"),
+    )
+    return SimpleNamespace(
+        items=[item],
+        programme_methodology=methodology,
+        regulatory_basis=regulatory_basis or [],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 12, 31),
+    )
 
 
 def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
@@ -124,12 +146,23 @@ def test_audit_programme_schedule_lineage_migration_extends_single_chain() -> No
     assert len(revision.revision) <= 32
 
 
+def test_audit_programme_methodology_migration_extends_current_quality_chain() -> None:
+    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+    revision = script.get_revision("quality_260823_programme_method")
+    assert revision is not None
+    assert revision.down_revision == "quality_260820_provider_gov"
+    assert len(revision.revision) <= 32
+
+
 def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
     assert "quality_audit_programmes" in Base.metadata.tables
     assert "quality_audit_universe_items" in Base.metadata.tables
     assert "quality_audit_programme_items" in Base.metadata.tables
     assert "quality_audit_programme_events" in Base.metadata.tables
-    assert Base.metadata.tables["quality_audit_programmes"].c.amo_id.nullable is False
+    programme_table = Base.metadata.tables["quality_audit_programmes"]
+    assert programme_table.c.amo_id.nullable is False
+    assert programme_table.c.programme_methodology.nullable is False
+    assert programme_table.c.methodology_rationale.nullable is True
     assert Base.metadata.tables["quality_audit_universe_items"].c.amo_id.nullable is False
 
     item_table = Base.metadata.tables["quality_audit_programme_items"]
@@ -160,13 +193,22 @@ def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> 
     _assert_editable(SimpleNamespace(status="UNDER_REVIEW"))
 
 
-def test_programme_payload_validates_period_and_custom_recurrence() -> None:
+def test_programme_payload_validates_period_methodology_and_custom_recurrence() -> None:
     with pytest.raises(ValidationError):
         ProgrammeCreate(
             programme_year=2026,
             title="Invalid period",
             period_start="2026-12-31",
             period_end="2026-01-01",
+        )
+
+    with pytest.raises(ValidationError):
+        ProgrammeCreate(
+            programme_year=2026,
+            title="Invalid methodology",
+            programme_methodology="CHECKLIST",
+            period_start="2026-01-01",
+            period_end="2026-12-31",
         )
 
     with pytest.raises(ValidationError):
@@ -177,6 +219,36 @@ def test_programme_payload_validates_period_and_custom_recurrence() -> None:
             scope="Quality",
             recurrence="CUSTOM",
         )
+
+
+def test_programme_readiness_keeps_methodology_separate_from_mandatory_coverage() -> None:
+    compliance = _programme_readiness(_readiness_programme("COMPLIANCE"))
+    assert compliance["ready_for_approval"] is False
+    assert "NO_COMPLIANCE_BASIS" in {blocker["code"] for blocker in compliance["blockers"]}
+
+    compliance_with_basis = _programme_readiness(_readiness_programme("COMPLIANCE", ["KCAR 145 / approved MPM"]))
+    assert compliance_with_basis["ready_for_approval"] is True
+    assert compliance_with_basis["mandatory_requirement_count"] == 1
+    assert compliance_with_basis["high_risk_requirement_count"] == 1
+
+    for methodology in ("PERFORMANCE", "RISK"):
+        readiness = _programme_readiness(_readiness_programme(methodology))
+        assert readiness["ready_for_approval"] is True
+        assert readiness["mandatory_requirement_count"] == 1
+        assert readiness["unscheduled_requirement_count"] == 1
+
+
+def test_programme_target_window_cannot_escape_governed_period() -> None:
+    programme = _readiness_programme("RISK")
+    _validate_item_window(programme, date(2026, 2, 1), date(2026, 2, 28))
+
+    with pytest.raises(HTTPException) as early:
+        _validate_item_window(programme, date(2025, 12, 31), date(2026, 1, 2))
+    assert early.value.status_code == 422
+
+    with pytest.raises(HTTPException) as late:
+        _validate_item_window(programme, date(2026, 12, 30), date(2027, 1, 2))
+    assert late.value.status_code == 422
 
 
 def test_schedule_frequency_is_derived_from_governed_recurrence() -> None:
