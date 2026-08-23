@@ -4,8 +4,15 @@ metadata:
   name: amo-portal-runtime
 data:
   APP_ENV: production
+  ASGI_APP: amodb.production_app:app
+  PORT: "8080"
+  PORTAL_API_PROCESS_COUNT: "1"
+  UVICORN_BACKLOG: "4096"
   PORTAL_REFRESH_COOKIE_SECURE: "true"
   PORTAL_AUTH_SESSION_HOURS: "12"
+  AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
+  # AUTH_RATE_LIMIT_REDIS_URL belongs in amo-portal-secrets and must point to a
+  # shared production Redis/compatible endpoint reachable by every API replica.
   DB_EXTERNAL_POOLER: "true"
   DB_POOL_TIMEOUT: "5"
   DB_CONNECT_TIMEOUT_SECONDS: "5"
@@ -59,8 +66,7 @@ spec:
         - name: api
           image: ghcr.io/replace/amo-portal-backend:replace
           imagePullPolicy: IfNotPresent
-          command: ["uvicorn"]
-          args: ["amodb.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+          command: ["python", "-m", "amodb.serve"]
           ports:
             - { name: http, containerPort: 8080 }
           envFrom:
