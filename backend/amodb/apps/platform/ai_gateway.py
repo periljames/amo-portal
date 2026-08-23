@@ -513,6 +513,7 @@ def run_ai(
     budget = int((policy or {}).get("monthly_budget_microusd") or 0)
     hard_limit = bool((policy or {}).get("hard_limit", False))
     response_id = str(draft.get("response_id") or "") or None
+    response_text = str(draft.get("text") or "")
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
     credential_scope = "TENANT" if credential.tenant_id else "PLATFORM"
 
@@ -550,7 +551,7 @@ def run_ai(
                 "rate_snapshot": cost["rate_snapshot"],
                 "prompt_sha256": prompt_hash,
                 "prompt_chars": len(prompt),
-                "response_chars": len(str(draft.get("text") or "")),
+                "response_chars": len(response_text),
                 "latency_ms": latency_ms,
                 "credential_scope": credential_scope,
                 "error_type": "ProviderModelMismatch",
@@ -560,6 +561,49 @@ def run_ai(
         raise RuntimeError(
             f"Provider returned model {provider_model!r}, which does not match requested rated model {item.model!r}"
         )
+
+    if not response_text:
+        if billing_scope == "TENANT":
+            assert tenant_id is not None
+            _record_tenant_usage(
+                db,
+                tenant_id=tenant_id,
+                month=month,
+                usage=usage,
+                provider_cost_microusd=provider_cost,
+                customer_charge_microusd=0,
+                budget_microusd=budget,
+                hard_limit=hard_limit,
+            )
+        _audit(
+            db,
+            actor_user_id=actor_user_id,
+            tenant_id=tenant_id,
+            action="ai.request.rejected",
+            entity_id=response_id,
+            reason="AI provider response rejected because it contained no usable output text",
+            details={
+                "provider": AI_PROVIDER,
+                "rated_model": item.model,
+                "provider_model": provider_model,
+                "tier": item.tier,
+                "feature_code": feature_code,
+                "billing_scope": billing_scope,
+                "usage_month": month,
+                "usage": usage,
+                "provider_cost_microusd": provider_cost,
+                "customer_charge_microusd": 0,
+                "rate_snapshot": cost["rate_snapshot"],
+                "prompt_sha256": prompt_hash,
+                "prompt_chars": len(prompt),
+                "response_chars": 0,
+                "latency_ms": latency_ms,
+                "credential_scope": credential_scope,
+                "error_type": "EmptyProviderOutput",
+            },
+        )
+        db.commit()
+        raise RuntimeError("OpenAI returned an empty response")
 
     markup_bps = int((policy or {}).get("markup_bps") or 0)
     calculated_customer_charge = _ceil_div(provider_cost * (10_000 + markup_bps), 10_000)
@@ -615,7 +659,7 @@ def run_ai(
             "rate_snapshot": cost["rate_snapshot"],
             "prompt_sha256": prompt_hash,
             "prompt_chars": len(prompt),
-            "response_chars": len(str(draft.get("text") or "")),
+            "response_chars": len(response_text),
             "latency_ms": latency_ms,
             "credential_scope": credential_scope,
             "budget_exceeded_by_request": budget_exceeded_by_request,
@@ -629,7 +673,7 @@ def run_ai(
         "rated_model": item.model,
         "tier": item.tier,
         "response_id": response_id,
-        "text": str(draft.get("text") or ""),
+        "text": response_text,
         "usage": usage,
         "provider_cost_microusd": provider_cost,
         "calculated_customer_charge_microusd": (
