@@ -9,12 +9,9 @@ const QualityEnhancementsHost = lazy(
 
 const QualityEnhancementsRouteGate: React.FC = () => {
   const location = useLocation();
-  const checklistLibraryRoute = /^\/maintenance\/[^/]+\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname);
-  const relevant = !checklistLibraryRoute && (
-    /^\/car-invite\/?$/i.test(location.pathname)
+  const relevant = /^\/car-invite\/?$/i.test(location.pathname)
     || /^\/maintenance\/[^/]+(?:\/|$)/i.test(location.pathname)
-    || /^\/platform(?:\/|$)/i.test(location.pathname)
-  );
+    || /^\/platform(?:\/|$)/i.test(location.pathname);
 
   return (
     <>
