@@ -109,9 +109,9 @@ jobs:
           amodb/apps/doc_control/tests/test_external_source_owned_work_contract.py
           amodb/apps/doc_control/tests/test_document_control_my_work_contract.py
 
-      - name: Upgrade clean PostgreSQL database through current Alembic head
+      - name: Upgrade clean PostgreSQL database through current Alembic heads
         working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade head
+        run: alembic -c amodb/alembic.ini upgrade heads
 
       - name: Verify DMS foundation schema exists
         working-directory: backend
