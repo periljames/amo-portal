@@ -53,15 +53,17 @@ const Drawer: React.FC<DrawerProps> = ({
       aria-hidden={!isOpen}
       aria-busy={closeDisabled || undefined}
     >
-      <aside className={`drawer-panel${panelClassName ? ` ${panelClassName}` : ""}`} role="dialog" aria-modal="true">
-        <div className="drawer__header">
-          <h3 className="drawer__title">{title}</h3>
-          <button type="button" className="drawer__close" onClick={onClose} disabled={closeDisabled} aria-label={`Close ${title}`}>
-            ×
-          </button>
-        </div>
-        {children}
-      </aside>
+      {isOpen ? (
+        <aside className={`drawer-panel${panelClassName ? ` ${panelClassName}` : ""}`} role="dialog" aria-modal="true">
+          <div className="drawer__header">
+            <h3 className="drawer__title">{title}</h3>
+            <button type="button" className="drawer__close" onClick={onClose} disabled={closeDisabled} aria-label={`Close ${title}`}>
+              ×
+            </button>
+          </div>
+          {children}
+        </aside>
+      ) : null}
     </div>
   );
 };
