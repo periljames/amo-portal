@@ -377,7 +377,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
           <header><strong>Programme revisions</strong><small>{programmes.length} in {year}</small></header>
           {!programmes.length ? <p>No programme exists for {year}.</p> : programmes.map((programme) => (
             <button key={programme.id} type="button" className={programme.id === selectedProgrammeId ? "is-active" : ""} onClick={() => setSelectedId(programme.id)}>
-              <span><strong>{programme.title}</strong><small>{programme.programme_ref} · {human(methodologyOf(programme))}</small></span>
+              <span><strong>{programme.title}</strong><small><span className="qms-audit-programme-flow__ref">{programme.programme_ref}</span> · {human(methodologyOf(programme))}</small></span>
               <small>Rev {programme.revision_no}</small><b>{human(programme.status)}</b>
             </button>
           ))}
@@ -387,7 +387,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
           {!selectedProgrammeId ? <p>Select or create a programme.</p> : detailQuery.isLoading ? <p>Loading programme…</p> : !selected ? <p>Programme not available.</p> : (
             <>
               <header className="qms-audit-programme__detail-header">
-                <div><span>{selected.programme_ref} · Rev {selected.revision_no}</span><h2>{selected.title}</h2><p>{dateLabel(selected.period_start)} → {dateLabel(selected.period_end)}</p></div>
+                <div><span><b className="qms-audit-programme-flow__ref">{selected.programme_ref}</b><small> · Rev {selected.revision_no}</small></span><h2>{selected.title}</h2><p>{dateLabel(selected.period_start)} → {dateLabel(selected.period_end)}</p></div>
                 <span>{human(selected.status)}</span>
               </header>
 
@@ -461,7 +461,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 </section>
               ) : null}
 
-              <details className="qms-audit-programme-flow__history">
+              <details className="qms-audit-programme-flow__history" open>
                 <summary>Programme history <small>{selected.events?.length || 0} events</small></summary>
                 <div>{[...(selected.events || [])].reverse().map((event) => <article key={event.id}><span><strong>{human(event.event_type)}</strong><small>{new Date(event.created_at).toLocaleString()}</small></span><p>{event.reason}</p></article>)}</div>
               </details>
