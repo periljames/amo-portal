@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai
+from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai, ai_router
 
 
 def test_catalog_defaults_to_luna_for_standard_tier() -> None:
@@ -121,17 +121,44 @@ def test_subscription_effective_period_controls_current_entitlement() -> None:
     assert ai_gateway._subscription_is_current(naive_scheduled, "ENABLED", now=now) is False
 
 
-def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monkeypatch) -> None:
-    class FakeDB:
-        def __init__(self) -> None:
-            self.commit_count = 0
+def test_policy_update_preserves_existing_entitlement_window(monkeypatch) -> None:
+    effective_from = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    effective_to = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    existing = SimpleNamespace(effective_from=effective_from, effective_to=effective_to)
+    captured: dict[str, object] = {}
 
-        def commit(self) -> None:
-            self.commit_count += 1
+    monkeypatch.setattr(ai_gateway, "_ai_subscription", lambda *_args, **_kwargs: existing)
 
-    db = FakeDB()
-    recorded_usage: dict[str, object] = {}
-    audits: list[dict[str, object]] = []
+    def update_modules(_db, **kwargs):
+        captured.update(kwargs)
+        return [{"module_code": "ai"}]
+
+    monkeypatch.setattr(ai_router.saas_services, "update_tenant_modules", update_modules)
+    monkeypatch.setattr(ai_gateway, "tenant_policy", lambda *_args, **_kwargs: {"enabled": True})
+
+    payload = ai_router.AITenantPolicyRequest(
+        enabled=True,
+        plan_code="STANDARD",
+        model="gpt-5.6-luna",
+        monthly_budget_microusd=100_000,
+        hard_limit=True,
+        allow_external_documents=False,
+        markup_bps=0,
+        reason="Adjust monthly AI budget",
+    )
+    ai_router.ai_tenant_policy_update(
+        "tenant-1",
+        payload,
+        db=object(),
+        user=SimpleNamespace(id="admin-1"),
+    )
+
+    change = captured["changes"][0]
+    assert change["effective_from"] == effective_from
+    assert change["effective_to"] == effective_to
+
+
+def _install_successful_provider_stubs(monkeypatch, *, text: str, model: str = "gpt-5.6-luna"):
     policy = {
         "enabled": True,
         "provider": "openai",
@@ -143,7 +170,6 @@ def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monke
         "markup_bps": 0,
     }
     credential = SimpleNamespace(config_json={}, tenant_id=None)
-
     monkeypatch.setattr(ai_gateway, "tenant_policy", lambda *_args, **_kwargs: policy)
     monkeypatch.setattr(ai_gateway, "_meter_value", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(
@@ -163,12 +189,26 @@ def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monke
         ai_gateway.ai_openai,
         "responses_request",
         lambda **_kwargs: {
-            "response_id": "resp-mismatch",
-            "model": "unexpected-model",
-            "text": "discard this provider response",
+            "response_id": "resp-rejected",
+            "model": model,
+            "text": text,
             "usage": {"input_tokens": 1_000, "output_tokens": 100},
         },
     )
+
+
+def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monkeypatch) -> None:
+    class FakeDB:
+        def __init__(self) -> None:
+            self.commit_count = 0
+
+        def commit(self) -> None:
+            self.commit_count += 1
+
+    db = FakeDB()
+    recorded_usage: dict[str, object] = {}
+    audits: list[dict[str, object]] = []
+    _install_successful_provider_stubs(monkeypatch, text="discard this provider response", model="unexpected-model")
 
     def record_usage(_db, **kwargs):
         recorded_usage.update(kwargs)
@@ -205,6 +245,71 @@ def test_provider_model_mismatch_records_tenant_cost_and_audited_rejection(monke
     assert audits[0]["details"]["provider_cost_microusd"] == 320
     assert audits[0]["details"]["customer_charge_microusd"] == 0
     assert db.commit_count == 1
+
+
+def test_empty_provider_output_records_tenant_cost_and_audited_rejection(monkeypatch) -> None:
+    class FakeDB:
+        def __init__(self) -> None:
+            self.commit_count = 0
+
+        def commit(self) -> None:
+            self.commit_count += 1
+
+    db = FakeDB()
+    recorded_usage: dict[str, object] = {}
+    audits: list[dict[str, object]] = []
+    _install_successful_provider_stubs(monkeypatch, text="")
+
+    def record_usage(_db, **kwargs):
+        recorded_usage.update(kwargs)
+        return 0, 0
+
+    monkeypatch.setattr(ai_gateway, "_record_tenant_usage", record_usage)
+    monkeypatch.setattr(ai_gateway, "_audit", lambda _db, **kwargs: audits.append(kwargs))
+
+    base_run_ai = ai_execution_policy._ORIGINAL_RUN_AI
+    assert base_run_ai is not None
+    with pytest.raises(RuntimeError, match="empty response"):
+        base_run_ai(
+            db,
+            prompt="Test empty output accounting.",
+            instructions="Be concise.",
+            actor_user_id="user-1",
+            tenant_id="tenant-1",
+            billing_scope="TENANT",
+        )
+
+    assert recorded_usage["provider_cost_microusd"] == 320
+    assert recorded_usage["customer_charge_microusd"] == 0
+    assert len(audits) == 1
+    assert audits[0]["action"] == "ai.request.rejected"
+    assert audits[0]["details"]["error_type"] == "EmptyProviderOutput"
+    assert audits[0]["details"]["provider_cost_microusd"] == 320
+    assert audits[0]["details"]["customer_charge_microusd"] == 0
+    assert db.commit_count == 1
+
+
+def test_openai_success_with_empty_output_preserves_usage(monkeypatch) -> None:
+    def request(*_args, **_kwargs):
+        return 200, {
+            "id": "resp-empty",
+            "model": "gpt-5.6-luna",
+            "output_text": "",
+            "usage": {"input_tokens": 1_000, "output_tokens": 100},
+        }, 1.0
+
+    monkeypatch.setattr(ai_openai.saas_providers, "_json_request", request)
+    result = ai_openai.responses_request(
+        secret={"api_key": "test-key"},
+        config={},
+        model="gpt-5.6-luna",
+        instructions="Be concise.",
+        prompt="Test empty provider output.",
+        max_output_tokens=64,
+    )
+
+    assert result["text"] == ""
+    assert result["usage"] == {"input_tokens": 1_000, "output_tokens": 100}
 
 
 def test_managed_openai_request_ignores_configured_alternate_base_url(monkeypatch) -> None:
