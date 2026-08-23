@@ -109,6 +109,9 @@ def test_shared_limit_rejects_before_authentication_work() -> None:
     assert called is False
     assert response_messages[0]["status"] == 429
     assert any(header[0] == b"retry-after" for header in response_messages[0]["headers"])
+    payload = json.loads(response_messages[1]["body"])
+    assert payload["error_code"] == "AUTH_RATE_LIMITED"
+    assert payload["retryable"] is True
 
 
 def test_required_shared_limiter_outage_fails_auth_closed() -> None:
@@ -137,3 +140,40 @@ def test_required_shared_limiter_outage_fails_auth_closed() -> None:
 
     assert called is False
     assert response_messages[0]["status"] == 503
+    payload = json.loads(response_messages[1]["body"])
+    assert payload["error_code"] == "AUTH_RATE_LIMIT_UNAVAILABLE"
+    assert payload["retryable"] is True
+
+
+def test_oversized_auth_request_is_rejected_with_non_retryable_metadata() -> None:
+    called = False
+    response_messages: list[dict] = []
+    limiter = FakeLimiter()
+
+    async def inner(scope, receive, send):
+        nonlocal called
+        called = True
+
+    middleware = DistributedAuthRateLimitMiddleware(inner, limiter=limiter)  # type: ignore[arg-type]
+    middleware.max_body_bytes = 4096
+    delivered = False
+    body = b"x" * 4097
+
+    async def receive():
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        delivered = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message):
+        response_messages.append(message)
+
+    asyncio.run(middleware(_scope(), receive, send))
+
+    assert called is False
+    assert limiter.calls == []
+    assert response_messages[0]["status"] == 413
+    payload = json.loads(response_messages[1]["body"])
+    assert payload["error_code"] == "AUTH_REQUEST_TOO_LARGE"
+    assert payload["retryable"] is False
