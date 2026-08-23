@@ -158,6 +158,31 @@ def batch_work_pattern_cycle_starts(
                 "Every selected person must have an active work pattern.",
                 code="WORK_PATTERN_CYCLE_START_PATTERN_INACTIVE",
             )
+
+        # Preserve the same governance enforced by the canonical Workforce
+        # assignment create/update paths. A person may have moved departments,
+        # been deactivated, or a shift may have been re-scoped after the
+        # original assignment was created. A cycle-anchor batch must not make an
+        # already-invalid assignment look newly configured.
+        try:
+            active_user = workforce_services._require_user(
+                db,
+                amo_id=amo_id,
+                user_id=row.user_id,
+                active_only=True,
+            )
+            workforce_services._validate_pattern_user_shift_scope(
+                pattern,
+                user=active_user,
+            )
+        except ValueError as exc:
+            db.rollback()
+            raise _error(
+                str(exc),
+                code="WORK_PATTERN_CYCLE_START_SCOPE_INVALID",
+                status_code=status.HTTP_409_CONFLICT,
+            ) from exc
+
         days = {int(day.cycle_day_index) for day in pattern.days or []}
         if payload.cycle_day_index >= int(pattern.cycle_length_days) or payload.cycle_day_index not in days:
             db.rollback()
