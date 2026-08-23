@@ -49,6 +49,46 @@ def test_subject_is_global_per_login_identity_without_storing_raw_key_material()
     assert subject == "safarilink|pilot@example.com"
 
 
+def test_login_subject_uses_explicit_authenticated_credential_before_identifier() -> None:
+    email_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "safarilink",
+                "email": "pilot@example.com",
+                "identifier": "attacker-controlled-rotation-1",
+            }
+        ).encode(),
+        _scope(),
+    )
+    rotated_identifier_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "safarilink",
+                "email": "pilot@example.com",
+                "identifier": "attacker-controlled-rotation-2",
+            }
+        ).encode(),
+        _scope(),
+    )
+    staff_subject = DistributedAuthRateLimitMiddleware.subject(
+        "login",
+        json.dumps(
+            {
+                "amo_slug": "safarilink",
+                "staff_code": "SL001",
+                "identifier": "unused-alias",
+            }
+        ).encode(),
+        _scope(),
+    )
+
+    assert email_subject == "safarilink|pilot@example.com"
+    assert rotated_identifier_subject == email_subject
+    assert staff_subject == "safarilink|sl001"
+
+
 def test_allowed_auth_request_is_replayed_to_inner_app() -> None:
     received_body = bytearray()
     response_messages: list[dict] = []
