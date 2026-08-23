@@ -1,5 +1,6 @@
 import React from "react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
+import QualityChecklistTemplateHost from "../../components/QMS/QualityChecklistTemplateHost";
 import QualityCarsPage from "../QualityCarsPage";
 import QualityAuditsSectionLayout from "../qualityAudits/QualityAuditsSectionLayout";
 import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
@@ -31,6 +32,7 @@ export default function QmsCanonicalPage(): React.ReactElement {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const pathname = location.pathname.toLowerCase();
+  const amoCode = location.pathname.match(/^\/maintenance\/([^/]+)\//i)?.[1] || "";
 
   if (searchParams.get("control") && (pathname.includes("/quality/cars") || pathname.includes("/qms/cars"))) {
     return <QmsCarControlLoopPage />;
@@ -74,14 +76,14 @@ export default function QmsCanonicalPage(): React.ReactElement {
     return <Navigate to={location.pathname.replace(/\/register\/?$/i, "/dashboard")} replace />;
   }
 
-  // The checklist library is rendered by QualityChecklistTemplateHost as a
-  // first-class inline workspace. Keep the Assurance Workspace mounted around
-  // that host instead of dropping users into a visually unrelated route shell.
+  // The controlled checklist library is mounted as the workspace content itself.
+  // The global QualityEnhancementsRouteGate explicitly skips this library route,
+  // so there is one authoritative host inside the persistent Assurance Workspace.
   if (/\/(?:quality|qms)\/audits\/checklists\/?$/i.test(location.pathname)) {
     return assuranceWorkspace(
       "Audit checklists",
       "Use the controlled checklist library for audit preparation and execution.",
-      <div className="qms-hosted-specialist-workspace" aria-hidden="true" />
+      <QualityChecklistTemplateHost amoCode={decodeURIComponent(amoCode)} />
     );
   }
 
