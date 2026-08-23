@@ -33,6 +33,25 @@ type ParsedSseBlock = {
 
 const PLATFORM_LIVE_EVENT = "amo:platform-live";
 
+class PlatformRealtimeRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly terminal: boolean,
+  ) {
+    super(message);
+    this.name = "PlatformRealtimeRequestError";
+  }
+}
+
+export function isTerminalPlatformRealtimeStatus(status: number): boolean {
+  // A 404/405 is not a transient stream interruption. It means /ops is routed
+  // to the wrong process or the deployed gateway is incompatible with this UI.
+  // Retrying indefinitely only floods the browser/network logs and hides the
+  // deployment fault. Manual reconnect remains available after the route is fixed.
+  return status === 404 || status === 405;
+}
+
 function parseSseBlock(block: string): ParsedSseBlock | null {
   let event = "message";
   let id: string | undefined;
@@ -80,6 +99,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastEvent, setLastEvent] = useState<PlatformConsoleEvent | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
   const statusRef = useRef<PlatformLiveStatus>(streamEnabled ? "connecting" : "offline");
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<number | null>(null);
@@ -107,12 +127,14 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
     const token = getToken();
     if (!token || (typeof navigator !== "undefined" && !navigator.onLine)) {
       updateStatus("offline");
+      setLastError(!token ? "Platform session is unavailable." : "Browser is offline.");
       return;
     }
 
     const controller = new AbortController();
     controllerRef.current = controller;
     updateStatus("connecting");
+    setLastError(null);
 
     void (async () => {
       try {
@@ -126,9 +148,18 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
             "Cache-Control": "no-cache",
           },
         });
-        if (!response.ok || !response.body) throw new Error(`Platform live stream failed: ${response.status}`);
+        if (!response.ok || !response.body) {
+          const body = await response.text().catch(() => "");
+          const detail = body ? `: ${body.slice(0, 180)}` : "";
+          throw new PlatformRealtimeRequestError(
+            response.status,
+            `Platform Operations live stream failed (${response.status})${detail}`,
+            isTerminalPlatformRealtimeStatus(response.status),
+          );
+        }
 
         retryRef.current = 0;
+        setLastError(null);
         updateStatus("live");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -154,9 +185,14 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
           }
         }
         if (!controller.signal.aborted) throw new Error("Platform live stream closed");
-      } catch {
+      } catch (error) {
         if (controller.signal.aborted || !streamEnabled) return;
         updateStatus("offline");
+        setLastError(error instanceof Error ? error.message : "Platform live stream failed.");
+        if (error instanceof PlatformRealtimeRequestError && error.terminal) {
+          retryRef.current = 0;
+          return;
+        }
         const delay = Math.min(30_000, 1_500 * 2 ** retryRef.current);
         retryRef.current += 1;
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
@@ -167,6 +203,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
   const reconnect = useCallback(() => {
     if (!streamEnabled) return;
     retryRef.current = 0;
+    setLastError(null);
     connectRef.current();
   }, [streamEnabled]);
 
@@ -186,6 +223,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
       controllerRef.current?.abort();
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       updateStatus("offline");
+      setLastError(null);
       return;
     }
     connect();
@@ -193,6 +231,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
     const offline = () => {
       controllerRef.current?.abort();
       updateStatus("offline");
+      setLastError("Browser is offline.");
     };
     const visible = () => {
       if (document.visibilityState === "visible" && statusRef.current !== "live") reconnect();
@@ -209,7 +248,7 @@ export function usePlatformRealtime(enabled = true, dataMode?: DataMode) {
     };
   }, [connect, reconnect, streamEnabled, updateStatus]);
 
-  return { status, snapshot, lastUpdated, lastEvent, reconnect };
+  return { status, snapshot, lastUpdated, lastEvent, lastError, reconnect };
 }
 
 export const PLATFORM_CONSOLE_LIVE_EVENT = PLATFORM_LIVE_EVENT;
