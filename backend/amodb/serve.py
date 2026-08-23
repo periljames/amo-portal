@@ -25,23 +25,52 @@ def _ssl_options() -> Dict[str, Optional[str]]:
     return options
 
 
-def main() -> None:
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
-    reload_enabled = os.getenv("RELOAD", "false").lower() in {"1", "true", "yes", "on"}
-    log_level = os.getenv("LOG_LEVEL", "info")
-    forwarded_allow_ips = os.getenv("FORWARDED_ALLOW_IPS", "*")
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
-    uvicorn.run(
-        "amodb.main:app",
-        host=host,
-        port=port,
-        reload=reload_enabled,
-        log_level=log_level,
-        proxy_headers=True,
-        forwarded_allow_ips=forwarded_allow_ips,
-        **_ssl_options(),
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    try:
+        value = int(raw) if raw not in {None, ""} else default
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    return max(minimum, value)
+
+
+def _uvicorn_options() -> dict:
+    reload_enabled = _env_bool("RELOAD", False)
+    configured_workers = _env_int(
+        "PORTAL_API_PROCESS_COUNT",
+        _env_int("WEB_CONCURRENCY", 1),
     )
+    options: dict = {
+        "host": os.getenv("HOST", "0.0.0.0"),
+        "port": _env_int("PORT", 8000),
+        "reload": reload_enabled,
+        "workers": 1 if reload_enabled else configured_workers,
+        "log_level": os.getenv("LOG_LEVEL", "info"),
+        "proxy_headers": _env_bool("PROXY_HEADERS_ENABLED", True),
+        # Never trust arbitrary Internet clients as forwarding proxies by default.
+        # Deployments behind a known proxy/load balancer must set this explicitly.
+        "forwarded_allow_ips": os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        "backlog": _env_int("UVICORN_BACKLOG", 2048),
+        "timeout_keep_alive": _env_int("UVICORN_KEEP_ALIVE_SEC", 5),
+        "timeout_graceful_shutdown": _env_int("UVICORN_GRACEFUL_SHUTDOWN_SEC", 30),
+    }
+    limit_concurrency = int(os.getenv("UVICORN_LIMIT_CONCURRENCY", "0") or "0")
+    if limit_concurrency > 0:
+        options["limit_concurrency"] = limit_concurrency
+    options.update(_ssl_options())
+    return options
+
+
+def main() -> None:
+    app_path = os.getenv("ASGI_APP", "amodb.production_app:app")
+    uvicorn.run(app_path, **_uvicorn_options())
 
 
 if __name__ == "__main__":
