@@ -47,6 +47,26 @@ def test_production_requires_explicit_trusted_proxy_addresses() -> None:
             serve._uvicorn_options()
 
 
+def test_production_rejects_wildcard_trusted_proxy() -> None:
+    with patch.dict(
+        os.environ,
+        {"APP_ENV": "production", "FORWARDED_ALLOW_IPS": "*"},
+        clear=True,
+    ):
+        with pytest.raises(RuntimeError, match="must not trust"):
+            serve._uvicorn_options()
+
+
+def test_production_rejects_wildcard_among_proxy_cidrs() -> None:
+    with patch.dict(
+        os.environ,
+        {"APP_ENV": "production", "FORWARDED_ALLOW_IPS": "10.42.0.0/16,*,10.43.0.0/16"},
+        clear=True,
+    ):
+        with pytest.raises(RuntimeError, match="must not trust"):
+            serve._uvicorn_options()
+
+
 def test_production_uses_configured_proxy_cidrs() -> None:
     with patch.dict(
         os.environ,
