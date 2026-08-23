@@ -34,6 +34,7 @@ export function RosterSpreadsheetInteractions() {
     let lastCell: HTMLElement | null = null;
     let startX = 0;
     let startY = 0;
+    let extendFromExisting = false;
     let dragging = false;
     let suppressClick = false;
 
@@ -41,6 +42,7 @@ export function RosterSpreadsheetInteractions() {
       pointerId = null;
       startCell = null;
       lastCell = null;
+      extendFromExisting = false;
       dragging = false;
       grid.classList.remove("is-sheet-selecting");
       window.setTimeout(() => { suppressClick = false; }, 0);
@@ -51,10 +53,10 @@ export function RosterSpreadsheetInteractions() {
       const cell = asCell(event.target);
       if (!cell) return;
 
+      const modifierRange = event.shiftKey || event.ctrlKey || event.metaKey;
       const interactive = event.target instanceof Element
         ? event.target.closest(INTERACTIVE_SELECTOR)
         : null;
-      const modifierRange = event.shiftKey || event.ctrlKey || event.metaKey;
       if (interactive && !modifierRange) return;
 
       pointerId = event.pointerId;
@@ -62,16 +64,7 @@ export function RosterSpreadsheetInteractions() {
       lastCell = cell;
       startX = event.clientX;
       startY = event.clientY;
-
-      // Shift/Ctrl/Cmd on any part of a cell is explicitly a selection gesture,
-      // never an assignment/open action. Ctrl/Cmd intentionally extends the
-      // current rectangular range so Windows/macOS users get equivalent input.
-      if (modifierRange) {
-        suppressClick = true;
-        event.preventDefault();
-        event.stopPropagation();
-        dispatchCellClick(cell, true);
-      }
+      extendFromExisting = modifierRange;
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -83,7 +76,7 @@ export function RosterSpreadsheetInteractions() {
         dragging = true;
         suppressClick = true;
         grid.classList.add("is-sheet-selecting");
-        dispatchCellClick(startCell, false);
+        dispatchCellClick(startCell, extendFromExisting);
       }
 
       const underPointer = document.elementFromPoint(event.clientX, event.clientY);
@@ -109,9 +102,9 @@ export function RosterSpreadsheetInteractions() {
         return;
       }
 
-      // A Ctrl/Cmd click is normalized to the planner's existing Shift-click
-      // range contract. The synthetic event has no Ctrl/Cmd modifier, so it
-      // passes through this capture handler exactly once.
+      // Ctrl/Cmd gives Windows/macOS users the same rectangular range gesture
+      // as Shift. The planner's authoritative selection remains one rectangle,
+      // so bulk fill/copy/paste always operates on the cells the user sees.
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
