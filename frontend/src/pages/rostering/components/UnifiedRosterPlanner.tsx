@@ -1,6 +1,7 @@
 import "./roster-planner-ux.css";
 import "./roster-planner-actions.css";
 import "./roster-generation.css";
+import "./roster-spreadsheet-overrides.css";
 
 import { useEffect, useRef } from "react";
 import { Download, ShieldCheck } from "lucide-react";
@@ -8,6 +9,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { RosterComplianceControlCenter } from "./RosterComplianceControlCenter";
 import { RosterPlannerV2 } from "./RosterPlannerV2";
+import { RosterSpreadsheetInteractions } from "./RosterSpreadsheetInteractions";
 
 export function UnifiedRosterPlanner() {
   const { amoCode = "" } = useParams();
@@ -53,6 +55,7 @@ export function UnifiedRosterPlanner() {
         <Download size={17} aria-hidden="true" />
       </Link>
       <RosterPlannerV2 />
+      <RosterSpreadsheetInteractions />
     </div>
   );
 }
