@@ -24,24 +24,26 @@ def _repository_root() -> Path:
 
 
 def test_base_provider_helper_is_fail_closed_without_runtime_guard() -> None:
-    answer, citations, warning = assistant._openai_synthesis(
-        SimpleNamespace(),
-        "amo-1",
-        "user-1",
-        "Where is QAM 51?",
-        [_source()],
-    )
+    source = Path(assistant.__file__).read_text(encoding="utf-8")
+    helper_start = source.index("def _openai_synthesis(")
+    helper_end = source.index("\ndef _audit_assist(", helper_start)
+    helper_source = source[helper_start:helper_end]
 
-    assert answer is None
-    assert citations == []
-    assert warning is not None
-    assert "governed tenant AI runtime" in warning
+    assert "External AI synthesis requires the governed tenant AI runtime" in helper_source
+    assert "OPENAI_API_KEY" not in helper_source
+    assert "ai_gateway.run_ai" not in helper_source
+    assert "requests." not in helper_source
 
 
 def test_governed_synthesis_uses_explicit_tenant_gateway_context_and_filters_citations(
     monkeypatch,
 ) -> None:
     captured: dict = {}
+    access: dict = {}
+
+    def fake_require_tenant_data_access(_db, **kwargs):
+        access.update(kwargs)
+        return None
 
     def fake_run_ai(_db, **kwargs):
         captured.update(kwargs)
@@ -56,6 +58,11 @@ def test_governed_synthesis_uses_explicit_tenant_gateway_context_and_filters_cit
             "usage": {"input_tokens": 100, "output_tokens": 20},
         }
 
+    monkeypatch.setattr(
+        guard.ai_access,
+        "require_tenant_data_access",
+        fake_require_tenant_data_access,
+    )
     monkeypatch.setattr(guard.ai_gateway, "run_ai", fake_run_ai)
     db = SimpleNamespace()
     answer, citations, warning = guard._governed_synthesis(
@@ -69,6 +76,7 @@ def test_governed_synthesis_uses_explicit_tenant_gateway_context_and_filters_cit
     assert answer == "Open QAM 51 and verify the controlled form."
     assert citations == ["section:rev:sec"]
     assert warning is None
+    assert access == {"tenant_id": "amo-1", "actor_user_id": "user-1"}
     assert captured["tenant_id"] == "amo-1"
     assert captured["actor_user_id"] == "user-1"
     assert captured["billing_scope"] == "TENANT"
