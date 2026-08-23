@@ -175,11 +175,16 @@ class DistributedAuthRateLimitMiddleware:
 
     @staticmethod
     async def respond(send: Send, status: int, detail: str, *, retry_after: int | None = None) -> None:
+        error_code = {
+            413: "AUTH_REQUEST_TOO_LARGE",
+            429: "AUTH_RATE_LIMITED",
+            503: "AUTH_RATE_LIMIT_UNAVAILABLE",
+        }.get(status, "AUTH_REQUEST_REJECTED")
         payload = json.dumps(
             {
                 "detail": detail,
-                "error_code": "AUTH_RATE_LIMITED" if status == 429 else "AUTH_RATE_LIMIT_UNAVAILABLE",
-                "retryable": True,
+                "error_code": error_code,
+                "retryable": status in {429, 503},
                 "request_accepted": False,
             },
             separators=(",", ":"),
