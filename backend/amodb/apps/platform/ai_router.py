@@ -94,25 +94,32 @@ def ai_tenant_policy_update(
         raise HTTPException(status_code=422, detail="Selected AI model exceeds the tenant plan tier")
 
     try:
+        existing = ai_gateway._ai_subscription(db, tenant_id)
+        change: dict[str, Any] = {
+            "module_code": ai_gateway.AI_MODULE_CODE,
+            "status": "ENABLED" if payload.enabled else "DISABLED",
+            "plan_code": payload.plan_code,
+            "metadata": {
+                "provider": ai_gateway.AI_PROVIDER,
+                "model": model,
+                "max_model_tier": payload.plan_code,
+                "monthly_budget_microusd": payload.monthly_budget_microusd,
+                "hard_limit": payload.hard_limit,
+                "allow_external_documents": payload.allow_external_documents,
+                "markup_bps": payload.markup_bps,
+            },
+        }
+        # This endpoint edits AI policy, not commercial entitlement dates. Keep
+        # an existing scheduled/expiring subscription window intact; operators
+        # must use the module-subscription control to change those bounds.
+        if existing is not None:
+            change["effective_from"] = existing.effective_from
+            change["effective_to"] = existing.effective_to
+
         rows = saas_services.update_tenant_modules(
             db,
             tenant_id=tenant_id,
-            changes=[
-                {
-                    "module_code": ai_gateway.AI_MODULE_CODE,
-                    "status": "ENABLED" if payload.enabled else "DISABLED",
-                    "plan_code": payload.plan_code,
-                    "metadata": {
-                        "provider": ai_gateway.AI_PROVIDER,
-                        "model": model,
-                        "max_model_tier": payload.plan_code,
-                        "monthly_budget_microusd": payload.monthly_budget_microusd,
-                        "hard_limit": payload.hard_limit,
-                        "allow_external_documents": payload.allow_external_documents,
-                        "markup_bps": payload.markup_bps,
-                    },
-                }
-            ],
+            changes=[change],
             actor_user_id=str(user.id),
             reason=payload.reason,
         )
