@@ -60,8 +60,26 @@ def _register_and_promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *selected, *remaining[catchall_index:]]
 
 
+def _synchronise_public_completion_routes() -> None:
+    """Register every public completion route without relying on one sentinel.
+
+    The completion router can be imported while Quality extensions are still
+    being assembled. A single-route sentinel therefore cannot prove that the
+    entire child router was mounted. Copy only missing path/method signatures so
+    closing acknowledgement and verification endpoints are all available while
+    exact duplicates remain impossible.
+    """
+
+    existing = {_signature(item) for item in quality_public_router.routes}
+    for item in audit_live_completion_router.public_router.routes:
+        marker = _signature(item)
+        if marker in existing:
+            continue
+        quality_public_router.routes.append(item)
+        existing.add(marker)
+
+
 for _api_router in (router, legacy_router):
     _register_and_promote(_api_router)
 
-if not any("/quality/audit-verification/" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
-    quality_public_router.include_router(audit_live_completion_router.public_router)
+_synchronise_public_completion_routes()
