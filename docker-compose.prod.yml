@@ -1,4 +1,17 @@
 services:
+  auth-rate-limit-redis:
+    image: redis:8.10.0-alpine3.23
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    cpus: "${AUTH_RATE_LIMIT_REDIS_CPU_LIMIT:-0.50}"
+    mem_limit: "${AUTH_RATE_LIMIT_REDIS_MEMORY_LIMIT:-192m}"
+    pids_limit: 128
+
   backend:
     build:
       context: .
@@ -16,7 +29,11 @@ services:
       DB_POOL_SIZE: "${PORTAL_DB_POOL_SIZE:-20}"
       DB_MAX_OVERFLOW: "${PORTAL_DB_MAX_OVERFLOW:-10}"
       DB_POOL_TIMEOUT: "${PORTAL_DB_POOL_TIMEOUT:-5}"
-      PORTAL_API_PROCESS_COUNT: "1"
+      PORTAL_API_PROCESS_COUNT: "${PORTAL_API_PROCESS_COUNT:-2}"
+      UVICORN_BACKLOG: "${UVICORN_BACKLOG:-4096}"
+      FORWARDED_ALLOW_IPS: "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+      AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
+      AUTH_RATE_LIMIT_REDIS_URL: "redis://auth-rate-limit-redis:6379/0"
       PORTAL_WORKER_PROCESS_COUNT: "${PORTAL_WORKER_PROCESS_COUNT:-5}"
       PORTAL_SCHEDULED_PROCESS_COUNT: "${PORTAL_SCHEDULED_PROCESS_COUNT:-1}"
       DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT: "${DOCUMENT_EVIDENCE_PACK_PROCESS_COUNT:-1}"
@@ -33,6 +50,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+    depends_on:
+      auth-rate-limit-redis:
+        condition: service_healthy
 
   portal-worker:
     build:
