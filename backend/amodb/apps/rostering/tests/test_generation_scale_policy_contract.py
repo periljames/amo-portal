@@ -31,12 +31,28 @@ def test_scale_policy_never_reloads_the_complete_roster_to_return_one_batch():
     assert ".with_for_update(of=models.RosterVersion)" in source
 
 
+def test_bounded_result_loader_suppresses_related_entity_backrefs():
+    source = (ROOT / "generation_scale_policy.py").read_text(encoding="utf-8")
+    loader_start = source.index("def _load_assignments_by_id(")
+    loader_end = source.index("\ndef _result_from_receipt(", loader_start)
+    loader = source[loader_start:loader_end]
+
+    assert "noload(models.RosterAssignment.version)" in loader
+    assert 'selectinload(models.RosterAssignment.user).options(noload("*"))' in loader
+    assert 'selectinload(models.RosterAssignment.department).options(noload("*"))' in loader
+    assert 'selectinload(models.RosterAssignment.base_station).options(noload("*"))' in loader
+    assert 'selectinload(models.RosterAssignment.shift_template).options(noload("*"))' in loader
+    assert "noload(models.RosterTaskAssignmentLink.roster_assignment)" in loader
+    assert "selectinload(models.RosterTaskAssignmentLink.task_assignment)" in loader
+
+
 def test_locked_version_lookup_explicitly_defers_large_selectin_collections():
     source = (ROOT / "generation_scale_policy.py").read_text(encoding="utf-8")
     assert "lazyload(models.RosterVersion.assignments)" in source
     assert "lazyload(models.RosterVersion.validation_findings)" in source
     assert "lazyload(models.RosterVersion.exceptions)" in source
     assert "selectinload(models.RosterVersion.period)" in source
+    assert ".noload(\n                    models.RosterPeriod.versions\n                )" in source
 
 
 def test_generation_receipt_is_checked_before_canonical_revision_validation():
