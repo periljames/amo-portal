@@ -1,0 +1,40 @@
+/* Roster-sheet-only corrections requested after planner use.
+   Keep normal rows visually neutral; date meaning, not row parity, carries color. */
+
+.wr-planner-workspace .wr-roster-grid--month {
+  grid-template-columns: var(--wr-person-col) repeat(var(--wr-days), minmax(var(--wr-day-col), 1fr));
+  width: max(100%, calc(var(--wr-person-col) + var(--wr-days) * var(--wr-day-col)));
+}
+
+.wr-planner-workspace .wr-grid-row:nth-child(odd) > .wr-grid-person {
+  background-color: var(--wr-surface);
+}
+
+.wr-planner-workspace .wr-grid-row:nth-child(odd) > .wr-drop-cell:not(.is-weekend):not(.is-holiday) {
+  background-color: var(--wr-surface);
+}
+
+/* Weekend/public-holiday date tinting remains the only calendar background
+   treatment. Holiday takes precedence when a holiday falls on a weekend. */
+.wr-planner-workspace .wr-grid-row > .wr-drop-cell.is-weekend,
+.wr-planner-workspace .wr-day-header.is-weekend {
+  background-color: color-mix(in srgb, var(--wr-info) 4%, var(--wr-surface));
+}
+
+.wr-planner-workspace .wr-grid-row > .wr-drop-cell.is-holiday,
+.wr-planner-workspace .wr-day-header.is-holiday {
+  background-color: color-mix(in srgb, var(--wr-warning) 7%, var(--wr-surface));
+}
+
+.wr-planner-workspace .wr-roster-grid--month.is-sheet-selecting,
+.wr-planner-workspace .wr-roster-grid--month.is-sheet-selecting * {
+  user-select: none;
+}
+
+.wr-planner-workspace .wr-drop-cell {
+  cursor: cell;
+}
+
+.wr-planner-workspace .wr-drop-cell:has(button, input, select, textarea, a) {
+  cursor: default;
+}

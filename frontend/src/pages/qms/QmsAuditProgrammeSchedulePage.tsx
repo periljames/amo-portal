@@ -169,7 +169,7 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
   });
 
   if (!route) {
-    return <main className="qms-audit-programme"><div className="qms-audit-programme__error" role="alert">Invalid audit programme scheduling route.</div></main>;
+    return <section className="qms-audit-programme"><div className="qms-audit-programme__error" role="alert">Invalid audit programme scheduling route.</div></section>;
   }
 
   const backHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/program`;
@@ -180,7 +180,7 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
   const mutationError = scheduleMutation.error;
 
   return (
-    <main className="qms-audit-programme" aria-label="Schedule audit programme requirement">
+    <section className="qms-audit-programme" aria-label="Schedule audit programme requirement">
       <header className="qms-audit-programme__header">
         <div>
           <span><CalendarCheck2 size={15} /> Audit Programme → Quality Planner</span>
@@ -264,7 +264,7 @@ const QmsAuditProgrammeSchedulePage: React.FC = () => {
           ) : null}
         </section>
       ) : programmeQuery.isLoading ? <div className="qms-audit-programme__detail"><p className="is-empty">Loading programme requirement…</p></div> : null}
-    </main>
+    </section>
   );
 };
 

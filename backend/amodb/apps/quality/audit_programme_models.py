@@ -30,6 +30,11 @@ def _utcnow() -> datetime:
 class QualityAuditProgramme(Base):
     """Versioned annual/periodic audit programme owned by Quality.
 
+    Every programme uses one continuous hybrid assurance model: compliance is
+    the permanent baseline while risk and performance intelligence can increase
+    surveillance priority or recommend additional coverage. The programme owns
+    governed coverage and target windows; the Planner owns exact delivery.
+
     Approved revisions are not edited in place. Amendments create a new DRAFT
     revision linked through ``supersedes_programme_id`` while immutable events
     retain the human-attributed decision history.
@@ -58,6 +63,8 @@ class QualityAuditProgramme(Base):
     programme_year = Column(Integer, nullable=False)
     revision_no = Column(Integer, nullable=False, default=1, server_default="1")
     title = Column(String(255), nullable=False)
+    continuous_monitoring_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    optimizer_version = Column(String(64), nullable=False, default="HYBRID_ASSURANCE_V1", server_default="HYBRID_ASSURANCE_V1")
     objectives = Column(JSON, nullable=False, default=list)
     regulatory_basis = Column(JSON, nullable=False, default=list)
     status = Column(String(24), nullable=False, default="DRAFT", server_default="DRAFT")

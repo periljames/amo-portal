@@ -176,7 +176,7 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
 function assuranceSectionTabs(basePath: string): ContextTab[] {
   return [
     { id: "assurance-home", label: "Overview", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
-    { id: "assurance-audits", label: "Audit operations", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`] },
+    { id: "assurance-audits", label: "Audit assurance", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`] },
     { id: "assurance-findings", label: "Findings", path: `${basePath}/findings/register`, activePrefixes: [`${basePath}/findings`] },
     { id: "assurance-cars", label: "Corrective action", path: `${basePath}/cars/register`, activePrefixes: [`${basePath}/cars`] },
     { id: "assurance-providers", label: "External providers", path: `${basePath}/suppliers/approved-list`, activePrefixes: [`${basePath}/suppliers`] },
@@ -189,8 +189,8 @@ function assuranceSectionTabs(basePath: string): ContextTab[] {
 function auditSectionTabs(basePath: string): ContextTab[] {
   return [
     { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
-    { id: "audit-programme", label: "Programme", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
-    { id: "audit-planner", label: "Planner", path: `${basePath}/calendar/audits` },
+    { id: "audit-programme", label: "Programme setup", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
+    { id: "audit-planner", label: "Audit calendar", path: `${basePath}/calendar/audits` },
     { id: "audit-checklists", label: "Checklist templates", path: `${basePath}/audits/checklists`, exact: true },
   ];
 }

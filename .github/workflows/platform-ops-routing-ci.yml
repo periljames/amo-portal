@@ -1,0 +1,98 @@
+name: Platform Ops Routing CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/apps/platform/ops_*"
+      - "deploy/saas/docker-compose.yml"
+      - "docker-compose.prod.yml"
+      - "infra/nginx/frontend-default.conf"
+      - "scripts/dev_runtime.py"
+      - "frontend/vite.config.ts"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/devProxyRouting.test.ts"
+      - "frontend/src/services/platformOperations.ts"
+      - "frontend/src/pages/platform/components/usePlatformRealtime.ts"
+      - "frontend/src/pages/platform/components/usePlatformRealtime.test.ts"
+      - ".github/workflows/platform-ops-routing-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/platform_ops_main.py"
+      - "backend/amodb/apps/platform/ops_*"
+      - "deploy/saas/docker-compose.yml"
+      - "docker-compose.prod.yml"
+      - "infra/nginx/frontend-default.conf"
+      - "scripts/dev_runtime.py"
+      - "frontend/vite.config.ts"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/devProxyRouting.test.ts"
+      - "frontend/src/services/platformOperations.ts"
+      - "frontend/src/pages/platform/components/usePlatformRealtime.ts"
+      - "frontend/src/pages/platform/components/usePlatformRealtime.test.ts"
+      - ".github/workflows/platform-ops-routing-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  browser-to-gateway-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql+psycopg2://amo:amo@db:5432/amo
+      DATABASE_WRITE_URL: postgresql+psycopg2://amo:amo@db:5432/amo
+      DATABASE_READ_URL: postgresql+psycopg2://amo:amo@db:5432/amo
+      SECRET_KEY: routing-ci-secret
+      PLATFORM_SECRETS_KEY: routing-ci-platform-secret
+      CORS_ALLOWED_ORIGINS: https://portal.example.test
+      MQTT_BROKER_INTERNAL_URL: mqtt://mqtt:1883
+      MQTT_BROKER_WS_URL: wss://portal.example.test/mqtt
+      REALTIME_BROKER_WEBHOOK_SECRET: routing-ci-webhook-secret
+      REALTIME_GATEWAY_USERNAME: routing-ci-user
+      REALTIME_GATEWAY_PASSWORD: routing-ci-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify dedicated Operations gateway is mounted
+        run: |
+          grep -q 'from amodb.apps.platform.ops_api_router import router as versioned_ops_router' backend/amodb/platform_ops_main.py
+          grep -q 'app.include_router(versioned_ops_router)' backend/amodb/platform_ops_main.py
+          grep -q 'APIRouter(prefix="/ops/v1"' backend/amodb/apps/platform/ops_api_router.py
+
+      - name: Verify every browser runtime has an /ops upstream
+        run: |
+          grep -A18 'location /ops/' infra/nginx/frontend-default.conf | grep -q 'proxy_pass http://platform-ops-gateway:8090;'
+          grep -q 'PLATFORM_OPS_DEV_PROXY_PATTERN' frontend/vite.config.ts
+          grep -q 'http://127.0.0.1:8090' frontend/src/services/devProxyRouting.ts
+          grep -q 'amodb.platform_ops_main:app' scripts/dev_runtime.py
+          grep -q '"8090"' scripts/dev_runtime.py
+
+      - name: Verify SaaS deployment includes a private Operations gateway
+        run: |
+          docker compose -f deploy/saas/docker-compose.yml config >/tmp/amo-saas-compose.yml
+          grep -q 'platform-ops-gateway:' /tmp/amo-saas-compose.yml
+          grep -A70 'platform-ops-gateway:' /tmp/amo-saas-compose.yml | grep -q 'amodb.platform_ops_main:app'
+          grep -A70 'platform-ops-gateway:' /tmp/amo-saas-compose.yml | grep -q '127.0.0.1'
+          if grep -A70 'platform-ops-gateway:' /tmp/amo-saas-compose.yml | grep -q '0.0.0.0:8090'; then
+            echo 'Platform Operations gateway must not be exposed on a wildcard host address' >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify dev proxy and realtime failure contracts
+        working-directory: frontend
+        run: >-
+          npx vitest run
+          src/services/devProxyRouting.test.ts
+          src/pages/platform/components/usePlatformRealtime.test.ts
