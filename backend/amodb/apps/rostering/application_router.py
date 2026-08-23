@@ -47,6 +47,7 @@ from .rest_code_canonicalization import router as rest_code_canonicalization_rou
 from .roster_control_router import router as roster_control_router
 from .shift_semantics_router import router as shift_semantics_router
 from .workflow_state_router import router as workflow_state_router
+from ..workforce import attendance_warning_policy
 from ..workforce import pattern_rest_policy
 from ..workforce import pay_policy_store
 from ..workforce import services as workforce_services
@@ -109,6 +110,9 @@ compliance_audit_policy.install()
 # explicit template is persisted as canonical RD rather than anonymous empty
 # calendar space. This also upgrades the older 5D/2O recipe behavior.
 pattern_rest_policy.install_service_policy(workforce_services)
+# Summary warnings are user-facing reasons, not event identifiers. Keep one
+# display warning per distinct reason while preserving every underlying event.
+attendance_warning_policy.install(workforce_services)
 
 # Attach contract-owned floors before the timesheet classifier runs. A stored
 # contractual rate may raise the entitlement floor; user/supervisor input may
