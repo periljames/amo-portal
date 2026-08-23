@@ -43,7 +43,9 @@ def responses_request(
 
     Network/transport failures are normalized to ``RuntimeError`` so callers can
     apply their documented retry or deterministic-fallback policy without
-    depending on urllib/socket exception types.
+    depending on urllib/socket exception types. A successful provider response
+    with valid usage is returned even when it contains no output text; the
+    gateway must meter that billable usage and audit the rejected outcome.
     """
     api_key = str(secret.get("api_key") or "").strip()
     if not api_key:
@@ -77,9 +79,6 @@ def responses_request(
     if status < 200 or status >= 300 or not isinstance(response, dict):
         raise RuntimeError(f"OpenAI request failed ({status})")
 
-    text = _response_text(response)
-    if not text:
-        raise RuntimeError("OpenAI returned an empty response")
     usage = response.get("usage")
     if not isinstance(usage, dict):
         raise RuntimeError("OpenAI response did not include usage accounting")
@@ -90,7 +89,7 @@ def responses_request(
         "provider": "openai",
         "response_id": response.get("id"),
         "model": response.get("model") or model,
-        "text": text,
+        "text": _response_text(response),
         "usage": usage,
         "latency_ms": elapsed,
     }
