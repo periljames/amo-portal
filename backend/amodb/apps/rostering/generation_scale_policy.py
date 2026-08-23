@@ -9,8 +9,8 @@ version row lock. Both behaviours become progressively more expensive while a
 large monthly roster is being built.
 
 This policy keeps all existing validation, source-owned-state, idempotency and
-audit behaviour. It changes only the read shape used by locked version lookup
-and by the final serialization of a successful bulk batch.
+audit behaviour. It changes only the read shape used by locked version lookup,
+by successful bulk responses and by idempotent generation replays.
 """
 
 from typing import Any
@@ -41,6 +41,23 @@ def _load_assignments_by_id(db, assignment_ids: list[str]) -> dict[str, models.R
     return {str(row.id): row for row in rows}
 
 
+def _result_from_receipt(
+    db,
+    *,
+    version_id: str,
+    receipt,
+) -> schemas.RosterBulkAssignmentResult:
+    assignment_ids = [str(value) for value in (receipt.response_json or {}).get("assignment_ids", [])]
+    by_id = _load_assignments_by_id(db, assignment_ids)
+    return schemas.RosterBulkAssignmentResult(
+        version_id=version_id,
+        created=[common.serialize_assignment(by_id[row_id]) for row_id in assignment_ids if row_id in by_id],
+        skipped=list((receipt.response_json or {}).get("skipped", [])),
+        conflicts=list((receipt.response_json or {}).get("conflicts", [])),
+        idempotent_replay=True,
+    )
+
+
 def _bounded_bulk_create_assignments(
     db,
     *,
@@ -52,11 +69,12 @@ def _bounded_bulk_create_assignments(
 
     This mirrors ``assignments.bulk_create_assignments`` except that both a
     normal completion and an idempotent replay load only the assignment ids
-    belonging to the command instead of the entire roster version.
+    belonging to the command instead of the entire roster version. The receipt
+    check precedes revision validation so a response-lost retry of an already
+    committed command can replay safely instead of failing as stale.
     """
 
     common.ensure_draft(version)
-    common.check_version_revision(version, payload.expected_version_revision)
     request_payload = common.dump(payload)
     request_hash = common.canonical_hash(request_payload)
     receipt = common.command_receipt(
@@ -67,15 +85,8 @@ def _bounded_bulk_create_assignments(
         request_hash=request_hash,
     )
     if receipt:
-        assignment_ids = [str(value) for value in (receipt.response_json or {}).get("assignment_ids", [])]
-        by_id = _load_assignments_by_id(db, assignment_ids)
-        return schemas.RosterBulkAssignmentResult(
-            version_id=version.id,
-            created=[common.serialize_assignment(by_id[row_id]) for row_id in assignment_ids if row_id in by_id],
-            skipped=list((receipt.response_json or {}).get("skipped", [])),
-            conflicts=list((receipt.response_json or {}).get("conflicts", [])),
-            idempotent_replay=True,
-        )
+        return _result_from_receipt(db, version_id=version.id, receipt=receipt)
+    common.check_version_revision(version, payload.expected_version_revision)
 
     created: list[models.RosterAssignment] = []
     skipped: list[dict[str, Any]] = []
@@ -179,6 +190,7 @@ def install(service_module) -> None:
         return
 
     original_get_version = service_module.get_version
+    original_generate_from_patterns = service_module.generate_from_patterns
 
     def get_version(db, *, amo_id: str, version_id: str, lock: bool = False):
         if not lock:
@@ -200,8 +212,32 @@ def install(service_module) -> None:
             .first()
         )
 
+    def generate_from_patterns(db, *, version, actor_user_id: str, payload):
+        # The historical generator checks the version revision before looking
+        # for its idempotency receipt. A committed request whose HTTP response
+        # was lost can therefore look stale on retry. Resolve a matching receipt
+        # first and return only that command's assignment ids. New commands still
+        # enter the canonical generator and undergo its normal revision check.
+        request_hash = common.canonical_hash(common.dump(payload))
+        receipt = common.command_receipt(
+            db,
+            amo_id=version.amo_id,
+            idempotency_key=payload.idempotency_key,
+            operation="GENERATE_PATTERN",
+            request_hash=request_hash,
+        )
+        if receipt:
+            return _result_from_receipt(db, version_id=version.id, receipt=receipt)
+        return original_generate_from_patterns(
+            db,
+            version=version,
+            actor_user_id=actor_user_id,
+            payload=payload,
+        )
+
     service_module.get_version = get_version
     service_module._bulk_create_assignments = _bounded_bulk_create_assignments
+    service_module.generate_from_patterns = generate_from_patterns
     _INSTALLED = True
 
 
