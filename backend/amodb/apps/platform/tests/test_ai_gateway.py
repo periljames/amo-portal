@@ -125,13 +125,14 @@ def test_subscription_effective_period_controls_current_entitlement() -> None:
     assert ai_gateway._subscription_is_current(naive_scheduled, "ENABLED", now=now) is False
 
 
-def test_policy_update_preserves_existing_entitlement_window_and_trial_status(monkeypatch) -> None:
+def test_policy_update_preserves_existing_entitlement_window_trial_and_valid_model(monkeypatch) -> None:
     effective_from = datetime(2026, 8, 1, tzinfo=timezone.utc)
     effective_to = datetime(2026, 9, 1, tzinfo=timezone.utc)
     existing = SimpleNamespace(
         status=account_models.ModuleSubscriptionStatus.TRIAL,
         effective_from=effective_from,
         effective_to=effective_to,
+        metadata_json='{"model":"gpt-5.6-luna"}',
     )
     captured: dict[str, object] = {}
 
@@ -146,8 +147,7 @@ def test_policy_update_preserves_existing_entitlement_window_and_trial_status(mo
 
     payload = ai_router_module.AITenantPolicyRequest(
         enabled=True,
-        plan_code="STANDARD",
-        model="gpt-5.6-luna",
+        plan_code="ADVANCED",
         monthly_budget_microusd=100_000,
         hard_limit=True,
         allow_external_documents=False,
@@ -165,6 +165,7 @@ def test_policy_update_preserves_existing_entitlement_window_and_trial_status(mo
     assert change["status"] == "TRIAL"
     assert change["effective_from"] == effective_from
     assert change["effective_to"] == effective_to
+    assert change["metadata"]["model"] == "gpt-5.6-luna"
 
 
 def _install_successful_provider_stubs(monkeypatch, *, text: str, model: str = "gpt-5.6-luna"):
