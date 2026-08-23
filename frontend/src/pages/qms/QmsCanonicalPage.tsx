@@ -105,7 +105,7 @@ export default function QmsCanonicalPage(): React.ReactElement {
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
   if (isEvidenceRegister) {
     return assuranceWorkspace(
-      "Evidence vault",
+      "Evidence Vault",
       "Review objective evidence, retained records and governed assurance packages.",
       <QmsRegisterPage embedded />
     );
