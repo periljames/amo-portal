@@ -21,10 +21,21 @@ jobs:
     name: Process, admission and DB capacity contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:8.10.0-alpine3.23
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       PYTHONPATH: backend
       APP_ENV: test
-      AUTH_RATE_LIMIT_SHARED_REQUIRED: "false"
+      AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
+      AUTH_RATE_LIMIT_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
