@@ -43,6 +43,8 @@ jobs:
           backend/tests/test_distributed_rate_limit.py
           backend/tests/test_serve_runtime.py
           backend/amodb/apps/accounts/tests/test_router_public_rate_limit.py
+      - name: Prepare compose environment
+        run: cp .env.example .env
       - name: Validate production compose model
         run: docker compose -f docker-compose.prod.yml config >/dev/null
       - name: Build production backend image
