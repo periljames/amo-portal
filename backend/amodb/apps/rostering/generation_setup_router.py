@@ -9,12 +9,13 @@ full rotation signatures are identical.
 """
 
 from datetime import date, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, noload, selectinload
 
 from ...database import get_db
 from ...security import get_current_active_user
@@ -23,6 +24,7 @@ from ..audit import services as audit_services
 from ..workforce import models as workforce_models
 from ..workforce import permissions as workforce_permissions
 from ..workforce import services as workforce_services
+from . import models as rostering_models
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
 
@@ -114,11 +116,29 @@ def batch_work_pattern_cycle_starts(
             code="WORK_PATTERN_CYCLE_START_DUPLICATE",
         )
 
+    # Model defaults on this graph are deliberately eager/selectin in several
+    # places for ordinary directory screens. A 10,000-person setup must not
+    # inherit those defaults and materialize unrelated workforce history. Load
+    # only the graph required for rotation identity and shift-department scope.
+    pattern_loader = selectinload(
+        workforce_models.EmployeeWorkPatternAssignment.work_pattern
+    ).options(
+        noload(workforce_models.WorkPattern.employee_assignments),
+        selectinload(workforce_models.WorkPattern.days).options(
+            noload(workforce_models.WorkPatternDay.work_pattern),
+            joinedload(workforce_models.WorkPatternDay.shift_template).options(
+                noload(rostering_models.ShiftTemplate.assignments),
+                selectinload(rostering_models.ShiftTemplate.departments).options(
+                    noload(account_models.Department.users),
+                ),
+            ),
+        ),
+    )
     rows = (
         db.query(workforce_models.EmployeeWorkPatternAssignment)
         .options(
-            selectinload(workforce_models.EmployeeWorkPatternAssignment.work_pattern)
-            .selectinload(workforce_models.WorkPattern.days),
+            noload(workforce_models.EmployeeWorkPatternAssignment.user),
+            pattern_loader,
         )
         .filter(
             workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
@@ -136,17 +156,24 @@ def batch_work_pattern_cycle_starts(
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
-    # Match Workforce's canonical active-user/system-account guard without an
-    # N+1 query. This stays bounded even when a tenant selects thousands of
-    # assignments in first-time setup.
+    # Match Workforce's canonical active-user/system-account guard using scalar
+    # columns only. Loading User entities here would trigger their default
+    # selectin authorization/security history relationships and defeat the
+    # bounded batch design.
     user_ids = sorted({str(row.user_id) for row in rows})
-    active_users = db.query(account_models.User).filter(
+    active_user_rows = db.query(
+        account_models.User.id,
+        account_models.User.department_id,
+    ).filter(
         account_models.User.amo_id == amo_id,
         account_models.User.id.in_(user_ids),
         account_models.User.is_active.is_(True),
         account_models.User.is_system_account.is_(False),
     ).all()
-    active_users_by_id = {str(user.id): user for user in active_users}
+    active_users_by_id = {
+        str(user_id): SimpleNamespace(id=str(user_id), department_id=department_id)
+        for user_id, department_id in active_user_rows
+    }
     if len(active_users_by_id) != len(user_ids):
         db.rollback()
         raise _error(
