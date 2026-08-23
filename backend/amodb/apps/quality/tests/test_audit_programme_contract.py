@@ -157,7 +157,6 @@ def test_hybrid_programme_migration_extends_current_quality_chain_without_method
     assert revision is not None
     assert revision.down_revision == "quality_260820_provider_gov"
     assert len(revision.revision) <= 32
-    assert script.get_revision("quality_260823_programme_method") is None
 
 
 def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
@@ -238,7 +237,7 @@ def test_programme_readiness_always_keeps_compliance_baseline() -> None:
     assert "MANDATORY_COVERAGE_GAP" in {blocker["code"] for blocker in with_gap["blockers"]}
 
 
-def test_hybrid_optimizer_is_versioned_transparent_and_can_only_increase_mandatory_surveillance() -> None:
+def test_hybrid_optimizer_is_versioned_transparent_and_only_evidence_increases_mandatory_surveillance() -> None:
     assert ALGORITHM_VERSION == "HYBRID_ASSURANCE_V1"
     assert sum(WEIGHTS.values()) == pytest.approx(1.0)
     entity = SimpleNamespace(
@@ -248,8 +247,9 @@ def test_hybrid_optimizer_is_versioned_transparent_and_can_only_increase_mandato
         surveillance_interval_days=365,
     )
     baseline = score_surveillance(universe_item=entity, signals={})
-    assert baseline["priority_score"] >= 80
-    assert baseline["recommended_interval_days"] <= 365
+    assert baseline["priority_score"] >= 40
+    assert baseline["priority_score"] < 60
+    assert baseline["recommended_interval_days"] == 365
     assert baseline["mandatory_baseline"] is True
     assert baseline["recommend_in_programme"] is True
     assert {entry["factor"] for entry in baseline["drivers"]} >= {"COMPLIANCE", "RISK", "PERFORMANCE", "MANDATORY_FLOOR", "MANDATORY_INTERVAL_CAP"}
@@ -258,8 +258,8 @@ def test_hybrid_optimizer_is_versioned_transparent_and_can_only_increase_mandato
         universe_item=entity,
         signals={"repeat_findings": 3, "open_findings": 2, "follow_up_required": 1, "adverse_trends": 2},
     )
-    assert pressured["priority_score"] >= baseline["priority_score"]
-    assert pressured["recommended_interval_days"] <= baseline["recommended_interval_days"]
+    assert pressured["priority_score"] > baseline["priority_score"]
+    assert pressured["recommended_interval_days"] < baseline["recommended_interval_days"]
     assert pressured["components"]["performance"] > baseline["components"]["performance"]
 
 
