@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from amodb.apps.accounts import models as account_models
 from amodb.apps.platform import ai_execution_policy, ai_gateway, ai_openai
 
 ai_router_module = importlib.import_module("amodb.apps.platform.ai_router")
@@ -128,7 +129,7 @@ def test_policy_update_preserves_existing_entitlement_window_and_trial_status(mo
     effective_from = datetime(2026, 8, 1, tzinfo=timezone.utc)
     effective_to = datetime(2026, 9, 1, tzinfo=timezone.utc)
     existing = SimpleNamespace(
-        status="TRIAL",
+        status=account_models.ModuleSubscriptionStatus.TRIAL,
         effective_from=effective_from,
         effective_to=effective_to,
     )
