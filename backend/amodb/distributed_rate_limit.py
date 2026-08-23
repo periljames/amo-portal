@@ -136,10 +136,14 @@ class DistributedAuthRateLimitMiddleware:
 
         amo = str(payload.get("amo_slug") or "").strip().lower()
         if endpoint == "login":
+            # Match router_public.login/authenticate_user semantics exactly: an
+            # explicit email or staff code is authoritative. `identifier` is a
+            # compatibility fallback only when neither explicit credential is
+            # supplied, so an unused identifier can never rotate the Redis key.
             identity = str(
-                payload.get("identifier")
-                or payload.get("email")
+                payload.get("email")
                 or payload.get("staff_code")
+                or payload.get("identifier")
                 or ""
             ).strip().lower()
             if identity:
