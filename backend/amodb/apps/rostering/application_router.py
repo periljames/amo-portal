@@ -21,8 +21,10 @@ from . import (
     extended_duty_day_policy,
     extended_duty_policy,
     extended_duty_validation_policy,
+    generation_scale_policy,
     lifecycle_error_policy,
     lineage,
+    notification_resilience_policy,
     protected_rest_exact_policy,
     roster_control,
     shift_scheduling_policy,
@@ -41,10 +43,13 @@ from .commitments_router import router as commitments_router
 from .consent_router import router as consent_router
 from .exemption_router import router as exemption_router
 from .extended_duty_router import router as extended_duty_router
+from .generation_read_router import router as generation_read_router
+from .generation_setup_router import router as generation_setup_router
 from .rest_code_canonicalization import router as rest_code_canonicalization_router
 from .roster_control_router import router as roster_control_router
 from .shift_semantics_router import router as shift_semantics_router
 from .workflow_state_router import router as workflow_state_router
+from ..workforce import attendance_warning_policy
 from ..workforce import pattern_rest_policy
 from ..workforce import pay_policy_store
 from ..workforce import services as workforce_services
@@ -60,10 +65,22 @@ _LEGACY_CALENDAR_PATHS = {
     "/rostering/calendar/subscription",
     "/rostering/calendar/feed/{token}.ics",
 }
+_LEGACY_ASSIGNMENT_READ_PATH = "/rostering/versions/{version_id}/assignments"
+
+
+def _keep_legacy_route(route) -> bool:
+    path = getattr(route, "path", None)
+    if path in _LEGACY_CALENDAR_PATHS:
+        return False
+    if path == _LEGACY_ASSIGNMENT_READ_PATH and "GET" in (getattr(route, "methods", set()) or set()):
+        return False
+    return True
+
+
 rostering_route_module.router.routes = [
     route
     for route in rostering_route_module.router.routes
-    if getattr(route, "path", None) not in _LEGACY_CALENDAR_PATHS
+    if _keep_legacy_route(route)
 ]
 
 roster_control.ensure_assignment_lineages = lineage.ensure_assignment_lineages
@@ -79,6 +96,13 @@ starter_shift_semantics_policy.install(code_registry)
 # use only their explicitly governed rule sets and a missing legacy helper can
 # never turn an ordinary planner mutation into HTTP 500.
 configured_rule_policy.install_service_policy(rostering_route_module.services)
+# Large generated rosters must not repeatedly materialize every assignment in
+# the version simply to lock the parent row or return the current batch.
+generation_scale_policy.install(rostering_route_module.services)
+# Best-effort roster email must never poison the authoritative roster
+# transaction. Compact workflow correlation ids to the canonical 64-character
+# identifier contract and use a dedicated notification transaction.
+notification_resilience_policy.install()
 compliance_policy.install_validation_policy()
 # Replace candidate sampling with exact continuous interval coverage before any
 # validation request can run. The compatibility seam inside compliance_policy
@@ -104,6 +128,9 @@ compliance_audit_policy.install()
 # explicit template is persisted as canonical RD rather than anonymous empty
 # calendar space. This also upgrades the older 5D/2O recipe behavior.
 pattern_rest_policy.install_service_policy(workforce_services)
+# Summary warnings are user-facing reasons, not event identifiers. Keep one
+# display warning per distinct reason while preserving every underlying event.
+attendance_warning_policy.install(workforce_services)
 
 # Attach contract-owned floors before the timesheet classifier runs. A stored
 # contractual rate may raise the entitlement floor; user/supervisor input may
@@ -146,6 +173,7 @@ structured_error_policy.install(rostering_route_module)
 router = APIRouter()
 router.include_router(calendar_subscription_status_router)
 router.include_router(roster_control_router)
+router.include_router(generation_read_router)
 router.include_router(rostering_route_module.router)
 router.include_router(code_registry_router)
 router.include_router(shift_semantics_router)
@@ -163,5 +191,6 @@ router.include_router(workforce_governance_router)
 router.include_router(workforce_selection_router)
 router.include_router(workforce_bulk_router)
 router.include_router(workforce_pay_policy_router)
+router.include_router(generation_setup_router)
 
 __all__ = ["router"]
