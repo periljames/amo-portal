@@ -22,6 +22,7 @@ from ..accounts import models as account_models
 from ..audit import services as audit_services
 from ..workforce import models as workforce_models
 from ..workforce import permissions as workforce_permissions
+from ..workforce import services as workforce_services
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
 
@@ -47,7 +48,7 @@ class CycleStartBatchResponse(BaseModel):
 
 
 def _amo(user: account_models.User) -> str:
-    return getattr(user, "effective_amo_id", None) or user.amo_id
+    return workforce_services.effective_amo_id(user)
 
 
 def _error(detail: str, *, code: str, status_code: int = 400) -> HTTPException:
