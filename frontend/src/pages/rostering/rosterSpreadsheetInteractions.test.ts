@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
-const read = (relative: string) => readFileSync(new URL(relative, `file://${here}/`), "utf8");
+const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 
 describe("roster spreadsheet interaction contract", () => {
   it("mounts the sheet gesture adapter and planner-only overrides", () => {
