@@ -3,19 +3,20 @@ from __future__ import annotations
 """Bound database work performed by large roster-generation batches.
 
 The legacy bulk assignment implementation reloaded every assignment in the
-version after each batch only to serialize the rows just created. Roster
-mutation routes also loaded the complete assignment graph before acquiring a
-version row lock. Both behaviours become progressively more expensive while a
-large monthly roster is being built.
+version after each batch only to serialize the rows just created. Locked roster
+lookups also triggered the model's default ``selectin`` loaders before callers
+actually needed the assignment/finding graph.
 
-This policy keeps all existing validation, source-owned-state, idempotency and
-audit behaviour. It changes only the read shape used by locked version lookup,
-by successful bulk responses and by idempotent generation replays.
+This policy keeps validation, source-owned-state, idempotency and audit
+behaviour intact while making those reads deliberate: locked lookups defer the
+large collections until a workflow really accesses them, bulk responses load
+only the assignments created by that command, and receipt replays are strictly
+scoped to the target tenant/version.
 """
 
 from typing import Any
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import lazyload, selectinload
 
 from . import assignments as assignment_module
 from . import common, models, schemas
@@ -23,7 +24,13 @@ from . import common, models, schemas
 _INSTALLED = False
 
 
-def _load_assignments_by_id(db, assignment_ids: list[str]) -> dict[str, models.RosterAssignment]:
+def _load_assignments_by_id(
+    db,
+    *,
+    amo_id: str,
+    version_id: str,
+    assignment_ids: list[str],
+) -> dict[str, models.RosterAssignment]:
     if not assignment_ids:
         return {}
     rows = (
@@ -35,7 +42,11 @@ def _load_assignments_by_id(db, assignment_ids: list[str]) -> dict[str, models.R
             selectinload(models.RosterAssignment.shift_template),
             selectinload(models.RosterAssignment.task_links),
         )
-        .filter(models.RosterAssignment.id.in_(assignment_ids))
+        .filter(
+            models.RosterAssignment.amo_id == amo_id,
+            models.RosterAssignment.version_id == version_id,
+            models.RosterAssignment.id.in_(assignment_ids),
+        )
         .all()
     )
     return {str(row.id): row for row in rows}
@@ -44,16 +55,27 @@ def _load_assignments_by_id(db, assignment_ids: list[str]) -> dict[str, models.R
 def _result_from_receipt(
     db,
     *,
+    amo_id: str,
     version_id: str,
     receipt,
 ) -> schemas.RosterBulkAssignmentResult:
-    assignment_ids = [str(value) for value in (receipt.response_json or {}).get("assignment_ids", [])]
-    by_id = _load_assignments_by_id(db, assignment_ids)
+    response = receipt.response_json or {}
+    receipt_version_id = str(response.get("version_id") or "")
+    if receipt_version_id != str(version_id):
+        raise ValueError("Idempotency key was already used for a different roster version")
+
+    assignment_ids = [str(value) for value in response.get("assignment_ids", [])]
+    by_id = _load_assignments_by_id(
+        db,
+        amo_id=amo_id,
+        version_id=version_id,
+        assignment_ids=assignment_ids,
+    )
     return schemas.RosterBulkAssignmentResult(
         version_id=version_id,
         created=[common.serialize_assignment(by_id[row_id]) for row_id in assignment_ids if row_id in by_id],
-        skipped=list((receipt.response_json or {}).get("skipped", [])),
-        conflicts=list((receipt.response_json or {}).get("conflicts", [])),
+        skipped=list(response.get("skipped", [])),
+        conflicts=list(response.get("conflicts", [])),
         idempotent_replay=True,
     )
 
@@ -85,7 +107,12 @@ def _bounded_bulk_create_assignments(
         request_hash=request_hash,
     )
     if receipt:
-        return _result_from_receipt(db, version_id=version.id, receipt=receipt)
+        return _result_from_receipt(
+            db,
+            amo_id=version.amo_id,
+            version_id=version.id,
+            receipt=receipt,
+        )
     common.check_version_revision(version, payload.expected_version_revision)
 
     created: list[models.RosterAssignment] = []
@@ -173,7 +200,12 @@ def _bounded_bulk_create_assignments(
             "idempotency_key": payload.idempotency_key,
         },
     )
-    by_id = _load_assignments_by_id(db, assignment_ids)
+    by_id = _load_assignments_by_id(
+        db,
+        amo_id=version.amo_id,
+        version_id=version.id,
+        assignment_ids=assignment_ids,
+    )
     return schemas.RosterBulkAssignmentResult(
         version_id=version.id,
         created=[common.serialize_assignment(by_id[row_id]) for row_id in assignment_ids if row_id in by_id],
@@ -200,10 +232,21 @@ def install(service_module) -> None:
                 version_id=version_id,
                 lock=False,
             )
-        # Locked mutations need the authoritative version row, not an eager
-        # materialization of every assignment/finding already attached to it.
+        # RosterVersion collections use lazy="selectin" at the model level, so
+        # merely omitting eager options still materializes them. Explicit
+        # lazyload keeps the lock query bounded while preserving correctness:
+        # lifecycle/validation code that genuinely needs a collection can load
+        # it later through the same session. The period remains immediately
+        # available because generation and validation both require it.
         return (
             db.query(models.RosterVersion)
+            .options(
+                selectinload(models.RosterVersion.period),
+                lazyload(models.RosterVersion.source_version),
+                lazyload(models.RosterVersion.assignments),
+                lazyload(models.RosterVersion.validation_findings),
+                lazyload(models.RosterVersion.exceptions),
+            )
             .filter(
                 models.RosterVersion.amo_id == amo_id,
                 models.RosterVersion.id == version_id,
@@ -216,8 +259,9 @@ def install(service_module) -> None:
         # The historical generator checks the version revision before looking
         # for its idempotency receipt. A committed request whose HTTP response
         # was lost can therefore look stale on retry. Resolve a matching receipt
-        # first and return only that command's assignment ids. New commands still
-        # enter the canonical generator and undergo its normal revision check.
+        # first and return only that command's assignment ids. Receipt replay is
+        # also checked against the current version so an idempotency key can
+        # never replay assignments from another roster version.
         request_hash = common.canonical_hash(common.dump(payload))
         receipt = common.command_receipt(
             db,
@@ -227,7 +271,12 @@ def install(service_module) -> None:
             request_hash=request_hash,
         )
         if receipt:
-            return _result_from_receipt(db, version_id=version.id, receipt=receipt)
+            return _result_from_receipt(
+                db,
+                amo_id=version.amo_id,
+                version_id=version.id,
+                receipt=receipt,
+            )
         return original_generate_from_patterns(
             db,
             version=version,
