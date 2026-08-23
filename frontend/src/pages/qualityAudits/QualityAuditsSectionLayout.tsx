@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays,
   ClipboardList,
-  FileText,
   Files,
   Gauge,
   ListChecks,
@@ -83,7 +82,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         href: `/maintenance/${amoCode}/quality/audits/program`,
         description: "Governed audit programme controls",
         group: "govern",
-        active: location.pathname === `/maintenance/${amoCode}/quality/audits/program`,
+        active: location.pathname.startsWith(`/maintenance/${amoCode}/quality/audits/program`),
       },
       {
         id: "checklists",
@@ -94,16 +93,6 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         description: "Controlled audit checklist library",
         group: "govern",
         active: location.pathname === `/maintenance/${amoCode}/quality/audits/checklists`,
-      },
-      {
-        id: "reports",
-        label: "Reports",
-        shortLabel: "Reports",
-        icon: FileText,
-        href: `/maintenance/${amoCode}/quality/audits/reports`,
-        description: "Issued and retained audit outputs",
-        group: "govern",
-        active: location.pathname === `/maintenance/${amoCode}/quality/audits/reports`,
       },
       {
         id: "evidence-library",
@@ -268,9 +257,9 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
           </div>
         </aside>
 
-        <main className="qa-workspace-main" data-assurance-workspace-section={activeId}>
+        <section className="qa-workspace-main" data-assurance-workspace-section={activeId} aria-label="Current assurance workspace">
           {children}
-        </main>
+        </section>
       </div>
 
       <Drawer
