@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -10,12 +11,16 @@ from pydantic import ValidationError
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.audit_programme_optimizer import ALGORITHM_VERSION, WEIGHTS, score_surveillance
 from amodb.apps.quality.audit_programme_queue_router import router as audit_programme_queue_router
 from amodb.apps.quality.audit_programme_router import (
     ProgrammeCreate,
     ProgrammeItemCreate,
     _TRANSITIONS,
     _assert_editable,
+    _programme_readiness,
+    _recurrence_for_interval,
+    _validate_item_window,
     router as audit_programme_router,
 )
 from amodb.apps.quality.audit_programme_schedule_router import (
@@ -38,6 +43,24 @@ def _matching(router, path: str, method: str):
     return [route for route in router.routes if str(route.path) == path and method in (getattr(route, "methods", None) or set())]
 
 
+def _readiness_programme(regulatory_basis: list | None = None):
+    item = SimpleNamespace(
+        title="Maintenance Department Audit",
+        target_start=date(2026, 8, 1),
+        target_end=date(2026, 8, 31),
+        criteria=["KCAR / MPM"],
+        mandatory_surveillance=True,
+        state="PLANNED",
+        universe_item=SimpleNamespace(risk_classification="HIGH"),
+    )
+    return SimpleNamespace(
+        items=[item],
+        regulatory_basis=regulatory_basis or [],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 12, 31),
+    )
+
+
 def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
     methods = _route_methods(audit_programme_router)
     assert {
@@ -45,6 +68,8 @@ def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
         ("/audit-programmes", "POST"),
         ("/audit-programmes/{programme_id}", "GET"),
         ("/audit-programmes/{programme_id}", "PATCH"),
+        ("/audit-programmes/{programme_id}/optimizer", "GET"),
+        ("/audit-programmes/{programme_id}/optimizer/rebuild", "POST"),
         ("/audit-programmes/{programme_id}/transitions", "POST"),
         ("/audit-programmes/{programme_id}/amendments", "POST"),
         ("/audit-programmes/universe/items", "GET"),
@@ -77,9 +102,6 @@ def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> Non
         ("/audit-programmes/{programme_id}/items/{item_id}/schedule", "POST"),
     }.issubset(methods)
 
-    # The standalone adapter remains the schedule authority. Canonical tenant
-    # routing deliberately exposes the People & Privileges guard wrapper, which
-    # validates auditor hard gates and then delegates to this adapter.
     adapter_matches = _matching(
         audit_programme_schedule_router,
         "/audit-programmes/{programme_id}/items/{item_id}/schedule",
@@ -114,6 +136,11 @@ def test_audit_programme_routes_are_promoted_before_generic_quality_catchall() -
         assert len(universe) == 1
         assert universe[0].endpoint.__name__ == "list_universe"
         assert router.routes.index(universe[0]) < _catchall_index(router)
+        optimizer_path = f"{prefix}/audit-programmes/{{programme_id}}/optimizer"
+        optimizer = _matching(router, optimizer_path, "GET")
+        assert len(optimizer) == 1
+        assert optimizer[0].endpoint.__name__ == "get_programme_optimizer"
+        assert router.routes.index(optimizer[0]) < _catchall_index(router)
 
 
 def test_audit_programme_schedule_lineage_migration_extends_single_chain() -> None:
@@ -124,12 +151,25 @@ def test_audit_programme_schedule_lineage_migration_extends_single_chain() -> No
     assert len(revision.revision) <= 32
 
 
+def test_hybrid_programme_migration_extends_current_quality_chain_without_methodology_backfill() -> None:
+    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+    revision = script.get_revision("quality_260823_hybrid_programme")
+    assert revision is not None
+    assert revision.down_revision == "quality_260820_provider_gov"
+    assert len(revision.revision) <= 32
+
+
 def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
     assert "quality_audit_programmes" in Base.metadata.tables
     assert "quality_audit_universe_items" in Base.metadata.tables
     assert "quality_audit_programme_items" in Base.metadata.tables
     assert "quality_audit_programme_events" in Base.metadata.tables
-    assert Base.metadata.tables["quality_audit_programmes"].c.amo_id.nullable is False
+    programme_table = Base.metadata.tables["quality_audit_programmes"]
+    assert programme_table.c.amo_id.nullable is False
+    assert programme_table.c.continuous_monitoring_enabled.nullable is False
+    assert programme_table.c.optimizer_version.nullable is False
+    assert "programme_methodology" not in programme_table.c
+    assert "methodology_rationale" not in programme_table.c
     assert Base.metadata.tables["quality_audit_universe_items"].c.amo_id.nullable is False
 
     item_table = Base.metadata.tables["quality_audit_programme_items"]
@@ -160,7 +200,10 @@ def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> 
     _assert_editable(SimpleNamespace(status="UNDER_REVIEW"))
 
 
-def test_programme_payload_validates_period_and_custom_recurrence() -> None:
+def test_programme_payload_has_no_methodology_choice_and_validates_period_and_recurrence() -> None:
+    assert "programme_methodology" not in ProgrammeCreate.model_fields
+    assert "methodology_rationale" not in ProgrammeCreate.model_fields
+
     with pytest.raises(ValidationError):
         ProgrammeCreate(
             programme_year=2026,
@@ -177,6 +220,68 @@ def test_programme_payload_validates_period_and_custom_recurrence() -> None:
             scope="Quality",
             recurrence="CUSTOM",
         )
+
+
+def test_programme_readiness_always_keeps_compliance_baseline() -> None:
+    without_basis = _programme_readiness(_readiness_programme())
+    assert without_basis["ready_for_approval"] is False
+    assert "NO_COMPLIANCE_BASIS" in {blocker["code"] for blocker in without_basis["blockers"]}
+
+    with_basis = _programme_readiness(_readiness_programme(["KCAR / approved MPM"]))
+    assert with_basis["ready_for_approval"] is True
+    assert with_basis["mandatory_requirement_count"] == 1
+    assert with_basis["high_risk_requirement_count"] == 1
+
+    with_gap = _programme_readiness(_readiness_programme(["KCAR / approved MPM"]), mandatory_coverage_gaps=1)
+    assert with_gap["ready_for_approval"] is False
+    assert "MANDATORY_COVERAGE_GAP" in {blocker["code"] for blocker in with_gap["blockers"]}
+
+
+def test_hybrid_optimizer_is_versioned_transparent_and_only_evidence_increases_mandatory_surveillance() -> None:
+    assert ALGORITHM_VERSION == "HYBRID_ASSURANCE_V1"
+    assert sum(WEIGHTS.values()) == pytest.approx(1.0)
+    entity = SimpleNamespace(
+        regulatory_criticality="LOW",
+        risk_classification="LOW",
+        mandatory_surveillance=True,
+        surveillance_interval_days=365,
+    )
+    baseline = score_surveillance(universe_item=entity, signals={})
+    assert baseline["priority_score"] >= 40
+    assert baseline["priority_score"] < 60
+    assert baseline["recommended_interval_days"] == 365
+    assert baseline["mandatory_baseline"] is True
+    assert baseline["recommend_in_programme"] is True
+    assert {entry["factor"] for entry in baseline["drivers"]} >= {"COMPLIANCE", "RISK", "PERFORMANCE", "MANDATORY_FLOOR", "MANDATORY_INTERVAL_CAP"}
+
+    pressured = score_surveillance(
+        universe_item=entity,
+        signals={"repeat_findings": 3, "open_findings": 2, "follow_up_required": 1, "adverse_trends": 2},
+    )
+    assert pressured["priority_score"] > baseline["priority_score"]
+    assert pressured["recommended_interval_days"] < baseline["recommended_interval_days"]
+    assert pressured["components"]["performance"] > baseline["components"]["performance"]
+
+
+def test_hybrid_interval_maps_to_supported_planner_cadence() -> None:
+    assert _recurrence_for_interval(30) == ("MONTHLY", None)
+    assert _recurrence_for_interval(90) == ("QUARTERLY", None)
+    assert _recurrence_for_interval(180) == ("SEMI_ANNUAL", None)
+    assert _recurrence_for_interval(365) == ("ANNUAL", None)
+    assert _recurrence_for_interval(730) == ("CUSTOM", 730)
+
+
+def test_programme_target_window_cannot_escape_governed_period() -> None:
+    programme = _readiness_programme(["KCAR / MPM"])
+    _validate_item_window(programme, date(2026, 2, 1), date(2026, 2, 28))
+
+    with pytest.raises(HTTPException) as early:
+        _validate_item_window(programme, date(2025, 12, 31), date(2026, 1, 2))
+    assert early.value.status_code == 422
+
+    with pytest.raises(HTTPException) as late:
+        _validate_item_window(programme, date(2026, 12, 30), date(2027, 1, 2))
+    assert late.value.status_code == 422
 
 
 def test_schedule_frequency_is_derived_from_governed_recurrence() -> None:
