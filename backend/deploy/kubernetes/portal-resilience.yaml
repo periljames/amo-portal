@@ -11,8 +11,8 @@ data:
   PORTAL_REFRESH_COOKIE_SECURE: "true"
   PORTAL_AUTH_SESSION_HOURS: "12"
   AUTH_RATE_LIMIT_SHARED_REQUIRED: "true"
-  # AUTH_RATE_LIMIT_REDIS_URL belongs in amo-portal-secrets and must point to a
-  # shared production Redis/compatible endpoint reachable by every API replica.
+  # AUTH_RATE_LIMIT_REDIS_URL and FORWARDED_ALLOW_IPS belong in
+  # amo-portal-secrets. Both are required explicitly by the API deployment.
   DB_EXTERNAL_POOLER: "true"
   DB_POOL_TIMEOUT: "5"
   DB_CONNECT_TIMEOUT_SECONDS: "5"
@@ -72,6 +72,17 @@ spec:
           envFrom:
             - configMapRef: { name: amo-portal-runtime }
             - secretRef: { name: amo-portal-secrets }
+          env:
+            - name: FORWARDED_ALLOW_IPS
+              valueFrom:
+                secretKeyRef:
+                  name: amo-portal-secrets
+                  key: FORWARDED_ALLOW_IPS
+            - name: AUTH_RATE_LIMIT_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: amo-portal-secrets
+                  key: AUTH_RATE_LIMIT_REDIS_URL
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 3
