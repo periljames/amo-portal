@@ -1,0 +1,82 @@
+name: Governed AI Gateway CI
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/apps/platform/ai_*.py"
+      - "backend/amodb/apps/platform/managed_ai_provider_policy.py"
+      - "backend/amodb/apps/platform/saas_execution_policy.py"
+      - "backend/amodb/apps/platform/saas_providers.py"
+      - "backend/amodb/apps/platform/saas_services.py"
+      - "backend/amodb/apps/platform/saas_side_effects.py"
+      - "backend/amodb/apps/platform/tests/test_ai_*.py"
+      - "backend/amodb/apps/platform/tests/test_managed_ai_provider_policy.py"
+      - "backend/amodb/apps/platform/tests/test_saas_execution_policy.py"
+      - "backend/amodb/apps/platform/tests/test_saas_side_effect_safety.py"
+      - ".github/workflows/ai-gateway-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/amodb/apps/platform/ai_*.py"
+      - "backend/amodb/apps/platform/managed_ai_provider_policy.py"
+      - "backend/amodb/apps/platform/saas_execution_policy.py"
+      - "backend/amodb/apps/platform/saas_providers.py"
+      - "backend/amodb/apps/platform/saas_services.py"
+      - "backend/amodb/apps/platform/saas_side_effects.py"
+      - "backend/amodb/apps/platform/tests/test_ai_*.py"
+      - "backend/amodb/apps/platform/tests/test_managed_ai_provider_policy.py"
+      - "backend/amodb/apps/platform/tests/test_saas_execution_policy.py"
+      - "backend/amodb/apps/platform/tests/test_saas_side_effect_safety.py"
+      - ".github/workflows/ai-gateway-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governed-ai-gateway-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  governed-ai-contracts:
+    name: Tenant entitlement, provider isolation and billing integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: governed-ai-ci-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      PYTHONPATH: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile governed AI modules
+        run: >-
+          python -m py_compile
+          backend/amodb/apps/platform/ai_access.py
+          backend/amodb/apps/platform/ai_execution_policy.py
+          backend/amodb/apps/platform/ai_gateway.py
+          backend/amodb/apps/platform/ai_openai.py
+          backend/amodb/apps/platform/ai_router.py
+          backend/amodb/apps/platform/managed_ai_provider_policy.py
+          backend/amodb/apps/platform/saas_execution_policy.py
+          backend/amodb/apps/platform/saas_side_effects.py
+      - name: Prove tenant isolation, entitlement and billing contracts
+        run: >-
+          pytest -q
+          backend/amodb/apps/platform/tests/test_ai_gateway.py
+          backend/amodb/apps/platform/tests/test_ai_execution_policy.py
+          backend/amodb/apps/platform/tests/test_managed_ai_provider_policy.py
+          backend/amodb/apps/platform/tests/test_saas_execution_policy.py
+          backend/amodb/apps/platform/tests/test_saas_side_effect_safety.py
