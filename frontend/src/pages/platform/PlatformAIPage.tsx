@@ -7,6 +7,7 @@ import { usePlatformData } from "./components/usePlatformData";
 
 const usd = (micros?: number | null) => `$${(Number(micros || 0) / 1_000_000).toFixed(6)}`;
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+const entitlementEnabled = (policy: AITenantPolicy) => ["ENABLED", "TRIAL"].includes(policy.status.toUpperCase());
 
 type AIStatusPayload = {
   provider?: { status?: string; scope?: string; display_name?: string } | null;
@@ -80,7 +81,11 @@ export default function PlatformAIPage() {
 
   useEffect(() => {
     if (!currentPolicy) return;
-    setEnabled(currentPolicy.enabled);
+    // Subscription status expresses the commercial entitlement, while
+    // currentPolicy.enabled expresses whether its effective window is active
+    // right now. A future-scheduled ENABLED/TRIAL entitlement must therefore
+    // remain checked during unrelated budget/document-permission edits.
+    setEnabled(entitlementEnabled(currentPolicy));
     setPlan(currentPolicy.plan_code);
     setModel(currentPolicy.model);
     setBudgetUsd(String(currentPolicy.monthly_budget_microusd / 1_000_000));
