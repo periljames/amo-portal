@@ -21,6 +21,7 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 router = APIRouter(prefix="/audit-programmes", tags=["Quality audit programme"])
 
 ProgrammeStatus = Literal["DRAFT", "UNDER_REVIEW", "APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"]
+ProgrammeMethodology = Literal["COMPLIANCE", "PERFORMANCE", "RISK"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 EntityType = Literal[
     "DEPARTMENT", "FACILITY", "STATION", "SUPPLIER", "CONTRACTOR", "PROCESS",
@@ -37,6 +38,8 @@ ProgrammeItemState = Literal["PLANNED", "SCHEDULED", "COMPLETED", "DEFERRED", "C
 class ProgrammeCreate(BaseModel):
     programme_year: int = Field(ge=2000, le=2200)
     title: str = Field(min_length=3, max_length=255)
+    programme_methodology: ProgrammeMethodology = "COMPLIANCE"
+    methodology_rationale: str | None = Field(default=None, max_length=4000)
     objectives: list[str] = Field(default_factory=list)
     regulatory_basis: list[str | dict[str, Any]] = Field(default_factory=list)
     period_start: date
@@ -52,6 +55,8 @@ class ProgrammeCreate(BaseModel):
 
 class ProgrammePatch(BaseModel):
     title: str | None = Field(default=None, min_length=3, max_length=255)
+    programme_methodology: ProgrammeMethodology | None = None
+    methodology_rationale: str | None = Field(default=None, max_length=4000)
     objectives: list[str] | None = None
     regulatory_basis: list[str | dict[str, Any]] | None = None
     period_start: date | None = None
@@ -177,10 +182,42 @@ def _programme_snapshot(programme: QualityAuditProgramme) -> dict[str, Any]:
         "id": str(programme.id), "programme_ref": programme.programme_ref,
         "programme_series": programme.programme_series, "programme_year": programme.programme_year,
         "revision_no": programme.revision_no, "title": programme.title,
+        "programme_methodology": programme.programme_methodology,
+        "methodology_rationale": programme.methodology_rationale,
         "objectives": programme.objectives, "regulatory_basis": programme.regulatory_basis,
         "status": programme.status, "period_start": programme.period_start.isoformat(),
         "period_end": programme.period_end.isoformat(), "owner_user_id": programme.owner_user_id,
         "supersedes_programme_id": programme.supersedes_programme_id,
+    }
+
+
+def _programme_readiness(programme: QualityAuditProgramme) -> dict[str, Any]:
+    items = list(programme.items or [])
+    blockers: list[dict[str, str]] = []
+    if not items:
+        blockers.append({"code": "NO_REQUIREMENTS", "message": "Add at least one governed audit requirement before approval."})
+    if programme.programme_methodology == "COMPLIANCE" and not list(programme.regulatory_basis or []):
+        blockers.append({"code": "NO_COMPLIANCE_BASIS", "message": "Compliance-based programmes require at least one regulatory, standard or manual basis."})
+    for item in items:
+        if not item.target_start or not item.target_end:
+            blockers.append({"code": "MISSING_TARGET_WINDOW", "message": f"{item.title}: set a target start and end window."})
+        elif item.target_start < programme.period_start or item.target_end > programme.period_end:
+            blockers.append({"code": "OUTSIDE_PROGRAMME_PERIOD", "message": f"{item.title}: target window must remain inside the programme period."})
+        if not list(item.criteria or []):
+            blockers.append({"code": "MISSING_CRITERIA", "message": f"{item.title}: add the audit criteria before approval."})
+    mandatory = [item for item in items if item.mandatory_surveillance]
+    high_risk = [
+        item for item in items
+        if item.universe_item and item.universe_item.risk_classification in {"HIGH", "CRITICAL"}
+    ]
+    return {
+        "ready_for_approval": not blockers,
+        "blockers": blockers,
+        "requirement_count": len(items),
+        "mandatory_requirement_count": len(mandatory),
+        "mandatory_unscheduled_count": sum(1 for item in mandatory if item.state == "PLANNED"),
+        "high_risk_requirement_count": len(high_risk),
+        "unscheduled_requirement_count": sum(1 for item in items if item.state == "PLANNED"),
     }
 
 
@@ -199,7 +236,9 @@ def _programme_dict(programme: QualityAuditProgramme, *, detail: bool = False) -
             "planned_audit_count": len(items), "completed_audit_count": counts["COMPLETED"],
             "deferred_audit_count": counts["DEFERRED"], "cancelled_audit_count": counts["CANCELLED"],
             "follow_up_audit_count": counts["FOLLOW_UP_REQUIRED"], "scheduled_audit_count": counts["SCHEDULED"],
+            "unscheduled_audit_count": counts["PLANNED"],
         },
+        "readiness": _programme_readiness(programme),
     }
     if detail:
         result["items"] = [_item_dict(item) for item in items]
@@ -243,6 +282,13 @@ def _assert_editable(programme: QualityAuditProgramme) -> None:
                             detail="Approved or active programme revisions are immutable. Create an amendment revision instead.")
 
 
+def _validate_item_window(programme: QualityAuditProgramme, start: date | None, end: date | None) -> None:
+    if start and start < programme.period_start:
+        raise HTTPException(status_code=422, detail="target_start must be inside the audit programme period")
+    if end and end > programme.period_end:
+        raise HTTPException(status_code=422, detail="target_end must be inside the audit programme period")
+
+
 @router.get("")
 def list_programmes(
     year: int | None = Query(default=None, ge=2000, le=2200),
@@ -251,7 +297,9 @@ def list_programmes(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")), db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    query = _query(db, ctx.amo_id).options(selectinload(QualityAuditProgramme.items))
+    query = _query(db, ctx.amo_id).options(
+        selectinload(QualityAuditProgramme.items).selectinload(QualityAuditProgrammeItem.universe_item)
+    )
     if year is not None: query = query.filter(QualityAuditProgramme.programme_year == year)
     if status_filter: query = query.filter(QualityAuditProgramme.status == status_filter)
     total = int(query.order_by(None).count())
@@ -267,9 +315,10 @@ def create_programme(payload: ProgrammeCreate,
     ref, series = _programme_ref(payload.programme_year, 1); now = _utcnow()
     row = QualityAuditProgramme(
         amo_id=ctx.amo_id, programme_ref=ref, programme_series=series, programme_year=payload.programme_year,
-        revision_no=1, title=payload.title.strip(), objectives=payload.objectives,
-        regulatory_basis=payload.regulatory_basis, status="DRAFT", period_start=payload.period_start,
-        period_end=payload.period_end, owner_user_id=payload.owner_user_id or ctx.user_id,
+        revision_no=1, title=payload.title.strip(), programme_methodology=payload.programme_methodology,
+        methodology_rationale=payload.methodology_rationale.strip() if payload.methodology_rationale else None,
+        objectives=payload.objectives, regulatory_basis=payload.regulatory_basis, status="DRAFT",
+        period_start=payload.period_start, period_end=payload.period_end, owner_user_id=payload.owner_user_id or ctx.user_id,
         created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id, created_at=now, updated_at=now,
     )
     db.add(row); db.flush(); _event(db, row, ctx, "CREATED", "Audit programme created.", None, _programme_snapshot(row)); db.commit()
@@ -290,8 +339,12 @@ def patch_programme(programme_id: str, payload: ProgrammePatch,
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     row = _load_programme(db, ctx.amo_id, programme_id, for_update=True); _assert_editable(row); before = _programme_snapshot(row)
     updates = payload.model_dump(exclude_unset=True, exclude={"reason"})
+    if "methodology_rationale" in updates and updates["methodology_rationale"] is not None:
+        updates["methodology_rationale"] = updates["methodology_rationale"].strip() or None
     for field, value in updates.items(): setattr(row, field, value)
     if row.period_end < row.period_start: raise HTTPException(status_code=422, detail="period_end must be on or after period_start")
+    for item in list(row.items or []):
+        _validate_item_window(row, item.target_start, item.target_end)
     row.updated_by_user_id = ctx.user_id; row.updated_at = _utcnow()
     _event(db, row, ctx, "UPDATED", payload.reason, before, _programme_snapshot(row)); db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -314,6 +367,16 @@ def transition_programme(programme_id: str, payload: ProgrammeTransition,
     row = _load_programme(db, ctx.amo_id, programme_id, for_update=True)
     if payload.target_status not in _TRANSITIONS.get(row.status, set()):
         raise HTTPException(status_code=409, detail=f"Audit programme cannot transition from {row.status} to {payload.target_status}.")
+    if payload.target_status == "APPROVED":
+        readiness = _programme_readiness(row)
+        if not readiness["ready_for_approval"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "Audit programme is not ready for approval.",
+                    "blockers": readiness["blockers"],
+                },
+            )
     before = _programme_snapshot(row); now = _utcnow(); row.status = payload.target_status
     if row.status == "APPROVED": row.approved_by_user_id = ctx.user_id; row.approved_at = now
     if row.status == "ACTIVE": row.activated_at = now
@@ -341,6 +404,7 @@ def create_amendment(programme_id: str, payload: ProgrammeAmendment,
     row = QualityAuditProgramme(
         amo_id=ctx.amo_id, programme_ref=f"{prior.programme_series}-R{next_revision:02d}", programme_series=prior.programme_series,
         programme_year=prior.programme_year, revision_no=next_revision, title=(payload.title or prior.title).strip(),
+        programme_methodology=prior.programme_methodology, methodology_rationale=prior.methodology_rationale,
         objectives=list(prior.objectives or []), regulatory_basis=list(prior.regulatory_basis or []), status="DRAFT",
         period_start=prior.period_start, period_end=prior.period_end, owner_user_id=prior.owner_user_id,
         supersedes_programme_id=prior.id, created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id,
@@ -411,6 +475,7 @@ def add_programme_item(programme_id: str, payload: ProgrammeItemCreate,
     universe = db.query(QualityAuditUniverseItem).filter(QualityAuditUniverseItem.amo_id == ctx.amo_id,
         QualityAuditUniverseItem.id == payload.universe_item_id, QualityAuditUniverseItem.active.is_(True)).first()
     if not universe: raise HTTPException(status_code=422, detail="Select an active Audit Universe item from this tenant.")
+    _validate_item_window(programme, payload.target_start, payload.target_end)
     now = _utcnow(); row = QualityAuditProgrammeItem(
         amo_id=ctx.amo_id, programme_id=programme.id, **payload.model_dump(), state="PLANNED",
         created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id, created_at=now, updated_at=now,
@@ -441,6 +506,7 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
     for field, value in updates.items(): setattr(row, field, value)
     if row.target_start and row.target_end and row.target_end < row.target_start:
         raise HTTPException(status_code=422, detail="target_end must be on or after target_start")
+    _validate_item_window(programme, row.target_start, row.target_end)
     if row.recurrence == "CUSTOM" and not row.custom_interval_days:
         raise HTTPException(status_code=422, detail="CUSTOM recurrence requires custom_interval_days")
     row.updated_by_user_id = ctx.user_id; row.updated_at = _utcnow()
