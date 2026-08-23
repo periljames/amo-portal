@@ -104,10 +104,11 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
   if (isEvidenceRegister) {
-    // QmsRegisterPage already owns the Quality DepartmentLayout. Do not wrap it
-    // in another Assurance/QMS shell; that creates duplicate navigation and main
-    // landmarks. A future persistent rail must embed a shell-free register body.
-    return <QmsRegisterPage />;
+    return assuranceWorkspace(
+      "Evidence vault",
+      "Review objective evidence, retained records and governed assurance packages.",
+      <QmsRegisterPage embedded />
+    );
   }
 
   return <QmsCanonicalLegacyPage />;
