@@ -106,9 +106,12 @@ export default function PlatformAIPage() {
         enabled,
         plan_code: plan,
         monthly_budget_microusd: Math.max(0, Math.round(Number(budgetUsd || 0) * 1_000_000)),
-        hard_limit: true,
+        // These billing fields are not editable on this screen. Preserve the
+        // governed values returned by the API instead of silently resetting
+        // soft limits or tenant markup during an unrelated policy edit.
+        hard_limit: currentPolicy.hard_limit,
         allow_external_documents: allowDocs,
-        markup_bps: 0,
+        markup_bps: currentPolicy.markup_bps,
         reason: "AI policy updated from superadmin AI Control Centre",
       });
       if (tenantIdRef.current !== requestTenantId) return;
