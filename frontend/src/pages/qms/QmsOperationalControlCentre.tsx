@@ -145,7 +145,14 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
               </section>
               <div className="qms-assurance-room__primary-grid">
                 {dashboard.action_queue.length ? <QmsActionQueue amoCode={amoCode} items={dashboard.action_queue} fallbackRoute={routes.myWork} /> : null}
-                {dashboard.upcoming_obligations.length ? <QmsUpcomingObligations amoCode={amoCode} items={dashboard.upcoming_obligations} fallbackRoute={routes.calendar} /> : null}
+                {dashboard.upcoming_obligations.length ? (
+                  <QmsUpcomingObligations
+                    amoCode={amoCode}
+                    items={dashboard.upcoming_obligations}
+                    fallbackRoute={routes.calendar}
+                    referenceDate={new Date(dashboard.as_of)}
+                  />
+                ) : null}
               </div>
             </>
           ) : null}
