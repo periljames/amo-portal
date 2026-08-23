@@ -6,8 +6,8 @@ from ..rostering import models as roster_models
 from . import models as workforce_models
 
 
-def _canonical_rd(db: Session, *, amo_id: str) -> roster_models.ShiftTemplate:
-    row = db.query(roster_models.ShiftTemplate).filter(
+def _canonical_rd_id(db: Session, *, amo_id: str) -> str:
+    row = db.query(roster_models.ShiftTemplate.id).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
         roster_models.ShiftTemplate.code == "RD",
         roster_models.ShiftTemplate.is_active.is_(True),
@@ -16,7 +16,7 @@ def _canonical_rd(db: Session, *, amo_id: str) -> roster_models.ShiftTemplate:
     ).first()
     if row is None:
         raise ValueError("Canonical RD shift template is required before saving protected OFF days")
-    return row
+    return str(row[0])
 
 
 def canonicalize_pattern_payload(db: Session, *, amo_id: str, payload):
@@ -29,11 +29,11 @@ def canonicalize_pattern_payload(db: Session, *, amo_id: str, payload):
     )
     if not needs_rd:
         return payload
-    rd = _canonical_rd(db, amo_id=amo_id)
+    rd_id = _canonical_rd_id(db, amo_id=amo_id)
     normalized = [
         day.model_copy(
             update={
-                "shift_template_id": rd.id,
+                "shift_template_id": rd_id,
                 "start_time_local": None,
                 "end_time_local": None,
                 "spans_next_day": False,

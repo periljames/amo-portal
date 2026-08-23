@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import audit_live_completion_models as _audit_live_completion_models  # noqa: F401
 from . import audit_live_completion_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import public_router as quality_public_router
 
 
@@ -17,7 +17,7 @@ def _is_completion_route(route_item) -> bool:
         or "/signature/options" in path
         or "/signature/verify" in path
         or ("/report-revisions/" in path and path.endswith("/transitions"))
-    ) and ("/quality/" in path or "/qms/" in path)
+    ) and "/quality/" in path
 
 
 def _is_generic_catchall(route_item) -> bool:
@@ -31,14 +31,7 @@ def _signature(route_item) -> tuple[str, frozenset[str]]:
 
 
 def _register_and_promote(api_router: APIRouter) -> None:
-    """Mount the complete completion router and retain one exact route per method.
-
-    Quality extensions are composed in stages. Seeing one WebAuthn endpoint (for
-    example ``GET /audit-webauthn/credentials``) does not prove that sibling POST
-    registration or signing endpoints were mounted. Always clone the child router,
-    then de-duplicate the completion surface by path/method while keeping the most
-    recently mounted guarded handler ahead of broad legacy catch-alls.
-    """
+    """Mount the complete completion router and retain one exact route per method."""
 
     api_router.include_router(audit_live_completion_router.router)
 
@@ -46,9 +39,6 @@ def _register_and_promote(api_router: APIRouter) -> None:
     if not completion:
         raise RuntimeError("QMS live-audit completion routes were not registered")
 
-    # The guarded transition endpoint deliberately shadows the older report
-    # transition handler. Preserve the most recently registered exact path/method
-    # so acknowledgement and passkey issue gates cannot be bypassed by route order.
     selected_reversed = []
     seen: set[tuple[str, frozenset[str]]] = set()
     for item in reversed(completion):
@@ -69,14 +59,7 @@ def _register_and_promote(api_router: APIRouter) -> None:
 
 
 def _synchronise_public_completion_routes() -> None:
-    """Register every public completion route without relying on one sentinel.
-
-    The completion router can be imported while Quality extensions are still
-    being assembled. A single-route sentinel therefore cannot prove that the
-    entire child router was mounted. Copy only missing path/method signatures so
-    closing acknowledgement and verification endpoints are all available while
-    exact duplicates remain impossible.
-    """
+    """Register every public completion route without relying on one sentinel."""
 
     existing = {_signature(item) for item in quality_public_router.routes}
     for item in audit_live_completion_router.public_router.routes:
@@ -87,7 +70,5 @@ def _synchronise_public_completion_routes() -> None:
         existing.add(marker)
 
 
-for _api_router in (router, legacy_router):
-    _register_and_promote(_api_router)
-
+_register_and_promote(router)
 _synchronise_public_completion_routes()

@@ -31,17 +31,17 @@ describe("complete roster creation and recovery workflow", () => {
   });
 
   it("prefills the selected period from effective rotations while protecting commitments", () => {
-    expect(plannerSource).toContain("Prefill month");
+    expect(plannerSource).toContain("Controlled generation");
     expect(plannerSource).toContain("generateRosterFromPattern");
-    expect(plannerSource).toContain("Scheduled classes protected");
-    expect(plannerSource).toContain("Collision-safe");
+    expect(plannerSource).toContain("protected commitments are mandatory constraints");
+    expect(plannerSource).toContain("Existing manual edits and protected source commitments remain unchanged");
     expect(rosterServiceSource).toContain("/generate-from-pattern");
   });
 
   it("guides a monthly roster through create, generate, exceptions and review", () => {
     expect(plannerSource).toContain("createRosterVersion");
     expect(plannerSource).toContain("Create monthly roster");
-    expect(plannerSource).toContain("Generate month");
+    expect(plannerSource).toContain("Generate roster");
     expect(plannerSource).toContain("OperationProgress");
     expect(plannerSource).toContain("Exceptions");
     expect(plannerSource).toContain("Review &amp; submit");

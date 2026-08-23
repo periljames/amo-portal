@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import audit_closing_assurance_models as _audit_closing_assurance_models  # noqa: F401
 from . import audit_closing_assurance_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 
 
 def _is_closing_assurance_route(route_item) -> bool:
@@ -39,6 +39,6 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-for api_router in (router, legacy_router):
+for api_router in (router,):
     _register(api_router)
     _promote(api_router)

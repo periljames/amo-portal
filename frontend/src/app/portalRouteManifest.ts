@@ -178,33 +178,14 @@ function qualitySections(amoCode: string): PortalNavItem[] {
 }
 
 function documentControlSections(base: string): PortalNavItem[] {
-  const section = (id: string, label: string, routes: Array<[string, string, string]>): PortalNavItem => ({
-    id,
-    label,
-    path: joinPath(base, routes[0][2]),
-    children: routes.map(([routeId, routeLabel, suffix]) => ({ id: routeId, label: routeLabel, path: joinPath(base, suffix) })),
-  });
   return [
-    section("doc-library", "Library", [
-      ["doc-controlled-library", "Controlled Library", "library"],
-      ["doc-records", "Generated Records", "records"],
-      ["doc-registers", "Registers", "registers"],
-      ["doc-copies", "Controlled Copies", "controlled-copies"],
-      ["doc-external", "External Sources", "external-sources"],
-    ]),
-    section("doc-workflow", "Workflow", [
-      ["doc-drafts", "Drafts & Approval", "drafts"],
-      ["doc-change", "Change Proposals", "change-proposals"],
-      ["doc-reviews", "Review Planner", "reviews"],
-      ["doc-tr", "Temporary Revisions", "tr"],
-    ]),
-    section("doc-governance", "Governance", [
-      ["doc-authority", "Authority", "authority"],
-      ["doc-distribution", "Distribution & ACK", "distribution"],
-      ["doc-archive", "Archive / Obsolete", "archive"],
-      ["doc-integrations", "Integrations", "integrations"],
-      ["doc-settings", "Settings", "settings"],
-    ]),
+    { id: "doc-home", label: "Home", path: base },
+    { id: "doc-library", label: "Library", path: joinPath(base, "library") },
+    { id: "doc-changes", label: "Changes", path: joinPath(base, "changes") },
+    { id: "doc-distribution", label: "Distribution", path: joinPath(base, "distribution") },
+    { id: "doc-compliance", label: "Compliance", path: joinPath(base, "compliance") },
+    { id: "doc-reports", label: "Reports", path: joinPath(base, "reports") },
+    { id: "doc-administration", label: "Administration", path: joinPath(base, "administration") },
   ];
 }
 

@@ -4,13 +4,13 @@ from fastapi import APIRouter
 
 from . import audit_presence_models as _audit_presence_models  # noqa: F401
 from . import audit_presence_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import public_router as quality_public_router
 
 
 def _is_presence_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
-    return "/audits/" in path and "/presence" in path and ("/quality/" in path or "/qms/" in path)
+    return "/audits/" in path and "/presence" in path and "/quality/" in path
 
 
 def _is_generic_catchall(route_item) -> bool:
@@ -33,9 +33,8 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-for api_router in (router, legacy_router):
-    _register(api_router)
-    _promote(api_router)
+_register(router)
+_promote(router)
 
 if not any("/quality/audit-access/presence/heartbeat" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
     quality_public_router.include_router(audit_presence_router.public_router)

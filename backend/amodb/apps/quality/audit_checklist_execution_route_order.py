@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import audit_checklist_execution_router
 from . import router as quality_api_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from .router import (
     _date_to_datetime,
     _ensure_car_for_finding,
@@ -37,9 +37,9 @@ def _is_generic_catchall(route_item) -> bool:
 def _bind_quality_helpers() -> None:
     """Keep lazy fieldwork imports bound to the Quality module contract.
 
-    ``amodb.apps.quality`` exports its primary APIRouter as ``router``.  Python's
+    ``amodb.apps.quality`` exports its primary APIRouter as ``router``. Python's
     ``from . import router`` therefore resolves that package export rather than
-    the ``quality.router`` module inside lazy fieldwork paths.  Bind the small
+    the ``quality.router`` module inside lazy fieldwork paths. Bind the small
     helper surface those paths intentionally reuse so runtime authorization and
     finding creation cannot fail with APIRouter attribute errors.
     """
@@ -71,6 +71,5 @@ def _promote(api_router: APIRouter) -> None:
 
 
 _bind_quality_helpers()
-for api_router in (router, legacy_router):
-    _register(api_router)
-    _promote(api_router)
+_register(router)
+_promote(router)

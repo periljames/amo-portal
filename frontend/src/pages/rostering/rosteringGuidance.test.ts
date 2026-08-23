@@ -13,13 +13,13 @@ const myRosterSource = readSource("./components/MyRosterWorkspace.tsx");
 const calendarSecuritySource = readSource("./components/CalendarSubscriptionSecurityPanel.tsx");
 
 describe("rostering self-service guidance", () => {
-  it("replaces the permanent commitment board with zero-runtime native guidance", () => {
+  it("uses one planner with native compliance guidance", () => {
     expect(unifiedPlannerSource).not.toContain("RosterCommitmentBoard");
     expect(unifiedPlannerSource).not.toContain("PrerequisiteDialog");
     expect(unifiedPlannerSource).not.toContain("ContextualHelp");
     expect(unifiedPlannerSource).toContain("<details");
-    expect(unifiedPlannerSource).toContain("Commitment sources");
-    expect(unifiedPlannerSource).toContain("source modules rather than creating duplicate roster records");
+    expect(unifiedPlannerSource).toContain("RosterComplianceControlCenter");
+    expect(unifiedPlannerSource).toContain("<RosterPlannerV2 />");
   });
 
   it("keeps live attendance state independent from the selected report range", () => {

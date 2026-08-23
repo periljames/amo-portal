@@ -60,7 +60,7 @@ export default function DocumentControlPrimaryActions({ detail, tenant, basePath
     {canUpload ? <button type="button" className="dc-button" onClick={() => setMode("upload")}><FileUp size={14} /> Upload revision</button> : null}
     {canPublish ? publishReady
       ? <button type="button" className="dc-button dc-button--primary" onClick={() => setMode("publish")}><Rocket size={14} /> Publish revision</button>
-      : <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${detail.document.id}?view=workflow`)}><Rocket size={14} /> Continue approval</button> : null}
+      : <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${detail.document.id}?tab=workflow`)}><Rocket size={14} /> Continue approval</button> : null}
 
     {mode === "properties" ? <PropertiesDialog detail={detail} tenant={tenant} onClose={() => setMode(null)} onChanged={onChanged} /> : null}
     {mode === "upload" ? <RevisionUploadDialog detail={detail} tenant={tenant} onClose={() => setMode(null)} onChanged={onChanged} /> : null}

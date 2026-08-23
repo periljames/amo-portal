@@ -274,12 +274,6 @@ Canonical prefix:
 /api/maintenance/{amo_code}/quality/excellence
 ```
 
-Compatibility prefix:
-
-```text
-/api/maintenance/{amo_code}/qms/excellence
-```
-
 Primary endpoints:
 
 ```text

@@ -44,7 +44,7 @@ def test_non_rest_non_duty_semantic_does_not_satisfy_weekly_rest():
     ) is False
 
 
-def test_consecutive_duty_rule_is_non_overridable_and_cannot_be_weakened():
+def test_consecutive_duty_rule_is_a_non_overridable_planning_warning():
     row = SimpleNamespace(
         code=compliance_policy.CONSECUTIVE_DUTY_RULE,
         parameters_json={"maximum_days": 12},
@@ -54,10 +54,10 @@ def test_consecutive_duty_rule_is_non_overridable_and_cannot_be_weakened():
 
     compliance_policy._govern_rule(row)
 
-    assert row.parameters_json["maximum_days"] == 6
-    assert row.severity == models.RosterValidationSeverity.BLOCKER
+    assert row.parameters_json["maximum_days"] == 12
+    assert row.severity == models.RosterValidationSeverity.WARNING
     assert row.allow_override is False
-    assert compliance_policy.statutory_rule_is_non_overridable(row.code) is True
+    assert compliance_policy.statutory_rule_is_non_overridable(row.code) is False
 
 
 def test_normal_hours_warning_carries_overtime_classification_metadata():

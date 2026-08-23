@@ -332,18 +332,32 @@ def ensure_qms_audit_reference_schema(db: Session) -> bool:
             db.execute(text(f"ALTER TABLE qms_audits ADD COLUMN {column} INTEGER"))
 
     if "qms_audit_reference_counters" not in inspector.get_table_names():
-        db.execute(text("""
-            CREATE TABLE IF NOT EXISTS qms_audit_reference_counters (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                amo_id VARCHAR(36) NOT NULL REFERENCES amos(id) ON DELETE CASCADE,
-                reference_family VARCHAR(16) NOT NULL,
-                unit_code VARCHAR(16) NOT NULL,
-                ref_year INTEGER NOT NULL,
-                last_value INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """))
+        if bind.dialect.name == "sqlite":
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS qms_audit_reference_counters (
+                    id VARCHAR(36) PRIMARY KEY,
+                    amo_id VARCHAR(36) NOT NULL REFERENCES amos(id) ON DELETE CASCADE,
+                    reference_family VARCHAR(16) NOT NULL,
+                    unit_code VARCHAR(16) NOT NULL,
+                    ref_year INTEGER NOT NULL,
+                    last_value INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+        else:
+            db.execute(text("""
+                CREATE TABLE IF NOT EXISTS qms_audit_reference_counters (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    amo_id VARCHAR(36) NOT NULL REFERENCES amos(id) ON DELETE CASCADE,
+                    reference_family VARCHAR(16) NOT NULL,
+                    unit_code VARCHAR(16) NOT NULL,
+                    ref_year INTEGER NOT NULL,
+                    last_value INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
         db.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_qms_audit_ref_counter_scope
             ON qms_audit_reference_counters (amo_id, reference_family, unit_code, ref_year)

@@ -15,15 +15,12 @@ import {
   LayoutList,
   MailCheck,
   Search,
-  ShieldCheck,
   Pencil,
   Play,
   Plus,
   RefreshCw,
   Trash2,
-  UserCheck,
   UserPlus,
-  Users,
 } from "lucide-react";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import "./quality-audit-dashboard.css";
@@ -183,6 +180,38 @@ const defaultSchedule: ScheduleFormState = {
   is_active: true,
 };
 
+type StoredScheduleDraft = {
+  form: ScheduleFormState;
+  editingScheduleId: string | null;
+};
+
+function readScheduleDraft(storageKey: string): StoredScheduleDraft {
+  const fallback = { form: defaultSchedule, editingScheduleId: null };
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(storageKey);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as {
+      form?: ScheduleFormState;
+      editingScheduleId?: string | null;
+    };
+    if (!parsed.form) return fallback;
+    return {
+      form: {
+        ...defaultSchedule,
+        ...parsed.form,
+        external_auditees: parsed.form.external_auditees?.length
+          ? parsed.form.external_auditees
+          : [defaultExternalAuditee()],
+      },
+      editingScheduleId: parsed.editingScheduleId || null,
+    };
+  } catch {
+    window.localStorage.removeItem(storageKey);
+    return fallback;
+  }
+}
+
 const defaultPlannedAudit: PlannedAuditFormState = {
   title: "",
   kind: "INTERNAL",
@@ -262,10 +291,6 @@ function initialsForName(value?: string | null): string {
 function getStoredAvatarUrl(userId?: string | null): string | null {
   if (!userId || typeof window === "undefined") return null;
   return window.localStorage.getItem(`amo_portal_profile_avatar:${userId}`);
-}
-
-function personRoleLabel(role: string): string {
-  return role.replaceAll("_", " ");
 }
 
 const PersonAvatar: React.FC<{ person?: QMSPersonOption | null; fallback?: string | null; label?: string; size?: "sm" | "md" }> = ({ person, fallback, label, size = "md" }) => {
@@ -593,7 +618,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const { pushToast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [form, setForm] = useState<ScheduleFormState>(defaultSchedule);
+  const draftStorageKey = `qms-audit-schedule-draft:${amoCode}:${department}`;
+  const guideStorageKey = `qms-audit-planner-guide-dismissed:${amoCode}`;
+  const initialDraft = useMemo(
+    () => readScheduleDraft(draftStorageKey),
+    [draftStorageKey]
+  );
+  const [form, setForm] = useState<ScheduleFormState>(initialDraft.form);
   const [error, setError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
@@ -602,7 +633,9 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [auditForm, setAuditForm] = useState<PlannedAuditFormState>(defaultPlannedAudit);
   const [editingAuditId, setEditingAuditId] = useState<string | null>(null);
   const [visibleMonth, setVisibleMonth] = useState<Date | null>(null);
-  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(
+    initialDraft.editingScheduleId
+  );
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("overview");
   const [personSearch, setPersonSearch] = useState<Record<PersonSearchField, string>>({
     auditee_user_id: "",
@@ -610,7 +643,9 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     observer_auditor_user_id: "",
     assistant_auditor_user_id: "",
   });
-  const [guideDismissed, setGuideDismissed] = useState(false);
+  const [guideDismissed, setGuideDismissed] = useState(
+    () => typeof window !== "undefined" && window.localStorage.getItem(guideStorageKey) === "1"
+  );
   const [guideOpen, setGuideOpen] = useState(false);
   const [recordFilter, setRecordFilter] = useState<PlannedRecordFilter>("all");
   const [recordSearch, setRecordSearch] = useState("");
@@ -624,9 +659,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     assistant_auditor_user_id: "",
   });
   const queryClient = useQueryClient();
-  const draftStorageKey = useMemo(() => `qms-audit-schedule-draft:${amoCode}:${department}`, [amoCode, department]);
-  const guideStorageKey = useMemo(() => `qms-audit-planner-guide-dismissed:${amoCode}`, [amoCode]);
-
   const rawView = searchParams.get("view") || "calendar";
   const view = (["calendar", "list", "table"].includes(rawView) ? rawView : "calendar") as PlannerView;
 
@@ -665,10 +697,10 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     staleTime: 5 * 60_000,
   });
 
-  const schedules = schedulesQuery.data ?? [];
-  const plannedAudits = plannedAuditsQuery.data ?? [];
-  const personnelOptions = personnelQuery.data ?? [];
-  const auditScopes = auditScopesQuery.data ?? [];
+  const schedules = useMemo(() => schedulesQuery.data ?? [], [schedulesQuery.data]);
+  const plannedAudits = useMemo(() => plannedAuditsQuery.data ?? [], [plannedAuditsQuery.data]);
+  const personnelOptions = useMemo(() => personnelQuery.data ?? [], [personnelQuery.data]);
+  const auditScopes = useMemo(() => auditScopesQuery.data ?? [], [auditScopesQuery.data]);
   const peopleById = useMemo(() => {
     const next = new Map<string, QMSPersonOption>();
     personnelOptions.forEach((person) => next.set(person.id, person));
@@ -742,26 +774,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     });
     return order.map((key) => ({ key, label: groupAuditLabel(key), audits: groups.get(key) || [] })).filter((group) => group.audits.length > 0);
   }, [filteredPlannedAudits]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(draftStorageKey);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as { form?: ScheduleFormState; editingScheduleId?: string | null };
-      if (parsed.form) {
-        setForm({ ...defaultSchedule, ...parsed.form, external_auditees: parsed.form.external_auditees?.length ? parsed.form.external_auditees : [defaultExternalAuditee()] });
-      }
-      if (parsed.editingScheduleId) setEditingScheduleId(parsed.editingScheduleId);
-    } catch {
-      window.localStorage.removeItem(draftStorageKey);
-    }
-  }, [draftStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setGuideDismissed(window.localStorage.getItem(guideStorageKey) === "1");
-  }, [guideStorageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -884,11 +896,10 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     return firstDue ? new Date(firstDue) : new Date();
   }, [plannerCalendarItems]);
 
-  useEffect(() => {
-    setVisibleMonth((prev) => prev ?? new Date(seedDate.getFullYear(), seedDate.getMonth(), 1));
-  }, [seedDate]);
-
-  const activeCalendarMonth = visibleMonth ?? new Date(seedDate.getFullYear(), seedDate.getMonth(), 1);
+  const activeCalendarMonth = useMemo(
+    () => visibleMonth ?? new Date(seedDate.getFullYear(), seedDate.getMonth(), 1),
+    [seedDate, visibleMonth]
+  );
   const calendarCells = useMemo(() => monthGrid(activeCalendarMonth), [activeCalendarMonth]);
 
   const scheduleSummary = useMemo(
@@ -1240,7 +1251,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     onSuccess: async (audit) => {
       await queryClient.invalidateQueries({ queryKey: ["qms-audits-planned", amoCode, department] });
       pushToast({ title: "Fieldwork started", message: `${audit.audit_ref} is now in progress.`, variant: "success", sound: true });
-      navigate(`/maintenance/${amoCode}/quality/audits/${audit.id}`);
+      navigate(`/maintenance/${amoCode}/quality/audits/${audit.id}/setup`);
     },
     onError: (e: Error) => {
       pushToast({ title: "Could not start fieldwork", message: e.message || "The audit could not be started.", variant: "error" });
@@ -1276,7 +1287,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   };
 
   const handleDelete = (schedule: QMSAuditScheduleOut) => {
-    const confirmDelete = window.confirm(`Delete schedule \"${schedule.title}\" due ${formatDate(schedule.next_due_date)}?`);
+    const confirmDelete = window.confirm(`Delete schedule "${schedule.title}" due ${formatDate(schedule.next_due_date)}?`);
     if (!confirmDelete) return;
     deleteSchedule.mutate(schedule);
   };
@@ -1288,7 +1299,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   };
 
   const openAuditWorkspace = (audit: QMSAuditOut) => {
-    navigate(`/maintenance/${amoCode}/quality/audits/${audit.id}`);
+    navigate(`/maintenance/${amoCode}/quality/audits/${audit.id}/setup`);
   };
 
   const toggleAuditExpansion = (auditId: string) => {

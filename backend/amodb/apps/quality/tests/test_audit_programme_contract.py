@@ -86,7 +86,6 @@ def test_programme_queue_is_bounded_and_static_before_generic_quality_catchall()
 
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         queue_path = f"{prefix}/audit-programmes/planner/queue"
         matches = _matching(router, queue_path, "GET")
@@ -112,7 +111,6 @@ def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> Non
 
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         schedule_path = f"{prefix}/audit-programmes/{{programme_id}}/items/{{item_id}}/schedule"
         matches = _matching(router, schedule_path, "POST")
@@ -124,7 +122,6 @@ def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> Non
 def test_audit_programme_routes_are_promoted_before_generic_quality_catchall() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         path = f"{prefix}/audit-programmes"
         matches = _matching(router, path, "GET")

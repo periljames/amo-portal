@@ -115,8 +115,9 @@ def test_ledger_fail_closed_raises_on_db_failure():
         )
 
 
-def test_training_gate_blocks_when_unresolved_requirements():
+def test_training_gate_blocks_when_unresolved_requirements(monkeypatch):
     db = _DB(unresolved=2)
+    monkeypatch.setattr(gates, "unresolved_training_gate_items", lambda *_args, **_kwargs: [{}, {}])
     package = SimpleNamespace(package_id="PKG1", requires_training=True, training_gate_policy="ALL_ASSIGNEES")
     with pytest.raises(HTTPException) as exc:
         gates.ensure_revision_training_gate_satisfied(db, amo_id="A1", package=package)

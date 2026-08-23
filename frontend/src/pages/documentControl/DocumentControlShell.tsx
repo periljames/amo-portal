@@ -23,29 +23,6 @@ import "./documentControlExperience.css";
 import "./documentControlLibraryExperience.css";
 import "./dmsLibraryDiscovery.css";
 
-/**
- * Legacy workspace identifiers remain exported until the route migration is
- * complete. New permanent navigation is intentionally expressed through the
- * smaller PrimaryWorkspaceId set below.
- */
-export type DocumentControlWorkspaceId =
-  | "desk"
-  | "library"
-  | "structure"
-  | "records"
-  | "changes"
-  | "revisions"
-  | "authority"
-  | "temporary-revisions"
-  | "distribution"
-  | "reviews"
-  | "copies"
-  | "external"
-  | "integrations"
-  | "archive"
-  | "reports"
-  | "settings";
-
 type PrimaryWorkspaceId =
   | "home"
   | "library"
@@ -78,34 +55,12 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
 ];
 
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
-  if (
-    pathname.includes("/drafts") ||
-    pathname.includes("/change-proposals") ||
-    pathname.includes("/revisions/") ||
-    pathname.includes("/lep/") ||
-    pathname.includes("/authority") ||
-    pathname.includes("/tr") ||
-    pathname.includes("/changes")
-  ) return "changes";
-
-  if (pathname.includes("/distribution") || pathname.includes("/controlled-copies")) return "distribution";
-
-  if (
-    pathname.includes("/reviews") ||
-    pathname.includes("/external-sources") ||
-    pathname.includes("/integrations") ||
-    pathname.includes("/compliance")
-  ) return "compliance";
-
-  if (pathname.includes("/registers") || pathname.includes("/reports")) return "reports";
-  if (pathname.includes("/settings") || pathname.includes("/administration")) return "administration";
-
-  if (
-    pathname.includes("/library") ||
-    pathname.includes("/structure") ||
-    pathname.includes("/records") ||
-    pathname.includes("/archive")
-  ) return "library";
+  if (pathname.includes("/changes")) return "changes";
+  if (pathname.includes("/distribution")) return "distribution";
+  if (pathname.includes("/compliance")) return "compliance";
+  if (pathname.includes("/reports")) return "reports";
+  if (pathname.includes("/administration")) return "administration";
+  if (pathname.includes("/library")) return "library";
 
   return "home";
 }

@@ -58,7 +58,6 @@ def test_wiring_router_exposes_lifecycle_source_event_and_review_contracts() -> 
 
 def test_latest_wiring_and_lifecycle_handlers_override_base_excellence_once() -> None:
     canonical_prefix = "/api/maintenance/{amo_code}/quality"
-    legacy_prefix = "/api/maintenance/{amo_code}/qms"
     cases = (
         ("/excellence/controls", "GET", "list_controls"),
         ("/excellence/controls", "POST", "create_draft_control"),
@@ -71,7 +70,6 @@ def test_latest_wiring_and_lifecycle_handlers_override_base_excellence_once() ->
     for suffix, method, endpoint_name in cases:
         for router, prefix in (
             (canonical_router.router, canonical_prefix),
-            (canonical_router.legacy_router, legacy_prefix),
         ):
             full_path = f"{prefix}{suffix}"
             matches = _matching_routes(router, full_path, method)

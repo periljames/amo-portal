@@ -37,9 +37,13 @@ def _seed_amo_user(db_session, amo_code: str, user_id: str, role: account_models
 
 
 def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session, monkeypatch):
+    amo, _department, _user = _seed_amo_user(
+        db_session, "COCKPIT", "cockpit-user", account_models.AccountRole.QUALITY_MANAGER
+    )
     for idx in range(30):
         db_session.add(
             quality_models.CorrectiveActionRequest(
+                amo_id=amo.id,
                 program=quality_models.CARProgram.QUALITY,
                 car_number=f"Q-2026-{idx:04d}",
                 title=f"CAR {idx}",
@@ -64,7 +68,7 @@ def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session,
         "change_requests_open": 4,
     })
 
-    snapshot = quality_service.get_cockpit_snapshot(db_session)
+    snapshot = quality_service.get_cockpit_snapshot(db_session, amo_id=amo.id)
 
     assert snapshot["generated_at"] is not None
     assert snapshot["pending_acknowledgements"] >= 0

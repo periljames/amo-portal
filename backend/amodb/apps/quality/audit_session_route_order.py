@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import audit_session_router
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 
 
 def _is_session_route(route_item) -> bool:
@@ -11,7 +11,7 @@ def _is_session_route(route_item) -> bool:
     methods = set(getattr(route_item, "methods", None) or ())
     is_setup_update = path.endswith("/audits/{audit_id}/setup") and "PATCH" in methods
     return (
-        ("/quality/audits/" in path or "/qms/audits/" in path)
+        "/quality/audits/" in path
         and (path.endswith("/session") or "/audits/resolve/" in path or is_setup_update)
     )
 
@@ -36,9 +36,8 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-for api_router in (router, legacy_router):
-    _register(api_router)
-    _promote(api_router)
+_register(router)
+_promote(router)
 
 from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
 from . import audit_evidence_route_order as _audit_evidence_route_order  # noqa: F401,E402

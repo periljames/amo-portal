@@ -255,7 +255,7 @@ def process_default_pattern_item(
     item: bulk_models.WorkforceBulkOperationItem,
     actor: account_models.User,
 ) -> tuple[str, str, str, dict[str, Any] | None]:
-    from .legacy_guard import RETIRED_DEFAULT_PATTERN_MESSAGE
+    from .retired_pattern_guard import RETIRED_DEFAULT_PATTERN_MESSAGE
 
     return (
         "FAILED",

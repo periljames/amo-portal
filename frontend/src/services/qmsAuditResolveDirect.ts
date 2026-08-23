@@ -1,6 +1,6 @@
 import { ApiClientError, apiRequest, qmsPath } from "./apiClient";
 import { getContext } from "./auth";
-import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsLegacy";
+import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsCore";
 
 function normalizedAuditKey(value: string): string {
   return value

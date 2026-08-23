@@ -74,7 +74,7 @@ def test_workforce_bulk_progress_is_committed_per_person() -> None:
 
 
 def test_manual_processing_routes_create_real_saas_jobs() -> None:
-    manual_router = source("apps/manuals/router_legacy.py")
+    manual_router = source("apps/manuals/core_router.py")
     safe_worker = source("jobs/saas_worker_safe.py")
     handler = source("jobs/manual_revision_jobs.py")
     assert 'job_type="MANUAL_REVISION_PROCESS"' in manual_router

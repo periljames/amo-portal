@@ -3,5 +3,4 @@
 }
 
 /* The six-stage occurrence workspace is authoritative on /setup, /prepare,
-   /live, /closing, /follow-up and /archive. The legacy cockpit remains
-   available only on compatibility audit URLs that do not select a stage. */
+   /live, /closing, /follow-up and /archive. */

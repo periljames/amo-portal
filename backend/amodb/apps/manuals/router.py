@@ -1,8 +1,7 @@
-"""Compatibility router for the controlled Publications module.
+"""Composed router for the controlled Publications module.
 
-The original Manuals API remains intact in ``router_legacy``. New reader-only
-endpoints are composed here so existing integrations keep their stable
-``/manuals`` API contract while the user-facing module is renamed Publications.
+Core Manuals routes and focused reader routes are composed here under the stable
+``/manuals`` API contract used by Publications.
 """
 from __future__ import annotations
 
@@ -13,11 +12,11 @@ from fastapi import APIRouter
 from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # noqa: F401
 from amodb.apps.doc_control.knowledge_access_router import publication_tree_router
 
-from . import router_legacy as _legacy
+from . import core_router as _core
 from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
-from .legacy_contract_override_router import router as _legacy_contract_override_router
+from .revision_contract_router import router as _revision_contract_router
 from .pdf_reader_form_override_router import router as _pdf_reader_form_override_router
 from .pdf_reader_precomputed_router import router as _pdf_reader_precomputed_router
 from .pdf_reader_router import router as _pdf_reader_router
@@ -35,11 +34,10 @@ for _route in _pdf_reader_form_override_router.routes:
 
 
 router = APIRouter()
-# Guards, stable legacy-contract overrides and precomputed capability routes precede
-# compatibility routes because Starlette resolves identical paths in declaration
-# order. The legacy router remains mounted for endpoints that are not replaced.
+# Guards, stable revision contracts and precomputed capability routes precede core
+# routes because Starlette resolves identical paths in declaration order.
 router.include_router(_upload_guard_router)
-router.include_router(_legacy_contract_override_router)
+router.include_router(_revision_contract_router)
 router.include_router(_pdf_reader_precomputed_router)
 router.include_router(_pdf_reader_form_override_router)
 router.include_router(_pdf_reader_router)
@@ -48,13 +46,13 @@ router.include_router(publication_tree_router)
 router.include_router(_knowledge_reader_access_router)
 router.include_router(_knowledge_reader_router)
 router.include_router(_approved_intake_router)
-router.include_router(_legacy.router)
+router.include_router(_core.router)
 router.include_router(_publications_router)
 
 
 def __getattr__(name: str):
-    """Preserve imports of helpers/constants from the historical router module."""
-    return getattr(_legacy, name)
+    """Expose shared helpers/constants from the core router module."""
+    return getattr(_core, name)
 
 
 __all__ = ["router"]

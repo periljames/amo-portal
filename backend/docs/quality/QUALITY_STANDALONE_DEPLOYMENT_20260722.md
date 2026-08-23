@@ -72,7 +72,8 @@ The Quality module is the backend owner. New code must not target the deprecated
 |---|---|---|
 | Direct Quality API | `/quality/*` | Active compatibility and workflow API used by the current frontend |
 | Canonical tenant API | `/api/maintenance/{amo_code}/quality/*` | Preferred tenant-scoped API |
-| Legacy tenant alias | `/api/maintenance/{amo_code}/qms/*` | Deprecated compatibility alias only |
+
+The retired `/api/maintenance/{amo_code}/qms/*` alias is not mounted.
 
 The canonical router applies tenant context and Quality permissions. The direct router must continue to scope every audit, schedule, finding and CAR query to the authenticated user's AMO.
 

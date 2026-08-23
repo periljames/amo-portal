@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from amodb.apps.rostering import assignments, services
+from amodb.apps.rostering import services
 from amodb.apps.rostering.services import _ensure_source_owned_state
 
 
@@ -190,6 +190,7 @@ def test_non_atomic_bulk_preserves_valid_items_and_original_conflict_indexes(mon
 
     monkeypatch.setattr(services, "_ensure_source_owned_state", guard)
     monkeypatch.setattr(services, "_bulk_create_assignments", underlying)
+    monkeypatch.setattr(services, "validate_version", lambda *_args, **_kwargs: None)
 
     result = services.bulk_create_assignments(
         object(),
@@ -201,7 +202,3 @@ def test_non_atomic_bulk_preserves_valid_items_and_original_conflict_indexes(mon
     assert forwarded == [good]
     assert result.conflicts == [{"index": 0, "client_id": "bad-client", "reason": "blocking Training commitment"}]
     assert result.skipped == [{"index": 1, "reason": "duplicate"}]
-
-
-def test_pattern_generation_uses_the_guarded_bulk_path():
-    assert assignments.bulk_create_assignments is services.bulk_create_assignments

@@ -25,7 +25,7 @@ from .pdf_reader_router import (
     process_completed_pdf,
     read_bounded_pdf_upload,
 )
-from .router_legacy import _tenant_by_slug
+from .core_router import _tenant_by_slug
 
 
 router = APIRouter(prefix="/manuals", tags=["Publications Knowledge Graph"])

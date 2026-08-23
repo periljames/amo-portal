@@ -303,7 +303,7 @@ def run_task_runner(
             amo_id=task.amo_id,
             db=db,
         )
-        if email_log.status == notification_models.EmailStatus.SENT:
+        if email_log.status != notification_models.EmailStatus.FAILED:
             _merge_metadata(task, {"last_notified_at": now.isoformat()})
             db.add(task)
             audit_services.log_event(
@@ -312,9 +312,9 @@ def run_task_runner(
                 actor_user_id=task.owner_user_id,
                 entity_type="tasks.task",
                 entity_id=str(task.id),
-                action="REMINDER_SENT",
+                action="REMINDER_PROCESSED",
                 after={"due_at": str(task.due_at)},
-                metadata={"module": "tasks"},
+                metadata={"module": "tasks", "email_status": email_log.status.value},
             )
             reminders_sent += 1
 

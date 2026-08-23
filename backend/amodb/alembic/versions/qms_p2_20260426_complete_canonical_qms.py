@@ -4,8 +4,8 @@ Revision ID: qms_p2_20260426
 Revises: qms_p1_rls_20260426
 Create Date: 2026-04-26
 
-This migration completes the canonical QMS storage layer used by
-/api/maintenance/{amo_code}/qms. It is intentionally additive and production-safe:
+This migration completes the canonical QMS storage layer now used by
+/api/maintenance/{amo_code}/quality. It is intentionally additive and production-safe:
 existing tables are not dropped; missing tenant/common columns are added; RLS is enabled
 where an amo_id column is present.
 """

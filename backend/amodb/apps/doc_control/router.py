@@ -12,7 +12,7 @@ from .governance_runtime_guard import install as install_governance_runtime_guar
 from .reader_governance_router import router as reader_governance_router
 from .knowledge_access_router import workspace_tree_router
 from .knowledge_resolution_router import router as knowledge_resolution_router
-from .router_legacy import router as legacy_router
+from .core_router import router as core_router
 from .knowledge_assistant_router import router as knowledge_assistant_router
 from .knowledge_assistant_runtime_guard import install as install_knowledge_assistant_runtime_guard
 from .knowledge_records_router import router as knowledge_records_router
@@ -69,7 +69,7 @@ quarantine_legacy_copy_mutations(workspace_router)
 router = APIRouter()
 router.include_router(reminder_lifecycle_router)
 router.include_router(evidence_pack_job_lifecycle_router)
-router.include_router(legacy_router)
+router.include_router(core_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
 # verification, controlled change assessment, verified applicability, authority

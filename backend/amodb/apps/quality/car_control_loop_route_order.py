@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .canonical_router import legacy_router, router
+from .canonical_router import router
 from . import car_control_loop_session_context as _car_control_loop_session_context  # noqa: F401,E402
 from . import car_control_loop_authority_guard as _car_control_loop_authority_guard  # noqa: E402
 from . import car_control_loop_evidence_guard as _car_control_loop_evidence_guard  # noqa: E402
@@ -13,9 +13,7 @@ from . import car_control_loop_evidence_guard as _car_control_loop_evidence_guar
 # overlapping milestone-decision and close operations. Evidence uses dedicated
 # control-loop paths rather than the legacy assignee attachment endpoints.
 router.include_router(_car_control_loop_authority_guard.router)
-legacy_router.include_router(_car_control_loop_authority_guard.router)
 router.include_router(_car_control_loop_evidence_guard.router)
-legacy_router.include_router(_car_control_loop_evidence_guard.router)
 
 
 def _is_control_loop_route(route_item) -> bool:
@@ -60,7 +58,6 @@ def _promote_control_loop_routes(api_router: APIRouter) -> None:
 
 
 _promote_control_loop_routes(router)
-_promote_control_loop_routes(legacy_router)
 
 # The live-audit session projection is a read-only orchestration layer over the
 # authoritative audit workflow, preparation, closure and archive records. Load

@@ -2,20 +2,10 @@ import React from "react";
 import { ClipboardCheck } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
-/**
- * Preserve an explicit mobile control for both the canonical Closing stage and
- * legacy closeout deep links. The component never owns lifecycle state; it only
- * focuses the already mounted canonical closing workspace.
- */
+/** Focus the mounted canonical Closing workspace on small screens. */
 const MobileAuditDeepLinkState: React.FC = () => {
   const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const tab = (params.get("tab") || "").trim().toLowerCase();
-  const canonicalClosing = /\/(?:qms|quality)\/audits\/[^/]+\/closing\/?$/i.test(location.pathname);
-  const legacyAuditRun = /\/(?:qms|quality)\/audits\/[^/]+\/?$/i.test(location.pathname);
-  const shouldRender = canonicalClosing || (legacyAuditRun && ["closeout", "report"].includes(tab));
-
-  if (!shouldRender) return null;
+  if (!/\/quality\/audits\/[^/]+\/closing\/?$/i.test(location.pathname)) return null;
 
   const focusCloseout = () => {
     const target = document.querySelector<HTMLElement>(

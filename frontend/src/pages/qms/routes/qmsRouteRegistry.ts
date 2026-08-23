@@ -19,15 +19,13 @@ export type QmsModuleRoute = {
   componentType: QmsRouteComponentType;
   allowRecordDetails?: boolean;
   recordRoutes?: readonly QmsDynamicRecordRoute[];
-  legacyAliases?: readonly string[];
 };
 
 export type QmsPathClassification = {
-  kind: "outside" | "overview" | "known" | "unknown" | "legacy";
+  kind: "outside" | "overview" | "known" | "unknown";
   amoCode?: string;
   relativePath?: string;
   module?: QmsModuleRoute;
-  canonicalTarget?: string;
 };
 
 const AUDIT_WORKSPACE_TAILS = [
@@ -40,17 +38,6 @@ const AUDIT_WORKSPACE_TAILS = [
   "closing",
   "follow-up",
   "archive",
-  // Legacy record views remain recognized so PortalRouteSurface can redirect
-  // old/deep links to the equivalent canonical stage without breaking bookmarks.
-  "overview",
-  "war-room",
-  "checklist",
-  "fieldwork",
-  "findings",
-  "cars",
-  "evidence",
-  "report",
-  "closeout",
 ] as const;
 
 const CAR_WORKSPACE_TAILS = [
@@ -84,7 +71,6 @@ const MODULES: readonly QmsModuleRoute[] = [
     defaultView: "assigned-to-me",
     validViews: ["assigned-to-me", "approvals", "overdue", "watching", "completed"],
     componentType: "canonical",
-    legacyAliases: ["tasks"],
   },
   {
     id: "calendar",
@@ -105,12 +91,12 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.audit.view",
     section: "assurance",
     defaultView: "dashboard",
-    validViews: ["dashboard", "program", "schedule", "register", "checklists", "reports", "templates", "new", "plan", "bin"],
+    validViews: ["dashboard", "program", "schedule", "register", "checklists", "templates", "new", "plan", "bin"],
     componentType: "specialist",
     allowRecordDetails: true,
     recordRoutes: [
       { prefix: ["schedules"], allowBare: true },
-      { allowBare: true, allowedTails: AUDIT_WORKSPACE_TAILS },
+      { allowBare: false, allowedTails: AUDIT_WORKSPACE_TAILS },
     ],
   },
   {
@@ -380,34 +366,16 @@ export function qmsNavigationItems(amoCode: string): Array<QmsModuleRoute & { pa
   }));
 }
 
-function canonicalTargetForAlias(amoCode: string, relative: string): string {
-  const clean = relative.replace(/^\/+/, "");
-  if (!clean) return qmsBasePath(amoCode);
-  if (clean === "tasks") return qmsModulePath(amoCode, "inbox", "assigned-to-me");
-  if (clean === "audits/programme") return qmsModulePath(amoCode, "audits", "program");
-  return `${qmsBasePath(amoCode)}/${clean}`;
-}
-
 export function classifyQmsPath(pathname: string): QmsPathClassification {
   const segments = pathSegments(pathname);
   if (segments[0] !== "maintenance" || !segments[1]) return { kind: "outside" };
 
   const amoCode = segments[1];
   if (segments[2] === "qms") {
-    return {
-      kind: "legacy",
-      amoCode,
-      relativePath: segments.slice(3).join("/"),
-      canonicalTarget: canonicalTargetForAlias(amoCode, segments.slice(3).join("/")),
-    };
+    return { kind: "unknown", amoCode, relativePath: segments.slice(3).join("/") };
   }
   if (segments.length >= 4 && segments[3] === "qms") {
-    return {
-      kind: "legacy",
-      amoCode,
-      relativePath: segments.slice(4).join("/"),
-      canonicalTarget: canonicalTargetForAlias(amoCode, segments.slice(4).join("/")),
-    };
+    return { kind: "unknown", amoCode, relativePath: segments.slice(4).join("/") };
   }
   if (segments[2] !== "quality") return { kind: "outside" };
 
@@ -416,15 +384,6 @@ export function classifyQmsPath(pathname: string): QmsPathClassification {
   if (relativeSegments.length === 0 || relativePath === "cockpit" || relativePath === "cockpit/dashboard") {
     return { kind: "overview", amoCode, relativePath };
   }
-  if (relativePath === "tasks" || relativePath === "audits/programme") {
-    return {
-      kind: "legacy",
-      amoCode,
-      relativePath,
-      canonicalTarget: canonicalTargetForAlias(amoCode, relativePath),
-    };
-  }
-
   const module = MODULES.find((candidate) => candidate.segment === relativeSegments[0]);
   if (!module) return { kind: "unknown", amoCode, relativePath };
 
@@ -445,7 +404,7 @@ export function classifyQmsPath(pathname: string): QmsPathClassification {
     return { kind: "known", amoCode, relativePath, module };
   }
 
-  if (module.allowRecordDetails && isSafeRecordKey(view)) {
+  if (module.allowRecordDetails && !module.recordRoutes && isSafeRecordKey(view)) {
     const tail = moduleSegments.slice(1);
     if (tail.length === 0 || (tail.length === 1 && tail[0] === "overview")) {
       return { kind: "known", amoCode, relativePath, module };
@@ -457,5 +416,5 @@ export function classifyQmsPath(pathname: string): QmsPathClassification {
 
 export function isKnownQmsPath(pathname: string): boolean {
   const result = classifyQmsPath(pathname);
-  return result.kind === "overview" || result.kind === "known" || result.kind === "legacy";
+  return result.kind === "overview" || result.kind === "known";
 }

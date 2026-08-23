@@ -18,7 +18,6 @@ def _route(router, path: str, method: str):
 def test_schema_aware_overview_and_management_pack_override_assumed_column_queries() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
-        (canonical_router.legacy_router, "/api/maintenance/{amo_code}/qms"),
     ):
         overview = _route(router, f"{prefix}/excellence/overview/full", "GET")
         management_pack = _route(router, f"{prefix}/excellence/management-review-pack", "GET")

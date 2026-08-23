@@ -118,7 +118,7 @@ export function ModalTopLayerGuard() {
       if (addedPopoverAttribute.delete(host)) host.removeAttribute("popover");
     };
 
-    const useFallbackLayer = (host: HTMLElement) => {
+    const applyFallbackLayer = (host: HTMLElement) => {
       clearAddedPopoverAttribute(host);
       if (host.classList.contains(FALLBACK_HOST_CLASS)) return;
       host.classList.add(FALLBACK_HOST_CLASS);
@@ -130,7 +130,7 @@ export function ModalTopLayerGuard() {
       host.dataset.portalModalLayer = "true";
 
       if (typeof host.showPopover !== "function") {
-        useFallbackLayer(host);
+        applyFallbackLayer(host);
         return;
       }
 
@@ -142,7 +142,7 @@ export function ModalTopLayerGuard() {
       try {
         if (!isPopoverOpen(host)) host.showPopover();
       } catch {
-        useFallbackLayer(host);
+        applyFallbackLayer(host);
       }
     };
 
@@ -197,7 +197,7 @@ export function ModalTopLayerGuard() {
             try {
               current.host.showPopover();
             } catch {
-              useFallbackLayer(current.host);
+              applyFallbackLayer(current.host);
             }
           }
           continue;

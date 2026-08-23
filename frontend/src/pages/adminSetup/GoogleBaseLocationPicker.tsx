@@ -149,11 +149,9 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
   const listenersRef = useRef<MapsListener[]>([]);
   const onChangeRef = useRef(onPositionChange);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unconfigured" | "error">(
-    apiKey ? "idle" : "unconfigured",
+    apiKey ? "loading" : "unconfigured",
   );
   const [error, setError] = useState<string | null>(null);
-
-  onChangeRef.current = onPositionChange;
 
   const position = useMemo<LatLngLiteral | null>(() => {
     if (latitude == null || longitude == null) return null;
@@ -162,18 +160,20 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
   }, [latitude, longitude]);
   const positionRef = useRef<LatLngLiteral | null>(position);
   const labelRef = useRef(label);
-  positionRef.current = position;
-  labelRef.current = label;
 
   useEffect(() => {
-    if (!apiKey || !mapHostRef.current || !searchHostRef.current) {
-      setStatus(apiKey ? "idle" : "unconfigured");
-      return;
-    }
+    onChangeRef.current = onPositionChange;
+  }, [onPositionChange]);
+
+  useEffect(() => {
+    positionRef.current = position;
+    labelRef.current = label;
+  }, [label, position]);
+
+  useEffect(() => {
+    if (!apiKey || !mapHostRef.current || !searchHostRef.current) return;
 
     let cancelled = false;
-    setStatus("loading");
-    setError(null);
 
     void loadGoogleMaps(apiKey)
       .then(async (google) => {

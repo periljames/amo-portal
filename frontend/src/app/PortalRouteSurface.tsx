@@ -21,17 +21,6 @@ const DEPARTMENT_HOMES = new Set([
 ]);
 const SIMPLE_DEPARTMENT_VIEWS = new Set(["operations", "settings"]);
 const CANONICAL_AUDIT_STAGES = new Set(["setup", "prepare", "live", "closing", "follow-up", "archive"]);
-const AUDIT_STAGE_BY_LEGACY_VIEW: Readonly<Record<string, string>> = {
-  overview: "setup",
-  "war-room": "setup",
-  checklist: "live",
-  fieldwork: "live",
-  findings: "live",
-  evidence: "live",
-  report: "closing",
-  closeout: "closing",
-  cars: "follow-up",
-};
 
 function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean).map((value) => {
@@ -41,27 +30,6 @@ function pathSegments(pathname: string): string[] {
       return value;
     }
   });
-}
-
-function auditOccurrenceCompatibilityTarget(parts: string[], search: string): string | null {
-  const module = parts[2] || "";
-  const view = parts[3] || "";
-  const auditKey = parts[4] || "";
-  if (!(["quality", "qms"].includes(module)) || view !== "audits" || !auditKey || !/\d/.test(auditKey)) return null;
-
-  const tail = (parts[5] || "").toLowerCase();
-  if (CANONICAL_AUDIT_STAGES.has(tail)) return null;
-  if (parts.length > 6) return null;
-
-  const params = new URLSearchParams(search);
-  const queryTab = (params.get("tab") || "").trim().toLowerCase();
-  const legacyView = tail || queryTab || "overview";
-  const stage = AUDIT_STAGE_BY_LEGACY_VIEW[legacyView];
-  if (!stage) return null;
-
-  params.delete("tab");
-  const remaining = params.toString();
-  return `/maintenance/${encodeURIComponent(parts[1])}/quality/audits/${encodeURIComponent(auditKey)}/${stage}${remaining ? `?${remaining}` : ""}`;
 }
 
 function LoadingRoute({ label }: { label: string }): React.ReactElement {
@@ -116,12 +84,7 @@ export const AppRouter: React.FC = () => {
 
   if (!isTenantPath) return <PortalRoutes />;
 
-  const auditCompatibilityTarget = auditOccurrenceCompatibilityTarget(parts, location.search);
-  if (auditCompatibilityTarget) {
-    return <Navigate to={`${auditCompatibilityTarget}${location.hash}`} replace state={location.state} />;
-  }
-
-  const canonicalAuditStage = (module === "quality" || module === "qms")
+  const canonicalAuditStage = module === "quality"
     && view === "audits"
     && Boolean(parts[4])
     && CANONICAL_AUDIT_STAGES.has((parts[5] || "").toLowerCase());

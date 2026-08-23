@@ -466,21 +466,6 @@ def _date_to_datetime(value: Optional[date]) -> Optional[datetime]:
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
-def _derive_audit_unit_code(db: Session, amo_id: Optional[str]) -> str:
-    if not amo_id:
-        return "MO"
-    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
-    raw = (amo.amo_code if amo else "") or (amo.icao_code if amo else "") or "MO"
-    cleaned = re.sub(r"[^A-Z0-9]", "", raw.upper())
-    if len(cleaned) <= 8:
-        return cleaned or "MO"
-    compact = "".join(part[:3] for part in re.split(r"[^A-Z0-9]+", raw.upper()) if part)
-    compact_clean = re.sub(r"[^A-Z0-9]", "", compact)
-    return (compact_clean[:8] or cleaned[:8] or "MO")
-
-
-
-
 def _normalize_scope_code(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None

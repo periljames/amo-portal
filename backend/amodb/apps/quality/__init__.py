@@ -18,7 +18,7 @@ from . import audit_preparation_models as _audit_preparation_models  # noqa: F40
 from . import car_control_loop_models as _car_control_loop_models  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
-# Focused extensions are loaded only after the compatibility router is complete.
+# Focused extensions are loaded after the base router is complete.
 from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
 from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
@@ -46,14 +46,13 @@ _deduplicate_exact_routes(router)
 _deduplicate_exact_routes(public_router)
 
 # Register the operational dashboard, then explicitly place its static route
-# ahead of the generic /{module_path:path} fallback on both canonical aliases.
+# ahead of the generic /{module_path:path} fallback.
 from . import dashboard_v2 as _dashboard_v2  # noqa: F401,E402
 from . import dashboard_route_order as _dashboard_route_order  # noqa: F401,E402
 
-# Continuous-assurance APIs live under the canonical Quality and legacy QMS
-# tenant prefixes. Later extension routers intentionally override selected base
-# paths with stricter tenant validation, schema-aware aggregation and lifecycle
-# transition enforcement.
+# Continuous-assurance APIs live under the canonical Quality tenant prefix. Later
+# extension routers intentionally override selected base paths with stricter tenant
+# validation, schema-aware aggregation and lifecycle transition enforcement.
 from . import canonical_router as _canonical_router  # noqa: F401,E402
 from . import excellence_router as _excellence_router  # noqa: F401,E402
 from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
@@ -88,53 +87,34 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/excellence/overview",
 )
 _include_once(
-    _canonical_router.legacy_router,
-    _excellence_router.router,
-    "/api/maintenance/{amo_code}/qms/excellence/overview",
-)
-_include_once(
     _canonical_router.router,
     _assurance_wiring_router.router,
     "/api/maintenance/{amo_code}/quality/excellence/source-catalog",
-)
-_include_once(
-    _canonical_router.legacy_router,
-    _assurance_wiring_router.router,
-    "/api/maintenance/{amo_code}/qms/excellence/source-catalog",
 )
 
 # Metrics intentionally override the wiring router's broad aggregation paths.
 # Register them directly so the later route-order pass can retain the latest
 # exact path/method handler rather than treating the overlap as duplication.
 _canonical_router.router.include_router(_assurance_metrics_router.router)
-_canonical_router.legacy_router.include_router(_assurance_metrics_router.router)
 
 # Lifecycle endpoints intentionally overlap the base wiring contract. They are
 # registered last so create, approval and test operations retain strict state
 # transition and evidence gates.
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
-_canonical_router.legacy_router.include_router(_assurance_lifecycle_guard_router.router)
 
 # Missions are additive governed workflows rather than a duplicate operational
 # register. They coordinate evidence and decisions sourced from other AMO
-# domains, and keep canonical and legacy tenant aliases contract-compatible.
+# domains.
 _include_once(
     _canonical_router.router,
     _mission_router.router,
     "/api/maintenance/{amo_code}/quality/missions",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _mission_router.router,
-    "/api/maintenance/{amo_code}/qms/missions",
-)
 
 # Write guards override only the Mission operations that require stronger tenant
 # participant validation, gate evidence checks and attributable human approval.
 _canonical_router.router.include_router(_mission_management_guard_router.router)
-_canonical_router.legacy_router.include_router(_mission_management_guard_router.router)
 _canonical_router.router.include_router(_mission_lifecycle_guard_router.router)
-_canonical_router.legacy_router.include_router(_mission_lifecycle_guard_router.router)
 
 # Audit Programmes and the Audit Universe add governed planning primitives around
 # the existing audit schedule/execution engine. They do not create shadow audit,
@@ -144,24 +124,17 @@ _include_once(
     _audit_programme_router.router,
     "/api/maintenance/{amo_code}/quality/audit-programmes",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _audit_programme_router.router,
-    "/api/maintenance/{amo_code}/qms/audit-programmes",
-)
 
 # The scheduling queue is a bounded join of approved/active programme
 # requirements. It prevents the frontend from issuing one detail request per
 # programme revision simply to discover work awaiting the Planner.
 _canonical_router.router.include_router(_audit_programme_queue_router.router)
-_canonical_router.legacy_router.include_router(_audit_programme_queue_router.router)
 
 # Programme-to-Planner linkage is a focused transactional adapter around the
 # authoritative audit schedule engine. It is deliberately registered after the
 # programme CRUD routes so only the schedule-link operations overlap the same
 # route family.
 _canonical_router.router.include_router(_audit_programme_schedule_router.router)
-_canonical_router.legacy_router.include_router(_audit_programme_schedule_router.router)
 
 # People & Privileges owns only Quality authorization decisions, hard eligibility
 # and independence declarations. Training, Workforce and Rostering stay the
@@ -170,11 +143,6 @@ _include_once(
     _canonical_router.router,
     _people_router.router,
     "/api/maintenance/{amo_code}/quality/people",
-)
-_include_once(
-    _canonical_router.legacy_router,
-    _people_router.router,
-    "/api/maintenance/{amo_code}/qms/people",
 )
 
 # Assurance Cases coordinate source-backed investigations and corrective-action
@@ -185,11 +153,6 @@ _include_once(
     _assurance_case_router.router,
     "/api/maintenance/{amo_code}/quality/assurance-cases",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _assurance_case_router.router,
-    "/api/maintenance/{amo_code}/qms/assurance-cases",
-)
 
 # Quality Intelligence is a bounded read model over governed source records. It
 # exposes transparent calculations and deterministic surveillance factors; it
@@ -199,17 +162,11 @@ _include_once(
     _intelligence_router.router,
     "/api/maintenance/{amo_code}/quality/intelligence",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _intelligence_router.router,
-    "/api/maintenance/{amo_code}/qms/intelligence",
-)
 
 # Signal rules/observations and the approval impact graph are governed adjuncts
 # under the same Intelligence workspace. These routes are additive to /overview
 # and are included directly because the workspace prefix is already registered.
 _canonical_router.router.include_router(_intelligence_governance_router.router)
-_canonical_router.legacy_router.include_router(_intelligence_governance_router.router)
 
 # Preparation revisions preserve the controlled checklist/criteria/document
 # request state used to prepare an audit. They snapshot authoritative records;
@@ -219,36 +176,23 @@ _include_once(
     _audit_preparation_router.router,
     "/api/maintenance/{amo_code}/quality/audits/{audit_id}/preparation-revisions",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _audit_preparation_router.router,
-    "/api/maintenance/{amo_code}/qms/audits/{audit_id}/preparation-revisions",
-)
 
 # Governed assignment routes intentionally override selected Planner writes.
 # The original scheduling functions remain authoritative and are called only
 # after People & Privileges hard gates have been evaluated.
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
-_canonical_router.legacy_router.include_router(_planner_assignment_guard_router.router)
 
 # CAR/CAPA control-loop records are an additive governance layer over the
-# authoritative quality_cars register. Both canonical aliases receive the same
-# staged ownership, deadline, dependency, escalation and closeout contract.
+# authoritative quality_cars register under the canonical Quality route.
 _include_once(
     _canonical_router.router,
     _car_control_loop_router.router,
     "/api/maintenance/{amo_code}/quality/cars/{car_id}/control-loop",
 )
-_include_once(
-    _canonical_router.legacy_router,
-    _car_control_loop_router.router,
-    "/api/maintenance/{amo_code}/qms/cars/{car_id}/control-loop",
-)
 
 # Deadline decisions and escalation evaluation deliberately override selected
 # broad control-loop endpoints with stricter sequence and stale-request guards.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
-_canonical_router.legacy_router.include_router(_car_control_loop_guard_router.router)
 
 # Promote static assurance APIs ahead of the canonical catch-all and collapse
 # path/method overlaps in favour of the latest, most specific handler.

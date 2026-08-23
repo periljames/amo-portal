@@ -45,8 +45,8 @@ describe("simplified rostering workflow", () => {
     expect(workforceSource).toContain("Audited reason");
   });
 
-  it("reduces duplicate navigation while preserving legacy routes", () => {
-    expect(shellSource).not.toContain('label: "Reports"');
+  it("reduces duplicate navigation while keeping active workspaces", () => {
+    expect(shellSource).toContain('label: "Reports"');
     expect(shellSource).not.toContain('label: "Compliance"');
     expect(manifestSource).not.toContain('feature("rostering-training"');
     expect(manifestSource).not.toContain('feature("rostering-reports"');

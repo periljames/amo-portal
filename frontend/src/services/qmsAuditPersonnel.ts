@@ -1,4 +1,4 @@
-import { qmsListAuditPersonnelOptions as qmsListLegacyAuditPersonnelOptions, type QMSPersonOption } from "./qmsLegacy";
+import { qmsListAuditPersonnelOptions as qmsListCoreAuditPersonnelOptions, type QMSPersonOption } from "./qmsCore";
 
 export type QMSAuditPersonnelOptionsParams = {
   search?: string;
@@ -7,14 +7,6 @@ export type QMSAuditPersonnelOptionsParams = {
 
 /**
  * Load audit personnel through the registered Quality personnel endpoint.
- *
- * The canonical AMO-scoped router does not currently expose
- * `/audits/personnel/options`; sending this request through `qmsPath(...)`
- * therefore falls into the generic canonical catch-all, whose response shape
- * and limit contract do not match `QMSPersonOption[]`. Keep this compatibility
- * call on the explicit `/quality/audits/personnel/options` handler until a
- * dedicated canonical route is registered and covered by backend tests.
- *
  * The explicit personnel handler caps `limit` at 100 and `search` at 100
  * characters. Enforce those bounds centrally so stale callers cannot produce
  * FastAPI 422 responses.
@@ -26,7 +18,7 @@ export async function qmsListAuditPersonnelOptions(
   const limit = Math.min(100, Math.max(1, requestedLimit));
   const search = params?.search?.trim().slice(0, 100) || "";
 
-  return qmsListLegacyAuditPersonnelOptions({
+  return qmsListCoreAuditPersonnelOptions({
     limit,
     ...(search ? { search } : {}),
   });

@@ -155,7 +155,7 @@ def get_changes_portfolio(
                 "source": row.source_module,
                 "training_impact_required": bool(row.training_impact_required),
                 "qms_blocking": bool(row.qms_blocking),
-                "target_path": f"/maintenance/{tenant_slug}/document-control/change-proposals/{row.id}",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{manual.id}?tab=changes&change={row.id}",
             })
     elif view == "authority":
         query = db.query(dm.DocumentAuthoritySubmission, manual_models.Manual).join(

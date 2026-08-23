@@ -1,8 +1,5 @@
-// Compatibility facade for the mature QMS service surface.
-//
-// qmsLegacy retains the existing API helpers unchanged. The explicit exports
-// below replace compatibility calls that must be tenant-scoped and bounded by
-// the canonical /api/maintenance/:amoCode/quality contract.
-export * from "./qmsLegacy";
+// Public QMS service surface. The explicit resolver uses the bounded,
+// tenant-scoped endpoint instead of scanning the audit register client-side.
+export * from "./qmsCore";
+export * from "./qmsAuditPersonnel";
 export { qmsResolveAudit } from "./qmsAuditResolveDirect";
-export { qmsListAuditPersonnelOptions } from "./qmsAuditPersonnel";
