@@ -24,6 +24,10 @@ const SAFE_METADATA_KEYS = new Set([
   "entry_point",
 ]);
 
+const MAX_ANALYTICS_IN_FLIGHT = 2;
+let analyticsInFlight = 0;
+const analyticsWaiters: Array<() => void> = [];
+
 function safeMetadata(metadata?: Record<string, unknown>): Record<string, string> {
   const output: Record<string, string> = {};
   Object.entries(metadata || {}).forEach(([key, value]) => {
@@ -31,6 +35,20 @@ function safeMetadata(metadata?: Record<string, unknown>): Record<string, string
     output[key] = String(value).slice(0, 128);
   });
   return output;
+}
+
+async function acquireAnalyticsSlot(): Promise<void> {
+  if (analyticsInFlight < MAX_ANALYTICS_IN_FLIGHT) {
+    analyticsInFlight += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => analyticsWaiters.push(resolve));
+  analyticsInFlight += 1;
+}
+
+function releaseAnalyticsSlot(): void {
+  analyticsInFlight = Math.max(0, analyticsInFlight - 1);
+  analyticsWaiters.shift()?.();
 }
 
 export async function emitProductEvent(input: {
@@ -42,6 +60,8 @@ export async function emitProductEvent(input: {
 }): Promise<boolean> {
   const token = getToken();
   if (!token || !ALLOWED_EVENTS.has(input.event_type)) return false;
+
+  await acquireAnalyticsSlot();
   try {
     const response = await fetch("/platform/product-events", {
       method: "POST",
@@ -64,6 +84,8 @@ export async function emitProductEvent(input: {
   } catch {
     // Product analytics is deliberately fail-open. It must never block portal work.
     return false;
+  } finally {
+    releaseAnalyticsSlot();
   }
 }
 
