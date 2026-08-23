@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import pytest
+
 from amodb import serve
 
 
@@ -33,10 +35,29 @@ def test_reload_forces_single_worker() -> None:
     assert options["reload"] is True
 
 
-def test_forwarded_proxy_trust_is_not_open_by_default() -> None:
+def test_forwarded_proxy_trust_is_loopback_only_outside_production() -> None:
     with patch.dict(os.environ, {}, clear=True):
         options = serve._uvicorn_options()
     assert options["forwarded_allow_ips"] == "127.0.0.1"
+
+
+def test_production_requires_explicit_trusted_proxy_addresses() -> None:
+    with patch.dict(os.environ, {"APP_ENV": "production"}, clear=True):
+        with pytest.raises(RuntimeError, match="FORWARDED_ALLOW_IPS"):
+            serve._uvicorn_options()
+
+
+def test_production_uses_configured_proxy_cidrs() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "APP_ENV": "production",
+            "FORWARDED_ALLOW_IPS": "10.42.0.0/16,10.43.0.0/16",
+        },
+        clear=True,
+    ):
+        options = serve._uvicorn_options()
+    assert options["forwarded_allow_ips"] == "10.42.0.0/16,10.43.0.0/16"
 
 
 def test_optional_concurrency_ceiling_is_applied_only_when_configured() -> None:
