@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from amodb.apps.platform import (
     saas_execution_policy,
@@ -12,6 +14,8 @@ from amodb.apps.platform import (
     saas_services,
     tenant_saas_job_router,
 )
+
+saas_router_module = importlib.import_module("amodb.apps.platform.saas_router")
 
 
 def _job_query(rows: list[object]) -> MagicMock:
@@ -144,6 +148,26 @@ def test_tenant_support_ai_cannot_enqueue_without_governed_access(
             actor_user_id="platform-user",
         )
     enqueue.assert_not_called()
+
+
+def test_support_ai_permission_denial_is_forbidden_not_unauthorized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        saas_router_module.saas_services,
+        "enqueue_ai_support_reply",
+        MagicMock(side_effect=PermissionError("support session required")),
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        saas_router_module.support_ai_reply(
+            "ticket-1",
+            db=MagicMock(),
+            user=SimpleNamespace(id="platform-user"),
+        )
+
+    assert raised.value.status_code == 403
+    assert raised.value.detail == "support session required"
 
 
 def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
