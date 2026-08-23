@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import audit_report_composition_models as _audit_report_composition_models  # noqa: F401
+from . import audit_report_composition_hardening as _audit_report_composition_hardening  # noqa: F401
 from . import audit_report_composition_router
 from .canonical_router import legacy_router, router
 
