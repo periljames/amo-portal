@@ -1,5 +1,4 @@
 import { defineConfig } from "@playwright/test";
-import documentGovernanceGlobalSetup from "./tests/e2e/document-governance-global-setup";
 
 const liveDocumentGovernance = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const useStableChromiumChannel = process.env.E2E_CHROMIUM_CHANNEL === "1";
@@ -8,7 +7,7 @@ export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
   retries: 0,
-  globalSetup: liveDocumentGovernance ? documentGovernanceGlobalSetup : undefined,
+  globalSetup: liveDocumentGovernance ? "./tests/e2e/document-governance-global-setup.ts" : undefined,
   expect: {
     // The authenticated governance suite exercises real large-PDF parsing and
     // production-build navigation. Give assertions the same ceiling as the
