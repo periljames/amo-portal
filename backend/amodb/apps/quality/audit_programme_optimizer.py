@@ -35,9 +35,9 @@ def _level(value: str | None) -> int:
 def _performance_pressure(signals: dict[str, int]) -> int:
     """Convert adverse operating history into a bounded pressure score.
 
-    Signals are additive but capped. Repeat/follow-up findings are intentionally
-    stronger than isolated deferrals so recurring ineffectiveness drives more
-    surveillance without ever reducing the compliance baseline.
+    Repeat/follow-up findings are intentionally stronger than isolated
+    deferrals. The score is evidence pressure only: it never relaxes a
+    compliance requirement or mandatory maximum surveillance interval.
     """
 
     return _clamp(
@@ -79,9 +79,10 @@ def score_surveillance(
 ) -> dict[str, Any]:
     """Score one auditable entity using a compliance floor + adaptive pressure.
 
-    Mandatory/regulatory surveillance is a hard floor. Risk and performance can
-    shorten the recommended interval or add surveillance; they cannot lengthen
-    a mandatory minimum interval.
+    Mandatory surveillance guarantees inclusion, not artificial high risk.
+    Where a maximum surveillance interval is configured, routine conditions
+    retain that cadence. Risk/performance pressure may shorten it but can never
+    lengthen it.
     """
 
     signals = signals or {}
@@ -96,11 +97,20 @@ def score_surveillance(
         + inherent_risk * WEIGHTS["risk"]
         + performance * WEIGHTS["performance"]
     )
-    priority = max(weighted, 80 if mandatory else 0)
+    # Mandatory coverage must always enter the programme, but mandatory status
+    # alone must not impersonate high operational risk.
+    priority = max(weighted, 40 if mandatory else 0)
 
     dynamic_interval = _interval_from_score(priority)
-    minimum_interval = getattr(universe_item, "surveillance_interval_days", None)
-    recommended_interval = min(dynamic_interval, int(minimum_interval)) if minimum_interval else dynamic_interval
+    maximum_interval = getattr(universe_item, "surveillance_interval_days", None)
+    if maximum_interval:
+        maximum_interval = int(maximum_interval)
+        # Below ELEVATED pressure, retain the tenant's governed compliance
+        # cadence. At ELEVATED/HIGH/CRITICAL pressure the adaptive interval may
+        # only move earlier.
+        recommended_interval = maximum_interval if priority < 60 else min(dynamic_interval, maximum_interval)
+    else:
+        recommended_interval = dynamic_interval
 
     drivers: list[dict[str, Any]] = [
         {"factor": "COMPLIANCE", "score": compliance, "weight": WEIGHTS["compliance"]},
@@ -108,11 +118,11 @@ def score_surveillance(
         {"factor": "PERFORMANCE", "score": performance, "weight": WEIGHTS["performance"], "signals": signals},
     ]
     if mandatory:
-        drivers.append({"factor": "MANDATORY_FLOOR", "score": 80, "effect": "priority_floor"})
-    if minimum_interval:
+        drivers.append({"factor": "MANDATORY_FLOOR", "score": 40, "effect": "coverage_inclusion_floor"})
+    if maximum_interval:
         drivers.append({
             "factor": "MANDATORY_INTERVAL_CAP",
-            "days": int(minimum_interval),
+            "days": maximum_interval,
             "effect": "recommended_interval_cannot_exceed",
         })
 
@@ -128,7 +138,7 @@ def score_surveillance(
         },
         "drivers": drivers,
         "mandatory_baseline": mandatory,
-        "recommend_in_programme": mandatory or priority >= 40,
+        "recommend_in_programme": mandatory or bool(maximum_interval) or priority >= 40,
     }
 
 
