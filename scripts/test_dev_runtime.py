@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
+import types
 import unittest
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("dev_runtime.py")
+
+# Keep this regression test dependency-free so the routing workflow can run it
+# before installing backend requirements.
+dotenv_stub = types.ModuleType("dotenv")
+dotenv_stub.dotenv_values = lambda _path: {}
+sys.modules.setdefault("dotenv", dotenv_stub)
+
 SPEC = importlib.util.spec_from_file_location("dev_runtime", SCRIPT)
 assert SPEC and SPEC.loader
 DEV_RUNTIME = importlib.util.module_from_spec(SPEC)
@@ -28,15 +35,10 @@ class DevRuntimePortTests(unittest.TestCase):
         self.assertEqual(DEV_RUNTIME._parse_windows_netstat(sample, 8090), [])
 
     def test_replace_running_is_explicit_cli_option(self) -> None:
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--replace-running", result.stdout)
-        self.assertIn("Terminate processes currently listening", result.stdout)
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"--replace-running"', source)
+        self.assertIn("_replace_occupied_ports", source)
+        self.assertIn("Refusing to terminate an unknown listener", source)
 
 
 if __name__ == "__main__":
