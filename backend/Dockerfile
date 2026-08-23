@@ -3,7 +3,8 @@ FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    ASGI_APP=amodb.main:app \
+    ASGI_APP=amodb.production_app:app \
+    PORT=8080 \
     AMO_LICENSED_FONT_DIR=/usr/local/share/fonts/amo-licensed
 
 WORKDIR /app
@@ -37,4 +38,4 @@ COPY backend /app/backend
 ENV PYTHONPATH=/app/backend
 
 EXPOSE 8080
-CMD ["sh", "-c", "fc-cache -f >/dev/null 2>&1 || true; exec uvicorn \"${ASGI_APP}\" --host 0.0.0.0 --port \"${PORT:-8080}\""]
+CMD ["sh", "-c", "fc-cache -f >/dev/null 2>&1 || true; exec python -m amodb.serve"]
