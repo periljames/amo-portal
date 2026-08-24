@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   QMS_ROUTE_REGISTRY,
   classifyQmsPath,
+  isSafeRecordKey,
   qmsModulePath,
   qmsNavigationItems,
   qmsRecordPath,
@@ -54,6 +55,24 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedule").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/live").kind).toBe("known");
+    expect(
+      classifyQmsPath(
+        "/maintenance/SAF/quality/audits/program/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/items/91a3f9c2-0bc9-431a-9e68-4b51f4ae5128/schedule",
+      ).kind,
+    ).toBe("known");
+  });
+
+  it("rejects audit overview deep-links; setup is the canonical execution entry", () => {
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/overview").kind).toBe(
+      "unknown",
+    );
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/setup").kind).toBe(
+      "known",
+    );
+  });
+
+  it("keeps CAR overview as the canonical CAR record entry", () => {
+    expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
   });
 
   it("recognises every canonical live-audit stage before the not-found guard", () => {
@@ -99,5 +118,35 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/programme").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002").kind).toBe("unknown");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/QAR-MO-26-002/checklist").kind).toBe("unknown");
+  });
+
+  it("accepts opaque safe record keys without requiring digits", () => {
+    expect(isSafeRecordKey("ev-demo")).toBe(true);
+    expect(isSafeRecordKey("ev-1")).toBe(true);
+    expect(isSafeRecordKey("ID-ABCDEFGH")).toBe(true);
+    expect(isSafeRecordKey("2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128")).toBe(true);
+    expect(isSafeRecordKey("QAR-MO-26-002")).toBe(true);
+
+    expect(isSafeRecordKey("")).toBe(false);
+    expect(isSafeRecordKey(".")).toBe(false);
+    expect(isSafeRecordKey("..")).toBe(false);
+    expect(isSafeRecordKey("../secret")).toBe(false);
+    expect(isSafeRecordKey("foo/bar")).toBe(false);
+    expect(isSafeRecordKey("foo\\bar")).toBe(false);
+    expect(isSafeRecordKey("has space")).toBe(false);
+    expect(isSafeRecordKey("bad\0id")).toBe(false);
+    expect(isSafeRecordKey("ovverdue")).toBe(false);
+    expect(isSafeRecordKey("schedul")).toBe(false);
+    expect(isSafeRecordKey("a".repeat(161))).toBe(false);
+
+    expect(classifyQmsPath("/maintenance/SAF/quality/evidence-vault/ev-demo").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/evidence-vault/ev-1").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/evidence-vault/%2e%2e").kind).toBe("unknown");
+    expect(classifyQmsPath("/maintenance/SAF/quality/evidence-vault/foo%2Fbar").kind).toBe("unknown");
+    // Registered views stay views, not record keys.
+    expect(classifyQmsPath("/maintenance/SAF/quality/evidence-vault/search").kind).toBe("known");
+    expect(qmsRecordPath("SAF", "evidence-vault", "ev-demo")).toBe(
+      "/maintenance/SAF/quality/evidence-vault/ev-demo",
+    );
   });
 });

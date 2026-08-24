@@ -286,14 +286,39 @@ function pathSegments(pathname: string): string[] {
   return pathname.split("?")[0].split("#")[0].split("/").filter(Boolean).map(decodeSegment);
 }
 
-function isSafeRecordKey(value: string): boolean {
+/**
+ * Path-safe opaque record identifiers (UUIDs, `ID-…`, `QAR-…`, `ev-demo`, etc.).
+ * Digits are not required — backend path params are opaque strings and
+ * `generate_user_id()` can yield letter-only blocks after an uppercase prefix.
+ *
+ * Still blocks:
+ * - path traversal / separators / controls / whitespace
+ * - bare lowercase alphabetic tokens (`ovverdue`) that collide with misspelled views
+ *   under allowBare record routes. Hyphenated slugs like `ev-demo` remain valid.
+ */
+export function isSafeRecordKey(value: string): boolean {
   const key = value.trim();
   if (!key || key === "." || key === ".." || key.length > 160) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9._~:@+-]*$/.test(key) && /\d/.test(key);
+  if (key.includes("/") || key.includes("\\") || key.includes("\0")) return false;
+  if (/[\u0000-\u001f\u007f\s]/.test(key)) return false;
+  // Pure lowercase letter tokens collide with misspelled validViews (cars/ovverdue).
+  if (/^[a-z]+$/.test(key)) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9._~:@+-]*$/.test(key);
 }
 
 function isSafeTail(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]*$/.test(value);
+}
+
+function matchesAuditProgrammeScheduleRoute(moduleSegments: string[]): boolean {
+  return (
+    moduleSegments.length === 5 &&
+    moduleSegments[0] === "program" &&
+    isSafeRecordKey(moduleSegments[1]) &&
+    moduleSegments[2] === "items" &&
+    isSafeRecordKey(moduleSegments[3]) &&
+    moduleSegments[4] === "schedule"
+  );
 }
 
 function matchesDynamicRecordRoute(moduleSegments: string[], route: QmsDynamicRecordRoute): boolean {
@@ -391,6 +416,10 @@ export function classifyQmsPath(pathname: string): QmsPathClassification {
   const view = moduleSegments[0] || module.defaultView;
 
   if (module.segment === "documents" && matchesDocumentReaderRoute(moduleSegments)) {
+    return { kind: "known", amoCode, relativePath, module };
+  }
+
+  if (module.segment === "audits" && matchesAuditProgrammeScheduleRoute(moduleSegments)) {
     return { kind: "known", amoCode, relativePath, module };
   }
 

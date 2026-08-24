@@ -362,9 +362,73 @@
   color: #1d4ed8;
 }
 
+/* Planner: icon-only Assurance rail — keep calendar width beside Department sidebar */
+.qa-workspace-shell--planner {
+  gap: 0.55rem;
+  grid-template-columns: 2.85rem minmax(0, 1fr);
+}
+
+.qa-workspace-rail--compact {
+  border-radius: 0.7rem;
+  gap: 0.35rem;
+  padding: 0.35rem;
+}
+
+.qa-workspace-rail--compact .qa-workspace-rail__heading {
+  flex-direction: column;
+  gap: 0.3rem;
+  justify-content: center;
+  padding: 0.1rem 0 0.35rem;
+  text-align: center;
+}
+
+.qa-workspace-rail--compact .qa-workspace-rail__heading > span {
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+.qa-workspace-rail--compact .qa-workspace-rail__heading button {
+  height: 1.7rem;
+  width: 1.7rem;
+}
+
+.qa-workspace-rail__group--compact {
+  gap: 0.2rem;
+}
+
+.qa-workspace-rail__tab--icon {
+  align-items: center;
+  flex-direction: column;
+  gap: 0;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: 0.4rem 0.2rem;
+  text-align: center;
+}
+
+.qa-workspace-rail__tab--icon > svg {
+  margin-top: 0;
+}
+
+.qa-workspace-rail__tab-label,
+.qa-workspace-rail__tab--icon > span {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .qa-workspace-shell:not(.qa-workspace-shell--planner) {
+    grid-template-columns: minmax(11.5rem, 13rem) minmax(0, 1fr);
+  }
+
+  .qa-workspace-shell:not(.qa-workspace-shell--planner) .qa-workspace-rail__tab small {
+    display: none;
+  }
+}
+
 @media (max-width: 1100px) {
-  .qa-workspace-shell {
-    grid-template-columns: minmax(12.5rem, 13.5rem) minmax(0, 1fr);
+  .qa-workspace-shell:not(.qa-workspace-shell--planner) {
+    grid-template-columns: minmax(10.5rem, 12rem) minmax(0, 1fr);
   }
 
   .qa-workspace-rail__tab small {
@@ -408,4 +472,33 @@
     max-width: 100vw;
     width: 100vw;
   }
+}
+
+.audit-workspace--register-dense .audit-panel__header--dense {
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.audit-workspace--register-dense .audit-panel__title {
+  font-size: 0.95rem;
+}
+
+.audit-workspace--register-dense .audit-panel__subtitle {
+  font-size: 0.72rem;
+}
+
+.audit-chip-list--dense {
+  gap: 0.3rem;
+}
+
+.audit-chip-list--dense .qms-pill,
+.audit-chip-list--dense .secondary-chip-btn {
+  font-size: 0.68rem;
+  padding: 0.22rem 0.45rem;
+}
+
+.qms-pill--warn {
+  border-color: color-mix(in srgb, #b45309 40%, rgba(148, 163, 184, 0.45));
+  background: color-mix(in srgb, #b45309 8%, #fff);
+  color: #9a3412;
 }

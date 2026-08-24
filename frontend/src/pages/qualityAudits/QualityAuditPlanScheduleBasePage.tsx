@@ -3,10 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BellRing,
-  CalendarRange,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
   Filter,
   ClipboardList,
@@ -50,9 +47,8 @@ import {
   type QMSExternalAuditeeContact,
   type QMSPersonOption,
 } from "../../services/qms";
-import { getQmsCalendar } from "../../services/qmsCalendar";
 
-type PlannerView = "calendar" | "list" | "table";
+type PlannerView = "list" | "table";
 type PlannedRecordFilter = "all" | "needsAssignment" | "scheduled" | "dueSoon" | "deferred";
 type PlannedRecordDensity = "comfortable" | "compact";
 type DrawerTab = "overview" | "participants" | "review";
@@ -143,7 +139,6 @@ const auditKinds: Array<{ value: AuditKind; label: string; helper: string }> = [
   { value: "EXTERNAL", label: "External", helper: "Capture named external auditees, their roles, and contact details." },
   { value: "THIRD_PARTY", label: "Third party", helper: "Use named external auditees for regulatory, customer, or certification audits." },
 ];
-const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const drawerTabs: Array<{ id: DrawerTab; label: string; helper: string }> = [
   { id: "overview", label: "Overview", helper: "Audit identity, scope, window, and cadence" },
   { id: "participants", label: "Participants", helper: "Internal team or external auditee contacts" },
@@ -244,7 +239,6 @@ const defaultAuditScopeForm: AuditScopeFormState = {
 
 function plannerViewOptions() {
   return [
-    { value: "calendar" as PlannerView, label: "Calendar", icon: CalendarRange },
     { value: "list" as PlannerView, label: "List", icon: LayoutList },
     { value: "table" as PlannerView, label: "Table", icon: ClipboardList },
   ];
@@ -268,13 +262,6 @@ function formatDate(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
-}
-
-function addMonthsDateOnly(months: number): string {
-  const date = new Date();
-  date.setUTCDate(1);
-  date.setUTCMonth(date.getUTCMonth() + months);
-  return date.toISOString().slice(0, 10);
 }
 
 function userLabel(user?: QMSPersonOption | null): string {
@@ -425,31 +412,6 @@ function auditToForm(audit: QMSAuditOut): PlannedAuditFormState {
     notify_auditees: audit.notify_auditees ?? true,
     reminder_interval_days: String(audit.reminder_interval_days ?? 7),
   };
-}
-
-function monthGrid(seedDate: Date) {
-  const start = new Date(seedDate.getFullYear(), seedDate.getMonth(), 1);
-  const end = new Date(seedDate.getFullYear(), seedDate.getMonth() + 1, 0);
-  const firstWeekday = (start.getDay() + 6) % 7;
-  const daysInMonth = end.getDate();
-  const cells: Array<{ key: string; date: Date; inMonth: boolean; isToday: boolean }> = [];
-  const gridStart = new Date(start);
-  gridStart.setDate(start.getDate() - firstWeekday);
-  for (let i = 0; i < 42; i += 1) {
-    const day = new Date(gridStart);
-    day.setDate(gridStart.getDate() + i);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const compare = new Date(day);
-    compare.setHours(0, 0, 0, 0);
-    cells.push({
-      key: compare.toISOString(),
-      date: day,
-      inMonth: day.getMonth() === start.getMonth() && day.getDate() <= daysInMonth,
-      isToday: compare.getTime() === today.getTime(),
-    });
-  }
-  return cells;
 }
 
 function cleanExternalAuditees(items: QMSExternalAuditeeContact[]): QMSExternalAuditeeContact[] {
@@ -632,7 +594,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [scopeForm, setScopeForm] = useState<AuditScopeFormState>(defaultAuditScopeForm);
   const [auditForm, setAuditForm] = useState<PlannedAuditFormState>(defaultPlannedAudit);
   const [editingAuditId, setEditingAuditId] = useState<string | null>(null);
-  const [visibleMonth, setVisibleMonth] = useState<Date | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(
     initialDraft.editingScheduleId
   );
@@ -659,8 +620,15 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     assistant_auditor_user_id: "",
   });
   const queryClient = useQueryClient();
-  const rawView = searchParams.get("view") || "calendar";
-  const view = (["calendar", "list", "table"].includes(rawView) ? rawView : "calendar") as PlannerView;
+  const rawView = searchParams.get("view") || "list";
+  const requestedCalendar = rawView === "calendar";
+  const view = (["list", "table"].includes(rawView) ? rawView : "list") as PlannerView;
+  const plannerV2Href = `/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`;
+
+  useEffect(() => {
+    if (!requestedCalendar) return;
+    navigate(plannerV2Href, { replace: true });
+  }, [navigate, plannerV2Href, requestedCalendar]);
 
   const schedulesQuery = useQuery({
     queryKey: ["qms-audit-schedules", amoCode, department],
@@ -672,17 +640,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     queryKey: ["qms-audits-planned", amoCode, department],
     queryFn: () => qmsListAudits({ domain: "AMO", status_: "PLANNED" }),
     staleTime: 30_000,
-  });
-
-  const auditCalendarIntegrationQuery = useQuery({
-    queryKey: ["qms-audit-planner-calendar-integration", amoCode],
-    queryFn: () => getQmsCalendar(amoCode, {
-      source: "audits",
-      start: addMonthsDateOnly(-3),
-      end: addMonthsDateOnly(18),
-      limit: 300,
-    }),
-    staleTime: 60_000,
   });
 
   const personnelQuery = useQuery({
@@ -861,50 +818,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       })
       .filter((item): item is PlannerCalendarItem => item !== null);
 
-    const existingKeys = new Set([...auditItems, ...scheduleItems].map((item) => `${item.source}:${item.date}:${item.title.trim().toLowerCase()}:${item.kind}`));
-    const integrationItems: PlannerCalendarItem[] = (auditCalendarIntegrationQuery.data?.items ?? [])
-      .filter((event) => event.module === "audits" && Boolean(event.date))
-      .map((event) => {
-        const source = event.entity_type === "audit_schedule" ? "schedule" as const : "audit" as const;
-        const title = String(event.title || event.audit_ref || "Audit commitment");
-        const item: PlannerCalendarItem = {
-          id: `integration:${event.entity_type}:${event.entity_id}:${event.date}`,
-          source,
-          title,
-          kind: event.kind || "AUDIT",
-          date: String(event.date),
-          ref: event.audit_ref || null,
-          status: event.status || event.event_type || null,
-          auditee: event.auditee || event.auditee_email || null,
-          lead_auditor_user_id: event.lead_auditor_user_id || null,
-          link: event.link || null,
-        };
-        return item;
-      })
-      .filter((item) => {
-        const key = `${item.source}:${item.date}:${item.title.trim().toLowerCase()}:${item.kind}`;
-        if (existingKeys.has(key)) return false;
-        existingKeys.add(key);
-        return true;
-      });
-
-    return [...auditItems, ...scheduleItems, ...integrationItems].sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
-  }, [auditCalendarIntegrationQuery.data?.items, boardSchedules, peopleById, plannedAudits]);
-
-  const seedDate = useMemo(() => {
-    const firstDue = plannerCalendarItems[0]?.date;
-    return firstDue ? new Date(firstDue) : new Date();
-  }, [plannerCalendarItems]);
-
-  const activeCalendarMonth = useMemo(
-    () => visibleMonth ?? new Date(seedDate.getFullYear(), seedDate.getMonth(), 1),
-    [seedDate, visibleMonth]
-  );
-  const calendarCells = useMemo(() => monthGrid(activeCalendarMonth), [activeCalendarMonth]);
+    return [...auditItems, ...scheduleItems].sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+  }, [boardSchedules, peopleById, plannedAudits]);
 
   const scheduleSummary = useMemo(
     () => [
-      { label: "Calendar items", value: String(plannerCalendarItems.length) },
+      { label: "Due commitments", value: String(plannerCalendarItems.length) },
       { label: "Live planned", value: String(plannedAudits.length) },
       { label: "Next due", value: plannerCalendarItems[0]?.date ? formatDate(plannerCalendarItems[0].date) : "Not scheduled" },
       {
@@ -1280,8 +1199,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       setGuideOpen(false);
       return;
     }
-    if (action === "calendar" || action === "list") {
-      setSearchParams({ view: action });
+    if (action === "calendar") {
+      setGuideOpen(false);
+      navigate(plannerV2Href);
+      return;
+    }
+    if (action === "list") {
+      setSearchParams({ view: "list" });
       setGuideOpen(false);
     }
   };
@@ -1542,79 +1466,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     </div>
   );
 
-  const renderCalendar = () => {
-    const byDate = new Map<string, PlannerCalendarItem[]>();
-    plannerCalendarItems.forEach((item) => {
-      const key = item.date;
-      if (!key) return;
-      const group = byDate.get(key) ?? [];
-      group.push(item);
-      byDate.set(key, group);
-    });
-
-    return (
-      <div className="planner-calendar-shell">
-        <div className="planner-calendar-toolbar">
-          <Button variant="ghost" size="sm" onClick={() => setVisibleMonth((prev) => new Date((prev ?? activeCalendarMonth).getFullYear(), (prev ?? activeCalendarMonth).getMonth() - 1, 1))}>
-            <ChevronLeft size={15} />
-            Prev
-          </Button>
-          <strong>{activeCalendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
-          <Button variant="ghost" size="sm" onClick={() => setVisibleMonth((prev) => new Date((prev ?? activeCalendarMonth).getFullYear(), (prev ?? activeCalendarMonth).getMonth() + 1, 1))}>
-            Next
-            <ChevronRight size={15} />
-          </Button>
-        </div>
-
-        <div className="planner-calendar-scroll">
-          <div className="planner-calendar-grid planner-calendar-grid--header">
-            {weekdayLabels.map((label) => (
-              <div key={label} className="planner-calendar-cell planner-calendar-cell--label">{label}</div>
-            ))}
-          </div>
-
-          <div className="planner-calendar-grid">
-            {calendarCells.map((cell) => {
-              const dateKey = cell.date.toISOString().slice(0, 10);
-              const dayItems = byDate.get(dateKey) ?? [];
-              return (
-                <div key={cell.key} className={`planner-calendar-cell${cell.inMonth ? "" : " is-outside"}${cell.isToday ? " is-today" : ""}`}>
-                  <div className="planner-calendar-cell__date">{cell.date.getDate()}</div>
-                  <div className="planner-calendar-cell__items">
-                    {dayItems.map((item) => {
-                      const countdown = countdownLabel(item.date);
-                      const leadUser = item.lead_auditor_user_id ? peopleById.get(item.lead_auditor_user_id) : null;
-                      const sourceLabel = item.source === "audit" ? item.status || "PLANNED" : item.schedule?.preview_label || formatKindLabel(item.kind);
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`planner-calendar-event${item.is_preview ? " planner-calendar-event--preview" : ""}${item.source === "audit" ? " planner-calendar-event--audit-record" : ""}`}
-                          onClick={() => {
-                            if (item.schedule?.is_preview) setDrawerOpen(true);
-                            else if (item.schedule) beginEdit(item.schedule);
-                            else if (item.audit) openAuditWorkspace(item.audit);
-                            else if (item.link) navigate(item.link);
-                          }}
-                        >
-                          <strong>{item.ref ? `${item.ref} · ${item.title}` : item.title}</strong>
-                          <span>{sourceLabel}</span>
-                          <span>{leadUser ? userLabel(leadUser) : "Lead auditor pending"}</span>
-                          <span>{item.auditee || "Auditee not set"}</span>
-                          <span className={countdown.className}>{countdown.text}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const renderList = () => (
     <div className="portal-list-grid">
       {boardSchedules.map((schedule) => {
@@ -1700,10 +1551,14 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Audit Planner"
-      subtitle="Stage, confirm, schedule, reschedule, and launch audits from one controlled workspace."
+      title="Create / run schedules"
+      subtitle="Create schedule templates and run them into planned audits. Browse and reschedule on Planner V2."
       toolbar={
         <div className="planner-toolbar-actions">
+          <Button variant="secondary" size="sm" onClick={() => navigate(plannerV2Href)}>
+            <ExternalLink size={15} />
+            Open Planner
+          </Button>
           <Button variant="secondary" size="sm" onClick={reopenGuide}>
             <HelpCircle size={15} />
             Guide
@@ -1788,8 +1643,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           </div>
         </SectionCard>
 
-        {view !== "calendar" ? (
-          <SectionCard
+        <SectionCard
             title="Planned audit records"
             subtitle="These are the live audit records already created from the schedule/programme. Assign the lead auditor here, push dates forward, open the workspace, or delete the record."
             eyebrow="Audit records"
@@ -1800,16 +1654,24 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             ) : null}
             {!plannedAuditsQuery.isLoading && plannedAudits.length ? (view === "table" ? renderPlannedAuditsTable() : renderPlannedAuditsList()) : null}
           </SectionCard>
-        ) : null}
 
         <SectionCard
-          title={view === "calendar" ? "Integrated audit calendar" : view === "list" ? "Recurring schedule programme" : "Recurring schedule register"}
-          subtitle={view === "calendar" ? "Shows live planned audit records and recurring programme schedules in one planning surface." : "Schedules are programme templates. Use Run to create a live planned audit record above."}
-          eyebrow={view === "calendar" ? "Calendar view" : "Schedule templates"}
+          title={view === "list" ? "Recurring schedule programme" : "Recurring schedule register"}
+          subtitle="Schedules are programme templates. Use Run to create a live planned audit record above. Browse and reschedule dates in Planner V2."
+          eyebrow="Schedule templates"
         >
-          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading || auditCalendarIntegrationQuery.isLoading ? <p className="qms-loading-copy">Loading audit calendar…</p> : null}
-          {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && !auditCalendarIntegrationQuery.isLoading && !plannerCalendarItems.length ? <EmptyState title="No audit dates found" description="Create a schedule or a planned audit record to populate the planner and QMS calendar views." /> : null}
-          {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && !auditCalendarIntegrationQuery.isLoading && plannerCalendarItems.length ? (view === "calendar" ? renderCalendar() : view === "list" ? renderList() : renderTable()) : null}
+          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading schedules…</p> : null}
+          {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && !schedules.length && !plannedAudits.length ? (
+            <EmptyState
+              title="No schedules found"
+              description="Create a schedule template here, then open Planner V2 to browse the calendar."
+            />
+          ) : null}
+          {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && (schedules.length || plannedAudits.length)
+            ? view === "list"
+              ? renderList()
+              : renderTable()
+            : null}
         </SectionCard>
       </div>
 
@@ -1820,7 +1682,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             <button type="button" onClick={() => guideAction("create")}><strong>1. Create or continue schedule</strong><span>Open the schedule drawer and define title, type, due date, scope and criteria.</span></button>
             <button type="button" onClick={() => guideAction("participants")}><strong>2. Assign people</strong><span>Set lead auditor, observer, assistant and internal or external auditees.</span></button>
             <button type="button" onClick={() => guideAction("review")}><strong>3. Review notices</strong><span>Check recipients, reminder interval and whether notices should be sent.</span></button>
-            <button type="button" onClick={() => guideAction("calendar")}><strong>4. Check the calendar</strong><span>Confirm spacing and upcoming workload before saving or running an audit.</span></button>
+            <button type="button" onClick={() => guideAction("calendar")}><strong>4. Check the calendar</strong><span>Open Planner V2 to confirm spacing and upcoming workload.</span></button>
             <button type="button" onClick={() => guideAction("list")}><strong>5. Run or edit saved items</strong><span>Use the schedule action buttons to run, edit or delete saved audit schedules.</span></button>
           </div>
           <div className="planner-guide-drawer__footer">

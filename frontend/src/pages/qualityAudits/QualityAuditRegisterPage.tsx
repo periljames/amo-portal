@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
+import { ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
 import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useDensityPreference } from "../../hooks/useDensityPreference";
@@ -164,7 +164,7 @@ const QualityAuditRegisterPage: React.FC = () => {
   return (
     <QualityAuditsSectionLayout
       title="Register"
-      subtitle="Operational closeout register for findings and linked CAR actions."
+      subtitle="Findings and linked CARs — enter canonical audit execution from each row."
       toolbar={
         <ResponsiveSegmentedControl
           label="Register dataset"
@@ -183,14 +183,14 @@ const QualityAuditRegisterPage: React.FC = () => {
         />
       }
     >
-      <div className="audit-workspace">
+      <div className="audit-workspace audit-workspace--register-dense">
         <div className="audit-workspace__toolbar-row">
           <label className="audit-search" aria-label="Quick filter register rows">
             <TableProperties size={15} />
             <input
               value={quickFilter}
               onChange={(event) => setQuickFilter(event.target.value)}
-              placeholder="Quick filter across audit ref, finding, owner, CAR, and summary"
+              placeholder="Filter audit ref, finding, owner, CAR…"
             />
           </label>
           <SpreadsheetToolbar
@@ -207,17 +207,18 @@ const QualityAuditRegisterPage: React.FC = () => {
         </div>
 
         <div className="audit-panel">
-          <div className="audit-panel__header">
+          <div className="audit-panel__header audit-panel__header--dense">
             <div>
-              <h2 className="audit-panel__title">Closeout register</h2>
+              <h2 className="audit-panel__title">Operational register</h2>
               <p className="audit-panel__subtitle">
-                {pageStart}-{pageEnd} of {total} matched rows · {tab === "cars" ? "CAR-linked findings only" : "all findings"}
+                {pageStart}-{pageEnd} of {total}
+                {tab === "cars" ? " · CAR-linked" : ""}
                 {refreshing ? " · refreshing" : ""}
               </p>
             </div>
-            <div className="audit-chip-list">
+            <div className="audit-chip-list audit-chip-list--dense">
               {filtersActive ? (
-                <button type="button" className="secondary-chip-btn" onClick={clearFilters}>Clear filters</button>
+                <button type="button" className="secondary-chip-btn" onClick={clearFilters}>Clear</button>
               ) : null}
               <label className="qms-pill">
                 Rows
@@ -231,7 +232,9 @@ const QualityAuditRegisterPage: React.FC = () => {
                   <option value={100}>100</option>
                 </select>
               </label>
-              <span className="qms-pill">{density === "compact" ? "Compact density" : "Comfortable density"}</span>
+              <span className="qms-pill">{density === "compact" ? "Compact" : "Comfortable"}</span>
+              <span className="qms-pill">{registerQuery.data?.car_linked_findings ?? 0} with CARs</span>
+              <span className="qms-pill">{registerQuery.data?.open_car_count ?? 0} open CARs</span>
             </div>
           </div>
 
@@ -246,22 +249,26 @@ const QualityAuditRegisterPage: React.FC = () => {
             <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
               <thead>
                 <tr>
-                  <th>Finding ref</th>
-                  <th>Audit ref</th>
+                  <th>Status / stage</th>
                   <th>Finding</th>
+                  <th>Audit</th>
+                  <th>Schedule</th>
+                  <th>Lead</th>
                   <th>Type</th>
                   {showOwner ? <th>Owner</th> : null}
-                  <th>Linked CARs</th>
+                  <th>CARs</th>
                   <th>Action</th>
                 </tr>
                 {showFilters ? (
                   <tr>
-                    <th><input className="input" placeholder="Find ref" value={headerFilters.ref} onChange={(event) => setHeaderFilters((current) => ({ ...current, ref: event.target.value }))} /></th>
-                    <th><input className="input" placeholder="Audit ref / title" value={headerFilters.audit} onChange={(event) => setHeaderFilters((current) => ({ ...current, audit: event.target.value }))} /></th>
+                    <th />
                     <th><input className="input" placeholder="Finding text" value={headerFilters.finding} onChange={(event) => setHeaderFilters((current) => ({ ...current, finding: event.target.value }))} /></th>
+                    <th><input className="input" placeholder="Audit ref / title" value={headerFilters.audit} onChange={(event) => setHeaderFilters((current) => ({ ...current, audit: event.target.value }))} /></th>
+                    <th />
+                    <th />
                     <th><input className="input" placeholder="Type" value={headerFilters.type} onChange={(event) => setHeaderFilters((current) => ({ ...current, type: event.target.value }))} /></th>
                     {showOwner ? <th><input className="input" placeholder="Owner" value={headerFilters.owner} onChange={(event) => setHeaderFilters((current) => ({ ...current, owner: event.target.value }))} /></th> : null}
-                    <th><input className="input" placeholder="CAR number / title" value={headerFilters.car} onChange={(event) => setHeaderFilters((current) => ({ ...current, car: event.target.value }))} /></th>
+                    <th><input className="input" placeholder="CAR" value={headerFilters.car} onChange={(event) => setHeaderFilters((current) => ({ ...current, car: event.target.value }))} /></th>
                     <th />
                   </tr>
                 ) : null}
@@ -269,52 +276,82 @@ const QualityAuditRegisterPage: React.FC = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={showOwner ? 7 : 6}>Loading register…</td>
+                    <td colSpan={showOwner ? 9 : 8}>Loading register…</td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={showOwner ? 7 : 6}>No register rows match the current filters.</td>
+                    <td colSpan={showOwner ? 9 : 8}>No register rows match the current filters.</td>
                   </tr>
                 ) : (
-                  rows.map(({ audit, finding, linkedCars }) => (
-                    <tr key={finding.id}>
-                      <td>{finding.finding_ref || finding.id}</td>
-                      <td>
-                        <strong>{audit.audit_ref}</strong>
-                        <div className={`text-muted ${cellTextClass}`}>{audit.title}</div>
-                      </td>
-                      <td>
-                        <div className={cellTextClass}>{finding.description}</div>
-                        <div className={`text-muted ${cellTextClass}`}>{finding.objective_evidence || "No objective evidence captured."}</div>
-                      </td>
-                      <td><span className="qms-pill">{finding.finding_type}</span></td>
-                      {showOwner ? <td>{finding.acknowledged_by_name || "Unassigned"}</td> : null}
-                      <td>
-                        <div className="audit-chip-list">
-                          {linkedCars.length === 0 ? <span className="text-muted">No linked CARs</span> : linkedCars.map((car) => (
-                            <button
-                              key={car.id}
-                              type="button"
-                              onClick={() => navigate(`/maintenance/${amoCode}/quality/cars?carId=${car.id}`)}
-                              className="secondary-chip-btn"
-                              title={`${car.car_number} · ${car.title}`}
-                            >
-                              {car.car_number}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          onClick={() => navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref }))}
-                          className="secondary-chip-btn"
-                        >
-                          View audit
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  rows.map(({ audit, finding, linkedCars }) => {
+                    const findingOpen = !finding.closed_at;
+                    const stage = findingOpen
+                      ? linkedCars.length
+                        ? "Follow-up"
+                        : "Open finding"
+                      : "Closed";
+                    return (
+                      <tr key={finding.id}>
+                        <td>
+                          <span className={`qms-pill${findingOpen ? " qms-pill--warn" : ""}`}>{stage}</span>
+                          <div className={`text-muted ${cellTextClass}`}>{audit.status?.replaceAll("_", " ") || "—"}</div>
+                        </td>
+                        <td>
+                          <strong title={finding.finding_ref || finding.id}>{finding.finding_ref || finding.id.slice(0, 8)}</strong>
+                          <div className={cellTextClass} title={finding.description || undefined}>{finding.description}</div>
+                          {finding.level || finding.severity ? (
+                            <div className={`text-muted ${cellTextClass}`}>{finding.level || finding.severity}</div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <strong title={audit.audit_ref}>{audit.audit_ref}</strong>
+                          <div className={`text-muted ${cellTextClass}`} title={audit.title || undefined}>{audit.title}</div>
+                          <div className={`text-muted ${cellTextClass}`}>{audit.kind?.replaceAll("_", " ")}</div>
+                        </td>
+                        <td>
+                          {audit.planned_start || audit.planned_end || audit.actual_start ? (
+                            <span>
+                              {(audit.planned_start || audit.actual_start || "").slice(0, 10) || "—"}
+                              {audit.planned_end ? ` → ${audit.planned_end.slice(0, 10)}` : ""}
+                            </span>
+                          ) : (
+                            <span className="text-muted">No date</span>
+                          )}
+                        </td>
+                        <td>{audit.lead_auditor_name || "Unassigned"}</td>
+                        <td><span className="qms-pill">{finding.finding_type}</span></td>
+                        {showOwner ? <td>{finding.acknowledged_by_name || "Unassigned"}</td> : null}
+                        <td>
+                          <div className="audit-chip-list">
+                            {linkedCars.length === 0 ? (
+                              <span className="text-muted">0</span>
+                            ) : (
+                              linkedCars.map((car) => (
+                                <button
+                                  key={car.id}
+                                  type="button"
+                                  onClick={() => navigate(`/maintenance/${amoCode}/quality/cars?carId=${car.id}`)}
+                                  className="secondary-chip-btn"
+                                  title={`${car.car_number} · ${car.title}`}
+                                >
+                                  {car.car_number}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref }))}
+                            className="secondary-chip-btn"
+                          >
+                            Open audit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -338,21 +375,6 @@ const QualityAuditRegisterPage: React.FC = () => {
             >
               Next
             </button>
-          </div>
-        </div>
-
-        <div className="audit-stats-grid">
-          <div className="audit-stat-card">
-            <div className="audit-stat-card__label"><ClipboardList size={15} /> Findings in scope</div>
-            <div className="audit-stat-card__value">{total}</div>
-          </div>
-          <div className="audit-stat-card">
-            <div className="audit-stat-card__label"><ShieldAlert size={15} /> Findings with CARs</div>
-            <div className="audit-stat-card__value">{registerQuery.data?.car_linked_findings ?? 0}</div>
-          </div>
-          <div className="audit-stat-card">
-            <div className="audit-stat-card__label"><AlertTriangle size={15} /> Open CAR count</div>
-            <div className="audit-stat-card__value">{registerQuery.data?.open_car_count ?? 0}</div>
           </div>
         </div>
       </div>

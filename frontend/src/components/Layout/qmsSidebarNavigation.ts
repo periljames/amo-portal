@@ -60,22 +60,15 @@ const STATIC_AUDIT_SEGMENTS = new Set([
 ]);
 
 export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
-  { id: "audit-dashboard", label: "Audit dashboard", moduleId: "audits", view: "dashboard", keywords: "assurance overview" },
-  { id: "audit-programme", label: "Annual programme", moduleId: "audits", view: "program", keywords: "programme plan year" },
+  // Single sidebar entry into the workspace — section nav lives on the Assurance rail.
   {
-    id: "audit-schedule",
-    label: "Audit schedule",
+    id: "audit-assurance-hub",
+    label: "Audit Assurance",
     moduleId: "audits",
-    view: "schedule",
-    keywords: "calendar dates planner",
-    matchRelativePrefixes: ["audits/schedules/"],
+    view: "dashboard",
+    keywords: "assurance overview programme register planner checklists evidence",
+    matchRelativePrefixes: ["audits"],
   },
-  { id: "audit-plan", label: "Prepare / plan audit", moduleId: "audits", view: "plan", keywords: "preparation prep scope team notice" },
-  { id: "audit-register", label: "Audit register", moduleId: "audits", view: "register", keywords: "all audits open closed" },
-  { id: "audit-new", label: "Create audit", moduleId: "audits", view: "new", keywords: "new initiate" },
-  { id: "audit-checklists", label: "Checklist library", moduleId: "audits", view: "checklists", keywords: "questions working paper" },
-  { id: "audit-templates", label: "Audit templates", moduleId: "audits", view: "templates", keywords: "template notice checklist preparation" },
-  { id: "audit-bin", label: "Recycle bin", moduleId: "audits", view: "bin", keywords: "deleted restored audit" },
 ] as const;
 
 export const QMS_CALENDAR_DESTINATIONS: readonly QmsRegisteredDestination[] = [
@@ -353,14 +346,14 @@ function createPanel(
     },
     {
       id: "quick-calendar",
-      label: "Calendar",
-      path: qmsModulePath(amoCode, "calendar", "month"),
+      label: "Planner",
+      path: qmsModulePath(amoCode, "calendar", "week"),
       activeMode: "prefix",
       matchPrefixes: [`${basePath}/calendar`],
     },
     {
       id: "quick-audits",
-      label: "Audits",
+      label: "Audit Assurance",
       path: qmsModulePath(amoCode, "audits", "dashboard"),
       activeMode: "prefix",
       matchPrefixes: [`${basePath}/audits`],
@@ -387,8 +380,8 @@ function createPanel(
   const auditLinks = QMS_AUDIT_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination));
   sections.append(createSection(
     "audits",
-    "Audit workflow",
-    "Programme, planning, preparation, execution and reporting",
+    "Audit Assurance",
+    "Programme → Planner V2 → execute → follow-up",
     auditLinks,
     pathname,
     onNavigate,

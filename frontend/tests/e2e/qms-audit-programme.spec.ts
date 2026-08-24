@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`;
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: 4_102_444_800 })}.signature`;
 }
 
 function universeItem() {
@@ -184,35 +184,132 @@ async function prepare(page: Page): Promise<void> {
   let programmes = [programme()];
   let current = programmes[0];
 
-  await page.addInitScript(({ storedToken }) => {
+  const currentUser = {
+    id: "quality-user-a",
+    amo_id: "amo-a",
+    department_id: "department-quality",
+    staff_code: "QMS-001",
+    email: "quality@tenant-a.test",
+    first_name: "Quality",
+    last_name: "Manager",
+    full_name: "Quality Manager",
+    role: "QUALITY_MANAGER",
+    position_title: "Quality Manager",
+    is_active: true,
+    is_superuser: false,
+    is_amo_admin: true,
+    must_change_password: false,
+    last_login_at: null,
+    last_login_ip: null,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+  };
+
+  // Vite 5173/4173 uses same-origin API paths (getApiBaseUrl() === "").
+  // Inject the session into sessionStorage (canonical token store) and keep a
+  // localStorage copy only for the auth module's one-time migration path.
+  await page.addInitScript(({ storedToken, storedUser }) => {
+    sessionStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
     localStorage.setItem("amo_color_scheme", "light");
     localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
-    localStorage.setItem("amo_current_user", JSON.stringify({
-      id: "quality-user-a", amo_id: "amo-a", department_id: "department-quality", staff_code: "QMS-001",
-      email: "quality@tenant-a.test", first_name: "Quality", last_name: "Manager", full_name: "Quality Manager",
-      role: "QUALITY_MANAGER", position_title: "Quality Manager", is_active: true, is_superuser: false,
-      is_amo_admin: false, must_change_password: false,
-    }));
-  }, { storedToken: token });
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    localStorage.setItem("amo_current_user", JSON.stringify(storedUser));
+    localStorage.setItem("amo_session_last_user_activity", String(Date.now()));
+  }, { storedToken: token, storedUser: currentUser });
 
   const fulfil = async (route: Route) => {
     const request = route.request();
+    // Never replace the SPA document/assets with JSON — that previously caused
+    // navigations under /quality/... to render API error bodies instead of React.
+    if (["document", "stylesheet", "script", "image", "font", "media", "manifest"].includes(request.resourceType())) {
+      await route.continue();
+      return;
+    }
+
     const url = new URL(request.url());
     const path = url.pathname;
 
-    if (path === "/auth/portal-preferences/") {
+    if (path === "/readyz" || path === "/livez" || path === "/healthz" || path === "/health") {
+      // RealtimeProvider/fetchHealthz requires process liveness shape ({ status: "alive" } or process: true).
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "alive", process: true, ready: true, live: true }),
+      });
+      return;
+    }
+    if (path === "/time") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ epoch_ms: Date.now() }),
+      });
+      return;
+    }
+    // Analytics beacons are same-origin portal URLs. A real 401 here trips
+    // portalFetchErrorBridge → handleAuthFailure and clears the mocked session.
+    if (path === "/platform/product-events" || path.startsWith("/platform/product-events?")) {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    if (path.startsWith("/api/events")) {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    if (path.endsWith("/auth/me") || path.includes("/auth/me?")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(currentUser) });
+      return;
+    }
+    if (path.endsWith("/auth/refresh") && request.method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: token,
+          token_type: "bearer",
+          expires_in: 3600,
+          user: currentUser,
+          amo: { id: "amo-a", amo_code: "AMO-A", name: "Tenant A", login_slug: "tenant-a", data_mode: "REAL" },
+          department: { id: "department-quality", code: "quality", name: "Quality" },
+        }),
+      });
+      return;
+    }
+    if (path.includes("/auth/portal-preferences")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable",
         motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-08T12:00:00Z",
       }) });
       return;
     }
-    if (path.includes("/accounts/admin/admin-profile/")) {
+    if (path.includes("/accounts/admin/admin-profile")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false, active: false }) });
+      return;
+    }
+    if (path.includes("/accounts/onboarding/status")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ is_complete: true, missing: [] }),
+      });
+      return;
+    }
+    // messagingApi.threads() expects a bare ChatThread[] (not { items: [] }).
+    // A wrong shape crashes MessagingHub and can blank the authenticated shell.
+    if (path.startsWith("/api/chat/threads")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+    if (path.includes("/api/notifications/me/unread-count")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ notifications: 0, messages: 0, total: 0 }),
+      });
       return;
     }
     if (path === "/api/maintenance/tenant-a/quality/audit-programmes" && request.method() === "GET") {
@@ -236,13 +333,18 @@ async function prepare(page: Page): Promise<void> {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [universeItem()], total: 1, limit: 200, offset: 0, has_more: false }) });
       return;
     }
+    const scheduleLinksMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)\/schedule-links$/);
+    if (scheduleLinksMatch && request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, limit: 50, offset: 0, has_more: false }) });
+      return;
+    }
     const optimizerMatch = path.match(/^\/api\/maintenance\/tenant-a\/quality\/audit-programmes\/([^/]+)\/optimizer(?:\/rebuild)?$/);
     if (optimizerMatch) {
       const result = optimizer();
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(request.method() === "POST" ? { ...result, sync: { added: 0, updated: 1 } } : result) });
       return;
     }
-    if (path === "/api/maintenance/tenant-a/quality/integrations/calendar/schedule-options") {
+    if (path === "/api/maintenance/tenant-a/quality/integrations/calendar/schedule-options" || path === "/quality/integrations/calendar/schedule-options") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         timezone_name: "Africa/Nairobi",
         frequencies: ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"],
@@ -308,33 +410,41 @@ async function prepare(page: Page): Promise<void> {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(current) });
       return;
     }
-    if (path.includes("/api/maintenance/tenant-a/quality/")) {
+    if (path.includes("/api/maintenance/tenant-a/quality/") || path.startsWith("/quality/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], columns: [], limit: 25, offset: 0, has_more: false }) });
       return;
     }
-    await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not configured in Audit Programme browser test" }) });
+    if (path.startsWith("/auth/") || path.startsWith("/api/") || path.startsWith("/accounts/") || path.startsWith("/platform/")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+      return;
+    }
+    await route.continue();
   };
 
-  await page.route("**/auth/portal-preferences/", fulfil);
-  await page.route("**/accounts/admin/admin-profile/**", fulfil);
-  await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
-  await page.route("http://127.0.0.1:8080/**", fulfil);
+  // Same-origin (5173/4173) and direct-8080 API traffic both must be mocked.
+  // Document navigations under /maintenance/.../quality/... continue above.
+  await page.route("**/*", fulfil);
 }
 
 test("opens hybrid programme, optimizer and Audit Universe lineage", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "Audit Programme", exact: true })).toBeVisible();
+  // Quality context chrome hides AuditPageShell's h1 title block; assert the
+  // live programme workspace surface instead of the suppressed page heading.
+  await expect(page.getByLabel("Audit Programme workspace")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Programme workspace sections" })).toBeVisible();
   await expect(page.getByText("AP-2026-BASE-R01", { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
   await expect(page.getByText("Hybrid · Always on", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
+  await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Universe" }).click();
   await expect(page.getByRole("heading", { name: "Audit Universe", exact: true })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
-  await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 });
 
 test("creates a hybrid draft without a methodology choice and requires a reason before review", async ({ page }) => {
@@ -342,14 +452,16 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "New programme" }).click();
-  await expect(page.getByText("Create continuous assurance programme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Create programme" })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(0);
-  await expect(page.getByText("Compliance baseline", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel(/Compliance baseline/i)).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
   const detailHeader = page.locator(".qms-audit-programme__detail-header");
   await expect(page.getByText("AP-2026-CREATED-R01", { exact: false }).first()).toBeVisible();
   await expect(detailHeader.getByText("Draft", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Readiness" }).click();
   const submitReview = page.getByRole("button", { name: "Submit for review" });
   await expect(submitReview).toBeDisabled();
   await page.getByLabel("Programme transition reason").fill("Ready for independent Quality review.");
@@ -365,8 +477,9 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   const queue = page.getByRole("region", { name: "Programme scheduling queue" });
-  await queue.getByRole("link", { name: "Maintenance Department Audit" }).click();
-  await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
+  await queue.getByRole("button", { name: /Maintenance Department Audit/i }).click();
+  await expect(page.getByRole("dialog", { name: "Schedule into Planner V2" })).toBeVisible();
+  await expect(page.getByLabel("Schedule audit programme requirement")).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
   await expect(page.getByLabel("Date")).toHaveValue("2026-08-15");
   await page.getByLabel("Location").fill("Hangar 1");
@@ -378,6 +491,20 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await page.getByLabel("Conflict override reason").fill("Activities are operationally separated with independent coverage.");
   await page.getByRole("button", { name: "Create with governed override" }).click();
 
-  await expect(page.getByText("Authoritative schedule created", { exact: false })).toBeVisible();
+  await expect(page.getByText("Schedule created", { exact: false })).toBeVisible();
   await expect(page.getByText("schedule-1", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open in Planner" })).toBeVisible();
+});
+
+test("programme schedule deep-link stays inside Audit Assurance chrome", async ({ page }) => {
+  await prepare(page);
+  await page.goto(
+    "/maintenance/tenant-a/quality/audits/program/programme-1/items/programme-item-1/schedule",
+    { waitUntil: "domcontentloaded" },
+  );
+
+  await expect(page.getByLabel("Audit Assurance sections")).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Programme/i })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
 });

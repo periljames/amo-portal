@@ -284,7 +284,7 @@ const QmsAssurancePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   return (
-    <main className="qms-assurance-cases" aria-label="Assurance workspace">
+    <main className="qms-assurance-cases" aria-label="Assurance Cases workspace">
       <header className="qms-assurance-cases__hero">
         <div><span>Assurance</span><h1>Cases, investigation & effectiveness</h1><p>Connect source signals to evidence, causal analysis and verified corrective-action outcomes without replacing the source audit, CAR, supplier or maintenance records.</p></div>
         <div className="qms-assurance-cases__hero-actions">{canManageAudits ? <button type="button" onClick={() => setShowCreate(true)}><Plus size={16} aria-hidden="true" /> New case</button> : null}<button type="button" onClick={() => void loadCases()} disabled={loading}><RefreshCw size={16} aria-hidden="true" /> Refresh</button></div>

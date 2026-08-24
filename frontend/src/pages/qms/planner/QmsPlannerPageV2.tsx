@@ -537,7 +537,11 @@ function AgendaView({ events, selectedEventId, timeFormat, onSelect }: { events:
   );
 }
 
-export default function QmsPlannerPageV2(): React.ReactElement {
+type QmsPlannerPageV2Props = {
+  embedded?: boolean;
+};
+
+export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2Props): React.ReactElement {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -791,9 +795,8 @@ export default function QmsPlannerPageV2(): React.ReactElement {
   const targetDayEvents = pendingMove ? eventsByDate.get(pendingMove.targetDate) || [] : [];
   const sameOwnerConflicts = pendingMove?.event.ownerLabel ? targetDayEvents.filter((event) => event.ownerLabel === pendingMove.event.ownerLabel && event.id !== pendingMove.event.id) : [];
 
-  return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <main className={`qms-modern-planner qms-modern-planner-v2 density-${preferences.density}${preferences.leftRailOpen ? " has-left-rail" : ""}${preferences.rightPanelOpen ? " has-context" : ""}${selectedEvent && preferences.rightPanelOpen ? " has-inspector" : ""}`}>
+  const plannerMain = (
+      <main className={`qms-modern-planner qms-modern-planner-v2 density-${preferences.density}${preferences.leftRailOpen ? " has-left-rail" : ""}${preferences.rightPanelOpen ? " has-context" : ""}${selectedEvent && preferences.rightPanelOpen ? " has-inspector" : ""}${embedded ? " is-embedded" : ""}`}>
         <header className="qms-modern-planner__toolbar">
           <div className="qms-planner-toolbar__leading">
             <button type="button" className="qms-planner-icon-button" onClick={() => setPreferences((current) => ({ ...current, leftRailOpen: !current.leftRailOpen }))} aria-label={preferences.leftRailOpen ? "Hide planner sidebar" : "Show planner sidebar"}>{preferences.leftRailOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
@@ -954,6 +957,12 @@ export default function QmsPlannerPageV2(): React.ReactElement {
 
         {toast ? <div className={`qms-planner-toast qms-planner-toast--${toast.tone}`} role="status">{toast.tone === "success" ? <CheckCircle2 size={16} /> : toast.tone === "danger" ? <AlertTriangle size={16} /> : <CircleHelp size={16} />}<span>{toast.message}</span></div> : null}
       </main>
+  );
+
+  if (embedded) return plannerMain;
+  return (
+    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      {plannerMain}
     </DepartmentLayout>
   );
 }

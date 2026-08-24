@@ -249,10 +249,15 @@ function usePlannerDialogFocusManagement(): void {
   }, []);
 }
 
+type QmsPlannerLivePageProps = {
+  /** When true, omit DepartmentLayout — parent already provides Assurance/QMS shell. */
+  embedded?: boolean;
+};
+
 // QmsPlannerPageV2 owns the tenant timezone and live clock because those values
 // come from the tenant-scoped calendar projection. This wrapper owns only modal
 // focus containment and trigger restoration.
-export default function QmsPlannerLivePage(): React.ReactElement {
+export default function QmsPlannerLivePage({ embedded = false }: QmsPlannerLivePageProps): React.ReactElement {
   usePlannerDialogFocusManagement();
-  return <QmsPlannerPageV2 />;
+  return <QmsPlannerPageV2 embedded={embedded} />;
 }

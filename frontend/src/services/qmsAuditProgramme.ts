@@ -1,6 +1,8 @@
 import { apiRequest, qmsPath } from "./apiClient";
 
 export type AuditProgrammeStatus = "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "CLOSED";
+/** Programme methodology. Backend currently emits HYBRID; other values are reserved for display/future API support. */
+export type AuditAssuranceModel = "HYBRID" | "COMPLIANCE" | "PERFORMANCE" | "RISK";
 export type AuditRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AuditUniverseEntityType = "DEPARTMENT" | "FACILITY" | "STATION" | "SUPPLIER" | "CONTRACTOR" | "PROCESS" | "CAPABILITY" | "APPROVAL_RATING" | "AIRCRAFT_TYPE" | "PERSONNEL_GROUP" | "OTHER";
 export type AuditProgrammeItemState = "PLANNED" | "SCHEDULED" | "COMPLETED" | "DEFERRED" | "CANCELLED" | "FOLLOW_UP_REQUIRED";
@@ -61,7 +63,7 @@ export type AuditProgramme = {
   programme_year: number;
   revision_no: number;
   title: string;
-  assurance_model: "HYBRID";
+  assurance_model: AuditAssuranceModel;
   continuous_monitoring_enabled: boolean;
   optimizer_version: string;
   objectives: string[];
@@ -132,7 +134,7 @@ export type AuditProgrammeOptimizer = {
   algorithm: string;
   weights: { compliance: number; risk: number; performance: number };
   as_of: string;
-  assurance_model: "HYBRID";
+  assurance_model: AuditAssuranceModel;
   continuous_monitoring_enabled: boolean;
   recommendations: AuditProgrammeOptimizerRecommendation[];
   summary: {
@@ -304,6 +306,22 @@ export function createAuditProgramme(amoCode: string, payload: {
   return apiRequest(qmsPath(amoCode, "/audit-programmes"), jsonOptions("POST", payload));
 }
 
+export function updateAuditProgramme(
+  amoCode: string,
+  programmeId: string,
+  payload: {
+    title?: string;
+    objectives?: string[];
+    regulatory_basis?: Array<string | Record<string, unknown>>;
+    period_start?: string;
+    period_end?: string;
+    owner_user_id?: string;
+    reason: string;
+  },
+): Promise<AuditProgramme> {
+  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}`), jsonOptions("PATCH", payload));
+}
+
 export function transitionAuditProgramme(amoCode: string, programmeId: string, targetStatus: AuditProgrammeStatus, reason: string): Promise<AuditProgramme> {
   return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/transitions`), jsonOptions("POST", { target_status: targetStatus, reason }));
 }
@@ -324,12 +342,55 @@ export function createAuditUniverseItem(amoCode: string, payload: {
   return apiRequest(qmsPath(amoCode, "/audit-programmes/universe/items"), jsonOptions("POST", payload));
 }
 
+export function updateAuditUniverseItem(amoCode: string, universeItemId: string, payload: {
+  display_label?: string;
+  source_route?: string | null;
+  risk_classification?: AuditRiskLevel;
+  regulatory_criticality?: AuditRiskLevel;
+  surveillance_interval_days?: number | null;
+  mandatory_surveillance?: boolean;
+  active?: boolean;
+  notes?: string | null;
+}): Promise<AuditUniverseItem> {
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes/universe/items/${encodeURIComponent(universeItemId)}`),
+    jsonOptions("PATCH", payload),
+  );
+}
+
 export function addAuditProgrammeItem(amoCode: string, programmeId: string, payload: {
   universe_item_id: string; audit_type: string; title: string; purpose?: string; scope: string;
   criteria: string[]; mandatory_surveillance: boolean; recurrence: string; target_start?: string; target_end?: string;
   prioritization_basis: Array<Record<string, unknown>>;
 }): Promise<AuditProgrammeItem> {
   return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items`), jsonOptions("POST", payload));
+}
+
+export function updateAuditProgrammeItem(
+  amoCode: string,
+  programmeId: string,
+  itemId: string,
+  payload: {
+    title?: string;
+    purpose?: string | null;
+    scope?: string;
+    criteria?: Array<string | Record<string, unknown>>;
+    mandatory_surveillance?: boolean;
+    recurrence?: string;
+    custom_interval_days?: number | null;
+    target_start?: string | null;
+    target_end?: string | null;
+    prioritization_basis?: Array<Record<string, unknown>>;
+    state?: AuditProgrammeItemState;
+    deferral_reason?: string | null;
+    cancellation_reason?: string | null;
+    reason: string;
+  },
+): Promise<AuditProgrammeItem> {
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}`),
+    jsonOptions("PATCH", payload),
+  );
 }
 
 export function listAuditProgrammeSchedulingQueue(amoCode: string, signal?: AbortSignal): Promise<AuditProgrammeSchedulingQueue> {

@@ -13,7 +13,6 @@ import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
-const QmsAuditProgrammeSchedulePage = lazy(() => import("./pages/qms/QmsAuditProgrammeSchedulePage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
@@ -70,7 +69,9 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // Programme/programme are governed specialist Audit Operations routes owned by
   // PortalRouteSurface. Only the remaining shallow audit registers stay on the
   // generic register shortcut.
-  if (route.module.id === "audits") return ["checklists", "reports", "templates"].includes(view);
+  // Checklists are owned by QmsCanonicalPage (Assurance chrome + checklist library host).
+  // Keep only shallow audit register shortcuts here.
+  if (route.module.id === "audits") return ["reports", "templates"].includes(view);
   // CAR/CAPA has a governed specialist owner in PortalRouteSurface. Keeping it
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
@@ -95,22 +96,6 @@ function isSupportedCarPerformanceReportPath(pathname: string): boolean {
   if (qualityIndex < 0) return false;
   const relative = parts.slice(qualityIndex + 1);
   return relative.length === 2 && relative[0] === "reports" && relative[1] === "car-performance";
-}
-
-function isSupportedAuditProgrammeSchedulePath(pathname: string): boolean {
-  const parts = pathSegments(pathname);
-  const qualityIndex = parts.indexOf("quality");
-  if (qualityIndex < 0) return false;
-  const relative = parts.slice(qualityIndex + 1);
-  return Boolean(
-    relative.length === 6 &&
-    relative[0] === "audits" &&
-    relative[1] === "program" &&
-    relative[2] &&
-    relative[3] === "items" &&
-    relative[4] &&
-    relative[5] === "schedule"
-  );
 }
 
 function workspaceSlugFromPath(pathname: string): string {
@@ -182,14 +167,6 @@ function QmsNotFoundRouteSurface() {
   );
 }
 
-function QmsAuditProgrammeScheduleRouteSurface() {
-  return (
-    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading audit programme scheduler…</div></div>}>
-      <WorkspaceRequireAuth><QmsAuditProgrammeSchedulePage /></WorkspaceRequireAuth>
-    </Suspense>
-  );
-}
-
 function QmsCarPerformanceReportRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading CAR performance…</div></div>}>
@@ -247,14 +224,12 @@ export const AppRouter: React.FC = () => {
   const location = useLocation();
   const qmsRoute = classifyQmsPath(location.pathname);
 
-  if (isSupportedAuditProgrammeSchedulePath(location.pathname)) return <QmsAuditProgrammeScheduleRouteSurface />;
   if (isSupportedCarPerformanceReportPath(location.pathname)) return <QmsCarPerformanceReportRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
   if (
     qmsRoute.kind === "unknown" &&
-    !isSupportedDocumentReaderPath(location.pathname) &&
-    !isSupportedAuditProgrammeSchedulePath(location.pathname)
+    !isSupportedDocumentReaderPath(location.pathname)
   ) return <QmsNotFoundRouteSurface />;
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;

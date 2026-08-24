@@ -485,7 +485,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
               aria-label="Audit route tabs"
               style={{ "--segment-count": 3, "--segment-active-index": 0 } as React.CSSProperties}
             >
-              <button type="button" className="is-active" onClick={() => navigate(`${baseQmsPath}/audits/plan?view=calendar`)}>Plan</button>
+              <button type="button" className="is-active" onClick={() => navigate(`${baseQmsPath}/audits/plan?view=list`)}>Plan</button>
               <button type="button" onClick={goToRegister}>Register</button>
               <button type="button" onClick={goToEvidence}>Evidence</button>
             </div>
@@ -603,7 +603,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
         ) : activeTab === "checklists" ? (
           <div style={{ marginTop: 12 }}>
             <p><strong>{upcomingAudit?.checklist_file_ref ? "Checklist attached" : "No checklist attached yet"}</strong></p>
-            {upcomingAudit ? <button type="button" className="secondary-chip-btn" onClick={() => navigate(`${baseQmsPath}/audits/${upcomingAudit.id}`)}>Open Run Hub</button> : null}
+            {upcomingAudit ? <button type="button" className="secondary-chip-btn" onClick={() => navigate(`${baseQmsPath}/audits/${upcomingAudit.id}/setup`)}>Open Setup</button> : null}
           </div>
         ) : (
           <div style={{ marginTop: 12 }}>

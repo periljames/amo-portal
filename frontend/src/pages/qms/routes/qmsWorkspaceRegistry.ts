@@ -56,10 +56,10 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "assurance",
     segment: "assurance",
-    label: "Assurance",
-    shortLabel: "Assurance",
+    label: "Assurance Cases",
+    shortLabel: "Cases",
     permission: "qms.audit.view",
-    description: "Signals, audits, findings, CAPA, supplier/tooling exposure, cases and effectiveness review.",
+    description: "Governed assurance cases and effectiveness review. Audit Assurance (audits hub), findings, CAPA and supplier/tooling exposure live under this workspace.",
     activePrefixes: [
       "assurance",
       "audits",

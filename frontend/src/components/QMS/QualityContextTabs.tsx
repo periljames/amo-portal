@@ -175,23 +175,14 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
 
 function assuranceSectionTabs(basePath: string): ContextTab[] {
   return [
-    { id: "assurance-home", label: "Overview", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
-    { id: "assurance-audits", label: "Audit assurance", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`] },
+    { id: "assurance-home", label: "Cases", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
+    { id: "assurance-audits", label: "Audit Assurance", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`, `${basePath}/calendar`] },
     { id: "assurance-findings", label: "Findings", path: `${basePath}/findings/register`, activePrefixes: [`${basePath}/findings`] },
     { id: "assurance-cars", label: "Corrective action", path: `${basePath}/cars/register`, activePrefixes: [`${basePath}/cars`] },
     { id: "assurance-providers", label: "External providers", path: `${basePath}/suppliers/approved-list`, activePrefixes: [`${basePath}/suppliers`] },
     { id: "assurance-tooling", label: "Tooling", path: `${basePath}/equipment-calibration/register`, activePrefixes: [`${basePath}/equipment-calibration`] },
     { id: "assurance-external", label: "External & regulatory", path: `${basePath}/external-interface/regulator-findings`, activePrefixes: [`${basePath}/external-interface`] },
-    { id: "assurance-evidence", label: "Evidence", path: `${basePath}/evidence-vault/search`, activePrefixes: [`${basePath}/evidence-vault`] },
-  ];
-}
-
-function auditSectionTabs(basePath: string): ContextTab[] {
-  return [
-    { id: "audit-overview", label: "Overview", path: `${basePath}/audits/dashboard`, exact: true },
-    { id: "audit-programme", label: "Programme setup", path: `${basePath}/audits/program`, activePrefixes: [`${basePath}/audits/program`, `${basePath}/audits/programme`] },
-    { id: "audit-planner", label: "Audit calendar", path: `${basePath}/calendar/audits` },
-    { id: "audit-checklists", label: "Checklist templates", path: `${basePath}/audits/checklists`, exact: true },
+    { id: "assurance-evidence", label: "Evidence vault", path: `${basePath}/evidence-vault/search`, activePrefixes: [`${basePath}/evidence-vault`] },
   ];
 }
 
@@ -279,13 +270,15 @@ const QualityContextTabs: React.FC = () => {
   const isCarRecord = moduleSegment === "cars" && Boolean(safeRecordKey) && !STATIC_CAR_VIEWS.has(safeRecordKey);
   const isAssuranceHub = !moduleSegment && workspace === "assurance";
   const isAssuranceModule = Boolean(moduleSegment && ASSURANCE_MODULES.has(moduleSegment));
+  const isAuditAssuranceSurface =
+    moduleSegment === "audits" || moduleSegment === "calendar" || moduleSegment === "evidence-vault";
   const workspaceTabs = topLevelTabs(route);
   const contextualTabs = isAuditRecord
     ? auditRecordTabs(route.basePath, safeRecordKey)
     : isCarRecord
       ? carRecordTabs(route.basePath, safeRecordKey)
-      : moduleSegment === "audits"
-        ? auditSectionTabs(route.basePath)
+      : isAuditAssuranceSurface
+        ? assuranceSectionTabs(route.basePath)
         : isAssuranceHub || isAssuranceModule
           ? assuranceSectionTabs(route.basePath)
           : [];
@@ -295,8 +288,12 @@ const QualityContextTabs: React.FC = () => {
     : isCarRecord
       ? `CAR ${safeRecordKey}`
       : isAssuranceHub
-        ? "Assurance"
-        : moduleTitle(moduleSegment);
+        ? "Assurance Cases"
+        : isAuditAssuranceSurface && moduleSegment === "calendar"
+          ? "Audit Assurance"
+          : isAuditAssuranceSurface && moduleSegment === "audits"
+            ? "Audit Assurance"
+            : moduleTitle(moduleSegment);
 
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
   const primaryAction = isAuditRecord

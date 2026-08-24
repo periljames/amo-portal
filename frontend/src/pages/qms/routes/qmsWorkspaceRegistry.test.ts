@@ -61,4 +61,10 @@ describe("QMS assurance workspace registry", () => {
       "/maintenance/SAF/quality?workspace=intelligence",
     ]);
   });
+
+  it("labels the cases workspace distinctly from Audit Assurance", () => {
+    const assurance = QMS_WORKSPACES.find((workspace) => workspace.id === "assurance");
+    expect(assurance?.label).toBe("Assurance Cases");
+    expect(assurance?.shortLabel).toBe("Cases");
+  });
 });

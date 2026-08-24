@@ -17,25 +17,24 @@ import {
 import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 
 describe("QMS sidebar navigation", () => {
-  it("keeps the complete active audit route set directly reachable", () => {
-    expect(QMS_AUDIT_DESTINATIONS.map((item) => item.view)).toEqual([
-      "dashboard",
-      "program",
-      "schedule",
-      "plan",
-      "register",
-      "new",
-      "checklists",
-      "templates",
-      "bin",
-    ]);
-    expect(new Set(QMS_AUDIT_DESTINATIONS.map((item) => item.id)).size).toBe(
-      QMS_AUDIT_DESTINATIONS.length,
-    );
+  it("exposes Audit Assurance as a single sidebar hub (rail owns section destinations)", () => {
+    expect(QMS_AUDIT_DESTINATIONS.map((item) => item.view)).toEqual(["dashboard"]);
+    expect(QMS_AUDIT_DESTINATIONS).toHaveLength(1);
+    expect(QMS_AUDIT_DESTINATIONS[0]?.label).toBe("Audit Assurance");
+    expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-schedule")).toBe(false);
+    expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-plan")).toBe(false);
+    expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-programme")).toBe(false);
 
     for (const item of QMS_AUDIT_DESTINATIONS) {
       const path = qmsModulePath("safarilink", item.moduleId, item.view);
       expect(classifyQmsPath(path), path).toMatchObject({ kind: "known" });
+    }
+  });
+
+  it("routes calendar browsing exclusively through Planner V2 destinations", () => {
+    for (const item of QMS_CALENDAR_DESTINATIONS) {
+      expect(item.moduleId).toBe("calendar");
+      expect(qmsModulePath("safarilink", item.moduleId, item.view)).toContain("/quality/calendar/");
     }
   });
 
