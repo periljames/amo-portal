@@ -186,7 +186,7 @@ def qms_planner_calendar(
                     title=title,
                     event_date=row.get("event_date"),
                     event_type="audit_planned",
-                    link=f"/maintenance/{ctx.amo_code}/quality/audits/{row.get('id')}/overview",
+                    link=f"/maintenance/{ctx.amo_code}/quality/audits/{row.get('id')}/setup",
                     today=today,
                     extra={
                         "audit_source": "live_audit",

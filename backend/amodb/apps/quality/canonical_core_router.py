@@ -996,7 +996,7 @@ def qms_integration_calendar(
             events.append(_calendar_event_row(
                 module="audits", entity_type="audit", entity_id=row.get("id"), title=title,
                 event_date=row.get("event_date"), event_type="audit_planned",
-                link=f"/maintenance/{ctx.amo_code}/quality/audits/{row.get('id')}/overview", today=today,
+                link=f"/maintenance/{ctx.amo_code}/quality/audits/{row.get('id')}/setup", today=today,
                 extra={
                     "audit_source": "live_audit",
                     "calendar_group": "audit",

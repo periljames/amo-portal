@@ -45,7 +45,7 @@ class SourceSpec:
 
 
 SOURCE_REGISTRY: dict[str, SourceSpec] = {
-    "AUDIT": SourceSpec("AUDIT", "Audit", "qms_audits", ("id", "audit_ref"), ("audit_ref", "title"), ("planned_end",), "/maintenance/{amo_code}/quality/audits/{id}/overview", "Approved audit scope, fieldwork, report and closeout record."),
+    "AUDIT": SourceSpec("AUDIT", "Audit", "qms_audits", ("id", "audit_ref"), ("audit_ref", "title"), ("planned_end",), "/maintenance/{amo_code}/quality/audits/{id}/setup", "Approved audit scope, fieldwork, report and closeout record."),
     "AUDIT_SCHEDULE": SourceSpec("AUDIT_SCHEDULE", "Audit schedule", "qms_audit_schedules", ("id",), ("title", "kind", "auditee"), ("next_due_date",), "/maintenance/{amo_code}/quality/audits/plan?view=list&schedule_id={id}", "Risk-based audit programme commitment."),
     "FINDING": SourceSpec("FINDING", "Finding", "qms_audit_findings", ("id", "finding_ref"), ("finding_ref", "description"), ("target_close_date",), "/maintenance/{amo_code}/quality/findings/{id}/overview", "Objective evidence, classification and closeout state."),
     "CAR": SourceSpec("CAR", "CAR / CAPA", "quality_cars", ("id", "car_number"), ("car_number", "title"), ("due_date",), "/maintenance/{amo_code}/quality/cars/{id}/overview", "Containment, root cause, action, effectiveness and closure record."),

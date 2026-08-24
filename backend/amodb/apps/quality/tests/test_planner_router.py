@@ -108,6 +108,9 @@ def test_training_projection_selects_only_latest_active_record(monkeypatch) -> N
     assert "PARTITION BY r.user_id, r.course_id" in source
     assert "record_rank = 1" in source
     assert source.index("record_rank = 1") < source.index("event_date >= :start_date")
+    assert "/quality/audits/{row.get('id')}/setup" in source
+    assert "/quality/audits/{row.get('id')}/overview" not in source
+    assert "/quality/cars/{row.get('id')}/overview" in source
 
 
 def test_calendar_page_is_stable_and_reports_next_offset() -> None:
