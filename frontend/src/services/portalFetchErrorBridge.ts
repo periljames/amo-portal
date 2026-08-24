@@ -81,6 +81,24 @@ function isPublicHealthUrl(url: string): boolean {
   }
 }
 
+/**
+ * Platform Operations is a separate gateway (proxied under same-origin /ops).
+ * Its 401s mean ops auth/config failed — not that the portal access token is
+ * invalid. Treating them as session death logs Superadmin users out while
+ * /auth/me would still succeed.
+ */
+export function isPlatformOpsUrl(url: string): boolean {
+  try {
+    const base = typeof window !== "undefined" && window.location?.origin
+      ? window.location.origin
+      : "http://127.0.0.1";
+    const path = new URL(url, base).pathname;
+    return path === "/ops" || path.startsWith("/ops/");
+  } catch {
+    return false;
+  }
+}
+
 function isPortalApiUrl(url: string): boolean {
   try {
     const requestUrl = new URL(url, window.location.origin);
@@ -212,8 +230,9 @@ export function installPortalFetchErrorBridge(): () => void {
     const authRecoveryRequest = isAuthRecoveryUrl(url);
     const publicAuthRequest = isPublicAuthUrl(url);
     const publicHealthRequest = isPublicHealthUrl(url);
+    const platformOpsRequest = isPlatformOpsUrl(url);
     const silent = headers.get("X-AMO-Silent-Error") === "1" || isSilentBackgroundMutation(url);
-    const portalRequest = isPortalApiUrl(url);
+    const portalRequest = isPortalApiUrl(url) && !platformOpsRequest;
     const authenticatedRequest = portalRequest
       && !authRecoveryRequest
       && !publicAuthRequest

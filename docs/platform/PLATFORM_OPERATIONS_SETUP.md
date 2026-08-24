@@ -17,19 +17,24 @@ The browser reaches the Operations gateway through the frontend origin under `/o
 
 Local development preserves the same browser contract as production: the frontend uses same-origin `/ops/*` URLs, while Vite proxies those requests to the dedicated Platform Operations Gateway instead of the tenant API.
 
-Run the tenant API and Operations Gateway as separate processes:
+Run the tenant API and Operations Gateway as separate processes. Both must load
+the same repository `.env.development` so JWT signing (`SECRET_KEY`) matches.
+Prefer `python scripts/dev_runtime.py` from the repo root; for manual starts:
 
 ```bash
 cd backend
-python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 --reload
+python -m uvicorn amodb.main:app --host 127.0.0.1 --port 8080 --reload --env-file ../.env.development
 ```
 
 In a second terminal:
 
 ```bash
 cd backend
-python -m uvicorn amodb.platform_ops_main:app --host 127.0.0.1 --port 8090 --reload
+python -m uvicorn amodb.platform_ops_main:app --host 127.0.0.1 --port 8090 --reload --env-file ../.env.development
 ```
+
+If the API and Ops gateway load different secrets, `/auth/me` succeeds while
+`/ops/v1/bootstrap` and `/ops/v1/live` return 401.
 
 Then run the frontend normally:
 

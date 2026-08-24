@@ -79,9 +79,11 @@ const LoginPage: React.FC = () => {
   const { amoCode } = useParams<{ amoCode?: string }>();
 
   const cachedIdentifier = getLastLoginIdentifier();
-  const defaultIdentifier = import.meta.env.DEV && !amoCode ? "admin@amo.local" : "";
-  const [identifier, setIdentifier] = useState(cachedIdentifier || defaultIdentifier);
-  const [password, setPassword] = useState(import.meta.env.DEV ? "ChangeMe123!" : "");
+  // Do not autofill a hard-coded DEV identity: admin@amo.local is not the
+  // platform superuser in this environment, and a wrong password after logout
+  // produces "Incorrect email, password or AMO slug." noise / lockout risk.
+  const [identifier, setIdentifier] = useState(cachedIdentifier || "");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
