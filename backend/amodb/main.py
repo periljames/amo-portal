@@ -515,6 +515,33 @@ def livez():
 _readiness_migration_cache: dict[str, object] = {"checked_at": 0.0, "ready": False, "detail": "Not checked"}
 
 
+def _revision_applied_in_database(
+    script: ScriptDirectory,
+    required: str,
+    database_heads: set[str],
+) -> bool:
+    """Return True when ``required`` is a DB head row or an ancestor of any DB head.
+
+    Alembic stores current branch tips in ``alembic_version``, not every historical
+    revision. A configured expected revision that is an ancestor of an applied head
+    is therefore already satisfied.
+    """
+    if required in database_heads:
+        return True
+    try:
+        script.get_revision(required)
+    except Exception:
+        return False
+    for head in database_heads:
+        try:
+            for rev in script.iterate_revisions(head, "base"):
+                if rev.revision == required:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
 def _migration_readiness() -> tuple[bool, str | None]:
     now = time.monotonic()
     if now - float(_readiness_migration_cache["checked_at"] or 0.0) < 30.0:
@@ -533,10 +560,16 @@ def _migration_readiness() -> tuple[bool, str | None]:
         required_heads = configured_heads or repository_heads
         # Independent module branches may intentionally create multiple heads.
         # A release can declare its required subset without reporting unrelated
-        # module heads as missing.
-        ready = bool(database_heads) and required_heads.issubset(database_heads)
+        # module heads as missing. Historical ancestors of applied heads count as
+        # satisfied — they are not expected to remain as alembic_version rows.
+        missing = sorted(
+            revision
+            for revision in required_heads
+            if not _revision_applied_in_database(script, revision, database_heads)
+        )
+        ready = bool(database_heads) and not missing
         detail = None if ready else (
-            f"Database migrations {sorted(database_heads)} do not include required heads {sorted(required_heads)}"
+            f"Database migrations {sorted(database_heads)} do not include required heads {missing}"
         )
     except Exception as exc:
         ready = False
