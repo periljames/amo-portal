@@ -55,7 +55,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
         return <React.Fragment key={id}><Link to={auditSessionPath(amoCode, auditKey, id)} className={`qms-audit-session-step${selected ? " is-selected" : ""}${complete ? " is-complete" : ""}`} aria-current={selected ? "step" : undefined} title={server?.helper || `Open ${STAGE_LABELS[id]}`}><span className="qms-audit-session-step__icon" aria-hidden="true">{complete ? <Check size={14} /> : <Circle size={10} />}</span><span>{STAGE_LABELS[id]}</span></Link>{index < stageState.length - 1 ? <span className="qms-audit-session-step__line" aria-hidden="true" /> : null}</React.Fragment>;
       })}
     </nav>
-    {sessionQuery.data ? <div className="qms-audit-session-rail__authority" role="status">Authoritative next stage: <strong>{sessionQuery.data.current_stage_label}</strong>{routeStage && routeStage !== sessionQuery.data.current_stage_id ? <span> · Viewing {STAGE_LABELS[routeStage]} without changing lifecycle state.</span> : null}</div> : null}
+    {sessionQuery.data ? <div className="qms-audit-session-rail__authority" role="note">Authoritative next stage: <strong>{sessionQuery.data.current_stage_label}</strong>{routeStage && routeStage !== sessionQuery.data.current_stage_id ? <span> · Viewing {STAGE_LABELS[routeStage]} without changing lifecycle state.</span> : null}</div> : null}
   </section>;
 };
 

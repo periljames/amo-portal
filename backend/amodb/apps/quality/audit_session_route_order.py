@@ -11,7 +11,7 @@ def _is_session_route(route_item) -> bool:
     methods = set(getattr(route_item, "methods", None) or ())
     is_setup_update = path.endswith("/audits/{audit_id}/setup") and "PATCH" in methods
     return (
-        ("/quality/audits/" in path or "/qms/audits/" in path)
+        "/quality/audits/" in path
         and (path.endswith("/session") or "/audits/resolve/" in path or is_setup_update)
     )
 
@@ -36,14 +36,14 @@ def _promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
 
 
-for api_router in (router,):
-    _register(api_router)
-    _promote(api_router)
+_register(router)
+_promote(router)
 
 from . import audit_external_access_route_order as _audit_external_access_route_order  # noqa: F401,E402
 from . import audit_evidence_route_order as _audit_evidence_route_order  # noqa: F401,E402
 from . import audit_presence_route_order as _audit_presence_route_order  # noqa: F401,E402
 from . import audit_occurrence_completion_route_order as _audit_occurrence_completion_route_order  # noqa: F401,E402
+from . import audit_preparation_context_route_order as _audit_preparation_context_route_order  # noqa: F401,E402
 from . import audit_report_composition_route_order as _audit_report_composition_route_order  # noqa: F401,E402
 from . import audit_closing_assurance_route_order as _audit_closing_assurance_route_order  # noqa: F401,E402
 from . import audit_archive_governance_route_order as _audit_archive_governance_route_order  # noqa: F401,E402

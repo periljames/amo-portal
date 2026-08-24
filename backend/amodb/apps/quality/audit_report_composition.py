@@ -131,8 +131,8 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "sort_order": item.sort_order if item else None,
             "canonical_response_status": row.canonical_response_status,
             "auditor_notes": row.auditor_notes,
-            "objective_evidence": row.objective_evidence,
-            "evidence_references": row.evidence_references_json or [],
+            "objective_evidence": item.objective_evidence if item else None,
+            "evidence_references": list(row.evidence_references or []),
         }
 
     return _json_value({

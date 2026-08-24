@@ -95,7 +95,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
 
   const personnelQuery = useQuery({
     queryKey: ["qms-audit-personnel-options", amoCode],
-    queryFn: () => qmsListAuditPersonnelOptions({ limit: 200 }),
+    queryFn: () => qmsListAuditPersonnelOptions({ limit: 100 }),
     enabled: canManage,
     staleTime: 30_000,
   });

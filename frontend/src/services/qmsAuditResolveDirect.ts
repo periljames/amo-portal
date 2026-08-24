@@ -1,4 +1,5 @@
-import { apiRequest } from "./apiClient";
+import { ApiClientError, apiRequest, qmsPath } from "./apiClient";
+import { getContext } from "./auth";
 import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsCore";
 
 function normalizedAuditKey(value: string): string {
@@ -22,13 +23,22 @@ export async function qmsResolveAudit(
   // to /audits/resolve/{audit_key} as one encoded raw segment. The backend
   // resolver deliberately accepts this deterministic route slug.
   const routeKey = normalizedAuditKey(key);
+  const context = getContext();
+  const amoCode = (context.amoSlug || context.amoCode || "").trim();
+  const resolverPath = amoCode
+    ? qmsPath(amoCode, `/audits/resolve/${encodeURIComponent(routeKey)}`)
+    : `/quality/audits/resolve/${encodeURIComponent(routeKey)}`;
+
   try {
     return await apiRequest<QMSAuditOut>(
-      `/quality/audits/resolve/${encodeURIComponent(routeKey)}`,
+      resolverPath,
       { timeoutMs: 15_000, cacheTtlMs: 5_000 },
     );
   } catch (cause) {
-    if (!(cause instanceof Error) || !/(?:API|HTTP|QMS API)\s*404|\b404\b/.test(cause.message)) throw cause;
+    const isNotFound = cause instanceof ApiClientError
+      ? cause.status === 404
+      : cause instanceof Error && /\b404\b/.test(cause.message);
+    if (!isNotFound) throw cause;
 
     // Keep legacy non-stage audit URLs usable while older deployments or
     // compatibility fixtures do not yet expose the direct resolver. This is

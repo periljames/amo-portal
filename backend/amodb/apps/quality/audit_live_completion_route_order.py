@@ -17,7 +17,7 @@ def _is_completion_route(route_item) -> bool:
         or "/signature/options" in path
         or "/signature/verify" in path
         or ("/report-revisions/" in path and path.endswith("/transitions"))
-    ) and ("/quality/" in path or "/qms/" in path)
+    ) and "/quality/" in path
 
 
 def _is_generic_catchall(route_item) -> bool:
@@ -31,16 +31,14 @@ def _signature(route_item) -> tuple[str, frozenset[str]]:
 
 
 def _register_and_promote(api_router: APIRouter) -> None:
-    if not any("/audit-webauthn/credentials" in str(getattr(item, "path", "")) for item in api_router.routes):
-        api_router.include_router(audit_live_completion_router.router)
+    """Mount the complete completion router and retain one exact route per method."""
+
+    api_router.include_router(audit_live_completion_router.router)
 
     completion = [item for item in api_router.routes if _is_completion_route(item)]
     if not completion:
         raise RuntimeError("QMS live-audit completion routes were not registered")
 
-    # The guarded transition endpoint deliberately shadows the older report
-    # transition handler. Preserve the most recently registered exact path/method
-    # so acknowledgement and passkey issue gates cannot be bypassed by route order.
     selected_reversed = []
     seen: set[tuple[str, frozenset[str]]] = set()
     for item in reversed(completion):
@@ -60,8 +58,17 @@ def _register_and_promote(api_router: APIRouter) -> None:
     api_router.routes[:] = [*remaining[:catchall_index], *selected, *remaining[catchall_index:]]
 
 
-for _api_router in (router,):
-    _register_and_promote(_api_router)
+def _synchronise_public_completion_routes() -> None:
+    """Register every public completion route without relying on one sentinel."""
 
-if not any("/quality/audit-verification/" in str(getattr(item, "path", "")) for item in quality_public_router.routes):
-    quality_public_router.include_router(audit_live_completion_router.public_router)
+    existing = {_signature(item) for item in quality_public_router.routes}
+    for item in audit_live_completion_router.public_router.routes:
+        marker = _signature(item)
+        if marker in existing:
+            continue
+        quality_public_router.routes.append(item)
+        existing.add(marker)
+
+
+_register_and_promote(router)
+_synchronise_public_completion_routes()

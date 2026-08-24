@@ -106,11 +106,14 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(prepare.getByText("Real browser setup scope covering controlled maintenance and Quality records.")).toBeVisible();
 
     await prepare.getByRole("button", { name: "New request" }).click();
+    // Select upload-only before filling the request. The default hybrid mode starts
+    // an optional controlled-DMS lookup that this audit-only test user is not
+    // entitled to perform and must not block the request form itself.
+    await prepare.getByRole("combobox", { name: "Submission source", exact: true }).selectOption("UPLOAD");
     await prepare.getByLabel("Due date", { exact: true }).fill(futureDate(20));
     await prepare.getByLabel("Request title", { exact: true }).fill("Current authorization and competence evidence");
     await prepare.getByLabel("Purpose / records required", { exact: true }).fill("Provide the current authorization and competence evidence for the sampled certifying personnel before fieldwork.");
     await prepare.getByLabel("Linked criterion / requirement", { exact: true }).fill("QMSM 5.4 and approved personnel authorization procedure");
-    await prepare.getByLabel("Submission source", { exact: true }).selectOption("UPLOAD");
     await prepare.getByRole("button", { name: "Create governed request" }).click();
     await expect(prepare.getByText("Current authorization and competence evidence", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(prepare.getByText(/QMSM 5\.4/)).toBeVisible();
