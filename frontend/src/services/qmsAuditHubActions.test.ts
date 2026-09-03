@@ -174,7 +174,8 @@ describe("Quality workflow integrity and public CAR UI contracts", () => {
     expect(routeGateSource).toContain("/car-invite");
     expect(routeGateSource).toContain("<ModalTopLayerGuard />");
     expect(routeGateSource).not.toContain("QualityChecklistPdfFormEditorHost");
-    expect(enhancementsHostSource).toContain('activeTab={auditSessionStage === "prepare" ? "checklist" : null}');
+    expect(enhancementsHostSource).not.toContain('activeTab={auditSessionStage === "prepare" ? "checklist" : null}');
+    expect(enhancementsHostSource).toContain("<QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} />");
   });
 
   it("keeps the public CAR workflow usable at normal browser zoom", () => {

@@ -98,7 +98,9 @@ class QualityPrivilege(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    rule = relationship("QualityPrivilegeRule", lazy="joined")
+    # selectin (not joined): FOR UPDATE on privileges must not LEFT JOIN rules —
+    # Postgres rejects FOR UPDATE on the nullable side of an outer join.
+    rule = relationship("QualityPrivilegeRule", lazy="selectin")
     decisions = relationship(
         "QualityPrivilegeDecision",
         back_populates="privilege",

@@ -1,0 +1,212 @@
+/* Assurance workflow — unified CTA contract and visual hierarchy repairs.
+   Loaded after workspace sheets so it corrects inverted .is-primary rules. */
+
+.qms-surface-root,
+.qms-occurrence-stage,
+.qms-audit-prepare,
+.qms-live-audit-focus,
+.qms-audit-closing,
+.qms-audit-archive,
+.qms-live-release-decision,
+.qms-audit-stage-load-error,
+.qa-dashboard,
+.qms-audit-programme-flow,
+.qms-audit-programme-drawer {
+  --qms-cta-bg: var(--accent-primary, #2563eb);
+  --qms-cta-fg: #fff;
+  --qms-cta-border: var(--accent-primary, #2563eb);
+  --qms-cta-hover-bg: color-mix(in srgb, var(--accent-primary, #2563eb) 86%, #000);
+  --qms-cta-disabled-bg: color-mix(in srgb, var(--accent-primary, #2563eb) 38%, var(--qms-panel));
+  --qms-cta-disabled-fg: color-mix(in srgb, #fff 78%, var(--qms-muted));
+}
+
+/* Primary / next-step CTAs — accent fill, not inverted text/panel */
+:is(
+  .qms-occurrence-stage__card button.is-primary,
+  .qms-occurrence-stage__next,
+  .qms-audit-prepare__continue,
+  .qms-audit-prepare__next,
+  .qms-live-audit-focus__closing-link.is-primary,
+  .qms-audit-prepare__card button.is-primary,
+  .qms-audit-closing button.is-primary,
+  .qms-audit-closing__continue,
+  .qms-audit-stage-load-error__actions button.is-primary,
+  .qms-audit-archive button.is-primary,
+  .qms-live-audit-finding .is-primary,
+  .qms-live-release-decision button.is-primary,
+  .qms-audit-programme-flow button.is-primary,
+  .qms-audit-programme-drawer button.is-primary
+) {
+  background: var(--qms-cta-bg);
+  border-color: var(--qms-cta-border);
+  color: var(--qms-cta-fg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--qms-cta-bg) 28%, transparent);
+}
+
+:is(
+  .qms-occurrence-stage__card button.is-primary,
+  .qms-occurrence-stage__next,
+  .qms-audit-prepare__continue,
+  .qms-audit-prepare__next,
+  .qms-live-audit-focus__closing-link.is-primary,
+  .qms-audit-prepare__card button.is-primary,
+  .qms-audit-closing button.is-primary,
+  .qms-audit-closing__continue,
+  .qms-audit-stage-load-error__actions button.is-primary,
+  .qms-audit-archive button.is-primary,
+  .qms-live-audit-finding .is-primary,
+  .qms-live-release-decision button.is-primary,
+  .qms-audit-programme-flow button.is-primary,
+  .qms-audit-programme-drawer button.is-primary
+):hover:not(:disabled),
+:is(
+  .qms-occurrence-stage__card button.is-primary,
+  .qms-occurrence-stage__next,
+  .qms-audit-prepare__continue,
+  .qms-audit-prepare__next,
+  .qms-live-audit-focus__closing-link.is-primary,
+  .qms-audit-prepare__card button.is-primary,
+  .qms-audit-closing button.is-primary,
+  .qms-audit-closing__continue,
+  .qms-audit-stage-load-error__actions button.is-primary,
+  .qms-audit-archive button.is-primary,
+  .qms-live-audit-finding .is-primary,
+  .qms-live-release-decision button.is-primary,
+  .qms-audit-programme-flow button.is-primary,
+  .qms-audit-programme-drawer button.is-primary
+):focus-visible {
+  background: var(--qms-cta-hover-bg);
+  border-color: var(--qms-cta-hover-bg);
+  color: var(--qms-cta-fg);
+}
+
+/* Disabled primary — legible gated state (no stacked opacity wash) */
+.qms-occurrence-stage__card button.is-primary:disabled,
+.qms-audit-prepare__card button.is-primary:disabled,
+.qms-audit-closing button.is-primary:disabled,
+.qms-live-audit-finding .is-primary:disabled,
+.qms-live-release-decision button.is-primary:disabled,
+.qms-audit-archive button.is-primary:disabled,
+.qms-audit-programme-flow button.is-primary:disabled,
+.qms-audit-programme-drawer button.is-primary:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: var(--qms-cta-disabled-bg);
+  border-color: color-mix(in srgb, var(--qms-cta-border) 50%, var(--qms-line));
+  color: var(--qms-cta-disabled-fg);
+  box-shadow: none;
+}
+
+/* Secondary buttons — clearer affordance vs primary */
+.qms-occurrence-stage__card button:not(.is-primary):not(:disabled):hover,
+.qms-audit-prepare__card button:not(.is-primary):not(:disabled):hover,
+.qms-audit-closing button:not(.is-primary):not(:disabled):hover,
+.qms-audit-archive button:not(.is-primary):not(:disabled):hover,
+.qms-audit-programme-flow button.is-secondary:not(:disabled):hover,
+.qms-audit-programme-drawer button.is-secondary:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 35%, var(--qms-line));
+  background: var(--qms-hover);
+}
+
+/* Occurrence stage — header CTA rail + card action footer */
+.qms-occurrence-stage__header > div:last-child {
+  flex-shrink: 0;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.qms-occurrence-stage__actions {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--qms-line-soft);
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.qms-occurrence-stage__actions > span {
+  color: var(--qms-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* Status banners — theme-aware (setup/prepare/follow-up) */
+html[data-color-scheme="dark"] .qms-occurrence-stage__message,
+body[data-color-scheme="dark"] .qms-occurrence-stage__message,
+[data-theme="dark"] .qms-occurrence-stage__message,
+.dark .qms-occurrence-stage__message {
+  border-color: var(--qa-ok-border, rgba(16, 185, 129, 0.42));
+  background: var(--qa-ok-bg, #1e322c);
+  color: var(--qa-ok-ink, #a7f3d0);
+}
+
+html[data-color-scheme="dark"] .qms-occurrence-stage__message.is-error,
+body[data-color-scheme="dark"] .qms-occurrence-stage__message.is-error,
+[data-theme="dark"] .qms-occurrence-stage__message.is-error,
+.dark .qms-occurrence-stage__message.is-error {
+  border-color: var(--qa-danger-border, rgba(239, 68, 68, 0.45));
+  background: var(--qa-danger-bg, #3a2226);
+  color: var(--qa-danger-ink, #fecaca);
+}
+
+html[data-color-scheme="dark"] .qms-occurrence-stage .is-ready,
+body[data-color-scheme="dark"] .qms-occurrence-stage .is-ready {
+  color: var(--qa-ok-ink, #a7f3d0);
+}
+
+html[data-color-scheme="dark"] .qms-audit-closing__error,
+body[data-color-scheme="dark"] .qms-audit-closing__error {
+  border-color: var(--qa-danger-border, rgba(239, 68, 68, 0.45));
+  background: var(--qa-danger-bg, #3a2226);
+  color: var(--qa-danger-ink, #fecaca);
+}
+
+/* Dashboard primary links — survive qa-dark-contrast chip flattening */
+html[data-color-scheme="dark"] .qa-dashboard .qa-dashboard-link-btn--primary,
+body[data-color-scheme="dark"] .qa-dashboard .qa-dashboard-link-btn--primary,
+[data-theme="dark"] .qa-dashboard .qa-dashboard-link-btn--primary,
+.dark .qa-dashboard .qa-dashboard-link-btn--primary,
+html[data-color-scheme="dark"] .qa-dashboard .btn--primary,
+body[data-color-scheme="dark"] .qa-dashboard .btn--primary,
+[data-theme="dark"] .qa-dashboard .btn--primary,
+.dark .qa-dashboard .btn--primary {
+  background: var(--accent-primary, #4f8cff) !important;
+  border-color: var(--accent-primary, #4f8cff) !important;
+  color: #fff !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard .qa-dashboard-link-btn--primary:hover,
+body[data-color-scheme="dark"] .qa-dashboard .qa-dashboard-link-btn--primary:hover,
+html[data-color-scheme="dark"] .qa-dashboard .btn--primary:hover,
+body[data-color-scheme="dark"] .qa-dashboard .btn--primary:hover {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 88%, #000) !important;
+  border-color: color-mix(in srgb, var(--accent-primary, #4f8cff) 88%, #000) !important;
+}
+
+/* Prepare workspace — card hierarchy */
+.qms-audit-prepare__card > header strong {
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.qms-audit-prepare__card > header small {
+  margin-top: 0.15rem;
+  color: var(--qms-muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+/* Closing workspace — locked cards stay readable */
+.qms-audit-closing__card.is-locked {
+  opacity: 1;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--qms-panel) 92%, var(--qms-muted));
+}
+
+.qms-audit-closing__card.is-locked > :not(.qms-audit-closing__locked) {
+  opacity: 0.78;
+}
+
+.qms-audit-closing__card.is-locked .qms-audit-closing__locked {
+  opacity: 1;
+}

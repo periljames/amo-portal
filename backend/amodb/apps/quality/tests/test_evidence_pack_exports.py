@@ -117,6 +117,19 @@ def test_audit_evidence_pack_contains_summary_and_findings(db_session):
     db_session.add(amo)
     db_session.commit()
     user = _create_user(db_session, amo_id=amo.id)
+    db_session.add(
+        quality_models.QMSAuditScope(
+            amo_id=amo.id,
+            code="MO",
+            name="Maintenance organisation",
+            party_level="FIRST_PARTY",
+            default_kind=quality_models.QMSAuditKind.INTERNAL,
+            is_active=True,
+            is_system_default=True,
+            created_by_user_id=user.id,
+        )
+    )
+    db_session.commit()
 
     audit_payload = quality_schemas.QMSAuditCreate(
         domain=quality_models.QMSDomain.AMO,

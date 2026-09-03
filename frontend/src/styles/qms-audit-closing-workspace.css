@@ -4,8 +4,8 @@
   z-index: 1195;
   display: grid;
   grid-template-rows: auto 1fr;
-  background: var(--surface, #f8fafc);
-  color: var(--text, #0f172a);
+  background: var(--qms-page);
+  color: var(--qms-text);
 }
 
 .qms-audit-closing--loading {
@@ -14,25 +14,111 @@
   font-weight: 700;
 }
 
+.qms-audit-closing--error,
+.qms-audit-prepare--error,
+.qms-live-audit-focus--error,
+.qms-audit-archive--error {
+  place-items: center;
+  align-content: center;
+  justify-items: center;
+  gap: 0.85rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  grid-template-rows: auto;
+}
+
+.qms-audit-stage-load-error__copy {
+  max-width: 28rem;
+}
+
+.qms-audit-stage-load-error__copy strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 0.35rem;
+}
+
+.qms-audit-stage-load-error__copy p {
+  margin: 0;
+  color: var(--qms-muted);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.qms-audit-stage-load-error__raw {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--qms-muted);
+}
+
+.qms-audit-stage-load-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.qms-audit-stage-load-error__actions button,
+.qms-audit-stage-load-error__actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--qms-radius);
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.qms-audit-stage-load-error__actions button.is-primary {
+  background: var(--qms-text);
+  border-color: var(--qms-text);
+  color: var(--qms-panel);
+}
+
 .qms-audit-closing__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--border, #d8dee8);
-  background: var(--surface, #fff);
+  border-bottom: 1px solid var(--qms-line);
+  background: color-mix(in srgb, var(--qms-panel) 96%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .qms-audit-closing__header span,
 .qms-audit-closing__card small,
 .qms-audit-closing__metrics span,
 .qms-audit-closing dt {
-  color: var(--text-muted, #64748b);
+  color: var(--qms-muted);
   font-size: 0.72rem;
 }
 
-.qms-audit-closing__header h1 { margin: 0.15rem 0 0; font-size: 1.15rem; }
+.qms-audit-closing__header h1 {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.3vw, 1.28rem);
+  font-weight: 740;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--qms-text);
+}
+
+.qms-audit-closing__helper {
+  margin: 0.25rem 0 0;
+  color: var(--qms-muted);
+  font-size: 0.78rem;
+  font-weight: 550;
+  line-height: 1.35;
+}
 .qms-audit-closing__header-actions { display: flex; gap: 0.5rem; align-items: center; }
 
 .qms-audit-closing button,
@@ -44,9 +130,9 @@
   gap: 0.35rem;
   min-height: 2.35rem;
   padding: 0.45rem 0.65rem;
-  border: 1px solid var(--border, #cbd5e1);
-  border-radius: 8px;
-  background: var(--surface, #fff);
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
   color: inherit;
   font: inherit;
   font-weight: 700;
@@ -54,8 +140,20 @@
 }
 
 .qms-audit-closing button.is-primary,
-.qms-audit-closing__continue { background: #0f172a; color: #fff; }
+.qms-audit-closing__continue {
+  background: var(--accent-primary, #2563eb);
+  border-color: var(--accent-primary, #2563eb);
+  color: #fff;
+}
 .qms-audit-closing button:disabled { opacity: 0.55; }
+
+.qms-audit-closing button.is-primary:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 38%, var(--qms-panel));
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 50%, var(--qms-line));
+  color: color-mix(in srgb, #fff 78%, var(--qms-muted));
+}
 
 .qms-audit-closing__error {
   position: absolute;
@@ -90,9 +188,40 @@
 
 .qms-audit-closing__card {
   padding: 0.9rem;
-  border: 1px solid var(--border, #d8dee8);
-  border-radius: 10px;
-  background: var(--surface, #fff);
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+  box-shadow: var(--qms-shadow);
+}
+
+.qms-audit-closing__card.is-current {
+  border-color: color-mix(in srgb, var(--accent, #3730a3) 45%, var(--qms-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #3730a3) 18%, transparent);
+}
+
+.qms-audit-closing__card.is-complete {
+  opacity: 0.88;
+}
+
+.qms-audit-closing__card.is-locked {
+  opacity: 1;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--qms-panel) 92%, var(--qms-muted));
+}
+
+.qms-audit-closing__card.is-locked .qms-audit-closing__actions,
+.qms-audit-closing__card.is-locked .is-primary,
+.qms-audit-closing__card.is-locked button {
+  pointer-events: none;
+}
+
+.qms-audit-closing__locked {
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-subtle) 88%, var(--qms-line));
+  color: var(--qms-muted);
+  font-size: 0.78rem;
 }
 
 .qms-audit-closing__card > header {
@@ -103,7 +232,16 @@
 }
 
 .qms-audit-closing__card > header strong,
+.qms-audit-closing__card > header h3,
 .qms-audit-closing__card > header small { display: block; }
+
+.qms-audit-closing__card > header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 740;
+  line-height: 1.25;
+  color: var(--qms-text);
+}
 
 .qms-audit-closing__metrics {
   display: grid;
@@ -114,8 +252,8 @@
 
 .qms-audit-closing__metrics div {
   padding: 0.55rem;
-  border-radius: 8px;
-  background: var(--surface-subtle, #f8fafc);
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle);
 }
 
 .qms-audit-closing__metrics strong,
@@ -129,7 +267,7 @@
   margin-top: 0.5rem;
   padding: 0.55rem;
   border-radius: 8px;
-  background: #fff7ed;
+  background: color-mix(in srgb, #f59e0b 12%, var(--qms-panel));
   color: #9a3412;
   font-size: 0.78rem;
 }
@@ -151,14 +289,14 @@
 .qms-audit-closing__artifact > div {
   min-width: 0;
   padding: 0.5rem;
-  border-radius: 7px;
-  background: var(--surface-subtle, #f8fafc);
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle);
 }
 
 .qms-audit-closing__artifact .is-wide { grid-column: 1 / -1; }
 .qms-audit-closing dd { margin: 0.15rem 0 0; font-weight: 700; }
 .qms-audit-closing code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7rem; }
-.qms-audit-closing__empty { color: var(--text-muted, #64748b); }
+.qms-audit-closing__empty { color: var(--qms-muted); }
 
 .qms-audit-closing__lifecycle {
   display: grid;
@@ -169,14 +307,14 @@
 
 .qms-audit-closing__lifecycle > div {
   padding: 0.55rem;
-  border-radius: 8px;
-  background: var(--surface-subtle, #f8fafc);
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle);
 }
 
 .qms-audit-closing__lifecycle span,
 .qms-audit-closing__lifecycle strong { display: block; }
-.qms-audit-closing__lifecycle span { color: var(--text-muted, #64748b); font-size: 0.68rem; }
-.qms-audit-closing__card > p { color: var(--text-muted, #64748b); font-size: 0.8rem; }
+.qms-audit-closing__lifecycle span { color: var(--qms-muted); font-size: 0.68rem; }
+.qms-audit-closing__card > p { color: var(--qms-muted); font-size: 0.8rem; }
 
 .qms-audit-closing__gates ul {
   display: grid;
@@ -191,8 +329,8 @@
   justify-content: space-between;
   gap: 0.55rem;
   padding: 0.55rem;
-  border-radius: 7px;
-  background: var(--surface-subtle, #f8fafc);
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle);
 }
 
 .qms-audit-closing__gates li[data-ready="true"] strong { color: #15803d; }

@@ -84,6 +84,82 @@ def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session,
     assert "manpower" in snapshot
 
 
+def test_dashboard_and_trends_are_strictly_tenant_scoped(db_session):
+    amo_a, _dept_a, user_a = _seed_amo_user(
+        db_session, "DASH-A", "dashboard-user-a", account_models.AccountRole.QUALITY_MANAGER
+    )
+    amo_b, _dept_b, user_b = _seed_amo_user(
+        db_session, "DASH-B", "dashboard-user-b", account_models.AccountRole.QUALITY_MANAGER
+    )
+    today = date.today()
+
+    def seed_quality_rows(amo, user, suffix: str, count: int):
+        audit_ids = []
+        for index in range(count):
+            document = quality_models.QMSDocument(
+                amo_id=amo.id,
+                domain=quality_models.QMSDomain.AMO,
+                doc_type=quality_models.QMSDocType.MANUAL,
+                doc_code=f"DOC-{suffix}-{index}",
+                title=f"Document {suffix} {index}",
+                status=quality_models.QMSDocStatus.ACTIVE,
+                created_by_user_id=user.id,
+            )
+            change = quality_models.QMSManualChangeRequest(
+                amo_id=amo.id,
+                domain=quality_models.QMSDomain.AMO,
+                petitioner_name="Quality User",
+                manual_title=f"Manual {suffix} {index}",
+                change_request_text="Controlled change required",
+                created_by_user_id=user.id,
+            )
+            audit = quality_models.QMSAudit(
+                amo_id=amo.id,
+                domain=quality_models.QMSDomain.AMO,
+                kind=quality_models.QMSAuditKind.INTERNAL,
+                status=quality_models.QMSAuditStatus.CLOSED,
+                audit_ref=f"QAR/{suffix}/26/{index + 1:03d}",
+                reference_family="QAR",
+                unit_code=suffix,
+                ref_year=26,
+                ref_sequence=index + 1,
+                title=f"Audit {suffix} {index}",
+                actual_end=today,
+                created_by_user_id=user.id,
+            )
+            db_session.add_all([document, change, audit])
+            db_session.flush()
+            db_session.add(quality_models.QMSAuditFinding(
+                amo_id=amo.id,
+                audit_id=audit.id,
+                finding_ref=f"F-{suffix}-{index}",
+                finding_type=quality_models.QMSFindingType.NON_CONFORMITY,
+                severity=quality_models.QMSFindingSeverity.MINOR,
+                level=quality_models.FindingLevel.LEVEL_3,
+                description="Tenant-scoped finding",
+                created_by_user_id=user.id,
+            ))
+            audit_ids.append(str(audit.id))
+        return audit_ids
+
+    audit_ids_a = seed_quality_rows(amo_a, user_a, "DA", 1)
+    seed_quality_rows(amo_b, user_b, "DB", 2)
+    db_session.commit()
+    quality_service._PERF_CACHE.clear()
+
+    dashboard_a = quality_service.get_dashboard(db_session, amo_id=amo_a.id)
+    assert dashboard_a["documents_total"] == 1
+    assert dashboard_a["change_requests_total"] == 1
+    assert dashboard_a["audits_total"] == 1
+    assert dashboard_a["findings_open_total"] == 1
+
+    closure = quality_service._build_audit_closure_trend(db_session, amo_id=amo_a.id)
+    assert sum(point["closed_count"] for point in closure) == 1
+    assert [audit_id for point in closure for audit_id in point["audit_ids"]] == audit_ids_a
+    finding_trend = quality_service._build_most_common_finding_trend_12m(db_session, amo_id=amo_a.id)
+    assert sum(point["count"] for point in finding_trend) == 1
+
+
 def test_cockpit_snapshot_manpower_and_tenant_scoping(db_session, monkeypatch):
     amo_a, _dept_a, user_a = _seed_amo_user(db_session, "A1", "user-a", account_models.AccountRole.QUALITY_MANAGER)
     amo_b, _dept_b, user_b = _seed_amo_user(db_session, "B1", "user-b", account_models.AccountRole.TECHNICIAN)

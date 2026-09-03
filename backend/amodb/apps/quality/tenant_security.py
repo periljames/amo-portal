@@ -6,6 +6,7 @@ from typing import Callable, Optional
 
 from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
@@ -133,7 +134,7 @@ def _has_role_permission(user: account_models.User, permission: str) -> bool:
 
 
 def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permission: str) -> Optional[bool]:
-    """Return True/False when authz tables are usable, or None when not configured."""
+    """Return an explicit grant result; fail closed when the auth store is unhealthy."""
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return None
@@ -169,8 +170,11 @@ def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permis
             {"amo_id": amo_id, "user_id": user_id, "permission": permission},
         ).first()
         return bool(allowed)
-    except Exception:
-        return None
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Quality authorization could not be verified.",
+        ) from exc
 
 
 def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
@@ -321,7 +325,11 @@ def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> 
     """Return whether the resolved tenant user/support session has a Quality permission."""
     if ctx.is_superuser:
         return _support_level_allows(ctx.support_access_level, permission)
-    user = db.query(account_models.User).filter(account_models.User.id == ctx.user_id).first()
+    user = db.query(account_models.User).filter(
+        account_models.User.id == ctx.user_id,
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.is_active.is_(True),
+    ).first()
     if not user or _is_platform_superuser(user):
         return False
     capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)

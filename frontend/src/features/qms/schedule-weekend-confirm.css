@@ -1,0 +1,305 @@
+.qms-weekend-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.qms-weekend-confirm {
+  width: min(38rem, 100%);
+  border: 1px solid var(--qms-line, #d7dee8);
+  border-radius: 0.7rem;
+  background: var(--qms-panel, #fff);
+  color: var(--text-primary, #0f172a);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+}
+
+.qms-weekend-confirm > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border-bottom: 1px solid var(--qms-line, #d7dee8);
+}
+
+.qms-weekend-confirm > header span {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+.qms-weekend-confirm > header strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1rem;
+}
+
+.qms-weekend-confirm > header button,
+.qms-weekend-confirm__choice,
+.qms-weekend-confirm > footer button {
+  border: 1px solid var(--qms-line, #d7dee8);
+  border-radius: 0.45rem;
+  background: var(--qms-page, #f8fafc);
+  color: inherit;
+  cursor: pointer;
+}
+
+.qms-weekend-confirm > header button {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.qms-weekend-confirm__message {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.95rem 0.35rem;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.qms-weekend-confirm__visual {
+  margin: 0.35rem 0.95rem 0.55rem;
+  padding: 0.7rem 0.75rem 0.65rem;
+  border: 1px solid var(--qms-line, #d7dee8);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--qms-page, #f8fafc) 88%, var(--qms-panel, #fff));
+}
+
+.qms-weekend-confirm__visual-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.qms-weekend-confirm__visual-meta span {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+.qms-weekend-confirm__visual-meta strong {
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-weekend-confirm__strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-height: 3.4rem;
+}
+
+.qms-weekend-confirm__day {
+  display: grid;
+  place-items: center;
+  gap: 0.1rem;
+  min-width: 2.55rem;
+  padding: 0.35rem 0.4rem 0.4rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--qms-line, #d7dee8);
+  background: var(--qms-panel, #fff);
+  transform-origin: center bottom;
+  transition:
+    transform 280ms ease,
+    opacity 280ms ease,
+    background-color 280ms ease,
+    border-color 280ms ease,
+    box-shadow 280ms ease;
+}
+
+.qms-weekend-confirm__day-name {
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+.qms-weekend-confirm__day-num {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.qms-weekend-confirm__day.is-work {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 35%, var(--qms-line, #d7dee8));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 10%, var(--qms-panel, #fff));
+}
+
+.qms-weekend-confirm__day.is-weekend-work {
+  border-color: color-mix(in srgb, #b45309 42%, var(--qms-line, #d7dee8));
+  background: color-mix(in srgb, #f59e0b 18%, var(--qms-panel, #fff));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 25%, transparent);
+}
+
+.qms-weekend-confirm__day.is-weekend-work .qms-weekend-confirm__day-name {
+  color: #92400e;
+}
+
+.qms-weekend-confirm__day.is-skipped {
+  opacity: 0.28;
+  transform: scale(0.86) translateY(0.15rem);
+  border-style: dashed;
+  background: transparent;
+  filter: grayscale(0.35);
+}
+
+.qms-weekend-confirm__day.is-rolled {
+  border-color: color-mix(in srgb, #0f766e 40%, var(--qms-line, #d7dee8));
+  background: color-mix(in srgb, #14b8a6 14%, var(--qms-panel, #fff));
+  animation: qms-weekend-day-roll-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.qms-weekend-confirm__day.is-muted {
+  opacity: 0.35;
+}
+
+.qms-weekend-confirm__visual-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0.55rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-secondary, #64748b);
+}
+
+.qms-weekend-confirm__visual-hint svg {
+  flex: 0 0 auto;
+  margin-top: 0.12rem;
+}
+
+.qms-weekend-confirm__choices {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.45rem 0.95rem 0.85rem;
+}
+
+.qms-weekend-confirm__choice {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.qms-weekend-confirm__choice.is-preview,
+.qms-weekend-confirm__choice:hover,
+.qms-weekend-confirm__choice:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 45%, var(--qms-line, #d7dee8));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--qms-page, #f8fafc));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary, #2563eb) 18%, transparent);
+}
+
+.qms-weekend-confirm__choice.is-skip.is-preview,
+.qms-weekend-confirm__choice.is-skip:hover,
+.qms-weekend-confirm__choice.is-skip:focus-visible {
+  border-color: color-mix(in srgb, #0f766e 45%, var(--qms-line, #d7dee8));
+  background: color-mix(in srgb, #14b8a6 10%, var(--qms-page, #f8fafc));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #0f766e 18%, transparent);
+}
+
+.qms-weekend-confirm__choice strong {
+  display: block;
+  font-size: 0.86rem;
+}
+
+.qms-weekend-confirm__choice small {
+  display: block;
+  margin-top: 0.2rem;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-weekend-confirm > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.7rem 0.95rem;
+  border-top: 1px solid var(--qms-line, #d7dee8);
+}
+
+.qms-weekend-confirm > footer button {
+  min-height: 2.2rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+@keyframes qms-weekend-day-roll-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.65rem) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qms-weekend-confirm__day,
+  .qms-weekend-confirm__choice {
+    transition: none;
+  }
+
+  .qms-weekend-confirm__day.is-rolled {
+    animation: none;
+  }
+}
+
+[data-theme="dark"] .qms-weekend-confirm,
+.theme-dark .qms-weekend-confirm {
+  background: var(--qms-panel, #1c1f24);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+[data-theme="dark"] .qms-weekend-confirm__visual,
+.theme-dark .qms-weekend-confirm__visual {
+  background: color-mix(in srgb, #111418 70%, var(--qms-panel, #1c1f24));
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .qms-weekend-confirm__day,
+.theme-dark .qms-weekend-confirm__day {
+  background: #22252b;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .qms-weekend-confirm__day.is-weekend-work,
+.theme-dark .qms-weekend-confirm__day.is-weekend-work {
+  background: color-mix(in srgb, #f59e0b 16%, #22252b);
+  border-color: color-mix(in srgb, #f59e0b 35%, rgba(255, 255, 255, 0.12));
+}
+
+[data-theme="dark"] .qms-weekend-confirm__day.is-weekend-work .qms-weekend-confirm__day-name,
+.theme-dark .qms-weekend-confirm__day.is-weekend-work .qms-weekend-confirm__day-name {
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .qms-weekend-confirm__day.is-rolled,
+.theme-dark .qms-weekend-confirm__day.is-rolled {
+  background: color-mix(in srgb, #14b8a6 16%, #22252b);
+  border-color: color-mix(in srgb, #2dd4bf 35%, rgba(255, 255, 255, 0.12));
+}
+

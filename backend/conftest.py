@@ -79,6 +79,8 @@ def db_session():
             quality_models.QMSDocument.__table__,
             quality_models.QMSDocumentRevision.__table__,
             quality_models.QMSDocumentDistribution.__table__,
+            quality_models.QMSManualChangeRequest.__table__,
+            quality_models.QMSAuditScope.__table__,
             quality_models.QMSAuditReferenceCounter.__table__,
             quality_models.QMSAuditSchedule.__table__,
             quality_models.QMSAudit.__table__,

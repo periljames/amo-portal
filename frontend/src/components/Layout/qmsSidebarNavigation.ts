@@ -72,8 +72,8 @@ export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
 ] as const;
 
 export const QMS_CALENDAR_DESTINATIONS: readonly QmsRegisteredDestination[] = [
-  { id: "calendar-month", label: "Month", moduleId: "calendar", view: "month", keywords: "calendar dates planner" },
   { id: "calendar-week", label: "Week", moduleId: "calendar", view: "week", keywords: "calendar dates planner" },
+  { id: "calendar-month", label: "Month", moduleId: "calendar", view: "month", keywords: "calendar dates planner" },
   { id: "calendar-year", label: "Year", moduleId: "calendar", view: "year", keywords: "calendar programme annual" },
   { id: "calendar-agenda", label: "Agenda", moduleId: "calendar", view: "list", keywords: "list upcoming deadlines" },
   { id: "calendar-audits", label: "Audit dates", moduleId: "calendar", view: "audits", keywords: "audit schedule inspection" },
@@ -346,7 +346,7 @@ function createPanel(
     },
     {
       id: "quick-calendar",
-      label: "Planner",
+      label: "Calendar",
       path: qmsModulePath(amoCode, "calendar", "week"),
       activeMode: "prefix",
       matchPrefixes: [`${basePath}/calendar`],

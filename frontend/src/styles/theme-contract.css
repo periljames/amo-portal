@@ -12,17 +12,17 @@
   --portal-surface: var(--surface);
   --portal-surface-raised: var(--surface-elevated);
   --portal-surface-muted: var(--surface-soft);
-  --portal-surface-hover: color-mix(in srgb, var(--surface-elevated) 82%, var(--text-primary) 6%);
+  --portal-surface-hover: var(--surface-hover, rgba(255, 255, 255, 0.065));
   --portal-control-bg: var(--input-bg);
   --portal-control-bg-focus: var(--input-bg-focus);
   --portal-control-bg-disabled: color-mix(in srgb, var(--input-bg) 78%, var(--text-muted) 10%);
   --portal-control-text: var(--text-primary);
   --portal-control-placeholder: var(--input-placeholder);
-  --portal-table-head: color-mix(in srgb, var(--surface-elevated) 95%, transparent);
-  --portal-row-hover: color-mix(in srgb, var(--surface-soft) 80%, var(--text-primary) 5%);
-  --portal-overlay: color-mix(in srgb, var(--bg-base-alt) 72%, transparent);
+  --portal-table-head: rgba(255, 255, 255, 0.035);
+  --portal-row-hover: rgba(255, 255, 255, 0.045);
+  --portal-overlay: rgba(0, 0, 0, 0.52);
   --portal-focus: color-mix(in srgb, var(--accent-primary) 45%, transparent);
-  --portal-shadow: 0 18px 42px color-mix(in srgb, #020617 30%, transparent);
+  --portal-shadow: var(--shadow-float, 0 24px 64px rgba(0, 0, 0, 0.45));
 }
 
 body[data-color-scheme="light"] {
@@ -52,7 +52,8 @@ body :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"])
 
 body :where(input, textarea)::placeholder {
   color: var(--portal-control-placeholder);
-  opacity: 1;
+  -webkit-text-fill-color: var(--portal-control-placeholder);
+  opacity: 0.7;
 }
 
 body :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {

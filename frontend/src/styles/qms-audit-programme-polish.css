@@ -1,0 +1,576 @@
+/* Audit Programme page — UX polish pass (drawers, CTAs, tab panels) */
+
+.qms-audit-programme-flow {
+  --qms-cta-bg: var(--accent-primary, #2563eb);
+  --qms-cta-fg: #fff;
+  --qms-cta-border: var(--accent-primary, #2563eb);
+  --qms-cta-hover-bg: color-mix(in srgb, var(--accent-primary, #2563eb) 86%, #000);
+}
+
+/* Context bar — compact secondary info, grouped actions */
+.qms-audit-programme-flow__context-actions-secondary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.qms-audit-programme-flow__sticky-actions {
+  gap: 0.55rem;
+}
+
+.qms-audit-programme-flow__info-btn.is-secondary {
+  border: none;
+  background: transparent;
+  color: var(--qms-muted);
+  padding: 0.35rem 0.45rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--qms-muted) 55%, transparent);
+}
+
+.qms-audit-programme-flow__info-btn.is-secondary:hover:not(:disabled),
+.qms-audit-programme-flow__info-btn.is-secondary:focus-visible {
+  color: inherit;
+  background: transparent;
+  text-decoration-color: currentColor;
+}
+
+.qms-audit-programme-flow__planner-link.is-secondary,
+.qms-audit-programme-flow__sticky-actions > button:not(.is-primary),
+.qms-audit-programme-flow__sticky-actions > label {
+  font-size: 0.78rem;
+}
+
+.qms-audit-programme-flow__planner-link.is-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.qms-audit-programme-flow__tabs button {
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.qms-audit-programme-flow__detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--qms-line-soft);
+}
+
+.qms-audit-programme-flow__detail-toolbar h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.qms-audit-programme-flow__drawer-note.is-compact {
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--qms-line-soft);
+  border-radius: 6px;
+  background: var(--qms-page);
+}
+
+.qms-audit-programme-flow__drawer-advanced {
+  grid-column: 1 / -1;
+  border: 1px solid var(--qms-line-soft);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  background: var(--qms-page);
+}
+
+.qms-audit-programme-flow__drawer-advanced > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--qms-muted);
+  list-style-position: outside;
+}
+
+.qms-audit-programme-flow__drawer-advanced-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.qms-audit-programme-flow__drawer-advanced-body > .is-wide,
+.qms-audit-programme-flow__drawer-advanced-body > .is-checkbox {
+  grid-column: 1 / -1;
+}
+
+.qms-audit-programme-flow__readiness-stats--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Detail header action rail */
+.qms-audit-programme-flow__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.qms-audit-programme-flow__detail-actions button.is-secondary,
+.qms-audit-programme-flow__row-actions button.is-secondary {
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.76rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.qms-audit-programme-flow__detail-actions button.is-secondary:hover:not(:disabled),
+.qms-audit-programme-flow__row-actions button.is-secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 35%, var(--qms-line));
+  background: var(--qms-hover);
+}
+
+.qms-audit-programme-flow__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.qms-audit-programme-flow__row-actions .is-schedule,
+.qms-audit-programme-flow__row-actions button.is-schedule {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 45%, var(--qms-line));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 12%, var(--qms-panel));
+  font-weight: 650;
+}
+
+/* Primary / secondary buttons in flow */
+.qms-audit-programme-flow button.is-primary {
+  background: var(--qms-cta-bg);
+  border: 1px solid var(--qms-cta-border);
+  color: var(--qms-cta-fg);
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--qms-cta-bg) 28%, transparent);
+}
+
+.qms-audit-programme-flow button.is-primary:hover:not(:disabled),
+.qms-audit-programme-flow button.is-primary:focus-visible {
+  background: var(--qms-cta-hover-bg);
+  border-color: var(--qms-cta-hover-bg);
+  color: var(--qms-cta-fg);
+}
+
+.qms-audit-programme-flow button.is-primary:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--qms-cta-bg) 38%, var(--qms-panel));
+  border-color: color-mix(in srgb, var(--qms-cta-border) 50%, var(--qms-line));
+  color: color-mix(in srgb, #fff 78%, var(--qms-muted));
+  box-shadow: none;
+}
+
+.qms-audit-programme-flow button.is-secondary {
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.qms-audit-programme-flow button.is-secondary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 35%, var(--qms-line));
+  background: var(--qms-hover);
+}
+
+/* Approval panel — simplified */
+.qms-audit-programme-flow__readiness {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  background: var(--qms-page);
+}
+
+.qms-audit-programme-flow__readiness.is-ready {
+  border-left: 4px solid var(--qa-ok-border, #10b981);
+  background: color-mix(in srgb, var(--qa-ok-bg, #ecfdf5) 55%, var(--qms-page));
+}
+
+.qms-audit-programme-flow__readiness.is-blocked {
+  border-left: 4px solid var(--qa-warn-border, #f59e0b);
+  background: color-mix(in srgb, var(--qa-warn-bg, #fffbeb) 45%, var(--qms-page));
+}
+
+.qms-audit-programme-flow__readiness > div:first-child {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.qms-audit-programme-flow__readiness > div:first-child > span {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.qms-audit-programme-flow__readiness ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--qms-muted);
+}
+
+.qms-audit-programme-flow__readiness-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qms-audit-programme-flow__readiness-stats article {
+  border: 1px solid var(--qms-line-soft);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: var(--qms-panel);
+  display: grid;
+  gap: 0.15rem;
+}
+
+.qms-audit-programme-flow__readiness-stats article > span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--qms-muted);
+}
+
+.qms-audit-programme-flow__readiness-stats article > strong {
+  font-size: 1.05rem;
+}
+
+.qms-audit-programme-flow__readiness-stats article > small {
+  font-size: 0.72rem;
+  color: var(--qms-muted);
+}
+
+.qms-audit-programme-flow__approval-panel {
+  border: 1px solid var(--qms-line);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  background: var(--qms-panel);
+  display: grid;
+  gap: 0.65rem;
+}
+
+.qms-audit-programme-flow__approval-panel p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--qms-muted);
+}
+
+.qms-audit-programme-flow__approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.qms-audit-programme-flow__approval-actions input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  border: 1px solid var(--qms-line);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.8rem;
+  background: var(--qms-page);
+  color: inherit;
+}
+
+/* Coverage panel inside workspace */
+.qms-audit-programme-flow__coverage-panel {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.qms-audit-programme-flow__coverage-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.qms-audit-programme-flow__coverage-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.qms-audit-programme-flow__coverage-header p {
+  margin: 0.15rem 0 0;
+  font-size: 0.76rem;
+  color: var(--qms-muted);
+}
+
+/* Programme drawers — centered workspace modals (not edge slide-ins) */
+.drawer-overlay--right:has(.qms-audit-programme-drawer) {
+  z-index: 120;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--tenant-topbar-height, 50px) + var(--s-3)) var(--s-4) var(--s-4);
+  padding-left: calc(var(--tenant-sidebar-width, var(--sidebar-width, 260px)) + var(--s-4));
+}
+
+.tenant-shell--pinned .drawer-overlay--right:has(.qms-audit-programme-drawer) {
+  padding-left: calc(var(--tenant-sidebar-width, 284px) + var(--s-4));
+}
+
+.drawer-overlay--right.drawer-overlay--open:has(.qms-audit-programme-drawer) {
+  background: rgba(2, 6, 23, 0.48);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.drawer-overlay--right:has(.qms-audit-programme-drawer) .drawer-panel {
+  width: min(560px, calc(100vw - var(--tenant-sidebar-width, 284px) - 4rem));
+  max-width: min(560px, calc(100vw - var(--tenant-sidebar-width, 284px) - 4rem));
+  max-height: min(88dvh, 920px);
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 150ms ease;
+}
+
+.drawer-overlay--right:has(.qms-audit-programme-drawer--schedule) .drawer-panel {
+  width: min(720px, calc(100vw - var(--tenant-sidebar-width, 284px) - 4rem));
+  max-width: min(720px, calc(100vw - var(--tenant-sidebar-width, 284px) - 4rem));
+}
+
+.drawer-overlay--right.drawer-overlay--open:has(.qms-audit-programme-drawer) .drawer-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Drawer shell — flex column; body scrolls, footer stays compact at bottom */
+.qms-audit-programme-drawer.drawer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  max-height: min(88dvh, 920px);
+  overflow: hidden;
+  background: var(--qms-panel, var(--surface));
+  border-color: var(--qms-line, var(--border));
+  color: var(--qms-text, inherit);
+}
+
+.qms-audit-programme-drawer.drawer-panel .drawer__header {
+  flex: 0 0 auto;
+  border-bottom-color: var(--qms-line-soft, var(--border));
+}
+
+.qms-audit-programme-drawer.drawer-panel .drawer__title {
+  color: var(--qms-text, inherit);
+}
+
+.qms-audit-programme-drawer.drawer-panel > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qms-audit-programme-drawer.drawer-panel > .qms-audit-programme-drawer__body,
+.qms-audit-programme-drawer.drawer-panel > .qms-audit-programme-drawer__footer {
+  flex-shrink: 0;
+}
+
+.qms-audit-programme-drawer.drawer-panel > .qms-audit-programme-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.qms-audit-programme-drawer__body:has(.qms-audit-programme-flow__drawer-summary) {
+  display: block;
+}
+
+.qms-audit-programme-drawer--info .qms-audit-programme-flow__queue header button.is-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.76rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.qms-audit-programme-drawer__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 0.75rem;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-4);
+  padding-top: var(--s-3);
+}
+
+.qms-audit-programme-drawer__body > .is-wide,
+.qms-audit-programme-drawer__body > .qms-audit-programme-flow__drawer-note,
+.qms-audit-programme-drawer__body > .qms-audit-programme-flow__drawer-advanced,
+.qms-audit-programme-drawer__body > .qms-audit-programme-flow__drawer-summary {
+  grid-column: 1 / -1;
+}
+
+.qms-audit-programme-drawer__footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  padding: 0.75rem var(--s-4) var(--s-4);
+  border-top: 1px solid var(--qms-line-soft);
+  background: var(--qms-panel);
+}
+
+.qms-audit-programme-drawer__footer button {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 0;
+  align-self: center;
+}
+
+.qms-audit-programme-drawer .qms-audit-programme__form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.qms-audit-programme-drawer .qms-audit-programme__form > footer {
+  display: none;
+}
+
+.qms-audit-programme-drawer button.is-primary {
+  background: var(--qms-cta-bg, var(--accent-primary, #2563eb));
+  border: 1px solid var(--qms-cta-border, var(--accent-primary, #2563eb));
+  color: var(--qms-cta-fg, #fff);
+}
+
+.qms-audit-programme-drawer button.is-secondary {
+  border: 1px solid var(--qms-line);
+  background: var(--qms-panel);
+  color: inherit;
+}
+
+/* Create programme — full-width fields in body grid */
+.qms-audit-programme-flow__create-drawer .qms-audit-programme-drawer__body label:not(.is-wide) {
+  grid-column: span 1;
+}
+
+.qms-audit-programme-flow__create-drawer .qms-audit-programme-flow__drawer-note {
+  font-size: 0.76rem;
+  color: var(--qms-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Dark mode — button contrast */
+html[data-color-scheme="dark"] .qms-audit-programme-flow button.is-secondary,
+body[data-color-scheme="dark"] .qms-audit-programme-flow button.is-secondary,
+[data-theme="dark"] .qms-audit-programme-flow button.is-secondary,
+html[data-color-scheme="dark"] .qms-audit-programme-drawer button.is-secondary,
+body[data-color-scheme="dark"] .qms-audit-programme-drawer button.is-secondary,
+[data-theme="dark"] .qms-audit-programme-drawer button.is-secondary {
+  border-color: color-mix(in srgb, var(--qms-line) 85%, #fff 15%);
+  background: color-mix(in srgb, var(--qms-panel) 88%, #fff 12%);
+  color: var(--qms-text, inherit);
+}
+
+html[data-color-scheme="dark"] .qms-audit-programme-flow__info-btn.is-secondary,
+body[data-color-scheme="dark"] .qms-audit-programme-flow__info-btn.is-secondary,
+[data-theme="dark"] .qms-audit-programme-flow__info-btn.is-secondary {
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--qms-muted) 90%, #fff 10%);
+}
+
+html[data-color-scheme="dark"] .qms-audit-programme-drawer.drawer-panel,
+body[data-color-scheme="dark"] .qms-audit-programme-drawer.drawer-panel,
+[data-theme="dark"] .qms-audit-programme-drawer.drawer-panel {
+  background: var(--qms-panel);
+  border-color: var(--qms-line);
+}
+
+html[data-color-scheme="dark"] .qms-audit-programme-flow button.is-primary,
+body[data-color-scheme="dark"] .qms-audit-programme-flow button.is-primary,
+[data-theme="dark"] .qms-audit-programme-flow button.is-primary {
+  background: var(--accent-primary, #4f8cff);
+  border-color: var(--accent-primary, #4f8cff);
+  color: #fff;
+}
+
+html[data-color-scheme="dark"] .qms-audit-programme-flow__readiness.is-ready,
+body[data-color-scheme="dark"] .qms-audit-programme-flow__readiness.is-ready {
+  border-color: var(--qa-ok-border, rgba(16, 185, 129, 0.42));
+  background: var(--qa-ok-bg, #1e322c);
+  color: var(--qa-ok-ink, #a7f3d0);
+}
+
+html[data-color-scheme="dark"] .qms-audit-programme-flow__readiness.is-blocked,
+body[data-color-scheme="dark"] .qms-audit-programme-flow__readiness.is-blocked {
+  border-color: var(--qa-warn-border, rgba(245, 158, 11, 0.42));
+  background: color-mix(in srgb, #3a2e1a 70%, var(--qms-page));
+}
+
+@media (max-width: 720px) {
+  .qms-audit-programme-flow__readiness-stats,
+  .qms-audit-programme-flow__readiness-stats--two {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-programme-flow__drawer-advanced-body,
+  .qms-audit-programme-drawer__body {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-overlay--right:has(.qms-audit-programme-drawer) {
+    padding: calc(var(--app-header-offset, 0px) + var(--s-2)) var(--s-2) var(--s-2);
+    padding-left: var(--s-2);
+  }
+
+  .drawer-overlay--right:has(.qms-audit-programme-drawer) .drawer-panel {
+    width: min(100%, calc(100vw - 1rem));
+    max-width: min(100%, calc(100vw - 1rem));
+  }
+}

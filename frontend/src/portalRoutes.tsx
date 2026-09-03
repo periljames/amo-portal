@@ -189,8 +189,10 @@ const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/Publ
 const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 
 const QualityAuditAssuranceDashboardPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditAssuranceDashboardPage"));
+const QualityAuditsWorkspacePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditsWorkspacePage"));
 const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditPlanSchedulePage"));
 const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
+const QualityFindingDetailPage = lazyDefault(() => import("./pages/qualityAudits/QualityFindingDetailPage"));
 const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
 const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
 const QualityEvidenceViewerPage = lazyDefault(() => import("./pages/QualityEvidenceViewerPage"));
@@ -786,15 +788,22 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditAssuranceDashboardPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/dashboard" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditAssuranceDashboardPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/workspace" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditsWorkspacePage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/program" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/program/:programmeId/items/:itemId/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/checklists" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../../calendar/week" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
+      {/* Authoritative schedule create/edit (weekend confirmation lives here). Do not redirect to calendar. */}
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../plan" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRegisterPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/findings-actions" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../register?tab=findings" replace /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/bin" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRecycleBinPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScheduleDetailPage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/quality/findings" element={<RequireAuth><RequireQmsPermission permission="qms.finding.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/findings/register" element={<RequireAuth><RequireQmsPermission permission="qms.finding.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/findings/:findingId/overview" element={<RequireAuth><RequireQmsPermission permission="qms.finding.view"><QualityFindingDetailPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/cars" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/cars/register" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />

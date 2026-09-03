@@ -116,8 +116,15 @@ export function getQmsPeopleSummary(amoCode: string, signal?: AbortSignal): Prom
   return apiRequest<QmsPeopleSummary>(qmsPath(amoCode, "/people/summary"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
 }
 
-export function listQmsPrivilegeRules(amoCode: string, signal?: AbortSignal): Promise<{ items: QmsPrivilegeRule[] }> {
-  return apiRequest<{ items: QmsPrivilegeRule[] }>(qmsPath(amoCode, "/people/rules"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+export function listQmsPrivilegeRules(
+  amoCode: string,
+  options: { includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<{ items: QmsPrivilegeRule[] }> {
+  const params = new URLSearchParams();
+  if (options.includeInactive) params.set("include_inactive", "true");
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{ items: QmsPrivilegeRule[] }>(qmsPath(amoCode, `/people/rules${suffix}`), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
 }
 
 export function createQmsPrivilegeRule(
@@ -134,6 +141,48 @@ export function createQmsPrivilegeRule(
   },
 ): Promise<QmsPrivilegeRule> {
   return apiRequest<QmsPrivilegeRule>(qmsPath(amoCode, "/people/rules"), jsonOptions("POST", payload));
+}
+
+export function updateQmsPrivilegeRule(
+  amoCode: string,
+  ruleId: string,
+  payload: {
+    title?: string;
+    description?: string | null;
+    required_training_course_codes?: string[];
+    independence_required?: boolean;
+    max_concurrent_assignments?: number | null;
+    scope_schema?: Record<string, unknown>;
+    is_active?: boolean;
+  },
+): Promise<QmsPrivilegeRule> {
+  return apiRequest<QmsPrivilegeRule>(qmsPath(amoCode, `/people/rules/${encodeURIComponent(ruleId)}`), jsonOptions("PATCH", payload));
+}
+
+export type QmsIndependenceDeclaration = {
+  id: string;
+  user_id: string;
+  context_type: "AUDIT" | "AUDIT_SCHEDULE" | "PROGRAMME_ITEM" | "ASSURANCE_CASE" | "MISSION" | "OTHER";
+  context_id: string;
+  declaration: "INDEPENDENT" | "CONFLICT" | "REQUIRES_REVIEW";
+  relationship_to_subject?: string | null;
+  rationale: string;
+  source_references: Array<Record<string, unknown>>;
+  declared_by_user_id?: string | null;
+  declared_at: string;
+};
+
+export function listQmsIndependenceDeclarations(
+  amoCode: string,
+  options: { userId?: string; contextType?: string; contextId?: string } = {},
+  signal?: AbortSignal,
+): Promise<{ items: QmsIndependenceDeclaration[] }> {
+  const params = new URLSearchParams();
+  if (options.userId) params.set("user_id", options.userId);
+  if (options.contextType) params.set("context_type", options.contextType);
+  if (options.contextId) params.set("context_id", options.contextId);
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<{ items: QmsIndependenceDeclaration[] }>(qmsPath(amoCode, `/people/independence${suffix}`), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
 }
 
 export function listQmsPrivileges(

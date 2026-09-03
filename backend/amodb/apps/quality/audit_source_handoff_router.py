@@ -12,7 +12,7 @@ from amodb.database import get_read_db, get_write_db
 from .audit_source_link_models import QualityAuditSourceLink
 from .intelligence_models import QualitySignalObservation, QualitySignalRule
 from .mission_models import QualityMission
-from .planner_assignment_guard_router import create_guarded_planner_audit_schedule
+from .planner_assignment_guard_router import _create_guarded_planner_audit_schedule
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 from .planner_schedule_router import PlannerAuditScheduleCreate, PlannerAuditScheduleResponse
 from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
@@ -41,7 +41,7 @@ def _record_link(db: Session, *, ctx: TenantContext, schedule_id: str, source_ty
         source_id=source_id, source_route=source_route, rationale=rationale.strip(),
         source_snapshot=source_snapshot, created_by_user_id=ctx.user_id,
     ))
-    db.commit()
+    db.flush()
 
 
 def _mission_snapshot(mission: QualityMission) -> dict[str, Any]:
@@ -102,12 +102,19 @@ def create_mission_audit_handoff(
         raise HTTPException(status_code=404, detail="Quality Mission not found.")
     if mission.status == "CANCELLED":
         raise HTTPException(status_code=409, detail="A cancelled Mission cannot generate an audit handoff.")
-    schedule = create_guarded_planner_audit_schedule(payload=payload.schedule, request=request, ctx=ctx, db=db)
+    schedule = _create_guarded_planner_audit_schedule(
+        payload=payload.schedule,
+        request=request,
+        ctx=ctx,
+        db=db,
+        commit=False,
+    )
     _record_link(
         db, ctx=ctx, schedule_id=str(schedule.id), source_type="MISSION", source_id=str(mission.id),
         source_route=f"/maintenance/{ctx.amo_code}/quality?workspace=missions&mission={mission.id}",
         rationale=payload.rationale, source_snapshot=_mission_snapshot(mission),
     )
+    db.commit()
     return schedule
 
 
@@ -128,10 +135,17 @@ def create_signal_audit_handoff(
     rule = db.query(QualitySignalRule).filter(
         QualitySignalRule.amo_id == ctx.amo_id, QualitySignalRule.id == signal.rule_id,
     ).first()
-    schedule = create_guarded_planner_audit_schedule(payload=payload.schedule, request=request, ctx=ctx, db=db)
+    schedule = _create_guarded_planner_audit_schedule(
+        payload=payload.schedule,
+        request=request,
+        ctx=ctx,
+        db=db,
+        commit=False,
+    )
     _record_link(
         db, ctx=ctx, schedule_id=str(schedule.id), source_type="SIGNAL", source_id=str(signal.id),
         source_route=f"/maintenance/{ctx.amo_code}/quality?workspace=intelligence&signal={signal.id}",
         rationale=payload.rationale, source_snapshot=_signal_snapshot(signal, rule),
     )
+    db.commit()
     return schedule

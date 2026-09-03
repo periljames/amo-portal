@@ -1,0 +1,494 @@
+/* Setup stage — flat page stack (same lineage as Prepare). */
+
+.qms-audit-setup-stage {
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--qms-line);
+}
+
+.qms-audit-setup-stage__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.qms-audit-setup-stage__title {
+  margin: 0;
+  color: var(--qms-text);
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.qms-audit-setup-stage__helper {
+  margin: 0;
+  color: var(--qms-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  max-width: 36rem;
+}
+
+.qms-audit-setup-stage__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 999px;
+  background: var(--surface-subtle, var(--qms-line-soft));
+  color: var(--qms-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.qms-audit-setup-stage__chip.is-warning {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--qms-line));
+  color: #b91c1c;
+}
+
+.qms-audit-setup-stage__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.qms-audit-setup-stage__toolbar-actions > a:not(.qms-occurrence-stage__next),
+.qms-audit-setup-stage__toolbar-actions > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.qms-audit-setup-stage__tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.qms-audit-setup-tile {
+  min-width: 0;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel, var(--surface-primary));
+  overflow: clip;
+}
+
+.qms-audit-setup-tile[open] {
+  grid-column: 1 / -1;
+}
+
+.qms-audit-setup-tile[open] > summary {
+  border-bottom: 1px solid var(--qms-line-soft);
+}
+
+/* Keep open tile body denser so Scope/Criteria don't dominate the viewport. */
+.qms-audit-setup-tile[open] textarea {
+  min-height: 2.2rem;
+  max-height: 5.5rem;
+}
+
+.qms-audit-setup-tile > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.qms-audit-setup-tile > summary::-webkit-details-marker {
+  display: none;
+}
+
+.qms-audit-setup-tile > summary::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: auto;
+  border-right: 2px solid var(--qms-muted);
+  border-bottom: 2px solid var(--qms-muted);
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+}
+
+.qms-audit-setup-tile[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.qms-audit-setup-tile__title {
+  flex: 0 0 auto;
+  font-size: 0.9rem;
+  font-weight: 740;
+}
+
+.qms-audit-setup-tile__hint {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-audit-setup-tile__hint.is-warning {
+  color: #b91c1c;
+}
+
+.qms-audit-setup-tile__body {
+  padding: 0 0.85rem 0.85rem;
+  border-top: 1px solid var(--qms-line-soft);
+  padding-top: 0.75rem;
+}
+
+.qms-audit-setup-tile__body > label {
+  display: grid;
+  gap: 0.28rem;
+  margin-bottom: 0.65rem;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.qms-audit-setup-tile__body > label > span,
+.qms-audit-setup-tile__body .qms-audit-setup-stage__fields label > span {
+  color: var(--qms-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-audit-setup-tile__body input,
+.qms-audit-setup-tile__body textarea,
+.qms-audit-setup-tile__body select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.55rem;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+  color: inherit;
+  font: inherit;
+}
+
+.qms-audit-setup-tile__body textarea {
+  resize: vertical;
+  min-height: 2.4rem;
+}
+
+.qms-audit-setup-stage__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.qms-audit-setup-stage__fields label {
+  display: grid;
+  gap: 0.28rem;
+  margin-bottom: 0;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__datetime {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.qms-audit-setup-stage__checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: inherit;
+}
+
+.qms-audit-setup-stage__checks label > span {
+  display: none;
+}
+
+.qms-audit-setup-stage__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.qms-audit-setup-stage__section button,
+.qms-audit-setup-tile__body button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 2.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qms-audit-setup-stage__section button.is-primary,
+.qms-audit-setup-tile__body button.is-primary,
+.qms-audit-setup-stage .qms-occurrence-stage__next {
+  background: var(--accent-primary, #2563eb);
+  border-color: var(--accent-primary, #2563eb);
+  color: #fff;
+}
+
+.qms-audit-setup-stage__section button:disabled,
+.qms-audit-setup-tile__body button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.qms-audit-setup-stage__meetings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.qms-audit-setup-stage__meeting {
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--qms-line-soft);
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle, transparent);
+}
+
+.qms-audit-setup-stage__meeting > strong {
+  display: block;
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+}
+
+.qms-audit-setup-stage__modality {
+  margin: 0 0 0.65rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__modality > legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  color: var(--qms-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-audit-setup-stage__modality-options {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.qms-audit-setup-stage__modality-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.qms-audit-setup-stage__modality-options input {
+  width: auto;
+  min-width: 0;
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.qms-audit-setup-stage__check-row {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.55rem !important;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.qms-audit-setup-stage__check-row input {
+  width: auto;
+  min-width: 0;
+}
+
+.qms-audit-setup-stage__schedule-inherit {
+  margin: 0 0 0.65rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle, var(--qms-line-soft));
+  color: var(--qms-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.qms-audit-setup-stage__schedule-inherit strong {
+  color: inherit;
+  font-weight: 700;
+}
+
+.qms-audit-setup-stage__meeting small {
+  display: block;
+  margin: 0.35rem 0 0.55rem;
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+}
+
+.qms-audit-setup-stage__notice-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+}
+
+.qms-audit-setup-stage__notice-meta > div {
+  min-width: 0;
+  padding: 0.5rem;
+  border-radius: var(--qms-radius);
+  background: var(--surface-subtle);
+}
+
+.qms-audit-setup-stage__notice-meta dt {
+  color: var(--qms-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qms-audit-setup-stage__notice-meta dd {
+  margin: 0.15rem 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-setup-stage__empty {
+  margin: 0 0 0.65rem;
+  color: var(--qms-muted);
+  font-size: 0.85rem;
+}
+
+/* Team panel — flatten nested card; tile summary owns the title. */
+.qms-audit-setup-stage .qms-occurrence-stage__card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__card > header {
+  display: none;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__fields label small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  font-weight: 550;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__fields label small.is-error {
+  color: #b91c1c;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__independence {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--qms-line-soft);
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__independence > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.qms-audit-setup-stage .qms-occurrence-stage__independence > p {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .qms-audit-setup-stage__tiles,
+  .qms-audit-setup-stage__fields,
+  .qms-audit-setup-stage__meetings,
+  .qms-audit-setup-stage .qms-occurrence-stage__fields,
+  .qms-audit-setup-stage__notice-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-setup-tile[open] {
+    grid-column: auto;
+  }
+}

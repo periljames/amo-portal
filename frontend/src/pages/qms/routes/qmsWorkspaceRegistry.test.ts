@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   QMS_WORKSPACES,
+  qmsPeopleWorkspacePath,
   qmsWorkspaceEntryPath,
   qmsWorkspaceFromRelativePath,
   qmsWorkspaceNavigationItems,
@@ -31,11 +32,21 @@ describe("QMS assurance workspace registry", () => {
 
   it("consolidates transitional workspace entries on the Quality root", () => {
     expect(qmsWorkspaceEntryPath("SAF", "control-room")).toBe("/maintenance/SAF/quality");
-    expect(qmsWorkspaceEntryPath("SAF", "planner")).toBe("/maintenance/SAF/quality/calendar/month");
+    expect(qmsWorkspaceEntryPath("SAF", "planner")).toBe("/maintenance/SAF/quality/calendar/week");
     expect(qmsWorkspaceEntryPath("SAF", "missions")).toBe("/maintenance/SAF/quality?workspace=missions");
     expect(qmsWorkspaceEntryPath("SAF", "people")).toBe("/maintenance/SAF/quality?workspace=people");
-    expect(qmsWorkspaceEntryPath("SAF", "assurance")).toBe("/maintenance/SAF/quality?workspace=assurance");
+    expect(qmsWorkspaceEntryPath("SAF", "assurance")).toBe("/maintenance/SAF/quality/audits/dashboard");
     expect(qmsWorkspaceEntryPath("SAF", "intelligence")).toBe("/maintenance/SAF/quality?workspace=intelligence");
+  });
+
+  it("builds People deep-links for competence setup CTAs", () => {
+    expect(qmsPeopleWorkspacePath("SAF")).toBe("/maintenance/SAF/quality?workspace=people");
+    expect(qmsPeopleWorkspacePath("SAF", { tab: "rules", action: "CREATE_RULE", ruleType: "AUDITOR" })).toBe(
+      "/maintenance/SAF/quality?workspace=people&tab=rules&action=CREATE_RULE&ruleType=AUDITOR",
+    );
+    expect(qmsPeopleWorkspacePath("SAF", { tab: "privileges", action: "CREATE", ruleType: "LEAD_AUDITOR" })).toBe(
+      "/maintenance/SAF/quality?workspace=people&tab=privileges&action=CREATE&ruleType=LEAD_AUDITOR",
+    );
   });
 
   it("maps legacy QMS modules into their owning workspace instead of new top-level registers", () => {
@@ -54,17 +65,17 @@ describe("QMS assurance workspace registry", () => {
     expect(items).toHaveLength(6);
     expect(items.map((item) => item.path)).toEqual([
       "/maintenance/SAF/quality",
-      "/maintenance/SAF/quality/calendar/month",
+      "/maintenance/SAF/quality/calendar/week",
       "/maintenance/SAF/quality?workspace=missions",
       "/maintenance/SAF/quality?workspace=people",
-      "/maintenance/SAF/quality?workspace=assurance",
+      "/maintenance/SAF/quality/audits/dashboard",
       "/maintenance/SAF/quality?workspace=intelligence",
     ]);
   });
 
-  it("labels the cases workspace distinctly from Audit Assurance", () => {
+  it("labels the assurance workspace for audits and case review", () => {
     const assurance = QMS_WORKSPACES.find((workspace) => workspace.id === "assurance");
-    expect(assurance?.label).toBe("Assurance Cases");
-    expect(assurance?.shortLabel).toBe("Cases");
+    expect(assurance?.label).toBe("Assurance");
+    expect(assurance?.shortLabel).toBe("Assurance");
   });
 });

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -172,8 +172,8 @@ def _reliability_context(db: Session, ctx: TenantContext) -> tuple[dict[str, int
     }
 
     event_columns = _table_columns(db, "reliability_events")
-    if event_columns:
-        where = ["amo_id = :amo_id"] if "amo_id" in event_columns else []
+    if event_columns and "amo_id" in event_columns:
+        where = ["amo_id = :amo_id"]
         params: dict[str, Any] = {"amo_id": ctx.amo_id, "since": _utcnow() - timedelta(days=90)}
         if "occurred_at" in event_columns:
             where.append("occurred_at >= :since")
@@ -185,23 +185,27 @@ def _reliability_context(db: Session, ctx: TenantContext) -> tuple[dict[str, int
             values["repeat_events_90d"] = int(db.execute(text(
                 f"SELECT COALESCE(SUM(n - 1),0) FROM (SELECT repeat_key, COUNT(*) n FROM reliability_events WHERE {' AND '.join([*where, 'repeat_key IS NOT NULL'])} GROUP BY repeat_key HAVING COUNT(*) > 1) q"
             ), params).scalar() or 0)
-    else:
+    elif not event_columns:
         warnings.append({"source": "reliability_events", "type": "SourceUnavailable", "message": "Reliability event ledger is unavailable."})
+    else:
+        warnings.append({"source": "reliability_events", "type": "TenantIsolationUnavailable", "message": "Reliability event ledger has no tenant key and was excluded."})
 
     recurring_columns = _table_columns(db, "reliability_recurring_findings")
-    if recurring_columns:
-        conditions = ["amo_id = :amo_id"] if "amo_id" in recurring_columns else []
+    if recurring_columns and "amo_id" in recurring_columns:
+        conditions = ["amo_id = :amo_id"]
         if "occurrence_count" in recurring_columns:
             conditions.append("occurrence_count > 1")
         values["recurring_findings"] = int(db.execute(text(
             f"SELECT COUNT(*) FROM {_safe_identifier('reliability_recurring_findings')}" + (" WHERE " + " AND ".join(conditions) if conditions else "")
         ), {"amo_id": ctx.amo_id}).scalar() or 0)
-    else:
+    elif not recurring_columns:
         warnings.append({"source": "reliability_recurring_findings", "type": "SourceUnavailable", "message": "Reliability recurring-finding ledger is unavailable."})
+    else:
+        warnings.append({"source": "reliability_recurring_findings", "type": "TenantIsolationUnavailable", "message": "Reliability recurring-finding ledger has no tenant key and was excluded."})
 
     recommendation_columns = _table_columns(db, "reliability_recommendations")
-    if recommendation_columns:
-        conditions = ["amo_id = :amo_id"] if "amo_id" in recommendation_columns else []
+    if recommendation_columns and "amo_id" in recommendation_columns:
+        conditions = ["amo_id = :amo_id"]
         if "status" in recommendation_columns:
             conditions.append("UPPER(CAST(status AS TEXT)) NOT IN ('CLOSED','CANCELLED')")
         if "priority" in recommendation_columns:
@@ -209,8 +213,10 @@ def _reliability_context(db: Session, ctx: TenantContext) -> tuple[dict[str, int
         values["open_high_recommendations"] = int(db.execute(text(
             f"SELECT COUNT(*) FROM {_safe_identifier('reliability_recommendations')}" + (" WHERE " + " AND ".join(conditions) if conditions else "")
         ), {"amo_id": ctx.amo_id}).scalar() or 0)
-    else:
+    elif not recommendation_columns:
         warnings.append({"source": "reliability_recommendations", "type": "SourceUnavailable", "message": "Reliability recommendation ledger is unavailable."})
+    else:
+        warnings.append({"source": "reliability_recommendations", "type": "TenantIsolationUnavailable", "message": "Reliability recommendation ledger has no tenant key and was excluded."})
 
     return values, warnings
 
@@ -223,7 +229,10 @@ def _audit_history_context(db: Session, amo_id: str) -> tuple[dict[str, list[str
         QMSAuditSchedule.last_run_at,
     ).outerjoin(
         QMSAuditSchedule,
-        QualityAuditProgrammeItem.schedule_id == QMSAuditSchedule.id,
+        and_(
+            QualityAuditProgrammeItem.schedule_id == QMSAuditSchedule.id,
+            QualityAuditProgrammeItem.amo_id == QMSAuditSchedule.amo_id,
+        ),
     ).filter(
         QualityAuditProgrammeItem.amo_id == amo_id,
     ).limit(10000).all()

@@ -7,12 +7,10 @@ from . import audit_guest_document_models as _audit_guest_document_models  # noq
 from . import audit_external_access_router
 from . import audit_external_report_acknowledgement_router as _audit_external_report_acknowledgement_router  # noqa: F401
 from . import audit_external_fieldwork_router as _audit_external_fieldwork_router  # noqa: F401
-from . import audit_external_session_guard_router as _audit_external_session_guard_router  # noqa: F401
 from . import audit_external_passkey_router as _audit_external_passkey_router  # noqa: F401
 from . import audit_external_participant_guard_router
 from . import audit_external_finding_draft_router
 from . import audit_external_finding_promotion_router
-from . import audit_external_fieldwork_draft_enable_router as _audit_external_fieldwork_draft_enable_router  # noqa: F401
 from . import audit_finding_release_status_router
 from . import audit_guest_documents_router
 from .canonical_router import router

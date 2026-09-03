@@ -3,13 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, FileCheck2, ShieldAlert, X } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import { qmsListFindings, qmsResolveAudit } from "../../../services/qms";
+import { qmsListFindings } from "../../../services/qms";
 import { listAuditEvidence, type AuditEvidenceArtifact } from "../../../services/qmsAuditEvidence";
 import {
   listAuditFindingReleases,
   releaseAuditFinding,
   type AuditFindingReleaseState,
 } from "../../../services/qmsAuditExternalAccess";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { listChecklistExecutionGovernance } from "../../../services/qmsChecklistExecutionGovernance";
 import "../../../styles/qms-live-finding-release.css";
 
@@ -38,8 +39,8 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [error, setError] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-live-release-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-live-release-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     enabled: canManage,
     staleTime: 5_000,
   });

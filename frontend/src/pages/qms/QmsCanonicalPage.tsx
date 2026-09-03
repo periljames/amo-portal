@@ -1,5 +1,5 @@
 import React from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import QualityChecklistTemplateHost from "../../components/QMS/QualityChecklistTemplateHost";
 import QualityCarsPage from "../QualityCarsPage";
 import QualityAuditsSectionLayout from "../qualityAudits/QualityAuditsSectionLayout";
@@ -34,6 +34,18 @@ export default function QmsCanonicalPage(): React.ReactElement {
   const [searchParams] = useSearchParams();
   const pathname = location.pathname.toLowerCase();
   const amoCode = location.pathname.match(/^\/maintenance\/([^/]+)\//i)?.[1] || "";
+
+  if (/\/quality\/planner\/?$/i.test(location.pathname)) {
+    return <Navigate to={`/maintenance/${amoCode}/quality/calendar/week`} replace />;
+  }
+
+  if (/\/quality\/calendar\/?$/i.test(location.pathname)) {
+    return <Navigate to={`/maintenance/${amoCode}/quality/calendar/week`} replace />;
+  }
+
+  if (/\/quality\/findings(?:\/register)?\/?$/i.test(location.pathname)) {
+    return <Navigate to={`/maintenance/${amoCode}/quality/audits/register?tab=findings`} replace />;
+  }
 
   if (searchParams.get("control") && pathname.includes("/quality/cars")) {
     return <QmsCarControlLoopPage />;
@@ -74,11 +86,11 @@ export default function QmsCanonicalPage(): React.ReactElement {
     );
   }
 
-  // Sole Planner V2 owner — wrapped in Assurance chrome so rail destinations stay coherent.
+  // Canonical Calendar surface — sole AA scheduling UI (Planner V2 engine remains underneath).
   if (pathname.includes("/quality/calendar")) {
     return assuranceWorkspace(
-      "Planner",
-      "Dated Quality calendar — Planner V2 is the only scheduling surface.",
+      "Calendar",
+      "Dated Quality calendar — the only primary scheduling surface for Audit Assurance.",
       <QmsPlannerLivePage embedded />
     );
   }

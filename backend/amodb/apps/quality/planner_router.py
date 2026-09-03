@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_read_db, get_write_db
 
 from .canonical_core_router import _log_qms_activity
+from .schedule_weekend import resolve_schedule_window
 from .tenant_security import (
     TenantContext,
     assert_quality_permission,
@@ -31,6 +32,10 @@ class CalendarRescheduleRequest(BaseModel):
     new_date: date
     expected_old_date: date | None = None
     reason: str = Field(min_length=8, max_length=1000)
+    weekend_policy: str | None = Field(
+        default=None,
+        description="Required when the moved occurrence spans Saturday/Sunday.",
+    )
 
 
 class CalendarRescheduleResponse(BaseModel):
@@ -54,6 +59,8 @@ class PlannerCapabilitiesResponse(BaseModel):
 # closed, cancelled, deactivated, or soft-deleted after the planner loaded.
 _MUTABLE_CALENDAR_SOURCES: dict[str, dict[str, Any]] = {
     "audit_schedule": {
+        "module": "audits",
+        "event_type": "audit_due",
         "table": "qms_audit_schedules",
         "start_column": "next_due_date",
         "end_column": None,
@@ -61,6 +68,8 @@ _MUTABLE_CALENDAR_SOURCES: dict[str, dict[str, Any]] = {
         "active_predicate": "is_active IS TRUE AND deleted_at IS NULL",
     },
     "audit": {
+        "module": "audits",
+        "event_type": "audit_planned",
         "table": "qms_audits",
         "start_column": "planned_start",
         "end_column": "planned_end",
@@ -68,6 +77,8 @@ _MUTABLE_CALENDAR_SOURCES: dict[str, dict[str, Any]] = {
         "active_predicate": "deleted_at IS NULL AND UPPER(CAST(status AS TEXT)) NOT IN ('CLOSED', 'CANCELLED')",
     },
     "car": {
+        "module": "cars",
+        "event_type": "car_due",
         "table": "quality_cars",
         "start_column": "due_date",
         "end_column": None,
@@ -75,6 +86,8 @@ _MUTABLE_CALENDAR_SOURCES: dict[str, dict[str, Any]] = {
         "active_predicate": "closed_at IS NULL AND UPPER(CAST(status AS TEXT)) NOT IN ('CLOSED', 'CANCELLED')",
     },
     "training_event": {
+        "module": "training-competence",
+        "event_type": "training_session",
         "table": "training_events",
         "start_column": "starts_on",
         "end_column": "ends_on",
@@ -163,6 +176,16 @@ def qms_planner_reschedule(
             },
         )
 
+    if module != source["module"] or event_type != source["event_type"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Calendar event identity does not match its authoritative source type.",
+                "event_id": payload.event_id,
+                "trace_id": trace_id,
+            },
+        )
+
     assert_quality_permission(db, ctx, str(source["permission"]))
 
     table_name = str(source["table"])
@@ -232,11 +255,33 @@ def qms_planner_reschedule(
             detail={"message": "Choose a different date.", "trace_id": trace_id},
         )
 
-    duration = (old_end - old_date) if old_end else None
-    new_end = payload.new_date + duration if isinstance(duration, timedelta) else None
+    if old_end is not None:
+        duration_days = max((old_end - old_date).days + 1, 1)
+    elif entity_type == "audit_schedule":
+        duration_row = db.execute(
+            text(
+                """
+                SELECT GREATEST(COALESCE(duration_days, 1), 1) AS duration_days
+                FROM qms_audit_schedules
+                WHERE amo_id = :amo_id AND CAST(id AS TEXT) = :entity_id
+                LIMIT 1
+                """
+            ),
+            {"amo_id": ctx.amo_id, "entity_id": entity_id},
+        ).mappings().first()
+        duration_days = int((duration_row or {}).get("duration_days") or 1)
+    else:
+        duration_days = 1
+
+    start_date, new_end, resolved_duration = resolve_schedule_window(
+        start=payload.new_date,
+        duration_days=duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=None,
+    )
 
     update_params: dict[str, Any] = {
-        "new_date": payload.new_date,
+        "new_date": start_date,
         "amo_id": ctx.amo_id,
         "entity_id": entity_id,
     }
@@ -255,6 +300,39 @@ def qms_planner_reschedule(
             ),
             update_params,
         )
+    elif entity_type == "audit_schedule":
+        update_params["duration_days"] = resolved_duration
+        result = db.execute(
+            text(
+                """
+                UPDATE qms_audit_schedules
+                SET next_due_date = :new_date,
+                    duration_days = :duration_days
+                WHERE amo_id = :amo_id
+                  AND CAST(id AS TEXT) = :entity_id
+                  AND (is_active IS TRUE AND deleted_at IS NULL)
+                """
+            ),
+            update_params,
+        )
+        if result.rowcount == 1:
+            db.execute(
+                text(
+                    """
+                    UPDATE qms_planner_schedule_metadata
+                    SET occurrence_date = :new_date,
+                        end_date = :new_end
+                    WHERE amo_id = :amo_id
+                      AND CAST(schedule_id AS TEXT) = :entity_id
+                    """
+                ),
+                {
+                    "new_date": start_date,
+                    "new_end": new_end,
+                    "amo_id": ctx.amo_id,
+                    "entity_id": entity_id,
+                },
+            )
     else:
         result = db.execute(
             text(
@@ -300,8 +378,10 @@ def qms_planner_reschedule(
         new_value={
             "event_id": payload.event_id,
             "event_type": event_type,
-            "start_date": payload.new_date.isoformat(),
+            "start_date": start_date.isoformat(),
             "end_date": new_end.isoformat() if new_end else None,
+            "duration_days": resolved_duration,
+            "weekend_policy": payload.weekend_policy,
             "reason": payload.reason.strip(),
             "trace_id": trace_id,
         },
@@ -318,14 +398,14 @@ def qms_planner_reschedule(
         entity_id,
         event_type,
         old_date.isoformat(),
-        payload.new_date.isoformat(),
+        start_date.isoformat(),
         payload.reason.strip(),
     )
 
     return CalendarRescheduleResponse(
         event_id=payload.event_id,
         old_date=old_date,
-        new_date=payload.new_date,
+        new_date=start_date,
         end_date=new_end,
         trace_id=trace_id,
     )

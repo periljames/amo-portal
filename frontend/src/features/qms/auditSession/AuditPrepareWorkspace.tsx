@@ -3,25 +3,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
-  BookOpenCheck,
   CheckCircle2,
-  ClipboardList,
   Copy,
-  FileCheck2,
-  FileClock,
-  History,
   Link2,
   Plus,
   ShieldAlert,
   UserPlus,
   UserX,
-  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { apiRequest } from "../../../services/apiClient";
-import { qmsListDocuments, qmsResolveAudit, type QMSDocumentOut } from "../../../services/qms";
+import { qmsListDocuments, type QMSDocumentOut } from "../../../services/qms";
 import {
   createExternalAuditParticipant,
   listExternalAuditParticipants,
@@ -34,9 +28,13 @@ import {
   updateGovernedAuditDocumentRequest,
   type GovernedAuditDocumentRequest,
 } from "../../../services/qmsAuditOccurrenceCompletion";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditPreparationContext } from "../../../services/qmsAuditPreparationContext";
 import { getAuditSession } from "../../../services/qmsAuditSession";
-import { auditSessionPath } from "./auditSessionRoutes";
+import { AuditStageLoadError } from "./AuditStageLoadError";
+import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
+import { auditSessionPath, isAtLeastLiveStage } from "./auditSessionRoutes";
+import { AUDIT_PREPARE_TOOLBAR_ID } from "./OccurrenceToolbarPortal";
 import "../../../styles/qms-audit-prepare-workspace.css";
 
 type Props = { amoCode: string; auditKey: string };
@@ -151,8 +149,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-prepare-audit-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-prepare-audit-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
@@ -277,50 +275,146 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const required = requests.filter((request) => request.is_required && request.status !== "WAIVED");
     const accepted = required.filter((request) => request.status === "ACCEPTED").length;
     const total = required.length;
-    return { accepted, total, percent: total ? Math.round((accepted / total) * 100) : 100 };
+    // 0 required must never read as 100% success — that invents readiness.
+    if (!total) {
+      return {
+        accepted: 0,
+        total: 0,
+        percent: null as number | null,
+        label: "Not applicable",
+        detail: "No required requests",
+      };
+    }
+    const percent = Math.round((accepted / total) * 100);
+    return {
+      accepted,
+      total,
+      percent,
+      label: `${percent}%`,
+      detail: `${accepted} of ${total} required requests accepted`,
+    };
   }, [requests]);
   const documents = (controlledDocumentsQuery.data || []) as QMSDocumentOut[];
   const revisions = controlledRevisionsQuery.data || [];
 
-  if (auditQuery.isLoading || contextQuery.isLoading || requestsQuery.isLoading || participantsQuery.isLoading) {
-    return <div className="qms-audit-prepare qms-audit-prepare--loading">Loading governed preparation workspace…</div>;
+  const dependentQueriesLoading =
+    Boolean(auditId) &&
+    (contextQuery.isLoading ||
+      contextQuery.isPending ||
+      requestsQuery.isLoading ||
+      requestsQuery.isPending ||
+      participantsQuery.isLoading ||
+      participantsQuery.isPending);
+
+  if (auditQuery.isLoading || auditQuery.isPending || dependentQueriesLoading) {
+    return <div className="qms-occurrence-stage qms-occurrence-stage--loading">Loading preparation workspace…</div>;
   }
 
-  const loadError = auditQuery.error || contextQuery.error || requestsQuery.error || participantsQuery.error;
-  if (loadError || !auditQuery.data) {
-    return <div className="qms-audit-prepare qms-audit-prepare--loading" role="alert"><AlertTriangle size={20} /> {loadError instanceof Error ? loadError.message : "Preparation workspace unavailable."}</div>;
+  if (auditQuery.error || !auditQuery.data) {
+    return (
+      <AuditStageLoadError
+        className="qms-occurrence-stage qms-occurrence-stage--error"
+        title="Audit occurrence unavailable"
+        detail={auditOccurrenceLoadDetail(auditQuery.error)}
+        onRetry={() => void auditQuery.refetch()}
+        exitHref={auditSessionPath(amoCode, auditKey, "setup")}
+        exitLabel="Back to Setup"
+        secondaryHref={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits`}
+        secondaryLabel="Audits overview"
+      />
+    );
   }
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error;
+  if (prerequisiteError) {
+    return (
+      <AuditStageLoadError
+        className="qms-occurrence-stage qms-occurrence-stage--error"
+        title="Complete audit setup before preparation"
+        detail={auditPrerequisiteLoadDetail(
+          prerequisiteError,
+          "The governed preparation context is not available yet. Complete and save the audit Setup stage, then retry preparation.",
+        )}
+        onRetry={() => {
+          void contextQuery.refetch();
+          void requestsQuery.refetch();
+          void participantsQuery.refetch();
+        }}
+        exitHref={auditSessionPath(amoCode, auditKey, "setup")}
+        exitLabel="Back to Setup"
+      />
+    );
+  }
+  if (!context) {
+    return (
+      <AuditStageLoadError
+        className="qms-occurrence-stage qms-occurrence-stage--error"
+        title="Complete audit setup before preparation"
+        detail="The governed preparation context is not available yet. Complete and save the audit Setup stage, then retry preparation."
+        onRetry={() => void contextQuery.refetch()}
+        exitHref={auditSessionPath(amoCode, auditKey, "setup")}
+        exitLabel="Back to Setup"
+      />
+    );
+  }
+
+  const prepRevision = context.controlled_preparation?.latest_revision;
+  const checklistBindings = context.controlled_preparation?.checklist_bindings?.length || 0;
+  const readinessWarning = readiness.percent != null && readiness.percent < 100;
+  const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
+  const stageBlocked = !fieldworkOpen;
 
   return (
-    <div className="qms-audit-prepare" role="region" aria-label="Pre-audit preparation workspace">
-      <header className="qms-audit-prepare__header">
-        <div><span>PREPARE · evidence before fieldwork</span><h1>{auditQuery.data.audit_ref} · {auditQuery.data.title}</h1></div>
-        <div className="qms-audit-prepare__actions">
-          <span>{sessionQuery.data ? `Authoritative stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span>
-          <Link to={auditSessionPath(amoCode, auditKey, "setup")}><X size={16} /> Exit preparation</Link>
+    <section className="qms-occurrence-stage qms-audit-prepare-stage" aria-label="Pre-audit preparation workspace" id="audit-occurrence-prepare">
+      <div className="qms-audit-prepare-stage__toolbar">
+        <div className="qms-audit-prepare-stage__intro">
+          <h2 className="qms-audit-prepare-stage__title">Prepare</h2>
+          <p className="qms-audit-prepare-stage__helper">Request evidence, invite participants, and confirm readiness before fieldwork.</p>
+          <div id={AUDIT_PREPARE_TOOLBAR_ID} className="qms-audit-prepare-toolbar" />
+          <div className="qms-audit-prepare-stage__status" role="status" aria-label="Preparation readiness">
+            <span className={`qms-audit-prepare-stage__readiness-chip${readinessWarning ? " is-warning" : ""}`}>
+              Evidence {readiness.label}
+            </span>
+            <span className="qms-audit-prepare-stage__meta-chip">{checklistBindings} checklist(s)</span>
+            {prepRevision ? <span className="qms-audit-prepare-stage__meta-chip">Prep {prepRevision.status}</span> : null}
+          </div>
         </div>
-      </header>
+        <div className="qms-audit-prepare-stage__toolbar-actions">
+          <Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "live")}>
+            {fieldworkOpen ? "Open Fieldwork" : "Continue to Fieldwork"}
+            <ArrowRight size={16} aria-hidden />
+          </Link>
+          <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits`}>Exit</Link>
+        </div>
+      </div>
 
-      {localError ? <div className="qms-audit-prepare__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
+      {localError ? <div className="qms-occurrence-stage__message is-error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
+      {stageBlocked ? (
+        <p className="qms-audit-prepare-stage__notice is-warning">
+          <ShieldAlert size={14} aria-hidden /> Fieldwork unlocks when preparation is complete and the lifecycle advances.
+        </p>
+      ) : null}
+      {readinessWarning ? (
+        <p className="qms-audit-prepare-stage__notice is-warning">
+          <ShieldAlert size={14} aria-hidden /> {readiness.detail}
+        </p>
+      ) : null}
 
-      <div className="qms-audit-prepare__body">
-        <main>
-          <section className="qms-audit-prepare__card qms-audit-prepare__basis">
-            <header><BookOpenCheck size={18} /><div><strong>Frozen audit basis</strong><small>Scope, criteria and checklist lineage come from the governed audit occurrence.</small></div></header>
-            <dl>
-              <div><dt>Scope</dt><dd>{context?.regulatory_and_manual_basis.audit_scope || auditQuery.data.scope || "—"}</dd></div>
-              <div><dt>Criteria</dt><dd>{context?.regulatory_and_manual_basis.audit_criteria || auditQuery.data.criteria || "—"}</dd></div>
-              <div><dt>Checklist binding</dt><dd>{context?.controlled_preparation.checklist_bindings.length || 0} governed revision(s)</dd></div>
-              <div><dt>Preparation revision</dt><dd>{context?.controlled_preparation.latest_revision ? `Rev ${context.controlled_preparation.latest_revision.revision_no} · ${context.controlled_preparation.latest_revision.status}` : "Not issued"}</dd></div>
-            </dl>
-          </section>
+      <div className="qms-audit-prepare-stage__stack">
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
+          <header><div><h3>Audit basis</h3></div></header>
+          <dl>
+            <div><dt>Scope</dt><dd>{context.regulatory_and_manual_basis?.audit_scope || auditQuery.data.scope || "—"}</dd></div>
+            <div><dt>Criteria</dt><dd>{context.regulatory_and_manual_basis?.audit_criteria || auditQuery.data.criteria || "—"}</dd></div>
+            <div><dt>Checklists</dt><dd>{checklistBindings} revision(s)</dd></div>
+            <div><dt>Prep revision</dt><dd>{prepRevision ? `Rev ${prepRevision.revision_no} · ${prepRevision.status}` : "Not issued"}</dd></div>
+          </dl>
+        </section>
 
-          <section className="qms-audit-prepare__card">
-            <header>
-              <FileClock size={18} />
-              <div><strong>Document and record requests</strong><small>Each request states why it is needed, the criterion it supports and whether an auditee may upload or link a controlled DMS record.</small></div>
-              {canManage ? <button type="button" onClick={() => setShowRequestForm((value) => !value)}><Plus size={15} /> New request</button> : null}
-            </header>
+        <section className="qms-audit-prepare-stage__section">
+          <header>
+            <div><h3>Document requests</h3></div>
+            {canManage ? <button type="button" onClick={() => setShowRequestForm((value) => !value)}><Plus size={15} /> New request</button> : null}
+          </header>
 
             {showRequestForm ? (
               <form className="qms-audit-prepare__request-form" onSubmit={(event) => { event.preventDefault(); createMutation.mutate(); }}>
@@ -363,16 +457,15 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </article>
               ))}
             </div>
-          </section>
+        </section>
 
-          <section className="qms-audit-prepare__card qms-audit-prepare__participants">
-            <header>
-              <UserPlus size={18} />
-              <div><strong>External participants</strong><small>Scoped audit access without creating employee accounts.</small></div>
-              {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}
-            </header>
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__participants">
+          <header>
+            <div><h3>External participants</h3></div>
+            {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}
+          </header>
 
-            {oneTimeAccessUrl ? <div className="qms-audit-prepare__one-time-link" role="status"><div><strong>One-time invitation link created</strong><small>Copy it now. The server stores only its SHA-256 hash and cannot reveal this token again.</small></div><button type="button" onClick={() => void navigator.clipboard.writeText(oneTimeAccessUrl)}><Copy size={14} /> Copy link</button></div> : null}
+            {oneTimeAccessUrl ? <div className="qms-audit-prepare__one-time-link" role="status"><div><strong>Invitation link ready</strong><small>Copy now — the token is shown once.</small></div><button type="button" onClick={() => void navigator.clipboard.writeText(oneTimeAccessUrl)}><Copy size={14} /> Copy link</button></div> : null}
 
             {showParticipantForm ? <form className="qms-audit-prepare__participant-form" onSubmit={(event) => { event.preventDefault(); participantMutation.mutate(); }}>
               <label><span>Participant type</span><select value={participantDraft.participantType} onChange={(event) => { const participantType = event.target.value as ExternalParticipantType; setParticipantDraft((current) => ({ ...current, participantType, role: participantType === "AUDITEE_GUEST" ? "AUDITEE" : "AUDITOR", assuranceLevel: participantType === "AUDITEE_GUEST" ? "EMAIL_LINK" : current.assuranceLevel })); }}><option value="AUDITEE_GUEST">Auditee guest</option><option value="EXTERNAL_AUDITOR">External auditor</option></select></label>
@@ -383,26 +476,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label><span>Access expires</span><input required type="datetime-local" value={participantDraft.expiresAt} onChange={(event) => setParticipantDraft((current) => ({ ...current, expiresAt: event.target.value }))} /></label>
               <label><span>Identity assurance</span><select value={participantDraft.assuranceLevel} onChange={(event) => setParticipantDraft((current) => ({ ...current, assuranceLevel: event.target.value as ExternalParticipantDraft["assuranceLevel"] }))}><option value="EMAIL_LINK">Email link</option>{participantDraft.participantType === "EXTERNAL_AUDITOR" ? <option value="PASSKEY">Passkey required</option> : null}</select></label>
               <fieldset className="is-wide"><legend>Scoped access</legend><label><input type="checkbox" checked={participantDraft.readProgress} onChange={(event) => setParticipantDraft((current) => ({ ...current, readProgress: event.target.checked }))} /> View fieldwork progress</label>{participantDraft.participantType === "AUDITEE_GUEST" ? <label><input type="checkbox" checked={participantDraft.readReleasedEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, readReleasedEvidence: event.target.checked }))} /> View evidence explicitly released with findings</label> : <><label><input type="checkbox" checked={participantDraft.executeChecklist} onChange={(event) => setParticipantDraft((current) => ({ ...current, executeChecklist: event.target.checked }))} /> Execute assigned checklist</label><label><input type="checkbox" checked={participantDraft.createEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, createEvidence: event.target.checked }))} /> Add audit evidence</label><label><input type="checkbox" checked={participantDraft.draftFinding} onChange={(event) => setParticipantDraft((current) => ({ ...current, draftFinding: event.target.checked }))} /> Draft findings</label></>}</fieldset>
-              <p className="is-wide">Only implemented assurance modes are selectable. Auditees use purpose-bound email-link sessions; external auditors may additionally require a WebAuthn passkey. Unconfigured MFA is not presented as an operable choice.</p>
+              <p className="is-wide">Auditees use email-link access. External auditors may require a passkey when configured.</p>
               <footer><button type="button" onClick={() => setShowParticipantForm(false)}>Cancel</button><button type="submit" className="is-primary" disabled={!participantDraft.expiresAt || participantMutation.isPending}>{participantMutation.isPending ? "Creating access…" : "Create invitation"}</button></footer>
             </form> : null}
 
             <div className="qms-audit-prepare__participant-list">
               {!participants.length ? <p className="qms-audit-prepare__empty">No external participants are assigned to this audit.</p> : participants.map((participant) => <article key={participant.id}><div><span>{participant.participant_type.replaceAll("_", " ")}</span><strong>{participant.display_name || participant.email || "External participant"}</strong><small>{participant.organisation || "No organisation"} · {participant.role} · {participant.assurance_level || "EMAIL_LINK"}</small><small>{participant.permissions.join(" · ")}</small><small>Expires {new Date(participant.expires_at).toLocaleString()} · {participant.status}</small></div>{canManage && participant.status !== "REVOKED" ? <button type="button" onClick={() => revokeMutation.mutate(participant.id)} disabled={revokeMutation.isPending}><UserX size={14} /> Revoke</button> : null}</article>)}
             </div>
-          </section>
-        </main>
-
-        <aside className="qms-audit-prepare__sidebar">
-          <section className="qms-audit-prepare__readiness"><span>Required evidence readiness</span><strong>{readiness.percent}%</strong><div><span style={{ width: `${readiness.percent}%` }} /></div><small>{readiness.accepted} of {readiness.total} required requests accepted</small></section>
-          <section><ClipboardList size={17} /><strong>Checklist basis</strong><small>{context?.controlled_preparation.checklist_bindings.length || 0} frozen checklist revision(s) are bound to this occurrence.</small></section>
-          <section><FileCheck2 size={17} /><strong>Preparation evidence</strong><small>Uploaded files and controlled-DMS references remain reviewable and attributable before fieldwork.</small></section>
-          <section><History size={17} /><strong>Change control</strong><small>Issue a new preparation revision when the audit basis changes; do not silently mutate a frozen revision.</small></section>
-          <Link className="qms-audit-prepare__next" to={auditSessionPath(amoCode, auditKey, "live")}><ArrowRight size={16} /> Open Live Audit</Link>
-          {readiness.percent < 100 ? <div className="qms-audit-prepare__warning"><ShieldAlert size={15} /> Required document requests remain unresolved. The authoritative session determines whether fieldwork may advance.</div> : null}
-        </aside>
+        </section>
       </div>
-    </div>
+    </section>
   );
 };
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, selectinload
 
+from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
 
 from . import models
@@ -37,11 +38,50 @@ AuditType = Literal[
 ]
 Recurrence = Literal["ONE_TIME", "MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL", "CUSTOM", "RISK_TRIGGERED"]
 ProgrammeItemState = Literal["PLANNED", "SCHEDULED", "COMPLETED", "DEFERRED", "CANCELLED", "FOLLOW_UP_REQUIRED"]
+ProgrammeKind = Literal["INTERNAL", "EXTERNAL", "THIRD_PARTY"]
+_ACTIVE_PROGRAMME_STATUSES = ("DRAFT", "UNDER_REVIEW", "APPROVED", "ACTIVE")
+_PROGRAMME_KIND_LABELS: dict[str, str] = {
+    "INTERNAL": "Internal Audits",
+    "EXTERNAL": "External Audits",
+    "THIRD_PARTY": "Third Party Audits",
+}
+
+
+def _programme_kind_title(kind: ProgrammeKind, year: int) -> str:
+    return f"{_PROGRAMME_KIND_LABELS[kind]} ({year})"
+
+
+def _assert_programme_kind_available(db: Session, *, amo_id: str, year: int, kind: ProgrammeKind) -> None:
+    prefix = _PROGRAMME_KIND_LABELS[kind]
+    conflict = (
+        db.query(QualityAuditProgramme.id, QualityAuditProgramme.title)
+        .filter(
+            QualityAuditProgramme.amo_id == amo_id,
+            QualityAuditProgramme.programme_year == year,
+            QualityAuditProgramme.status.in_(_ACTIVE_PROGRAMME_STATUSES),
+        )
+        .all()
+    )
+    for _, title in conflict:
+        normalized = str(title or "").strip().lower()
+        if normalized.startswith(prefix.lower()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An active {prefix} programme already exists for {year}. Amend or close it before creating another.",
+            )
+        if kind == "INTERNAL" and not any(
+            normalized.startswith(label.lower()) for label in _PROGRAMME_KIND_LABELS.values()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An active audit programme already exists for {year}. Amend or close it before creating another.",
+            )
 
 
 class ProgrammeCreate(BaseModel):
     programme_year: int = Field(ge=2000, le=2200)
-    title: str = Field(min_length=3, max_length=255)
+    programme_kind: ProgrammeKind = "INTERNAL"
+    title: str | None = Field(default=None, min_length=3, max_length=255)
     objectives: list[str] = Field(default_factory=list)
     regulatory_basis: list[str | dict[str, Any]] = Field(default_factory=list)
     period_start: date
@@ -144,6 +184,22 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _validate_programme_owner(db: Session, *, amo_id: str, user_id: str | None) -> None:
+    if user_id is None:
+        return
+    owner = db.query(account_models.User.id).filter(
+        account_models.User.amo_id == amo_id,
+        account_models.User.id == user_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).first()
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Programme owner must be an active human user in this tenant.",
+        )
+
+
 def _programme_ref(year: int, revision: int) -> tuple[str, str]:
     series = f"AP-{year}-{uuid.uuid4().hex[:8].upper()}"
     return f"{series}-R{revision:02d}", series
@@ -199,6 +255,8 @@ def _programme_readiness(programme: QualityAuditProgramme, *, mandatory_coverage
         blockers.append({"code": "NO_REQUIREMENTS", "message": "The hybrid engine has not produced any governed audit coverage."})
     if not list(programme.regulatory_basis or []):
         blockers.append({"code": "NO_COMPLIANCE_BASIS", "message": "Add the applicable regulatory, approval, manual or contractual baseline before approval."})
+    if not programme.owner_user_id:
+        blockers.append({"code": "NO_OWNER", "message": "Assign an accountable programme owner before approval."})
     if mandatory_coverage_gaps:
         blockers.append({
             "code": "MANDATORY_COVERAGE_GAP",
@@ -641,14 +699,18 @@ def list_programmes(
 def create_programme(payload: ProgrammeCreate,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")), db: Session = Depends(get_write_db)) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    owner_user_id = payload.owner_user_id or ctx.user_id
+    _validate_programme_owner(db, amo_id=ctx.amo_id, user_id=owner_user_id)
+    _assert_programme_kind_available(db, amo_id=ctx.amo_id, year=payload.programme_year, kind=payload.programme_kind)
+    title = (payload.title or _programme_kind_title(payload.programme_kind, payload.programme_year)).strip()
     ref, series = _programme_ref(payload.programme_year, 1)
     now = _utcnow()
     row = QualityAuditProgramme(
         amo_id=ctx.amo_id, programme_ref=ref, programme_series=series, programme_year=payload.programme_year,
-        revision_no=1, title=payload.title.strip(), continuous_monitoring_enabled=True,
+        revision_no=1, title=title, continuous_monitoring_enabled=True,
         optimizer_version=ALGORITHM_VERSION, objectives=payload.objectives,
         regulatory_basis=payload.regulatory_basis, status="DRAFT", period_start=payload.period_start,
-        period_end=payload.period_end, owner_user_id=payload.owner_user_id or ctx.user_id,
+        period_end=payload.period_end, owner_user_id=owner_user_id,
         created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id, created_at=now, updated_at=now,
     )
     db.add(row)
@@ -701,6 +763,8 @@ def patch_programme(programme_id: str, payload: ProgrammePatch,
     _assert_editable(row)
     before = _programme_snapshot(row)
     updates = payload.model_dump(exclude_unset=True, exclude={"reason"})
+    if "owner_user_id" in updates:
+        _validate_programme_owner(db, amo_id=ctx.amo_id, user_id=updates["owner_user_id"])
     for field, value in updates.items():
         setattr(row, field, value)
     if row.period_end < row.period_start:
@@ -902,10 +966,20 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
               "target_end": str(row.target_end) if row.target_end else None}
     updates = payload.model_dump(exclude_unset=True, exclude={"reason"})
     candidate_state = updates.get("state", row.state)
-    if candidate_state == "DEFERRED" and not str(updates.get("deferral_reason", row.deferral_reason) or "").strip():
-        raise HTTPException(status_code=422, detail="Deferring an audit requirement requires a reason.")
+    if "state" in updates and candidate_state not in {"PLANNED", "CANCELLED"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Scheduling, completion, follow-up and deferral states are owned by their governed workflows.",
+        )
+    if "deferral_reason" in updates:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Use the governed audit-deferral request, decision and apply workflow.",
+        )
     if candidate_state == "CANCELLED" and not str(updates.get("cancellation_reason", row.cancellation_reason) or "").strip():
         raise HTTPException(status_code=422, detail="Cancelling an audit requirement requires a reason.")
+    if "state" in updates and candidate_state == "PLANNED":
+        updates["cancellation_reason"] = None
     if "mandatory_surveillance" in updates and row.universe_item and row.universe_item.mandatory_surveillance:
         updates["mandatory_surveillance"] = True
     for field, value in updates.items():

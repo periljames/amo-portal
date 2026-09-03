@@ -13,8 +13,6 @@ from amodb.apps.training.integration import training_record_summary
 
 from .assurance_wiring_router import (
     SOURCE_REGISTRY,
-    _priority_queue,
-    _readiness,
     _safe_identifier,
     _table_columns,
 )
@@ -22,6 +20,71 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 
 
 router = APIRouter(prefix="/excellence", tags=["Quality assurance metrics"])
+
+
+def _score(value: float) -> int:
+    return max(0, min(100, int(round(value))))
+
+
+def _readiness(metrics: dict[str, int]) -> dict[str, Any]:
+    total_docs = metrics.get("active_documents", 0) + metrics.get("draft_documents", 0)
+    active_controls = metrics.get("active_controls", 0)
+    dimensions = {
+        "audit_programme": _score(100 - metrics.get("overdue_audits", 0) * 18 - metrics.get("audits_due_30", 0) * 2),
+        "capa_discipline": _score(100 - metrics.get("overdue_cars", 0) * 14 - max(0, metrics.get("open_cars", 0) - metrics.get("overdue_cars", 0)) * 2),
+        "finding_control": _score(100 - metrics.get("open_findings", 0) * 4),
+        "document_currency": _score(50 if total_docs == 0 else metrics.get("active_documents", 0) / total_docs * 100),
+        "competence": _score(100 - metrics.get("expired_training", 0) * 10),
+        "supplier_calibration": _score(100 - metrics.get("expired_supplier_approvals", 0) * 10 - metrics.get("overdue_calibrations", 0) * 10 - metrics.get("out_of_tolerance", 0) * 15),
+        "risk_change": _score(100 - metrics.get("critical_risks", 0) * 18 - metrics.get("high_risks", 0) * 8 - metrics.get("pending_changes", 0) * 3),
+        "continuous_controls": _score(25 if active_controls == 0 else (metrics.get("verified_controls", 0) / max(1, active_controls) * 70 + metrics.get("approved_controls", 0) / max(1, active_controls) * 30 - metrics.get("controls_due", 0) * 4 - metrics.get("failed_control_tests", 0) * 8)),
+        "external_commitments": _score(100 - metrics.get("open_regulator_findings", 0) * 12 - metrics.get("overdue_external_commitments", 0) * 12),
+        "management_review": _score(100 - metrics.get("overdue_review_actions", 0) * 10),
+    }
+    weights = {
+        "audit_programme": 0.15,
+        "capa_discipline": 0.15,
+        "finding_control": 0.08,
+        "document_currency": 0.08,
+        "competence": 0.08,
+        "supplier_calibration": 0.10,
+        "risk_change": 0.10,
+        "continuous_controls": 0.16,
+        "external_commitments": 0.05,
+        "management_review": 0.05,
+    }
+    overall = _score(sum(dimensions[key] * weights[key] for key in weights))
+    band = "STRONG" if overall >= 85 else "WATCH" if overall >= 70 else "AT_RISK" if overall >= 50 else "CRITICAL"
+    return {
+        "score": overall,
+        "band": band,
+        "dimensions": [{"id": key, "label": key.replace("_", " ").title(), "score": dimensions[key], "weight": weights[key]} for key in weights],
+        "method": "cross_module_continuous_assurance_v2",
+        "disclaimer": "Readiness is a transparent operational indicator, not a regulatory compliance declaration.",
+    }
+
+
+def _priority_queue(metrics: dict[str, int], amo_code: str) -> list[dict[str, Any]]:
+    candidates = [
+        ("overdue-cars", "Overdue corrective actions", "overdue_cars", "CRITICAL", "Closure dates have passed while CAR records remain open.", f"/maintenance/{amo_code}/quality/cars/overdue"),
+        ("regulator-findings", "Open regulator findings", "open_regulator_findings", "CRITICAL", "Authority findings remain open and require governed response evidence.", f"/maintenance/{amo_code}/quality/external-interface/regulator-findings"),
+        ("overdue-audits", "Overdue audit commitments", "overdue_audits", "HIGH", "Approved audit programme dates have passed.", f"/maintenance/{amo_code}/quality/audits/plan?view=calendar"),
+        ("calibration", "Overdue calibration", "overdue_calibrations", "HIGH", "Measuring or inspection equipment has passed its calibration due date.", f"/maintenance/{amo_code}/quality/equipment-calibration/overdue"),
+        ("supplier-approval", "Expired supplier approvals", "expired_supplier_approvals", "HIGH", "Supplier approval evidence is no longer current.", f"/maintenance/{amo_code}/quality/suppliers/expired-approvals"),
+        ("training", "Expired competence evidence", "expired_training", "HIGH", "Latest recurrent training or qualification validity has expired.", f"/maintenance/{amo_code}/quality/training-competence/overdue"),
+        ("controls", "Controls needing retest", "controls_due", "HIGH", "Controls have no future test date or fall due within 30 days.", f"/maintenance/{amo_code}/quality?hub=controls"),
+        ("evidence", "Invalid assurance evidence", "invalid_evidence", "HIGH", "Linked evidence is expired, rejected or no longer supported by its source.", f"/maintenance/{amo_code}/quality?hub=evidence"),
+        ("risk", "Critical quality risks", "critical_risks", "HIGH", "Critical risks remain open without accepted treatment closure.", f"/maintenance/{amo_code}/quality/risk/register"),
+        ("review", "Overdue management-review actions", "overdue_review_actions", "MEDIUM", "Management decisions have actions beyond their due date.", f"/maintenance/{amo_code}/quality/management-review/open-actions"),
+        ("events", "Assurance updates awaiting reconciliation", "pending_assurance_events", "INFO", "Authoritative records changed and their control links need reconciliation.", f"/maintenance/{amo_code}/quality?hub=evidence"),
+    ]
+    rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    items = [
+        {"id": item_id, "label": label, "count": metrics.get(metric, 0), "severity": severity, "why": why, "path": path}
+        for item_id, label, metric, severity, why, path in candidates
+        if metrics.get(metric, 0) > 0
+    ]
+    return sorted(items, key=lambda item: (rank[item["severity"]], -item["count"]))
 
 
 # Canonical QMS tables guarantee due_date and payload even where a richer module

@@ -26,6 +26,12 @@ import Button from "../../components/UI/Button";
 import EmptyState from "../../components/shared/EmptyState";
 import Drawer from "../../components/shared/Drawer";
 import { useToast } from "../../components/feedback/ToastProvider";
+import ScheduleWeekendConfirmDialog from "../../features/qms/ScheduleWeekendConfirmDialog";
+import {
+  parseWeekendConfirmationDetail,
+  type WeekendConfirmationDetail,
+  type WeekendPolicy,
+} from "../../features/qms/scheduleWeekend";
 import { getContext } from "../../services/auth";
 import {
   qmsCreateAuditSchedule,
@@ -613,6 +619,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [recordDensity, setRecordDensity] = useState<PlannedRecordDensity>("compact");
   const [expandedAuditIds, setExpandedAuditIds] = useState<Set<string>>(new Set());
   const [collapsedAuditGroups, setCollapsedAuditGroups] = useState<Set<PlannedRecordFilter>>(new Set());
+  const [weekendPrompt, setWeekendPrompt] = useState<WeekendConfirmationDetail | null>(null);
+  const [weekendPolicy, setWeekendPolicy] = useState<WeekendPolicy | null>(null);
   const [auditPersonSearch, setAuditPersonSearch] = useState<Record<PersonSearchField, string>>({
     auditee_user_id: "",
     lead_auditor_user_id: "",
@@ -644,7 +652,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const personnelQuery = useQuery({
     queryKey: ["qms-audit-personnel-options", amoCode],
-    queryFn: () => qmsListAuditPersonnelOptions({ limit: 100 }),
+    queryFn: () => qmsListAuditPersonnelOptions(amoCode, { limit: 100 }),
     staleTime: 5 * 60_000,
   });
 
@@ -1041,6 +1049,10 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     if (!form.title.trim()) return "Audit title is required.";
     if (!form.audit_scope_code) return "Select the audit scope before saving.";
     if (!form.next_due_date) return "Next due date is required.";
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (form.next_due_date < todayIso) {
+      return `The schedule start date cannot be in the past (today is ${todayIso}). Choose today or a future date.`;
+    }
     if (!Number.isFinite(duration) || duration < 1) return "Enter a valid duration in days.";
     if (!form.lead_auditor_user_id) return "Assign a lead auditor before saving the schedule.";
     if (form.kind === "INTERNAL" && !form.auditee_user_id && !form.auditee_email.trim()) {
@@ -1053,21 +1065,26 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   };
 
   const saveSchedule = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (policy?: WeekendPolicy | null) => {
       const validationError = validateForm();
       if (validationError) throw new Error(validationError);
-      const payload = formToPayload(form);
-      const confirmationMessage = editingScheduleId
-        ? `Confirm rescheduling or updating this audit. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`
-        : `Confirm creation of this audit schedule. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`;
-      if (!window.confirm(confirmationMessage)) {
-        throw new Error("Schedule confirmation cancelled.");
+      const resolvedPolicy = policy || weekendPolicy || undefined;
+      const payload = { ...formToPayload(form), weekend_policy: resolvedPolicy };
+      if (!resolvedPolicy) {
+        const confirmationMessage = editingScheduleId
+          ? `Confirm rescheduling or updating this audit. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`
+          : `Confirm creation of this audit schedule. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`;
+        if (!window.confirm(confirmationMessage)) {
+          throw new Error("Schedule confirmation cancelled.");
+        }
       }
       if (editingScheduleId) return qmsUpdateAuditSchedule(editingScheduleId, payload);
       return qmsCreateAuditSchedule(payload);
     },
     onSuccess: async () => {
       const wasEditing = Boolean(editingScheduleId);
+      setWeekendPrompt(null);
+      setWeekendPolicy(null);
       discardDraft();
       setDrawerTab("overview");
       setDrawerOpen(false);
@@ -1083,6 +1100,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     },
     onError: (e: Error) => {
       if (e.message === "Schedule confirmation cancelled.") return;
+      const weekendDetail = parseWeekendConfirmationDetail(e);
+      if (weekendDetail) {
+        setWeekendPrompt(weekendDetail);
+        setError(null);
+        return;
+      }
       setError(e.message || "Failed to save schedule.");
     },
   });
@@ -1949,7 +1972,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
                 <label className="profile-inline-field">
                   <span>Next due date</span>
-                  <input className="input" type="date" value={form.next_due_date} onChange={(e) => setField("next_due_date", e.target.value)} />
+                  <input
+                    className="input"
+                    type="date"
+                    min={new Date().toISOString().slice(0, 10)}
+                    value={form.next_due_date}
+                    onChange={(e) => setField("next_due_date", e.target.value)}
+                  />
                 </label>
 
                 <label className="profile-inline-field">
@@ -2153,7 +2182,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                   Next
                 </Button>
               ) : null}
-              <Button onClick={() => saveSchedule.mutate()} loading={saveSchedule.isPending}>
+              <Button onClick={() => saveSchedule.mutate(weekendPolicy)} loading={saveSchedule.isPending}>
                 <Plus size={16} />
                 {editingScheduleId ? "Save changes" : "Save schedule"}
               </Button>
@@ -2161,6 +2190,22 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           </div>
         </div>
       </Drawer>
+
+      {weekendPrompt ? (
+        <ScheduleWeekendConfirmDialog
+          detail={weekendPrompt}
+          busy={saveSchedule.isPending}
+          onCancel={() => {
+            setWeekendPrompt(null);
+            setWeekendPolicy(null);
+          }}
+          onConfirm={(policy) => {
+            setWeekendPolicy(policy);
+            setWeekendPrompt(null);
+            saveSchedule.mutate(policy);
+          }}
+        />
+      ) : null}
     </QualityAuditsSectionLayout>
   );
 };

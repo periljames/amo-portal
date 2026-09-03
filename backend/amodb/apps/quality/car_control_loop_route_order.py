@@ -1,66 +1,25 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
-
+from . import car_control_loop_authority_guard
+from . import car_control_loop_evidence_guard
 from .canonical_router import router
-from . import car_control_loop_session_context as _car_control_loop_session_context  # noqa: F401,E402
-from . import car_control_loop_authority_guard as _car_control_loop_authority_guard  # noqa: E402
-from . import car_control_loop_evidence_guard as _car_control_loop_evidence_guard  # noqa: E402
+from .route_ordering import promote_route_family
 
 
-# Reviewer/closure authority routes are registered after the base and sequence
-# guards so the route-order pass below retains these stricter handlers for the
-# overlapping milestone-decision and close operations. Evidence uses dedicated
-# control-loop paths rather than the legacy assignee attachment endpoints.
-router.include_router(_car_control_loop_authority_guard.router)
-router.include_router(_car_control_loop_evidence_guard.router)
+router.include_router(car_control_loop_authority_guard.router)
+router.include_router(car_control_loop_evidence_guard.router)
 
 
-def _is_control_loop_route(route_item) -> bool:
+def _is_control_loop_route(route_item: object) -> bool:
     path = str(getattr(route_item, "path", ""))
-    return "/cars/" in path and "/control-loop" in path and ("/quality/" in path or "/qms/" in path)
-
-
-def _is_generic_catchall(route_item) -> bool:
-    path = str(getattr(route_item, "path", ""))
-    methods = set(getattr(route_item, "methods", None) or ())
-    return path.endswith("/{module_path:path}") and bool(methods & {"GET", "POST", "PATCH", "DELETE"})
-
-
-def _route_signature(route_item) -> tuple[str, frozenset[str]]:
     return (
-        str(getattr(route_item, "path", "")),
-        frozenset(getattr(route_item, "methods", None) or ()),
+        "/cars/" in path
+        and "/control-loop" in path
+        and ("/quality/" in path or "/qms/" in path)
     )
 
 
-def _promote_control_loop_routes(api_router: APIRouter) -> None:
-    registered = [route_item for route_item in api_router.routes if _is_control_loop_route(route_item)]
-    if not registered:
-        raise RuntimeError("QMS CAR control-loop routes were not registered")
+promote_route_family(router, predicate=_is_control_loop_route, label="QMS CAR control loop")
 
-    selected_reversed = []
-    seen: set[tuple[str, frozenset[str]]] = set()
-    for route_item in reversed(registered):
-        signature = _route_signature(route_item)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        selected_reversed.append(route_item)
-    selected = list(reversed(selected_reversed))
-
-    remaining = [route_item for route_item in api_router.routes if not _is_control_loop_route(route_item)]
-    catchall_index = next(
-        (index for index, route_item in enumerate(remaining) if _is_generic_catchall(route_item)),
-        len(remaining),
-    )
-    api_router.routes[:] = [*remaining[:catchall_index], *selected, *remaining[catchall_index:]]
-
-
-_promote_control_loop_routes(router)
-
-# The live-audit session projection is a read-only orchestration layer over the
-# authoritative audit workflow, preparation, closure and archive records. Load
-# it from an existing Quality route-order extension point so no central router
-# bootstrap duplication is introduced.
-from . import audit_session_route_order as _audit_session_route_order  # noqa: F401,E402
+# The session projection is registered from this established extension point.
+from . import audit_session_route_order as _audit_session_route_order  # noqa: E402,F401

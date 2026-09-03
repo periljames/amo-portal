@@ -19,6 +19,8 @@ def _is_occurrence_completion_route(route_item) -> bool:
             fragment in path
             for fragment in (
                 "/assignment-eligibility",
+                "/independence",
+                "/assignments",
                 "/governed-document-requests",
                 "/controlled-document-submissions",
                 "/document-control/documents",
@@ -45,10 +47,11 @@ def _promote_occurrence_routes(api_router: APIRouter) -> None:
     """Place exact occurrence routes ahead of broad legacy workflow handlers.
 
     The legacy POST ``/{module}/{record_id}/{action}`` route also matches exact
-    paths such as ``/audits/{audit_id}/meetings`` and
-    ``/audits/{audit_id}/governed-document-requests``. Starlette dispatches the
-    first matching route, so appending the occurrence router causes valid writes
-    to be misclassified as unsupported workflow actions and returned as 404.
+    paths such as ``/audits/{audit_id}/meetings``,
+    ``/audits/{audit_id}/independence``, ``/audits/{audit_id}/assignments``,
+    and ``/audits/{audit_id}/governed-document-requests``. Starlette dispatches
+    the first matching route, so appending the occurrence router causes valid
+    writes to be misclassified as unsupported workflow actions and returned as 404.
     """
 
     occurrence_routes = [item for item in api_router.routes if _is_occurrence_completion_route(item)]

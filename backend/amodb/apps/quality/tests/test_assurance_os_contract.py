@@ -50,7 +50,7 @@ def test_assurance_operating_system_models_are_registered() -> None:
     assert expected.issubset(Base.metadata.tables)
 
 
-def test_assignment_guard_exposes_preflight_and_authoritative_overrides() -> None:
+def test_assignment_guard_exposes_preflight_and_authoritative_writes() -> None:
     methods = _methods(assignment_guard_router)
     assert {
         ("/integrations/calendar/auditor-eligibility", "POST"),
@@ -60,7 +60,7 @@ def test_assignment_guard_exposes_preflight_and_authoritative_overrides() -> Non
     }.issubset(methods)
 
 
-def test_assignment_overrides_are_unique_and_promoted_before_catchall() -> None:
+def test_assignment_writes_are_unique_and_promoted_before_catchall() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
     ):

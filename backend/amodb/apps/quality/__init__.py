@@ -23,36 +23,20 @@ from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
 from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
 from . import register_pagination as _register_pagination  # noqa: F401,E402
+from .route_ordering import assert_unique_routes
 
 
-def _deduplicate_exact_routes(api_router: APIRouter) -> None:
-    """Remove accidental duplicate decorators while preserving distinct handlers."""
-
-    unique_routes = []
-    seen: set[tuple[str, frozenset[str], int]] = set()
-    for route_item in api_router.routes:
-        path = str(getattr(route_item, "path", ""))
-        methods = frozenset(getattr(route_item, "methods", None) or ())
-        endpoint_marker = id(getattr(route_item, "endpoint", route_item))
-        signature = (path, methods, endpoint_marker)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        unique_routes.append(route_item)
-    api_router.routes[:] = unique_routes
-
-
-_deduplicate_exact_routes(router)
-_deduplicate_exact_routes(public_router)
+assert_unique_routes(router, label="QMS base API")
+assert_unique_routes(public_router, label="QMS public API")
 
 # Register the operational dashboard, then explicitly place its static route
 # ahead of the generic /{module_path:path} fallback.
 from . import dashboard_v2 as _dashboard_v2  # noqa: F401,E402
 from . import dashboard_route_order as _dashboard_route_order  # noqa: F401,E402
 
-# Continuous-assurance APIs live under the canonical Quality tenant prefix. Later
-# extension routers intentionally override selected base paths with stricter tenant
-# validation, schema-aware aggregation and lifecycle transition enforcement.
+# Continuous-assurance APIs live under the canonical Quality tenant prefix.
+# Each public route has one owner; lifecycle routers expose guarded writes while
+# service implementations remain private.
 from . import canonical_router as _canonical_router  # noqa: F401,E402
 from . import excellence_router as _excellence_router  # noqa: F401,E402
 from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
@@ -92,14 +76,10 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/excellence/source-catalog",
 )
 
-# Metrics intentionally override the wiring router's broad aggregation paths.
-# Register them directly so the later route-order pass can retain the latest
-# exact path/method handler rather than treating the overlap as duplication.
+# Schema-aware metrics own the full overview and management-review projections.
 _canonical_router.router.include_router(_assurance_metrics_router.router)
 
-# Lifecycle endpoints intentionally overlap the base wiring contract. They are
-# registered last so create, approval and test operations retain strict state
-# transition and evidence gates.
+# Lifecycle endpoints own control creation, approval and test transitions.
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
 
 # Missions are additive governed workflows rather than a duplicate operational
@@ -111,8 +91,8 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/missions",
 )
 
-# Write guards override only the Mission operations that require stronger tenant
-# participant validation, gate evidence checks and attributable human approval.
+# Guard routers own Mission writes that require tenant participant validation,
+# gate evidence checks and attributable human approval.
 _canonical_router.router.include_router(_mission_management_guard_router.router)
 _canonical_router.router.include_router(_mission_lifecycle_guard_router.router)
 
@@ -131,9 +111,7 @@ _include_once(
 _canonical_router.router.include_router(_audit_programme_queue_router.router)
 
 # Programme-to-Planner linkage is a focused transactional adapter around the
-# authoritative audit schedule engine. It is deliberately registered after the
-# programme CRUD routes so only the schedule-link operations overlap the same
-# route family.
+# authoritative audit schedule engine.
 _canonical_router.router.include_router(_audit_programme_schedule_router.router)
 
 # People & Privileges owns only Quality authorization decisions, hard eligibility
@@ -177,9 +155,8 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/audits/{audit_id}/preparation-revisions",
 )
 
-# Governed assignment routes intentionally override selected Planner writes.
-# The original scheduling functions remain authoritative and are called only
-# after People & Privileges hard gates have been evaluated.
+# Governed assignment routes own Planner writes after People & Privileges hard
+# gates have been evaluated.
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
 
 # CAR/CAPA control-loop records are an additive governance layer over the
@@ -190,12 +167,12 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/cars/{car_id}/control-loop",
 )
 
-# Deadline decisions and escalation evaluation deliberately override selected
-# broad control-loop endpoints with stricter sequence and stale-request guards.
+# Deadline decisions and escalation evaluation enforce sequence and stale-request
+# guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
-# Promote static assurance APIs ahead of the canonical catch-all and collapse
-# path/method overlaps in favour of the latest, most specific handler.
+# Promote static APIs ahead of the canonical catch-all. Route-family promotion
+# fails startup if two handlers could match the same path and method.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
 from . import mission_route_order as _mission_route_order  # noqa: F401,E402
 from . import audit_programme_route_order as _audit_programme_route_order  # noqa: F401,E402

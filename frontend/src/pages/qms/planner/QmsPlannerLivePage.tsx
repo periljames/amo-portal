@@ -38,7 +38,7 @@ function fallbackTrigger(dialog: HTMLElement): HTMLElement | null {
   }
   if (dialog.matches(".qms-planner-create-modal")) {
     return firstFocusable(
-      document.querySelector<HTMLElement>(".qms-planner-quick-schedule"),
+      document.querySelector<HTMLElement>(".qms-planner-schedule-action"),
       document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child"),
     );
   }
@@ -65,7 +65,7 @@ function shortcutTrigger(event: KeyboardEvent): HTMLElement | null {
   }
   if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "c") {
     return firstFocusable(
-      document.querySelector<HTMLElement>(".qms-planner-quick-schedule"),
+      document.querySelector<HTMLElement>(".qms-planner-schedule-action"),
       document.querySelector<HTMLElement>(".qms-planner-toolbar__controls button:last-child"),
     );
   }

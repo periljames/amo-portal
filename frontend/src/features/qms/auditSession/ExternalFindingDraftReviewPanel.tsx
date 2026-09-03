@@ -2,12 +2,12 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, CornerDownLeft, FileWarning, X } from "lucide-react";
 
-import { qmsResolveAudit } from "../../../services/qms";
 import {
   listExternalFindingDraftsForQuality,
   promoteExternalFindingDraft,
   returnExternalFindingDraft,
 } from "../../../services/qmsExternalFindingDraftReview";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import "../../../styles/qms-external-finding-draft-review.css";
 
 type Props = { amoCode: string; auditKey: string };
@@ -17,8 +17,8 @@ const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey })
   const [open, setOpen] = useState(true);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const auditQuery = useQuery({
-    queryKey: ["qms", "external-draft-review-audit", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms", "external-draft-review-audit", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";

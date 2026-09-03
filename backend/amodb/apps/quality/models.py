@@ -344,6 +344,7 @@ class QMSManualChangeRequest(Base):
     __tablename__ = "qms_manual_change_requests"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     domain = Column(
         SAEnum(QMSDomain, name="qms_domain", native_enum=False),
@@ -383,8 +384,8 @@ class QMSManualChangeRequest(Base):
     submitted_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
-        Index("ix_qms_cr_domain_status", "domain", "status"),
-        Index("ix_qms_cr_submitted_at", "submitted_at"),
+        Index("ix_qms_cr_amo_domain_status", "amo_id", "domain", "status"),
+        Index("ix_qms_cr_amo_submitted_at", "amo_id", "submitted_at"),
     )
 
     def __repr__(self) -> str:

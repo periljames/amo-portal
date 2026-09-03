@@ -34,6 +34,7 @@ describe("QMS route registry", () => {
       "/maintenance/Safari%20Link%2FAMO/quality/cars/CAR-24%2B1/overview",
     );
     expect(qmsNavigationItems("SAF").find((item) => item.id === "audits")?.path).toBe("/maintenance/SAF/quality/audits/dashboard");
+    expect(qmsNavigationItems("SAF").find((item) => item.id === "calendar")?.path).toBe("/maintenance/SAF/quality/calendar/week");
     expect(qmsNavigationItems("Safari Link/AMO").every((item) => item.path.startsWith("/maintenance/Safari%20Link%2FAMO/quality/"))).toBe(true);
   });
 
@@ -52,6 +53,7 @@ describe("QMS route registry", () => {
 
   it("recognises overview and specialist record workspaces", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality").kind).toBe("overview");
+    expect(classifyQmsPath("/maintenance/SAF/quality/calendar/day").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedule").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/live").kind).toBe("known");
@@ -73,6 +75,11 @@ describe("QMS route registry", () => {
 
   it("keeps CAR overview as the canonical CAR record entry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
+  });
+
+  it("recognises the Findings & Actions owner and finding overview deep links", () => {
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/findings-actions").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/findings/F-123/overview").kind).toBe("known");
   });
 
   it("recognises every canonical live-audit stage before the not-found guard", () => {

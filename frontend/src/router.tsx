@@ -76,6 +76,9 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
   if (route.module.id === "cars") return false;
+  // Findings list aliases and record details are owned by the Audit Assurance
+  // Findings & Actions workspace in PortalRouteSurface.
+  if (route.module.id === "findings") return false;
   return route.module.componentType === "canonical";
 }
 
@@ -223,6 +226,15 @@ function PublicationsRouteSurface() {
 export const AppRouter: React.FC = () => {
   const location = useLocation();
   const qmsRoute = classifyQmsPath(location.pathname);
+
+  // Legacy/alias planner entry and bare calendar → canonical week view (avoids "route not found").
+  const plannerOrBareCalendar = location.pathname.match(
+    /^\/maintenance\/([^/]+)\/quality\/(?:planner|calendar)\/?$/i,
+  );
+  if (plannerOrBareCalendar) {
+    const amo = plannerOrBareCalendar[1];
+    return <Navigate to={`/maintenance/${amo}/quality/calendar/week`} replace />;
+  }
 
   if (isSupportedCarPerformanceReportPath(location.pathname)) return <QmsCarPerformanceReportRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;

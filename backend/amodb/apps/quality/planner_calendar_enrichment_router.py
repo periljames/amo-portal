@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
 
-from .planner_calendar_router import qms_planner_calendar
+from .planner_calendar_router import _qms_planner_calendar
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 from .tenant_security import TenantContext, require_quality_permission
 from .tenant_timezone import TenantTimezone, resolve_tenant_timezone
@@ -95,7 +95,7 @@ def qms_planner_calendar_enriched(
     ctx: TenantContext = Depends(require_quality_permission("qms.calendar.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    payload = qms_planner_calendar(
+    payload = _qms_planner_calendar(
         start=start,
         end=end,
         limit=limit,
@@ -194,6 +194,11 @@ def qms_planner_calendar_enriched(
         item["attendee_count"] = len(metadata.attendee_user_ids) + len(metadata.external_attendees)
         item["source_schedule_id"] = str(metadata.source_schedule_id) if metadata.source_schedule_id else None
         item["occurrence_date"] = metadata.occurrence_date.isoformat() if metadata.occurrence_date else None
+        if metadata.end_date:
+            item["ends_on"] = metadata.end_date.isoformat()
+        if item.get("entity_type") == "audit_schedule":
+            item["schedule_version"] = metadata.version
+            item["expected_version"] = metadata.version
 
     if timezone_source == "client":
         _refresh_due_state(items, today=datetime.now(effective_timezone.tzinfo).date())

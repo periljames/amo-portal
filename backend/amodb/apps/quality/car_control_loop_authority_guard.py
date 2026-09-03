@@ -9,9 +9,9 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_write_db
 
 from .car_control_loop_guard_router import (
-    close_control_loop_guarded as _close_control_loop_guarded,
-    decide_deadline_change_guarded as _decide_deadline_change_guarded,
-    request_deadline_change_guarded as _request_deadline_change_guarded,
+    _close_control_loop_guarded,
+    _decide_deadline_change_guarded,
+    _request_deadline_change_guarded,
 )
 from .car_control_loop_router import (
     CloseControlLoop,
@@ -20,7 +20,7 @@ from .car_control_loop_router import (
     MilestoneUpdate,
     _enum_value,
     _load_car,
-    update_milestone as _update_milestone_base,
+    _update_milestone as _update_milestone_base,
 )
 from .tenant_security import (
     TenantContext,

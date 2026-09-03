@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, CalendarRange, Factory, PanelRightClose, PanelRightOpen, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { Building2, CalendarRange, Factory, PanelRightClose, RefreshCw, ShieldCheck, Users } from "lucide-react";
 
 import { getQmsPlannerStrategicView } from "../../services/qmsPlannerStrategic";
 import "../../styles/qms-planner-strategic.css";
@@ -13,8 +13,9 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 const QualityPlannerStrategicHost: React.FC<Props> = ({ amoCode }) => {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isPlannerRoute = /\/(?:quality|qms)\/(?:calendar|planner)(?:\/|$)/i.test(location.pathname);
-  const [open, setOpen] = useState(false);
+  const open = searchParams.get("strategic") === "1";
   const [view, setView] = useState<View>("year");
   const [year, setYear] = useState(new Date().getFullYear());
   const query = useQuery({
@@ -24,17 +25,19 @@ const QualityPlannerStrategicHost: React.FC<Props> = ({ amoCode }) => {
   });
   const data = query.data;
   const maxMonth = useMemo(() => Math.max(1, ...(data?.months.map((row) => row.schedule_count) || [1])), [data]);
+  const close = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("strategic");
+    setSearchParams(next, { replace: true });
+  };
 
-  if (!isPlannerRoute) return null;
+  if (!isPlannerRoute || !open) return null;
 
-  return <>
-    <button className="qms-planner-strategic-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="qms-planner-strategic-panel">
-      {open ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />} Strategic Planner
-    </button>
-    {open ? <aside id="qms-planner-strategic-panel" className="qms-planner-strategic-panel" aria-label="Strategic Quality Planner">
+  return (
+    <aside id="qms-planner-strategic-panel" className="qms-planner-strategic-panel" aria-label="Audit coverage planning">
       <header>
-        <div><span>Strategic planning</span><strong>Year · Quarter · Coverage</strong></div>
-        <button type="button" onClick={() => setOpen(false)} aria-label="Close strategic Planner"><PanelRightClose size={18} /></button>
+        <div><span>Audit coverage planning</span><strong>Year · Quarter · Coverage</strong></div>
+        <button type="button" onClick={close} aria-label="Close audit coverage planning"><PanelRightClose size={18} /></button>
       </header>
       <div className="qms-planner-strategic-toolbar">
         <button type="button" onClick={() => setYear((value) => value - 1)}>←</button>
@@ -42,14 +45,14 @@ const QualityPlannerStrategicHost: React.FC<Props> = ({ amoCode }) => {
         <button type="button" onClick={() => setYear((value) => value + 1)}>→</button>
         <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching}><RefreshCw size={15} /> Refresh</button>
       </div>
-      <nav aria-label="Strategic Planner views">
+      <nav aria-label="Audit coverage views">
         <button type="button" className={view === "year" ? "is-active" : ""} onClick={() => setView("year")}><CalendarRange size={15} /> Year</button>
         <button type="button" className={view === "quarter" ? "is-active" : ""} onClick={() => setView("quarter")}><CalendarRange size={15} /> Quarter</button>
         <button type="button" className={view === "workload" ? "is-active" : ""} onClick={() => setView("workload")}><Users size={15} /> Workload</button>
         <button type="button" className={view === "coverage" ? "is-active" : ""} onClick={() => setView("coverage")}><Building2 size={15} /> Coverage</button>
       </nav>
       <div className="qms-planner-strategic-body">
-        {query.isLoading ? <p>Loading authoritative Planner coverage…</p> : query.error ? <p role="alert">{query.error instanceof Error ? query.error.message : "Strategic Planner could not be loaded."}</p> : null}
+        {query.isLoading ? <p>Loading authoritative Planner coverage…</p> : query.error ? <p role="alert">{query.error instanceof Error ? query.error.message : "Audit coverage planning could not be loaded."}</p> : null}
         {data && view === "year" ? <>
           <section className="qms-planner-strategic-summary"><strong>{data.schedule_count}</strong><span>authoritative audit schedules in {year}</span><small>{data.timezone_name}</small></section>
           <div className="qms-planner-strategic-months">{data.months.map((row) => <article key={row.month}><strong>{MONTHS[row.month - 1]}</strong><div><span style={{ height: `${Math.max(6, (row.schedule_count / maxMonth) * 100)}%` }} /></div><small>{row.schedule_count}</small></article>)}</div>
@@ -64,8 +67,8 @@ const QualityPlannerStrategicHost: React.FC<Props> = ({ amoCode }) => {
           <section className="qms-planner-strategic-card"><header><ShieldCheck size={17} /><strong>Regulatory commitments</strong></header><ul>{data.regulatory_commitments.length ? data.regulatory_commitments.map((row) => <li key={row.id}><strong>{row.label}</strong><span>{row.mandatory_surveillance ? "Mandatory" : row.regulatory_criticality} · {row.programme_states.join(", ") || "not yet in programme"}</span>{row.source_route ? <a href={row.source_route}>Open source</a> : null}</li>) : <li>No regulatory/mandatory Audit Universe items are configured.</li>}</ul></section>
         </> : null}
       </div>
-    </aside> : null}
-  </>;
+    </aside>
+  );
 };
 
 export default QualityPlannerStrategicHost;

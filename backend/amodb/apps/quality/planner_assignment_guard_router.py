@@ -12,13 +12,14 @@ from amodb.database import get_write_db
 
 from . import models as quality_models
 from .audit_assignment_guard import evaluate_auditor_assignment, evaluate_schedule_auditors
-from .audit_programme_schedule_router import schedule_programme_requirement
+from .people_default_rules import ensure_default_quality_privilege_rules
+from .audit_programme_schedule_router import _schedule_programme_requirement
 from .planner_schedule_router import (
     PlannerAuditScheduleCreate,
     PlannerAuditScheduleResponse,
     PlannerAuditScheduleStateUpdate,
-    create_planner_audit_schedule,
-    resume_planner_audit_schedule,
+    _change_schedule_state,
+    _create_planner_audit_schedule,
 )
 from .tenant_security import TenantContext, assert_quality_permission, set_postgres_tenant_context, write_tenant_context
 
@@ -95,7 +96,9 @@ def auditor_eligibility_preflight(
 ) -> dict:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    return evaluate_auditor_assignment(
+    ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    db.flush()
+    result = evaluate_auditor_assignment(
         db,
         amo_id=ctx.amo_id,
         user_id=payload.user_id,
@@ -107,18 +110,17 @@ def auditor_eligibility_preflight(
         enforce_independence=payload.enforce_independence,
         exclude_schedule_id=payload.exclude_schedule_id,
     )
+    db.commit()
+    return result
 
 
-@router.post(
-    "/integrations/calendar/audit-schedules",
-    response_model=PlannerAuditScheduleResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_guarded_planner_audit_schedule(
+def _create_guarded_planner_audit_schedule(
     payload: PlannerAuditScheduleCreate,
     request: Request,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
+    ctx: TenantContext,
+    db: Session,
+    *,
+    commit: bool,
 ) -> PlannerAuditScheduleResponse:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -144,7 +146,33 @@ def create_guarded_planner_audit_schedule(
                 "required_action": "Create the schedule with automation_active=false, record each required AUDIT_SCHEDULE independence declaration using the returned schedule ID, then resume the schedule. Resume is hard-gated and rechecks privilege, training, scope, capacity and independence.",
             },
         )
-    return create_planner_audit_schedule(payload=payload, request=request, ctx=ctx, db=db)
+    return _create_planner_audit_schedule(
+        payload=payload,
+        request=request,
+        ctx=ctx,
+        db=db,
+        commit=commit,
+    )
+
+
+@router.post(
+    "/integrations/calendar/audit-schedules",
+    response_model=PlannerAuditScheduleResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_guarded_planner_audit_schedule(
+    payload: PlannerAuditScheduleCreate,
+    request: Request,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> PlannerAuditScheduleResponse:
+    return _create_guarded_planner_audit_schedule(
+        payload=payload,
+        request=request,
+        ctx=ctx,
+        db=db,
+        commit=True,
+    )
 
 
 @router.post(
@@ -178,7 +206,14 @@ def resume_guarded_planner_audit_schedule(
         exclude_schedule_id=str(schedule.id),
     )
     _raise_assignment_blocked(result=gate, operation="Schedule activation")
-    return resume_planner_audit_schedule(schedule_id=schedule_id, payload=payload, request=request, ctx=ctx, db=db)
+    return _change_schedule_state(
+        schedule_id=schedule_id,
+        active=True,
+        payload=payload,
+        request=request,
+        ctx=ctx,
+        db=db,
+    )
 
 
 @router.post(
@@ -204,7 +239,7 @@ def schedule_guarded_programme_requirement(
         context_id=item_id,
         enforce_independence=True,
     )
-    return schedule_programme_requirement(
+    return _schedule_programme_requirement(
         programme_id=programme_id,
         item_id=item_id,
         payload=payload,

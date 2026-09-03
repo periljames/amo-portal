@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, List, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, EmailStr
@@ -216,6 +216,7 @@ class QMSChangeRequestOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    amo_id: str
     domain: QMSDomain
 
     petitioner_name: str
@@ -595,6 +596,10 @@ class QMSAuditScheduleCreate(BaseModel):
     reminder_interval_days: int = Field(default=7, ge=1, le=60)
     duration_days: int = Field(default=1, ge=1, le=90)
     next_due_date: date
+    weekend_policy: Optional[Literal["INCLUDE_WEEKEND", "SKIP_WEEKEND"]] = Field(
+        default=None,
+        description="Required when the occurrence spans Saturday/Sunday.",
+    )
 
 
 class QMSAuditScheduleUpdate(BaseModel):
@@ -617,6 +622,10 @@ class QMSAuditScheduleUpdate(BaseModel):
     reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=60)
     duration_days: Optional[int] = Field(default=None, ge=1, le=90)
     next_due_date: Optional[date] = None
+    weekend_policy: Optional[Literal["INCLUDE_WEEKEND", "SKIP_WEEKEND"]] = Field(
+        default=None,
+        description="Required when the occurrence spans Saturday/Sunday.",
+    )
     is_active: Optional[bool] = None
 
 
@@ -838,10 +847,14 @@ class QualityWorkflowSettingsOut(BaseModel):
     updated_at: datetime
 
 
+WorkflowReminderDay = Annotated[int, Field(ge=0, le=60)]
+WorkflowReminderPercentage = Annotated[int, Field(gt=0, lt=100)]
+
+
 class QualityWorkflowSettingsUpdate(BaseModel):
     report_due_days: Optional[int] = Field(default=None, ge=1, le=60)
-    report_reminder_days: Optional[List[int]] = None
-    car_reminder_percentages: Optional[List[int]] = None
+    report_reminder_days: Optional[List[WorkflowReminderDay]] = Field(default=None, min_length=1, max_length=10)
+    car_reminder_percentages: Optional[List[WorkflowReminderPercentage]] = Field(default=None, min_length=1, max_length=10)
     final_reminder_days_before_due: Optional[int] = Field(default=None, ge=0, le=30)
     auto_escalation_enabled: Optional[bool] = None
 

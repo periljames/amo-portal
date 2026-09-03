@@ -1,0 +1,373 @@
+/* Assurance dark mode — solid charcoal surfaces + light ink.
+   Nested chips/tabs must not paint as white/pastel paper. */
+
+html[data-color-scheme="dark"],
+body[data-color-scheme="dark"],
+[data-theme="dark"],
+.dark {
+  --qa-ink: rgba(255, 255, 255, 0.94);
+  --qa-ink-muted: rgba(255, 255, 255, 0.72);
+  --qa-ink-soft: rgba(255, 255, 255, 0.84);
+  --qa-chip: #22252b;
+  --qa-chip-raised: #2a2e36;
+  --qa-chip-border: rgba(255, 255, 255, 0.14);
+  --qa-danger-bg: #3a2226;
+  --qa-danger-border: rgba(239, 68, 68, 0.45);
+  --qa-danger-ink: #fecaca;
+  --qa-warn-bg: #3a3120;
+  --qa-warn-border: rgba(245, 158, 11, 0.45);
+  --qa-warn-ink: #fde68a;
+  --qa-ok-bg: #1e322c;
+  --qa-ok-border: rgba(16, 185, 129, 0.42);
+  --qa-ok-ink: #a7f3d0;
+  --qa-info-bg: #1e2a3a;
+  --qa-info-border: rgba(59, 130, 246, 0.42);
+  --qa-info-ink: #bfdbfe;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-status-banner,
+  .qa-status-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-empty-state,
+  .qa-ops-mini-links a,
+  .qa-dashboard-link-btn,
+  .qa-panel__full-link
+),
+body[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-status-banner,
+  .qa-status-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-empty-state,
+  .qa-ops-mini-links a,
+  .qa-dashboard-link-btn,
+  .qa-panel__full-link
+),
+[data-theme="dark"] .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-status-banner,
+  .qa-status-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-empty-state,
+  .qa-ops-mini-links a,
+  .qa-dashboard-link-btn,
+  .qa-panel__full-link
+),
+.dark .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-status-banner,
+  .qa-status-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-empty-state,
+  .qa-ops-mini-links a,
+  .qa-dashboard-link-btn,
+  .qa-panel__full-link
+) {
+  background: var(--qa-chip) !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-ops-mini-links a
+) :is(strong, span, small, p, a, label, h3),
+body[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card,
+  .qa-kpi-card,
+  .qa-next-action-card,
+  .qa-upcoming-item,
+  .qa-action-item,
+  .qa-launch-button,
+  .qa-action-queue__item,
+  .qa-exposure-row,
+  .qa-health-metric,
+  .qa-car-metric,
+  .qa-ops-mini-links a
+) :is(strong, span, small, p, a, label, h3) {
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card__body small,
+  .qa-kpi-card small,
+  .qa-upcoming-item small,
+  .qa-action-item small,
+  .qa-launch-button small,
+  .qa-action-queue__item small,
+  .qa-health-metric span,
+  .qa-car-metric span,
+  .qa-empty-state
+),
+body[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-ops-card__body small,
+  .qa-kpi-card small,
+  .qa-upcoming-item small,
+  .qa-health-metric span,
+  .qa-empty-state
+) {
+  color: var(--qa-ink-muted) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--danger,
+html[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--danger,
+body[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--danger,
+body[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--danger {
+  background: var(--qa-danger-bg) !important;
+  border-color: var(--qa-danger-border) !important;
+  color: var(--qa-danger-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--warning,
+html[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--warning,
+body[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--warning,
+body[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--warning {
+  background: var(--qa-warn-bg) !important;
+  border-color: var(--qa-warn-border) !important;
+  color: var(--qa-warn-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--success,
+html[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--success,
+html[data-color-scheme="dark"] .qa-dashboard .qa-next-action-card.qa-next-action-card--clear,
+body[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--success,
+body[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--success,
+body[data-color-scheme="dark"] .qa-dashboard .qa-next-action-card.qa-next-action-card--clear {
+  background: var(--qa-ok-bg) !important;
+  border-color: var(--qa-ok-border) !important;
+  color: var(--qa-ok-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--info,
+html[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--info,
+body[data-color-scheme="dark"] .qa-dashboard .qa-exposure-row.qa-exposure-row--info,
+body[data-color-scheme="dark"] .qa-dashboard .qa-health-metric.qa-health-metric--info {
+  background: var(--qa-info-bg) !important;
+  border-color: var(--qa-info-border) !important;
+  color: var(--qa-info-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-upcoming-item__date,
+body[data-color-scheme="dark"] .qa-upcoming-item__date {
+  background: #1a1d22 !important;
+  color: var(--qa-ink-soft) !important;
+}
+
+html[data-color-scheme="dark"] .qa-ops-card__icon,
+body[data-color-scheme="dark"] .qa-ops-card__icon {
+  background: #1a1d22 !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink-soft) !important;
+}
+
+html[data-color-scheme="dark"] .qa-ops-card--danger .qa-ops-card__icon,
+body[data-color-scheme="dark"] .qa-ops-card--danger .qa-ops-card__icon {
+  background: var(--qa-danger-bg) !important;
+  border-color: var(--qa-danger-border) !important;
+  color: var(--qa-danger-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-ops-card--warning .qa-ops-card__icon,
+body[data-color-scheme="dark"] .qa-ops-card--warning .qa-ops-card__icon {
+  background: var(--qa-warn-bg) !important;
+  border-color: var(--qa-warn-border) !important;
+  color: var(--qa-warn-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-ops-card--success .qa-ops-card__icon,
+body[data-color-scheme="dark"] .qa-ops-card--success .qa-ops-card__icon {
+  background: var(--qa-ok-bg) !important;
+  border-color: var(--qa-ok-border) !important;
+  color: var(--qa-ok-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-ops-card--info .qa-ops-card__icon,
+body[data-color-scheme="dark"] .qa-ops-card--info .qa-ops-card__icon {
+  background: var(--qa-info-bg) !important;
+  border-color: var(--qa-info-border) !important;
+  color: var(--qa-info-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-panel__header h3,
+body[data-color-scheme="dark"] .qa-panel__header h3 {
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-panel__header p,
+body[data-color-scheme="dark"] .qa-panel__header p {
+  color: var(--qa-ink-muted) !important;
+}
+
+html[data-color-scheme="dark"] .qa-panel__header a,
+body[data-color-scheme="dark"] .qa-panel__header a {
+  color: #e8d48a !important;
+}
+
+/* Audits list / register */
+html[data-color-scheme="dark"] :is(.qa-audits-list__toolbar, .qa-audits-list__row, .qa-audits-list__search),
+body[data-color-scheme="dark"] :is(.qa-audits-list__toolbar, .qa-audits-list__row, .qa-audits-list__search),
+[data-theme="dark"] :is(.qa-audits-list__toolbar, .qa-audits-list__row, .qa-audits-list__search),
+.dark :is(.qa-audits-list__toolbar, .qa-audits-list__row, .qa-audits-list__search) {
+  background: var(--qa-chip) !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-audits-list__summary strong,
+body[data-color-scheme="dark"] .qa-audits-list__summary strong {
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qa-audits-list__summary :is(span, small),
+body[data-color-scheme="dark"] .qa-audits-list__summary :is(span, small) {
+  color: var(--qa-ink-muted) !important;
+}
+
+/* Quality context + rail tabs */
+html[data-color-scheme="dark"] .quality-context-bar__tabs > button,
+body[data-color-scheme="dark"] .quality-context-bar__tabs > button,
+[data-theme="dark"] .quality-context-bar__tabs > button,
+.dark .quality-context-bar__tabs > button {
+  background: transparent !important;
+  color: var(--qa-ink-soft) !important;
+  font-weight: 720 !important;
+}
+
+html[data-color-scheme="dark"] .quality-context-bar__tabs > button.is-active,
+body[data-color-scheme="dark"] .quality-context-bar__tabs > button.is-active,
+[data-theme="dark"] .quality-context-bar__tabs > button.is-active,
+.dark .quality-context-bar__tabs > button.is-active {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 22%, var(--qa-chip)) !important;
+  color: #fff !important;
+  font-weight: 800 !important;
+}
+
+html[data-color-scheme="dark"] .quality-context-bar__subtabs > button,
+html[data-color-scheme="dark"] .quality-context-bar__more > summary,
+body[data-color-scheme="dark"] .quality-context-bar__subtabs > button,
+body[data-color-scheme="dark"] .quality-context-bar__more > summary {
+  background: var(--qa-chip) !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink) !important;
+}
+
+html[data-color-scheme="dark"] .quality-context-bar__subtabs > button.is-active,
+html[data-color-scheme="dark"] .quality-context-bar__more.is-active > summary,
+html[data-color-scheme="dark"] .quality-context-bar__more[open] > summary,
+body[data-color-scheme="dark"] .quality-context-bar__subtabs > button.is-active {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 22%, var(--qa-chip)) !important;
+  color: #fff !important;
+}
+
+html[data-color-scheme="dark"] .qa-workspace-rail__tab,
+body[data-color-scheme="dark"] .qa-workspace-rail__tab {
+  color: var(--qa-ink-soft) !important;
+}
+
+html[data-color-scheme="dark"] .qa-workspace-rail__tab--active,
+body[data-color-scheme="dark"] .qa-workspace-rail__tab--active {
+  color: #fff !important;
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 24%, var(--qa-chip)) !important;
+  border-color: color-mix(in srgb, var(--accent-primary, #4f8cff) 45%, var(--qa-chip-border)) !important;
+}
+
+html[data-color-scheme="dark"] .qa-workspace-rail__group-label,
+html[data-color-scheme="dark"] .quality-context-bar__identity small,
+body[data-color-scheme="dark"] .qa-workspace-rail__group-label,
+body[data-color-scheme="dark"] .quality-context-bar__identity small {
+  color: var(--qa-ink-muted) !important;
+}
+
+/* Tools drawer */
+html[data-color-scheme="dark"] .qa-workspace-drawer__tabs button,
+body[data-color-scheme="dark"] .qa-workspace-drawer__tabs button {
+  background: var(--qa-chip) !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink-soft) !important;
+}
+
+html[data-color-scheme="dark"] .qa-workspace-drawer__tabs button.is-active,
+body[data-color-scheme="dark"] .qa-workspace-drawer__tabs button.is-active {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 24%, var(--qa-chip)) !important;
+  color: #fff !important;
+}
+
+html[data-color-scheme="dark"] :is(.qa-workspace-action, .qa-workspace-lifecycle li),
+body[data-color-scheme="dark"] :is(.qa-workspace-action, .qa-workspace-lifecycle li) {
+  background: var(--qa-chip-raised) !important;
+  border-color: var(--qa-chip-border) !important;
+  color: var(--qa-ink) !important;
+}
+
+/* Primary CTAs must not flatten to charcoal chips */
+html[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-dashboard-link-btn--primary,
+  .btn--primary,
+  .audit-step-nav--primary,
+  .audit-file-action--primary
+),
+body[data-color-scheme="dark"] .qa-dashboard :is(
+  .qa-dashboard-link-btn--primary,
+  .btn--primary,
+  .audit-step-nav--primary,
+  .audit-file-action--primary
+),
+[data-theme="dark"] .qa-dashboard :is(
+  .qa-dashboard-link-btn--primary,
+  .btn--primary,
+  .audit-step-nav--primary,
+  .audit-file-action--primary
+),
+.dark .qa-dashboard :is(
+  .qa-dashboard-link-btn--primary,
+  .btn--primary,
+  .audit-step-nav--primary,
+  .audit-file-action--primary
+) {
+  background: var(--accent-primary, #4f8cff) !important;
+  border-color: var(--accent-primary, #4f8cff) !important;
+  color: #fff !important;
+}

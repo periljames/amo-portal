@@ -12,12 +12,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import models
-from .schema_compat import ensure_qms_audit_reference_schema
 from ..finance import models as finance_models
 from ..training import models as training_models
 from ..training.integration import training_record_summary
@@ -138,14 +137,13 @@ def normalize_finding_level(severity, level: Optional[FindingLevel], finding_typ
     return infer_level_from_severity(severity)
 
 
-def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None) -> dict:
-    cache_key = ("dashboard", str(amo_id or ""), str(domain.value if domain else "ALL"))
+def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, *, amo_id: str) -> dict:
+    cache_key = ("dashboard", amo_id, str(domain.value if domain else "ALL"))
     cached = _get_perf_cache(cache_key)
     if cached is not None:
         return cached
-    ensure_qms_audit_reference_schema(db)
     # Documents
-    doc_q = db.query(models.QMSDocument)
+    doc_q = db.query(models.QMSDocument).filter(models.QMSDocument.amo_id == amo_id)
     if domain:
         doc_q = doc_q.filter(models.QMSDocument.domain == domain)
 
@@ -156,15 +154,22 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optio
 
     # Pending acknowledgements
     dist_q = db.query(models.QMSDocumentDistribution).filter(
+        models.QMSDocumentDistribution.amo_id == amo_id,
         models.QMSDocumentDistribution.requires_ack.is_(True),
         models.QMSDocumentDistribution.acked_at.is_(None),
     )
     if domain:
-        dist_q = dist_q.join(models.QMSDocument).filter(models.QMSDocument.domain == domain)
+        dist_q = dist_q.join(
+            models.QMSDocument,
+            and_(
+                models.QMSDocument.id == models.QMSDocumentDistribution.document_id,
+                models.QMSDocument.amo_id == models.QMSDocumentDistribution.amo_id,
+            ),
+        ).filter(models.QMSDocument.amo_id == amo_id, models.QMSDocument.domain == domain)
     distributions_pending_ack = dist_q.count()
 
     # Change requests
-    cr_q = db.query(models.QMSManualChangeRequest)
+    cr_q = db.query(models.QMSManualChangeRequest).filter(models.QMSManualChangeRequest.amo_id == amo_id)
     if domain:
         cr_q = cr_q.filter(models.QMSManualChangeRequest.domain == domain)
     change_requests_total = cr_q.count()
@@ -176,9 +181,7 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optio
     ).count()
 
     # Audits
-    a_q = db.query(models.QMSAudit)
-    if amo_id:
-        a_q = a_q.filter(models.QMSAudit.amo_id == amo_id)
+    a_q = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == amo_id)
     if domain:
         a_q = a_q.filter(models.QMSAudit.domain == domain)
     audits_total = a_q.count()
@@ -191,13 +194,15 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optio
     ).count()
 
     # Findings (open = not closed)
-    f_q = db.query(models.QMSAuditFinding)
-    if domain or amo_id:
-        f_q = f_q.join(models.QMSAudit)
-        if amo_id:
-            f_q = f_q.filter(models.QMSAudit.amo_id == amo_id)
-        if domain:
-            f_q = f_q.filter(models.QMSAudit.domain == domain)
+    f_q = db.query(models.QMSAuditFinding).join(
+        models.QMSAudit,
+        and_(
+            models.QMSAudit.id == models.QMSAuditFinding.audit_id,
+            models.QMSAudit.amo_id == models.QMSAuditFinding.amo_id,
+        ),
+    ).filter(models.QMSAudit.amo_id == amo_id, models.QMSAuditFinding.amo_id == amo_id)
+    if domain:
+        f_q = f_q.filter(models.QMSAudit.domain == domain)
 
     findings_open = f_q.filter(models.QMSAuditFinding.closed_at.is_(None))
     findings_open_total = findings_open.count()
@@ -275,13 +280,17 @@ def _safe_count(query) -> int:
         return 0
 
 
-def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: int = 7) -> list[dict]:
+def _build_audit_closure_trend(db: Session, *, amo_id: str, window_days: int = 90, bucket_days: int = 7) -> list[dict]:
     today = date.today()
     start = today - timedelta(days=window_days - 1)
     try:
         audits = (
             db.query(models.QMSAudit.id, models.QMSAudit.actual_end)
-            .filter(models.QMSAudit.status == QMSAuditStatus.CLOSED, models.QMSAudit.actual_end.is_not(None))
+            .filter(
+                models.QMSAudit.amo_id == amo_id,
+                models.QMSAudit.status == QMSAuditStatus.CLOSED,
+                models.QMSAudit.actual_end.is_not(None),
+            )
             .all()
         )
     except ProgrammingError:
@@ -318,7 +327,7 @@ def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: 
 
 
 
-def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
+def _build_most_common_finding_trend_12m(db: Session, *, amo_id: str) -> list[dict]:
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(days=365)
 
@@ -328,7 +337,18 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
                 models.QMSAuditFinding.finding_type,
                 func.count(models.QMSAuditFinding.id).label("finding_count"),
             )
-            .filter(models.QMSAuditFinding.created_at >= window_start)
+            .join(
+                models.QMSAudit,
+                and_(
+                    models.QMSAudit.id == models.QMSAuditFinding.audit_id,
+                    models.QMSAudit.amo_id == models.QMSAuditFinding.amo_id,
+                ),
+            )
+            .filter(
+                models.QMSAudit.amo_id == amo_id,
+                models.QMSAuditFinding.amo_id == amo_id,
+                models.QMSAuditFinding.created_at >= window_start,
+            )
             .group_by(models.QMSAuditFinding.finding_type)
             .order_by(func.count(models.QMSAuditFinding.id).desc())
             .first()
@@ -346,7 +366,16 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
     try:
         finding_rows = (
             db.query(models.QMSAuditFinding.created_at)
+            .join(
+                models.QMSAudit,
+                and_(
+                    models.QMSAudit.id == models.QMSAuditFinding.audit_id,
+                    models.QMSAudit.amo_id == models.QMSAuditFinding.amo_id,
+                ),
+            )
             .filter(
+                models.QMSAudit.amo_id == amo_id,
+                models.QMSAuditFinding.amo_id == amo_id,
                 models.QMSAuditFinding.created_at >= window_start,
                 models.QMSAuditFinding.finding_type == top_finding[0],
             )
@@ -382,12 +411,14 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
         for month_key in month_keys
     ]
 
-def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code: Optional[str] = None) -> dict:
-    users_q = db.query(account_models.User).filter(account_models.User.is_active.is_(True))
-    if amo_id:
-        users_q = users_q.filter(account_models.User.amo_id == amo_id)
+def _build_manpower_snapshot(db: Session, amo_id: str, department_code: Optional[str] = None) -> dict:
+    users_q = db.query(account_models.User).filter(
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    )
 
-    if department_code and amo_id:
+    if department_code:
         dept = db.query(account_models.Department.id).filter(
             account_models.Department.amo_id == amo_id,
             account_models.Department.code == department_code,
@@ -401,22 +432,29 @@ def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code
         role_key = getattr(getattr(user, "role", None), "value", getattr(user, "role", "UNKNOWN")) or "UNKNOWN"
         by_role[role_key] = by_role.get(role_key, 0) + 1
 
-    by_department_rows = []
-    if amo_id:
-        by_department_rows = (
-            db.query(account_models.Department.name, func.count(account_models.User.id))
-            .join(account_models.User, account_models.User.department_id == account_models.Department.id, isouter=True)
-            .filter(account_models.Department.amo_id == amo_id, account_models.User.is_active.is_(True))
-            .group_by(account_models.Department.name)
-            .all()
+    by_department_rows = (
+        db.query(account_models.Department.name, func.count(account_models.User.id))
+        .join(
+            account_models.User,
+            and_(
+                account_models.User.department_id == account_models.Department.id,
+                account_models.User.amo_id == account_models.Department.amo_id,
+            ),
+            isouter=True,
         )
+        .filter(
+            account_models.Department.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        )
+        .group_by(account_models.Department.name)
+        .all()
+    )
 
     now = datetime.now(timezone.utc)
     availability = {"on_duty": 0, "away": 0, "on_leave": 0}
     try:
-        availability_q = db.query(models.UserAvailability)
-        if amo_id:
-            availability_q = availability_q.filter(models.UserAvailability.amo_id == amo_id)
+        availability_q = db.query(models.UserAvailability).filter(models.UserAvailability.amo_id == amo_id)
         availability_rows = availability_q.filter(
             models.UserAvailability.effective_from <= now,
             or_(models.UserAvailability.effective_to.is_(None), models.UserAvailability.effective_to >= now),
@@ -446,10 +484,8 @@ def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code
     }
 
 
-def _select_next_due_audit(db: Session, amo_id: Optional[str], domain: Optional[QMSDomain]) -> Optional[dict]:
-    query = db.query(models.QMSAudit)
-    if amo_id:
-        query = query.filter(models.QMSAudit.amo_id == amo_id)
+def _select_next_due_audit(db: Session, amo_id: str, domain: Optional[QMSDomain]) -> Optional[dict]:
+    query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == amo_id)
     if domain:
         query = query.filter(models.QMSAudit.domain == domain)
     query = query.filter(models.QMSAudit.status.in_([QMSAuditStatus.PLANNED, QMSAuditStatus.IN_PROGRESS, QMSAuditStatus.CAP_OPEN]))
@@ -473,16 +509,21 @@ def _select_next_due_audit(db: Session, amo_id: Optional[str], domain: Optional[
     }
 
 
-def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None, department_code: Optional[str] = None) -> dict:
-    cache_key = ("cockpit", str(amo_id or ""), str(domain.value if domain else "ALL"))
+def get_cockpit_snapshot(
+    db: Session,
+    domain: Optional[QMSDomain] = None,
+    *,
+    amo_id: str,
+    department_code: Optional[str] = None,
+) -> dict:
+    cache_key = ("cockpit", amo_id, str(domain.value if domain else "ALL"))
     cached = _get_perf_cache(cache_key)
     if cached is not None:
         return cached
     dashboard = get_dashboard(db, domain=domain, amo_id=amo_id)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
     cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
-    if amo_id:
-        cars_q = cars_q.filter(models.CorrectiveActionRequest.amo_id == amo_id)
+    cars_q = cars_q.filter(models.CorrectiveActionRequest.amo_id == amo_id)
     try:
         action_rows = (
             cars_q.order_by(
@@ -505,12 +546,12 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
         models.CorrectiveActionRequest.due_date < today,
     ))
 
-    deferral_q = db.query(training_models.TrainingDeferralRequest)
-    if amo_id and hasattr(training_models.TrainingDeferralRequest, "amo_id"):
-        deferral_q = deferral_q.filter(training_models.TrainingDeferralRequest.amo_id == amo_id)
+    deferral_q = db.query(training_models.TrainingDeferralRequest).filter(
+        training_models.TrainingDeferralRequest.amo_id == amo_id
+    )
 
     try:
-        training_summary = training_record_summary(db, amo_id=amo_id, as_of=today, due_days=30) if amo_id else None
+        training_summary = training_record_summary(db, amo_id=amo_id, as_of=today, due_days=30)
     except ProgrammingError:
         raise
     except SQLAlchemyError:
@@ -523,31 +564,26 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
         training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.PENDING,
     ))
 
-    suppliers_q = db.query(finance_models.Vendor)
-    if amo_id and hasattr(finance_models.Vendor, "amo_id"):
-        suppliers_q = suppliers_q.filter(finance_models.Vendor.amo_id == amo_id)
+    suppliers_q = db.query(finance_models.Vendor).filter(finance_models.Vendor.amo_id == amo_id)
     suppliers_active = _safe_count(suppliers_q.filter(finance_models.Vendor.is_active.is_(True)))
     suppliers_inactive = _safe_count(suppliers_q.filter(finance_models.Vendor.is_active.is_(False)))
 
     tasks_q = db.query(task_models.Task).filter(task_models.Task.status.in_([task_models.TaskStatus.OPEN, task_models.TaskStatus.IN_PROGRESS]))
-    if amo_id:
-        tasks_q = tasks_q.filter(task_models.Task.amo_id == amo_id)
+    tasks_q = tasks_q.filter(task_models.Task.amo_id == amo_id)
     tasks_due_today = _safe_count(tasks_q.filter(func.date(task_models.Task.due_at) == today))
     tasks_overdue = _safe_count(tasks_q.filter(task_models.Task.due_at.is_not(None), func.date(task_models.Task.due_at) < today))
 
     events_hold_count = 0
     events_new_count = 0
-    if amo_id:
-        events_hold_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.action.ilike("%hold%")))
-        events_new_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=1)))
+    events_hold_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.action.ilike("%hold%")))
+    events_new_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=1)))
 
     manpower = _build_manpower_snapshot(db, amo_id=amo_id, department_code=department_code)
 
     compliance_actions_q = db.query(tr_models.ComplianceAction)
     publication_matches_q = db.query(tr_models.AirworthinessPublicationMatch)
-    if amo_id:
-        compliance_actions_q = compliance_actions_q.filter(tr_models.ComplianceAction.amo_id == amo_id)
-        publication_matches_q = publication_matches_q.filter(tr_models.AirworthinessPublicationMatch.amo_id == amo_id)
+    compliance_actions_q = compliance_actions_q.filter(tr_models.ComplianceAction.amo_id == amo_id)
+    publication_matches_q = publication_matches_q.filter(tr_models.AirworthinessPublicationMatch.amo_id == amo_id)
 
     compliance_exceptions_open = _safe_count(compliance_actions_q.filter(tr_models.ComplianceAction.status.in_(["Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification"])))
     compliance_overdue = _safe_count(compliance_actions_q.filter(tr_models.ComplianceAction.due_date.is_not(None), tr_models.ComplianceAction.due_date < today, tr_models.ComplianceAction.status.notin_(["Complied", "Closed", "Cancelled"])))
@@ -595,8 +631,8 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
         "compliance_overdue": compliance_overdue,
         "compliance_unplanned_applicable": compliance_unplanned_applicable,
         "manpower": manpower,
-        "audit_closure_trend": _build_audit_closure_trend(db),
-        "most_common_finding_trend_12m": _build_most_common_finding_trend_12m(db),
+        "audit_closure_trend": _build_audit_closure_trend(db, amo_id=amo_id),
+        "most_common_finding_trend_12m": _build_most_common_finding_trend_12m(db, amo_id=amo_id),
         "action_queue": [
             {
                 "id": str(row.id),

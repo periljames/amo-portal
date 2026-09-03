@@ -1,0 +1,47 @@
+---
+description: Tenant isolation, auth session, RBAC/entitlements, cache scope, public vs private routes
+globs:
+  - frontend/src/services/auth.ts
+  - frontend/src/app/TenantRouteBoundary.tsx
+  - frontend/src/app/routeGuards.ts
+  - frontend/src/app/loginRedirect.ts
+  - frontend/src/services/apiClient.ts
+  - frontend/src/services/queryPersister.ts
+  - frontend/src/services/offlinePersistence.ts
+  - frontend/src/main.tsx
+  - frontend/src/utils/roleAccess.ts
+  - frontend/src/utils/departmentAccess.ts
+  - frontend/src/components/realtime/**/*
+  - backend/amodb/security.py
+  - backend/amodb/entitlements.py
+  - backend/amodb/apps/accounts/**/*
+  - backend/amodb/apps/realtime/**/*
+  - backend/amodb/apps/events/**/*
+alwaysApply: false
+---
+
+
+# Tenant & security boundaries
+
+## Preserve these designs
+
+- URL tenancy: `/maintenance/:amoCode/...` (and documented aliases only).
+- `TenantRouteBoundary` — AMO match, department ACL, superuser → `/platform` (not tenant shell).
+- Auth: JWT in **sessionStorage**; refresh cookie on `/auth`; idle/tab sync in `services/auth.ts`.
+- API/query cache scoped by user+AMO; clear on tenant / active-AMO change (`apiClient`, `queryPersister`, `main.tsx` guards).
+- Backend: JWT `amo_id` / effective AMO, RLS `app.tenant_id`, `require_module`, roles/capabilities.
+- Platform/superuser separation from customer AMO tenants.
+- Realtime: SSE `/api/events` + MQTT/WSS interactive paths; follow `EVENT_SCHEMA.md`.
+
+## Never
+
+- Bypass module entitlements, role, or capability checks (UI or API).
+- Trust frontend-only gates as authorization.
+- Leak or persist sensitive query keys (auth, billing, permissions, tokens) against existing exclude lists.
+- Widen public routes (`/qms/audit-access`, CAR invite, verify, etc.) without backend parity.
+- Hard-code a single tenant’s rules into shared platform code.
+
+## Changes that touch auth/tenant
+
+Trace UI → `apiClient`/`auth` → FastAPI dependency → DB scope before declaring done. Prefer `security-reviewer` subagent for review.
+---

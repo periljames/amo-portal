@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BellRing, CheckCircle2, ClipboardCheck, FileClock, History, PanelRightClose, PanelRightOpen, Send, ShieldAlert } from "lucide-react";
 
-import { qmsResolveAudit } from "../../services/qms";
 import {
   createAuditNotice,
   createAuditNoticePolicy,
@@ -15,9 +14,11 @@ import {
   transitionAuditNotice,
   type AuditNotice,
 } from "../../services/qmsAuditGovernance";
+import { resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
+import OccurrenceToolbarPortal, { AUDIT_PREPARE_TOOLBAR_ID } from "../../features/qms/auditSession/OccurrenceToolbarPortal";
 import "../../styles/qms-audit-governance-panel.css";
 
-type Props = { amoCode: string; auditKey: string };
+type Props = { amoCode: string; auditKey: string; launcherPortalId?: string };
 type PanelTab = "preparation" | "notices";
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -34,7 +35,7 @@ function nextNoticeActions(notice: AuditNotice): Array<AuditNotice["status"] | "
   }
 }
 
-const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey }) => {
+const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, launcherPortalId = AUDIT_PREPARE_TOOLBAR_ID }) => {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("preparation");
@@ -51,8 +52,8 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey })
   const [policyDays, setPolicyDays] = useState("14");
 
   const auditQuery = useQuery({
-    queryKey: ["qms-audit-governance-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-audit-governance-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const audit = auditQuery.data;
@@ -150,18 +151,24 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey })
 
   const actions = latestNotice ? nextNoticeActions(latestNotice).filter((item): item is "SUBMIT" | "RETURN" | "APPROVE" | "GENERATE" | "DELIVER" | "ACKNOWLEDGE" | "CANCEL" => !["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED", "DELIVERED", "ACKNOWLEDGED", "SUPERSEDED", "CANCELLED"].includes(item as AuditNotice["status"])) : [];
 
+  const launcher = (
+    <button
+      className="qms-audit-governance-launcher qms-occurrence-toolbar-btn"
+      type="button"
+      onClick={() => setOpen((value) => !value)}
+      aria-expanded={open}
+      aria-controls="qms-audit-governance-panel"
+    >
+      {open ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
+      Governance
+    </button>
+  );
+
   return (
     <>
-      <button
-        className="qms-audit-governance-launcher"
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls="qms-audit-governance-panel"
-      >
-        {open ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-        Audit governance
-      </button>
+      {launcherPortalId ? (
+        <OccurrenceToolbarPortal containerId={launcherPortalId}>{launcher}</OccurrenceToolbarPortal>
+      ) : launcher}
       {open ? (
         <aside id="qms-audit-governance-panel" className="qms-audit-governance-panel" aria-label="Audit governance">
           <header>

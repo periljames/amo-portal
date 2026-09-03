@@ -31,7 +31,7 @@ from .audit_external_access_router import (
     _public_read_model,
     _utcnow,
 )
-from .audit_external_session_guard_router import _CANONICAL_GUEST_COOKIE_PATH
+from .audit_external_access_router import _CANONICAL_GUEST_COOKIE_PATH
 from .audit_live_completion_models import QualityAuditWebAuthnChallenge, QualityAuditWebAuthnCredential
 from .router import public_router
 

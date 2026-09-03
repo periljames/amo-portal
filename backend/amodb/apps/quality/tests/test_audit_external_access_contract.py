@@ -181,8 +181,8 @@ def test_regular_exchange_rejects_passkey_external_auditor_before_session_mutati
     with pytest.raises(HTTPException) as exc:
         access_router.exchange_audit_access(payload=payload, request=request, response=response, db=db)
 
-    assert exc.value.status_code == 403
-    assert "passkey assurance" in str(exc.value.detail).lower()
+    assert exc.value.status_code == 428
+    assert "passkey verification" in str(exc.value.detail).lower()
     assert grant.last_used_at is None
     assert participant.accepted_at is None
     assert participant.status == "INVITED"

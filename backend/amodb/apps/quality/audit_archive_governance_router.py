@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -412,107 +412,6 @@ def create_retention_policy(
     return _policy_dict(row)["current"]
 
 
-@router.get("/audits/{audit_id}/archive-governance")
-def get_archive_governance(
-    audit_id: uuid.UUID,
-    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
-    db: Session = Depends(get_read_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    manifest = _latest_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    holds = _active_holds(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    disposition = db.query(QualityAuditDispositionEvent).filter(
-        QualityAuditDispositionEvent.amo_id == ctx.amo_id,
-        QualityAuditDispositionEvent.audit_id == audit_id,
-    ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
-    now = _utcnow()
-    return {
-        "policy": _policy_dict(_latest_policy(db, ctx.amo_id)),
-        "manifest": _manifest_dict(manifest) if manifest else None,
-        "active_holds": [{"hold_key": hold.hold_key, "reason": hold.reason, "governing_basis": hold.governing_basis, "created_at": hold.created_at} for hold in holds],
-        "disposition": {
-            "event_type": disposition.event_type,
-            "disposition_mode": disposition.disposition_mode,
-            "inventory_sha256": disposition.inventory_sha256,
-            "reason": disposition.reason,
-            "created_at": disposition.created_at,
-        } if disposition else None,
-        "retention_due": bool(manifest and manifest.retention_due_at and manifest.retention_due_at <= now),
-    }
-
-
-@router.post("/audits/{audit_id}/archive-manifests/generate", status_code=status.HTTP_201_CREATED)
-def generate_archive_manifest(
-    audit_id: uuid.UUID,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.audit.manage")
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    policy = _latest_policy(db, ctx.amo_id)
-    if policy is None:
-        raise HTTPException(status_code=409, detail="Audit retention policy is not configured for this tenant.")
-    closure = db.query(QualityAuditClosureState).filter(
-        QualityAuditClosureState.amo_id == ctx.amo_id,
-        QualityAuditClosureState.audit_id == audit_id,
-    ).first()
-    if closure is None:
-        raise HTTPException(status_code=409, detail="Audit closure state is required before archive generation.")
-    if closure.follow_up_status != "COMPLETE":
-        raise HTTPException(status_code=409, detail="Assurance follow-up must be complete before the audit package can be archived.")
-
-    retention_start = _retention_start(closure, policy)
-    retention_due = None if policy.indefinite else retention_start + timedelta(days=int(policy.duration_days or 0))
-    latest = _latest_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    version = (latest.manifest_version + 1) if latest else 1
-    inventory = _build_inventory(db, amo_id=ctx.amo_id, audit=audit)
-    manifest_payload = {
-        "tenant_id": ctx.amo_id,
-        "audit_id": str(audit.id),
-        "audit_ref": audit.audit_ref,
-        "manifest_version": version,
-        "retention_policy_revision_id": policy.id,
-        "retention_class": policy.retention_class,
-        "retention_start_at": retention_start,
-        "retention_due_at": retention_due,
-        "items": inventory,
-    }
-    digest = _canonical_hash(manifest_payload)
-    manifest = QualityAuditArchiveManifest(
-        amo_id=ctx.amo_id,
-        audit_id=audit.id,
-        manifest_version=version,
-        retention_policy_revision_id=policy.id,
-        retention_class=policy.retention_class,
-        retention_start_at=retention_start,
-        retention_due_at=retention_due,
-        manifest_json=jsonable_encoder(manifest_payload),
-        manifest_sha256=digest,
-        item_count=len(inventory),
-        created_by_user_id=ctx.user_id,
-    )
-    db.add(manifest)
-    db.flush()
-    for item in inventory:
-        db.add(QualityAuditArchiveManifestItem(
-            amo_id=ctx.amo_id,
-            audit_id=audit.id,
-            manifest_id=manifest.id,
-            item_type=item["item_type"],
-            authoritative_record_id=item["authoritative_record_id"],
-            revision_ref=item["revision_ref"],
-            source_system=item["source_system"],
-            content_hash=item["content_hash"],
-            retention_role=item["retention_role"],
-            metadata_json=item["metadata"],
-        ))
-    db.commit()
-    loaded = db.query(QualityAuditArchiveManifest).options(selectinload(QualityAuditArchiveManifest.items)).filter(QualityAuditArchiveManifest.id == manifest.id).one()
-    return _manifest_dict(loaded)
-
-
 @router.post("/audits/{audit_id}/legal-holds/{hold_key}/place", status_code=status.HTTP_201_CREATED)
 def place_legal_hold(
     audit_id: uuid.UUID,
@@ -610,71 +509,3 @@ def review_disposition(
     db.add(row)
     db.commit()
     return {"event_type": row.event_type, "inventory_sha256": row.inventory_sha256, "created_at": row.created_at}
-
-
-@router.post("/audits/{audit_id}/archive-manifests/{manifest_id}/dispose")
-def execute_disposition(
-    audit_id: uuid.UUID,
-    manifest_id: str,
-    payload: DispositionExecute,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    policy = _latest_policy(db, ctx.amo_id)
-    if policy is None:
-        raise HTTPException(status_code=409, detail="Audit retention policy is not configured.")
-    assert_quality_permission(db, ctx, policy.approving_capability)
-    if policy.indefinite or policy.disposition_mode == "NO_DISPOSITION":
-        raise HTTPException(status_code=409, detail="Current retention policy does not permit disposition.")
-    manifest = db.query(QualityAuditArchiveManifest).options(selectinload(QualityAuditArchiveManifest.items)).filter(
-        QualityAuditArchiveManifest.amo_id == ctx.amo_id,
-        QualityAuditArchiveManifest.audit_id == audit_id,
-        QualityAuditArchiveManifest.id == manifest_id,
-    ).first()
-    if manifest is None:
-        raise HTTPException(status_code=404, detail="Archive manifest not found.")
-    if manifest.retention_due_at is None or manifest.retention_due_at > _utcnow():
-        raise HTTPException(status_code=409, detail="Archive retention is not yet due.")
-    holds = _active_holds(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    if holds:
-        raise HTTPException(status_code=409, detail={"message": "Active legal hold blocks disposition.", "holds": [hold.hold_key for hold in holds]})
-    if policy.review_before_disposition:
-        latest_review = db.query(QualityAuditDispositionEvent).filter(
-            QualityAuditDispositionEvent.amo_id == ctx.amo_id,
-            QualityAuditDispositionEvent.audit_id == audit_id,
-            QualityAuditDispositionEvent.manifest_id == manifest.id,
-            QualityAuditDispositionEvent.event_type.in_(["APPROVED", "REJECTED"]),
-        ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
-        if latest_review is None or latest_review.event_type != "APPROVED":
-            raise HTTPException(status_code=409, detail="Approved disposition review is required by policy before execution.")
-    prior_execution = db.query(QualityAuditDispositionEvent.id).filter(
-        QualityAuditDispositionEvent.amo_id == ctx.amo_id,
-        QualityAuditDispositionEvent.audit_id == audit_id,
-        QualityAuditDispositionEvent.manifest_id == manifest.id,
-        QualityAuditDispositionEvent.event_type == "EXECUTED",
-    ).first()
-    if prior_execution is not None:
-        raise HTTPException(status_code=409, detail="Disposition has already been executed for this manifest.")
-
-    inventory_sha = _inventory_hash(manifest)
-    row = QualityAuditDispositionEvent(
-        amo_id=ctx.amo_id,
-        audit_id=audit_id,
-        manifest_id=manifest.id,
-        event_type="EXECUTED",
-        disposition_mode=policy.disposition_mode,
-        inventory_sha256=inventory_sha,
-        reason=payload.reason.strip(),
-        actor_user_id=ctx.user_id,
-    )
-    db.add(row)
-    db.commit()
-    return {
-        "event_type": row.event_type,
-        "disposition_mode": row.disposition_mode,
-        "inventory_sha256": row.inventory_sha256,
-        "created_at": row.created_at,
-        "authoritative_records_deleted": False,
-        "metadata_preserved": True,
-    }

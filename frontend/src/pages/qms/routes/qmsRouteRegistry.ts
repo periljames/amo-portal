@@ -79,8 +79,8 @@ const MODULES: readonly QmsModuleRoute[] = [
     navigationLabel: "Calendar",
     permission: "qms.calendar.view",
     section: "command",
-    defaultView: "list",
-    validViews: ["month", "week", "year", "agenda", "list", "audits", "cars", "training", "management-review"],
+    defaultView: "week",
+    validViews: ["month", "week", "day", "year", "agenda", "list", "audits", "cars", "training", "management-review"],
     componentType: "canonical",
   },
   {
@@ -91,7 +91,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.audit.view",
     section: "assurance",
     defaultView: "dashboard",
-    validViews: ["dashboard", "program", "schedule", "register", "checklists", "templates", "new", "plan", "bin"],
+    validViews: ["dashboard", "workspace", "program", "schedule", "register", "findings-actions", "checklists", "templates", "new", "plan", "bin"],
     componentType: "specialist",
     allowRecordDetails: true,
     recordRoutes: [
@@ -300,6 +300,8 @@ export function isSafeRecordKey(value: string): boolean {
   const key = value.trim();
   if (!key || key === "." || key === ".." || key.length > 160) return false;
   if (key.includes("/") || key.includes("\\") || key.includes("\0")) return false;
+  // Intentional control-character rejection for opaque route identifiers.
+  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f\s]/.test(key)) return false;
   // Pure lowercase letter tokens collide with misspelled validViews (cars/ovverdue).
   if (/^[a-z]+$/.test(key)) return false;

@@ -60,7 +60,7 @@ const QmsOverviewPage: React.FC = () => {
   }
 
   if (workspace === "planner") {
-    return <Navigate to={`${qualityRoot}/calendar/month`} replace />;
+    return <Navigate to={`${qualityRoot}/calendar/week`} replace />;
   }
 
   return (

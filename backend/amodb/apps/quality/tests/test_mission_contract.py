@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
-from amodb.apps.quality.mission_lifecycle_guard_router import assert_mission_actor_allowed
+from amodb.apps.quality.mission_lifecycle_guard_router import assert_mission_actor_allowed, router as mission_lifecycle_router
 from amodb.apps.quality.mission_management_guard_router import router as mission_management_router
 from amodb.apps.quality.mission_router import (
     CAPABILITY_ADDITION_GATE_TEMPLATE,
@@ -65,32 +65,50 @@ def _decision(decision_type: str, status: str):
     )
 
 
-def _mission(*, gates=None, decisions=None, owner_user_id="quality-owner", sponsor_user_id="accountable-executive"):
+def _mission(*, gates=None, decisions=None, owner_user_id="quality-owner", sponsor_user_id="accountable-executive", status=None):
+    decision_list = list(decisions or [])
+    if status is None:
+        approved = {item.decision_type for item in decision_list if item.status == "APPROVED"}
+        if "AUTHORITY_SUBMISSION" in approved:
+            status = "SUBMITTED_TO_AUTHORITY"
+        elif "ACCOUNTABLE_EXECUTIVE" in approved:
+            status = "APPROVED"
+        elif "QUALITY_SELF_EVALUATION" in approved:
+            status = "READY_FOR_APPROVAL"
+        else:
+            gate_list = list(gates or [])
+            status = "GATE_REVIEW" if gate_list and all(item.status == "PASS" for item in gate_list if item.gate_type == "HARD") else "IN_PROGRESS"
     return SimpleNamespace(
         gates=list(gates or []),
-        decisions=list(decisions or []),
+        decisions=decision_list,
         owner_user_id=owner_user_id,
         sponsor_user_id=sponsor_user_id,
+        status=status,
     )
 
 
-def test_mission_router_exposes_bounded_read_contract_and_base_write_contract() -> None:
+def test_mission_router_exposes_reads_and_only_guard_routers_expose_writes() -> None:
     methods = _route_methods(mission_router)
     assert {
         ("/missions/templates", "GET"),
         ("/missions", "GET"),
-        ("/missions", "POST"),
         ("/missions/{mission_id}", "GET"),
-        ("/missions/{mission_id}/gates/{gate_id}", "PATCH"),
-        ("/missions/{mission_id}/decisions", "POST"),
     }.issubset(methods)
+    assert not any(method in {"POST", "PATCH", "PUT", "DELETE"} for _path, method in methods)
 
     management_methods = _route_methods(mission_management_router)
     assert {
         ("/missions", "POST"),
         ("/missions/{mission_id}", "PATCH"),
+        ("/missions/{mission_id}/gates", "POST"),
         ("/missions/{mission_id}/gates/{gate_id}", "PATCH"),
     }.issubset(management_methods)
+
+    lifecycle_methods = _route_methods(mission_lifecycle_router)
+    assert {
+        ("/missions/{mission_id}/decisions", "POST"),
+        ("/missions/{mission_id}/cancel", "POST"),
+    }.issubset(lifecycle_methods)
 
 
 def test_mission_routes_are_promoted_before_generic_quality_catchall() -> None:

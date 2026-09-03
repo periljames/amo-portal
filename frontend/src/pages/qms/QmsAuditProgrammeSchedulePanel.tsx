@@ -4,6 +4,12 @@ import { AlertTriangle, CalendarCheck2, CheckCircle2, ShieldAlert } from "lucide
 import { Link, useNavigate } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../app/routeGuards";
+import ScheduleWeekendConfirmDialog from "../../features/qms/ScheduleWeekendConfirmDialog";
+import {
+  parseWeekendConfirmationDetail,
+  type WeekendConfirmationDetail,
+  type WeekendPolicy,
+} from "../../features/qms/scheduleWeekend";
 import { ApiClientError } from "../../services/apiClient";
 import {
   getAuditProgramme,
@@ -63,6 +69,12 @@ export type QmsAuditProgrammeSchedulePanelProps = {
   programmeId: string;
   itemId: string;
   variant?: "page" | "embedded";
+  initialValues?: {
+    title?: string;
+    next_due_date?: string;
+    duration_days?: string;
+    start_time?: string;
+  };
   onCancel?: () => void;
   onScheduled?: (scheduleId: string) => void;
 };
@@ -72,6 +84,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
   programmeId,
   itemId,
   variant = "page",
+  initialValues,
   onCancel,
   onScheduled,
 }) => {
@@ -98,11 +111,11 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
 
   const formDefaults = useMemo<ScheduleFormState>(
     () => ({
-      title: item?.title || "",
-      next_due_date: item?.target_start || programme?.period_start || "",
-      start_time: "09:00",
+      title: initialValues?.title ?? item?.title ?? "",
+      next_due_date: initialValues?.next_due_date ?? item?.target_start ?? programme?.period_start ?? "",
+      start_time: initialValues?.start_time ?? "09:00",
       end_time: "10:00",
-      duration_days: "1",
+      duration_days: initialValues?.duration_days ?? "1",
       kind: "INTERNAL",
       audit_scope_id: "",
       location: "",
@@ -116,7 +129,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
       notify_auditors: true,
       notify_auditees: true,
     }),
-    [item, programme?.period_start],
+    [initialValues, item, programme?.period_start],
   );
   const [formByItem, setFormByItem] = useState<Record<string, ScheduleFormState>>({});
   const form = formByItem[itemId] || formDefaults;
@@ -130,9 +143,12 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
   const [conflicts, setConflicts] = useState<PlannerConflict[]>([]);
   const [overrideReason, setOverrideReason] = useState("");
   const [resultScheduleId, setResultScheduleId] = useState("");
+  const [weekendPrompt, setWeekendPrompt] = useState<WeekendConfirmationDetail | null>(null);
+  const [pendingAllowConflicts, setPendingAllowConflicts] = useState(false);
+  const [weekendPolicy, setWeekendPolicy] = useState<WeekendPolicy | null>(null);
 
   const scheduleMutation = useMutation({
-    mutationFn: (allowConflicts: boolean) => {
+    mutationFn: ({ allowConflicts, weekendPolicy: policy }: { allowConflicts: boolean; weekendPolicy?: WeekendPolicy | null }) => {
       if (!programme || !item || !expectedFrequency) {
         throw new Error("This programme requirement cannot be scheduled with the current planner cadence.");
       }
@@ -162,11 +178,14 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
         automation_active: true,
         allow_conflicts: allowConflicts,
         conflict_override_reason: allowConflicts ? overrideReason.trim() : undefined,
+        weekend_policy: policy || undefined,
       };
       return scheduleAuditProgrammeItem(amoCode, programme.id, item.id, payload);
     },
     onSuccess: async (schedule) => {
       setConflicts([]);
+      setWeekendPrompt(null);
+      setWeekendPolicy(null);
       setResultScheduleId(schedule.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["qms-audit-programme", amoCode, programmeId] }),
@@ -177,8 +196,21 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
       ]);
       onScheduled?.(schedule.id);
     },
-    onError: (error) => setConflicts(conflictDetail(error)),
+    onError: (error) => {
+      const weekendDetail = parseWeekendConfirmationDetail(error);
+      if (weekendDetail) {
+        setWeekendPrompt(weekendDetail);
+        setConflicts([]);
+        return;
+      }
+      setConflicts(conflictDetail(error));
+    },
   });
+
+  const submitSchedule = (allowConflicts: boolean, policy: WeekendPolicy | null = weekendPolicy) => {
+    setPendingAllowConflicts(allowConflicts);
+    scheduleMutation.mutate({ allowConflicts, weekendPolicy: policy });
+  };
 
   const programmeHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/program`;
   const calendarHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`;
@@ -345,7 +377,9 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
               onSubmit={(event) => {
                 event.preventDefault();
                 setConflicts([]);
-                scheduleMutation.mutate(false);
+                scheduleMutation.reset();
+                setWeekendPrompt(null);
+                submitSchedule(false);
               }}
             >
               <header>
@@ -368,7 +402,12 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
                   id="programme-schedule-date"
                   required
                   type="date"
-                  min={item.target_start || programme.period_start}
+                  min={
+                    [item.target_start, programme.period_start, new Date().toISOString().slice(0, 10)]
+                      .filter(Boolean)
+                      .sort()
+                      .at(-1)
+                  }
                   max={item.target_end || programme.period_end}
                   value={form.next_due_date}
                   onChange={(event) => setForm((current) => ({ ...current, next_due_date: event.target.value }))}
@@ -588,7 +627,9 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
                 className="qms-audit-programme__form is-embedded"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  scheduleMutation.mutate(true);
+                  scheduleMutation.reset();
+                  setWeekendPrompt(null);
+                  submitSchedule(true);
                 }}
               >
                 <label className="is-wide" htmlFor="programme-schedule-conflict-reason">
@@ -614,7 +655,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
                 </footer>
               </form>
             </section>
-          ) : mutationError && !resultScheduleId ? (
+          ) : mutationError && !resultScheduleId && !weekendPrompt ? (
             <div className="qms-audit-programme__error" role="alert">
               <AlertTriangle size={16} />{" "}
               {mutationError instanceof Error ? mutationError.message : "The authoritative schedule could not be created."}
@@ -625,6 +666,22 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
         <div className="qms-audit-programme__detail">
           <p className="is-empty">Loading programme requirement…</p>
         </div>
+      ) : null}
+
+      {weekendPrompt ? (
+        <ScheduleWeekendConfirmDialog
+          detail={weekendPrompt}
+          busy={scheduleMutation.isPending}
+          onCancel={() => {
+            setWeekendPrompt(null);
+            scheduleMutation.reset();
+          }}
+          onConfirm={(policy) => {
+            setWeekendPolicy(policy);
+            setWeekendPrompt(null);
+            submitSchedule(pendingAllowConflicts, policy);
+          }}
+        />
       ) : null}
     </section>
   );

@@ -2,13 +2,13 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ClipboardCheck, History, PanelRightClose, PanelRightOpen, Save, ShieldAlert } from "lucide-react";
 
-import { qmsResolveAudit } from "../../services/qms";
 import {
   listChecklistExecutionGovernance,
   updateChecklistExecutionGovernance,
   type CanonicalChecklistResponse,
   type ChecklistExecutionGovernanceRow,
 } from "../../services/qmsChecklistExecutionGovernance";
+import { resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
 import "../../styles/qms-checklist-execution-governance.css";
 
 type Props = { amoCode: string; auditKey: string; activeTab?: string | null };
@@ -66,8 +66,8 @@ const QualityChecklistExecutionGovernanceHost: React.FC<Props> = ({ amoCode, aud
   const shouldRender = activeTab === "checklist";
 
   const auditQuery = useQuery({
-    queryKey: ["qms-checklist-execution-audit", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-checklist-execution-audit", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     enabled: Boolean(open && shouldRender && auditKey),
   });
   const auditId = auditQuery.data?.id || "";

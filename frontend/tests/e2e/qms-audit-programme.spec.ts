@@ -30,7 +30,7 @@ function programme(id = "programme-1", status = "APPROVED") {
     programme_series: id === "programme-1" ? "AP-2026-BASE" : "AP-2026-CREATED",
     programme_year: 2026,
     revision_no: 1,
-    title: id === "programme-1" ? "2026 Approved Audit Programme" : "2026 Quality Audit Programme",
+    title: id === "programme-1" ? "Internal Audits (2026)" : "Internal Audits (2026)",
     assurance_model: "HYBRID",
     continuous_monitoring_enabled: true,
     optimizer_version: "HYBRID_ASSURANCE_V1",
@@ -179,9 +179,9 @@ function schedulingQueue() {
   };
 }
 
-async function prepare(page: Page): Promise<void> {
+async function prepare(page: Page, options?: { programmes?: ReturnType<typeof programme>[] }): Promise<void> {
   const token = futureToken();
-  let programmes = [programme()];
+  let programmes = options?.programmes ?? [programme()];
   let current = programmes[0];
 
   const currentUser = {
@@ -426,29 +426,29 @@ async function prepare(page: Page): Promise<void> {
   await page.route("**/*", fulfil);
 }
 
-test("opens hybrid programme, optimizer and Audit Universe lineage", async ({ page }) => {
+test("opens programme workspace, coverage areas, and methodology info drawer", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
-  // Quality context chrome hides AuditPageShell's h1 title block; assert the
-  // live programme workspace surface instead of the suppressed page heading.
   await expect(page.getByLabel("Audit Programme workspace")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Programme workspace sections" })).toBeVisible();
-  await expect(page.getByText("AP-2026-BASE-R01", { exact: false }).first()).toBeVisible();
-  await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
-  await expect(page.getByText("Hybrid · Always on", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
+  await expect(page.getByText("Internal Audits (2026)", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Universe" }).click();
-  await expect(page.getByRole("heading", { name: "Audit Universe", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /How this programme works/i }).click();
+  await expect(page.getByRole("dialog", { name: "How this programme works" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
+  await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
+
+  await page.getByRole("button", { name: "Coverage areas" }).click();
+  await expect(page.getByRole("heading", { name: "Coverage areas", exact: true })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
 });
 
 test("creates a hybrid draft without a methodology choice and requires a reason before review", async ({ page }) => {
-  await prepare(page);
+  await prepare(page, { programmes: [] });
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "New programme" }).click();
@@ -457,17 +457,16 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
   await expect(page.getByLabel(/Compliance baseline/i)).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
-  const detailHeader = page.locator(".qms-audit-programme__detail-header");
-  await expect(page.getByText("AP-2026-CREATED-R01", { exact: false }).first()).toBeVisible();
-  await expect(detailHeader.getByText("Draft", { exact: true })).toBeVisible();
+  await expect(page.getByText("Internal Audits (2026)", { exact: false }).first()).toBeVisible();
+  await expect(page.locator(".qms-audit-programme-flow__portfolio-card.is-active").getByText("Draft", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Readiness" }).click();
+  await page.getByRole("button", { name: "Approval" }).click();
   const submitReview = page.getByRole("button", { name: "Submit for review" });
   await expect(submitReview).toBeDisabled();
-  await page.getByLabel("Programme transition reason").fill("Ready for independent Quality review.");
+  await page.getByLabel("Reason for this action").fill("Ready for independent Quality review.");
   await expect(submitReview).toBeEnabled();
   await submitReview.click();
-  await expect(detailHeader.getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".qms-audit-programme-flow__portfolio-card.is-active").getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
   await page.locator(".qms-audit-programme-flow__history > summary").click();
   await expect(page.locator(".qms-audit-programme-flow__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
 });

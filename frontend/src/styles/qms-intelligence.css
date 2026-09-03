@@ -1,11 +1,11 @@
 .qms-intelligence {
-  --qms-intel-border: var(--border-color, #dfe3e8);
-  --qms-intel-border-soft: color-mix(in srgb, var(--qms-intel-border) 70%, transparent);
-  --qms-intel-surface: var(--surface-primary, #fff);
-  --qms-intel-surface-soft: var(--surface-secondary, #f7f9fc);
-  --qms-intel-text: var(--text-primary, #182230);
-  --qms-intel-muted: var(--text-secondary, #667085);
-  --qms-intel-primary: var(--primary, #1d4ed8);
+  --qms-intel-border: var(--qms-line, var(--border-color, #dfe3e8));
+  --qms-intel-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-intel-border) 70%, transparent));
+  --qms-intel-surface: var(--qms-panel, var(--surface-primary, #fff));
+  --qms-intel-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-intel-text: var(--qms-text, var(--text-primary, #182230));
+  --qms-intel-muted: var(--qms-muted, var(--text-secondary, #667085));
+  --qms-intel-primary: var(--accent-primary, var(--primary, #1d4ed8));
   --qms-intel-danger: #b42318;
   --qms-intel-warning: #9a6700;
   --qms-intel-positive: #16723a;
@@ -15,6 +15,7 @@
   margin: 0 auto;
   padding: 20px;
   color: var(--qms-intel-text);
+  background: var(--qms-page, transparent);
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 

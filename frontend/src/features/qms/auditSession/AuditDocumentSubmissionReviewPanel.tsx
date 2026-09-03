@@ -12,9 +12,10 @@ import {
 } from "../../../services/qmsAuditOccurrenceCompletion";
 import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { saveDownloadedFile } from "../../../utils/downloads";
+import OccurrenceToolbarPortal, { AUDIT_PREPARE_TOOLBAR_ID } from "./OccurrenceToolbarPortal";
 import "../../../styles/qms-audit-document-review.css";
 
-type Props = { amoCode: string; auditKey: string };
+type Props = { amoCode: string; auditKey: string; launcherPortalId?: string };
 
 function bytes(value: number): string {
   if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
@@ -22,7 +23,7 @@ function bytes(value: number): string {
   return `${value} B`;
 }
 
-const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey }) => {
+const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey, launcherPortalId = AUDIT_PREPARE_TOOLBAR_ID }) => {
   const [open, setOpen] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -31,14 +32,13 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
   const auditQuery = useQuery({
     queryKey: ["qms-prepare-document-review-resolve", amoCode, auditKey],
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
-    enabled: open,
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
   const requestsQuery = useQuery({
     queryKey: ["qms-governed-audit-document-requests", amoCode, auditId],
     queryFn: ({ signal }) => listGovernedAuditDocumentRequests(amoCode, auditId, signal),
-    enabled: Boolean(open && auditId),
+    enabled: Boolean(auditId),
     staleTime: 2_000,
   });
   const controlledQuery = useQuery({
@@ -74,8 +74,21 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
 
   const submittedCount = requests.filter((request) => Boolean(request.uploaded_at) || request.status === "UPLOADED" || controlledByRequest.has(request.id)).length;
 
+  const launcher = (
+    <button
+      className="qms-audit-document-review-launcher qms-occurrence-toolbar-btn"
+      type="button"
+      onClick={() => setOpen((value) => !value)}
+      aria-expanded={open}
+    >
+      <Files size={16} /> Submissions <span>{submittedCount}</span>
+    </button>
+  );
+
   return <>
-    <button className="qms-audit-document-review-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}><Files size={16} /> Submitted evidence <span>{submittedCount}</span></button>
+    {launcherPortalId ? (
+      <OccurrenceToolbarPortal containerId={launcherPortalId}>{launcher}</OccurrenceToolbarPortal>
+    ) : launcher}
     {open ? <aside className="qms-audit-document-review" aria-label="Submitted pre-audit evidence">
       <header><div><span>PRE-AUDIT EVIDENCE</span><strong>Governed submissions</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close document review"><X size={17} /></button></header>
       {error ? <div className="qms-audit-document-review__error" role="alert">{error}</div> : null}

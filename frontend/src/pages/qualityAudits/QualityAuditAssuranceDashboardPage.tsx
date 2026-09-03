@@ -33,8 +33,12 @@ import {
   type QMSDashboardOut,
 } from "../../services/qms";
 import { getQmsCalendar } from "../../services/qmsCalendar";
-import { listAuditProgrammes, type AuditProgramme } from "../../services/qmsAuditProgramme";
-import { buildAuditWorkspacePath } from "../../utils/auditSlug";
+import {
+  listedReadinessOf,
+  listAuditProgrammes,
+  readinessExceptionCount,
+} from "../../services/qmsAuditProgramme";
+import { auditNavigationHref } from "./auditNavigation";
 import "./quality-audit-dashboard.css";
 
 type KpiTone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -135,8 +139,8 @@ type UpcomingAuditCommitment =
   | { kind: "schedule"; id: string; date: string; title: string; helper: string; href: string }
   | { kind: "audit"; id: string; date: string; title: string; helper: string; href: string };
 
-function auditHref(amoCode: string, department: string, audit: QMSAuditOut): string {
-  return buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref || audit.id });
+function auditHref(amoCode: string, audit: QMSAuditOut): string {
+  return auditNavigationHref(amoCode, audit);
 }
 
 function carHref(amoCode: string, car: CAROut): string {
@@ -166,24 +170,6 @@ function uniqueRegisterRows(rows: QMSAuditRegisterRowOut[]): QMSAuditRegisterRow
     seen.add(key);
     return true;
   });
-}
-
-function programmeUnscheduled(programme: AuditProgramme): number {
-  return (
-    programme.readiness?.unscheduled_requirement_count ??
-    programme.metrics?.unscheduled_audit_count ??
-    0
-  );
-}
-
-function programmeReadinessIssues(programme: AuditProgramme): number {
-  const readiness = programme.readiness;
-  if (!readiness) return 0;
-  return (
-    (readiness.blockers?.length || 0) +
-    (readiness.mandatory_coverage_gap_count || 0) +
-    (readiness.mandatory_unscheduled_count || 0)
-  );
 }
 
 const QualityAuditAssuranceDashboardPage: React.FC = () => {
@@ -274,9 +260,17 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
     queryErrorMessage(programmesQuery.error);
 
   const activeProgrammes = programmes.filter((programme) => ACTIVE_PROGRAMME_STATUSES.has(programme.status));
-  const programmeUnscheduledTotal = programmes.reduce((sum, programme) => sum + programmeUnscheduled(programme), 0);
-  const programmeReadinessIssueTotal = programmes.reduce((sum, programme) => sum + programmeReadinessIssues(programme), 0);
-  const programmesMissingReadiness = programmes.filter((programme) => !programme.readiness).length;
+  const programmeReadiness = programmes.map(listedReadinessOf);
+  const programmesMissingReadiness = programmeReadiness.filter((readiness) => readiness === null).length;
+  const hasCompleteProgrammeReadiness = programmes.length > 0 && programmesMissingReadiness === 0;
+  const programmeUnscheduledTotal = programmeReadiness.reduce(
+    (sum, readiness) => sum + (readiness?.unscheduled_requirement_count ?? 0),
+    0,
+  );
+  const programmeReadinessIssueTotal = programmeReadiness.reduce(
+    (sum, readiness) => sum + (readiness ? readinessExceptionCount(readiness) : 0),
+    0,
+  );
 
   const activeSchedules = schedules.filter((schedule) => schedule.is_active !== false);
   const overdueSchedules = activeSchedules.filter((schedule) => isDateBefore(schedule.next_due_date, today));
@@ -345,9 +339,16 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
     {
       id: "unscheduled",
       label: "Unscheduled",
-      value: programmeUnscheduledTotal,
-      helper: programmeUnscheduledTotal ? "Programme requirements awaiting Planner" : "No unscheduled requirements reported",
-      tone: programmeUnscheduledTotal ? "warning" : "success",
+      value: programmes.length === 0 ? "—" : hasCompleteProgrammeReadiness ? programmeUnscheduledTotal : "Unavailable",
+      helper:
+        programmes.length === 0
+          ? "No programmes in current year"
+          : !hasCompleteProgrammeReadiness
+            ? "Programme readiness unavailable on list payload"
+            : programmeUnscheduledTotal
+              ? "Programme requirements awaiting Calendar"
+              : "No unscheduled requirements reported",
+      tone: hasCompleteProgrammeReadiness && programmeUnscheduledTotal ? "warning" : hasCompleteProgrammeReadiness ? "success" : "neutral",
       href: programmeHref(amoCode),
       icon: CalendarClock,
     },
@@ -375,20 +376,18 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       value:
         programmes.length === 0
           ? "—"
-          : programmesMissingReadiness === programmes.length
-            ? "n/a"
+          : !hasCompleteProgrammeReadiness
+            ? "Unavailable"
             : programmeReadinessIssueTotal,
       helper:
         programmes.length === 0
           ? "No programmes in current year"
-          : programmesMissingReadiness === programmes.length
+          : !hasCompleteProgrammeReadiness
             ? "Readiness unavailable on list payload — open Programme"
-            : programmesMissingReadiness
-              ? `${programmesMissingReadiness} without readiness detail`
-              : programmeReadinessIssueTotal
-                ? "Blockers, mandatory gaps, or unscheduled mandatory items"
-                : "No readiness issues reported",
-      tone: programmeReadinessIssueTotal ? "warning" : programmesMissingReadiness ? "neutral" : programmes.length ? "success" : "neutral",
+            : programmeReadinessIssueTotal
+              ? "Programme approval blockers"
+              : "No readiness blockers reported",
+      tone: hasCompleteProgrammeReadiness && programmeReadinessIssueTotal ? "warning" : hasCompleteProgrammeReadiness ? "success" : "neutral",
       href: programmeHref(amoCode),
       icon: ListChecks,
     },
@@ -401,7 +400,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       date: auditCalendarDate(audit) || "",
       title: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
       helper: `${formatStatus(audit.kind)} · ${audit.auditee || audit.auditee_email || "Auditee not set"}`,
-      href: auditHref(amoCode, department, audit),
+      href: auditHref(amoCode, audit),
     })),
     ...dueFortyFiveSchedules.map((schedule) => ({
       kind: "schedule" as const,
@@ -429,7 +428,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       id: `audit-${audit.id}`,
       label: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
       meta: `Planned audit overdue since ${formatDate(auditCalendarDate(audit))}`,
-      href: auditHref(amoCode, department, audit),
+      href: auditHref(amoCode, audit),
       urgency: "danger" as ActionUrgency,
     })),
     ...overdueSchedules.slice(0, 3).map((schedule) => ({
@@ -457,7 +456,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       id: `unassigned-audit-${audit.id}`,
       label: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
       meta: `Lead auditor not assigned · starts ${formatDate(auditCalendarDate(audit))}`,
-      href: auditHref(amoCode, department, audit),
+      href: auditHref(amoCode, audit),
       urgency: "warning" as ActionUrgency,
     })),
     ...unassignedLeadSchedules.slice(0, 2).map((schedule) => ({
@@ -491,24 +490,14 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
           <Button variant="secondary" size="sm" onClick={refreshDashboard} loading={refreshing && !loading}>
             <RefreshCw size={14} /> Refresh
           </Button>
+          <Link className="btn btn--primary btn--sm" to={programmeHref(amoCode)}>
+            <Workflow size={14} /> Manage programme
+          </Link>
         </div>
       }
     >
       <div className="qa-dashboard qa-dashboard--ops" aria-busy={loading || undefined}>
         {firstError ? <InlineError message={`Some audit dashboard data could not load. ${firstError}`} /> : null}
-
-        <section className="qa-ops-strip" aria-label="Audit assurance destinations">
-          <div className="qa-ops-strip__intro">
-            <strong>Go to</strong>
-            <span>Programme · Planner · Register · CARs</span>
-          </div>
-          <div className="qa-ops-strip__links" aria-label="Quick destinations">
-            <Link to={programmeHref(amoCode)}>Programme</Link>
-            <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Planner</Link>
-            <Link to={registerHref(amoCode, "findings")}>Register</Link>
-            <Link to={registerHref(amoCode, "cars")}>CARs</Link>
-          </div>
-        </section>
 
         <section className="qa-ops-card-grid" aria-label="Operational attention cards">
           {opsCards.map((item) => {
@@ -593,7 +582,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                   <CalendarClock size={15} /> Upcoming
                 </h3>
               </div>
-              <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Planner</Link>
+              <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Calendar</Link>
             </div>
             <div className="qa-upcoming-list qa-upcoming-list--compact">
               {upcoming.length ? (
@@ -650,7 +639,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               <Link to={programmeHref(amoCode)}>
                 <Plus size={13} /> Manage programme coverage
               </Link>
-              <Link to={`/maintenance/${amoCode}/quality/audits/plan?view=list`}>Create / run schedule</Link>
+              <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Open Calendar</Link>
             </div>
           </article>
         </section>

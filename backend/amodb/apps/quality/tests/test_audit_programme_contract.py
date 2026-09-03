@@ -18,6 +18,7 @@ from amodb.apps.quality.audit_programme_router import (
     ProgrammeItemCreate,
     _TRANSITIONS,
     _assert_editable,
+    _programme_kind_title,
     _programme_readiness,
     _recurrence_for_interval,
     _validate_item_window,
@@ -28,6 +29,7 @@ from amodb.apps.quality.audit_programme_schedule_router import (
     _expected_frequency,
     router as audit_programme_schedule_router,
 )
+from amodb.apps.quality.planner_assignment_guard_router import router as planner_assignment_guard_router
 from amodb.apps.quality.enums import QMSAuditScheduleFrequency
 
 
@@ -56,6 +58,7 @@ def _readiness_programme(regulatory_basis: list | None = None):
     return SimpleNamespace(
         items=[item],
         regulatory_basis=regulatory_basis or [],
+        owner_user_id="quality-owner",
         period_start=date(2026, 1, 1),
         period_end=date(2026, 12, 31),
     )
@@ -96,18 +99,16 @@ def test_programme_queue_is_bounded_and_static_before_generic_quality_catchall()
 
 def test_programme_schedule_adapter_exposes_authoritative_link_contract() -> None:
     methods = _route_methods(audit_programme_schedule_router)
-    assert {
-        ("/audit-programmes/{programme_id}/schedule-links", "GET"),
-        ("/audit-programmes/{programme_id}/items/{item_id}/schedule", "POST"),
-    }.issubset(methods)
+    assert ("/audit-programmes/{programme_id}/schedule-links", "GET") in methods
+    assert ("/audit-programmes/{programme_id}/items/{item_id}/schedule", "POST") not in methods
 
     adapter_matches = _matching(
-        audit_programme_schedule_router,
+        planner_assignment_guard_router,
         "/audit-programmes/{programme_id}/items/{item_id}/schedule",
         "POST",
     )
     assert len(adapter_matches) == 1
-    assert adapter_matches[0].endpoint.__name__ == "schedule_programme_requirement"
+    assert adapter_matches[0].endpoint.__name__ == "schedule_guarded_programme_requirement"
 
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
@@ -200,6 +201,13 @@ def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> 
 def test_programme_payload_has_no_methodology_choice_and_validates_period_and_recurrence() -> None:
     assert "programme_methodology" not in ProgrammeCreate.model_fields
     assert "methodology_rationale" not in ProgrammeCreate.model_fields
+    assert ProgrammeCreate(
+        programme_year=2026,
+        programme_kind="INTERNAL",
+        period_start="2026-01-01",
+        period_end="2026-12-31",
+    ).title is None
+    assert _programme_kind_title("EXTERNAL", 2026) == "External Audits (2026)"
 
     with pytest.raises(ValidationError):
         ProgrammeCreate(

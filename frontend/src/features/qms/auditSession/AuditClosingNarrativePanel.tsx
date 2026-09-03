@@ -133,17 +133,22 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   return (
     <section className="qms-occurrence-stage qms-occurrence-stage--closing-record" aria-label="Closing meeting narrative and corrective actions">
-      <header className="qms-occurrence-stage__header">
-        <div><span>CLOSING · controlled meeting record</span><h2>Conclusion, positive practices and CAR release</h2><p>These fields are authoritative report inputs, not presentation-only notes.</p></div>
-        <button type="button" onClick={() => void refresh()}><RefreshCw size={15} /> Refresh</button>
-      </header>
+      <div className="qms-occurrence-stage__section-head">
+        <div>
+          <h2>Closing narrative</h2>
+          <p>Conclusion, positive practices, and CAR release — authoritative report inputs.</p>
+        </div>
+        <div className="qms-occurrence-stage__header-actions">
+          <button type="button" onClick={() => void refresh()}><RefreshCw size={15} /> Refresh</button>
+        </div>
+      </div>
       {localError ? <div className="qms-occurrence-stage__message is-error" role="alert"><AlertTriangle size={15} /> {localError}</div> : null}
       {notice ? <div className="qms-occurrence-stage__message" role="status"><CheckCircle2 size={15} /> {notice}</div> : null}
 
       <div className="qms-occurrence-stage__grid">
         <main>
           <article className="qms-occurrence-stage__card">
-            <header><FileText size={18} /><div><strong>Governed report narrative</strong><small>All three statements must be intentionally completed before report generation.</small></div></header>
+            <header><FileText size={18} /><div><h3>Governed report narrative</h3><small>All three statements must be intentionally completed before report generation.</small></div></header>
             <label><span>Management summary</span><textarea rows={5} readOnly={!canManage} value={draft.management_summary || ""} onChange={(event) => updateDraft({ management_summary: event.target.value })} placeholder="Concise management-level summary of audit purpose, coverage and outcome." /></label>
             <label><span>Audit conclusion</span><textarea rows={5} readOnly={!canManage} value={draft.conclusion || ""} onChange={(event) => updateDraft({ conclusion: event.target.value })} placeholder="Overall conformity/effectiveness conclusion supported by the fieldwork." /></label>
             <label><span>Positive practices</span><textarea rows={4} readOnly={!canManage} value={draft.positive_practices || ""} onChange={(event) => updateDraft({ positive_practices: event.target.value })} placeholder="Record observed positive practices, or explicitly state that none were noted." /></label>
@@ -151,7 +156,7 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
           </article>
 
           <article className="qms-occurrence-stage__card">
-            <header><Send size={18} /><div><strong>Findings and corrective actions shared at closing</strong><small>Official non-conformities already create their governed CAR atomically. Closing controls whether the finding/CAR is released to the auditee.</small></div></header>
+            <header><Send size={18} /><div><h3>Findings and corrective actions shared at closing</h3><small>Official non-conformities already create their governed CAR atomically. Closing controls whether the finding/CAR is released to the auditee.</small></div></header>
             {!findings.length ? <p>No governed findings were recorded.</p> : <div className="qms-occurrence-stage__queue">{findings.map((finding) => {
               const release = releaseByFinding.get(finding.id);
               const car = carByFinding.get(finding.id);
@@ -163,8 +168,8 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
 
         <aside>
           <article className="qms-occurrence-stage__card">
-            <header><Users size={18} /><div><strong>Closing meeting</strong><small>Same occurrence meeting configured in Setup and visible to authorised auditee participants.</small></div></header>
-            {closingMeeting ? <><dl><div><dt>Start</dt><dd>{new Date(closingMeeting.scheduled_start).toLocaleString()}</dd></div><div><dt>End</dt><dd>{closingMeeting.scheduled_end ? new Date(closingMeeting.scheduled_end).toLocaleString() : "—"}</dd></div><div><dt>Location</dt><dd>{closingMeeting.location || "—"}</dd></div><div><dt>Status</dt><dd>{closingMeeting.status.replaceAll("_", " ")}</dd></div></dl>{closingMeeting.agenda ? <p>{closingMeeting.agenda}</p> : null}{canManage && closingMeeting.status === "PLANNED" ? <button type="button" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "IN_PROGRESS" })}>Start closing meeting</button> : null}{canManage && closingMeeting.status === "IN_PROGRESS" ? <button type="button" className="is-primary" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "COMPLETED" })}>Record meeting complete</button> : null}</> : <div className="qms-occurrence-stage__message is-error"><AlertTriangle size={15} /> No closing meeting is configured. Return to Setup to create one.</div>}
+            <header><Users size={18} /><div><h3>Closing meeting</h3><small>Same occurrence meeting configured in Setup and visible to authorised auditee participants.</small></div></header>
+            {closingMeeting ? <><dl><div><dt>Start</dt><dd>{new Date(closingMeeting.scheduled_start).toLocaleString()}</dd></div><div><dt>End</dt><dd>{closingMeeting.scheduled_end ? new Date(closingMeeting.scheduled_end).toLocaleString() : "—"}</dd></div><div><dt>Location</dt><dd>{closingMeeting.location || "—"}</dd></div><div><dt>Status</dt><dd>{closingMeeting.status.replaceAll("_", " ")}</dd></div></dl>{closingMeeting.agenda ? <p>{closingMeeting.agenda}</p> : null}<footer className="qms-occurrence-stage__actions">{canManage && closingMeeting.status === "PLANNED" ? <button type="button" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "IN_PROGRESS" })}>Start closing meeting</button> : null}{canManage && closingMeeting.status === "IN_PROGRESS" ? <button type="button" className="is-primary" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "COMPLETED" })}>Record meeting complete</button> : null}</footer></> : <div className="qms-occurrence-stage__message is-error"><AlertTriangle size={15} /> No closing meeting is configured. Return to Setup to create one.</div>}
           </article>
         </aside>
       </div>

@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_
+from sqlalchemy.orm import Session, noload, selectinload
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.training import models as training_models
@@ -14,6 +15,7 @@ from amodb.apps.training.integration import current_training_evidence
 from amodb.database import get_read_db, get_write_db
 
 from . import models as quality_models
+from .people_default_rules import ensure_default_quality_privilege_rules
 from .people_models import (
     QualityIndependenceDeclaration,
     QualityPrivilege,
@@ -36,6 +38,16 @@ DecisionType = Literal["GRANT", "RENEW", "SUSPEND", "REINSTATE", "REVOKE", "EXPI
 ContextType = Literal["AUDIT", "AUDIT_SCHEDULE", "PROGRAMME_ITEM", "ASSURANCE_CASE", "MISSION", "OTHER"]
 Declaration = Literal["INDEPENDENT", "CONFLICT", "REQUIRES_REVIEW"]
 
+_PRIVILEGE_DECISION_ALLOWED_FROM: dict[str, set[str]] = {
+    "GRANT": {"DRAFT"},
+    "REJECT": {"DRAFT"},
+    "RENEW": {"ACTIVE", "EXPIRED"},
+    "SUSPEND": {"ACTIVE"},
+    "REINSTATE": {"SUSPENDED"},
+    "REVOKE": {"ACTIVE", "SUSPENDED"},
+    "EXPIRE": {"ACTIVE", "SUSPENDED"},
+}
+
 
 class PrivilegeRuleCreate(BaseModel):
     privilege_code: str = Field(min_length=2, max_length=64, pattern=r"^[A-Z0-9_\-]+$")
@@ -46,6 +58,16 @@ class PrivilegeRuleCreate(BaseModel):
     independence_required: bool = True
     max_concurrent_assignments: int | None = Field(default=None, ge=1, le=100)
     scope_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class PrivilegeRuleUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=255)
+    description: str | None = None
+    required_training_course_codes: list[str] | None = Field(default=None, max_length=50)
+    independence_required: bool | None = None
+    max_concurrent_assignments: int | None = Field(default=None, ge=1, le=100)
+    scope_schema: dict[str, Any] | None = None
+    is_active: bool | None = None
 
 
 class PrivilegeCreate(BaseModel):
@@ -169,9 +191,13 @@ def _workload_evidence(
     window_end = on_date + timedelta(days=90)
     schedules = db.query(quality_models.QMSAuditSchedule, QMSPlannerScheduleMetadata).join(
         QMSPlannerScheduleMetadata,
-        QMSPlannerScheduleMetadata.schedule_id == quality_models.QMSAuditSchedule.id,
+        and_(
+            QMSPlannerScheduleMetadata.schedule_id == quality_models.QMSAuditSchedule.id,
+            QMSPlannerScheduleMetadata.amo_id == quality_models.QMSAuditSchedule.amo_id,
+        ),
     ).filter(
         quality_models.QMSAuditSchedule.amo_id == amo_id,
+        QMSPlannerScheduleMetadata.amo_id == amo_id,
         quality_models.QMSAuditSchedule.is_active.is_(True),
         quality_models.QMSAuditSchedule.deleted_at.is_(None),
         quality_models.QMSAuditSchedule.next_due_date >= window_start,
@@ -193,7 +219,9 @@ def _workload_evidence(
         }
         if user_id not in schedule_users:
             continue
-        end_date = schedule.next_due_date + timedelta(days=max(int(schedule.duration_days or 1), 1) - 1)
+        end_date = metadata.end_date or (
+            schedule.next_due_date + timedelta(days=max(int(schedule.duration_days or 1), 1) - 1)
+        )
         if schedule.next_due_date <= on_date <= end_date:
             assignments.append({
                 "schedule_id": str(schedule.id),
@@ -372,14 +400,34 @@ def people_summary(
 def list_rules(
     include_inactive: bool = False,
     ctx: TenantContext = Depends(require_quality_permission("qms.training.view")),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    # Every tenant receives the default Lead / Observer-Trainee / Auditor catalog.
+    ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    # Flush only — commit would clear transaction-local RLS (app.tenant_id) before the list query.
+    db.flush()
     query = db.query(QualityPrivilegeRule).filter(QualityPrivilegeRule.amo_id == ctx.amo_id)
     if not include_inactive:
         query = query.filter(QualityPrivilegeRule.is_active.is_(True))
     rows = query.order_by(QualityPrivilegeRule.title.asc()).limit(250).all()
-    return {"items": [_rule_dict(row) for row in rows]}
+    payload = {"items": [_rule_dict(row) for row in rows]}
+    db.commit()
+    return payload
+
+
+@router.post("/rules/ensure-defaults", status_code=status.HTTP_200_OK)
+def ensure_default_rules(
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Idempotently provision the default audit competence rule catalog."""
+    assert_quality_permission(db, ctx, "qms.training.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    rows = ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    payload = {"items": [_rule_dict(row) for row in rows]}
+    db.commit()
+    return payload
 
 
 @router.post("/rules", status_code=status.HTTP_201_CREATED)
@@ -407,6 +455,42 @@ def create_rule(
         updated_by_user_id=ctx.user_id,
     )
     db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _rule_dict(row)
+
+
+@router.patch("/rules/{rule_id}")
+def update_rule(
+    rule_id: str,
+    payload: PrivilegeRuleUpdate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    assert_quality_permission(db, ctx, "qms.training.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = _rule(db, amo_id=ctx.amo_id, rule_id=rule_id)
+    updates = payload.model_dump(exclude_unset=True)
+    if "title" in updates:
+        row.title = str(updates["title"]).strip()
+    if "description" in updates:
+        row.description = updates["description"]
+    if "required_training_course_codes" in updates:
+        row.required_training_course_codes = sorted({
+            value.strip().upper()
+            for value in (updates["required_training_course_codes"] or [])
+            if value.strip()
+        })
+    if "independence_required" in updates:
+        row.independence_required = updates["independence_required"]
+    if "max_concurrent_assignments" in updates:
+        row.max_concurrent_assignments = updates["max_concurrent_assignments"]
+    if "scope_schema" in updates:
+        row.scope_schema = updates["scope_schema"] or {}
+    if "is_active" in updates:
+        row.is_active = updates["is_active"]
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
     db.commit()
     db.refresh(row)
     return _rule_dict(row)
@@ -462,6 +546,7 @@ def create_privilege(
     )
     db.add(row)
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     return _privilege_dict(row)
 
@@ -499,13 +584,33 @@ def decide_privilege(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.training.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    privilege = db.query(QualityPrivilege).options(selectinload(QualityPrivilege.decisions)).filter(
-        QualityPrivilege.amo_id == ctx.amo_id,
-        QualityPrivilege.id == privilege_id,
-    ).with_for_update().first()
+    # Lock the privilege row only. Do not eager-load relationships here: a joined
+    # rule load produces LEFT OUTER JOIN … FOR UPDATE, which Postgres rejects.
+    privilege = (
+        db.query(QualityPrivilege)
+        .options(noload(QualityPrivilege.rule), noload(QualityPrivilege.decisions))
+        .filter(
+            QualityPrivilege.amo_id == ctx.amo_id,
+            QualityPrivilege.id == privilege_id,
+        )
+        .with_for_update()
+        .first()
+    )
     if not privilege:
         raise HTTPException(status_code=404, detail="Quality privilege not found.")
     rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(privilege.rule_id))
+
+    allowed_from = _PRIVILEGE_DECISION_ALLOWED_FROM[payload.decision_type]
+    if privilege.status not in allowed_from:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Privilege decision is not valid from the current lifecycle state.",
+                "current_status": privilege.status,
+                "decision_type": payload.decision_type,
+                "allowed_from": sorted(allowed_from),
+            },
+        )
 
     resulting_status = {
         "GRANT": "ACTIVE",
@@ -516,15 +621,28 @@ def decide_privilege(
         "EXPIRE": "EXPIRED",
         "REJECT": "DRAFT",
     }[payload.decision_type]
-    if payload.expires_on and payload.effective_from and payload.expires_on < payload.effective_from:
+    activation_decision = payload.decision_type in {"GRANT", "RENEW", "REINSTATE"}
+    if not activation_decision and (payload.effective_from is not None or payload.expires_on is not None):
+        raise HTTPException(status_code=422, detail="Lifecycle-only privilege decisions must not alter effective dates.")
+    effective_from = (
+        payload.effective_from or privilege.effective_from or date.today()
+        if activation_decision
+        else privilege.effective_from
+    )
+    expires_on = (
+        payload.expires_on if "expires_on" in payload.model_fields_set else privilege.expires_on
+    )
+    if expires_on and effective_from and expires_on < effective_from:
         raise HTTPException(status_code=422, detail="Privilege expiry cannot precede its effective date.")
+    if activation_decision and expires_on and expires_on < date.today():
+        raise HTTPException(status_code=422, detail="An active privilege cannot retain an expiry date in the past.")
 
     eligibility = evaluate_eligibility(
         db,
         amo_id=ctx.amo_id,
         user_id=str(privilege.user_id),
         rule=rule,
-        as_of=payload.effective_from or date.today(),
+        as_of=effective_from or date.today(),
         require_active_privilege=False,
     )
     if payload.decision_type in {"GRANT", "RENEW", "REINSTATE"}:
@@ -539,6 +657,10 @@ def decide_privilege(
                 detail={"message": "Hard source-backed eligibility gates do not allow this privilege decision.", "eligibility": eligibility},
             )
 
+    # Re-bind tenant GUC before the append-only insert. Transaction-local
+    # set_config is cleared by any mid-request commit/rollback, and RLS WITH CHECK
+    # on quality_privilege_decisions rejects the row as a bare 500 without it.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     decision = QualityPrivilegeDecision(
         amo_id=ctx.amo_id,
         privilege_id=privilege.id,
@@ -547,24 +669,61 @@ def decide_privilege(
         rationale=payload.rationale.strip(),
         eligibility_snapshot=eligibility,
         source_references=payload.source_references,
-        effective_from=payload.effective_from,
-        expires_on=payload.expires_on,
+        effective_from=effective_from,
+        expires_on=expires_on,
         decided_by_user_id=ctx.user_id,
         decided_at=_utcnow(),
     )
     db.add(decision)
     db.flush()
     privilege.status = resulting_status
-    if payload.effective_from is not None:
-        privilege.effective_from = payload.effective_from
-    if payload.expires_on is not None:
-        privilege.expires_on = payload.expires_on
+    if activation_decision:
+        privilege.effective_from = effective_from
+        privilege.expires_on = expires_on
     privilege.latest_decision_id = decision.id
     privilege.updated_by_user_id = ctx.user_id
     privilege.updated_at = _utcnow()
     db.commit()
+    # Commit clears transaction-local tenant GUC; re-bind before post-commit reads.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(privilege)
+    db.refresh(decision)
     return {"privilege": _privilege_dict(privilege), "decision": _decision_dict(decision)}
+
+
+def _independence_dict(row: QualityIndependenceDeclaration) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "user_id": str(row.user_id),
+        "context_type": row.context_type,
+        "context_id": row.context_id,
+        "declaration": row.declaration,
+        "relationship_to_subject": row.relationship_to_subject,
+        "rationale": row.rationale,
+        "source_references": row.source_references,
+        "declared_by_user_id": row.declared_by_user_id,
+        "declared_at": row.declared_at,
+    }
+
+
+@router.get("/independence")
+def list_independence(
+    user_id: str | None = None,
+    context_type: ContextType | None = None,
+    context_id: str | None = None,
+    ctx: TenantContext = Depends(require_quality_permission("qms.training.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    query = db.query(QualityIndependenceDeclaration).filter(QualityIndependenceDeclaration.amo_id == ctx.amo_id)
+    if user_id:
+        query = query.filter(QualityIndependenceDeclaration.user_id == user_id)
+    if context_type:
+        query = query.filter(QualityIndependenceDeclaration.context_type == context_type)
+    if context_id:
+        query = query.filter(QualityIndependenceDeclaration.context_id == context_id)
+    rows = query.order_by(QualityIndependenceDeclaration.declared_at.desc()).limit(250).all()
+    return {"items": [_independence_dict(row) for row in rows]}
 
 
 @router.post("/independence", status_code=status.HTTP_201_CREATED)
@@ -604,15 +763,4 @@ def declare_independence(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return {
-        "id": str(row.id),
-        "user_id": str(row.user_id),
-        "context_type": row.context_type,
-        "context_id": row.context_id,
-        "declaration": row.declaration,
-        "relationship_to_subject": row.relationship_to_subject,
-        "rationale": row.rationale,
-        "source_references": row.source_references,
-        "declared_by_user_id": row.declared_by_user_id,
-        "declared_at": row.declared_at,
-    }
+    return _independence_dict(row)
