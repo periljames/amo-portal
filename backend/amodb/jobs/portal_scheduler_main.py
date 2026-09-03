@@ -49,6 +49,17 @@ def main() -> None:
     from amodb.apps.quality.planner_schedule_router import start_quality_planner_scheduler, stop_quality_planner_scheduler
     from amodb.apps.reliability import advanced_scheduler as reliability_scheduler
     from amodb.jobs.portal_job_supervisor import PortalJobSupervisor
+    from amodb.jobs import platform_monitor
+
+    def _interval(name: str, default: float) -> float:
+        try:
+            return max(5.0, float(os.getenv(name, str(default))))
+        except (TypeError, ValueError):
+            return default
+
+    infra_interval = _interval("PLATFORM_INFRA_SNAPSHOT_INTERVAL_SECONDS", 30.0)
+    health_interval = _interval("PLATFORM_HEALTH_PROBE_INTERVAL_SECONDS", 120.0)
+    health_probe_network = (os.getenv("PLATFORM_HEALTH_PROBE_INCLUDE_NETWORK", "false") or "").strip().lower() in {"1", "true", "yes", "on"}
 
     stopping = False
 
@@ -66,10 +77,25 @@ def main() -> None:
     reliability_scheduler.start_reliability_scheduler()
     start_quality_planner_scheduler()
     supervisor.start()
+
+    # Prime the platform monitor immediately so the superadmin Operations and
+    # System Infrastructure views have data on first load.
+    platform_monitor.capture_infrastructure_once()
+    platform_monitor.capture_health_once(include_network=health_probe_network)
+    next_infra = time.monotonic() + infra_interval
+    next_health = time.monotonic() + health_interval
+
     try:
         while not stopping:
             if not supervisor.status()["running"]:
                 raise RuntimeError("Scheduled worker stopped unexpectedly")
+            now = time.monotonic()
+            if now >= next_infra:
+                platform_monitor.capture_infrastructure_once()
+                next_infra = now + infra_interval
+            if now >= next_health:
+                platform_monitor.capture_health_once(include_network=health_probe_network)
+                next_health = now + health_interval
             time.sleep(1)
     finally:
         supervisor.stop()

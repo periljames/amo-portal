@@ -15,6 +15,10 @@ def run_once() -> dict:
     try:
         result = diagnostics.run_health_probe(db, include_network=True)
         services.create_health_snapshot(db, result)
+        try:
+            services.capture_infrastructure_snapshot(db)
+        except Exception:
+            logger.exception("Infrastructure snapshot capture failed during health probe")
         hb = db.query(models.PlatformWorkerHeartbeat).filter(models.PlatformWorkerHeartbeat.worker_name == "platform_health_runner").first()
         if not hb:
             hb = models.PlatformWorkerHeartbeat(worker_name="platform_health_runner", worker_type="scheduler", status="ONLINE")
