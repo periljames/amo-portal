@@ -587,6 +587,71 @@ def provider_update(provider_id: str, payload: dict[str, Any], db: Session = Dep
 def provider_health(provider_id: str, payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)): return services.job_payload(services.create_command_job(db, payload={"command_name":"RUN_NETWORK_DIAGNOSTIC", "reason":"Provider health check"}, actor_id=_actor_id(user)))
 
 
+@router.get("/infrastructure/live")
+def infrastructure_live(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    """Instant host/DB metrics for ~1s real-time polling (Task-Manager style)."""
+    return services.live_system_metrics(db)
+
+
+@router.get("/diagnostics/ping")
+def diagnostics_ping(user=Depends(require_platform_superuser)):
+    """Tiny response so the browser can measure control-plane round-trip latency."""
+    return {"ok": True, "server_time": services.now_utc().isoformat()}
+
+
+@router.post("/diagnostics/db-check")
+def diagnostics_db_check(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """On-demand database connection speed/latency check."""
+    samples = (payload or {}).get("samples")
+    try:
+        samples = int(samples) if samples is not None else 5
+    except (TypeError, ValueError):
+        samples = 5
+    return services.database_latency_check(db, samples=samples)
+
+
+_SPEEDTEST_MAX_BYTES = 64 * 1024 * 1024
+
+
+@router.get("/diagnostics/speedtest/download")
+def diagnostics_speedtest_download(bytes: int = 8_000_000, user=Depends(require_platform_superuser)):
+    """Stream incompressible random bytes so the browser can measure download throughput."""
+    import os as _os
+    from fastapi.responses import StreamingResponse
+
+    size = max(1024, min(int(bytes or 0), _SPEEDTEST_MAX_BYTES))
+    chunk_size = 64 * 1024
+
+    def _generate():
+        remaining = size
+        while remaining > 0:
+            piece = _os.urandom(min(chunk_size, remaining))
+            remaining -= len(piece)
+            yield piece
+
+    headers = {
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
+        "X-Speedtest-Bytes": str(size),
+    }
+    return StreamingResponse(_generate(), media_type="application/octet-stream", headers=headers)
+
+
+@router.post("/diagnostics/speedtest/upload")
+async def diagnostics_speedtest_upload(request: Request, user=Depends(require_platform_superuser)):
+    """Consume an uploaded payload and report received size + duration for upload throughput."""
+    import time as _time
+
+    started = _time.perf_counter()
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _SPEEDTEST_MAX_BYTES:
+            break
+    elapsed = _time.perf_counter() - started
+    return {"bytes_received": total, "server_ms": round(elapsed * 1000, 2)}
+
+
 @router.get("/infrastructure/summary")
 def infrastructure_summary(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)): return services.infrastructure_summary(db)
 @router.get("/infrastructure/feature-flags")

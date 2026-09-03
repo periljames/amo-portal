@@ -884,3 +884,38 @@ button.platform-list-row:hover { background: var(--platform-hover); }
   .platform-shell *::before,
   .platform-shell *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---- Live monitor + diagnostics (System Infrastructure) ---- */
+.platform-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 12px;
+  flex-wrap: wrap;
+}
+.platform-section-head.compact { margin: 0 0 8px; align-items: center; }
+.platform-section-head h2 { margin: 0; font-size: 15px; }
+.platform-section-head p { margin: 2px 0 0; color: var(--platform-muted, #6b7a90); font-size: 12px; }
+.platform-muted { color: var(--platform-muted, #6b7a90); font-size: 12px; margin: 0 0 10px; }
+.platform-inline-note { font-size: 12px; color: var(--platform-muted, #6b7a90); margin: 0 0 10px; }
+.platform-inline-note.bad { color: #dc2626; }
+
+.platform-grid--live { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.platform-grid--tight { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; }
+.platform-two--spaced { gap: calc(var(--platform-page-gap) + 4px); }
+
+.platform-live-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+.platform-live-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.platform-live-card__head .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--platform-muted, #6b7a90); }
+.platform-live-card__value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.platform-live-card .caption { font-size: 11px; color: var(--platform-muted, #6b7a90); }
+.platform-sparkline { display: block; width: 100%; height: 48px; }
+
+@media (max-width: 1280px) {
+  .platform-grid--live { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .platform-grid--live { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .platform-grid--tight { grid-template-columns: 1fr; }
+}
