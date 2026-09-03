@@ -936,3 +936,18 @@ button.platform-list-row:hover { background: var(--platform-hover); }
   .platform-grid--live { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .platform-grid--tight { grid-template-columns: 1fr; }
 }
+
+/* ---- Network diagnostics ---- */
+.platform-net-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.platform-net-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.platform-net-card__head strong { display: block; font-size: 13px; }
+.platform-net-card__head small { color: var(--platform-muted, #6b7a90); font-size: 11px; }
+.platform-gauge { text-align: center; }
+.platform-gauge__value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: -6px; }
+.platform-gauge__value span { font-size: 11px; font-weight: 600; color: var(--platform-muted, #6b7a90); margin-left: 4px; }
+.platform-gauge__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--platform-muted, #6b7a90); }
+.platform-net-card__stats { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.platform-net-card__stats span { display: flex; flex-direction: column; gap: 2px; }
+.platform-net-card__stats em { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--platform-muted, #6b7a90); }
+.platform-net-sla { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--platform-muted, #6b7a90); }
+.platform-net-sla input { width: 84px; }

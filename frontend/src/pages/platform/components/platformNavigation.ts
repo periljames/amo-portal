@@ -27,6 +27,7 @@ export const platformNavSections: PlatformNavSection[] = [
     items: [
       { to: "/platform/integrations", label: "Integrations & API", mark: "IA", description: "Providers, email, webhooks and API keys", badgeKey: "configured_providers" },
       { to: "/platform/infrastructure", label: "System Infrastructure", mark: "SI", description: "Workers, maintenance, flags and diagnostics", badgeKey: "queue_depth" },
+      { to: "/platform/network", label: "Network Diagnostics", mark: "NW", description: "Speed tests, latency and SLA history" },
       { to: "/platform/security", label: "Security & Compliance", mark: "SC", description: "Alerts, policy controls and audit evidence", badgeKey: "critical_security_alerts" },
       { to: "/platform/security?tab=audit", label: "Audit Logs", mark: "AL", description: "Privileged and platform activity trail" },
     ],
