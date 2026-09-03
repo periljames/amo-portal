@@ -144,7 +144,7 @@ export default function PlatformBillingPage() {
         <MetricCard label="Failed payments" value={String(summaryData.failed_payments ?? 0)} />
       </section>
 
-      <section className="platform-two">
+      <section className="platform-two platform-two--spaced">
         <div className="platform-card">
           <h2>Module price catalog</h2>
           <div className="platform-form">
