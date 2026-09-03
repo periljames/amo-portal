@@ -1,4 +1,9 @@
-.PHONY: dev build deploy rollback health
+.PHONY: install dev build deploy rollback health
+
+# One-command production install on a fresh Linux server (bundled Postgres,
+# migrations, first superuser, health checks). See scripts/install.sh.
+install:
+	./scripts/install.sh
 
 dev:
 	docker compose up --build

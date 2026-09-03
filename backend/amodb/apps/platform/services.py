@@ -686,7 +686,250 @@ def list_providers(db: Session) -> list[dict[str, Any]]:
 def infrastructure_summary(db: Session) -> dict[str, Any]:
     snap = db.query(models.PlatformInfrastructureSnapshot).order_by(models.PlatformInfrastructureSnapshot.captured_at.desc()).first()
     health = latest_health_snapshot(db)
-    return {"status": (health or {}).get("status") or (snap.status if snap else "UNKNOWN"), "latest_snapshot": None if not snap else {"captured_at": snap.captured_at, "cpu_percent": snap.cpu_percent, "memory_percent": snap.memory_percent, "db_connections_active": snap.db_connections_active, "db_connections_max": snap.db_connections_max, "api_error_rate": snap.api_error_rate, "api_p95_latency_ms": snap.api_p95_latency_ms, "api_requests_per_minute": snap.api_requests_per_minute, "status": snap.status}, "feature_flags": _safe_count(db, models.PlatformFeatureFlag), "maintenance_windows": _safe_count(db, models.PlatformMaintenanceWindow, models.PlatformMaintenanceWindow.status.in_(["SCHEDULED", "ACTIVE"])), "workers": _safe_count(db, models.PlatformWorkerHeartbeat)}
+    latest_snapshot = None
+    if snap:
+        details = snap.details_json if isinstance(snap.details_json, dict) else {}
+        storage = details.get("storage") if isinstance(details.get("storage"), dict) else {}
+        latest_snapshot = {
+            "captured_at": snap.captured_at,
+            "cpu_percent": snap.cpu_percent,
+            "memory_percent": snap.memory_percent,
+            "db_connections_active": snap.db_connections_active,
+            "db_connections_max": snap.db_connections_max,
+            "queue_depth": snap.queue_depth,
+            "worker_count": snap.worker_count,
+            "storage_used_percent": storage.get("used_percent"),
+            "storage_used_bytes": storage.get("used_bytes"),
+            "storage_total_bytes": storage.get("total_bytes"),
+            "network_rx_bytes_per_sec": (details.get("network") or {}).get("rx_bytes_per_sec"),
+            "network_tx_bytes_per_sec": (details.get("network") or {}).get("tx_bytes_per_sec"),
+            "api_error_rate": snap.api_error_rate,
+            "api_p95_latency_ms": snap.api_p95_latency_ms,
+            "api_requests_per_minute": snap.api_requests_per_minute,
+            "status": snap.status,
+        }
+    return {"status": (health or {}).get("status") or (snap.status if snap else "UNKNOWN"), "latest_snapshot": latest_snapshot, "feature_flags": _safe_count(db, models.PlatformFeatureFlag), "maintenance_windows": _safe_count(db, models.PlatformMaintenanceWindow, models.PlatformMaintenanceWindow.status.in_(["SCHEDULED", "ACTIVE"])), "workers": _safe_count(db, models.PlatformWorkerHeartbeat)}
+
+
+def create_manual_invoice(
+    db: Session,
+    *,
+    tenant_id: str,
+    amount_cents: int,
+    currency: str = "USD",
+    description: str | None = None,
+    mark_paid: bool = False,
+    due_at: datetime | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a real manual invoice (ledger charge + billing invoice) for a tenant.
+
+    Wires the previously non-functional ``/platform/billing/tenants/{id}/manual-invoice``
+    endpoint to the same ledger-backed path used by the accounts admin console, so a
+    platform superuser can raise ad-hoc invoices without a module price.
+    """
+    amo = db.get(account_models.AMO, tenant_id)
+    if not amo:
+        raise ValueError("Tenant not found")
+    if amount_cents is None or int(amount_cents) <= 0:
+        raise ValueError("amount_cents must be a positive integer")
+
+    now = now_utc()
+    license = (
+        db.query(account_models.TenantLicense)
+        .filter(account_models.TenantLicense.amo_id == amo.id)
+        .order_by(account_models.TenantLicense.created_at.desc())
+        .first()
+    )
+    idempotency_key = f"platform-manual-invoice-{amo.id}-{secrets.token_hex(8)}"
+    normalised_currency = (currency or "USD").upper()
+    ledger = account_models.LedgerEntry(
+        amo_id=amo.id,
+        license_id=license.id if license else None,
+        amount_cents=int(amount_cents),
+        currency=normalised_currency,
+        entry_type=account_models.LedgerEntryType.CHARGE,
+        description=description or "Manual platform invoice",
+        idempotency_key=idempotency_key,
+        recorded_at=now,
+    )
+    db.add(ledger)
+    db.flush()
+    status_value = account_models.InvoiceStatus.PAID if mark_paid else account_models.InvoiceStatus.PENDING
+    invoice = account_models.BillingInvoice(
+        amo_id=amo.id,
+        license_id=license.id if license else None,
+        ledger_entry_id=ledger.id,
+        amount_cents=int(amount_cents),
+        currency=normalised_currency,
+        status=status_value,
+        description=description or "Manual platform invoice",
+        idempotency_key=idempotency_key,
+        issued_at=now,
+        due_at=due_at,
+        paid_at=now if status_value == account_models.InvoiceStatus.PAID else None,
+    )
+    db.add(invoice)
+    audit(
+        db,
+        actor_user_id=actor_id,
+        action="billing.manual_invoice",
+        tenant_id=amo.id,
+        entity_type="BillingInvoice",
+        entity_id=str(invoice.id),
+        details={"amount_cents": int(amount_cents), "currency": normalised_currency, "status": getattr(status_value, "value", str(status_value))},
+    )
+    db.commit()
+    db.refresh(invoice)
+    return {
+        "id": invoice.id,
+        "amo_id": amo.id,
+        "amount_cents": invoice.amount_cents,
+        "currency": invoice.currency,
+        "status": getattr(invoice.status, "value", str(invoice.status)),
+        "issued_at": invoice.issued_at,
+        "due_at": invoice.due_at,
+        "paid_at": invoice.paid_at,
+    }
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def capture_infrastructure_snapshot(db: Session) -> models.PlatformInfrastructureSnapshot:
+    """Collect host + database + API telemetry into ``platform_infrastructure_snapshots``.
+
+    This is the authoritative writer for the infrastructure snapshot table. Without
+    it, the System Infrastructure page and the Operations NOC host CPU/memory cards
+    have no data source unless an external Prometheus is configured. Metrics are
+    gathered with ``psutil`` (host), ``pg_stat_activity`` (database) and the
+    in-app route metrics rollup (API throughput).
+    """
+    import os
+
+    cpu_percent: float | None = None
+    memory_percent: float | None = None
+    storage_used: int | None = None
+    storage_total: int | None = None
+    storage_percent: float | None = None
+    net_rx_rate: float | None = None
+    net_tx_rate: float | None = None
+    try:
+        import psutil
+
+        cpu_percent = float(psutil.cpu_percent(interval=0.5))
+        memory_percent = float(psutil.virtual_memory().percent)
+        storage_root = os.getenv("AMO_STORAGE_LOCAL_ROOT") or "/"
+        try:
+            usage = psutil.disk_usage(storage_root)
+        except Exception:
+            usage = psutil.disk_usage("/")
+        storage_used = int(usage.used)
+        storage_total = int(usage.total)
+        if storage_total:
+            storage_percent = round(100.0 * storage_used / storage_total, 2)
+    except Exception:
+        pass
+
+    try:
+        bandwidth = (metrics.live_summary() or {}).get("bandwidth") or {}
+        net_rx_rate = _coerce_float(
+            bandwidth.get("current_ingress_bytes_per_second")
+            if bandwidth.get("current_ingress_bytes_per_second") is not None
+            else bandwidth.get("average_total_bytes_per_second")
+        )
+        net_tx_rate = _coerce_float(bandwidth.get("current_egress_bytes_per_second"))
+    except Exception:
+        bandwidth = {}
+
+    db_active = _safe_scalar(db, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()")
+    db_max = _safe_scalar(db, "SELECT setting::int FROM pg_settings WHERE name = 'max_connections'")
+
+    queue_depth = _safe_count(
+        db,
+        models.PlatformCommandJob,
+        models.PlatformCommandJob.status.in_(["PENDING", "RUNNING", "NEEDS_APPROVAL"]),
+    )
+    worker_cutoff = now_utc() - timedelta(minutes=10)
+    worker_count = _safe_count(
+        db,
+        models.PlatformWorkerHeartbeat,
+        models.PlatformWorkerHeartbeat.last_seen_at >= worker_cutoff,
+    )
+
+    try:
+        throughput = metrics.live_summary() or {}
+    except Exception:
+        throughput = {}
+    api_error_rate = _coerce_float(throughput.get("error_rate"))
+    api_p95 = _coerce_float(throughput.get("p95_latency_ms"))
+    api_rpm = _coerce_float(
+        throughput.get("current_requests_per_minute")
+        if throughput.get("current_requests_per_minute") is not None
+        else throughput.get("requests_per_minute")
+    )
+
+    db_ratio = 0.0
+    if db_active is not None and db_max:
+        try:
+            db_ratio = float(db_active) / float(db_max)
+        except (TypeError, ValueError, ZeroDivisionError):
+            db_ratio = 0.0
+
+    status = "OK"
+    if (
+        (cpu_percent is not None and cpu_percent >= 95)
+        or (memory_percent is not None and memory_percent >= 95)
+        or db_ratio >= 0.90
+        or (api_error_rate is not None and api_error_rate >= 0.15)
+    ):
+        status = "CRITICAL"
+    elif (
+        (cpu_percent is not None and cpu_percent >= 80)
+        or (memory_percent is not None and memory_percent >= 85)
+        or db_ratio >= 0.75
+        or (api_error_rate is not None and api_error_rate >= 0.05)
+    ):
+        status = "DEGRADED"
+
+    row = models.PlatformInfrastructureSnapshot(
+        cpu_percent=cpu_percent,
+        memory_percent=memory_percent,
+        db_connections_active=int(db_active) if db_active is not None else None,
+        db_connections_max=int(db_max) if db_max is not None else None,
+        queue_depth=queue_depth,
+        worker_count=worker_count,
+        # storage_used_bytes/storage_quota_bytes are INTEGER (int4) columns and
+        # cannot hold real disk sizes without overflow; keep bytes in details_json.
+        storage_used_bytes=None,
+        storage_quota_bytes=None,
+        api_error_rate=api_error_rate,
+        api_p95_latency_ms=api_p95,
+        api_requests_per_minute=api_rpm,
+        status=status,
+        details_json={
+            "storage": {
+                "used_bytes": storage_used,
+                "total_bytes": storage_total,
+                "used_percent": storage_percent,
+            },
+            "network": {
+                "rx_bytes_per_sec": net_rx_rate,
+                "tx_bytes_per_sec": net_tx_rate,
+            },
+            "source": "platform_monitor",
+        },
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def list_feature_flags(db: Session) -> list[dict[str, Any]]:
