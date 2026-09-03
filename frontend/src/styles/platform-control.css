@@ -705,6 +705,18 @@
 .platform-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; }
 .platform-form label { min-width: 0; display: grid; gap: 4px; color: var(--platform-muted); font-size: 8.5px; font-weight: 700; }
 .platform-form label > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Safety net: every text-like control in the page body follows the theme,
+   regardless of where it sits (cards, toolbars, detail panels, dialogs).
+   Scoped to the page body so the header search field keeps its own styling. */
+.platform-page-body input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not([type="file"]),
+.platform-page-body select,
+.platform-page-body textarea {
+  color: var(--platform-ink);
+  background: var(--platform-input);
+  border: 1px solid var(--platform-line-strong);
+  border-radius: 8px;
+}
+
 .platform-form input,
 .platform-form select,
 .platform-form textarea,
