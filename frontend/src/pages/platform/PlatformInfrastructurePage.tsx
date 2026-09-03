@@ -177,7 +177,7 @@ export default function PlatformInfrastructurePage() {
   return (
     <PlatformShell
       title="System Infrastructure"
-      subtitle="Real-time host, database and network monitoring, on-demand diagnostics, feature flags, maintenance windows and critical command jobs."
+      subtitle="Live host, database and network health"
       actions={
         <button className="platform-btn primary" onClick={() => platformApi.runDiagnostics("Infrastructure probe").then(infra.reload)}>
           Run diagnostics
@@ -188,10 +188,7 @@ export default function PlatformInfrastructurePage() {
 
       {/* ---- Real-time monitor (updates every second) ---- */}
       <section className="platform-section-head">
-        <div>
-          <h2>Live monitor</h2>
-          <p>Sampled every second from the host and database, like a task manager.</p>
-        </div>
+        <h2>Live monitor</h2>
         <div className="platform-actions">
           <span className={`platform-live-chip ${paused ? "offline" : "live"}`}><i />{paused ? "Paused" : "Live"}</span>
           <button className="platform-btn compact" onClick={() => setPaused((value) => !value)}>{paused ? "Resume" : "Pause"}</button>
@@ -209,8 +206,8 @@ export default function PlatformInfrastructurePage() {
           max={100}
           color="#0ea5e9"
         />
-        <LiveCard label="Network in" value={bytesPerSec(latest?.network_rx_bytes_per_sec)} data={history.rx} color="#22c55e" />
-        <LiveCard label="Network out" value={bytesPerSec(latest?.network_tx_bytes_per_sec)} data={history.tx} color="#f59e0b" />
+        <LiveCard label="Download" value={bytesPerSec(latest?.network_rx_bytes_per_sec)} data={history.rx} color="#22c55e" />
+        <LiveCard label="Upload" value={bytesPerSec(latest?.network_tx_bytes_per_sec)} data={history.tx} color="#f59e0b" />
         <LiveCard label="Durable queue" value={numeric(latest?.queue_depth)} caption="Pending / running command jobs" data={history.db.map(() => latest?.queue_depth ?? 0)} />
       </section>
 
@@ -218,12 +215,11 @@ export default function PlatformInfrastructurePage() {
       <section className="platform-two platform-two--spaced">
         <div className="platform-card">
           <div className="platform-section-head compact">
-            <h2>Database connection check</h2>
+            <h2>Database check</h2>
             <button className="platform-btn primary" onClick={runDbCheck} disabled={dbChecking}>
               {dbChecking ? "Running…" : "Run check"}
             </button>
           </div>
-          <p className="platform-muted">Runs a burst of round-trip queries and reports connection pool health.</p>
           {dbError ? <div className="platform-inline-note bad">{dbError}</div> : null}
           {dbResult ? (
             <div className="platform-grid platform-grid--tight">
@@ -233,18 +229,17 @@ export default function PlatformInfrastructurePage() {
               <MetricCard label="Result" value={<StatusBadge value={dbResult.ok ? "HEALTHY" : "ERROR"} />} caption={`${dbResult.samples} samples`} />
             </div>
           ) : (
-            <EmptyState label="Run the check to measure database latency and pool utilisation." />
+            <EmptyState label="Run a check to measure latency and pool use." />
           )}
         </div>
 
         <div className="platform-card">
           <div className="platform-section-head compact">
-            <h2>Network speed test</h2>
+            <h2>Speed test</h2>
             <button className="platform-btn primary" onClick={runSpeedTest} disabled={speedRunning}>
               {speedRunning ? "Testing…" : "Run speed test"}
             </button>
           </div>
-          <p className="platform-muted">Measures browser&nbsp;↔&nbsp;server latency and download/upload throughput.</p>
           {speedRunning ? <div className="platform-inline-note">{speedStage || "Preparing…"}</div> : null}
           {speedError ? <div className="platform-inline-note bad">{speedError}</div> : null}
           {speedResult ? (
@@ -254,17 +249,15 @@ export default function PlatformInfrastructurePage() {
               <MetricCard label="Latency" value={numeric(speedResult.latency_ms, " ms")} caption={`jitter ${numeric(speedResult.jitter_ms, " ms")}`} />
             </div>
           ) : (
-            !speedRunning && <EmptyState label="Run the test to measure link latency and throughput." />
+            !speedRunning && <EmptyState label="Run a test to measure latency and throughput." />
           )}
         </div>
       </section>
 
       {/* ---- Persisted snapshot summary + API health ---- */}
       <section className="platform-section-head">
-        <div>
-          <h2>Snapshot &amp; API health</h2>
-          <p>{snapshot.captured_at ? `Latest infrastructure snapshot ${new Date(snapshot.captured_at).toLocaleTimeString()}` : "Awaiting first snapshot"}</p>
-        </div>
+        <h2>API health</h2>
+        {snapshot.captured_at ? <span className="platform-muted">{new Date(snapshot.captured_at).toLocaleTimeString()}</span> : null}
       </section>
       <section className="platform-grid">
         <MetricCard label="Status" value={<StatusBadge value={summary.status} />} />

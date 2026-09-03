@@ -128,7 +128,7 @@ export default function PlatformBillingPage() {
   return (
     <PlatformShell
       title="Subscription, Pricing & Billing"
-      subtitle="Module prices, tenant invoices, recurring checkout, payment states, eTIMS fiscalization and queued billing operations."
+      subtitle="Plans, invoices and subscriptions"
       actions={<button className="platform-btn" onClick={() => { summary.reload(); invoices.reload(); prices.reload(); jobs.reload(); }}>Refresh</button>}
     >
       {summary.error ? <ErrorState error={summary.error} retry={summary.reload} /> : null}
