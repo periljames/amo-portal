@@ -20,11 +20,24 @@ type InfrastructureSummary = {
     memory_percent?: number | null;
     db_connections_active?: number | null;
     db_connections_max?: number | null;
+    worker_count?: number | null;
+    storage_used_percent?: number | null;
+    storage_used_bytes?: number | null;
+    storage_total_bytes?: number | null;
     api_error_rate?: number | null;
     api_p95_latency_ms?: number | null;
     api_requests_per_minute?: number | null;
     status?: string;
   } | null;
+};
+
+const bytesHumanShort = (value?: number | null): string => {
+  if (value == null) return "N/A";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = Number(value);
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size.toFixed(1)} ${units[unit]}`;
 };
 
 type FeatureFlag = { id: string; key: string; name: string; scope?: string; enabled: boolean };
@@ -60,13 +73,13 @@ const bytesHuman = (value?: number | null): string => {
 
 const HISTORY_POINTS = 60;
 
-type LiveHistory = { cpu: number[]; mem: number[]; db: number[]; rx: number[]; tx: number[] };
+type LiveHistory = { cpu: number[]; mem: number[]; db: number[]; rx: number[]; tx: number[]; queue: number[] };
 
 function useLiveMetrics(intervalMs = 1000) {
   const [latest, setLatest] = useState<LiveMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  const [history, setHistory] = useState<LiveHistory>({ cpu: [], mem: [], db: [], rx: [], tx: [] });
+  const [history, setHistory] = useState<LiveHistory>({ cpu: [], mem: [], db: [], rx: [], tx: [], queue: [] });
   const pausedRef = useRef(false);
 
   useEffect(() => {
@@ -89,6 +102,7 @@ function useLiveMetrics(intervalMs = 1000) {
             db: [...prev.db, metrics.db_utilisation_percent ?? 0].slice(-HISTORY_POINTS),
             rx: [...prev.rx, metrics.network_rx_bytes_per_sec ?? 0].slice(-HISTORY_POINTS),
             tx: [...prev.tx, metrics.network_tx_bytes_per_sec ?? 0].slice(-HISTORY_POINTS),
+            queue: [...prev.queue, metrics.queue_depth ?? 0].slice(-HISTORY_POINTS),
           }));
         } catch (err) {
           if (active) setError(err instanceof Error ? err.message : "Live metrics unavailable");
@@ -208,7 +222,7 @@ export default function PlatformInfrastructurePage() {
         />
         <LiveCard label="Download" value={bytesPerSec(latest?.network_rx_bytes_per_sec)} data={history.rx} color="#22c55e" />
         <LiveCard label="Upload" value={bytesPerSec(latest?.network_tx_bytes_per_sec)} data={history.tx} color="#f59e0b" />
-        <LiveCard label="Durable queue" value={numeric(latest?.queue_depth)} caption="Pending / running command jobs" data={history.db.map(() => latest?.queue_depth ?? 0)} />
+        <LiveCard label="Durable queue" value={numeric(latest?.queue_depth)} caption="Pending / running command jobs" data={history.queue} />
       </section>
 
       {/* ---- On-demand diagnostics: DB check + network speed test ---- */}
@@ -263,7 +277,8 @@ export default function PlatformInfrastructurePage() {
         <MetricCard label="Status" value={<StatusBadge value={summary.status} />} />
         <MetricCard label="API throughput" value={numeric(snapshot.api_requests_per_minute, " rpm")} caption={`p95 ${numeric(snapshot.api_p95_latency_ms, " ms")}`} />
         <MetricCard label="API error rate" value={snapshot.api_error_rate == null ? "N/A" : `${(snapshot.api_error_rate * 100).toFixed(2)}%`} tone={(snapshot.api_error_rate ?? 0) >= 0.05 ? "amber" : undefined} caption="Rolling 60m window" />
-        <MetricCard label="Workers online" value={summary.workers ?? 0} caption="Reporting heartbeats" />
+        <MetricCard label="Storage used" value={percent(snapshot.storage_used_percent)} tone={(snapshot.storage_used_percent ?? 0) >= 85 ? "amber" : undefined} caption={snapshot.storage_total_bytes ? `${bytesHumanShort(snapshot.storage_used_bytes)} of ${bytesHumanShort(snapshot.storage_total_bytes)}` : "Object/upload volume"} />
+        <MetricCard label="Workers online" value={snapshot.worker_count ?? summary.workers ?? 0} caption="Active in last 10 min" />
       </section>
 
       {/* ---- Controls ---- */}
