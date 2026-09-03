@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -39,12 +39,31 @@ class MissionPatch(BaseModel):
     target_date: date | None = None
 
 
+class MissionGateCreate(BaseModel):
+    gate_code: str = Field(min_length=2, max_length=64, pattern=r"^[A-Z0-9_\-]+$")
+    title: str = Field(min_length=3, max_length=255)
+    category: str = Field(min_length=2, max_length=80)
+    description: str | None = None
+    gate_type: Literal["HARD", "SOFT"] = "HARD"
+    requirement_ref: str | None = Field(default=None, max_length=255)
+    source_owner_module: str = Field(min_length=2, max_length=80)
+    source_type: str = Field(min_length=2, max_length=48)
+    owner_user_id: str | None = Field(default=None, max_length=36)
+    due_date: date | None = None
+    sort_order: int = Field(default=100, ge=0, le=10000)
+
+
 def _tenant_user_or_422(db: Session, *, amo_id: str, user_id: str | None, label: str) -> str | None:
     if not user_id:
         return None
     user = (
         db.query(account_models.User.id)
-        .filter(account_models.User.id == user_id, account_models.User.amo_id == amo_id)
+        .filter(
+            account_models.User.id == user_id,
+            account_models.User.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        )
         .first()
     )
     if not user:
@@ -53,6 +72,14 @@ def _tenant_user_or_422(db: Session, *, amo_id: str, user_id: str | None, label:
             detail=f"{label} must reference a user in the current AMO tenant.",
         )
     return str(user_id)
+
+
+def _assert_mission_mutable(mission: QualityMission) -> None:
+    if mission.status not in {"PLANNING", "IN_PROGRESS", "GATE_REVIEW"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Mission scope and readiness gates are immutable after self-evaluation or terminal approval. Create a new Mission for changed scope.",
+        )
 
 
 def _seed_capability_gates(db: Session, *, mission: QualityMission, amo_id: str, now) -> None:
@@ -139,6 +166,7 @@ def update_mission_metadata(
 ):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
+    _assert_mission_mutable(mission)
     updates = payload.model_dump(exclude_unset=True)
 
     if "owner_user_id" in updates:
@@ -168,6 +196,60 @@ def update_mission_metadata(
     return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)
 
 
+@router.post("/{mission_id}/gates", status_code=status.HTTP_201_CREATED)
+def create_governed_mission_gate(
+    mission_id: str,
+    payload: MissionGateCreate,
+    ctx: TenantContext = Depends(require_quality_permission("qms.change.manage")),
+    db: Session = Depends(get_write_db),
+):
+    """Add a governed readiness gate for Mission types without a fixed template."""
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
+    _assert_mission_mutable(mission)
+    gate_code = payload.gate_code.strip().upper()
+    duplicate = db.query(QualityMissionGate.id).filter(
+        QualityMissionGate.amo_id == ctx.amo_id,
+        QualityMissionGate.mission_id == mission.id,
+        QualityMissionGate.gate_code == gate_code,
+    ).first()
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mission gate code already exists.")
+    owner_user_id = _tenant_user_or_422(
+        db,
+        amo_id=ctx.amo_id,
+        user_id=payload.owner_user_id,
+        label="Gate owner",
+    )
+    now = _utcnow()
+    db.add(QualityMissionGate(
+        amo_id=ctx.amo_id,
+        mission_id=mission.id,
+        gate_code=gate_code,
+        title=payload.title.strip(),
+        category=payload.category.strip(),
+        description=payload.description,
+        gate_type=payload.gate_type,
+        status="PENDING",
+        requirement_ref=payload.requirement_ref,
+        source_owner_module=payload.source_owner_module.strip().lower(),
+        source_type=payload.source_type.strip().upper(),
+        evidence_status="UNLINKED",
+        owner_user_id=owner_user_id,
+        due_date=payload.due_date,
+        sort_order=payload.sort_order,
+        created_at=now,
+        updated_at=now,
+    ))
+    mission.status = "IN_PROGRESS"
+    mission.updated_by_user_id = ctx.user_id
+    mission.updated_at = now
+    db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)
+
+
 @router.patch("/{mission_id}/gates/{gate_id}")
 def update_governed_mission_gate(
     mission_id: str,
@@ -178,6 +260,7 @@ def update_governed_mission_gate(
 ):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
+    _assert_mission_mutable(mission)
     gate = (
         db.query(QualityMissionGate)
         .filter(

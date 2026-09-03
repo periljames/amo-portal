@@ -1,48 +1,120 @@
 /* Portal-wide depth layer.
    Loaded last so every module receives the same dark-surface hierarchy without
-   overriding status, severity or tenant-brand colours. */
+   overriding status, severity or tenant-brand colours.
+
+   Dark treatment: charcoal / graphite translucency (Origin-like), not navy slabs.
+   Glass blur is reserved for elevated shells (modal / drawer / popover / menus).
+   Ordinary cards stay calmer: alpha fill + fine border + soft shadow. */
 
 body:not([data-color-scheme="light"]) {
-  --bg-base: #07111f;
-  --bg-base-alt: #030712;
-  --bg-accent: rgba(34, 211, 238, 0.15);
-  --bg-accent-2: rgba(16, 185, 129, 0.12);
+  --bg-base: #141618;
+  --bg-base-alt: #0f1113;
+  --bg-accent: rgba(56, 189, 248, 0.1);
+  --bg-accent-2: rgba(45, 212, 191, 0.08);
 
-  --surface: rgba(10, 22, 39, 0.93);
-  --surface-elevated: rgba(19, 34, 55, 0.97);
-  --surface-soft: rgba(7, 17, 31, 0.84);
-  --surface-border: rgba(126, 151, 181, 0.34);
+  --surface: rgba(38, 40, 43, 0.9);
+  --surface-elevated: rgba(43, 45, 49, 0.94);
+  --surface-soft: rgba(32, 34, 37, 0.82);
+  --surface-border: rgba(255, 255, 255, 0.11);
+  --border-subtle: rgba(255, 255, 255, 0.075);
+  --panel-divider: rgba(255, 255, 255, 0.065);
+  --menu-surface: rgba(38, 40, 44, 0.88);
 
-  --text-primary: #f4f7fb;
-  --text-secondary: #c5d0df;
-  --text-muted: #8ea0b8;
-  --border-subtle: rgba(126, 151, 181, 0.25);
-  --panel-divider: rgba(126, 151, 181, 0.18);
+  --text-primary: rgba(255, 255, 255, 0.96);
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-muted: rgba(255, 255, 255, 0.52);
 
-  --input-bg: rgba(7, 18, 33, 0.95);
-  --input-bg-focus: rgba(14, 28, 47, 0.99);
-  --input-border: rgba(126, 151, 181, 0.42);
-  --input-placeholder: #8294ac;
+  --input-bg: rgba(255, 255, 255, 0.045);
+  --input-bg-focus: rgba(255, 255, 255, 0.07);
+  --input-border: rgba(255, 255, 255, 0.11);
+  --input-placeholder: rgba(255, 255, 255, 0.48);
+
+  --surface-hover: rgba(255, 255, 255, 0.065);
+  --surface-active: rgba(255, 255, 255, 0.095);
+  --glass-bg: linear-gradient(180deg, rgba(43, 45, 49, 0.92), rgba(31, 33, 36, 0.9));
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-blur: blur(18px) saturate(125%);
+  --blur-strength: 18px;
 
   --shadow-soft:
-    0 22px 54px rgba(0, 0, 0, 0.34),
-    0 1px 0 rgba(255, 255, 255, 0.025);
+    0 20px 55px rgba(0, 0, 0, 0.42),
+    0 2px 10px rgba(0, 0, 0, 0.28);
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 8px 22px rgba(0, 0, 0, 0.22);
   --portal-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.28),
-    0 1px 0 rgba(255, 255, 255, 0.025);
+    0 12px 30px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-float:
+    0 24px 64px rgba(0, 0, 0, 0.45),
+    0 4px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+
+  --portal-surface-hover: rgba(255, 255, 255, 0.065);
+  --portal-row-hover: rgba(255, 255, 255, 0.04);
+  --portal-table-head: rgba(255, 255, 255, 0.035);
+  --portal-overlay: rgba(0, 0, 0, 0.52);
+  --portal-control-bg: var(--input-bg);
+  --portal-control-bg-focus: var(--input-bg-focus);
 
   background:
-    radial-gradient(circle at 8% -8%, rgba(34, 211, 238, 0.13), transparent 32rem),
-    radial-gradient(circle at 95% 105%, rgba(16, 185, 129, 0.1), transparent 36rem),
-    linear-gradient(145deg, #07111f 0%, #081426 48%, #030712 100%);
+    radial-gradient(ellipse 80% 50% at 12% -10%, rgba(56, 189, 248, 0.06), transparent 42%),
+    radial-gradient(ellipse 70% 45% at 92% 108%, rgba(215, 184, 74, 0.05), transparent 40%),
+    linear-gradient(160deg, #17191c 0%, #141618 46%, #0f1113 100%);
   background-attachment: fixed;
 }
 
+/* Shell / navigation — graphite integration, not solid black slabs */
 body:not([data-color-scheme="light"]) :where(
   .app-shell__topbar,
-  .app-shell-v2__topbar,
+  .app-shell--v2 .app-shell__topbar,
   .app-shell__sidebar,
-  .app-shell-v2__sidebar,
+  .app-shell--v2 .app-shell__sidebar,
+  .tenant-shell__topbar,
+  .tenant-shell__sidebar
+) {
+  background: rgba(28, 30, 33, 0.82);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  body:not([data-color-scheme="light"]) :where(
+    .app-shell__topbar,
+    .app-shell--v2 .app-shell__topbar,
+    .tenant-shell__topbar
+  ) {
+    background: rgba(28, 30, 33, 0.72);
+    backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+  }
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .app-shell__nav-item,
+  .tenant-nav__link,
+  .tenant-nav__item,
+  .qms-nav-link,
+  .quality-context-tab
+):hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .app-shell__nav-item.is-active,
+  .app-shell__nav-item[aria-current="page"],
+  .tenant-nav__link.is-active,
+  .tenant-nav__link[aria-current="page"],
+  .tenant-nav__item.is-active,
+  .qms-nav-link.is-active,
+  .quality-context-tab.is-active,
+  .quality-context-tab[aria-current="page"]
+) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Standard page cards — calm translucent charcoal (no blur) */
+body:not([data-color-scheme="light"]) :where(
   .glass-panel,
   .section-card,
   .admin-panel,
@@ -58,16 +130,18 @@ body:not([data-color-scheme="light"]) :where(
   .production-panel,
   .wr-panel,
   .wr-planner-panel,
-  .wr-issue-rail
+  .wr-issue-rail,
+  .qms-audit-programme-flow__panel,
+  .qms-audit-closing,
+  .qms-audit-prepare,
+  .qms-live-audit,
+  .qms-occurrence-stage
 ) {
-  border-color: color-mix(in srgb, var(--border-subtle) 88%, transparent);
-  background-image:
-    linear-gradient(145deg,
-      color-mix(in srgb, var(--surface-elevated) 94%, rgba(255, 255, 255, 0.025)),
-      color-mix(in srgb, var(--surface) 97%, transparent));
+  background: rgba(38, 40, 43, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.065);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    0 14px 34px rgba(0, 0, 0, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 body:not([data-color-scheme="light"]) :where(
@@ -81,14 +155,11 @@ body:not([data-color-scheme="light"]) :where(
   .wr-metric,
   .wr-command-link
 ) {
-  border-color: color-mix(in srgb, var(--border-subtle) 82%, transparent);
-  background-image:
-    linear-gradient(150deg,
-      color-mix(in srgb, var(--surface-elevated) 84%, transparent),
-      color-mix(in srgb, var(--surface-soft) 94%, transparent));
+  background: rgba(38, 40, 43, 0.78);
+  border-color: rgba(255, 255, 255, 0.065);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.025),
-    0 7px 18px rgba(0, 0, 0, 0.13);
+    0 1px 2px rgba(0, 0, 0, 0.16);
 }
 
 body:not([data-color-scheme="light"]) :where(
@@ -101,17 +172,57 @@ body:not([data-color-scheme="light"]) :where(
   .wr-capacity-card,
   .wr-command-link
 ):hover {
-  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.11);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    0 10px 24px rgba(0, 0, 0, 0.18);
+    0 8px 20px rgba(0, 0, 0, 0.22);
 }
 
+/* Nested / inset surfaces */
+body:not([data-color-scheme="light"]) :where(
+  .qms-card__body,
+  .admin-card__body,
+  .section-card__body,
+  .qms-audit-closing__card,
+  .qms-audit-prepare__card,
+  .qms-live-audit__panel,
+  .audit-fieldwork-panel,
+  .qms-occurrence-stage__panel
+) {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-audit-closing__card.is-current,
+  .qms-audit-closing__card[aria-current="step"]
+) {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-audit-closing__card.is-locked
+) {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+  color: var(--text-secondary);
+}
+
+/* Inputs — translucent, not pure black */
 body:not([data-color-scheme="light"]) :where(
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea
 ) {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
@@ -120,7 +231,91 @@ body:not([data-color-scheme="light"]) :where(
   select,
   textarea
 ):hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--input-border));
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+):focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, rgba(255, 255, 255, 0.18));
+}
+
+/* Secondary / tertiary buttons */
+body:not([data-color-scheme="light"]) :where(
+  .btn:not(.btn-primary):not(.is-primary):not([data-variant="primary"]),
+  button.secondary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-tertiary
+) {
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .btn:not(.btn-primary):not(.is-primary):not([data-variant="primary"]),
+  button.secondary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-tertiary
+):hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.085);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Tables — no zebra bands; fine separators */
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table,
+  .ag-theme-alpine,
+  .ag-theme-quartz
+) {
+  background: rgba(38, 40, 43, 0.55);
+  border-color: rgba(255, 255, 255, 0.065);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table thead,
+  .aum-table thead,
+  .admin-table thead,
+  .qms-table thead,
+  .wr-table thead,
+  .ag-header
+) {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table th,
+  .aum-table th,
+  .admin-table th,
+  .qms-table th,
+  .wr-table th,
+  .ag-header-cell
+) {
+  color: var(--text-secondary);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+  background: transparent;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table td,
+  .aum-table td,
+  .admin-table td,
+  .qms-table td,
+  .wr-table td,
+  .ag-cell
+) {
+  border-bottom-color: rgba(255, 255, 255, 0.055);
+  background: transparent;
 }
 
 body:not([data-color-scheme="light"]) :where(
@@ -131,6 +326,24 @@ body:not([data-color-scheme="light"]) :where(
   .wr-table
 ) tbody tr {
   transition: background-color 120ms ease;
+  background: transparent;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr:nth-child(even),
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr:nth-child(odd) {
+  background: transparent;
 }
 
 body:not([data-color-scheme="light"]) :where(
@@ -140,27 +353,188 @@ body:not([data-color-scheme="light"]) :where(
   .qms-table,
   .wr-table
 ) tbody tr:hover {
-  background: color-mix(in srgb, var(--surface-elevated) 84%, var(--accent-primary) 4%);
+  background: rgba(255, 255, 255, 0.045);
 }
 
 body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr.is-selected,
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent-primary) 70%, transparent);
+}
+
+/* Floating elevated shells — glass (blur only here).
+   !important beats foundations/forms-and-overlays solid surface contract. */
+body:not([data-color-scheme="light"]) :where(
+  dialog,
   .drawer,
+  .drawer-panel,
   .modal,
+  .modal-content,
+  .modal-card,
+  .dialog,
+  .dialog-panel,
+  .confirm-dialog,
+  .prompt-dialog,
   .popover,
+  .popover-content,
   .dropdown-menu,
   .context-menu,
   .menu-surface,
-  .wr-drawer
+  .wr-drawer,
+  .finding-drawer,
+  .qms-finding-drawer,
+  [role="dialog"],
+  [role="alertdialog"],
+  [role="menu"],
+  [role="listbox"]
 ) {
-  background-image:
-    linear-gradient(150deg,
-      color-mix(in srgb, var(--surface-elevated) 98%, rgba(255, 255, 255, 0.02)),
-      color-mix(in srgb, var(--surface) 98%, transparent));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    0 24px 60px rgba(0, 0, 0, 0.38);
+  background: linear-gradient(180deg, rgba(42, 44, 48, 0.94), rgba(31, 33, 36, 0.92)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: var(--shadow-float, 0 24px 64px rgba(0, 0, 0, 0.45)) !important;
+  color: var(--text-primary) !important;
 }
 
+@supports (backdrop-filter: blur(1px)) {
+  body:not([data-color-scheme="light"]) :where(
+    dialog,
+    .drawer,
+    .drawer-panel,
+    .modal,
+    .modal-content,
+    .modal-card,
+    .dialog,
+    .dialog-panel,
+    .confirm-dialog,
+    .prompt-dialog,
+    .popover,
+    .popover-content,
+    .dropdown-menu,
+    .context-menu,
+    .menu-surface,
+    .wr-drawer,
+    .finding-drawer,
+    .qms-finding-drawer,
+    [role="dialog"],
+    [role="alertdialog"],
+    [role="menu"],
+    [role="listbox"]
+  ) {
+    background: linear-gradient(180deg, rgba(43, 45, 49, 0.9), rgba(31, 33, 36, 0.88)) !important;
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+  }
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .modal-header,
+  .modal__header,
+  .drawer-header,
+  .drawer__header,
+  .modal-footer,
+  .modal__footer,
+  .drawer-footer,
+  .drawer__footer
+) {
+  border-color: rgba(255, 255, 255, 0.065);
+  background: transparent;
+}
+
+/* Calendar — subdued grid; translucent events */
+body:not([data-color-scheme="light"]) :where(
+  .qms-calendar-workspace,
+  .qms-planner-v2,
+  .fc,
+  .planner-calendar
+) {
+  --fc-border-color: rgba(255, 255, 255, 0.06);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: rgba(255, 255, 255, 0.03);
+  --fc-today-bg-color: rgba(255, 255, 255, 0.04);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .fc-theme-standard td,
+  .fc-theme-standard th,
+  .qms-planner-v2__cell,
+  .planner-day-cell
+) {
+  border-color: rgba(255, 255, 255, 0.055);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .fc-event,
+  .qms-planner-v2__event,
+  .planner-event-chip
+) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-planner-v2__queue,
+  .planner-unscheduled-rail,
+  .qms-calendar-unscheduled
+) {
+  background: rgba(38, 40, 43, 0.88);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+/* Fieldwork — raised current pane; nested evidence */
+body:not([data-color-scheme="light"]) :where(
+  .audit-fieldwork-panel,
+  .qms-live-audit__checklist-rail,
+  .live-audit-checklist-rail
+) {
+  background: rgba(24, 26, 28, 0.92);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-live-audit__control-pane,
+  .live-audit-control-pane,
+  .audit-fieldwork-panel__current
+) {
+  background: rgba(43, 45, 49, 0.9);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-live-audit__checklist-item.is-selected,
+  .live-audit-checklist-item.is-selected,
+  .audit-fieldwork-panel__item.is-active
+) {
+  background: color-mix(in srgb, var(--accent-primary) 10%, rgba(255, 255, 255, 0.04));
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, rgba(255, 255, 255, 0.08));
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-live-audit__evidence,
+  .live-audit-evidence-pane,
+  .audit-fieldwork-panel__evidence
+) {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+/* Light theme: keep existing soft elevation only */
 body[data-color-scheme="light"] :where(
   .glass-panel,
   .section-card,
@@ -181,6 +555,48 @@ body[data-color-scheme="light"] :where(
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 860px) {
+  body:not([data-color-scheme="light"]) :where(
+    .drawer,
+    .drawer-panel,
+    .modal,
+    .modal-content,
+    .modal-card,
+    .popover,
+    .dropdown-menu
+  ) {
+    box-shadow:
+      0 16px 40px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body:not([data-color-scheme="light"]) {
+    --surface: #26282b;
+    --surface-elevated: #2b2d31;
+    --surface-soft: #202225;
+    --menu-surface: #26282c;
+  }
+
+  body:not([data-color-scheme="light"]) :where(
+    .drawer,
+    .drawer-panel,
+    .modal,
+    .modal-content,
+    .modal-card,
+    .popover,
+    .dropdown-menu,
+    .context-menu,
+    .menu-surface,
+    [role="dialog"]
+  ) {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: #2a2c30;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

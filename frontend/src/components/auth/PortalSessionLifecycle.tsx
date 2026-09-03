@@ -9,9 +9,9 @@ import {
   getLastUserSessionActivityAt,
   getToken,
   getTokenSecondsRemaining,
-  handleAuthFailure,
   onSessionEvent,
   recordUserSessionActivity,
+  recoverSessionAfterUnauthorized,
 } from "../../services/auth";
 
 const ACTIVITY_WRITE_THROTTLE_MS = 5_000;
@@ -77,9 +77,14 @@ const PortalSessionLifecycle: React.FC = () => {
       return;
     }
 
+    // Access JWTs are short-lived; the HttpOnly refresh cookie may still be valid.
+    // Never hard-logout here — recover (or leave recovery to the fetch bridge).
+    // Immediate handleAuthFailure("token-expired") caused mid-session "secure
+    // session expired" logouts while the user was still active within idle limits.
+    // Successful recovery emits "authenticated", which re-runs evaluateAndSchedule.
     const tokenSecondsRemaining = getTokenSecondsRemaining();
     if (tokenSecondsRemaining !== null && tokenSecondsRemaining <= 0) {
-      handleAuthFailure("token-expired");
+      void recoverSessionAfterUnauthorized("lifecycle-access-expired").catch(() => undefined);
     }
 
     logoutTimerRef.current = window.setTimeout(() => {
@@ -97,7 +102,8 @@ const PortalSessionLifecycle: React.FC = () => {
   }, [clearTimers, showWarning]);
 
   useEffect(() => {
-    evaluateAndSchedule();
+    // Defer past mount so the initial schedule does not setState synchronously in this effect.
+    const bootTimer = window.setTimeout(() => evaluateAndSchedule(), 0);
 
     const acceptHumanActivity = (event: Event) => {
       if (!getToken()) return;
@@ -140,8 +146,18 @@ const PortalSessionLifecycle: React.FC = () => {
     const stopSessionEvents = onSessionEvent((detail) => {
       if (detail.type === "authenticated") {
         const at = Date.now();
-        lastObservedActivityRef.current = at;
-        recordUserSessionActivity("authenticated", at);
+        // Silent JWT/cookie recovery must not reset the idle clock — only real
+        // sign-in (or an explicit activity event) counts as human presence.
+        const recoveryReason = String(detail.reason || "");
+        const isSilentRecovery =
+          recoveryReason.includes("expired") ||
+          recoveryReason.includes("unauthorized") ||
+          recoveryReason.includes("recover") ||
+          recoveryReason.includes("lifecycle");
+        if (!isSilentRecovery) {
+          lastObservedActivityRef.current = at;
+          recordUserSessionActivity("authenticated", at);
+        }
         evaluateAndSchedule(at);
         return;
       }
@@ -157,6 +173,7 @@ const PortalSessionLifecycle: React.FC = () => {
     });
 
     return () => {
+      window.clearTimeout(bootTimer);
       activityEvents.forEach((name) => window.removeEventListener(name, acceptHumanActivity, true));
       window.removeEventListener("focus", revalidateAfterSuspension, true);
       window.removeEventListener("pageshow", revalidateAfterSuspension, true);

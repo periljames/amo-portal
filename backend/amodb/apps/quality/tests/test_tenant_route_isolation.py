@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 
 from amodb.apps.quality import tenant_security
 
@@ -83,3 +84,20 @@ def test_platform_superuser_requires_active_support_session(monkeypatch) -> None
 
     assert exc.value.status_code == 403
     assert "support session" in str(exc.value.detail).lower()
+
+
+def test_capability_store_failure_fails_closed() -> None:
+    db = MagicMock()
+    db.get_bind.return_value.dialect.name = "postgresql"
+    db.execute.side_effect = OperationalError("authorization lookup", {}, Exception("database unavailable"))
+
+    with pytest.raises(HTTPException) as exc:
+        tenant_security._has_capability_permission(
+            db,
+            amo_id="amo-a",
+            user_id="user-a",
+            permission="qms.audit.manage",
+        )
+
+    assert exc.value.status_code == 503
+    assert "could not be verified" in str(exc.value.detail).lower()

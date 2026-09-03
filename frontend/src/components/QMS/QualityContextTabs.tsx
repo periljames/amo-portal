@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Gauge,
   ListChecks,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -26,6 +27,7 @@ type ContextTab = {
   queryTab?: string;
   queryWorkspace?: QmsWorkspaceId;
   activePrefixes?: string[];
+  excludePrefixes?: string[];
 };
 
 type QualityRoute = {
@@ -69,6 +71,9 @@ const ASSURANCE_MODULES = new Set([
   "evidence-vault",
 ]);
 
+/** Surfaces where the Audits rail owns local nav (calendar stays planner-owned). */
+const AUDIT_ASSURANCE_SEGMENTS = new Set(["audits"]);
+
 const WORKSPACE_ICONS: Record<QmsWorkspaceId, LucideIcon> = {
   "control-room": Gauge,
   planner: CalendarDays,
@@ -91,8 +96,8 @@ function parseQualityRoute(pathname: string): QualityRoute | null {
 
 function moduleTitle(segment: string | undefined): string {
   const labels: Record<string, string> = {
-    calendar: "Planner",
-    audits: "Audit Assurance",
+    calendar: "Calendar",
+    audits: "Audits",
     findings: "Findings",
     cars: "Corrective Action",
     risk: "Risk Intelligence",
@@ -121,6 +126,8 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
   const current = pathname.replace(/\/$/, "");
   const params = new URLSearchParams(search);
 
+  if (tab.excludePrefixes?.some((prefix) => pathMatches(current, prefix))) return false;
+
   if (tab.queryTab) {
     return pathMatches(current, target) && (params.get("tab") || "war-room") === tab.queryTab;
   }
@@ -138,11 +145,14 @@ function tabIsActive(tab: ContextTab, pathname: string, search: string): boolean
 function topLevelTabs(route: QualityRoute): ContextTab[] {
   const workspaceItems = qmsWorkspaceNavigationItems(route.amoCode);
   const base = route.basePath;
-  const activePrefixes: Record<QmsWorkspaceId, string[]> = {
-    "control-room": [base],
+
+  const activePrefixes: Record<QmsWorkspaceId, string[] | undefined> = {
+    "control-room": undefined,
     planner: [`${base}/planner`, `${base}/calendar`],
     missions: [`${base}/missions`, `${base}/change-control`],
     people: [`${base}/people`],
+    // Assurance owns audits + assurance cases + findings/CAR/providers family.
+    // Calendar stays planner-owned — do not dual-activate Assurance on /calendar.
     assurance: [
       `${base}/assurance`,
       `${base}/audits`,
@@ -168,33 +178,104 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
     path: workspace.path,
     icon: WORKSPACE_ICONS[workspace.id],
     exact: workspace.id === "control-room",
-    queryWorkspace: ["missions", "people", "assurance", "intelligence"].includes(workspace.id) ? workspace.id : undefined,
+    // Assurance lands on /audits/dashboard — do not require ?workspace=assurance for active state.
+    queryWorkspace: ["missions", "people", "intelligence"].includes(workspace.id) ? workspace.id : undefined,
     activePrefixes: workspace.id === "control-room" ? undefined : activePrefixes[workspace.id],
   }));
 }
 
-function assuranceSectionTabs(basePath: string): ContextTab[] {
+/**
+ * Permanent Assurance related-pages.
+ * When Audit Assurance rail owns Overview/Plan/Audits/Findings, do not render a
+ * second permanent related-pill row — demote sibling products into Tools.
+ */
+function assurancePrimaryTabs(basePath: string, aaRailOwnsLocalNav: boolean): ContextTab[] {
+  if (aaRailOwnsLocalNav) {
+    return [];
+  }
+
   return [
-    { id: "assurance-home", label: "Cases", path: `${basePath}?workspace=assurance`, queryWorkspace: "assurance" },
-    { id: "assurance-audits", label: "Audit Assurance", path: `${basePath}/audits/dashboard`, activePrefixes: [`${basePath}/audits`, `${basePath}/calendar`] },
-    { id: "assurance-findings", label: "Findings", path: `${basePath}/findings/register`, activePrefixes: [`${basePath}/findings`] },
-    { id: "assurance-cars", label: "Corrective action", path: `${basePath}/cars/register`, activePrefixes: [`${basePath}/cars`] },
-    { id: "assurance-providers", label: "External providers", path: `${basePath}/suppliers/approved-list`, activePrefixes: [`${basePath}/suppliers`] },
-    { id: "assurance-tooling", label: "Tooling", path: `${basePath}/equipment-calibration/register`, activePrefixes: [`${basePath}/equipment-calibration`] },
-    { id: "assurance-external", label: "External & regulatory", path: `${basePath}/external-interface/regulator-findings`, activePrefixes: [`${basePath}/external-interface`] },
-    { id: "assurance-evidence", label: "Evidence vault", path: `${basePath}/evidence-vault/search`, activePrefixes: [`${basePath}/evidence-vault`] },
+    {
+      id: "assurance-audits",
+      label: "Audits",
+      path: `${basePath}/audits/dashboard`,
+      activePrefixes: [`${basePath}/audits`],
+      excludePrefixes: [`${basePath}/audits/register`, `${basePath}/audits/findings-actions`],
+    },
+    {
+      id: "assurance-home",
+      label: "Assurance cases",
+      path: `${basePath}?workspace=assurance`,
+      queryWorkspace: "assurance",
+    },
+    {
+      id: "assurance-findings",
+      label: "Findings & Actions",
+      path: `${basePath}/audits/register?tab=findings`,
+      activePrefixes: [`${basePath}/findings`, `${basePath}/audits/register`],
+    },
+    {
+      id: "assurance-cars",
+      label: "Corrective action",
+      path: `${basePath}/cars/register`,
+      activePrefixes: [`${basePath}/cars`],
+    },
+    {
+      id: "assurance-evidence",
+      label: "Evidence",
+      path: `${basePath}/evidence-vault/search`,
+      activePrefixes: [`${basePath}/evidence-vault`],
+    },
   ];
 }
 
-function auditRecordTabs(basePath: string, auditKey: string): ContextTab[] {
-  const recordPath = `${basePath}/audits/${encodeURIComponent(auditKey)}`;
+/** Demoted assurance destinations — overflow/tools only. */
+function assuranceToolTabs(basePath: string, aaRailOwnsLocalNav: boolean): ContextTab[] {
+  const demotedOnAa: ContextTab[] = aaRailOwnsLocalNav
+    ? [
+        {
+          id: "assurance-home",
+          label: "Assurance cases",
+          path: `${basePath}?workspace=assurance`,
+          queryWorkspace: "assurance",
+          // Exact hub only — do not light Assurance cases while browsing Audits surfaces.
+          exact: true,
+        },
+        {
+          id: "assurance-cars",
+          label: "Corrective action",
+          path: `${basePath}/cars/register`,
+          activePrefixes: [`${basePath}/cars`],
+        },
+        {
+          id: "assurance-evidence",
+          label: "Evidence",
+          path: `${basePath}/evidence-vault/search`,
+          activePrefixes: [`${basePath}/evidence-vault`],
+        },
+      ]
+    : [];
+
   return [
-    { id: "audit-setup", label: "Setup", path: `${recordPath}/setup`, exact: true },
-    { id: "audit-prepare", label: "Prepare", path: `${recordPath}/prepare`, exact: true },
-    { id: "audit-live", label: "Live audit", path: `${recordPath}/live`, exact: true },
-    { id: "audit-closing", label: "Closing", path: `${recordPath}/closing`, exact: true },
-    { id: "audit-follow-up", label: "Follow-up", path: `${recordPath}/follow-up`, exact: true },
-    { id: "audit-archive", label: "Archive", path: `${recordPath}/archive`, exact: true },
+    ...demotedOnAa,
+    {
+      id: "assurance-providers",
+      label: "External providers",
+      path: `${basePath}/suppliers/approved-list`,
+      activePrefixes: [`${basePath}/suppliers`],
+    },
+    {
+      id: "assurance-tooling",
+      label: "Tooling",
+      path: `${basePath}/equipment-calibration/register`,
+      activePrefixes: [`${basePath}/equipment-calibration`],
+    },
+    {
+      id: "assurance-external",
+      label: "External & regulatory",
+      path: `${basePath}/external-interface/regulator-findings`,
+      activePrefixes: [`${basePath}/external-interface`],
+    },
   ];
 }
 
@@ -240,7 +321,7 @@ const QualityContextTabs: React.FC = () => {
         main.prepend(host);
       }
       activeHost = host;
-      setMountTarget((current) => current === host ? current : host);
+      setMountTarget((current) => (current === host ? current : host));
     };
 
     syncMount();
@@ -252,14 +333,25 @@ const QualityContextTabs: React.FC = () => {
     };
   }, [qualityActive]);
 
+  const moduleSegmentPreview = route?.segments[0];
+  const aaRailOwnsLocalNav = Boolean(
+    moduleSegmentPreview &&
+      (AUDIT_ASSURANCE_SEGMENTS.has(moduleSegmentPreview) || moduleSegmentPreview === "evidence-vault"),
+  );
+
   useEffect(() => {
     document.documentElement.classList.toggle("quality-context-active", qualityActive);
     const overview = Boolean(route && route.segments.length === 0);
     document.documentElement.classList.toggle("quality-context-overview", overview);
+    document.documentElement.classList.toggle("audit-assurance-surface", qualityActive && aaRailOwnsLocalNav);
     return () => {
-      document.documentElement.classList.remove("quality-context-active", "quality-context-overview");
+      document.documentElement.classList.remove(
+        "quality-context-active",
+        "quality-context-overview",
+        "audit-assurance-surface",
+      );
     };
-  }, [qualityActive, route]);
+  }, [aaRailOwnsLocalNav, qualityActive, route]);
 
   if (!route || !mountTarget) return null;
 
@@ -270,29 +362,34 @@ const QualityContextTabs: React.FC = () => {
   const isCarRecord = moduleSegment === "cars" && Boolean(safeRecordKey) && !STATIC_CAR_VIEWS.has(safeRecordKey);
   const isAssuranceHub = !moduleSegment && workspace === "assurance";
   const isAssuranceModule = Boolean(moduleSegment && ASSURANCE_MODULES.has(moduleSegment));
+  // Calendar is planner-owned for related/tools chrome; AA section layout may still wrap it.
   const isAuditAssuranceSurface =
-    moduleSegment === "audits" || moduleSegment === "calendar" || moduleSegment === "evidence-vault";
+    moduleSegment === "audits" || moduleSegment === "evidence-vault";
+  const showAssuranceRelated =
+    isAuditAssuranceSurface || isAssuranceHub || isAssuranceModule || isAuditRecord;
+
   const workspaceTabs = topLevelTabs(route);
-  const contextualTabs = isAuditRecord
-    ? auditRecordTabs(route.basePath, safeRecordKey)
-    : isCarRecord
-      ? carRecordTabs(route.basePath, safeRecordKey)
-      : isAuditAssuranceSurface
-        ? assuranceSectionTabs(route.basePath)
-        : isAssuranceHub || isAssuranceModule
-          ? assuranceSectionTabs(route.basePath)
-          : [];
+  const assurancePrimary = assurancePrimaryTabs(route.basePath, aaRailOwnsLocalNav);
+  const assuranceTools = assuranceToolTabs(route.basePath, aaRailOwnsLocalNav);
+  const toolsActive = assuranceTools.some((tab) => tabIsActive(tab, location.pathname, location.search));
+
+  // Audit occurrence stages are owned by AuditLifecycleRail — do not duplicate Setup/Prepare/… pills here.
+  const contextualTabs = isCarRecord
+    ? carRecordTabs(route.basePath, safeRecordKey)
+    : showAssuranceRelated
+      ? assurancePrimary
+      : [];
 
   const title = isAuditRecord
-    ? "Audit lifecycle"
+    ? "Audits"
     : isCarRecord
       ? `CAR ${safeRecordKey}`
       : isAssuranceHub
-        ? "Assurance Cases"
-        : isAuditAssuranceSurface && moduleSegment === "calendar"
-          ? "Audit Assurance"
+        ? "Assurance"
+        : moduleSegment === "calendar"
+          ? "Calendar"
           : isAuditAssuranceSurface && moduleSegment === "audits"
-            ? "Audit Assurance"
+            ? "Audits"
             : moduleTitle(moduleSegment);
 
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
@@ -310,21 +407,67 @@ const QualityContextTabs: React.FC = () => {
 
   const PrimaryIcon = primaryAction.icon;
 
-  const renderTabs = (tabs: ContextTab[]) => tabs.map((tab) => {
-    const Icon = tab.icon;
-    const active = tabIsActive(tab, location.pathname, location.search);
-    return (
-      <button key={tab.id} type="button" className={active ? "is-active" : ""} aria-current={active ? "page" : undefined} onClick={() => navigate(tab.path)}>
-        {Icon ? <Icon size={15} aria-hidden="true" /> : null}<span>{tab.label}</span>
-      </button>
-    );
-  });
+  const renderTabs = (tabs: ContextTab[]) =>
+    tabs.map((tab) => {
+      const Icon = tab.icon;
+      const active = tabIsActive(tab, location.pathname, location.search);
+      return (
+        <button
+          key={tab.id}
+          type="button"
+          className={active ? "is-active" : ""}
+          aria-current={active ? "page" : undefined}
+          onClick={() => navigate(tab.path)}
+        >
+          {Icon ? <Icon size={15} aria-hidden="true" /> : null}
+          <span>{tab.label}</span>
+        </button>
+      );
+    });
+
+  const renderAssuranceToolsMenu = () => (
+    <details className={`quality-context-bar__more${toolsActive ? " is-active" : ""}`}>
+      <summary aria-label="Assurance tools">
+        <MoreHorizontal size={16} aria-hidden="true" />
+        <span>Tools</span>
+      </summary>
+      <div role="menu">
+        {assuranceTools.map((tab) => {
+          const active = tabIsActive(tab, location.pathname, location.search);
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="menuitem"
+              className={active ? "is-active" : ""}
+              aria-current={active ? "page" : undefined}
+              onClick={() => navigate(tab.path)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </details>
+  );
+
+  const calendarSurface = moduleSegment === "calendar";
+  const IdentityMark = calendarSurface ? CalendarDays : ShieldCheck;
 
   return createPortal(
     <section className="quality-context-bar" aria-label="Quality Assurance workspace navigation">
       <div className="quality-context-bar__identity">
-        <span className="quality-context-bar__mark"><ShieldCheck size={17} aria-hidden="true" /></span>
-        <span><small>Quality assurance</small><strong>{title}</strong></span>
+        <span className={`quality-context-bar__mark${calendarSurface ? " quality-context-bar__mark--calendar" : ""}`}>
+          <IdentityMark size={17} aria-hidden="true" />
+        </span>
+        <span>
+          <small>{calendarSurface ? "Quality" : "Quality assurance"}</small>
+          {isAuditRecord ? (
+            <span className="quality-context-bar__title">{title}</span>
+          ) : (
+            <h1 className="quality-context-bar__title">{title}</h1>
+          )}
+        </span>
       </div>
 
       <nav className="quality-context-bar__tabs" aria-label="Quality Assurance workspaces">
@@ -332,13 +475,20 @@ const QualityContextTabs: React.FC = () => {
       </nav>
 
       <div className="quality-context-bar__actions">
-        <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active"><RefreshCw size={13} aria-hidden="true" /> Live</span>
-        <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}><PrimaryIcon size={15} aria-hidden="true" /><span>{primaryAction.label}</span></button>
+        <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active">
+          <RefreshCw size={13} aria-hidden="true" /> Live
+        </span>
+        {showAssuranceRelated && !isCarRecord && contextualTabs.length === 0 ? renderAssuranceToolsMenu() : null}
+        <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}>
+          <PrimaryIcon size={15} aria-hidden="true" />
+          <span>{primaryAction.label}</span>
+        </button>
       </div>
 
       {contextualTabs.length > 0 ? (
         <nav className="quality-context-bar__subtabs" aria-label={`${title} related pages`}>
           {renderTabs(contextualTabs)}
+          {showAssuranceRelated && !isCarRecord ? renderAssuranceToolsMenu() : null}
         </nav>
       ) : null}
     </section>,

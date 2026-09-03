@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CalendarPlus, ChevronLeft, ChevronRight, Mail, MapPin, Plus, RefreshCw, UsersRound } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 
 import Drawer from "../shared/Drawer";
 import TrainingSessionCloseoutDrawer from "./TrainingSessionCloseoutDrawer";
@@ -14,6 +15,7 @@ const emptySession = () => ({ course_id: "", title: "", starts_on: new Date().to
 
 const TrainingSessionPlanner: React.FC<Props> = ({ canManage, onOpenAttendance }) => {
   const client = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [offset, setOffset] = useState(0);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [rosterEvent, setRosterEvent] = useState<TrainingEventRead | null>(null);
@@ -23,6 +25,19 @@ const TrainingSessionPlanner: React.FC<Props> = ({ canManage, onOpenAttendance }
   const [channels, setChannels] = useState<Array<"IN_APP" | "EMAIL">>(["IN_APP", "EMAIL"]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canManage) return;
+    const date = searchParams.get("date") || searchParams.get("starts_on");
+    const title = searchParams.get("title");
+    if (!date && !title) return;
+    setSession((current) => ({
+      ...current,
+      starts_on: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : current.starts_on,
+      title: title?.trim() || current.title,
+    }));
+    setSessionOpen(true);
+  }, [canManage, searchParams]);
   const events = useQuery({ queryKey: ["training", "sessions", offset], queryFn: async () => { const rows = await listTrainingEvents({ limit: PAGE_SIZE + 1, offset }); return { items: rows.slice(0, PAGE_SIZE), hasMore: rows.length > PAGE_SIZE }; } });
   const courses = useQuery({ queryKey: ["training", "course-catalogue"], queryFn: () => listTrainingCourses({ limit: 500 }) });
   const people = useQuery({ queryKey: ["training", "people-reference"], queryFn: () => listTrainingPeopleReference(), enabled: Boolean(rosterEvent) });

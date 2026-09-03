@@ -15,6 +15,7 @@ from amodb.apps.quality.audit_deferral_router import router as audit_deferral_ro
 from amodb.apps.quality.audit_notice_router import router as audit_notice_router
 from amodb.apps.quality.audit_preparation_router import router as audit_preparation_router
 from amodb.apps.quality.audit_programme_occurrence_router import router as audit_programme_occurrence_router
+from amodb.apps.quality.audit_live_completion_router import router as audit_live_completion_router
 from amodb.apps.quality.audit_report_governance_router import router as audit_report_governance_router
 from amodb.apps.quality.audit_risk_planning_router import router as audit_risk_planning_router
 from amodb.apps.quality.audit_source_handoff_router import router as audit_source_handoff_router
@@ -66,10 +67,13 @@ def test_people_router_exposes_governed_privilege_and_independence_contract() ->
         ("/people/summary", "GET"),
         ("/people/rules", "GET"),
         ("/people/rules", "POST"),
+        ("/people/rules/ensure-defaults", "POST"),
+        ("/people/rules/{rule_id}", "PATCH"),
         ("/people/privileges", "GET"),
         ("/people/privileges", "POST"),
         ("/people/eligibility", "GET"),
         ("/people/privileges/{privilege_id}/decisions", "POST"),
+        ("/people/independence", "GET"),
         ("/people/independence", "POST"),
     }.issubset(_methods(people_router))
 
@@ -138,8 +142,11 @@ def test_full_audit_governance_contract() -> None:
     assert {
         ("/audits/{audit_id}/report-revisions", "GET"),
         ("/audits/{audit_id}/report-revisions/adopt-current", "POST"),
-        ("/audits/{audit_id}/report-revisions/{revision_id}/transitions", "POST"),
     }.issubset(_methods(audit_report_governance_router))
+    assert (
+        "/audits/{audit_id}/report-revisions/{revision_id}/transitions",
+        "POST",
+    ) in _methods(audit_live_completion_router)
     assert {
         ("/audits/{audit_id}/closure-state", "GET"),
         ("/audits/{audit_id}/closure-state/execution-close", "POST"),

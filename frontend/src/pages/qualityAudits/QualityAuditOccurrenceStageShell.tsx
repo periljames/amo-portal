@@ -1,6 +1,7 @@
 import React from "react";
 
 import QMSLayout from "../../components/QMS/QMSLayout";
+import { AUDIT_OCCURRENCE_MOUNT_ID } from "../../features/qms/auditSession/OccurrenceToolbarPortal";
 
 type Props = { amoCode: string };
 
@@ -22,7 +23,7 @@ const QualityAuditOccurrenceStageShell: React.FC<Props> = ({ amoCode }) => (
     hideBackButton
     customHeader={<></>}
   >
-    <div className="qms-canonical-occurrence-route-shell" aria-hidden="true" />
+    <div id={AUDIT_OCCURRENCE_MOUNT_ID} className="qms-audit-occurrence-mount" />
   </QMSLayout>
 );
 

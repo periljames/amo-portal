@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import and_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from amodb.database_resilience import database_circuit, is_database_disconnect
 from . import models
 from .enums import QMSAuditKind, QMSAuditScheduleFrequency, QMSAuditStatus, QMSDomain
 from .planner_schedule_models import QMSPlannerScheduleMetadata
+from .schedule_weekend import annotate_notes_with_weekend_policy, resolve_schedule_window
 from .router import (
     _advance_schedule_date,
     _audit_metadata,
@@ -175,6 +176,10 @@ class PlannerAuditScheduleCreate(BaseModel):
     automation_active: bool = True
     allow_conflicts: bool = False
     conflict_override_reason: str | None = Field(default=None, max_length=1000)
+    weekend_policy: Literal["INCLUDE_WEEKEND", "SKIP_WEEKEND"] | None = Field(
+        default=None,
+        description="Required when the occurrence spans Saturday/Sunday. INCLUDE_WEEKEND keeps weekend days; SKIP_WEEKEND keeps working days only (Friday then Monday).",
+    )
 
     @model_validator(mode="after")
     def validate_timing(self) -> "PlannerAuditScheduleCreate":
@@ -198,6 +203,10 @@ class PlannerAuditScheduleUpdate(BaseModel):
     reason: str = Field(min_length=8, max_length=1000)
     allow_conflicts: bool = False
     conflict_override_reason: str | None = Field(default=None, max_length=1000)
+    weekend_policy: Literal["INCLUDE_WEEKEND", "SKIP_WEEKEND"] | None = Field(
+        default=None,
+        description="Required when the occurrence spans Saturday/Sunday.",
+    )
 
     @model_validator(mode="after")
     def validate_timing(self) -> "PlannerAuditScheduleUpdate":
@@ -536,9 +545,16 @@ def _collect_conflicts(
 
     schedule_rows = (
         db.query(models.QMSAuditSchedule, QMSPlannerScheduleMetadata)
-        .join(QMSPlannerScheduleMetadata, QMSPlannerScheduleMetadata.schedule_id == models.QMSAuditSchedule.id)
+        .join(
+            QMSPlannerScheduleMetadata,
+            and_(
+                QMSPlannerScheduleMetadata.schedule_id == models.QMSAuditSchedule.id,
+                QMSPlannerScheduleMetadata.amo_id == models.QMSAuditSchedule.amo_id,
+            ),
+        )
         .filter(
             models.QMSAuditSchedule.amo_id == amo_id,
+            QMSPlannerScheduleMetadata.amo_id == amo_id,
             models.QMSAuditSchedule.is_active.is_(True),
             models.QMSAuditSchedule.deleted_at.is_(None),
             models.QMSAuditSchedule.next_due_date >= window_start,
@@ -556,7 +572,9 @@ def _collect_conflicts(
             subject_id=str(schedule.id),
             title=schedule.title,
             start_date=schedule.next_due_date,
-            end_date=schedule.next_due_date + timedelta(days=max(int(schedule.duration_days or 1), 1) - 1),
+            end_date=metadata.end_date or (
+                schedule.next_due_date + timedelta(days=max(int(schedule.duration_days or 1), 1) - 1)
+            ),
             start_time=metadata.start_time,
             end_time=metadata.end_time,
             location=metadata.location,
@@ -565,9 +583,16 @@ def _collect_conflicts(
 
     audit_rows = (
         db.query(models.QMSAudit, QMSPlannerScheduleMetadata)
-        .join(QMSPlannerScheduleMetadata, QMSPlannerScheduleMetadata.audit_id == models.QMSAudit.id)
+        .join(
+            QMSPlannerScheduleMetadata,
+            and_(
+                QMSPlannerScheduleMetadata.audit_id == models.QMSAudit.id,
+                QMSPlannerScheduleMetadata.amo_id == models.QMSAudit.amo_id,
+            ),
+        )
         .filter(
             models.QMSAudit.amo_id == amo_id,
+            QMSPlannerScheduleMetadata.amo_id == amo_id,
             models.QMSAudit.deleted_at.is_(None),
             models.QMSAudit.status.notin_([QMSAuditStatus.CLOSED]),
             models.QMSAudit.planned_start.is_not(None),
@@ -1040,15 +1065,16 @@ def _materialize_occurrence(
     return audit, False
 
 
-def _run_audit_reminders(db: Session, *, today: date) -> tuple[int, int]:
+def _run_audit_reminders(db: Session, *, amo_id: str, today: date) -> tuple[int, int]:
     horizon = today + timedelta(days=90)
     audits = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == amo_id,
         models.QMSAudit.status == QMSAuditStatus.PLANNED,
         models.QMSAudit.planned_start.is_not(None),
         models.QMSAudit.planned_start >= today,
         models.QMSAudit.planned_start <= horizon,
         models.QMSAudit.deleted_at.is_(None),
-    ).order_by(models.QMSAudit.amo_id.asc(), models.QMSAudit.planned_start.asc()).all()
+    ).order_by(models.QMSAudit.planned_start.asc()).all()
     upcoming = 0
     day_of = 0
     now = datetime.now(timezone.utc)
@@ -1123,6 +1149,90 @@ def _advisory_lock(db: Session) -> Iterator[bool]:
                 logger.debug("Quality planner advisory unlock failed", exc_info=True)
 
 
+def _run_quality_planner_tenant(
+    *,
+    amo_id: str,
+    today: date,
+    horizon: date,
+    result: dict[str, Any],
+) -> None:
+    db = WriteSessionLocal()
+    try:
+        set_postgres_tenant_context(
+            db,
+            amo_id=amo_id,
+            user_id="quality-planner-automation",
+        )
+        schedule_ids = [row[0] for row in db.query(models.QMSAuditSchedule.id).filter(
+            models.QMSAuditSchedule.amo_id == amo_id,
+            models.QMSAuditSchedule.is_active.is_(True),
+            models.QMSAuditSchedule.next_due_date <= horizon,
+            models.QMSAuditSchedule.deleted_at.is_(None),
+        ).order_by(models.QMSAuditSchedule.next_due_date.asc()).all()]
+        db.rollback()
+        for schedule_id in schedule_ids:
+            try:
+                # SET LOCAL is transaction-bound, so it must be restored after
+                # every commit or rollback before the next tenant-owned query.
+                set_postgres_tenant_context(
+                    db,
+                    amo_id=amo_id,
+                    user_id="quality-planner-automation",
+                )
+                schedule = db.query(models.QMSAuditSchedule).filter(
+                    models.QMSAuditSchedule.id == schedule_id,
+                    models.QMSAuditSchedule.amo_id == amo_id,
+                    models.QMSAuditSchedule.is_active.is_(True),
+                    models.QMSAuditSchedule.deleted_at.is_(None),
+                ).with_for_update(skip_locked=True).first()
+                if schedule is None:
+                    db.rollback()
+                    continue
+                actor_user_id = _accountable_actor_id(db, schedule)
+                occurrence_count = 0
+                while schedule.is_active and schedule.next_due_date <= horizon and occurrence_count < _max_catchup_occurrences():
+                    audit, blocked = _materialize_occurrence(db, schedule=schedule, actor_user_id=actor_user_id)
+                    occurrence_count += 1
+                    if blocked:
+                        result["conflicts"] += 1
+                        break
+                    if audit is not None:
+                        result["materialized"] += 1
+                    elif schedule.frequency == QMSAuditScheduleFrequency.ONE_TIME:
+                        schedule.is_active = False
+                    else:
+                        schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                logger.info("Quality planner occurrence already materialized schedule_id=%s", schedule_id)
+            except Exception:
+                db.rollback()
+                result["errors"] += 1
+                logger.exception(
+                    "Quality planner schedule materialization failed amo_id=%s schedule_id=%s",
+                    amo_id,
+                    schedule_id,
+                )
+
+        try:
+            set_postgres_tenant_context(
+                db,
+                amo_id=amo_id,
+                user_id="quality-planner-automation",
+            )
+            upcoming, day_of = _run_audit_reminders(db, amo_id=amo_id, today=today)
+            result["upcoming_notices"] += upcoming
+            result["day_of_notices"] += day_of
+            db.commit()
+        except Exception:
+            db.rollback()
+            result["errors"] += 1
+            logger.exception("Quality planner automatic reminder cycle failed amo_id=%s", amo_id)
+    finally:
+        close_session_safely(db)
+
+
 def run_quality_planner_cycle() -> dict[str, Any]:
     result: dict[str, Any] = {
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -1133,67 +1243,35 @@ def run_quality_planner_cycle() -> dict[str, Any]:
         "day_of_notices": 0,
         "errors": 0,
     }
-    db = WriteSessionLocal()
+    control_db = WriteSessionLocal()
     try:
-        with _advisory_lock(db) as acquired:
+        with _advisory_lock(control_db) as acquired:
             if not acquired:
                 result["completed_at"] = datetime.now(timezone.utc).isoformat()
                 return result
             today = datetime.now(_PLANNER_TIMEZONE).date()
             horizon = today + timedelta(days=_materialize_lead_days())
-            schedule_ids = [row[0] for row in db.query(models.QMSAuditSchedule.id).filter(
-                models.QMSAuditSchedule.is_active.is_(True),
-                models.QMSAuditSchedule.next_due_date <= horizon,
-                models.QMSAuditSchedule.deleted_at.is_(None),
-            ).order_by(models.QMSAuditSchedule.next_due_date.asc()).all()]
-            for schedule_id in schedule_ids:
+            tenant_ids = [
+                str(row[0])
+                for row in control_db.query(account_models.AMO.id)
+                .filter(account_models.AMO.is_active.is_(True))
+                .order_by(account_models.AMO.id.asc())
+                .all()
+            ]
+            control_db.rollback()
+            for amo_id in tenant_ids:
                 try:
-                    schedule = db.query(models.QMSAuditSchedule).filter(
-                        models.QMSAuditSchedule.id == schedule_id,
-                        models.QMSAuditSchedule.is_active.is_(True),
-                        models.QMSAuditSchedule.deleted_at.is_(None),
-                    ).with_for_update(skip_locked=True).first()
-                    if schedule is None:
-                        db.rollback()
-                        continue
-                    set_postgres_tenant_context(
-                        db,
-                        amo_id=str(schedule.amo_id),
-                        user_id=str(schedule.created_by_user_id or "quality-planner-automation"),
+                    _run_quality_planner_tenant(
+                        amo_id=amo_id,
+                        today=today,
+                        horizon=horizon,
+                        result=result,
                     )
-                    actor_user_id = _accountable_actor_id(db, schedule)
-                    occurrence_count = 0
-                    while schedule.is_active and schedule.next_due_date <= horizon and occurrence_count < _max_catchup_occurrences():
-                        audit, blocked = _materialize_occurrence(db, schedule=schedule, actor_user_id=actor_user_id)
-                        occurrence_count += 1
-                        if blocked:
-                            result["conflicts"] += 1
-                            break
-                        if audit is not None:
-                            result["materialized"] += 1
-                        elif schedule.frequency == QMSAuditScheduleFrequency.ONE_TIME:
-                            schedule.is_active = False
-                        else:
-                            schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
-                    db.commit()
-                except IntegrityError:
-                    db.rollback()
-                    logger.info("Quality planner occurrence already materialized schedule_id=%s", schedule_id)
                 except Exception:
-                    db.rollback()
                     result["errors"] += 1
-                    logger.exception("Quality planner schedule materialization failed schedule_id=%s", schedule_id)
-            try:
-                upcoming, day_of = _run_audit_reminders(db, today=today)
-                result["upcoming_notices"] = upcoming
-                result["day_of_notices"] = day_of
-                db.commit()
-            except Exception:
-                db.rollback()
-                result["errors"] += 1
-                logger.exception("Quality planner automatic reminder cycle failed")
+                    logger.exception("Quality planner tenant cycle failed amo_id=%s", amo_id)
     finally:
-        close_session_safely(db)
+        close_session_safely(control_db)
     result["completed_at"] = datetime.now(timezone.utc).isoformat()
     with _last_cycle_lock:
         _last_cycle.clear()
@@ -1277,16 +1355,13 @@ def planner_schedule_options(
     )
 
 
-@planner_schedule_router.post(
-    "/integrations/calendar/audit-schedules",
-    response_model=PlannerAuditScheduleResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_planner_audit_schedule(
+def _create_planner_audit_schedule(
     payload: PlannerAuditScheduleCreate,
     request: Request,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
+    ctx: TenantContext,
+    db: Session,
+    *,
+    commit: bool,
 ) -> PlannerAuditScheduleResponse:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -1305,13 +1380,18 @@ def create_planner_audit_schedule(
         audit_scope_code=payload.audit_scope_code,
         kind=payload.kind,
     )
-    end_date = payload.next_due_date + timedelta(days=payload.duration_days - 1)
-    _validate_one_calendar_year(start=payload.next_due_date, end=end_date)
+    start_date, end_date, duration_days = resolve_schedule_window(
+        start=payload.next_due_date,
+        duration_days=payload.duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=payload.title,
+    )
+    _validate_one_calendar_year(start=start_date, end=end_date)
     candidate = _Candidate(
         subject_type="AUDIT_SCHEDULE",
         subject_id="new",
         title=payload.title.strip(),
-        start_date=payload.next_due_date,
+        start_date=start_date,
         end_date=end_date,
         start_time=payload.start_time,
         end_time=payload.end_time,
@@ -1344,8 +1424,8 @@ def create_planner_audit_schedule(
         notify_auditors=payload.notify_auditors,
         notify_auditees=payload.notify_auditees,
         reminder_interval_days=payload.reminder_interval_days,
-        duration_days=payload.duration_days,
-        next_due_date=payload.next_due_date,
+        duration_days=duration_days,
+        next_due_date=start_date,
         is_active=payload.automation_active,
         created_by_user_id=ctx.user_id,
     )
@@ -1354,13 +1434,13 @@ def create_planner_audit_schedule(
     metadata = QMSPlannerScheduleMetadata(
         amo_id=ctx.amo_id,
         schedule_id=schedule.id,
-        occurrence_date=payload.next_due_date,
+        occurrence_date=start_date,
         end_date=end_date,
         start_time=payload.start_time,
         end_time=payload.end_time,
         timezone_name=payload.timezone_name,
         location=payload.location.strip() if payload.location else None,
-        notes=payload.notes,
+        notes=annotate_notes_with_weekend_policy(payload.notes, payload.weekend_policy),
         responsible_user_id=payload.lead_auditor_user_id,
         attendee_user_ids_json=_dump_json_list(payload.attendee_user_ids),
         external_attendees_json=_dump_json_list([item.model_dump(mode="json") for item in payload.external_attendees]),
@@ -1385,6 +1465,7 @@ def create_planner_audit_schedule(
             "start_time": payload.start_time.isoformat(timespec="minutes"),
             "location": metadata.location,
             "version": metadata.version,
+            "weekend_policy": payload.weekend_policy,
             "conflict_override_reason": payload.conflict_override_reason if conflicts else None,
             "conflicts": [item.model_dump(mode="json") for item in conflicts],
         },
@@ -1396,7 +1477,10 @@ def create_planner_audit_schedule(
         db, schedule=schedule, metadata=metadata, state="created",
         reason=payload.conflict_override_reason or "Created in the Quality Operations Planner.",
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(schedule)
     db.refresh(metadata)
     return _schedule_response(schedule, metadata, notifications_queued=notifications_queued, conflicts=conflicts)
@@ -1485,11 +1569,16 @@ def update_planner_audit_schedule(
         raise HTTPException(status_code=404, detail="Audit schedule not found")
     _assert_version(metadata, payload.expected_version)
     _validate_people(db, amo_id=ctx.amo_id, user_ids=payload.attendee_user_ids)
-    end_date = payload.next_due_date + timedelta(days=payload.duration_days - 1)
-    _validate_one_calendar_year(start=payload.next_due_date, end=end_date)
+    start_date, end_date, duration_days = resolve_schedule_window(
+        start=payload.next_due_date,
+        duration_days=payload.duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=schedule.title,
+    )
+    _validate_one_calendar_year(start=start_date, end=end_date)
     candidate = _Candidate(
         subject_type="AUDIT_SCHEDULE", subject_id=str(schedule.id), title=schedule.title,
-        start_date=payload.next_due_date, end_date=end_date,
+        start_date=start_date, end_date=end_date,
         start_time=payload.start_time, end_time=payload.end_time, location=payload.location,
         user_ids=_schedule_user_ids(schedule, metadata).union(payload.attendee_user_ids),
     )
@@ -1503,14 +1592,15 @@ def update_planner_audit_schedule(
         "location": metadata.location,
         "version": metadata.version,
     }
-    schedule.next_due_date = payload.next_due_date
-    schedule.duration_days = payload.duration_days
-    metadata.occurrence_date = payload.next_due_date
+    schedule.next_due_date = start_date
+    schedule.duration_days = duration_days
+    metadata.occurrence_date = start_date
     metadata.end_date = end_date
     metadata.start_time = payload.start_time
     metadata.end_time = payload.end_time
     metadata.timezone_name = payload.timezone_name
     metadata.location = payload.location.strip() if payload.location else None
+    metadata.notes = annotate_notes_with_weekend_policy(metadata.notes, payload.weekend_policy)
     metadata.attendee_user_ids_json = _dump_json_list(payload.attendee_user_ids)
     metadata.external_attendees_json = _dump_json_list([item.model_dump(mode="json") for item in payload.external_attendees])
     metadata.notify_attendees = payload.notify_attendees
@@ -1525,8 +1615,10 @@ def update_planner_audit_schedule(
         action="reschedule_resize",
         before=before,
         after={
-            "next_due_date": payload.next_due_date.isoformat(),
+            "next_due_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "duration_days": duration_days,
+            "weekend_policy": payload.weekend_policy,
             "start_time": payload.start_time.isoformat(),
             "end_time": payload.end_time.isoformat() if payload.end_time else None,
             "location": metadata.location,
@@ -1608,17 +1700,6 @@ def suspend_planner_audit_schedule(
     db: Session = Depends(get_write_db),
 ) -> PlannerAuditScheduleResponse:
     return _change_schedule_state(schedule_id=schedule_id, active=False, payload=payload, request=request, ctx=ctx, db=db)
-
-
-@planner_schedule_router.post("/integrations/calendar/audit-schedules/{schedule_id}/resume", response_model=PlannerAuditScheduleResponse)
-def resume_planner_audit_schedule(
-    schedule_id: uuid.UUID,
-    payload: PlannerAuditScheduleStateUpdate,
-    request: Request,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> PlannerAuditScheduleResponse:
-    return _change_schedule_state(schedule_id=schedule_id, active=True, payload=payload, request=request, ctx=ctx, db=db)
 
 
 def _source_record(db: Session, *, amo_id: str, source_type: str, source_id: str, lock: bool) -> dict[str, Any] | None:

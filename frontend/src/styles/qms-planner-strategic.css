@@ -1,30 +1,3 @@
-.qms-planner-strategic-launcher {
-  position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  z-index: 68;
-  display: inline-flex;
-  align-items: center;
-  gap: .42rem;
-  min-height: 2.35rem;
-  padding: 0 .78rem;
-  border: 1px solid color-mix(in srgb, var(--border-color, #d6d9de) 78%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-primary, #fff) 94%, transparent);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, .14);
-  color: var(--text-primary, #0f172a);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  font-size: .78rem;
-  font-weight: 720;
-  cursor: pointer;
-}
-
-.qms-planner-strategic-launcher:hover {
-  background: var(--surface-primary, #fff);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, .18);
-}
-
 .qms-planner-strategic-panel {
   position: fixed;
   top: calc(var(--tenant-topbar-height, 54px) + 4rem);
@@ -191,17 +164,10 @@
 .qms-modern-planner-v2 .qms-planner-title span { display: block; }
 
 @media (max-width: 1180px) {
-  .qms-planner-strategic-launcher { right: .75rem; bottom: .75rem; }
   .qms-planner-strategic-panel { right: .5rem; bottom: .5rem; width: min(560px, calc(100vw - 1rem)); }
 }
 
 @media (max-width: 720px) {
-  .qms-planner-strategic-launcher {
-    right: .6rem;
-    bottom: .6rem;
-    min-height: 2.2rem;
-    padding-inline: .65rem;
-  }
   .qms-planner-strategic-panel {
     top: calc(var(--tenant-topbar-height, 54px) + 3.25rem);
     right: .5rem;

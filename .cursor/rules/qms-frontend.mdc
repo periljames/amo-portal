@@ -1,0 +1,40 @@
+---
+description: QMS route ownership, planner, bounded registers, and stabilization guardrails
+globs:
+  - frontend/src/pages/qms/**/*
+  - frontend/src/pages/qualityAudits/**/*
+  - frontend/src/features/qms/**/*
+  - frontend/src/components/QMS/**/*
+  - frontend/src/services/qms*.ts
+  - frontend/src/app/routeGuards.ts
+  - backend/amodb/apps/quality/**/*
+  - docs/qms_frontend_stabilization_guardrails.md
+  - docs/qms/**/*
+  - docs/quality/**/*
+alwaysApply: false
+---
+
+
+# QMS frontend
+
+Binding: `docs/qms_frontend_stabilization_guardrails.md`.
+
+## Ownership
+
+- One live owner per list / record / create / review / evidence experience.
+- Do not resurrect legacy or duplicate QMS workflows (`qualityAudits` leftovers, orphaned libraries, parallel calendars).
+- Planner / calendar: **Planner V2** (`QmsPlannerLivePage` / planner V2) is the sole calendar owner.
+- Prefer canonical registers and specialist hubs already named in the guardrails doc.
+- `QmsCanonicalLegacyPage` is transitional — do not add new features there; migrate ownership instead.
+
+## Data & UX
+
+- Registers: **bounded server-side** pagination (respect backend page caps; no 1k-row client slice as the canonical pattern).
+- Control Centre is an operational cockpit (exceptions, assignments, due work) — not an analytics wall.
+- CTAs must land on governed source records that actually support the action.
+- Do not duplicate Document Control capabilities inside QMS.
+
+## Regression
+
+Run QMS Vitest scripts and the Playwright journey that covers the touched lifecycle. Review adjacent workflow stages (list → record → action → evidence → return), not only the edited control.
+---

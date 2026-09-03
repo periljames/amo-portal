@@ -1,0 +1,34 @@
+---
+description: Frontend shells, primitives, routing, and UX completeness for the Vite/React SPA
+globs: frontend/**/*
+alwaysApply: false
+---
+
+# Frontend development
+
+## Prefer existing structure
+
+- Shell: `DepartmentLayout` / `DepartmentLayoutImpl`; domain shells (QMS, DocumentControl, Roster) where already used.
+- Do not introduce a new layout framework; do not revive unused `AppShell` / `AppShellV2` without an explicit consolidation plan.
+- Primitives: `frontend/src/components/shared/*`, `components/UI/*`, brand/liquid-glass kits already in tree.
+- Styling: `styles/tokens.css` + `styles/index.css` import order. No competing token systems or Tailwind introduction.
+- Data: `services/apiClient.ts` + domain `services/*` + TanStack Query. No second HTTP stack.
+
+## Routing
+
+- Respect dispatcher → `PortalRouteSurface` → `portalRoutes` ownership.
+- Do not duplicate routes/pages/services for the same workflow. One live owner per URL/experience.
+- Path builders / manifests: prefer `app/canonicalRoutes.ts`, `portalRouteManifest.ts`, QMS registries.
+
+## UX completeness
+
+- Complex workspaces may use tabs and vertical drawers when that matches existing patterns.
+- Every visible action must work or be clearly unavailable (disabled + reason). No placeholder “complete” UI.
+- Verify responsive behavior at representative desktop, wide-desktop, tablet, and mobile widths.
+- Operational grids/workspaces must use available viewport space effectively and must not introduce unexplained dead space, clipping, or unnecessary horizontal scrolling.
+- After implementation: check browser console and network (failed requests, auth errors).
+
+## When unsure
+
+Search for an existing page/service/shell before adding files. If two implementations exist, extend the canonical owner documented in-repo (especially QMS guardrails).
+---

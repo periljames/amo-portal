@@ -277,6 +277,8 @@ const QualityCarsPage: React.FC = () => {
   const [form, setForm] = useState<CarFormState>(() => ({
     ...EMPTY_FORM,
     finding_id: searchParams.get("findingId") ?? "",
+    title: searchParams.get("title") ?? "",
+    due_date: searchParams.get("due_date") ?? "",
   }));
   const [createBusy, setCreateBusy] = useState(false);
   const [editingCar, setEditingCar] = useState<CAROut | null>(null);
@@ -314,6 +316,20 @@ const QualityCarsPage: React.FC = () => {
   useEffect(() => {
     if (routeRequestsCreate) setShowCreateForm(true);
   }, [routeRequestsCreate]);
+
+  useEffect(() => {
+    if (!routeRequestsCreate) return;
+    const title = searchParams.get("title");
+    const dueDate = searchParams.get("due_date");
+    const findingId = searchParams.get("findingId");
+    if (!title && !dueDate && !findingId) return;
+    setForm((current) => ({
+      ...current,
+      title: title ?? current.title,
+      due_date: dueDate ?? current.due_date,
+      finding_id: findingId ?? current.finding_id,
+    }));
+  }, [routeRequestsCreate, searchParams]);
 
   useEffect(() => {
     return () => {
@@ -644,6 +660,7 @@ const QualityCarsPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
+      <div className="qms-surface-root qms-car-ops">
       <header className="page-header qms-car-page-heading">
         <div>
           <p className="page-header__eyebrow">Quality · Corrective action control</p>
@@ -1167,6 +1184,7 @@ const QualityCarsPage: React.FC = () => {
           void refreshRegister();
         }}
       />
+      </div>
     </DepartmentLayout>
   );
 };

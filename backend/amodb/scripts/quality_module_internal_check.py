@@ -45,20 +45,19 @@ REQUIRED_CHECKS = {
             "def _get_finding_for_amo(",
         ],
     ),
-    "backend_quality_route_deduplication": (
+    "backend_quality_route_collision_guard": (
         BACKEND_ROOT / "amodb/apps/quality/__init__.py",
         [
-            "def _deduplicate_exact_routes(",
-            "signature = (path, methods, endpoint_marker)",
-            "_deduplicate_exact_routes(router)",
-            "_deduplicate_exact_routes(public_router)",
+            "from .route_ordering import assert_unique_routes",
+            'assert_unique_routes(router, label="QMS base API")',
+            'assert_unique_routes(public_router, label="QMS public API")',
             "dashboard_v2 as _dashboard_v2",
         ],
     ),
     "backend_service_dashboard_scoped": (
         BACKEND_ROOT / "amodb/apps/quality/service.py",
         [
-            "def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None)",
+            "def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, *, amo_id: str)",
             "models.QMSAudit.amo_id == amo_id",
         ],
     ),

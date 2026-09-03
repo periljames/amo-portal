@@ -33,7 +33,7 @@ export function buildQmsOverviewRoutes(amoCode: string): QmsOverviewRoutes {
   return {
     root: qmsBasePath(amoCode),
     myWork: qmsModulePath(amoCode, "inbox", "assigned-to-me"),
-    calendar: qmsModulePath(amoCode, "calendar", "list"),
+    calendar: qmsModulePath(amoCode, "calendar", "week"),
     audits: qmsModulePath(amoCode, "audits", "dashboard"),
     auditSchedule: qmsModulePath(amoCode, "audits", "schedule"),
     cars: qmsModulePath(amoCode, "cars", "register"),

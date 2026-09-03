@@ -1,11 +1,11 @@
 .qms-missions,
 .qms-mission-detail {
-  --qms-surface: var(--surface, #fff);
-  --qms-surface-soft: var(--surface-secondary, #f7f9fc);
-  --qms-border: color-mix(in srgb, var(--border-color, #cbd5e1) 82%, transparent);
+  --qms-surface: var(--qms-panel, var(--surface-elevated, #fff));
+  --qms-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-border: var(--qms-line, color-mix(in srgb, var(--border-color, #cbd5e1) 82%, transparent));
   --qms-text: var(--text-primary, #172033);
-  --qms-muted: var(--text-muted, #667085);
-  --qms-primary: var(--primary, #1d4ed8);
+  --qms-muted: var(--text-secondary, var(--text-muted, #667085));
+  --qms-primary: var(--accent-primary, var(--primary, #1d4ed8));
   --qms-danger: #b42318;
   --qms-warning: #a15c00;
   --qms-success: #137333;
@@ -15,7 +15,7 @@
   margin: 0 auto;
   padding: 20px;
   color: var(--qms-text);
-  background: color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #fff);
+  background: var(--qms-page, color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #fff));
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 
@@ -126,18 +126,16 @@
 
 .qms-missions button:disabled { opacity: .55; cursor: wait; }
 
-/* Creation is a secondary workflow, not the landing-page hero. */
+/* Creation is a secondary workflow card under the page header — not a full-viewport overlay. */
 .qms-missions__create {
-  position: fixed;
-  z-index: 1300;
-  top: max(24px, env(safe-area-inset-top));
-  right: max(24px, env(safe-area-inset-right));
-  bottom: max(24px, env(safe-area-inset-bottom));
-  width: min(620px, calc(100vw - 48px));
+  position: relative;
+  z-index: 1;
+  width: min(100%, 720px);
+  max-width: 720px;
+  margin: 0;
   padding: 0;
   overflow: auto;
-  box-shadow: 0 26px 80px rgba(15, 23, 42, .28), 0 0 0 100vmax rgba(15, 23, 42, .30);
-  clip-path: inset(-100vmax 0 -100vmax -100vmax);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, .12);
 }
 
 .qms-missions__create > header,
@@ -323,7 +321,7 @@ button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qm
 .qms-mission-detail__badges span {
   justify-self: start;
   padding: 5px 9px;
-  border-radius: 999px;
+  border-radius: 8px;
   font-size: 11.5px;
   font-weight: 800;
   text-transform: uppercase;
@@ -434,7 +432,7 @@ button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qm
   .qms-missions__header { padding: 18px; }
   .qms-missions__header > div:last-child { width: 100%; }
   .qms-missions__header button { flex: 1; }
-  .qms-missions__create { inset: 0; width: 100%; max-width: none; border-radius: 0; clip-path: none; }
+  .qms-missions__create { width: 100%; max-width: none; border-radius: 12px; }
   .qms-missions__create > div,
   .qms-missions__metrics,
   .qms-mission-detail__summary,

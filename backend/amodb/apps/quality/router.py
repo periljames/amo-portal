@@ -10,14 +10,13 @@ import re
 import shutil
 import io
 import zipfile
-from threading import Lock
 from typing import Optional, List, Iterator, Any
 from uuid import UUID
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header, Form, Body
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import func, or_, inspect, cast, String, text
+from sqlalchemy import and_, func, or_, cast, String
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
@@ -31,6 +30,7 @@ from amodb.apps.tasks import services as task_services
 from amodb.database import get_db, get_read_db
 
 from . import models
+from .schedule_weekend import resolve_schedule_window
 from . import transitions as car_transitions
 from .schemas import (
     CARActionCreate,
@@ -74,7 +74,6 @@ from .schemas import (
     QualityAuditMetricsOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus, QMSPhysicalCopyStatus, QMSCustodyAction, QMSRevisionLifecycleStatus, FindingLevel, QMSFindingType
-from .schema_compat import ensure_qms_audit_reference_schema, ensure_qms_audit_scope_schema
 from .storage_replication import replicate_file
 from .service import (
     add_car_action,
@@ -89,258 +88,15 @@ from .service import (
 )
 from ..workflow import apply_transition, TransitionError
 
-_QMS_SCHEMA_COMPAT_LOCK = Lock()
-_QMS_SCHEMA_COMPAT_READY = False
-
-
-def _ensure_qms_runtime_schema_compat(db: Session = Depends(get_db)) -> None:
-    """
-    Runtime guard for environments where the CAR responses migration was missed.
-
-    Some deployments have the ORM expecting ``quality_car_responses`` while the
-    live database is missing the table, which causes selectin relationship loads
-    to fail on otherwise routine CAR reads. Create the table on first access so
-    the quality module remains available until migrations are fully reconciled.
-    """
-    global _QMS_SCHEMA_COMPAT_READY
-    if _QMS_SCHEMA_COMPAT_READY:
-        return
-
-    with _QMS_SCHEMA_COMPAT_LOCK:
-        if _QMS_SCHEMA_COMPAT_READY:
-            return
-        bind = db.get_bind()
-        inspector = inspect(bind)
-        if inspector.has_table("quality_cars") and not inspector.has_table("quality_car_responses"):
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS quality_car_responses (
-                        id UUID NOT NULL,
-                        car_id UUID NOT NULL,
-                        containment_action TEXT,
-                        root_cause TEXT,
-                        corrective_action TEXT,
-                        preventive_action TEXT,
-                        evidence_ref VARCHAR(512),
-                        submitted_by_name VARCHAR(255),
-                        submitted_by_email VARCHAR(255),
-                        submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        status VARCHAR(32) NOT NULL
-                    )
-                    """
-                )
-            )
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_id_runtime ON quality_car_responses (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_car_runtime ON quality_car_responses (car_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_submitted_runtime ON quality_car_responses (submitted_at)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_status_runtime ON quality_car_responses (status)"))
-
-        if inspector.has_table("quality_cars") and not inspector.has_table("quality_car_attachments"):
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS quality_car_attachments (
-                        id UUID NOT NULL,
-                        car_id UUID NOT NULL,
-                        filename VARCHAR(255) NOT NULL,
-                        description VARCHAR(500),
-                        file_ref VARCHAR(512) NOT NULL,
-                        content_type VARCHAR(128),
-                        size_bytes INTEGER,
-                        sha256 VARCHAR(64),
-                        uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL
-                    )
-                    """
-                )
-            )
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_attachments_id_runtime ON quality_car_attachments (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_attachments_car_runtime ON quality_car_attachments (car_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_attachments_sha_runtime ON quality_car_attachments (sha256)"))
-
-        # Final Quality workflow tables were introduced after the QMS -> Quality
-        # merge.  Some live/dev databases may have the application code before the
-        # Alembic head has been applied, which must not make existing scheduled
-        # audits unreadable.  Create only missing workflow tables here, matching
-        # the ORM definitions where it is safe to do so.  The two finding/CAPA
-        # tables are handled separately with constraint-free runtime DDL because
-        # some PostgreSQL databases already contain orphaned/global constraint
-        # names such as pk_qms_corrective_actions.  SQLAlchemy table.create() then
-        # raises DuplicateTable even though the table itself is absent.
-        workflow_tables = (
-            models.QualityTenantWorkflowSettings.__table__,
-            models.QualityAuditDocumentRequest.__table__,
-            models.QualityAuditChecklistItem.__table__,
-            models.QualityAuditPostBrief.__table__,
-            models.QualityAuditReportTracker.__table__,
-            models.QualityCARExtensionRequest.__table__,
-            models.QualityReminderMilestone.__table__,
-            models.QualityArchivePackage.__table__,
-        )
-        for table in workflow_tables:
-            if not inspector.has_table(table.name):
-                table.create(bind=bind, checkfirst=True)
-
-        inspector = inspect(bind)
-
-        if not inspector.has_table("qms_corrective_actions"):
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS qms_corrective_actions (
-                        id UUID NOT NULL,
-                        amo_id VARCHAR(36) NOT NULL,
-                        finding_id UUID NOT NULL,
-                        root_cause TEXT,
-                        containment_action TEXT,
-                        corrective_action TEXT,
-                        preventive_action TEXT,
-                        responsible_user_id VARCHAR(36),
-                        due_date DATE,
-                        evidence_ref VARCHAR(512),
-                        verified_at TIMESTAMP WITH TIME ZONE,
-                        verified_by_user_id VARCHAR(36),
-                        status VARCHAR(11) NOT NULL,
-                        created_by_user_id VARCHAR(36),
-                        updated_by_user_id VARCHAR(36),
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        updated_at TIMESTAMP WITH TIME ZONE NOT NULL
-                    )
-                    """
-                )
-            )
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_corrective_actions_id_runtime ON qms_corrective_actions (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_corrective_actions_finding_runtime ON qms_corrective_actions (finding_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_corrective_actions_amo_runtime ON qms_corrective_actions (amo_id)"))
-
-        if not inspector.has_table("qms_finding_attachments"):
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS qms_finding_attachments (
-                        id UUID NOT NULL,
-                        finding_id UUID NOT NULL,
-                        filename VARCHAR(255) NOT NULL,
-                        description VARCHAR(500),
-                        file_ref VARCHAR(512) NOT NULL,
-                        content_type VARCHAR(128),
-                        size_bytes INTEGER,
-                        sha256 VARCHAR(64),
-                        uploaded_by_user_id VARCHAR(36),
-                        uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL
-                    )
-                    """
-                )
-            )
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_id_runtime ON qms_finding_attachments (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_finding_runtime ON qms_finding_attachments (finding_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_uploaded_runtime ON qms_finding_attachments (uploaded_at)"))
-
-        inspector = inspect(bind)
-
-        def _has_column(table_name: str, column_name: str) -> bool:
-            return column_name in {column["name"] for column in inspector.get_columns(table_name)}
-
-        def _add_column_if_missing(table_name: str, column_name: str, ddl: str) -> None:
-            if not inspector.has_table(table_name):
-                return
-            if _has_column(table_name, column_name):
-                return
-            db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
-
-        _add_column_if_missing("qms_audit_schedules", "amo_id", "VARCHAR(36)")
-        _add_column_if_missing("qms_audit_schedules", "external_auditees_json", "TEXT")
-        _add_column_if_missing("qms_audit_schedules", "notify_auditors", "BOOLEAN DEFAULT TRUE")
-        _add_column_if_missing("qms_audit_schedules", "notify_auditees", "BOOLEAN DEFAULT TRUE")
-        _add_column_if_missing("qms_audit_schedules", "reminder_interval_days", "INTEGER DEFAULT 7")
-        _add_column_if_missing("qms_audits", "external_auditees_json", "TEXT")
-        _add_column_if_missing("qms_audits", "notify_auditors", "BOOLEAN DEFAULT TRUE")
-        _add_column_if_missing("qms_audits", "notify_auditees", "BOOLEAN DEFAULT TRUE")
-        _add_column_if_missing("qms_audits", "reminder_interval_days", "INTEGER DEFAULT 7")
-        _add_column_if_missing("qms_finding_attachments", "id", "UUID")
-        _add_column_if_missing("qms_finding_attachments", "finding_id", "UUID")
-        _add_column_if_missing("qms_finding_attachments", "filename", "VARCHAR(255) DEFAULT 'finding-evidence'")
-        _add_column_if_missing("qms_finding_attachments", "description", "VARCHAR(500)")
-        _add_column_if_missing("qms_finding_attachments", "file_ref", "VARCHAR(512) DEFAULT ''")
-        _add_column_if_missing("qms_finding_attachments", "content_type", "VARCHAR(128)")
-        _add_column_if_missing("qms_finding_attachments", "size_bytes", "INTEGER")
-        _add_column_if_missing("qms_finding_attachments", "sha256", "VARCHAR(64)")
-        _add_column_if_missing("qms_finding_attachments", "uploaded_by_user_id", "VARCHAR(36)")
-        _add_column_if_missing("qms_finding_attachments", "uploaded_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
-        if inspector.has_table("qms_finding_attachments"):
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_id_runtime ON qms_finding_attachments (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_finding_runtime ON qms_finding_attachments (finding_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_uploaded_runtime ON qms_finding_attachments (uploaded_at)"))
-
-        _add_column_if_missing("quality_car_attachments", "id", "UUID")
-        _add_column_if_missing("quality_car_attachments", "car_id", "UUID")
-        _add_column_if_missing("quality_car_attachments", "filename", "VARCHAR(255) DEFAULT 'evidence-file'")
-        _add_column_if_missing("quality_car_attachments", "description", "VARCHAR(500)")
-        _add_column_if_missing("quality_car_attachments", "file_ref", "VARCHAR(512) DEFAULT ''")
-        _add_column_if_missing("quality_car_attachments", "content_type", "VARCHAR(128)")
-        _add_column_if_missing("quality_car_attachments", "size_bytes", "INTEGER")
-        _add_column_if_missing("quality_car_attachments", "sha256", "VARCHAR(64)")
-        _add_column_if_missing("quality_car_attachments", "uploaded_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
-        _add_column_if_missing("quality_car_responses", "id", "UUID")
-        _add_column_if_missing("quality_car_responses", "car_id", "UUID")
-        _add_column_if_missing("quality_car_responses", "containment_action", "TEXT")
-        _add_column_if_missing("quality_car_responses", "root_cause", "TEXT")
-        _add_column_if_missing("quality_car_responses", "corrective_action", "TEXT")
-        _add_column_if_missing("quality_car_responses", "preventive_action", "TEXT")
-        _add_column_if_missing("quality_car_responses", "evidence_ref", "VARCHAR(512)")
-        _add_column_if_missing("quality_car_responses", "submitted_by_name", "VARCHAR(255)")
-        _add_column_if_missing("quality_car_responses", "submitted_by_email", "VARCHAR(255)")
-        _add_column_if_missing("quality_car_responses", "submitted_at", "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
-        _add_column_if_missing("quality_car_responses", "status", "VARCHAR(32) DEFAULT 'SUBMITTED'")
-        if inspector.has_table("quality_car_responses"):
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_id_runtime ON quality_car_responses (id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_car_runtime ON quality_car_responses (car_id)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_submitted_runtime ON quality_car_responses (submitted_at)"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_responses_status_runtime ON quality_car_responses (status)"))
-
-        inspector = inspect(bind)
-
-        if inspector.has_table("qms_audit_schedules") and _has_column("qms_audit_schedules", "amo_id"):
-            db.execute(
-                text(
-                    """
-                    UPDATE qms_audit_schedules s
-                    SET amo_id = u.amo_id
-                    FROM users u
-                    WHERE s.amo_id IS NULL
-                      AND s.created_by_user_id IS NOT NULL
-                      AND u.id = s.created_by_user_id
-                      AND u.amo_id IS NOT NULL
-                    """
-                )
-            )
-
-        db.commit()
-        if inspector.has_table("qms_notifications"):
-            existing_notification_columns = {col["name"] for col in inspector.get_columns("qms_notifications")}
-            for column_name, column_type in {
-                "action_url": "VARCHAR(1024)",
-                "action_label": "VARCHAR(80)",
-                "entity_type": "VARCHAR(64)",
-                "entity_id": "VARCHAR(64)",
-            }.items():
-                if column_name not in existing_notification_columns:
-                    db.execute(text(f"ALTER TABLE qms_notifications ADD COLUMN {column_name} {column_type}"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_notifications_entity_runtime ON qms_notifications (entity_type, entity_id)"))
-
-        _QMS_SCHEMA_COMPAT_READY = True
-
-
 router = APIRouter(
     prefix="/quality",
     tags=["Quality / QMS"],
-    dependencies=[Depends(require_module("quality")), Depends(_ensure_qms_runtime_schema_compat)],
+    dependencies=[Depends(require_module("quality"))],
 )
 
 public_router = APIRouter(
     prefix="/quality",
     tags=["Quality / Public CAR"],
-    dependencies=[Depends(_ensure_qms_runtime_schema_compat)],
 )
 
 CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
@@ -505,7 +261,6 @@ def _resolve_audit_scope(
     audit_scope_code: Optional[str] = None,
     kind: Optional[models.QMSAuditKind] = None,
 ) -> models.QMSAuditScope:
-    ensure_qms_audit_scope_schema(db)
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO scope is required to resolve audit scope")
     query = db.query(models.QMSAuditScope).filter(models.QMSAuditScope.amo_id == amo_id)
@@ -535,41 +290,40 @@ def _audit_reference_matches_schedule(audit: models.QMSAudit) -> bool:
         return False
     return match.group(1) == expected_scope and int(match.group(2)) == expected_year
 
-def _current_amo_id(current_user: account_models.User) -> Optional[str]:
-    return getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+def _current_amo_id(current_user: account_models.User) -> str:
+    amo_id = getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+    if not amo_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An explicit AMO tenant context is required for Quality routes.",
+        )
+    return str(amo_id)
 
 
 
 
-def _schedule_query_for_amo(db: Session, amo_id: Optional[str]):
-    query = db.query(models.QMSAuditSchedule)
-    if amo_id:
-        query = query.filter(models.QMSAuditSchedule.amo_id == amo_id)
-    return query
+def _schedule_query_for_amo(db: Session, amo_id: str):
+    return db.query(models.QMSAuditSchedule).filter(models.QMSAuditSchedule.amo_id == amo_id)
 
 
-def _car_query_for_amo(db: Session, amo_id: Optional[str]):
-    query = db.query(models.CorrectiveActionRequest)
-    if amo_id:
-        query = query.join(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id).join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id).filter(models.QMSAudit.amo_id == amo_id)
-    return query
+def _car_query_for_amo(db: Session, amo_id: str):
+    return db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.amo_id == amo_id)
 
 
-def _get_schedule_for_amo(db: Session, *, amo_id: Optional[str], schedule_id: UUID) -> models.QMSAuditSchedule:
+def _get_schedule_for_amo(db: Session, *, amo_id: str, schedule_id: UUID) -> models.QMSAuditSchedule:
     schedule = _schedule_query_for_amo(db, amo_id).filter(models.QMSAuditSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Audit schedule not found")
     return schedule
 
 
-def _get_car_for_amo(db: Session, *, amo_id: Optional[str], car_id: UUID) -> models.CorrectiveActionRequest:
+def _get_car_for_amo(db: Session, *, amo_id: str, car_id: UUID) -> models.CorrectiveActionRequest:
     car = _car_query_for_amo(db, amo_id).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
     return car
 
-def _get_audit_for_amo(db: Session, *, amo_id: Optional[str], audit_id: UUID) -> models.QMSAudit:
-    ensure_qms_audit_reference_schema(db)
+def _get_audit_for_amo(db: Session, *, amo_id: str, audit_id: UUID) -> models.QMSAudit:
     audit = (
         db.query(models.QMSAudit)
         .filter(
@@ -583,13 +337,13 @@ def _get_audit_for_amo(db: Session, *, amo_id: Optional[str], audit_id: UUID) ->
     return audit
 
 
-def _get_finding_for_amo(db: Session, *, amo_id: Optional[str], finding_id: UUID) -> models.QMSAuditFinding:
-    ensure_qms_audit_reference_schema(db)
+def _get_finding_for_amo(db: Session, *, amo_id: str, finding_id: UUID) -> models.QMSAuditFinding:
     finding = (
         db.query(models.QMSAuditFinding)
         .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
         .filter(
             models.QMSAuditFinding.id == finding_id,
+            models.QMSAuditFinding.amo_id == amo_id,
             models.QMSAudit.amo_id == amo_id,
         )
         .first()
@@ -607,7 +361,6 @@ def _get_finding_and_audit_for_amo(
     audit_id: Optional[UUID] = None,
 ) -> tuple[models.QMSAuditFinding, models.QMSAudit]:
     amo_id = _current_amo_id(current_user)
-    ensure_qms_audit_reference_schema(db)
     if audit_id is not None:
         audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
         finding = (
@@ -615,6 +368,7 @@ def _get_finding_and_audit_for_amo(
             .filter(
                 models.QMSAuditFinding.id == finding_id,
                 models.QMSAuditFinding.audit_id == audit.id,
+                models.QMSAuditFinding.amo_id == amo_id,
             )
             .first()
         )
@@ -635,8 +389,6 @@ def _generate_audit_reference(
     audit_scope_code: Optional[str] = None,
     reference_family: str = "QAR",
 ) -> tuple[str, str, int, int]:
-    ensure_qms_audit_reference_schema(db)
-    ensure_qms_audit_scope_schema(db)
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
 
@@ -852,24 +604,6 @@ def get_actor() -> Optional[str]:
     return get_current_actor_id()
 
 
-def _ensure_qms_notification_assets(db: Session) -> None:
-    bind = db.get_bind()
-    models.QMSNotification.__table__.create(bind=bind, checkfirst=True)
-    inspector = inspect(bind)
-    if inspector.has_table("qms_notifications"):
-        existing = {col["name"] for col in inspector.get_columns("qms_notifications")}
-        notification_columns = {
-            "action_url": "VARCHAR(1024)",
-            "action_label": "VARCHAR(80)",
-            "entity_type": "VARCHAR(64)",
-            "entity_id": "VARCHAR(64)",
-        }
-        for column_name, column_type in notification_columns.items():
-            if column_name not in existing:
-                db.execute(text(f"ALTER TABLE qms_notifications ADD COLUMN {column_name} {column_type}"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_notifications_entity_runtime ON qms_notifications (entity_type, entity_id)"))
-
-
 def _safe_notification_action_url(value: Optional[str]) -> Optional[str]:
     raw = (value or "").strip()
     if not raw:
@@ -913,6 +647,7 @@ def _notify_user(
     message: str,
     severity=models.QMSNotificationSeverity,
     *,
+    amo_id: str,
     action_url: Optional[str] = None,
     action_label: Optional[str] = None,
     entity_type: Optional[str] = None,
@@ -920,9 +655,8 @@ def _notify_user(
 ):
     if not user_id:
         return
-    recipient = _load_user(db, user_id)
-    amo_id = getattr(recipient, "effective_amo_id", None) or getattr(recipient, "amo_id", None)
-    if not amo_id:
+    recipient = _load_user(db, user_id, amo_id=amo_id)
+    if recipient is None:
         return
 
     def _insert_notification() -> None:
@@ -941,19 +675,17 @@ def _notify_user(
             db.add(note)
             db.flush()
 
-    try:
-        _insert_notification()
-    except (OperationalError, ProgrammingError) as exc:
-        if not _is_missing_table_error(exc):
-            raise
-        _ensure_qms_notification_assets(db)
-        _insert_notification()
+    _insert_notification()
 
 
-def _load_user(db: Session, user_id: Optional[str]) -> Optional[account_models.User]:
+def _load_user(db: Session, user_id: Optional[str], *, amo_id: str) -> Optional[account_models.User]:
     if not user_id:
         return None
-    return db.query(account_models.User).filter(account_models.User.id == user_id).first()
+    return db.query(account_models.User).filter(
+        account_models.User.id == user_id,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+    ).first()
 
 
 def _json_list(value: Optional[str], fallback: Optional[list] = None) -> list:
@@ -1025,7 +757,10 @@ def _report_tracker_for_audit(
 ) -> models.QualityAuditReportTracker:
     tracker = (
         db.query(models.QualityAuditReportTracker)
-        .filter(models.QualityAuditReportTracker.audit_id == audit.id)
+        .filter(
+            models.QualityAuditReportTracker.amo_id == audit.amo_id,
+            models.QualityAuditReportTracker.audit_id == audit.id,
+        )
         .first()
     )
     settings = _get_or_create_workflow_settings(db, amo_id=str(audit.amo_id), actor_user_id=actor_user_id)
@@ -1079,18 +814,28 @@ def _archive_out(item: models.QualityArchivePackage) -> QualityArchivePackageOut
 
 
 def _audit_metrics(db: Session, audit: models.QMSAudit) -> dict[str, Any]:
-    findings = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.audit_id == audit.id).all()
+    findings = db.query(models.QMSAuditFinding).filter(
+        models.QMSAuditFinding.amo_id == audit.amo_id,
+        models.QMSAuditFinding.audit_id == audit.id,
+    ).all()
     finding_ids = [finding.id for finding in findings]
     cars = (
         db.query(models.CorrectiveActionRequest)
-        .filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids))
+        .filter(
+            models.CorrectiveActionRequest.amo_id == audit.amo_id,
+            models.CorrectiveActionRequest.finding_id.in_(finding_ids),
+        )
         .all()
         if finding_ids else []
     )
-    doc_requests_total = db.query(models.QualityAuditDocumentRequest).filter(models.QualityAuditDocumentRequest.audit_id == audit.id).count()
+    doc_requests_total = db.query(models.QualityAuditDocumentRequest).filter(
+        models.QualityAuditDocumentRequest.amo_id == audit.amo_id,
+        models.QualityAuditDocumentRequest.audit_id == audit.id,
+    ).count()
     doc_requests_open = (
         db.query(models.QualityAuditDocumentRequest)
         .filter(
+            models.QualityAuditDocumentRequest.amo_id == audit.amo_id,
             models.QualityAuditDocumentRequest.audit_id == audit.id,
             models.QualityAuditDocumentRequest.status.in_(["REQUESTED", "UPLOADED", "REJECTED"]),
         )
@@ -1106,7 +851,10 @@ def _audit_metrics(db: Session, audit: models.QMSAudit) -> dict[str, Any]:
         )
         .count()
     )
-    tracker = db.query(models.QualityAuditReportTracker).filter(models.QualityAuditReportTracker.audit_id == audit.id).first()
+    tracker = db.query(models.QualityAuditReportTracker).filter(
+        models.QualityAuditReportTracker.amo_id == audit.amo_id,
+        models.QualityAuditReportTracker.audit_id == audit.id,
+    ).first()
     today = date.today()
     return {
         "audit_id": audit.id,
@@ -1161,12 +909,7 @@ def _car_escalation_recipient_ids(db: Session, car: models.CorrectiveActionReque
         if value:
             recipients.add(value)
     if car.finding_id:
-        audit = (
-            db.query(models.QMSAudit)
-            .join(models.QMSAuditFinding, models.QMSAuditFinding.audit_id == models.QMSAudit.id)
-            .filter(models.QMSAuditFinding.id == car.finding_id)
-            .first()
-        )
+        audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
         if audit:
             for value in (audit.lead_auditor_user_id, audit.observer_auditor_user_id, audit.assistant_auditor_user_id, audit.auditee_user_id):
                 if value:
@@ -1458,6 +1201,7 @@ def _serialize_audit(audit: models.QMSAudit, db: Optional[Session] = None) -> QM
 def _collect_audit_notice_recipients(
     db: Session,
     *,
+    amo_id: str,
     lead_auditor_user_id: Optional[str],
     auditee_user_id: Optional[str],
     auditee_email: Optional[str],
@@ -1485,7 +1229,7 @@ def _collect_audit_notice_recipients(
             }
         )
 
-    lead_user = _load_user(db, lead_auditor_user_id)
+    lead_user = _load_user(db, lead_auditor_user_id, amo_id=amo_id)
     if notify_auditors and lead_user is not None:
         _add(
             "lead_auditor",
@@ -1494,7 +1238,7 @@ def _collect_audit_notice_recipients(
             label=_user_display_name(lead_user),
         )
 
-    auditee_user = _load_user(db, auditee_user_id)
+    auditee_user = _load_user(db, auditee_user_id, amo_id=amo_id)
     provided_auditee_email = _normalized_email(auditee_email)
     if notify_auditees and auditee_user is not None:
         internal_email = _normalized_email(getattr(auditee_user, "email", None))
@@ -1542,10 +1286,11 @@ def _send_notice_email(
 
 
 def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule, amo_id: str) -> None:
-    lead_user = _load_user(db, schedule.lead_auditor_user_id)
+    lead_user = _load_user(db, schedule.lead_auditor_user_id, amo_id=amo_id)
     lead_label = _user_display_name(lead_user)
     recipients = _collect_audit_notice_recipients(
         db,
+        amo_id=amo_id,
         lead_auditor_user_id=schedule.lead_auditor_user_id,
         auditee_user_id=schedule.auditee_user_id,
         auditee_email=schedule.auditee_email,
@@ -1563,6 +1308,7 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
                 recipient["user_id"],
                 f"You have been assigned as lead auditor for scheduled audit {schedule.title} due {schedule.next_due_date.isoformat()}.",
                 models.QMSNotificationSeverity.INFO,
+                amo_id=amo_id,
             )
         elif role.startswith("auditee") and recipient["user_id"]:
             _notify_user(
@@ -1570,6 +1316,7 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
                 recipient["user_id"],
                 f"You have been listed as auditee for scheduled audit {schedule.title} due {schedule.next_due_date.isoformat()}.",
                 models.QMSNotificationSeverity.INFO,
+                amo_id=amo_id,
             )
         _send_notice_email(
             db,
@@ -1598,10 +1345,11 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
 def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) -> None:
     planned_start = audit.planned_start.isoformat() if audit.planned_start else None
     planned_end = audit.planned_end.isoformat() if audit.planned_end else None
-    lead_user = _load_user(db, audit.lead_auditor_user_id)
+    lead_user = _load_user(db, audit.lead_auditor_user_id, amo_id=amo_id)
     lead_label = _user_display_name(lead_user)
     recipients = _collect_audit_notice_recipients(
         db,
+        amo_id=amo_id,
         lead_auditor_user_id=audit.lead_auditor_user_id,
         auditee_user_id=audit.auditee_user_id,
         auditee_email=audit.auditee_email,
@@ -1619,6 +1367,7 @@ def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) 
                 recipient["user_id"],
                 f"Audit notice memo issued: {audit.audit_ref} · {audit.title} starts {planned_start or 'TBD'}.",
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=amo_id,
             )
         elif role.startswith("auditee") and recipient["user_id"]:
             _notify_user(
@@ -1626,6 +1375,7 @@ def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) 
                 recipient["user_id"],
                 f"Audit notice memo issued to auditee: {audit.audit_ref} · {audit.title} starts {planned_start or 'TBD'}.",
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=amo_id,
             )
         _send_notice_email(
             db,
@@ -1697,13 +1447,19 @@ def _require_quality_scheduler(current_user: account_models.User) -> None:
         raise HTTPException(status_code=403, detail="Only Quality team roles can schedule audits or issue CARs")
 
 
-def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str) -> bool:
+def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str, *, amo_id: str) -> bool:
     if not finding_id:
         return False
     audit = (
         db.query(models.QMSAudit)
-        .join(models.QMSAuditFinding)
-        .filter(models.QMSAuditFinding.id == finding_id)
+        .join(
+            models.QMSAuditFinding,
+            and_(
+                models.QMSAuditFinding.audit_id == models.QMSAudit.id,
+                models.QMSAuditFinding.amo_id == models.QMSAudit.amo_id,
+            ),
+        )
+        .filter(models.QMSAuditFinding.id == finding_id, models.QMSAudit.amo_id == amo_id)
         .first()
     )
     if not audit:
@@ -1727,13 +1483,19 @@ def _audit_lead_allows_user_by_audit(audit: models.QMSAudit, user_id: str) -> bo
     return bool(user_id and audit.lead_auditor_user_id == user_id)
 
 
-def _audit_for_finding(db: Session, finding_id: Optional[UUID]) -> Optional[models.QMSAudit]:
+def _audit_for_finding(db: Session, finding_id: Optional[UUID], *, amo_id: str) -> Optional[models.QMSAudit]:
     if not finding_id:
         return None
     return (
         db.query(models.QMSAudit)
-        .join(models.QMSAuditFinding, models.QMSAuditFinding.audit_id == models.QMSAudit.id)
-        .filter(models.QMSAuditFinding.id == finding_id)
+        .join(
+            models.QMSAuditFinding,
+            and_(
+                models.QMSAuditFinding.audit_id == models.QMSAudit.id,
+                models.QMSAuditFinding.amo_id == models.QMSAudit.amo_id,
+            ),
+        )
+        .filter(models.QMSAuditFinding.id == finding_id, models.QMSAudit.amo_id == amo_id)
         .first()
     )
 
@@ -1767,7 +1529,7 @@ def _require_finding_owner_access(current_user: account_models.User, finding: mo
 def _current_user_can_modify_car(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> bool:
     if _is_system_quality_admin(current_user):
         return True
-    audit = _audit_for_finding(db, car.finding_id)
+    audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit:
         return _audit_lead_allows_user_by_audit(audit, current_user.id)
     if _is_quality_manager(current_user):
@@ -1783,7 +1545,7 @@ def _require_car_not_escalated(car: models.CorrectiveActionRequest) -> None:
 def _require_car_review_access(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> None:
     if _is_system_quality_admin(current_user):
         return
-    audit = _audit_for_finding(db, car.finding_id)
+    audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit and _audit_lead_allows_user_by_audit(audit, current_user.id):
         return
     if _is_quality_manager(current_user):
@@ -1817,7 +1579,11 @@ def _require_car_write_access(
         return
     if car and _current_user_can_modify_car(db, current_user, car):
         return
-    audit = _audit_for_finding(db, finding_id)
+    audit = _audit_for_finding(
+        db,
+        finding_id,
+        amo_id=car.amo_id if car is not None else _current_amo_id(current_user),
+    )
     if audit and (_is_system_quality_admin(current_user) or _audit_lead_allows_user_by_audit(audit, current_user.id)):
         return
     if _is_quality_manager(current_user):
@@ -1834,7 +1600,10 @@ def _assignee_can_request_extension(
         return False
     finding = (
         db.query(models.QMSAuditFinding)
-        .filter(models.QMSAuditFinding.id == car.finding_id)
+        .filter(
+            models.QMSAuditFinding.id == car.finding_id,
+            models.QMSAuditFinding.amo_id == car.amo_id,
+        )
         .first()
     )
     if not finding:
@@ -1849,8 +1618,9 @@ def _assignee_can_request_extension(
 def qms_dashboard(
     db: Session = Depends(get_db),
     domain: Optional[QMSDomain] = Query(default=None),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return get_dashboard(db, domain=domain)
+    return get_dashboard(db, domain=domain, amo_id=_current_amo_id(current_user))
 
 
 @router.get("/qms/cockpit-snapshot", response_model=QMSCockpitSnapshotOut)
@@ -1862,7 +1632,7 @@ def qms_cockpit_snapshot(
     return get_cockpit_snapshot(
         db,
         domain=domain,
-        amo_id=getattr(current_user, "effective_amo_id", None) or current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         department_code="quality",
     )
 
@@ -1873,7 +1643,7 @@ def list_manpower_availability(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    amo_id = getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+    amo_id = _current_amo_id(current_user)
     qs = db.query(models.UserAvailability).filter(models.UserAvailability.amo_id == amo_id)
     if department:
         dept = db.query(account_models.Department.id).filter(
@@ -1894,7 +1664,7 @@ def upsert_manpower_availability(
     if not _is_quality_scheduler(current_user):
         raise HTTPException(status_code=403, detail="Insufficient privileges to set manpower availability")
 
-    amo_id = getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+    amo_id = _current_amo_id(current_user)
     user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found in tenant scope")
@@ -1952,11 +1722,11 @@ def update_quality_workflow_settings(
     if "report_due_days" in data and data["report_due_days"] is not None:
         settings.report_due_days = int(data["report_due_days"])
     if "report_reminder_days" in data and data["report_reminder_days"] is not None:
-        values = sorted({int(v) for v in data["report_reminder_days"] if int(v) >= 0}, reverse=True)
-        settings.report_reminder_days_json = json.dumps(values or [7, 3, 1])
+        values = sorted({int(v) for v in data["report_reminder_days"]}, reverse=True)
+        settings.report_reminder_days_json = json.dumps(values)
     if "car_reminder_percentages" in data and data["car_reminder_percentages"] is not None:
-        values = sorted({int(v) for v in data["car_reminder_percentages"] if 0 < int(v) < 100}, reverse=True)
-        settings.car_reminder_percentages_json = json.dumps(values or [75, 50, 25])
+        values = sorted({int(v) for v in data["car_reminder_percentages"]}, reverse=True)
+        settings.car_reminder_percentages_json = json.dumps(values)
     if "final_reminder_days_before_due" in data and data["final_reminder_days_before_due"] is not None:
         settings.final_reminder_days_before_due = int(data["final_reminder_days_before_due"])
     if "auto_escalation_enabled" in data and data["auto_escalation_enabled"] is not None:
@@ -2011,8 +1781,12 @@ def list_audit_document_requests(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    return db.query(models.QualityAuditDocumentRequest).filter(models.QualityAuditDocumentRequest.audit_id == audit_id).order_by(models.QualityAuditDocumentRequest.created_at.desc()).all()
+    amo_id = _current_amo_id(current_user)
+    _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    return db.query(models.QualityAuditDocumentRequest).filter(
+        models.QualityAuditDocumentRequest.amo_id == amo_id,
+        models.QualityAuditDocumentRequest.audit_id == audit_id,
+    ).order_by(models.QualityAuditDocumentRequest.created_at.desc()).all()
 
 
 @router.patch("/audits/{audit_id}/document-requests/{request_id}", response_model=QualityDocumentRequestOut)
@@ -2024,8 +1798,13 @@ def update_audit_document_request(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    item = db.query(models.QualityAuditDocumentRequest).filter(models.QualityAuditDocumentRequest.id == request_id, models.QualityAuditDocumentRequest.audit_id == audit_id).first()
+    amo_id = _current_amo_id(current_user)
+    audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    item = db.query(models.QualityAuditDocumentRequest).filter(
+        models.QualityAuditDocumentRequest.id == request_id,
+        models.QualityAuditDocumentRequest.amo_id == amo_id,
+        models.QualityAuditDocumentRequest.audit_id == audit_id,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Document request not found")
     if not (_is_quality_admin(current_user) or _audit_allows_user_by_audit(audit, current_user.id) or audit.auditee_user_id == current_user.id):
@@ -2185,7 +1964,10 @@ def complete_audit_fieldwork(
     tracker = _report_tracker_for_audit(db, audit=audit, report_due_date=report_due, actor_user_id=current_user.id)
     _seed_report_reminders(db, tracker, audit)
     if payload.post_brief_summary:
-        brief = db.query(models.QualityAuditPostBrief).filter(models.QualityAuditPostBrief.audit_id == audit.id).first()
+        brief = db.query(models.QualityAuditPostBrief).filter(
+            models.QualityAuditPostBrief.amo_id == audit.amo_id,
+            models.QualityAuditPostBrief.audit_id == audit.id,
+        ).first()
         if not brief:
             brief = models.QualityAuditPostBrief(amo_id=audit.amo_id, audit_id=audit.id, created_by_user_id=current_user.id, report_due_date=report_due, summary=payload.post_brief_summary, attendees_json=json.dumps(payload.attendees or []))
             db.add(brief)
@@ -2194,7 +1976,7 @@ def complete_audit_fieldwork(
             brief.attendees_json = json.dumps(payload.attendees or [])
             brief.report_due_date = report_due
     for recipient in {audit.lead_auditor_user_id, audit.observer_auditor_user_id, audit.assistant_auditor_user_id} - {None}:
-        _notify_user(db, recipient, f"Fieldwork completed for audit {audit.audit_ref}. Report is due by {report_due.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED)
+        _notify_user(db, recipient, f"Fieldwork completed for audit {audit.audit_ref}. Report is due by {report_due.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED, amo_id=str(audit.amo_id))
     audit_services.log_event(db, amo_id=audit.amo_id, actor_user_id=current_user.id, entity_type="qms_audit", entity_id=str(audit.id), action="complete_fieldwork", after={"actual_end": actual_end.isoformat(), "report_due_date": report_due.isoformat()}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
     db.refresh(tracker)
@@ -2214,7 +1996,10 @@ def upsert_audit_post_brief(
     settings = _get_or_create_workflow_settings(db, amo_id=str(audit.amo_id), actor_user_id=current_user.id)
     base_date = audit.actual_end or date.today()
     report_due = payload.report_due_date or (base_date + timedelta(days=settings.report_due_days))
-    brief = db.query(models.QualityAuditPostBrief).filter(models.QualityAuditPostBrief.audit_id == audit.id).first()
+    brief = db.query(models.QualityAuditPostBrief).filter(
+        models.QualityAuditPostBrief.amo_id == audit.amo_id,
+        models.QualityAuditPostBrief.audit_id == audit.id,
+    ).first()
     if not brief:
         brief = models.QualityAuditPostBrief(amo_id=audit.amo_id, audit_id=audit.id, created_by_user_id=current_user.id, report_due_date=report_due, summary=payload.summary, briefing_at=payload.briefing_at or datetime.now(timezone.utc), attendees_json=json.dumps(payload.attendees or []))
         db.add(brief)
@@ -2237,8 +2022,12 @@ def get_audit_post_brief(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    brief = db.query(models.QualityAuditPostBrief).filter(models.QualityAuditPostBrief.audit_id == audit_id).first()
+    amo_id = _current_amo_id(current_user)
+    _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    brief = db.query(models.QualityAuditPostBrief).filter(
+        models.QualityAuditPostBrief.amo_id == amo_id,
+        models.QualityAuditPostBrief.audit_id == audit_id,
+    ).first()
     if not brief:
         raise HTTPException(status_code=404, detail="Post-brief not recorded")
     return _post_brief_out(brief)
@@ -2250,8 +2039,12 @@ def get_audit_report_tracker(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    tracker = db.query(models.QualityAuditReportTracker).filter(models.QualityAuditReportTracker.audit_id == audit_id).first()
+    amo_id = _current_amo_id(current_user)
+    _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    tracker = db.query(models.QualityAuditReportTracker).filter(
+        models.QualityAuditReportTracker.amo_id == amo_id,
+        models.QualityAuditReportTracker.audit_id == audit_id,
+    ).first()
     if not tracker:
         raise HTTPException(status_code=404, detail="Report tracker has not been created. Complete fieldwork or create a post-brief first.")
     return tracker
@@ -2301,8 +2094,12 @@ def list_audit_archive_packages(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    items = db.query(models.QualityArchivePackage).filter(models.QualityArchivePackage.audit_id == audit_id).order_by(models.QualityArchivePackage.generated_at.desc()).all()
+    amo_id = _current_amo_id(current_user)
+    _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    items = db.query(models.QualityArchivePackage).filter(
+        models.QualityArchivePackage.amo_id == amo_id,
+        models.QualityArchivePackage.audit_id == audit_id,
+    ).order_by(models.QualityArchivePackage.generated_at.desc()).all()
     return [_archive_out(item) for item in items]
 
 
@@ -2320,7 +2117,11 @@ def request_car_extension(
         raise HTTPException(status_code=403, detail="Only the CAR assignee, lead auditor, AMO Admin, or Superuser may request an extension.")
     if car.due_date and payload.requested_due_date <= car.due_date:
         raise HTTPException(status_code=400, detail="Requested extension date must be later than the current CAR due date.")
-    existing = db.query(models.QualityCARExtensionRequest).filter(models.QualityCARExtensionRequest.car_id == car.id, models.QualityCARExtensionRequest.status == "PENDING").first()
+    existing = db.query(models.QualityCARExtensionRequest).filter(
+        models.QualityCARExtensionRequest.amo_id == car.amo_id,
+        models.QualityCARExtensionRequest.car_id == car.id,
+        models.QualityCARExtensionRequest.status == "PENDING",
+    ).first()
     if existing:
         raise HTTPException(status_code=409, detail="A pending extension request already exists for this CAR")
     item = models.QualityCARExtensionRequest(amo_id=car.amo_id, car_id=car.id, requested_due_date=payload.requested_due_date, reason=payload.reason, requested_by_user_id=current_user.id)
@@ -2328,7 +2129,7 @@ def request_car_extension(
     add_car_action(db, car, models.CARActionType.COMMENT, f"Extension requested to {payload.requested_due_date.isoformat()}: {payload.reason}", current_user.id)
     for recipient in _car_escalation_recipient_ids(db, car):
         if recipient != current_user.id:
-            _notify_user(db, recipient, f"Extension approval requested for CAR {car.car_number} to {payload.requested_due_date.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED)
+            _notify_user(db, recipient, f"Extension approval requested for CAR {car.car_number} to {payload.requested_due_date.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED, amo_id=str(car.amo_id))
     audit_services.log_event(db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="quality_car_extension_request", entity_id=str(item.id), action="create", after={"car_number": car.car_number, "requested_due_date": payload.requested_due_date.isoformat()}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
     db.refresh(item)
@@ -2343,7 +2144,10 @@ def list_car_extension_requests(
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
-    return db.query(models.QualityCARExtensionRequest).filter(models.QualityCARExtensionRequest.car_id == car.id).order_by(models.QualityCARExtensionRequest.created_at.desc()).all()
+    return db.query(models.QualityCARExtensionRequest).filter(
+        models.QualityCARExtensionRequest.amo_id == car.amo_id,
+        models.QualityCARExtensionRequest.car_id == car.id,
+    ).order_by(models.QualityCARExtensionRequest.created_at.desc()).all()
 
 
 @router.post("/cars/{car_id}/extension-requests/{extension_id}/forward-to-qm", response_model=QualityCARExtensionRequestOut)
@@ -2357,7 +2161,11 @@ def forward_car_extension_to_qm(
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_review_access(db, current_user, car)
-    item = db.query(models.QualityCARExtensionRequest).filter(models.QualityCARExtensionRequest.id == extension_id, models.QualityCARExtensionRequest.car_id == car.id).first()
+    item = db.query(models.QualityCARExtensionRequest).filter(
+        models.QualityCARExtensionRequest.id == extension_id,
+        models.QualityCARExtensionRequest.amo_id == car.amo_id,
+        models.QualityCARExtensionRequest.car_id == car.id,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Extension request not found")
     if item.status != "PENDING":
@@ -2367,7 +2175,7 @@ def forward_car_extension_to_qm(
         raise HTTPException(status_code=404, detail="No active Quality Manager found for this AMO")
     for recipient in recipients:
         if recipient != current_user.id:
-            _notify_user(db, recipient, f"Deferral review requested for CAR {car.car_number}: extension to {item.requested_due_date.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED)
+            _notify_user(db, recipient, f"Deferral review requested for CAR {car.car_number}: extension to {item.requested_due_date.isoformat()}.", models.QMSNotificationSeverity.ACTION_REQUIRED, amo_id=str(car.amo_id))
     add_car_action(db, car, models.CARActionType.COMMENT, f"Deferral request forwarded to Quality Manager for review: {item.requested_due_date.isoformat()}", current_user.id)
     audit_services.log_event(db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="quality_car_extension_request", entity_id=str(item.id), action="forward_to_qm", after={"car_number": car.car_number, "requested_due_date": item.requested_due_date.isoformat()}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
@@ -2387,7 +2195,11 @@ def review_car_extension_request(
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_review_access(db, current_user, car)
-    item = db.query(models.QualityCARExtensionRequest).filter(models.QualityCARExtensionRequest.id == extension_id, models.QualityCARExtensionRequest.car_id == car.id).first()
+    item = db.query(models.QualityCARExtensionRequest).filter(
+        models.QualityCARExtensionRequest.id == extension_id,
+        models.QualityCARExtensionRequest.amo_id == car.amo_id,
+        models.QualityCARExtensionRequest.car_id == car.id,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Extension request not found")
     if item.status != "PENDING":
@@ -2405,7 +2217,7 @@ def review_car_extension_request(
     else:
         action_message = f"Extension rejected for requested date {item.requested_due_date.isoformat()}"
     add_car_action(db, car, models.CARActionType.STATUS_CHANGE, action_message, current_user.id)
-    _notify_user(db, item.requested_by_user_id, f"{action_message} for CAR {car.car_number}.", models.QMSNotificationSeverity.ACTION_REQUIRED)
+    _notify_user(db, item.requested_by_user_id, f"{action_message} for CAR {car.car_number}.", models.QMSNotificationSeverity.ACTION_REQUIRED, amo_id=str(car.amo_id))
     audit_services.log_event(db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="quality_car_extension_request", entity_id=str(item.id), action="approve" if payload.approved else "reject", after={"status": item.status, "car_due_date": str(car.due_date)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
     db.refresh(item)
@@ -2449,19 +2261,22 @@ def run_quality_workflow_reminders(
     settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=current_user.id)
     for reminder in due_reminders:
         severity = models.QMSNotificationSeverity.WARNING if reminder.severity == "WARNING" else models.QMSNotificationSeverity.ACTION_REQUIRED
-        _notify_user(db, reminder.recipient_user_id, reminder.message, severity)
+        _notify_user(db, reminder.recipient_user_id, reminder.message, severity, amo_id=amo_id)
         reminder.sent_at = now
         sent += 1
         if settings.auto_escalation_enabled and reminder.due_date and reminder.due_date < date.today():
             reminder.escalated_at = now
             escalated += 1
             if reminder.entity_type == "quality_car":
-                car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == UUID(str(reminder.entity_id))).first()
+                car = db.query(models.CorrectiveActionRequest).filter(
+                    models.CorrectiveActionRequest.id == UUID(str(reminder.entity_id)),
+                    models.CorrectiveActionRequest.amo_id == amo_id,
+                ).first()
                 if car and car.status != models.CARStatus.CLOSED:
                     car.status = models.CARStatus.ESCALATED
                     car.escalated_at = car.escalated_at or now
                     for recipient in _car_escalation_recipient_ids(db, car):
-                        _notify_user(db, recipient, f"Escalation: CAR {car.car_number} is overdue against due date {reminder.due_date.isoformat()}.", models.QMSNotificationSeverity.WARNING)
+                        _notify_user(db, recipient, f"Escalation: CAR {car.car_number} is overdue against due date {reminder.due_date.isoformat()}.", models.QMSNotificationSeverity.WARNING, amo_id=amo_id)
     audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="quality_reminders", entity_id=amo_id, action="dispatch_due", after={"sent": sent, "escalated": escalated}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=escalated > 0)
     db.commit()
     return {"sent": sent, "escalated": escalated, "checked_at": now.isoformat()}
@@ -2493,7 +2308,7 @@ def create_document(
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_document",
         entity_id=str(doc.id),
@@ -2575,7 +2390,7 @@ def update_document(
     doc.updated_by_user_id = get_actor()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_document",
         entity_id=str(doc.id),
@@ -2640,7 +2455,7 @@ def add_revision(
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_document_revision",
         entity_id=str(rev.id),
@@ -2717,7 +2532,7 @@ def publish_revision(
             to_state=doc.status.value,
             before_obj={
                 "status": before_status,
-                "amo_id": current_user.amo_id,
+                "amo_id": _current_amo_id(current_user),
             },
             after_obj={
                 "status": doc.status.value,
@@ -2727,7 +2542,7 @@ def publish_revision(
                 "authority_ref": rev.authority_ref,
                 "approved_by_user_id": rev.approved_by_user_id,
                 "approved_at": str(rev.approved_at) if rev.approved_at else None,
-                "amo_id": current_user.amo_id,
+                "amo_id": _current_amo_id(current_user),
             },
             correlation_id=str(uuid.uuid4()),
             critical=True,
@@ -2738,6 +2553,7 @@ def publish_revision(
     ack_distributions = (
         db.query(models.QMSDocumentDistribution)
         .filter(
+            models.QMSDocumentDistribution.amo_id == _current_amo_id(current_user),
             models.QMSDocumentDistribution.document_id == doc.id,
             models.QMSDocumentDistribution.requires_ack.is_(True),
             models.QMSDocumentDistribution.holder_user_id.is_not(None),
@@ -2747,7 +2563,7 @@ def publish_revision(
     for dist in ack_distributions:
         task_services.create_task(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             title="Acknowledge document distribution",
             description=f"Please acknowledge receipt of document {doc.doc_code}.",
             owner_user_id=dist.holder_user_id,
@@ -2768,12 +2584,31 @@ def create_distribution(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    amo_id = _current_amo_id(current_user)
     doc = db.query(models.QMSDocument).filter(
         models.QMSDocument.id == payload.document_id,
-        models.QMSDocument.amo_id == _current_amo_id(current_user),
+        models.QMSDocument.amo_id == amo_id,
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    if payload.revision_id:
+        revision = db.query(models.QMSDocumentRevision).filter(
+            models.QMSDocumentRevision.id == payload.revision_id,
+            models.QMSDocumentRevision.document_id == doc.id,
+            models.QMSDocumentRevision.amo_id == amo_id,
+        ).first()
+        if not revision:
+            raise HTTPException(status_code=422, detail="Revision does not belong to this tenant document")
+    if payload.holder_user_id:
+        holder = db.query(account_models.User).filter(
+            account_models.User.id == payload.holder_user_id,
+            account_models.User.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        ).first()
+        if not holder:
+            raise HTTPException(status_code=422, detail="Holder must be an active human user in this tenant")
 
     dist = models.QMSDocumentDistribution(
         amo_id=doc.amo_id,
@@ -2789,7 +2624,7 @@ def create_distribution(
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_document_distribution",
         entity_id=str(dist.id),
@@ -2838,9 +2673,15 @@ def acknowledge_distribution(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    dist = db.query(models.QMSDocumentDistribution).filter(models.QMSDocumentDistribution.id == dist_id).first()
+    amo_id = _current_amo_id(current_user)
+    dist = db.query(models.QMSDocumentDistribution).filter(
+        models.QMSDocumentDistribution.id == dist_id,
+        models.QMSDocumentDistribution.amo_id == amo_id,
+    ).first()
     if not dist:
         raise HTTPException(status_code=404, detail="Distribution record not found")
+    if dist.holder_user_id and dist.holder_user_id != current_user.id and not _is_quality_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only the assigned holder or a Quality administrator may acknowledge this distribution")
     if not dist.requires_ack:
         return dist
     if dist.acked_at:
@@ -2850,7 +2691,7 @@ def acknowledge_distribution(
     dist.acked_by_user_id = get_actor()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_document_distribution",
         entity_id=str(dist.id),
@@ -2867,9 +2708,32 @@ def acknowledge_distribution(
 # -----------------------------
 # Manual Change Requests
 # -----------------------------
+_CHANGE_REQUEST_TRANSITIONS = {
+    models.QMSChangeRequestStatus.SUBMITTED: {
+        models.QMSChangeRequestStatus.UNDER_REVIEW,
+        models.QMSChangeRequestStatus.REJECTED,
+    },
+    models.QMSChangeRequestStatus.UNDER_REVIEW: {
+        models.QMSChangeRequestStatus.APPROVED,
+        models.QMSChangeRequestStatus.REJECTED,
+    },
+    models.QMSChangeRequestStatus.APPROVED: {models.QMSChangeRequestStatus.IMPLEMENTED},
+    models.QMSChangeRequestStatus.IMPLEMENTED: {models.QMSChangeRequestStatus.CLOSED},
+    models.QMSChangeRequestStatus.REJECTED: set(),
+    models.QMSChangeRequestStatus.CLOSED: set(),
+}
+
+
 @router.post("/qms/change-requests", response_model=QMSChangeRequestOut, status_code=status.HTTP_201_CREATED)
-def create_change_request(payload: QMSChangeRequestCreate, db: Session = Depends(get_db)):
+def create_change_request(
+    payload: QMSChangeRequestCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    amo_id = _current_amo_id(current_user)
     cr = models.QMSManualChangeRequest(
+        amo_id=amo_id,
         domain=payload.domain,
         petitioner_name=payload.petitioner_name.strip(),
         petitioner_email=payload.petitioner_email,
@@ -2883,32 +2747,96 @@ def create_change_request(payload: QMSChangeRequestCreate, db: Session = Depends
         media_source=payload.media_source,
         remarks=payload.remarks,
         change_request_text=payload.change_request_text,
-        created_by_user_id=get_actor(),
+        created_by_user_id=current_user.id,
     )
     db.add(cr)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_manual_change_request",
+        entity_id=str(cr.id),
+        action="create",
+        after={"domain": cr.domain.value, "status": cr.status.value, "manual_title": cr.manual_title},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(cr)
     return cr
 
 
 @router.get("/qms/change-requests", response_model=List[QMSChangeRequestOut])
-def list_change_requests(db: Session = Depends(get_db), domain: Optional[QMSDomain] = None):
-    qs = db.query(models.QMSManualChangeRequest)
+def list_change_requests(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+    domain: Optional[QMSDomain] = None,
+):
+    qs = db.query(models.QMSManualChangeRequest).filter(
+        models.QMSManualChangeRequest.amo_id == _current_amo_id(current_user)
+    )
     if domain:
         qs = qs.filter(models.QMSManualChangeRequest.domain == domain)
     return qs.order_by(models.QMSManualChangeRequest.submitted_at.desc()).all()
 
 
 @router.patch("/qms/change-requests/{cr_id}", response_model=QMSChangeRequestOut)
-def update_change_request(cr_id: UUID, payload: QMSChangeRequestUpdate, db: Session = Depends(get_db)):
-    cr = db.query(models.QMSManualChangeRequest).filter(models.QMSManualChangeRequest.id == cr_id).first()
+def update_change_request(
+    cr_id: UUID,
+    payload: QMSChangeRequestUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not _is_quality_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only Quality Managers or AMO Admins can decide change requests")
+    amo_id = _current_amo_id(current_user)
+    cr = db.query(models.QMSManualChangeRequest).filter(
+        models.QMSManualChangeRequest.id == cr_id,
+        models.QMSManualChangeRequest.amo_id == amo_id,
+    ).with_for_update().first()
     if not cr:
         raise HTTPException(status_code=404, detail="Change request not found")
 
+    data = payload.model_dump(exclude_unset=True)
+    next_status = data.get("status")
+    if next_status is not None and next_status != cr.status:
+        if next_status not in _CHANGE_REQUEST_TRANSITIONS[cr.status]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Change request cannot transition from {cr.status.value} to {next_status.value}",
+            )
+    before = {
+        "status": cr.status.value,
+        "manual_owner_decision": cr.manual_owner_decision,
+        "qa_decision": cr.qa_decision,
+        "librarian_decision": cr.librarian_decision,
+        "review_feedback": cr.review_feedback,
+    }
     for field in ("status", "manual_owner_decision", "qa_decision", "librarian_decision", "review_feedback"):
-        val = getattr(payload, field)
-        if val is not None:
-            setattr(cr, field, val)
+        if field in data and data[field] is not None:
+            setattr(cr, field, data[field])
+
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_manual_change_request",
+        entity_id=str(cr.id),
+        action="update",
+        before=before,
+        after={
+            "status": cr.status.value,
+            "manual_owner_decision": cr.manual_owner_decision,
+            "qa_decision": cr.qa_decision,
+            "librarian_decision": cr.librarian_decision,
+            "review_feedback": cr.review_feedback,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=next_status is not None,
+    )
 
     db.commit()
     db.refresh(cr)
@@ -2926,7 +2854,6 @@ def list_audit_scopes(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     amo_id = _current_amo_id(current_user)
-    ensure_qms_audit_scope_schema(db)
     query = db.query(models.QMSAuditScope).filter(models.QMSAuditScope.amo_id == amo_id)
     if active is not None:
         query = query.filter(models.QMSAuditScope.is_active == active)
@@ -2942,7 +2869,6 @@ def create_audit_scope(
 ):
     _require_scope_admin(current_user)
     amo_id = _current_amo_id(current_user)
-    ensure_qms_audit_scope_schema(db)
     code = _normalize_scope_code(payload.code)
     if not code:
         raise HTTPException(status_code=400, detail="Audit scope code is required")
@@ -2979,7 +2905,6 @@ def update_audit_scope(
 ):
     _require_scope_admin(current_user)
     amo_id = _current_amo_id(current_user)
-    ensure_qms_audit_scope_schema(db)
     scope = db.query(models.QMSAuditScope).filter(models.QMSAuditScope.id == scope_id, models.QMSAuditScope.amo_id == amo_id).first()
     if not scope:
         raise HTTPException(status_code=404, detail="Audit scope not found")
@@ -3022,7 +2947,6 @@ def create_audit(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ensure_qms_audit_reference_schema(db)
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
     _validate_one_calendar_year(start=payload.planned_start, end=payload.planned_end)
@@ -3075,7 +2999,7 @@ def create_audit(
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
@@ -3084,7 +3008,7 @@ def create_audit(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
-    _dispatch_audit_notice(db, audit=audit, amo_id=str(current_user.amo_id))
+    _dispatch_audit_notice(db, audit=audit, amo_id=str(audit.amo_id))
     db.commit()
     db.refresh(audit)
     return _serialize_audit(audit, db)
@@ -3099,7 +3023,6 @@ def list_audits(
     limit: int = Query(default=250, ge=1, le=1000),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ensure_qms_audit_reference_schema(db)
     qs = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == _current_amo_id(current_user))
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
@@ -3140,7 +3063,6 @@ def get_audit_register(
     domain: Optional[QMSDomain] = None,
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ensure_qms_audit_reference_schema(db)
     scoped_amo_id = _current_amo_id(current_user)
     audit_query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == scoped_amo_id)
     if domain:
@@ -3267,12 +3189,14 @@ def create_audit_schedule(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
-    # Heal legacy table width and audit-scope columns before schedule creation.
-    # This prevents PostgreSQL from rejecting BI_ANNUAL and other full enum
-    # values on older databases whose frequency column was created as VARCHAR(7).
-    ensure_qms_audit_scope_schema(db)
     scoped_amo_id = _current_amo_id(current_user)
-    _validate_one_calendar_year(start=payload.next_due_date, end=None, duration_days=payload.duration_days)
+    start_date, _end_date, duration_days = resolve_schedule_window(
+        start=payload.next_due_date,
+        duration_days=payload.duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=payload.title,
+    )
+    _validate_one_calendar_year(start=start_date, end=None, duration_days=duration_days)
     audit_scope = _resolve_audit_scope(
         db,
         amo_id=scoped_amo_id,
@@ -3304,15 +3228,15 @@ def create_audit_schedule(
         notify_auditors=payload.notify_auditors,
         notify_auditees=payload.notify_auditees,
         reminder_interval_days=payload.reminder_interval_days,
-        duration_days=payload.duration_days,
-        next_due_date=payload.next_due_date,
+        duration_days=duration_days,
+        next_due_date=start_date,
         created_by_user_id=get_actor(),
     )
     db.add(schedule)
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit_schedule",
         entity_id=str(schedule.id),
@@ -3320,12 +3244,14 @@ def create_audit_schedule(
         after={
             "frequency": schedule.frequency.value,
             "next_due_date": str(schedule.next_due_date),
+            "duration_days": schedule.duration_days,
+            "weekend_policy": payload.weekend_policy,
             "title": schedule.title,
         },
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
-    _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(current_user.amo_id))
+    _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(schedule.amo_id))
     db.commit()
     db.refresh(schedule)
     return _serialize_schedule(schedule)
@@ -3340,7 +3266,6 @@ def update_audit_schedule(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
-    ensure_qms_audit_scope_schema(db)
     scoped_amo_id = _current_amo_id(current_user)
     schedule = (
         db.query(models.QMSAuditSchedule)
@@ -3371,6 +3296,19 @@ def update_audit_schedule(
     changes = payload.model_dump(exclude_unset=True)
     next_start = changes.get("next_due_date", schedule.next_due_date)
     next_duration = changes.get("duration_days", schedule.duration_days)
+    weekend_policy = changes.pop("weekend_policy", None)
+    date_window_changing = (
+        "next_due_date" in changes or "duration_days" in changes or weekend_policy is not None
+    )
+    if date_window_changing:
+        next_start, _next_end, next_duration = resolve_schedule_window(
+            start=next_start,
+            duration_days=next_duration,
+            weekend_policy=weekend_policy,
+            title=schedule.title,
+        )
+        changes["next_due_date"] = next_start
+        changes["duration_days"] = next_duration
     _validate_one_calendar_year(start=next_start, end=None, duration_days=next_duration)
     if "audit_scope_id" in changes or "audit_scope_code" in changes or "kind" in changes:
         resolved_scope = _resolve_audit_scope(
@@ -3434,7 +3372,7 @@ def update_audit_schedule(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit_schedule",
         entity_id=str(schedule.id),
@@ -3466,7 +3404,7 @@ def update_audit_schedule(
         or before["notify_auditees"] != schedule.notify_auditees
         or before["reminder_interval_days"] != schedule.reminder_interval_days
     ):
-        _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(current_user.amo_id))
+        _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(schedule.amo_id))
 
     db.commit()
     db.refresh(schedule)
@@ -3499,7 +3437,7 @@ def delete_audit_schedule(
     db.delete(schedule)
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit_schedule",
         entity_id=str(schedule_id),
@@ -3520,6 +3458,7 @@ def run_audit_schedule(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
     schedule = (
         db.query(models.QMSAuditSchedule)
@@ -3581,7 +3520,7 @@ def run_audit_schedule(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
@@ -3592,7 +3531,7 @@ def run_audit_schedule(
     )
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit_schedule",
         entity_id=str(schedule.id),
@@ -3605,7 +3544,7 @@ def run_audit_schedule(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
-    _dispatch_audit_notice(db, audit=audit, amo_id=str(current_user.amo_id))
+    _dispatch_audit_notice(db, audit=audit, amo_id=str(audit.amo_id))
     db.commit()
     db.refresh(audit)
     return _serialize_audit(audit, db)
@@ -3618,6 +3557,7 @@ def run_audit_reminders(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     if upcoming_days < 1 or upcoming_days > 90:
         raise HTTPException(status_code=400, detail="Upcoming days must be between 1 and 90")
     today = date.today()
@@ -3627,10 +3567,10 @@ def run_audit_reminders(
     audits_q = db.query(models.QMSAudit).filter(
         models.QMSAudit.status == models.QMSAuditStatus.PLANNED,
         models.QMSAudit.planned_start.isnot(None),
+        models.QMSAudit.planned_start >= today,
         models.QMSAudit.planned_start <= upcoming_end,
     )
-    if amo_id:
-        audits_q = audits_q.filter(models.QMSAudit.amo_id == amo_id)
+    audits_q = audits_q.filter(models.QMSAudit.amo_id == amo_id)
     audits = audits_q.all()
 
     day_of_sent = 0
@@ -3651,11 +3591,11 @@ def run_audit_reminders(
                     audit.observer_auditor_user_id,
                     audit.assistant_auditor_user_id,
                 ):
-                    _notify_user(db, target, message, models.QMSNotificationSeverity.ACTION_REQUIRED)
+                    _notify_user(db, target, message, models.QMSNotificationSeverity.ACTION_REQUIRED, amo_id=str(audit.amo_id))
                 audit.day_of_notice_sent_at = datetime.now(timezone.utc)
                 audit_services.log_event(
                     db,
-                    amo_id=current_user.amo_id,
+                    amo_id=_current_amo_id(current_user),
                     actor_user_id=current_user.id,
                     entity_type="qms_audit",
                     entity_id=str(audit.id),
@@ -3678,11 +3618,11 @@ def run_audit_reminders(
                 audit.observer_auditor_user_id,
                 audit.assistant_auditor_user_id,
             ):
-                _notify_user(db, target, message, models.QMSNotificationSeverity.INFO)
+                _notify_user(db, target, message, models.QMSNotificationSeverity.INFO, amo_id=str(audit.amo_id))
             audit.upcoming_notice_sent_at = datetime.now(timezone.utc)
             audit_services.log_event(
                 db,
-                amo_id=current_user.amo_id,
+                amo_id=_current_amo_id(current_user),
                 actor_user_id=current_user.id,
                 entity_type="qms_audit",
                 entity_id=str(audit.id),
@@ -3700,11 +3640,17 @@ def run_audit_reminders(
 
 
 def _build_audit_workflow_summary(db: Session, audit: models.QMSAudit) -> QMSAuditWorkflowSummaryOut:
-    findings = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.audit_id == audit.id).all()
+    findings = db.query(models.QMSAuditFinding).filter(
+        models.QMSAuditFinding.amo_id == audit.amo_id,
+        models.QMSAuditFinding.audit_id == audit.id,
+    ).all()
     finding_ids = [finding.id for finding in findings]
     cars = (
         db.query(models.CorrectiveActionRequest)
-        .filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids))
+        .filter(
+            models.CorrectiveActionRequest.amo_id == audit.amo_id,
+            models.CorrectiveActionRequest.finding_id.in_(finding_ids),
+        )
         .all()
         if finding_ids
         else []
@@ -3733,10 +3679,16 @@ def _build_audit_workflow_summary(db: Session, audit: models.QMSAudit) -> QMSAud
         )
         .count()
     )
-    report_tracker = db.query(models.QualityAuditReportTracker).filter(models.QualityAuditReportTracker.audit_id == audit.id).first()
+    report_tracker = db.query(models.QualityAuditReportTracker).filter(
+        models.QualityAuditReportTracker.amo_id == audit.amo_id,
+        models.QualityAuditReportTracker.audit_id == audit.id,
+    ).first()
     report_uploaded = bool(audit.report_file_ref)
     report_complete = report_uploaded or (report_tracker is not None and report_tracker.status in {"SUBMITTED", "ACCEPTED"})
-    archive_count = db.query(models.QualityArchivePackage).filter(models.QualityArchivePackage.audit_id == audit.id).count()
+    archive_count = db.query(models.QualityArchivePackage).filter(
+        models.QualityArchivePackage.amo_id == audit.amo_id,
+        models.QualityArchivePackage.audit_id == audit.id,
+    ).count()
 
     car_attachment_total = 0
     if cars:
@@ -3899,7 +3851,6 @@ def issue_audit_notice(
 
 
 @router.get("/audits/{audit_id}/evidence-pack")
-@router.get("/audits/{audit_id}/evidence-pack")
 def export_audit_evidence_pack(
     audit_id: UUID,
     db: Session = Depends(get_db),
@@ -3915,7 +3866,7 @@ def export_audit_evidence_pack(
         db,
         actor_user_id=current_user.id,
         correlation_id=str(uuid.uuid4()),
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
     )
 
 
@@ -3966,7 +3917,7 @@ def upload_audit_checklist(
     audit.checklist_file_ref = str(target_path)
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
@@ -4026,14 +3977,17 @@ def upload_audit_report(
         raise HTTPException(status_code=413, detail="Report exceeds the 25MB limit.")
 
     audit.report_file_ref = str(target_path)
-    tracker = db.query(models.QualityAuditReportTracker).filter(models.QualityAuditReportTracker.audit_id == audit.id).first()
+    tracker = db.query(models.QualityAuditReportTracker).filter(
+        models.QualityAuditReportTracker.amo_id == audit.amo_id,
+        models.QualityAuditReportTracker.audit_id == audit.id,
+    ).first()
     if tracker:
         tracker.report_submitted_at = datetime.now(timezone.utc)
         tracker.status = "SUBMITTED"
         tracker.next_reminder_at = None
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
@@ -4142,7 +4096,7 @@ def share_audit_report(
         )
 
     if "audited_department" in recipient_groups and audit.auditee_user_id:
-        auditee = _load_user(db, audit.auditee_user_id)
+        auditee = _load_user(db, audit.auditee_user_id, amo_id=str(audit.amo_id))
         if auditee and auditee.department_id:
             add_user_ids(base_user_query.filter(account_models.User.department_id == auditee.department_id).all())
         elif auditee:
@@ -4181,6 +4135,7 @@ def share_audit_report(
             user_id,
             message,
             models.QMSNotificationSeverity.ACTION_REQUIRED,
+            amo_id=str(audit.amo_id),
             action_url=action_url,
             action_label="Open audit report",
             entity_type="qms_audit",
@@ -4220,7 +4175,7 @@ def delete_audit(
     before = {"audit_ref": audit.audit_ref, "title": audit.title, "status": audit.status.value}
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
@@ -4318,14 +4273,20 @@ def update_audit(
         audit.day_of_notice_sent_at = None
 
     if payload.status == QMSAuditStatus.CLOSED:
-        findings = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.audit_id == audit.id).all()
+        findings = db.query(models.QMSAuditFinding).filter(
+            models.QMSAuditFinding.amo_id == audit.amo_id,
+            models.QMSAuditFinding.audit_id == audit.id,
+        ).all()
         nc_findings = [f for f in findings if f.finding_type == models.QMSFindingType.NON_CONFORMITY]
         if not nc_findings:
             if not audit.report_file_ref or not audit.checklist_file_ref:
                 raise HTTPException(status_code=400, detail="Audit report and checklist are required to close an audit with no NC findings")
         else:
             finding_ids = [f.id for f in nc_findings]
-            cars = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids)).all()
+            cars = db.query(models.CorrectiveActionRequest).filter(
+                models.CorrectiveActionRequest.amo_id == audit.amo_id,
+                models.CorrectiveActionRequest.finding_id.in_(finding_ids),
+            ).all()
             car_by_finding = {car.finding_id: car for car in cars}
             missing = [str(fid) for fid in finding_ids if fid not in car_by_finding]
             if missing:
@@ -4342,7 +4303,7 @@ def update_audit(
         elif audit.planned_end:
             audit.retention_until = date(audit.planned_end.year + 5, audit.planned_end.month, audit.planned_end.day)
         note_msg = f"Audit {audit.audit_ref} closed. Please send closure pack to {audit.auditee_email or 'auditee'}."
-        _notify_user(db, audit.lead_auditor_user_id, note_msg, models.QMSNotificationSeverity.INFO)
+        _notify_user(db, audit.lead_auditor_user_id, note_msg, models.QMSNotificationSeverity.INFO, amo_id=str(audit.amo_id))
 
     if payload.status is not None and payload.status.value != before_status:
         try:
@@ -4353,8 +4314,8 @@ def update_audit(
                 entity_id=str(audit.id),
                 from_state=before_status,
                 to_state=payload.status.value,
-                before_obj={"status": before_status, "audit_id": str(audit.id), "amo_id": current_user.amo_id},
-                after_obj={"status": payload.status.value, "audit_id": str(audit.id), "title": audit.title, "retention_until": str(audit.retention_until) if audit.retention_until else None, "amo_id": current_user.amo_id},
+                before_obj={"status": before_status, "audit_id": str(audit.id), "amo_id": audit.amo_id},
+                after_obj={"status": payload.status.value, "audit_id": str(audit.id), "title": audit.title, "retention_until": str(audit.retention_until) if audit.retention_until else None, "amo_id": audit.amo_id},
                 correlation_id=str(uuid.uuid4()),
                 critical=payload.status == QMSAuditStatus.CLOSED,
             )
@@ -4363,7 +4324,7 @@ def update_audit(
     else:
         audit_services.log_event(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             actor_user_id=current_user.id,
             entity_type="qms_audit",
             entity_id=str(audit.id),
@@ -4384,7 +4345,10 @@ def _next_audit_finding_ref(db: Session, audit: models.QMSAudit) -> str:
     max_seq = 0
     refs = (
         db.query(models.QMSAuditFinding.finding_ref)
-        .filter(models.QMSAuditFinding.audit_id == audit.id)
+        .filter(
+            models.QMSAuditFinding.amo_id == audit.amo_id,
+            models.QMSAuditFinding.audit_id == audit.id,
+        )
         .all()
     )
     for (ref,) in refs:
@@ -4457,6 +4421,7 @@ def _ensure_car_for_finding(
             audit.auditee_user_id,
             f"CAR {car.car_number} was issued for audit finding {title_ref}.",
             models.QMSNotificationSeverity.ACTION_REQUIRED,
+            amo_id=str(audit.amo_id),
             action_url=_safe_notification_action_url(build_car_invite_link(car)),
             action_label="Open CAR response",
             entity_type="car",
@@ -4501,7 +4466,7 @@ def add_finding(
     db.flush()
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -4519,7 +4484,7 @@ def add_finding(
         task_owner = audit.lead_auditor_user_id or current_user.id
         task_services.create_task(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             title="Respond to finding",
             description=f"Finding {finding.finding_ref or finding.id} requires response.",
             owner_user_id=task_owner,
@@ -4537,7 +4502,7 @@ def add_finding(
     if linked_car:
         audit_services.log_event(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             actor_user_id=current_user.id,
             entity_type="qms_car",
             entity_id=str(linked_car.id),
@@ -4635,7 +4600,7 @@ def update_finding(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -4673,7 +4638,10 @@ def delete_finding(
     )
     _require_finding_owner_access(current_user, finding, audit)
 
-    linked_cars = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.finding_id == finding.id).all()
+    linked_cars = db.query(models.CorrectiveActionRequest).filter(
+        models.CorrectiveActionRequest.amo_id == audit.amo_id,
+        models.CorrectiveActionRequest.finding_id == finding.id,
+    ).all()
     locked = [car.car_number for car in linked_cars if car.status in {models.CARStatus.ESCALATED, models.CARStatus.CLOSED, models.CARStatus.PENDING_VERIFICATION}]
     if locked:
         raise HTTPException(status_code=409, detail=f"Finding cannot be deleted because linked CAR(s) are locked: {', '.join(locked)}")
@@ -4690,7 +4658,7 @@ def delete_finding(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -4736,10 +4704,11 @@ def flag_finding_for_review(
                 recipient,
                 f"Finding {finding.finding_ref or finding.id} was flagged for review: {reason}",
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=str(audit.amo_id),
             )
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -4922,14 +4891,14 @@ def close_finding(
                 to_state="CLOSED",
                 before_obj={
                     "status": before_state,
-                    "amo_id": current_user.amo_id,
+                    "amo_id": finding.amo_id,
                 },
                 after_obj={
                     "status": "CLOSED",
                     "closed_at": str(finding.closed_at),
                     "objective_evidence": finding.objective_evidence,
                     "verified_at": str(finding.verified_at) if finding.verified_at else None,
-                    "amo_id": current_user.amo_id,
+                    "amo_id": finding.amo_id,
                 },
                 correlation_id=str(uuid.uuid4()),
                 critical=True,
@@ -4938,7 +4907,7 @@ def close_finding(
             return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
         task_services.close_tasks_for_entity(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             entity_type="qms_finding",
             entity_id=str(finding.id),
             actor_user_id=current_user.id,
@@ -4968,7 +4937,7 @@ def verify_finding(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -5011,11 +4980,11 @@ def acknowledge_finding(
             audit.observer_auditor_user_id,
             audit.assistant_auditor_user_id,
         ):
-            _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.INFO)
+            _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.INFO, amo_id=str(audit.amo_id))
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_finding",
         entity_id=str(finding.id),
@@ -5041,11 +5010,12 @@ def upsert_cap(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
+    finding = _get_finding_for_amo(db, amo_id=_current_amo_id(current_user), finding_id=finding_id)
 
-    cap = db.query(models.QMSCorrectiveAction).filter(models.QMSCorrectiveAction.finding_id == finding_id).first()
+    cap = db.query(models.QMSCorrectiveAction).filter(
+        models.QMSCorrectiveAction.finding_id == finding_id,
+        models.QMSCorrectiveAction.amo_id == finding.amo_id,
+    ).first()
     created_cap = False
     if not cap:
         cap = models.QMSCorrectiveAction(amo_id=finding.amo_id, finding_id=finding_id)
@@ -5066,7 +5036,7 @@ def upsert_cap(
         db.flush()
         task_services.create_task(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             title="Complete CAPA actions + evidence",
             description=f"Complete corrective actions for finding {finding.finding_ref or finding.id}.",
             owner_user_id=cap.responsible_user_id or current_user.id,
@@ -5078,7 +5048,7 @@ def upsert_cap(
         )
 
     if payload.status in (models.QMSCAPStatus.CLOSED, models.QMSCAPStatus.REJECTED):
-        audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+        audit = _get_audit_for_amo(db, amo_id=finding.amo_id, audit_id=finding.audit_id)
         if audit:
             note_msg = (
                 f"CAP {payload.status.value} for audit {audit.audit_ref} ({audit.title})."
@@ -5088,14 +5058,14 @@ def upsert_cap(
                 audit.observer_auditor_user_id,
                 audit.assistant_auditor_user_id,
             ):
-                _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING)
+                _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING, amo_id=str(audit.amo_id))
 
     if payload.status == models.QMSCAPStatus.IN_PROGRESS and cap.evidence_ref:
-        audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+        audit = _get_audit_for_amo(db, amo_id=finding.amo_id, audit_id=finding.audit_id)
         verifier_id = audit.lead_auditor_user_id if audit else None
         task_services.create_task(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             title="Verify CAPA",
             description=f"Verify CAPA evidence for finding {finding.finding_ref or finding.id}.",
             owner_user_id=verifier_id or current_user.id,
@@ -5117,7 +5087,7 @@ def upsert_cap(
                 to_state=payload.status.value,
                 before_obj={
                     "status": before_status,
-                    "amo_id": current_user.amo_id,
+                    "amo_id": finding.amo_id,
                 },
                 after_obj={
                     "status": payload.status.value,
@@ -5125,7 +5095,7 @@ def upsert_cap(
                     "corrective_action": cap.corrective_action,
                     "evidence_ref": cap.evidence_ref,
                     "verified_at": str(cap.verified_at) if cap.verified_at else None,
-                    "amo_id": current_user.amo_id,
+                    "amo_id": finding.amo_id,
                 },
                 correlation_id=str(uuid.uuid4()),
                 critical=payload.status == models.QMSCAPStatus.CLOSED,
@@ -5135,7 +5105,7 @@ def upsert_cap(
         if payload.status == models.QMSCAPStatus.CLOSED:
             task_services.close_tasks_for_entity(
                 db,
-                amo_id=current_user.amo_id,
+                amo_id=_current_amo_id(current_user),
                 entity_type="qms_cap",
                 entity_id=str(cap.id),
                 actor_user_id=current_user.id,
@@ -5143,7 +5113,7 @@ def upsert_cap(
     else:
         audit_services.log_event(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             actor_user_id=current_user.id,
             entity_type="qms_cap",
             entity_id=str(cap.id),
@@ -5211,11 +5181,18 @@ def _decorate_car_register_items(db: Session, cars: list[models.CorrectiveAction
     users = {}
     departments = {}
     if user_ids:
-        user_rows = db.query(account_models.User).filter(account_models.User.id.in_(list(user_ids))).all()
+        amo_ids = {str(car.amo_id) for car in cars}
+        user_rows = db.query(account_models.User).filter(
+            account_models.User.id.in_(list(user_ids)),
+            account_models.User.amo_id.in_(amo_ids),
+        ).all()
         users = {user.id: user for user in user_rows}
         dept_ids = {user.department_id for user in user_rows if getattr(user, "department_id", None)}
         if dept_ids:
-            dept_rows = db.query(account_models.Department).filter(account_models.Department.id.in_(list(dept_ids))).all()
+            dept_rows = db.query(account_models.Department).filter(
+                account_models.Department.id.in_(list(dept_ids)),
+                account_models.Department.amo_id.in_(amo_ids),
+            ).all()
             departments = {dept.id: dept for dept in dept_rows}
 
     today = date.today()
@@ -5285,8 +5262,20 @@ def _quality_car_register_query(
 ):
     qs = (
         db.query(models.CorrectiveActionRequest)
-        .outerjoin(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id)
-        .outerjoin(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
+        .outerjoin(
+            models.QMSAuditFinding,
+            and_(
+                models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id,
+                models.QMSAuditFinding.amo_id == models.CorrectiveActionRequest.amo_id,
+            ),
+        )
+        .outerjoin(
+            models.QMSAudit,
+            and_(
+                models.QMSAudit.id == models.QMSAuditFinding.audit_id,
+                models.QMSAudit.amo_id == models.QMSAuditFinding.amo_id,
+            ),
+        )
         .filter(models.CorrectiveActionRequest.amo_id == _current_amo_id(current_user))
     )
     if program:
@@ -5326,12 +5315,17 @@ def create_car_request(
 ):
     _require_quality_scheduler(current_user)
     _require_car_write_access(db, current_user, payload.finding_id)
-    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == payload.finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
+    finding = _get_finding_for_amo(
+        db,
+        amo_id=_current_amo_id(current_user),
+        finding_id=payload.finding_id,
+    )
     if finding.finding_type != models.QMSFindingType.NON_CONFORMITY:
         raise HTTPException(status_code=400, detail="CARs may only be issued for non-conformity findings")
-    existing_car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.finding_id == payload.finding_id).first()
+    existing_car = db.query(models.CorrectiveActionRequest).filter(
+        models.CorrectiveActionRequest.amo_id == finding.amo_id,
+        models.CorrectiveActionRequest.finding_id == payload.finding_id,
+    ).first()
     if existing_car:
         raise HTTPException(status_code=409, detail="A CAR already exists for this finding")
     try:
@@ -5357,6 +5351,7 @@ def create_car_request(
                 car.assigned_to_user_id,
                 f"CAR {car.car_number} assigned to you. Submit response.",
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=str(car.amo_id),
                 action_url=invite_url,
                 action_label="Open CAR response",
                 entity_type="car",
@@ -5385,7 +5380,7 @@ def create_car_request(
             )
         audit_services.log_event(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             actor_user_id=current_user.id,
             entity_type="qms_car",
             entity_id=str(car.id),
@@ -5427,12 +5422,21 @@ def list_cars(
         if assigned_to_user_id:
             qs = qs.filter(models.CorrectiveActionRequest.assigned_to_user_id == assigned_to_user_id)
         if audit_id:
-            qs = qs.join(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id).filter(models.QMSAuditFinding.audit_id == audit_id)
+            qs = qs.join(
+                models.QMSAuditFinding,
+                and_(
+                    models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id,
+                    models.QMSAuditFinding.amo_id == models.CorrectiveActionRequest.amo_id,
+                ),
+            ).filter(models.QMSAuditFinding.audit_id == audit_id)
         cars = qs.order_by(models.CorrectiveActionRequest.created_at.desc()).limit(limit).all()
         return _decorate_car_register_items(db, cars)
     except (OperationalError, ProgrammingError) as exc:
         if _is_missing_table_error(exc):
-            return []
+            raise HTTPException(
+                status_code=503,
+                detail="CARs are unavailable because the database schema is missing. Run alembic upgrade heads.",
+            ) from exc
         raise
 
 
@@ -5481,7 +5485,10 @@ def list_car_register(
         )
     except (OperationalError, ProgrammingError) as exc:
         if _is_missing_table_error(exc):
-            return CARRegisterResponse(items=[], total=0, limit=limit, offset=offset)
+            raise HTTPException(
+                status_code=503,
+                detail="The CAR register is unavailable because the database schema is missing. Run alembic upgrade heads.",
+            ) from exc
         raise
 
 @router.get("/cars/assignees", response_model=List[CARAssigneeOut])
@@ -5493,8 +5500,14 @@ def list_car_assignees(
 ):
     q = (
         db.query(account_models.User, account_models.Department)
-        .outerjoin(account_models.Department, account_models.User.department_id == account_models.Department.id)
-        .filter(account_models.User.amo_id == current_user.amo_id)
+        .outerjoin(
+            account_models.Department,
+            and_(
+                account_models.User.department_id == account_models.Department.id,
+                account_models.User.amo_id == account_models.Department.amo_id,
+            ),
+        )
+        .filter(account_models.User.amo_id == _current_amo_id(current_user))
         .filter(account_models.User.is_active.is_(True))
     )
     if department_id:
@@ -5532,9 +5545,7 @@ def update_car(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     before = {"status": car.status.value, "title": car.title}
     is_assignee = current_user.id == car.assigned_to_user_id
@@ -5554,7 +5565,7 @@ def update_car(
     }
 
     if is_assignee and not _is_quality_admin(current_user) and not _audit_allows_user(
-        db, car.finding_id, current_user.id
+        db, car.finding_id, current_user.id, amo_id=car.amo_id
     ):
         disallowed = set(data) - assignee_allowed
         if disallowed:
@@ -5601,7 +5612,7 @@ def update_car(
                 changed_status = True
                 car_transitions.transition_car(
                     db,
-                    amo_id=str(current_user.amo_id),
+                    amo_id=str(car.amo_id),
                     actor_user_id=str(current_user.id),
                     car=car,
                     target_status=str(val.value if hasattr(val, "value") else val),
@@ -5627,6 +5638,7 @@ def update_car(
                 car.assigned_to_user_id,
                 f"CAR {car.car_number} assigned to you. Submit response.",
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=str(car.amo_id),
                 action_url=invite_url,
                 action_label="Open CAR response",
                 entity_type="car",
@@ -5635,7 +5647,7 @@ def update_car(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -5658,13 +5670,11 @@ def delete_car(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -5686,9 +5696,7 @@ def print_car_form(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
 
     assigned_name = None
@@ -5720,7 +5728,7 @@ def print_car_form(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -5745,9 +5753,7 @@ def export_car_evidence_pack(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     return build_evidence_pack(
         "qms_car",
@@ -5755,7 +5761,7 @@ def export_car_evidence_pack(
         db,
         actor_user_id=current_user.id,
         correlation_id=str(uuid.uuid4()),
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
     )
 
 
@@ -5766,9 +5772,7 @@ def escalate_car(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car)
     if car.status == models.CARStatus.ESCALATED:
         raise HTTPException(status_code=409, detail="CAR is already escalated")
@@ -5784,7 +5788,7 @@ def escalate_car(
     )
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -5807,9 +5811,7 @@ def reschedule_car_reminder(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_write_access(db, current_user, car.finding_id, car=car)
     if reminder_interval_days < 1 or reminder_interval_days > 90:
@@ -5824,7 +5826,7 @@ def reschedule_car_reminder(
     )
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -5930,12 +5932,7 @@ def _latest_reviewable_car_response(db: Session, car_id: UUID) -> Optional[model
 def _mark_audit_in_progress_or_cap_open(db: Session, car: models.CorrectiveActionRequest) -> None:
     if not getattr(car, "finding_id", None):
         return
-    audit = (
-        db.query(models.QMSAudit)
-        .join(models.QMSAuditFinding, models.QMSAuditFinding.audit_id == models.QMSAudit.id)
-        .filter(models.QMSAuditFinding.id == car.finding_id)
-        .first()
-    )
+    audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit and audit.status not in {models.QMSAuditStatus.CLOSED, models.QMSAuditStatus.CAP_OPEN}:
         audit.status = models.QMSAuditStatus.CAP_OPEN
 
@@ -6077,8 +6074,18 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
     if db is not None and getattr(car, "finding_id", None):
         related_query = (
             db.query(models.CorrectiveActionRequest, models.QMSAuditFinding)
-            .join(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id)
-            .filter(models.QMSAuditFinding.audit_id == getattr(finding, "audit_id", None))
+            .join(
+                models.QMSAuditFinding,
+                and_(
+                    models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id,
+                    models.QMSAuditFinding.amo_id == models.CorrectiveActionRequest.amo_id,
+                ),
+            )
+            .filter(
+                models.CorrectiveActionRequest.amo_id == car.amo_id,
+                models.QMSAuditFinding.amo_id == car.amo_id,
+                models.QMSAuditFinding.audit_id == getattr(finding, "audit_id", None),
+            )
         )
         if getattr(car, "assigned_to_user_id", None):
             related_query = related_query.filter(models.CorrectiveActionRequest.assigned_to_user_id == car.assigned_to_user_id)
@@ -6138,10 +6145,14 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
 
 
 @router.get("/cars/{car_id}/invite", response_model=CARInviteOut)
-def get_car_invite(car_id: UUID, request: Request, db: Session = Depends(get_db)):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+def get_car_invite(
+    car_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     return _car_invite_payload(car, request=request, db=db)
 
 
@@ -6252,12 +6263,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     _sync_car_review_state(db, car, actor_user_id=None)
 
     if car.finding_id:
-        audit = (
-            db.query(models.QMSAudit)
-            .join(models.QMSAuditFinding)
-            .filter(models.QMSAuditFinding.id == car.finding_id)
-            .first()
-        )
+        audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     else:
         audit = None
 
@@ -6276,6 +6282,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
                 auditor_id,
                 note_msg,
                 models.QMSNotificationSeverity.ACTION_REQUIRED,
+                amo_id=str(car.amo_id),
                 action_url=audit_action_url,
                 action_label="Review response",
                 entity_type="car",
@@ -6286,6 +6293,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         car.assigned_to_user_id,
         f"Your CAR response was submitted for {car.car_number}. You may recall it until the auditor opens it.",
         models.QMSNotificationSeverity.ACTION_REQUIRED,
+        amo_id=str(car.amo_id),
         action_url=invite_action_url,
         action_label="Open / recall submission",
         entity_type="car",
@@ -6328,12 +6336,7 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     )
     audit = None
     if car.finding_id:
-        audit = (
-            db.query(models.QMSAudit)
-            .join(models.QMSAuditFinding)
-            .filter(models.QMSAuditFinding.id == car.finding_id)
-            .first()
-        )
+        audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     audit_action_url = _audit_workspace_notification_url(db, audit, tab="cars", car_id=car.id)
     if audit:
         recall_msg = f"CAR response recalled for {car.car_number} ({car.title}). Audit {audit.audit_ref}."
@@ -6347,6 +6350,7 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
                 auditor_id,
                 recall_msg,
                 models.QMSNotificationSeverity.WARNING,
+                amo_id=str(car.amo_id),
                 action_url=audit_action_url,
                 action_label="Open CAR review",
                 entity_type="car",
@@ -6357,6 +6361,7 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
         car.assigned_to_user_id,
         f"Submission recalled for {car.car_number}. You can update the response and submit again.",
         models.QMSNotificationSeverity.INFO,
+        amo_id=str(car.amo_id),
         action_url=_safe_notification_action_url(build_car_invite_link(car, request_origin=_public_request_origin(request))),
         action_label="Continue response",
         entity_type="car",
@@ -6569,9 +6574,7 @@ def list_car_attachments(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     return [
         CARAttachmentOut(
@@ -6626,9 +6629,7 @@ def upload_car_attachment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
@@ -6676,9 +6677,7 @@ def download_car_attachment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
@@ -6697,9 +6696,7 @@ def delete_car_attachment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=False)
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
@@ -6725,9 +6722,7 @@ def list_car_responses_for_review(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_review_access(db, current_user, car)
     latest = _car_invite_latest_active_response(db, car.id) if car.status == models.CARStatus.PENDING_VERIFICATION else None
     responses = [latest] if latest is not None else []
@@ -6743,7 +6738,7 @@ def list_car_responses_for_review(
             )
             audit_services.log_event(
                 db,
-                amo_id=current_user.amo_id,
+                amo_id=_current_amo_id(current_user),
                 actor_user_id=current_user.id,
                 entity_type="qms_car",
                 entity_id=str(car.id),
@@ -6766,7 +6761,10 @@ def _close_legacy_cap_for_car(
         return
     cap = (
         db.query(models.QMSCorrectiveAction)
-        .filter(models.QMSCorrectiveAction.finding_id == car.finding_id)
+        .filter(
+            models.QMSCorrectiveAction.finding_id == car.finding_id,
+            models.QMSCorrectiveAction.amo_id == car.amo_id,
+        )
         .first()
     )
     if cap is None:
@@ -6793,7 +6791,10 @@ def _close_finding_for_accepted_car(
         return
     finding = (
         db.query(models.QMSAuditFinding)
-        .filter(models.QMSAuditFinding.id == car.finding_id)
+        .filter(
+            models.QMSAuditFinding.id == car.finding_id,
+            models.QMSAuditFinding.amo_id == car.amo_id,
+        )
         .first()
     )
     if finding is None:
@@ -6856,9 +6857,7 @@ def review_car_response(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="This CAR is already closed or cancelled and cannot be reviewed again.")
@@ -6931,6 +6930,7 @@ def review_car_response(
             car.assigned_to_user_id,
             note_msg,
             models.QMSNotificationSeverity.ACTION_REQUIRED,
+            amo_id=str(car.amo_id),
             action_url=_safe_notification_action_url(build_car_invite_link(car, request_origin=_public_request_origin(request))),
             action_label="Open CAR response",
             entity_type="car",
@@ -6939,7 +6939,7 @@ def review_car_response(
 
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -6998,13 +6998,14 @@ def get_auditor_stats(
     }
 
 
-def _build_qms_notification_summary_payload(db: Session, user_id: str) -> QMSNotificationSummaryOut:
+def _build_qms_notification_summary_payload(db: Session, *, amo_id: str, user_id: str) -> QMSNotificationSummaryOut:
     unread_count, latest_created_at = (
         db.query(
             func.count(models.QMSNotification.id),
             func.max(models.QMSNotification.created_at),
         )
         .filter(
+            models.QMSNotification.amo_id == amo_id,
             models.QMSNotification.user_id == user_id,
             models.QMSNotification.read_at.is_(None),
         )
@@ -7032,13 +7033,11 @@ def get_my_notification_summary(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = _build_qms_notification_summary_payload(db, user_id)
-    except (OperationalError, ProgrammingError) as exc:
-        if _is_missing_table_error(exc):
-            payload = QMSNotificationSummaryOut(unread_count=0, latest_created_at=None)
-        else:
-            raise
+    payload = _build_qms_notification_summary_payload(
+        db,
+        amo_id=_current_amo_id(current_user),
+        user_id=user_id,
+    )
 
     etag = _make_qms_notification_summary_etag(payload)
     headers = {"ETag": etag, "Cache-Control": "private, max-age=0, must-revalidate"}
@@ -7060,19 +7059,17 @@ def list_my_notifications(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        query = (
-            db.query(models.QMSNotification)
-            .filter(models.QMSNotification.user_id == user_id)
-            .order_by(models.QMSNotification.created_at.desc())
+    query = (
+        db.query(models.QMSNotification)
+        .filter(
+            models.QMSNotification.amo_id == _current_amo_id(current_user),
+            models.QMSNotification.user_id == user_id,
         )
-        if not include_read:
-            query = query.filter(models.QMSNotification.read_at.is_(None))
-        notes = query.limit(limit).all()
-    except (OperationalError, ProgrammingError) as exc:
-        if _is_missing_table_error(exc):
-            return []
-        raise
+        .order_by(models.QMSNotification.created_at.desc())
+    )
+    if not include_read:
+        query = query.filter(models.QMSNotification.read_at.is_(None))
+    notes = query.limit(limit).all()
     return notes
 
 
@@ -7084,17 +7081,15 @@ def mark_all_notifications_read(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        updated = (
-            db.query(models.QMSNotification)
-            .filter(models.QMSNotification.user_id == user_id)
-            .filter(models.QMSNotification.read_at.is_(None))
-            .update({models.QMSNotification.read_at: func.now()}, synchronize_session=False)
+    updated = (
+        db.query(models.QMSNotification)
+        .filter(
+            models.QMSNotification.amo_id == _current_amo_id(current_user),
+            models.QMSNotification.user_id == user_id,
+            models.QMSNotification.read_at.is_(None),
         )
-    except (OperationalError, ProgrammingError) as exc:
-        if _is_missing_table_error(exc):
-            return {"updated": 0}
-        raise
+        .update({models.QMSNotification.read_at: func.now()}, synchronize_session=False)
+    )
     db.commit()
     return {"updated": int(updated or 0)}
 
@@ -7108,19 +7103,15 @@ def mark_notification_read(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        note = (
-            db.query(models.QMSNotification)
-            .filter(models.QMSNotification.id == notification_id, models.QMSNotification.user_id == user_id)
-            .first()
+    note = (
+        db.query(models.QMSNotification)
+        .filter(
+            models.QMSNotification.id == notification_id,
+            models.QMSNotification.amo_id == _current_amo_id(current_user),
+            models.QMSNotification.user_id == user_id,
         )
-    except (OperationalError, ProgrammingError) as exc:
-        if _is_missing_table_error(exc):
-            raise HTTPException(
-                status_code=503,
-                detail="Notifications are not available because the database schema is missing.",
-            ) from exc
-        raise
+        .first()
+    )
     if not note:
         raise HTTPException(status_code=404, detail="Notification not found")
     note.read_at = func.now()
@@ -7142,9 +7133,8 @@ def add_car_action_log(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
 
     log = add_car_action(
         db=db,
@@ -7155,7 +7145,7 @@ def add_car_action_log(
     )
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms_car",
         entity_id=str(car.id),
@@ -7170,10 +7160,13 @@ def add_car_action_log(
 
 
 @router.get("/cars/{car_id}/actions", response_model=List[CARActionOut])
-def list_car_actions(car_id: UUID, db: Session = Depends(get_db)):
-    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="CAR not found")
+def list_car_actions(
+    car_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     return (
         db.query(models.CARActionLog)
         .filter(models.CARActionLog.car_id == car_id)
@@ -7272,7 +7265,7 @@ def upload_doc_revision(
     replication = replicate_file(storage_path, f"{doc.id}/{rev.id}")
     audit_services.log_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=_current_amo_id(current_user),
         actor_user_id=current_user.id,
         entity_type="qms.document.revision",
         entity_id=str(rev.id),
@@ -7284,7 +7277,7 @@ def upload_doc_revision(
     if not (replication.aws_ok and replication.azure_ok and replication.onprem_ok):
         audit_services.log_event(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=_current_amo_id(current_user),
             actor_user_id=current_user.id,
             entity_type="qms.document.revision",
             entity_id=str(rev.id),
@@ -7294,20 +7287,24 @@ def upload_doc_revision(
             metadata=_audit_metadata(request),
         )
     db.commit()
-    return QMSUploadRevisionOut(revision_id=rev.id, sha256=sha256, viewer_url=f"/maintenance/{current_user.amo_id}/quality/qms/documents/{doc.id}/revisions/{rev.id}/view")
+    return QMSUploadRevisionOut(revision_id=rev.id, sha256=sha256, viewer_url=f"/maintenance/{_current_amo_id(current_user)}/quality/qms/documents/{doc.id}/revisions/{rev.id}/view")
 
 
 @router.post("/qms/physical-copies", response_model=List[QMSPhysicalCopyOut], dependencies=[Depends(_require_aerodoc_module)])
 def request_physical_copy(payload: QMSPhysicalCopyRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
-    rev = db.query(models.QMSDocumentRevision).filter(models.QMSDocumentRevision.id == payload.revision_id).first()
+    amo_id = _current_amo_id(current_user)
+    rev = db.query(models.QMSDocumentRevision).filter(
+        models.QMSDocumentRevision.id == payload.revision_id,
+        models.QMSDocumentRevision.amo_id == amo_id,
+    ).first()
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
     created = []
     existing = (
         db.query(models.QMSPhysicalControlledCopy)
         .filter(
-            models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id,
+            models.QMSPhysicalControlledCopy.amo_id == amo_id,
             models.QMSPhysicalControlledCopy.copy_serial_number.like(f"{payload.base_serial}-COPY-%"),
         )
         .all()
@@ -7323,7 +7320,7 @@ def request_physical_copy(payload: QMSPhysicalCopyRequest, request: Request, db:
     for _ in range(payload.count):
         serial = f"{payload.base_serial}-COPY-{next_num:03d}"
         row = models.QMSPhysicalControlledCopy(
-            amo_id=current_user.amo_id,
+            amo_id=amo_id,
             digital_revision_id=rev.id,
             copy_serial_number=serial,
             storage_location_path=payload.storage_location_path,
@@ -7332,23 +7329,24 @@ def request_physical_copy(payload: QMSPhysicalCopyRequest, request: Request, db:
         db.add(row)
         db.flush()
         created.append(row)
-        audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(row.id), action="created", after={"serial": serial, "revision_id": str(rev.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+        audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(row.id), action="created", after={"serial": serial, "revision_id": str(rev.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
         next_num += 1
     db.commit()
     return created
 
 
 def _custody_action(copy_id: UUID, action: QMSCustodyAction, payload: QMSCustodyActionCreate, request: Request, db: Session, current_user: account_models.User):
-    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    amo_id = _current_amo_id(current_user)
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == amo_id).first()
     if not copy:
         raise HTTPException(status_code=404, detail="Physical copy not found")
-    log = models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=action, gps_lat=payload.gps_lat, gps_lng=payload.gps_lng, notes=payload.notes)
+    log = models.QMSCustodyLog(amo_id=amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=action, gps_lat=payload.gps_lat, gps_lng=payload.gps_lng, notes=payload.notes)
     db.add(log)
     if action == QMSCustodyAction.CHECK_OUT:
         copy.current_holder_user_id = current_user.id
     if action == QMSCustodyAction.CHECK_IN:
         copy.current_holder_user_id = None
-    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.custody", entity_id=str(log.id), action=action.value.lower(), after={"copy_id": str(copy.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.custody", entity_id=str(log.id), action=action.value.lower(), after={"copy_id": str(copy.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
     db.commit()
     db.refresh(log)
     return log
@@ -7368,10 +7366,14 @@ def checkin_copy(copy_id: UUID, payload: QMSCustodyActionCreate, request: Reques
 
 @router.get("/qms/physical-copies/verify/{serial}", response_model=QMSPhysicalVerifyOut, dependencies=[Depends(_require_aerodoc_module)])
 def verify_physical_copy(serial: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
-    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.copy_serial_number == serial, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    amo_id = _current_amo_id(current_user)
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.copy_serial_number == serial, models.QMSPhysicalControlledCopy.amo_id == amo_id).first()
     if not copy:
         return QMSPhysicalVerifyOut(serial=serial, status="RED", current=False)
-    rev = db.query(models.QMSDocumentRevision).filter(models.QMSDocumentRevision.id == copy.digital_revision_id).first()
+    rev = db.query(models.QMSDocumentRevision).filter(
+        models.QMSDocumentRevision.id == copy.digital_revision_id,
+        models.QMSDocumentRevision.amo_id == amo_id,
+    ).first()
     is_current = bool(rev and rev.lifecycle_status == QMSRevisionLifecycleStatus.APPROVED and copy.status == QMSPhysicalCopyStatus.ACTIVE and copy.voided_at is None)
     return QMSPhysicalVerifyOut(serial=serial, status="GREEN" if is_current else "RED", current=is_current, approved_version=rev.version_semver if rev else None)
 
@@ -7379,16 +7381,17 @@ def verify_physical_copy(serial: str, db: Session = Depends(get_db), current_use
 @router.post("/qms/revisions/issue", response_model=QMSDocumentRevisionOut, dependencies=[Depends(_require_aerodoc_module)])
 def issue_revision(payload: QMSIssueRevisionRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
+    amo_id = _current_amo_id(current_user)
     doc = db.query(models.QMSDocument).filter(
         models.QMSDocument.id == payload.doc_id,
-        models.QMSDocument.amo_id == _current_amo_id(current_user),
+        models.QMSDocument.amo_id == amo_id,
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     db.query(models.QMSDocumentRevision).filter(
         models.QMSDocumentRevision.document_id == payload.doc_id,
-        models.QMSDocumentRevision.amo_id == _current_amo_id(current_user),
+        models.QMSDocumentRevision.amo_id == amo_id,
         models.QMSDocumentRevision.lifecycle_status == QMSRevisionLifecycleStatus.APPROVED,
     ).update({
         models.QMSDocumentRevision.lifecycle_status: QMSRevisionLifecycleStatus.SUPERSEDED,
@@ -7409,7 +7412,7 @@ def issue_revision(payload: QMSIssueRevisionRequest, request: Request, db: Sessi
     )
     db.add(rev)
     db.flush()
-    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="issued", after={"doc_id": str(payload.doc_id), "version_semver": rev.version_semver}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="issued", after={"doc_id": str(payload.doc_id), "version_semver": rev.version_semver}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
     db.commit()
     db.refresh(rev)
     return rev
@@ -7428,7 +7431,17 @@ def _stream_file_sha256(path: Path) -> str:
 
 @router.get("/qms/documents/{doc_id}/revisions/{rev_id}/open", dependencies=[Depends(_require_aerodoc_module)])
 def open_revision(doc_id: UUID, rev_id: UUID, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
-    rev = db.query(models.QMSDocumentRevision).join(models.QMSDocument, models.QMSDocument.id == models.QMSDocumentRevision.document_id).filter(models.QMSDocumentRevision.id == rev_id, models.QMSDocumentRevision.document_id == doc_id).first()
+    amo_id = _current_amo_id(current_user)
+    rev = db.query(models.QMSDocumentRevision).join(
+        models.QMSDocument,
+        (models.QMSDocument.id == models.QMSDocumentRevision.document_id)
+        & (models.QMSDocument.amo_id == models.QMSDocumentRevision.amo_id),
+    ).filter(
+        models.QMSDocumentRevision.id == rev_id,
+        models.QMSDocumentRevision.document_id == doc_id,
+        models.QMSDocumentRevision.amo_id == amo_id,
+        models.QMSDocument.amo_id == amo_id,
+    ).first()
     if not rev or not rev.file_ref:
         raise HTTPException(status_code=404, detail="Revision file not found")
     file_path = Path(rev.file_ref)
@@ -7437,7 +7450,7 @@ def open_revision(doc_id: UUID, rev_id: UUID, request: Request, db: Session = De
     computed = _stream_file_sha256(file_path)
     integrity_ok = bool(rev.sha256 and computed == rev.sha256)
     if not integrity_ok:
-        audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="integrity_mismatch", after={"stored": rev.sha256, "computed": computed}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+        audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="integrity_mismatch", after={"stored": rev.sha256, "computed": computed}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
         db.commit()
     response = FileResponse(path=file_path, media_type=rev.mime_type or "application/octet-stream", filename=file_path.name)
     response.headers["X-Document-Integrity"] = "ok" if integrity_ok else "compromised"
@@ -7447,7 +7460,8 @@ def open_revision(doc_id: UUID, rev_id: UUID, request: Request, db: Session = De
 @router.post("/qms/physical-copies/{copy_id}/report-damage", response_model=QMSDamageReportOut, dependencies=[Depends(_require_aerodoc_module)])
 def report_damage(copy_id: UUID, payload: QMSDamageReportRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
-    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    amo_id = _current_amo_id(current_user)
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == amo_id).first()
     if not copy:
         raise HTTPException(status_code=404, detail="Physical copy not found")
     copy.status = QMSPhysicalCopyStatus.RECALL_PENDING
@@ -7455,7 +7469,7 @@ def report_damage(copy_id: UUID, payload: QMSDamageReportRequest, request: Reque
     old_serial = copy.copy_serial_number
     replacement_serial = f"{old_serial}-R{int(datetime.now(timezone.utc).timestamp())}"
     replacement = models.QMSPhysicalControlledCopy(
-        amo_id=current_user.amo_id,
+        amo_id=amo_id,
         digital_revision_id=copy.digital_revision_id,
         copy_serial_number=replacement_serial,
         storage_location_path=payload.storage_location_path or copy.storage_location_path,
@@ -7465,10 +7479,10 @@ def report_damage(copy_id: UUID, payload: QMSDamageReportRequest, request: Reque
     db.flush()
     copy.replaced_by_copy_id = replacement.id
 
-    db.add(models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=QMSCustodyAction.DAMAGED, notes=payload.notes))
-    db.add(models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=replacement.id, user_id=current_user.id, action=QMSCustodyAction.INSPECTED, notes="Replacement issued"))
+    db.add(models.QMSCustodyLog(amo_id=amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=QMSCustodyAction.DAMAGED, notes=payload.notes))
+    db.add(models.QMSCustodyLog(amo_id=amo_id, physical_copy_id=replacement.id, user_id=current_user.id, action=QMSCustodyAction.INSPECTED, notes="Replacement issued"))
 
-    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(copy.id), action="damaged", after={"replacement_id": str(replacement.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(copy.id), action="damaged", after={"replacement_id": str(replacement.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
     db.commit()
     return QMSDamageReportOut(old_copy_id=copy.id, new_copy_id=replacement.id, old_serial=old_serial, new_serial=replacement_serial)
 
@@ -7476,9 +7490,10 @@ def report_damage(copy_id: UUID, payload: QMSDamageReportRequest, request: Reque
 @router.get("/qms/audit-mode/binder", dependencies=[Depends(_require_aerodoc_module)])
 def audit_mode_binder(db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
+    amo_id = _current_amo_id(current_user)
     since = datetime.now(timezone.utc) - timedelta(days=730)
-    docs = db.query(models.QMSDocument).filter(models.QMSDocument.status == models.QMSDocStatus.ACTIVE).all()
-    custody = db.query(models.QMSCustodyLog).filter(models.QMSCustodyLog.amo_id == current_user.amo_id, models.QMSCustodyLog.occurred_at >= since).all()
+    docs = db.query(models.QMSDocument).filter(models.QMSDocument.amo_id == amo_id, models.QMSDocument.status == models.QMSDocStatus.ACTIVE).all()
+    custody = db.query(models.QMSCustodyLog).filter(models.QMSCustodyLog.amo_id == amo_id, models.QMSCustodyLog.occurred_at >= since).all()
 
     def stream_zip() -> Iterator[bytes]:
         buf = io.BytesIO()
@@ -7498,10 +7513,11 @@ def audit_mode_binder(db: Session = Depends(get_db), current_user: account_model
 @router.post("/qms/documents/{doc_id}/archive", dependencies=[Depends(_require_aerodoc_module)])
 def archive_document(doc_id: UUID, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    amo_id = _current_amo_id(current_user)
+    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id, models.QMSDocument.amo_id == amo_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     doc.status = models.QMSDocStatus.OBSOLETE
-    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document", entity_id=str(doc.id), action="archived", after={"retention_category": getattr(doc.retention_category, "value", str(doc.retention_category))}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.document", entity_id=str(doc.id), action="archived", after={"retention_category": getattr(doc.retention_category, "value", str(doc.retention_category))}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
     db.commit()
     return {"status": "archived", "doc_id": str(doc.id)}

@@ -25,13 +25,6 @@ def _route_endpoint(route_item):
     return getattr(route_item, "endpoint", None)
 
 
-def _route_key(route_item) -> tuple[str, frozenset[str]]:
-    return (
-        str(getattr(route_item, "path", "")),
-        frozenset(getattr(route_item, "methods", None) or ()),
-    )
-
-
 def _is_generic_catchall(route_item) -> bool:
     return str(getattr(route_item, "path", "")).endswith("/{module_path:path}")
 
@@ -90,6 +83,7 @@ def _install_specialist_routes(api_router: APIRouter) -> None:
     """Register exact operational routes before generic QMS handlers."""
 
     for extension_router in (
+        planner_calendar_enrichment_router,
         planner_router,
         planner_schedule_router,
         planner_strategic_router,
@@ -100,22 +94,7 @@ def _install_specialist_routes(api_router: APIRouter) -> None:
             _capture_extension_routes(api_router, extension_router),
         )
 
-
-def _install_calendar_override(api_router: APIRouter) -> None:
-    """Replace the legacy projection route with the timed planner projection."""
-
-    calendar_routes = _capture_extension_routes(api_router, planner_calendar_enrichment_router)
-    override_keys = {_route_key(route_item) for route_item in calendar_routes}
-    api_router.routes[:] = [
-        route_item
-        for route_item in api_router.routes
-        if _route_key(route_item) not in override_keys
-    ]
-    _insert_before_catchalls(api_router, calendar_routes)
-
-
 # Direct core-router consumers and the public Quality router receive the same
 # specialist contract ahead of every generic module-path catch-all.
 for _api_router in (core_router, router):
-    _install_calendar_override(_api_router)
     _install_specialist_routes(_api_router)

@@ -15,7 +15,7 @@ def _route(router, path: str, method: str):
     return matches[0]
 
 
-def test_schema_aware_overview_and_management_pack_override_assumed_column_queries() -> None:
+def test_schema_aware_overview_and_management_pack_are_canonical() -> None:
     for router, prefix in (
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
     ):

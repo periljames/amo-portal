@@ -40,8 +40,8 @@ describe("QMS sidebar navigation", () => {
 
   it("keeps every functional Quality calendar view directly reachable", () => {
     expect(QMS_CALENDAR_DESTINATIONS.map((item) => item.view)).toEqual([
-      "month",
       "week",
+      "month",
       "year",
       "list",
       "audits",

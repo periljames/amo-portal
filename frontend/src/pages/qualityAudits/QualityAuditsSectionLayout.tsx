@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays,
@@ -6,7 +6,6 @@ import {
   Files,
   Gauge,
   ListChecks,
-  PanelRightOpen,
   TableProperties,
   Trash2,
   Workflow,
@@ -14,9 +13,11 @@ import {
 import AuditPageShell, { type AuditShellNavItem } from "../../components/QMS/AuditPageShell";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import Drawer from "../../components/shared/Drawer";
-import Button from "../../components/UI/Button";
 import { getContext } from "../../services/auth";
 import "./quality-audits-workspace.css";
+import "./qa-dark-contrast.css";
+
+const OPEN_ASSURANCE_TOOLS_EVENT = "qa:open-assurance-tools";
 
 type Props = {
   title: string;
@@ -28,9 +29,11 @@ type Props = {
 type DrawerTab = "actions" | "lifecycle";
 
 type WorkspaceNavItem = AuditShellNavItem & {
-  description: string;
-  group: "primary" | "retain" | "ops";
+  group: "overview" | "plan" | "registers" | "tools";
 };
+
+/** Canonical AA local IA — peers, not Plan→segment nesting. */
+const AA_CANONICAL_PRIMARY = ["dashboard", "programme", "calendar", "audits", "findings-actions"] as const;
 
 const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children, toolbar }) => {
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -42,6 +45,14 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("actions");
 
+  const auditsBase = `/maintenance/${amoCode}/quality/audits`;
+  const calendarBase = `/maintenance/${amoCode}/quality/calendar`;
+  const programmeHref = `${auditsBase}/program`;
+  const calendarHref = `${calendarBase}/week`;
+  const onProgramme = location.pathname.startsWith(`${auditsBase}/program`);
+  const onCalendar = location.pathname.startsWith(calendarBase);
+  const programmeFocusMode = onProgramme;
+
   const links = useMemo<WorkspaceNavItem[]>(
     () => [
       {
@@ -49,165 +60,203 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         label: "Overview",
         shortLabel: "Home",
         icon: Gauge,
-        href: `/maintenance/${amoCode}/quality/audits/dashboard`,
-        description: "Exposure, pipeline and next actions",
-        group: "primary",
+        href: `${auditsBase}/dashboard`,
+        group: "overview",
         active:
-          location.pathname === `/maintenance/${amoCode}/quality/audits` ||
-          location.pathname === `/maintenance/${amoCode}/quality/audits/dashboard`,
+          location.pathname === auditsBase ||
+          location.pathname === `${auditsBase}/dashboard`,
       },
       {
         id: "programme",
-        label: "Audit Programme",
+        label: "Programme",
         shortLabel: "Programme",
         icon: Workflow,
-        href: `/maintenance/${amoCode}/quality/audits/program`,
-        description: "Governed coverage, universe and readiness",
-        group: "primary",
-        active: location.pathname.startsWith(`/maintenance/${amoCode}/quality/audits/program`),
+        href: programmeHref,
+        group: "plan",
+        active: onProgramme,
       },
       {
-        id: "register",
-        label: "Audit Register",
-        shortLabel: "Register",
-        icon: TableProperties,
-        href: `/maintenance/${amoCode}/quality/audits/register?tab=findings`,
-        description: "Audits, findings and corrective actions",
-        group: "primary",
-        active: location.pathname === `/maintenance/${amoCode}/quality/audits/register`,
-      },
-      {
-        id: "planner",
-        label: "Planner",
-        shortLabel: "Planner",
+        id: "calendar",
+        label: "Calendar",
+        shortLabel: "Calendar",
         icon: CalendarDays,
-        href: `/maintenance/${amoCode}/quality/calendar/week`,
-        description: "Dated calendar — Planner V2 only",
-        group: "primary",
-        active: location.pathname.startsWith(`/maintenance/${amoCode}/quality/calendar`),
+        href: calendarHref,
+        group: "plan",
+        active: onCalendar,
+      },
+      {
+        // Audits-first register; occurrence stage routes keep Audits highlighted.
+        id: "audits",
+        label: "Audits",
+        shortLabel: "Audits",
+        icon: ClipboardList,
+        href: `${auditsBase}/workspace`,
+        group: "registers",
+        active:
+          location.pathname === `${auditsBase}/workspace` ||
+          /\/quality\/audits\/[^/]+\/(setup|prepare|live|closing|follow-up|archive)(?:\/|$)/.test(
+            location.pathname,
+          ),
+      },
+      {
+        id: "findings-actions",
+        label: "Findings & Actions",
+        shortLabel: "Findings",
+        icon: TableProperties,
+        href: `${auditsBase}/register?tab=findings`,
+        group: "registers",
+        active:
+          location.pathname === `${auditsBase}/register` ||
+          location.pathname.startsWith(`/maintenance/${amoCode}/quality/findings/`),
       },
       {
         id: "checklists",
         label: "Checklists",
         shortLabel: "Checks",
         icon: ListChecks,
-        href: `/maintenance/${amoCode}/quality/audits/checklists`,
-        description: "Controlled checklist library",
-        group: "retain",
-        active: location.pathname === `/maintenance/${amoCode}/quality/audits/checklists`,
+        href: `${auditsBase}/checklists`,
+        group: "tools",
+        active: location.pathname === `${auditsBase}/checklists`,
       },
       {
         id: "evidence-library",
-        label: "Evidence",
+        label: "Evidence vault",
         shortLabel: "Evidence",
         icon: Files,
         href: `/maintenance/${amoCode}/quality/evidence-vault`,
-        description: "Objective evidence and retained records",
-        group: "retain",
+        group: "tools",
         active: location.pathname.startsWith(`/maintenance/${amoCode}/quality/evidence-vault`),
       },
       {
         id: "create-run",
-        label: "Create / run",
-        shortLabel: "Create",
-        icon: ClipboardList,
-        href: `/maintenance/${amoCode}/quality/audits/plan?view=list`,
-        description: "Operational schedules and run records",
-        group: "ops",
+        label: "Calendar scheduling",
+        shortLabel: "Sched.",
+        icon: CalendarDays,
+        // Demoted tool entry — Calendar week is the sole primary scheduler.
+        href: calendarHref,
+        group: "tools",
         active:
-          location.pathname === `/maintenance/${amoCode}/quality/audits/plan` ||
-          location.pathname === `/maintenance/${amoCode}/quality/audits/schedule` ||
-          location.pathname === `/maintenance/${amoCode}/quality/audits/new` ||
-          location.pathname.startsWith(`/maintenance/${amoCode}/quality/audits/schedules/`),
+          location.pathname === `${auditsBase}/new` ||
+          location.pathname === `${auditsBase}/plan` ||
+          location.pathname === `${auditsBase}/schedule` ||
+          location.pathname.startsWith(`${auditsBase}/schedules/`),
       },
       {
         id: "bin",
         label: "Recycle bin",
         shortLabel: "Bin",
         icon: Trash2,
-        href: `/maintenance/${amoCode}/quality/audits/bin`,
-        description: "Recover removed audit records",
-        group: "ops",
-        active: location.pathname === `/maintenance/${amoCode}/quality/audits/bin`,
+        href: `${auditsBase}/bin`,
+        group: "tools",
+        active: location.pathname === `${auditsBase}/bin`,
       },
     ],
-    [amoCode, location.pathname],
+    [amoCode, auditsBase, calendarHref, location.pathname, onCalendar, onProgramme, programmeHref],
   );
 
-  const primaryLinks = links.filter((link) => link.group === "primary" || link.group === "retain");
+  const primaryLinks = links.filter((link) =>
+    (AA_CANONICAL_PRIMARY as readonly string[]).includes(link.id),
+  );
+  const toolLinks = links.filter((link) => link.group === "tools");
+  const toolsOpen = toolLinks.some((link) => link.active);
   const activeId = links.find((link) => link.active)?.id ?? "dashboard";
-  const plannerActive = activeId === "planner";
+  // Calendar already has Quality workspace tabs (Calendar selected). Hide the
+  // duplicate AA icon rail so headers do not compete for the same navigation job.
+  const calendarFocusMode = onCalendar;
 
   const openDrawer = (tab: DrawerTab = "actions") => {
     setDrawerTab(tab);
     setDrawerOpen(true);
   };
 
+  useEffect(() => {
+    const onOpenTools = () => openDrawer("actions");
+    window.addEventListener(OPEN_ASSURANCE_TOOLS_EVENT, onOpenTools);
+    return () => window.removeEventListener(OPEN_ASSURANCE_TOOLS_EVENT, onOpenTools);
+  }, []);
+
   const workflowActions = [
     {
-      title: "Open Audit Programme",
-      detail: "Define coverage intent, requirements, universe and readiness.",
-      href: `/maintenance/${amoCode}/quality/audits/program`,
+      title: "Open Programme",
+      detail: "Coverage, universe and readiness.",
+      href: programmeHref,
       icon: Workflow,
     },
     {
-      title: "Open Planner",
-      detail: "Browse and reschedule dated audits on Planner V2 — the only Quality calendar.",
-      href: `/maintenance/${amoCode}/quality/calendar/week`,
+      title: "Open Calendar",
+      detail: "Dated audits on the Quality planner.",
+      href: calendarHref,
       icon: CalendarDays,
     },
     {
-      title: "Create or run a schedule",
-      detail: "Operational templates and run records (not a second planner).",
-      href: `/maintenance/${amoCode}/quality/audits/plan?view=list`,
+      title: "Browse audits",
+      detail: "Planned and in-progress audit records.",
+      href: `${auditsBase}/workspace`,
       icon: ClipboardList,
     },
     {
-      title: "Work findings",
-      detail: "Open the governed finding register and audit records.",
-      href: `/maintenance/${amoCode}/quality/audits/register?tab=findings`,
+      title: "Findings & actions",
+      detail: "Findings register and linked CARs.",
+      href: `${auditsBase}/register?tab=findings`,
       icon: TableProperties,
     },
     {
-      title: "Work corrective actions",
-      detail: "Open the CAR closeout view linked to audit findings.",
-      href: `/maintenance/${amoCode}/quality/audits/register?tab=cars`,
+      title: "Corrective actions",
+      detail: "CAR closeout linked to audit findings.",
+      href: `${auditsBase}/register?tab=cars`,
       icon: ListChecks,
     },
     {
-      title: "Open evidence vault",
-      detail: "Review objective evidence and retained audit records.",
+      title: "Evidence vault",
+      detail: "Objective evidence and retained records.",
       href: `/maintenance/${amoCode}/quality/evidence-vault`,
       icon: Files,
     },
   ];
 
+  const renderNavButton = (link: WorkspaceNavItem, compact = false) => {
+    const Icon = link.icon;
+    if (compact) {
+      return (
+        <button
+          key={link.id}
+          type="button"
+          role="tab"
+          aria-selected={link.active}
+          aria-label={link.label}
+          title={link.label}
+          className={`qa-workspace-rail__tab qa-workspace-rail__tab--icon${link.active ? " qa-workspace-rail__tab--active" : ""}`}
+          onClick={() => navigate(link.href)}
+        >
+          <Icon size={17} aria-hidden />
+        </button>
+      );
+    }
+    return (
+      <button
+        key={link.id}
+        type="button"
+        role="tab"
+        aria-selected={link.active}
+        className={`qa-workspace-rail__tab qa-workspace-rail__tab--label-only${link.active ? " qa-workspace-rail__tab--active" : ""}`}
+        onClick={() => navigate(link.href)}
+      >
+        <Icon size={17} />
+        <span>
+          <strong>{link.label}</strong>
+        </span>
+      </button>
+    );
+  };
+
   const renderRailGroup = (label: string, group: WorkspaceNavItem["group"], ariaLabel: string) => (
     <div className="qa-workspace-rail__group" role="tablist" aria-label={ariaLabel} aria-orientation="vertical">
       <span className="qa-workspace-rail__group-label">{label}</span>
-      {links
-        .filter((link) => link.group === group)
-        .map((link) => {
-          const Icon = link.icon;
-          return (
-            <button
-              key={link.id}
-              type="button"
-              role="tab"
-              aria-selected={link.active}
-              className={`qa-workspace-rail__tab${link.active ? " qa-workspace-rail__tab--active" : ""}`}
-              onClick={() => navigate(link.href)}
-            >
-              <Icon size={17} />
-              <span>
-                <strong>{link.label}</strong>
-                <small>{link.description}</small>
-              </span>
-            </button>
-          );
-        })}
+      {links.filter((link) => link.group === group).map((link) => renderNavButton(link))}
     </div>
   );
+
+  const mergedToolbar = toolbar ? <div className="qa-workspace-toolbar">{toolbar}</div> : undefined;
 
   return (
     <AuditPageShell
@@ -217,20 +266,15 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       subtitle={subtitle}
       breadcrumbs={[
         { label: "QMS", onClick: () => navigate(`/maintenance/${amoCode}/quality`) },
-        { label: "Audit Assurance", onClick: () => navigate(`/maintenance/${amoCode}/quality/audits`) },
+        { label: "Audit Assurance", onClick: () => navigate(auditsBase) },
         { label: title },
       ]}
-      toolbar={
-        <div className="qa-workspace-toolbar">
-          {toolbar}
-          <Button variant="secondary" size="sm" onClick={() => openDrawer("actions")}>
-            <PanelRightOpen size={14} /> Workflows
-          </Button>
-        </div>
-      }
-      onOverflowAction={() => openDrawer("actions")}
-      overflowActionLabel="Open Audit Assurance workflow drawer"
+      toolbar={calendarFocusMode ? undefined : mergedToolbar}
+      suppressHeader={calendarFocusMode}
+      onOverflowAction={calendarFocusMode || programmeFocusMode ? undefined : () => openDrawer("actions")}
+      overflowActionLabel="Open Audit Assurance tools"
     >
+      {!calendarFocusMode && !programmeFocusMode ? (
       <div className="qa-workspace-mobile-tabs" aria-label="Audit Assurance navigation">
         <ResponsiveSegmentedControl
           label="Audit Assurance"
@@ -249,47 +293,25 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
           compactIconsOnMobile
         />
       </div>
+      ) : null}
 
-      <div className={`qa-workspace-shell${plannerActive ? " qa-workspace-shell--planner" : ""}`}>
-        <aside
-          className={`qa-workspace-rail${plannerActive ? " qa-workspace-rail--compact" : ""}`}
-          aria-label="Audit Assurance sections"
-        >
-          <div className="qa-workspace-rail__heading">
-            <span>{plannerActive ? "AA" : "Audit Assurance"}</span>
-            <button type="button" onClick={() => openDrawer("lifecycle")} aria-label="Open audit lifecycle drawer" title="Lifecycle">
-              <Workflow size={15} />
-            </button>
-          </div>
-
-          {plannerActive ? (
-            <div className="qa-workspace-rail__group qa-workspace-rail__group--compact" role="tablist" aria-label="Assurance destinations" aria-orientation="vertical">
-              {primaryLinks.map((link) => {
-                const Icon = link.icon;
-                return (
-                  <button
-                    key={link.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={link.active}
-                    aria-label={link.label}
-                    title={link.label}
-                    className={`qa-workspace-rail__tab qa-workspace-rail__tab--icon${link.active ? " qa-workspace-rail__tab--active" : ""}`}
-                    onClick={() => navigate(link.href)}
-                  >
-                    <Icon size={17} aria-hidden />
-                  </button>
-                );
-              })}
+      <div className={`qms-surface-root qa-workspace-shell${calendarFocusMode ? " qa-workspace-shell--planner qa-workspace-shell--calendar-focus" : ""}`}>
+        {!calendarFocusMode ? (
+          <aside className="qa-workspace-rail" aria-label="Audit Assurance sections">
+            <div className="qa-workspace-rail__heading">
+              <span>Audit Assurance</span>
             </div>
-          ) : (
-            <>
-              {renderRailGroup("Workspace", "primary", "Primary workspace")}
-              {renderRailGroup("Evidence & templates", "retain", "Checklists and evidence")}
-              {renderRailGroup("Operations", "ops", "Operational actions")}
-            </>
-          )}
-        </aside>
+            {renderRailGroup("Workspace", "overview", "Overview")}
+            {renderRailGroup("Planning", "plan", "Programme and calendar")}
+            {renderRailGroup("Work", "registers", "Audits and findings")}
+            <details className="qa-workspace-rail__tools" open={toolsOpen}>
+              <summary className="qa-workspace-rail__tools-summary">Tools</summary>
+              <div className="qa-workspace-rail__group" role="tablist" aria-label="Audit Assurance tools" aria-orientation="vertical">
+                {toolLinks.map((link) => renderNavButton(link))}
+              </div>
+            </details>
+          </aside>
+        ) : null}
 
         <section className="qa-workspace-main" data-assurance-workspace-section={activeId} aria-label="Current Audit Assurance workspace">
           {children}
@@ -297,14 +319,14 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       </div>
 
       <Drawer
-        title="Audit Assurance workflows"
+        title="Audit Assurance tools"
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         side="right"
         panelClassName="qa-workspace-drawer"
       >
         <div className="qa-workspace-drawer__body">
-          <div className="qa-workspace-drawer__tabs" role="tablist" aria-label="Workflow drawer tabs">
+          <div className="qa-workspace-drawer__tabs" role="tablist" aria-label="Tools drawer tabs">
             <button
               type="button"
               role="tab"
@@ -327,9 +349,6 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
 
           {drawerTab === "actions" ? (
             <div className="qa-workspace-drawer__panel" role="tabpanel">
-              <p className="qa-workspace-drawer__intro">
-                Programme defines coverage intent. Planner V2 owns dated scheduling. Create / run stays operational — not a second calendar.
-              </p>
               <div className="qa-workspace-action-list">
                 {workflowActions.map((action) => {
                   const Icon = action.icon;
@@ -353,40 +372,38 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
                 <li>
                   <span>1</span>
                   <div>
-                    <strong>Audit Programme</strong>
-                    <small>Setup coverage, requirements, universe and readiness.</small>
+                    <strong>Programme</strong>
+                    <small>Define why and what must be assured.</small>
                   </div>
                 </li>
                 <li>
                   <span>2</span>
                   <div>
-                    <strong>Schedule → Planner V2</strong>
-                    <small>Commit dates on the Quality calendar — never a duplicate planner under audits.</small>
+                    <strong>Calendar</strong>
+                    <small>Schedule requirements onto dated audit occurrences.</small>
                   </div>
                 </li>
                 <li>
                   <span>3</span>
                   <div>
-                    <strong>Execute</strong>
-                    <small>Open the audit record via Setup for preparation, fieldwork and evidence.</small>
+                    <strong>Audits</strong>
+                    <small>Prepare, conduct fieldwork, raise findings, close and archive.</small>
                   </div>
                 </li>
                 <li>
                   <span>4</span>
                   <div>
-                    <strong>Follow-up & close</strong>
-                    <small>Findings, CAPA, verification and retained output.</small>
+                    <strong>Findings & Actions</strong>
+                    <small>RCA, CAP, implementation, effectiveness and closure.</small>
                   </div>
                 </li>
               </ol>
               <div className="qa-workspace-drawer__governance-links">
-                {links
-                  .filter((link) => link.group === "retain")
-                  .map((link) => (
-                    <Link key={link.id} to={link.href} onClick={() => setDrawerOpen(false)}>
-                      {link.label}
-                    </Link>
-                  ))}
+                {toolLinks.map((link) => (
+                  <Link key={link.id} to={link.href} onClick={() => setDrawerOpen(false)}>
+                    {link.label}
+                  </Link>
+                ))}
               </div>
             </div>
           )}

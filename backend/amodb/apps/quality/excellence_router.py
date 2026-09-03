@@ -5,17 +5,13 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 
-from .excellence_models import (
-    QualityAssuranceControl,
-    QualityAssuranceEvidenceLink,
-    QualityIntelligenceReview,
-)
+from .excellence_models import QualityIntelligenceReview
 from .tenant_security import (
     TenantContext,
     require_quality_permission,
@@ -25,56 +21,8 @@ from .tenant_security import (
 
 router = APIRouter(prefix="/excellence", tags=["Quality excellence"])
 
-ControlCriticality = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-ControlStatus = Literal["DRAFT", "ACTIVE", "RETIRED"]
-EvidenceStatus = Literal["LINKED", "VERIFIED", "EXPIRED", "REJECTED"]
 InsightStatus = Literal["PROPOSED", "ACCEPTED", "DISMISSED", "IMPLEMENTED"]
 RiskLevel = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
-
-
-class AssuranceControlCreate(BaseModel):
-    control_code: str = Field(
-        min_length=2,
-        max_length=64,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/ -]*$",
-    )
-    title: str = Field(min_length=3, max_length=255)
-    description: str | None = None
-    framework: str = Field(default="INTERNAL_QMS", min_length=2, max_length=120)
-    clause_reference: str | None = Field(default=None, max_length=255)
-    process_area: str = Field(min_length=2, max_length=160)
-    owner_user_id: str | None = None
-    criticality: ControlCriticality = "MEDIUM"
-    status: ControlStatus = "ACTIVE"
-    test_frequency_days: int = Field(default=365, ge=1, le=3650)
-    evidence_expectation: str | None = None
-    last_tested_at: datetime | None = None
-    next_test_due: date | None = None
-
-
-class AssuranceControlPatch(BaseModel):
-    title: str | None = Field(default=None, min_length=3, max_length=255)
-    description: str | None = None
-    framework: str | None = Field(default=None, min_length=2, max_length=120)
-    clause_reference: str | None = Field(default=None, max_length=255)
-    process_area: str | None = Field(default=None, min_length=2, max_length=160)
-    owner_user_id: str | None = None
-    criticality: ControlCriticality | None = None
-    status: ControlStatus | None = None
-    test_frequency_days: int | None = Field(default=None, ge=1, le=3650)
-    evidence_expectation: str | None = None
-    last_tested_at: datetime | None = None
-    next_test_due: date | None = None
-
-
-class AssuranceEvidenceCreate(BaseModel):
-    source_type: str = Field(min_length=2, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
-    source_id: str = Field(min_length=1, max_length=160)
-    relationship: str = Field(default="EVIDENCES", min_length=2, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
-    label: str | None = Field(default=None, max_length=255)
-    evidence_status: EvidenceStatus = "LINKED"
-    valid_until: date | None = None
-    notes: str | None = None
 
 
 class IntelligenceDecision(BaseModel):
@@ -94,10 +42,6 @@ class IntelligenceManualCreate(BaseModel):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _normalise_code(value: str) -> str:
-    return "-".join(value.strip().upper().replace("_", "-").split())
 
 
 def _clamp_score(value: float) -> int:
@@ -169,50 +113,6 @@ def _score_readiness(metrics: dict[str, int]) -> dict[str, Any]:
         ],
         "method": "transparent_weighted_operational_pressure_v1",
         "disclaimer": "Readiness is an operational indicator, not a regulatory compliance declaration.",
-    }
-
-
-def _control_dict(row: QualityAssuranceControl, evidence_count: int = 0, verified_count: int = 0) -> dict[str, Any]:
-    today = date.today()
-    due_state = "UNSCHEDULED"
-    if row.next_test_due:
-        due_state = "OVERDUE" if row.next_test_due < today else "DUE_SOON" if row.next_test_due <= today + timedelta(days=30) else "CURRENT"
-    return {
-        "id": row.id,
-        "control_code": row.control_code,
-        "title": row.title,
-        "description": row.description,
-        "framework": row.framework,
-        "clause_reference": row.clause_reference,
-        "process_area": row.process_area,
-        "owner_user_id": row.owner_user_id,
-        "criticality": row.criticality,
-        "status": row.status,
-        "test_frequency_days": row.test_frequency_days,
-        "evidence_expectation": row.evidence_expectation,
-        "last_tested_at": row.last_tested_at.isoformat() if row.last_tested_at else None,
-        "next_test_due": row.next_test_due.isoformat() if row.next_test_due else None,
-        "due_state": due_state,
-        "evidence_count": evidence_count,
-        "verified_evidence_count": verified_count,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _evidence_dict(row: QualityAssuranceEvidenceLink) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "control_id": row.control_id,
-        "source_type": row.source_type,
-        "source_id": row.source_id,
-        "relationship": row.relationship,
-        "label": row.label,
-        "evidence_status": row.evidence_status,
-        "valid_until": row.valid_until.isoformat() if row.valid_until else None,
-        "notes": row.notes,
-        "verified_at": row.verified_at.isoformat() if row.verified_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
@@ -445,251 +345,6 @@ def excellence_overview(
             },
         ],
         "warnings": warnings,
-    }
-
-
-@router.get("/controls")
-def list_assurance_controls(
-    status_filter: ControlStatus | None = Query(default=None, alias="status"),
-    framework: str | None = Query(default=None),
-    process_area: str | None = Query(default=None),
-    limit: int = Query(default=250, ge=1, le=500),
-    ctx: TenantContext = Depends(require_quality_permission("qms.dashboard.view")),
-    db: Session = Depends(get_read_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    query = db.query(QualityAssuranceControl).filter(QualityAssuranceControl.amo_id == ctx.amo_id)
-    if status_filter:
-        query = query.filter(QualityAssuranceControl.status == status_filter)
-    if framework:
-        query = query.filter(QualityAssuranceControl.framework == framework)
-    if process_area:
-        query = query.filter(QualityAssuranceControl.process_area == process_area)
-    total = query.count()
-    criticality_order = case(
-        (QualityAssuranceControl.criticality == "CRITICAL", 0),
-        (QualityAssuranceControl.criticality == "HIGH", 1),
-        (QualityAssuranceControl.criticality == "MEDIUM", 2),
-        else_=3,
-    )
-    rows = query.order_by(criticality_order, QualityAssuranceControl.control_code.asc()).limit(limit).all()
-    evidence_rows = (
-        db.query(
-            QualityAssuranceEvidenceLink.control_id,
-            func.count(QualityAssuranceEvidenceLink.id),
-            func.sum(
-                case(
-                    (QualityAssuranceEvidenceLink.evidence_status == "VERIFIED", 1),
-                    else_=0,
-                )
-            ),
-        )
-        .filter(
-            QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
-            QualityAssuranceEvidenceLink.control_id.in_([row.id for row in rows] or ["__none__"]),
-        )
-        .group_by(QualityAssuranceEvidenceLink.control_id)
-        .all()
-    )
-    counts = {
-        control_id: {"total": int(total_count or 0), "verified": int(verified_count or 0)}
-        for control_id, total_count, verified_count in evidence_rows
-    }
-    return {
-        "items": [
-            _control_dict(
-                row,
-                evidence_count=counts.get(row.id, {}).get("total", 0),
-                verified_count=counts.get(row.id, {}).get("verified", 0),
-            )
-            for row in rows
-        ],
-        "total": total,
-        "as_of": _now().isoformat(),
-    }
-
-
-@router.post("/controls", status_code=status.HTTP_201_CREATED)
-def create_assurance_control(
-    payload: AssuranceControlCreate,
-    ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    row = QualityAssuranceControl(
-        amo_id=ctx.amo_id,
-        control_code=_normalise_code(payload.control_code),
-        title=payload.title.strip(),
-        description=payload.description,
-        framework=payload.framework.strip().upper(),
-        clause_reference=payload.clause_reference,
-        process_area=payload.process_area.strip(),
-        owner_user_id=payload.owner_user_id,
-        criticality=payload.criticality,
-        status=payload.status,
-        test_frequency_days=payload.test_frequency_days,
-        evidence_expectation=payload.evidence_expectation,
-        last_tested_at=payload.last_tested_at,
-        next_test_due=payload.next_test_due,
-        created_by_user_id=ctx.user_id,
-        updated_by_user_id=ctx.user_id,
-    )
-    db.add(row)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A control with this code already exists for the tenant.") from exc
-    db.refresh(row)
-    return _control_dict(row)
-
-
-@router.patch("/controls/{control_id}")
-def update_assurance_control(
-    control_id: str,
-    payload: AssuranceControlPatch,
-    ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    row = (
-        db.query(QualityAssuranceControl)
-        .filter(
-            QualityAssuranceControl.id == control_id,
-            QualityAssuranceControl.amo_id == ctx.amo_id,
-        )
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assurance control not found.")
-    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
-    for field, value in changes.items():
-        setattr(row, field, value.strip() if isinstance(value, str) else value)
-    row.updated_by_user_id = ctx.user_id
-    row.updated_at = _now()
-    db.commit()
-    db.refresh(row)
-    return _control_dict(row)
-
-
-@router.post("/controls/{control_id}/evidence", status_code=status.HTTP_201_CREATED)
-def link_control_evidence(
-    control_id: str,
-    payload: AssuranceEvidenceCreate,
-    ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    control = (
-        db.query(QualityAssuranceControl)
-        .filter(
-            QualityAssuranceControl.id == control_id,
-            QualityAssuranceControl.amo_id == ctx.amo_id,
-        )
-        .first()
-    )
-    if not control:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assurance control not found.")
-    now = _now()
-    row = QualityAssuranceEvidenceLink(
-        amo_id=ctx.amo_id,
-        control_id=control_id,
-        source_type=payload.source_type.strip().upper(),
-        source_id=payload.source_id.strip(),
-        relationship=payload.relationship.strip().upper(),
-        label=payload.label,
-        evidence_status=payload.evidence_status,
-        valid_until=payload.valid_until,
-        notes=payload.notes,
-        created_by_user_id=ctx.user_id,
-        verified_by_user_id=ctx.user_id if payload.evidence_status == "VERIFIED" else None,
-        verified_at=now if payload.evidence_status == "VERIFIED" else None,
-    )
-    db.add(row)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This evidence relationship already exists.") from exc
-    db.refresh(row)
-    return _evidence_dict(row)
-
-
-@router.get("/evidence-graph")
-def evidence_graph(
-    limit: int = Query(default=500, ge=1, le=1000),
-    ctx: TenantContext = Depends(require_quality_permission("qms.evidence.view")),
-    db: Session = Depends(get_read_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    controls = (
-        db.query(QualityAssuranceControl)
-        .filter(
-            QualityAssuranceControl.amo_id == ctx.amo_id,
-            QualityAssuranceControl.status != "RETIRED",
-        )
-        .order_by(QualityAssuranceControl.control_code.asc())
-        .limit(limit)
-        .all()
-    )
-    control_ids = [row.id for row in controls]
-    links = (
-        db.query(QualityAssuranceEvidenceLink)
-        .filter(
-            QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
-            QualityAssuranceEvidenceLink.control_id.in_(control_ids or ["__none__"]),
-        )
-        .order_by(QualityAssuranceEvidenceLink.created_at.desc())
-        .limit(limit * 4)
-        .all()
-    )
-    source_nodes: dict[tuple[str, str], dict[str, Any]] = {}
-    for link in links:
-        key = (link.source_type, link.source_id)
-        source_nodes.setdefault(
-            key,
-            {
-                "id": f"source:{link.source_type}:{link.source_id}",
-                "kind": "evidence",
-                "type": link.source_type,
-                "label": link.label or f"{link.source_type} {link.source_id}",
-                "status": link.evidence_status,
-            },
-        )
-    nodes = [
-        {
-            "id": f"control:{row.id}",
-            "kind": "control",
-            "label": f"{row.control_code} · {row.title}",
-            "framework": row.framework,
-            "process_area": row.process_area,
-            "criticality": row.criticality,
-            "status": row.status,
-        }
-        for row in controls
-    ] + list(source_nodes.values())
-    edges = [
-        {
-            "id": row.id,
-            "from": f"control:{row.control_id}",
-            "to": f"source:{row.source_type}:{row.source_id}",
-            "relationship": row.relationship,
-            "status": row.evidence_status,
-            "valid_until": row.valid_until.isoformat() if row.valid_until else None,
-        }
-        for row in links
-    ]
-    orphan_controls = len({row.id for row in controls} - {row.control_id for row in links})
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "summary": {
-            "controls": len(controls),
-            "evidence_records": len(source_nodes),
-            "relationships": len(edges),
-            "controls_without_evidence": orphan_controls,
-        },
-        "as_of": _now().isoformat(),
     }
 
 

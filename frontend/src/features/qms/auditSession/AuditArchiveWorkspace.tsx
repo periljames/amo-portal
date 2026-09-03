@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import { qmsResolveAudit } from "../../../services/qms";
 import {
   createAuditRetentionPolicyRevision,
   downloadAuditArchivePackage,
@@ -27,7 +26,11 @@ import {
   type AuditDispositionMode,
   type AuditRetentionStart,
 } from "../../../services/qmsAuditArchiveGovernance";
+import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { saveDownloadedFile } from "../../../utils/downloads";
+import { AuditStageLoadError } from "./AuditStageLoadError";
+import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
+import { auditSessionPath } from "./auditSessionRoutes";
 import "../../../styles/qms-audit-archive-workspace.css";
 
 type Props = { amoCode: string; auditKey: string };
@@ -82,8 +85,8 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [downloadBusy, setDownloadBusy] = useState(false);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-archive-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-archive-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
@@ -160,7 +163,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const governance = governanceQuery.data;
-  const policy = governance?.policy.current || null;
+  const policy = governance?.policy?.current || null;
   const manifest = governance?.manifest || null;
   const expectedConfirmation = auditQuery.data ? `DISPOSE ${auditQuery.data.audit_ref}` : "";
   const policyFormValid = policyForm.retentionClass.trim().length >= 2
@@ -200,15 +203,42 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   if (auditQuery.isLoading || governanceQuery.isLoading) return <div className="qms-audit-archive qms-audit-archive--loading">Loading governed audit archive…</div>;
-  const loadError = auditQuery.error || governanceQuery.error;
-  if (loadError || !auditQuery.data || !governance) {
-    return <div className="qms-audit-archive qms-audit-archive--loading" role="alert"><AlertTriangle size={18} /> {loadError instanceof Error ? loadError.message : "Audit archive unavailable."}</div>;
+  if (auditQuery.error || !auditQuery.data) {
+    return (
+      <AuditStageLoadError
+        className="qms-audit-archive qms-audit-archive--error"
+        title="Audit occurrence unavailable"
+        detail={auditOccurrenceLoadDetail(auditQuery.error)}
+        onRetry={() => void auditQuery.refetch()}
+        exitHref={auditSessionPath(amoCode, auditKey, "follow-up")}
+        exitLabel="Back to Follow-up"
+        secondaryHref={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits`}
+        secondaryLabel="Audits overview"
+      />
+    );
+  }
+  if (governanceQuery.error || !governance) {
+    return (
+      <AuditStageLoadError
+        className="qms-audit-archive qms-audit-archive--error"
+        title="Complete follow-up before archiving"
+        detail={auditPrerequisiteLoadDetail(
+          governanceQuery.error,
+          "Archive governance is not initialized yet. Complete the required follow-up and closeout actions before opening Archive.",
+        )}
+        onRetry={() => void governanceQuery.refetch()}
+        exitHref={auditSessionPath(amoCode, auditKey, "follow-up")}
+        exitLabel="Back to Follow-up"
+        secondaryHref={auditSessionPath(amoCode, auditKey, "setup")}
+        secondaryLabel="Open Setup"
+      />
+    );
   }
 
   return (
     <section className="qms-audit-archive" aria-label="Audit archive and retention workspace">
       <header className="qms-audit-archive__header">
-        <div><span>ARCHIVE · retention · legal hold · disposition</span><h1>{auditQuery.data.audit_ref} · {auditQuery.data.title}</h1></div>
+        <div><span>Archive</span><h2>Retention and disposition</h2></div>
         <button type="button" onClick={() => void invalidate()}><RefreshCw size={15} /> Refresh</button>
       </header>
       {localError ? <div className="qms-audit-archive__message is-error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}

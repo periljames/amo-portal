@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, selectinload
 
-from amodb.database import get_read_db, get_write_db
+from amodb.database import get_read_db
 
 from .mission_models import QualityMission, QualityMissionDecision, QualityMissionGate
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
@@ -314,6 +314,11 @@ def _latest_decision(mission: QualityMission, decision_type: str) -> QualityMiss
 
 
 def assert_mission_decision_allowed(mission: QualityMission, payload: MissionDecisionCreate) -> None:
+    if mission.status in {"COMPLETE", "CANCELLED"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Mission decisions are immutable after {mission.status}.",
+        )
     if payload.decision_type == "CUSTOM":
         return
 
@@ -324,7 +329,6 @@ def assert_mission_decision_allowed(mission: QualityMission, payload: MissionDec
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Quality self-evaluation cannot be approved until every HARD readiness gate has passed.",
             )
-        return
 
     prerequisites: dict[str, tuple[str, str]] = {
         "ACCOUNTABLE_EXECUTIVE": ("QUALITY_SELF_EVALUATION", "Quality self-evaluation"),
@@ -332,7 +336,7 @@ def assert_mission_decision_allowed(mission: QualityMission, payload: MissionDec
         "AUTHORITY_ACCEPTANCE": ("AUTHORITY_SUBMISSION", "Authority submission decision"),
     }
     prerequisite = prerequisites.get(payload.decision_type)
-    if prerequisite and payload.status == "APPROVED":
+    if prerequisite:
         prior_type, label = prerequisite
         prior = _latest_decision(mission, prior_type)
         if not prior or prior.status != "APPROVED":
@@ -340,6 +344,21 @@ def assert_mission_decision_allowed(mission: QualityMission, payload: MissionDec
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"{payload.decision_type.replace('_', ' ').title()} requires an APPROVED {label} first.",
             )
+
+    required_state = {
+        "QUALITY_SELF_EVALUATION": "GATE_REVIEW",
+        "ACCOUNTABLE_EXECUTIVE": "READY_FOR_APPROVAL",
+        "AUTHORITY_SUBMISSION": "APPROVED",
+        "AUTHORITY_ACCEPTANCE": "SUBMITTED_TO_AUTHORITY",
+    }[payload.decision_type]
+    if mission.status != required_state:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{payload.decision_type.replace('_', ' ').title()} requires Mission state {required_state}.",
+        )
+
+    if payload.decision_type == "QUALITY_SELF_EVALUATION" and payload.status == "APPROVED":
+        return
 
 
 def _decision_evidence_snapshot(mission: QualityMission) -> dict[str, Any]:
@@ -433,154 +452,11 @@ def list_missions(
     }
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-def create_mission(
-    payload: MissionCreate,
-    ctx: TenantContext = Depends(require_quality_permission("qms.change.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    now = _utcnow()
-    mission = QualityMission(
-        amo_id=ctx.amo_id,
-        mission_ref=_mission_ref(),
-        mission_type=payload.mission_type,
-        title=payload.title.strip(),
-        description=payload.description,
-        scope=payload.scope,
-        regulatory_basis=payload.regulatory_basis,
-        risk_level=payload.risk_level,
-        status="PLANNING",
-        owner_user_id=payload.owner_user_id or ctx.user_id,
-        requested_by_user_id=ctx.user_id,
-        sponsor_user_id=payload.sponsor_user_id,
-        requested_at=now,
-        target_date=payload.target_date,
-        started_at=now,
-        created_by_user_id=ctx.user_id,
-        updated_by_user_id=ctx.user_id,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(mission)
-    db.flush()
-
-    if payload.mission_type == "CAPABILITY_ADDITION":
-        for item in CAPABILITY_ADDITION_GATE_TEMPLATE:
-            db.add(
-                QualityMissionGate(
-                    amo_id=ctx.amo_id,
-                    mission_id=mission.id,
-                    gate_code=item["gate_code"],
-                    title=item["title"],
-                    category=item["category"],
-                    gate_type="HARD",
-                    status="PENDING",
-                    requirement_ref=item["requirement_ref"],
-                    source_owner_module=item["source_owner_module"],
-                    source_type=item["source_type"],
-                    evidence_status="UNLINKED",
-                    sort_order=item["sort_order"],
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-
-    db.commit()
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=str(mission.id)), include_detail=True)
-
-
 @router.get("/{mission_id}")
 def get_mission(
     mission_id: str,
     ctx: TenantContext = Depends(require_quality_permission("qms.change.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)
-
-
-@router.patch("/{mission_id}/gates/{gate_id}")
-def update_mission_gate(
-    mission_id: str,
-    gate_id: str,
-    payload: GatePatch,
-    ctx: TenantContext = Depends(require_quality_permission("qms.change.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
-    gate = next((item for item in mission.gates if str(item.id) == gate_id), None)
-    if not gate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission gate not found.")
-
-    updates = payload.model_dump(exclude_unset=True)
-    candidate_evidence_status = updates.get("evidence_status", gate.evidence_status)
-    candidate_source_type = updates.get("source_type", gate.source_type)
-    candidate_source_id = updates.get("source_id", gate.source_id)
-    candidate_status = updates.get("status", gate.status)
-
-    if candidate_status == "PASS":
-        if candidate_evidence_status != "VERIFIED" or not candidate_source_type or not candidate_source_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="A Mission gate may PASS only with a VERIFIED authoritative source reference.",
-            )
-    if candidate_status in {"FAIL", "BLOCKED"} and not str(updates.get("blocking_reason", gate.blocking_reason) or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="FAIL or BLOCKED Mission gates require a blocking reason.",
-        )
-
-    for field, value in updates.items():
-        setattr(gate, field, value)
-    gate.updated_at = _utcnow()
-    if candidate_status == "PASS":
-        gate.passed_at = _utcnow()
-        gate.passed_by_user_id = ctx.user_id
-        gate.blocking_reason = None
-    elif candidate_status != "PASS":
-        gate.passed_at = None
-        gate.passed_by_user_id = None
-
-    readiness = mission_readiness(list(mission.gates))
-    mission.status = "GATE_REVIEW" if readiness["ready_for_quality_self_evaluation"] else "IN_PROGRESS"
-    mission.updated_by_user_id = ctx.user_id
-    mission.updated_at = _utcnow()
-
-    db.commit()
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)
-
-
-@router.post("/{mission_id}/decisions", status_code=status.HTTP_201_CREATED)
-def record_mission_decision(
-    mission_id: str,
-    payload: MissionDecisionCreate,
-    ctx: TenantContext = Depends(require_quality_permission("qms.change.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
-    assert_mission_decision_allowed(mission, payload)
-
-    decision = QualityMissionDecision(
-        amo_id=ctx.amo_id,
-        mission_id=mission.id,
-        decision_type=payload.decision_type,
-        status=payload.status,
-        rationale=payload.rationale.strip(),
-        evidence_snapshot=_decision_evidence_snapshot(mission),
-        decided_by_user_id=ctx.user_id,
-        decided_at=_utcnow(),
-        created_at=_utcnow(),
-    )
-    db.add(decision)
-    _apply_decision_to_mission(mission, payload)
-    mission.updated_by_user_id = ctx.user_id
-    mission.updated_at = _utcnow()
-    db.commit()
-
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)

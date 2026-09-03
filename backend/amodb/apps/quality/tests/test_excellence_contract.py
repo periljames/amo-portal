@@ -4,6 +4,8 @@ from datetime import date
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.assurance_lifecycle_guard_router import router as lifecycle_router
+from amodb.apps.quality.assurance_wiring_router import router as wiring_router
 from amodb.apps.quality.excellence_router import (
     _rule_candidates,
     _score_readiness,
@@ -32,7 +34,11 @@ def _catchall_index(router) -> int:
 
 
 def test_excellence_routes_cover_readiness_controls_evidence_and_governance() -> None:
-    methods = _route_methods(excellence_router)
+    methods = (
+        _route_methods(excellence_router)
+        | _route_methods(wiring_router)
+        | _route_methods(lifecycle_router)
+    )
     expected = {
         ("/excellence/overview", "GET"),
         ("/excellence/controls", "GET"),

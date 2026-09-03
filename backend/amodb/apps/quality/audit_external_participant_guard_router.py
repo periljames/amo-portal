@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_write_db
 
 from .audit_external_access_models import QualityExternalIdentity
-from .audit_external_access_router import ExternalParticipantCreate, _normalise_email, create_external_participant
+from .audit_external_access_router import ExternalParticipantCreate, _create_external_participant, _normalise_email
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -72,4 +72,4 @@ def create_external_participant_guarded(
         payload.assurance_level,
     )
 
-    return create_external_participant(audit_id=audit_id, payload=payload, ctx=ctx, db=db)
+    return _create_external_participant(audit_id=audit_id, payload=payload, ctx=ctx, db=db)

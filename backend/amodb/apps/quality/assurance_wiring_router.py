@@ -46,7 +46,7 @@ class SourceSpec:
 
 SOURCE_REGISTRY: dict[str, SourceSpec] = {
     "AUDIT": SourceSpec("AUDIT", "Audit", "qms_audits", ("id", "audit_ref"), ("audit_ref", "title"), ("planned_end",), "/maintenance/{amo_code}/quality/audits/{id}/setup", "Approved audit scope, fieldwork, report and closeout record."),
-    "AUDIT_SCHEDULE": SourceSpec("AUDIT_SCHEDULE", "Audit schedule", "qms_audit_schedules", ("id",), ("title", "kind", "auditee"), ("next_due_date",), "/maintenance/{amo_code}/quality/audits/plan?view=list&schedule_id={id}", "Risk-based audit programme commitment."),
+    "AUDIT_SCHEDULE": SourceSpec("AUDIT_SCHEDULE", "Audit schedule", "qms_audit_schedules", ("id",), ("title", "kind", "auditee"), ("next_due_date",), "/maintenance/{amo_code}/quality/audits/schedules/{id}", "Risk-based audit programme commitment."),
     "FINDING": SourceSpec("FINDING", "Finding", "qms_audit_findings", ("id", "finding_ref"), ("finding_ref", "description"), ("target_close_date",), "/maintenance/{amo_code}/quality/findings/{id}/overview", "Objective evidence, classification and closeout state."),
     "CAR": SourceSpec("CAR", "CAR / CAPA", "quality_cars", ("id", "car_number"), ("car_number", "title"), ("due_date",), "/maintenance/{amo_code}/quality/cars/{id}/overview", "Containment, root cause, action, effectiveness and closure record."),
     "DOCUMENT": SourceSpec("DOCUMENT", "Controlled document", "qms_documents", ("id", "doc_code"), ("doc_code", "title"), ("review_due_date", "expiry_date"), "/maintenance/{amo_code}/quality/documents/library/{id}", "Approved controlled procedure, manual, form or work instruction."),
@@ -375,152 +375,6 @@ def _test_dict(row: QualityControlTest) -> dict[str, Any]:
     }
 
 
-def _safe_count(
-    db: Session,
-    ctx: TenantContext,
-    source: str,
-    sql: str,
-    params: dict[str, Any],
-    warnings: list[dict[str, str]],
-) -> int:
-    try:
-        with db.begin_nested():
-            return int(db.execute(text(sql), params).scalar() or 0)
-    except Exception as exc:
-        warnings.append({"source": source, "message": str(exc), "type": exc.__class__.__name__})
-        set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-        return 0
-
-
-def _score(value: float) -> int:
-    return max(0, min(100, int(round(value))))
-
-
-def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list[dict[str, str]]]:
-    today = date.today()
-    due_30 = today + timedelta(days=30)
-    params = {"amo_id": ctx.amo_id, "today": today, "due_30": due_30}
-    warnings: list[dict[str, str]] = []
-    queries = {
-        "overdue_audits": "SELECT COUNT(*) FROM qms_audit_schedules WHERE amo_id=:amo_id AND is_active IS TRUE AND next_due_date < :today",
-        "audits_due_30": "SELECT COUNT(*) FROM qms_audit_schedules WHERE amo_id=:amo_id AND is_active IS TRUE AND next_due_date BETWEEN :today AND :due_30",
-        "open_cars": "SELECT COUNT(*) FROM quality_cars WHERE amo_id=:amo_id AND status NOT IN ('CLOSED','CANCELLED')",
-        "overdue_cars": "SELECT COUNT(*) FROM quality_cars WHERE amo_id=:amo_id AND status NOT IN ('CLOSED','CANCELLED') AND due_date < :today",
-        "cars_due_30": "SELECT COUNT(*) FROM quality_cars WHERE amo_id=:amo_id AND status NOT IN ('CLOSED','CANCELLED') AND due_date BETWEEN :today AND :due_30",
-        "open_findings": "SELECT COUNT(*) FROM qms_audit_findings WHERE amo_id=:amo_id AND closed_at IS NULL",
-        "active_documents": "SELECT COUNT(*) FROM qms_documents WHERE amo_id=:amo_id AND status='ACTIVE'",
-        "draft_documents": "SELECT COUNT(*) FROM qms_documents WHERE amo_id=:amo_id AND status='DRAFT'",
-        "expired_training": "SELECT COUNT(*) FROM (SELECT DISTINCT ON (user_id,course_id) user_id,course_id,valid_until FROM training_records WHERE amo_id=:amo_id AND valid_until IS NOT NULL AND UPPER(CAST(verification_status AS TEXT))='VERIFIED' AND COALESCE(UPPER(NULLIF(record_status,'')),'ACTIVE') NOT IN ('RENEWED','SUPERSEDED') AND COALESCE(UPPER(NULLIF(source_status,'')),'ACTIVE') NOT IN ('RENEWED','SUPERSEDED') ORDER BY user_id,course_id,valid_until DESC NULLS LAST,completion_date DESC NULLS LAST,created_at DESC NULLS LAST,id DESC) latest WHERE valid_until < :today",
-        "expired_supplier_approvals": "SELECT COUNT(*) FROM qms_supplier_approvals WHERE amo_id=:amo_id AND COALESCE(valid_until,expiry_date,approval_expiry) < :today",
-        "supplier_approvals_due_30": "SELECT COUNT(*) FROM qms_supplier_approvals WHERE amo_id=:amo_id AND COALESCE(valid_until,expiry_date,approval_expiry) BETWEEN :today AND :due_30",
-        "overdue_calibrations": "SELECT COUNT(*) FROM qms_calibration_records WHERE amo_id=:amo_id AND COALESCE(next_due_date,due_date,valid_until) < :today",
-        "calibrations_due_30": "SELECT COUNT(*) FROM qms_calibration_records WHERE amo_id=:amo_id AND COALESCE(next_due_date,due_date,valid_until) BETWEEN :today AND :due_30",
-        "out_of_tolerance": "SELECT COUNT(*) FROM qms_out_of_tolerance_events WHERE amo_id=:amo_id AND COALESCE(status,'OPEN') NOT IN ('CLOSED','RESOLVED')",
-        "critical_risks": "SELECT COUNT(*) FROM qms_risks WHERE amo_id=:amo_id AND UPPER(COALESCE(rating,risk_level,severity,''))='CRITICAL' AND COALESCE(status,'OPEN') NOT IN ('CLOSED','ACCEPTED')",
-        "high_risks": "SELECT COUNT(*) FROM qms_risks WHERE amo_id=:amo_id AND UPPER(COALESCE(rating,risk_level,severity,''))='HIGH' AND COALESCE(status,'OPEN') NOT IN ('CLOSED','ACCEPTED')",
-        "pending_changes": "SELECT COUNT(*) FROM qms_change_controls WHERE amo_id=:amo_id AND COALESCE(status,'DRAFT') IN ('DRAFT','PENDING_APPROVAL','OPEN','IN_PROGRESS')",
-        "overdue_review_actions": "SELECT COUNT(*) FROM qms_management_review_actions WHERE amo_id=:amo_id AND due_date < :today AND COALESCE(status,'OPEN') NOT IN ('CLOSED','COMPLETED')",
-        "open_regulator_findings": "SELECT COUNT(*) FROM qms_regulator_findings WHERE amo_id=:amo_id AND COALESCE(status,'OPEN') NOT IN ('CLOSED','ACCEPTED')",
-        "overdue_external_commitments": "SELECT COUNT(*) FROM qms_external_commitments WHERE amo_id=:amo_id AND due_date < :today AND COALESCE(status,'OPEN') NOT IN ('CLOSED','COMPLETED')",
-        "active_controls": "SELECT COUNT(*) FROM quality_assurance_controls WHERE amo_id=:amo_id AND status='ACTIVE'",
-        "approved_controls": "SELECT COUNT(*) FROM quality_assurance_controls WHERE amo_id=:amo_id AND status='ACTIVE' AND approval_status='APPROVED'",
-        "controls_due": "SELECT COUNT(*) FROM quality_assurance_controls WHERE amo_id=:amo_id AND status='ACTIVE' AND (next_test_due IS NULL OR next_test_due <= :due_30)",
-        "verified_controls": "SELECT COUNT(DISTINCT control_id) FROM quality_assurance_evidence_links WHERE amo_id=:amo_id AND evidence_status='VERIFIED' AND (valid_until IS NULL OR valid_until >= :today)",
-        "invalid_evidence": "SELECT COUNT(*) FROM quality_assurance_evidence_links WHERE amo_id=:amo_id AND evidence_status IN ('EXPIRED','REJECTED')",
-        "failed_control_tests": "SELECT COUNT(*) FROM quality_control_tests WHERE amo_id=:amo_id AND result IN ('FAIL','PARTIAL') AND tested_at >= NOW() - INTERVAL '365 days'",
-        "pending_assurance_events": "SELECT COUNT(*) FROM quality_assurance_events WHERE amo_id=:amo_id AND processing_status='PENDING'",
-        "proposed_insights": "SELECT COUNT(*) FROM quality_intelligence_reviews WHERE amo_id=:amo_id AND status='PROPOSED'",
-    }
-    return ({name: _safe_count(db, ctx, name, sql, params, warnings) for name, sql in queries.items()}, warnings)
-
-
-def _readiness(metrics: dict[str, int]) -> dict[str, Any]:
-    total_docs = metrics.get("active_documents", 0) + metrics.get("draft_documents", 0)
-    active_controls = metrics.get("active_controls", 0)
-    dimensions = {
-        "audit_programme": _score(100 - metrics.get("overdue_audits", 0) * 18 - metrics.get("audits_due_30", 0) * 2),
-        "capa_discipline": _score(100 - metrics.get("overdue_cars", 0) * 14 - max(0, metrics.get("open_cars", 0) - metrics.get("overdue_cars", 0)) * 2),
-        "finding_control": _score(100 - metrics.get("open_findings", 0) * 4),
-        "document_currency": _score(50 if total_docs == 0 else metrics.get("active_documents", 0) / total_docs * 100),
-        "competence": _score(100 - metrics.get("expired_training", 0) * 10),
-        "supplier_calibration": _score(100 - metrics.get("expired_supplier_approvals", 0) * 10 - metrics.get("overdue_calibrations", 0) * 10 - metrics.get("out_of_tolerance", 0) * 15),
-        "risk_change": _score(100 - metrics.get("critical_risks", 0) * 18 - metrics.get("high_risks", 0) * 8 - metrics.get("pending_changes", 0) * 3),
-        "continuous_controls": _score(25 if active_controls == 0 else (metrics.get("verified_controls", 0) / max(1, active_controls) * 70 + metrics.get("approved_controls", 0) / max(1, active_controls) * 30 - metrics.get("controls_due", 0) * 4 - metrics.get("failed_control_tests", 0) * 8)),
-        "external_commitments": _score(100 - metrics.get("open_regulator_findings", 0) * 12 - metrics.get("overdue_external_commitments", 0) * 12),
-        "management_review": _score(100 - metrics.get("overdue_review_actions", 0) * 10),
-    }
-    weights = {
-        "audit_programme": 0.15,
-        "capa_discipline": 0.15,
-        "finding_control": 0.08,
-        "document_currency": 0.08,
-        "competence": 0.08,
-        "supplier_calibration": 0.10,
-        "risk_change": 0.10,
-        "continuous_controls": 0.16,
-        "external_commitments": 0.05,
-        "management_review": 0.05,
-    }
-    overall = _score(sum(dimensions[key] * weights[key] for key in weights))
-    band = "STRONG" if overall >= 85 else "WATCH" if overall >= 70 else "AT_RISK" if overall >= 50 else "CRITICAL"
-    return {
-        "score": overall,
-        "band": band,
-        "dimensions": [{"id": key, "label": key.replace("_", " ").title(), "score": dimensions[key], "weight": weights[key]} for key in weights],
-        "method": "cross_module_continuous_assurance_v2",
-        "disclaimer": "Readiness is a transparent operational indicator, not a regulatory compliance declaration.",
-    }
-
-
-def _priority_queue(metrics: dict[str, int], amo_code: str) -> list[dict[str, Any]]:
-    candidates = [
-        ("overdue-cars", "Overdue corrective actions", "overdue_cars", "CRITICAL", "Closure dates have passed while CAR records remain open.", f"/maintenance/{amo_code}/quality/cars/overdue"),
-        ("regulator-findings", "Open regulator findings", "open_regulator_findings", "CRITICAL", "Authority findings remain open and require governed response evidence.", f"/maintenance/{amo_code}/quality/external-interface/regulator-findings"),
-        ("overdue-audits", "Overdue audit commitments", "overdue_audits", "HIGH", "Approved audit programme dates have passed.", f"/maintenance/{amo_code}/quality/audits/plan?view=calendar"),
-        ("calibration", "Overdue calibration", "overdue_calibrations", "HIGH", "Measuring or inspection equipment has passed its calibration due date.", f"/maintenance/{amo_code}/quality/equipment-calibration/overdue"),
-        ("supplier-approval", "Expired supplier approvals", "expired_supplier_approvals", "HIGH", "Supplier approval evidence is no longer current.", f"/maintenance/{amo_code}/quality/suppliers/expired-approvals"),
-        ("training", "Expired competence evidence", "expired_training", "HIGH", "Latest recurrent training or qualification validity has expired.", f"/maintenance/{amo_code}/quality/training-competence/overdue"),
-        ("controls", "Controls needing retest", "controls_due", "HIGH", "Controls have no future test date or fall due within 30 days.", f"/maintenance/{amo_code}/quality?hub=controls"),
-        ("evidence", "Invalid assurance evidence", "invalid_evidence", "HIGH", "Linked evidence is expired, rejected or no longer supported by its source.", f"/maintenance/{amo_code}/quality?hub=evidence"),
-        ("risk", "Critical quality risks", "critical_risks", "HIGH", "Critical risks remain open without accepted treatment closure.", f"/maintenance/{amo_code}/quality/risk/register"),
-        ("review", "Overdue management-review actions", "overdue_review_actions", "MEDIUM", "Management decisions have actions beyond their due date.", f"/maintenance/{amo_code}/quality/management-review/open-actions"),
-        ("events", "Assurance updates awaiting reconciliation", "pending_assurance_events", "INFO", "Authoritative records changed and their control links need reconciliation.", f"/maintenance/{amo_code}/quality?hub=evidence"),
-    ]
-    rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-    items = [{"id": item_id, "label": label, "count": metrics.get(metric, 0), "severity": severity, "why": why, "path": path} for item_id, label, metric, severity, why, path in candidates if metrics.get(metric, 0) > 0]
-    return sorted(items, key=lambda item: (rank[item["severity"]], -item["count"]))
-
-
-@router.get("/overview/full")
-def full_assurance_overview(
-    ctx: TenantContext = Depends(require_quality_permission("qms.dashboard.view")),
-    db: Session = Depends(get_read_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    metrics, warnings = _full_metrics(db, ctx)
-    pressure = sum(metrics.get(key, 0) for key in ("audits_due_30", "cars_due_30", "controls_due", "supplier_approvals_due_30", "calibrations_due_30"))
-    return {
-        "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
-        "as_of": _now().isoformat(),
-        "readiness": _readiness(metrics),
-        "metrics": metrics,
-        "priority_queue": _priority_queue(metrics, ctx.amo_code),
-        "forecast": {
-            "commitments_due_30_days": pressure,
-            "band": "HEAVY" if pressure >= 20 else "ELEVATED" if pressure >= 8 else "MANAGEABLE",
-            "explanation": "Audit, CAR, control-test, supplier-approval and calibration commitments falling within 30 days.",
-        },
-        "capabilities": [
-            {"id": "control-twin", "label": "Approved control twin", "description": "Versioned controls with ownership, evidence, approval and operating-effectiveness tests.", "path": f"/maintenance/{ctx.amo_code}/quality?hub=controls"},
-            {"id": "evidence-graph", "label": "Validated evidence graph", "description": "Tenant-validated links that refresh when authoritative records change.", "path": f"/maintenance/{ctx.amo_code}/quality?hub=evidence"},
-            {"id": "management-pack", "label": "Management-review pack", "description": "Current assurance exposure, decisions and evidence gaps prepared from live sources.", "path": f"/maintenance/{ctx.amo_code}/quality/management-review/dashboard"},
-            {"id": "human-intelligence", "label": "Human-governed intelligence", "description": "Deterministic and future AI recommendations remain advisory until a named decision is recorded.", "path": f"/maintenance/{ctx.amo_code}/quality?hub=intelligence"},
-        ],
-        "source_coverage": {"available": len(SOURCE_REGISTRY), "warnings": len(warnings)},
-        "warnings": warnings,
-    }
-
-
 @router.get("/source-catalog")
 def source_catalog(
     ctx: TenantContext = Depends(require_quality_permission("qms.evidence.view")),
@@ -630,10 +484,7 @@ def list_controls(
         "total": total,
         "as_of": _now().isoformat(),
     }
-
-
-@router.post("/controls", status_code=status.HTTP_201_CREATED)
-def create_control(
+def _create_control(
     payload: ControlCreate,
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
     db: Session = Depends(get_write_db),
@@ -698,8 +549,7 @@ def update_control(
     return _control_dict(row)
 
 
-@router.post("/controls/{control_id}/approval")
-def decide_control_approval(
+def _decide_control_approval(
     control_id: str,
     payload: ApprovalDecision,
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
@@ -723,8 +573,7 @@ def decide_control_approval(
     return _control_dict(row)
 
 
-@router.post("/controls/{control_id}/tests", status_code=status.HTTP_201_CREATED)
-def record_control_test(
+def _record_control_test(
     control_id: str,
     payload: ControlTestCreate,
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
@@ -1014,44 +863,4 @@ def evidence_graph(
             "verified_relationships": sum(1 for row in links if row.evidence_status == "VERIFIED"),
         },
         "as_of": _now().isoformat(),
-    }
-
-
-@router.get("/management-review-pack")
-def management_review_pack(
-    ctx: TenantContext = Depends(require_quality_permission("qms.management_review.view")),
-    db: Session = Depends(get_read_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    metrics, warnings = _full_metrics(db, ctx)
-    readiness = _readiness(metrics)
-    priorities = _priority_queue(metrics, ctx.amo_code)
-    decisions = [
-        {
-            "title": item["label"],
-            "reason": item["why"],
-            "severity": item["severity"],
-            "count": item["count"],
-            "path": item["path"],
-        }
-        for item in priorities[:8]
-    ]
-    return {
-        "generated_at": _now().isoformat(),
-        "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
-        "readiness": readiness,
-        "executive_summary": [
-            f"Operational readiness is {readiness['score']}% ({readiness['band'].replace('_', ' ').lower()}).",
-            f"{metrics.get('overdue_cars', 0)} corrective actions and {metrics.get('overdue_audits', 0)} audit commitments are overdue.",
-            f"{metrics.get('invalid_evidence', 0)} assurance relationships are expired or rejected.",
-            f"{metrics.get('critical_risks', 0)} critical quality risks and {metrics.get('open_regulator_findings', 0)} regulator findings remain open.",
-        ],
-        "decisions_required": decisions,
-        "metrics": metrics,
-        "evidence_gaps": {
-            "invalid_evidence": metrics.get("invalid_evidence", 0),
-            "controls_due": metrics.get("controls_due", 0),
-            "pending_events": metrics.get("pending_assurance_events", 0),
-        },
-        "source_warnings": warnings,
     }

@@ -1,0 +1,184 @@
+[runtime     ] Venspera development runtime
+[runtime     ] env: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\.env.development
+[runtime     ] API jobs are isolated, but all workers stay continuously available.
+[runtime     ]   - api :8080
+[runtime     ]   - ops-gateway :8090
+[runtime     ]   - jobs
+[runtime     ]   - scheduler
+[runtime     ]   - evidence
+[runtime     ]   - ops-worker
+[runtime     ]   - rostering
+[runtime     ]   - frontend :5173
+[runtime     ] Ctrl+C stops the complete runtime.
+[runtime     ] started api (pid=26164)
+[runtime     ] started ops-gateway (pid=6760)
+[runtime     ] started jobs (pid=16092)
+[runtime     ] started scheduler (pid=20528)
+[runtime     ] started evidence (pid=20164)
+[runtime     ] started ops-worker (pid=24964)
+[runtime     ] started rostering (pid=20120)
+[runtime     ] started frontend (pid=8036)
+[api         ] INFO:     Will watch for changes in these directories: ['D:\\XLK-Assets-AMO-Portal-and-DB\\amo-portal\\backend']
+[api         ] INFO:     Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+[api         ] INFO:     Started reloader process [24776] using WatchFiles
+[ops-gateway ] INFO:     Will watch for changes in these directories: ['D:\\XLK-Assets-AMO-Portal-and-DB\\amo-portal\\backend']
+[ops-gateway ] INFO:     Uvicorn running on http://127.0.0.1:8090 (Press CTRL+C to quit)
+[ops-gateway ] INFO:     Started reloader process [19568] using WatchFiles
+[frontend    ] npm warn Unknown env config "devdir". This will stop working in the next major version of npm.
+[frontend    ] 
+[frontend    ] > frontend@0.0.0 dev
+[frontend    ] > vite --host 0.0.0.0 --port 5173
+[frontend    ] 
+[frontend    ] 
+[frontend    ]   VITE v7.3.2  ready in 2699 ms
+[frontend    ] 
+[frontend    ]   ➜  Local:   http://localhost:5173/
+[frontend    ]   ➜  Network: http://100.117.215.109:5173/
+[frontend    ]   ➜  Network: http://10.5.0.2:5173/
+[frontend    ]   ➜  Network: http://192.168.8.5:5173/
+[frontend    ]   ➜  Network: http://192.168.118.1:5173/
+[frontend    ]   ➜  Network: http://192.168.72.1:5173/
+[frontend    ]   ➜  Network: http://172.20.128.1:5173/
+[frontend    ]   ➜  press h + enter to show help
+[frontend    ] 5:00:41 AM [vite] http proxy error: /auth/me
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:00:41 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:00:56 AM [vite] http proxy error: /livez
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:01 AM [vite] http proxy error: /livez
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:01 AM [vite] http proxy error: /time
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:03 AM [vite] http proxy error: /auth/portal-preferences/
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:03 AM [vite] http proxy error: /auth/portal-preferences/
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /auth/me
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /platform/console/bootstrap
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /platform/console/bootstrap
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:06 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:07 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:10 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:17 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:21 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[scheduler   ] INFO:amodb.jobs.portal_job_supervisor:Started scheduled durable-job workers (max active cycles=1): training-notifications, training-plans
+[frontend    ] 5:01:29 AM [vite] http proxy error: /ops/v1/live?data_mode=REAL
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8090
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[scheduler   ] INFO:amodb.quality.planner.automation:Quality planner automation cycle completed: {'started_at': '2026-08-24T09:01:25.027256+00:00', 'completed_at': '2026-08-24T09:01:29.895514+00:00', 'materialized': 0, 'conflicts': 1, 'upcoming_notices': 0, 'day_of_notices': 0, 'errors': 0}
+[scheduler   ] INFO:amodb.apps.reliability.advanced_scheduler:Reliability scheduler cycle completed: {'tenants': 1, 'harvested_batches': 0, 'calculation_runs': 0}
+[frontend    ] 5:01:36 AM [vite] http proxy error: /auth/me
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:36 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[ops-gateway ] INFO:     Started server process [2976]
+[ops-gateway ] INFO:     Waiting for application startup.
+[ops-gateway ] INFO:     Application startup complete.
+[rostering   ] {"as_of": "2026-08-24T09:01:41.618753+00:00", "completed_count": 0, "due_count": 0, "failed_count": 0, "results": [], "skipped_count": 0}
+[frontend    ] 5:01:50 AM [vite] http proxy error: /livez
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:01:51 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[ops-gateway ] INFO:     127.0.0.1:56482 - "GET /ops/v1/live?data_mode=REAL HTTP/1.1" 200 OK
+[frontend    ] 5:01:55 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:02:06 AM [vite] http proxy error: /auth/me
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:02:06 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[frontend    ] 5:02:17 AM [vite] http proxy error: /platform/tenants?data_mode=REAL&limit=25&offset=0
+[frontend    ] Error: connect ECONNREFUSED 127.0.0.1:8080
+[frontend    ]     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[api         ] INFO:     Started server process [21140]
+[api         ] INFO:     Waiting for application startup.
+[api         ] INFO:     Application startup complete.
+[api         ] INFO:     127.0.0.1:62818 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:51985 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52765 - "GET /health HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52766 - "GET /healthz HTTP/1.1" 200 OK
+[jobs        ] INFO:amodb.jobs.portal_job_supervisor:Started dedicated durable-job workers (max active cycles=1): training-reports
+[api         ] INFO:     127.0.0.1:52769 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:63443 - "GET /time HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:56906 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:56907 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[jobs        ] INFO:amodb.jobs.portal_job_supervisor:Started dedicated durable-job workers (max active cycles=1): workforce
+[api         ] INFO:     127.0.0.1:62979 - "GET /auth/me HTTP/1.1" 200 OK
+[jobs        ] INFO:amodb.jobs.portal_job_supervisor:Started dedicated durable-job workers (max active cycles=1): saas
+[jobs        ] INFO:amodb.jobs.portal_job_supervisor:Started dedicated durable-job workers (max active cycles=1): training-workbooks
+[api         ] INFO:     127.0.0.1:49931 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[jobs        ] INFO:amodb.jobs.portal_job_supervisor:Started dedicated durable-job workers (max active cycles=1): document-indexing
+[api         ] INFO:     127.0.0.1:50262 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:50761 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:55879 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:54385 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:56435 - "GET /auth/me HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:59644 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:59542 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52640 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52641 - "GET /health HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52642 - "GET /healthz HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52931 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:51261 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:50762 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:52051 - "GET /auth/me HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:58981 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:58566 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:53544 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:49307 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:57461 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:55832 - "GET /auth/me HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:65034 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:57103 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:55812 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:58903 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:65269 - "GET /livez HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:65155 - "GET /auth/me HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:54005 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:56442 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[api         ] INFO:     127.0.0.1:54159 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[ops-gateway ] WARNING:  WatchFiles detected changes in 'amodb\tests\test_migration_readiness.py'. Reloading...
+[api         ] WARNING:  WatchFiles detected changes in 'amodb\tests\test_migration_readiness.py'. Reloading...
+[api         ]  INFO:     127.0.0.1:60115 - "GET /platform/tenants?data_mode=REAL&limit=25&offset=0 HTTP/1.1" 200 OK
+[runtime     ] stopping services...
+[ops-gateway ] 
+[runtime     ] stopped

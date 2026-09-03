@@ -37,7 +37,7 @@ def list_programme_scheduling_queue(
             QualityAuditProgrammeItem.amo_id == ctx.amo_id,
             QualityAuditProgramme.amo_id == ctx.amo_id,
             QualityAuditProgramme.status.in_(["APPROVED", "ACTIVE"]),
-            QualityAuditProgrammeItem.state == "PLANNED",
+            QualityAuditProgrammeItem.state.in_(["PLANNED", "DEFERRED"]),
         )
     )
     total = int(query.order_by(None).count())
@@ -66,8 +66,10 @@ def list_programme_scheduling_queue(
                 "title": item.title,
                 "recurrence": item.recurrence,
                 "mandatory_surveillance": bool(item.mandatory_surveillance),
+                "state": item.state,
                 "target_start": item.target_start,
                 "target_end": item.target_end,
+                "deferral_reason": item.deferral_reason,
                 "prioritization_basis": item.prioritization_basis or [],
             }
             for item in rows

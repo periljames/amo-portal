@@ -18,6 +18,8 @@
 @import "./base.css";
 
 @import "./qms.css";
+@import "./qms-surfaces.css";
+@import "./qms-workspace-theme.css";
 @import "./components/app-shell.css";
 @import "./components/page-header.css";
 @import "./components/section-card.css";

@@ -172,7 +172,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   const effectiveSelectedId = selectedId && items.some((item) => item.checklist_item_id === selectedId) ? selectedId : items[0]?.checklist_item_id || null;
   const selected = items.find((item) => item.checklist_item_id === effectiveSelectedId) || null;
   const completed = items.filter((item) => item.canonical_response_status !== "NOT_VERIFIED").length;
-  const percent = items.length ? Math.round((completed / items.length) * 100) : 0;
+  const percent = items.length ? Math.round((completed / items.length) * 100) : null;
 
   useEffect(() => {
     setEvidenceFile(null);
@@ -255,7 +255,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
     <section className="qms-public-audit__card qms-external-auditor-fieldwork" aria-label="External auditor fieldwork">
       <header>
         <ShieldAlert size={19} />
-        <div><strong>Assigned audit checklist</strong><small>Scoped external-auditor fieldwork · {completed}/{items.length} resolved · {percent}%</small></div>
+        <div><strong>Assigned audit checklist</strong><small>Scoped external-auditor fieldwork · {completed}/{items.length} resolved · {percent != null ? `${percent}%` : "N/A"}</small></div>
         <button type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={14} /> Refresh</button>
       </header>
 

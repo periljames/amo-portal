@@ -63,17 +63,20 @@ body[data-color-scheme="light"] {
 }
 
 body[data-color-scheme="dark"] {
-  --qms-shadow-card: 0 12px 24px rgba(2, 6, 23, 0.55);
-  --qms-nav-border: #334155;
-  --qms-nav-link-bg: #0f172a;
-  --qms-nav-link-color: #e2e8f0;
-  --qms-nav-link-hover-border: #64748b;
-  --qms-nav-link-hover-bg: #1e293b;
-  --qms-nav-link-hover-shadow: 0 12px 20px rgba(2, 6, 23, 0.45);
-  --qms-nav-link-active-border: #60a5fa;
-  --qms-nav-link-active-bg: #1d4ed8;
-  --qms-nav-meta-color: #94a3b8;
-  --qms-nav-active-color: #cbd5e1;
+  --qms-shadow-card:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+  --qms-nav-border: rgba(255, 255, 255, 0.08);
+  --qms-nav-link-bg: rgba(255, 255, 255, 0.03);
+  --qms-nav-link-color: rgba(255, 255, 255, 0.88);
+  --qms-nav-link-hover-border: rgba(255, 255, 255, 0.12);
+  --qms-nav-link-hover-bg: rgba(255, 255, 255, 0.055);
+  --qms-nav-link-hover-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  --qms-nav-link-active-border: color-mix(in srgb, var(--accent-primary) 55%, rgba(255, 255, 255, 0.12));
+  --qms-nav-link-active-bg: rgba(255, 255, 255, 0.085);
+  --qms-nav-meta-color: rgba(255, 255, 255, 0.52);
+  --qms-nav-active-color: rgba(255, 255, 255, 0.96);
 }
 
 .qms-shell {

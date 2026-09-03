@@ -182,10 +182,13 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
   text-transform: uppercase;
 }
 
-.quality-context-bar__identity strong {
+.quality-context-bar__identity strong,
+.quality-context-bar__title {
   overflow: hidden;
   max-width: 18rem;
+  margin: 0;
   font-size: 0.9rem;
+  font-weight: 740;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -212,12 +215,13 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--qms-nav-idle, color-mix(in srgb, var(--text-primary) 88%, var(--text-secondary)));
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 680;
+  font-weight: 720;
   cursor: pointer;
   white-space: nowrap;
+  -webkit-font-smoothing: auto;
 }
 
 .quality-context-bar__tabs > button:hover {
@@ -228,6 +232,7 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
 .quality-context-bar__tabs > button.is-active {
   background: color-mix(in srgb, var(--accent-primary) 11%, var(--surface-elevated));
   color: var(--text-primary);
+  font-weight: 780;
 }
 
 .quality-context-bar__tabs > button.is-active::after {
@@ -255,11 +260,11 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
   min-height: 30px;
   padding: 0 0.48rem;
   border: 1px solid color-mix(in srgb, var(--accent-success) 32%, var(--surface-border));
-  border-radius: 999px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--accent-success) 8%, var(--surface-elevated));
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 0.72rem;
-  font-weight: 740;
+  font-weight: 760;
 }
 
 .quality-context-bar__primary {
@@ -281,23 +286,77 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
 
 .quality-context-bar__primary:hover { filter: brightness(1.04); }
 
-.quality-context-bar__more { position: relative; }
+.quality-context-bar__subtabs {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.05rem 0 0.2rem;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+}
+
+.quality-context-bar__subtabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 0.62rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  color: var(--qms-nav-idle, color-mix(in srgb, var(--text-primary) 86%, var(--text-secondary)));
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 720;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-font-smoothing: auto;
+}
+
+.quality-context-bar__subtabs > button:hover {
+  background: var(--tenant-nav-hover);
+  color: var(--text-primary);
+}
+
+.quality-context-bar__subtabs > button.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--surface-border));
+  background: color-mix(in srgb, var(--accent-primary) 11%, var(--surface-elevated));
+  color: var(--text-primary);
+  font-weight: 750;
+}
+
+.quality-context-bar__more { position: relative; flex: 0 0 auto; }
 .quality-context-bar__more > summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.12rem;
+  gap: 0.28rem;
   min-width: 40px;
-  min-height: 38px;
-  padding: 0;
+  min-height: 32px;
+  padding: 0 0.55rem;
   border: 1px solid var(--surface-border);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-elevated);
-  color: var(--text-primary);
+  color: var(--qms-nav-idle, color-mix(in srgb, var(--text-primary) 88%, var(--text-secondary)));
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 740;
   cursor: pointer;
   list-style: none;
+  white-space: nowrap;
+  -webkit-font-smoothing: auto;
 }
 .quality-context-bar__more > summary::-webkit-details-marker { display: none; }
+.quality-context-bar__more.is-active > summary,
+.quality-context-bar__more[open] > summary {
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--surface-border));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-elevated));
+  color: var(--text-primary);
+}
 .quality-context-bar__more > div {
   position: absolute;
   top: calc(100% + 0.45rem);
@@ -324,21 +383,57 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
   cursor: pointer;
 }
 .quality-context-bar__more button:hover { background: var(--tenant-nav-hover); }
+.quality-context-bar__more button.is-active {
+  background: color-mix(in srgb, var(--accent-primary) 11%, transparent);
+  font-weight: 750;
+}
 
 /* Remove competing hierarchy only where the new context bar provides the same information. */
 html.quality-context-active .qms-ops-page > .page-header { display: none; }
 html.quality-context-active .qms-ops-module-strip { display: none; }
 html.quality-context-active:not(.quality-context-overview) .qms-ops-hero { display: none; }
-html.quality-context-active .audit-shell-header__title-block { display: none; }
-html.quality-context-active .audit-shell-header__nav { display: none; }
+/* Quality context bar already provides breadcrumbs and tools — do not leave a lone ⋮ row. */
 html.quality-context-active .audit-shell-header {
-  margin: 0;
-  padding: 0.35rem 0;
-  border: 0;
-  background: transparent;
+  display: none !important;
+}
+html.quality-context-active .audit-shell-content {
+  gap: 0.55rem;
+}
+
+/* Audit Assurance: denser Quality context + less stacked chrome */
+html.audit-assurance-surface .quality-context-bar {
+  min-height: 44px;
+  gap: 0.45rem;
+  padding-block: 0.28rem;
+}
+html.audit-assurance-surface .quality-context-bar__tabs > button {
+  min-height: 32px;
+  padding-inline: 0.5rem;
+  font-size: 0.78rem;
+}
+html.audit-assurance-surface .quality-context-bar__primary {
+  min-height: 32px;
+  padding-inline: 0.55rem;
+  font-size: 0.76rem;
+}
+html.audit-assurance-surface .quality-context-bar__subtabs {
+  padding-bottom: 0.08rem;
+}
+html.audit-assurance-surface .quality-context-bar__subtabs > button {
+  min-height: 26px;
+  padding-inline: 0.5rem;
+  font-size: 0.72rem;
+}
+html.audit-assurance-surface .quality-context-bar__mark {
+  width: 28px;
+  height: 28px;
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  color: color-mix(in srgb, var(--accent-primary) 70%, var(--text-primary));
   box-shadow: none;
 }
-html.quality-context-active .audit-shell-header__top-row { justify-content: flex-end; }
+html.audit-assurance-surface .quality-context-bar__identity strong {
+  font-size: 0.84rem;
+}
 
 /* QMS operational text should remain readable at Standard size. */
 .qms-ops-page,
@@ -410,4 +505,61 @@ html.quality-context-active .audit-shell-header__top-row { justify-content: flex
   .quality-context-bar__identity strong { max-width: 48vw; }
   .quality-context-bar__tabs > button { min-height: 40px; font-size: 0.8rem; }
   .quality-context-bar__tabs > button > svg { display: none; }
+}
+
+/* --- Nav / tab contrast: idle tabs must stay readable on dark chrome --- */
+.quality-context-bar {
+  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #0f172a) 78%, var(--text-secondary, #64748b));
+}
+
+html[data-color-scheme="dark"] .quality-context-bar,
+body[data-color-scheme="dark"] .quality-context-bar,
+[data-theme="dark"] .quality-context-bar,
+.dark .quality-context-bar {
+  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #f8fafc) 92%, var(--text-secondary, #94a3b8));
+}
+
+.quality-context-bar__tabs > button,
+.quality-context-bar__subtabs > button,
+.quality-context-bar__more > summary {
+  color: var(--qms-nav-idle) !important;
+  -webkit-font-smoothing: auto;
+  font-weight: 730;
+}
+
+.quality-context-bar__tabs > button.is-active,
+.quality-context-bar__subtabs > button.is-active,
+.quality-context-bar__more.is-active > summary,
+.quality-context-bar__more[open] > summary {
+  color: var(--text-primary) !important;
+  font-weight: 800;
+}
+
+.quality-context-bar__live {
+  color: var(--text-primary) !important;
+  font-weight: 760;
+}
+
+.quality-context-bar__tabs > button > svg,
+.quality-context-bar__subtabs > button > svg,
+.quality-context-bar__more > summary > svg {
+  color: inherit;
+  stroke: currentColor;
+  opacity: 1;
+}
+
+/* Idle Quality tabs: full primary ink — active state uses accent chrome, not washed secondary */
+.quality-context-bar__tabs > button:not(.is-active),
+.quality-context-bar__subtabs > button:not(.is-active),
+.quality-context-bar__more:not(.is-active):not([open]) > summary {
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+  font-weight: 750 !important;
+}
+
+html[data-color-scheme="dark"] .quality-context-bar__tabs > button:not(.is-active),
+body[data-color-scheme="dark"] .quality-context-bar__tabs > button:not(.is-active),
+[data-theme="dark"] .quality-context-bar__tabs > button:not(.is-active),
+.dark .quality-context-bar__tabs > button:not(.is-active) {
+  color: rgba(255, 255, 255, 0.96) !important;
 }

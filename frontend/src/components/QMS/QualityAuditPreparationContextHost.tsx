@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, BookOpenCheck, ClipboardList, History, Link2, PanelRightClose, PanelRightOpen, RefreshCw, ShieldCheck } from "lucide-react";
 
-import { qmsResolveAudit } from "../../services/qms";
+import { resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
 import { getAuditPreparationContext } from "../../services/qmsAuditPreparationContext";
 import "../../styles/qms-audit-preparation-context.css";
 
@@ -18,8 +18,8 @@ const QualityAuditPreparationContextHost: React.FC<Props> = ({ amoCode, auditKey
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const auditQuery = useQuery({
-    queryKey: ["qms-preparation-context-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(auditKey),
+    queryKey: ["qms-preparation-context-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";

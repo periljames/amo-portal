@@ -209,7 +209,7 @@ def request_deferral(
         original_target_start=item.target_start,
         original_target_end=item.target_end,
         revised_target_start=payload.revised_target_start,
-        revised_target_end=payload.revised_target_end,
+        revised_target_end=revised_end,
         reason=payload.reason.strip(),
         risk_rating=payload.risk_rating,
         risk_assessment=payload.risk_assessment.strip(),
@@ -223,7 +223,10 @@ def request_deferral(
     db.flush()
     _add_event(db, ctx=ctx, row=row, event_type="REQUESTED", reason=payload.reason)
     db.commit()
-    loaded = db.query(QualityAuditDeferral).options(selectinload(QualityAuditDeferral.events)).filter(QualityAuditDeferral.id == row.id).one()
+    loaded = db.query(QualityAuditDeferral).options(selectinload(QualityAuditDeferral.events)).filter(
+        QualityAuditDeferral.amo_id == ctx.amo_id,
+        QualityAuditDeferral.id == row.id,
+    ).one()
     return _dict(loaded)
 
 
@@ -250,6 +253,11 @@ def decide_deferral(
         row.status = "WITHDRAWN"
         event = "WITHDRAWN"
     elif payload.decision == "APPROVE":
+        if row.requested_by_user_id and str(row.requested_by_user_id) == str(ctx.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The requester cannot approve their own audit deferral.",
+            )
         row.status = "APPROVED"
         event = "APPROVED"
     else:
@@ -283,8 +291,19 @@ def apply_deferral(
     if not allowed:
         raise HTTPException(status_code=409, detail="This deferral requires approval before the revised target window can be applied.")
     programme, item, _ = _load_item(db, amo_id=ctx.amo_id, item_id=row.programme_item_id, lock=True)
+    if programme.status not in {"APPROVED", "ACTIVE"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The programme revision is no longer active for deferral application.",
+        )
     if item.schedule_id is not None or item.state == "SCHEDULED":
         raise HTTPException(status_code=409, detail="The requirement became scheduled while the deferral was pending. Use the authoritative Planner reschedule workflow instead.")
+    revised_end = row.revised_target_end or row.revised_target_start
+    if row.revised_target_start < programme.period_start or revised_end > programme.period_end:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The approved programme period changed and no longer contains this deferral window. Create a new request against the current revision.",
+        )
     current_start = item.target_start.isoformat() if item.target_start else None
     current_end = item.target_end.isoformat() if item.target_end else None
     expected_start = row.original_target_start.isoformat() if row.original_target_start else None
@@ -300,9 +319,9 @@ def apply_deferral(
             },
         )
     item.target_start = row.revised_target_start
-    item.target_end = row.revised_target_end
+    item.target_end = revised_end
     item.deferral_reason = row.reason
-    item.state = "PLANNED"
+    item.state = "DEFERRED"
     item.updated_by_user_id = ctx.user_id
     item.updated_at = _utcnow()
     row.status = "APPLIED"

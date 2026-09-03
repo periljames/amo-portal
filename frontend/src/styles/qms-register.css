@@ -3,12 +3,12 @@
   --qms-register-danger: var(--accent-danger, #b42318);
   --qms-register-warning: var(--accent-warning, #9a6700);
   --qms-register-positive: var(--accent-success, #16723a);
-  --qms-register-border: var(--border, rgba(15, 23, 42, .13));
-  --qms-register-border-soft: color-mix(in srgb, var(--qms-register-border) 68%, transparent);
-  --qms-register-surface: var(--surface-elevated, #fff);
-  --qms-register-muted-surface: var(--surface, #f8fafc);
-  --qms-register-text: var(--text-primary, #172033);
-  --qms-register-muted: var(--text-secondary, #667085);
+  --qms-register-border: var(--qms-line, var(--border-color, var(--border, rgba(15, 23, 42, .13))));
+  --qms-register-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-register-border) 68%, transparent));
+  --qms-register-surface: var(--qms-panel, var(--surface-elevated, #fff));
+  --qms-register-muted-surface: var(--surface-subtle, var(--qms-page, var(--surface, #f8fafc)));
+  --qms-register-text: var(--qms-text, var(--text-primary, #172033));
+  --qms-register-muted: var(--qms-muted, var(--text-muted, var(--text-secondary, #667085)));
   display: grid;
   gap: 16px;
   width: min(100%, 1680px);
@@ -16,6 +16,7 @@
   margin: 0 auto;
   padding: 20px 20px 28px;
   color: var(--qms-register-text);
+  background: var(--qms-page, transparent);
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 
@@ -25,8 +26,8 @@
   margin: 0;
   padding: 20px 22px;
   border: 1px solid var(--qms-register-border);
-  border-radius: 14px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  border-radius: calc(var(--qms-radius, 0.55rem) + 0.2rem);
+  box-shadow: var(--qms-shadow, 0 1px 2px rgba(15, 23, 42, .04));
 }
 .qms-register-page .page-header__eyebrow { font-size: 12px; letter-spacing: .055em; }
 .qms-register-page .page-header__title { font-size: clamp(28px, 2.25vw, 34px); line-height: 1.08; letter-spacing: -.02em; }
@@ -58,9 +59,9 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--qms-register-border);
-  border-radius: 14px;
+  border-radius: calc(var(--qms-radius, 0.55rem) + 0.2rem);
   background: var(--qms-register-surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  box-shadow: var(--qms-shadow, 0 1px 2px rgba(15, 23, 42, .04));
 }
 
 .qms-register-toolbar {
@@ -136,7 +137,7 @@
   white-space: nowrap;
 }
 .qms-register-table td { max-width: 420px; color: var(--qms-register-text); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
-.qms-register-table tbody tr:hover { background: color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface)); }
+.qms-register-table tbody tr:hover { background: var(--qms-hover, color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface))); }
 .qms-register-table tbody tr:last-child td { border-bottom: 0; }
 
 .qms-register-status {
@@ -173,8 +174,8 @@
   text-decoration: none;
 }
 .qms-register-task:last-child { border-bottom: 0; }
-a.qms-register-task:hover { background: color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface)); }
-.qms-register-task__marker { width: 5px; height: 48px; border-radius: 999px; background: #98a2b3; }
+a.qms-register-task:hover { background: var(--qms-hover, color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface))); }
+.qms-register-task__marker { width: 5px; height: 48px; border-radius: 999px; background: color-mix(in srgb, var(--qms-muted, #98a2b3) 70%, var(--qms-panel, #fff)); }
 .qms-register-task__marker.is-danger { background: var(--qms-register-danger); }
 .qms-register-task__marker.is-warning { background: var(--qms-register-warning); }
 .qms-register-task__body { display: grid; gap: 5px; min-width: 0; }
@@ -265,4 +266,12 @@ a.qms-register-task:hover { background: color-mix(in srgb, var(--qms-register-ac
   .qms-register-page *,
   .qms-register-page *::before,
   .qms-register-page *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+html[data-color-scheme="dark"] .qms-register-page,
+body[data-color-scheme="dark"] .qms-register-page,
+[data-theme="dark"] .qms-register-page,
+.dark .qms-register-page {
+  /* Shared dark tokens come from qms-surfaces when .qms-register is present; keep aliases live. */
+  color: var(--qms-text);
 }

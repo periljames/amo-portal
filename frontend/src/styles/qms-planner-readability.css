@@ -6,8 +6,11 @@
 }
 
 .qms-modern-planner-v2 .qms-modern-planner__toolbar {
-  min-height: 4.15rem;
-  padding: .55rem .75rem;
+  min-height: 3.15rem;
+  padding: .32rem .55rem;
+}
+.qms-modern-planner-v2.is-embedded .qms-modern-planner__toolbar {
+  min-height: 3rem;
 }
 
 .qms-modern-planner-v2 .qms-planner-title strong { font-size: clamp(1.12rem, 1.35vw, 1.35rem); }
@@ -23,15 +26,17 @@
 .qms-modern-planner-v2 .qms-planner-nav button:nth-child(2) { min-width: 4.25rem; font-size: .82rem; }
 .qms-modern-planner-v2 .qms-planner-view-switch button { min-height: 2.15rem; padding-inline: .6rem; font-size: .8rem; }
 .qms-modern-planner-v2 .qms-planner-toolbar__search { min-height: 2.5rem; padding: 0 .65rem; }
-.qms-modern-planner-v2 .qms-planner-toolbar__search span { font-size: .82rem; }
+.qms-modern-planner-v2 .qms-planner-toolbar__search span,
+.qms-modern-planner-v2 .qms-planner-toolbar__search-placeholder {
+  font-size: .82rem;
+  color: color-mix(in srgb, var(--text-secondary, #64748b) 55%, transparent);
+}
 .qms-modern-planner-v2 kbd { min-height: 1.45rem; font-size: .71rem; }
 
 .qms-modern-planner-v2 .qms-planner-mini { gap: .45rem; padding: .78rem .75rem .72rem; }
 .qms-modern-planner-v2 .qms-planner-mini > header strong { font-size: .9rem; }
 .qms-modern-planner-v2 .qms-planner-mini__weekdays span { min-height: 1.3rem; font-size: .7rem; }
 .qms-modern-planner-v2 .qms-planner-mini__days button { font-size: .75rem; }
-.qms-modern-planner-v2 .qms-planner-quick-schedule { min-height: 2.6rem; }
-.qms-modern-planner-v2 .qms-planner-quick-schedule span { font-size: .82rem; }
 .qms-modern-planner-v2 .qms-planner-rail-section { gap: .28rem; padding: .65rem .6rem; }
 .qms-modern-planner-v2 .qms-planner-rail-section > header { min-height: 1.8rem; }
 .qms-modern-planner-v2 .qms-planner-rail-section > header strong { font-size: .72rem; }
@@ -53,10 +58,33 @@
 .qms-modern-planner-v2 .qms-planner-empty span { font-size: .82rem; }
 
 .qms-modern-planner-v2 .qms-planner-month { grid-template-columns: repeat(7, minmax(8.4rem, 1fr)); min-width: 60rem; }
-.qms-modern-planner-v2 .qms-planner-month__dow { min-height: 2.25rem; padding: 0 .6rem; font-size: .72rem; }
+.qms-modern-planner-v2 .qms-planner-month__dow {
+  min-height: 2.25rem;
+  padding: 0 .6rem;
+  font-size: .72rem;
+  background: color-mix(in srgb, var(--planner-page) 55%, var(--planner-panel));
+}
 .qms-modern-planner-v2 .qms-planner-month__day { padding: .46rem; }
 .qms-modern-planner-v2 .qms-planner-month__day > header { min-height: 1.7rem; margin-bottom: .3rem; }
 .qms-modern-planner-v2 .qms-planner-month__day > header strong { width: 1.7rem; height: 1.7rem; font-size: .8rem; }
+.qms-modern-planner-v2 .qms-planner-month__day:not(.is-muted) {
+  background: #252830 !important;
+}
+.qms-modern-planner-v2 .qms-planner-month__day.is-muted {
+  background: #12151a !important;
+}
+.qms-modern-planner-v2 .qms-planner-month__day.is-muted > header strong {
+  color: #6b7280 !important;
+  -webkit-text-fill-color: #6b7280 !important;
+  opacity: 1 !important;
+  font-weight: 560 !important;
+}
+.qms-modern-planner-v2 .qms-planner-month__day:not(.is-muted) > header strong {
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  opacity: 1 !important;
+  font-weight: 720 !important;
+}
 .qms-modern-planner-v2 .qms-planner-month__day > header span { min-width: 1.35rem; height: 1.3rem; font-size: .69rem; }
 .qms-modern-planner-v2 .qms-planner-month__events { gap: .25rem; }
 .qms-modern-planner-v2 .qms-planner-month__more { min-height: 1.6rem; font-size: .72rem; }

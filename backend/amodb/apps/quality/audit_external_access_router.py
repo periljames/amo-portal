@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 import uuid
@@ -36,6 +37,8 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 router = APIRouter(tags=["Quality external audit access"])
 _public_extension = APIRouter(prefix="/quality", tags=["Quality / External Audit Access"])
 _GUEST_COOKIE = "amo_qms_audit_guest"
+_CANONICAL_GUEST_COOKIE_PATH = "/quality/audit-access"
+_LEGACY_GUEST_COOKIE_PATH = "/"
 _TOKEN_VERSION = 1
 
 AUDITEE_ALLOWED = {
@@ -256,8 +259,7 @@ def list_external_participants(
     return {"items": [_participant_payload(row) for row in rows]}
 
 
-@router.post("/audits/{audit_id}/external-participants", status_code=status.HTTP_201_CREATED)
-def create_external_participant(
+def _create_external_participant(
     audit_id: uuid.UUID,
     payload: ExternalParticipantCreate,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
@@ -366,43 +368,6 @@ def revoke_external_participant(
     db.commit()
     db.refresh(row)
     return _participant_payload(row)
-
-
-@router.post("/audits/{audit_id}/findings/{finding_id}/release")
-def release_audit_finding(
-    audit_id: uuid.UUID,
-    finding_id: uuid.UUID,
-    payload: FindingReleaseCreate,
-    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    finding = db.query(models.QMSAuditFinding).filter(
-        models.QMSAuditFinding.amo_id == ctx.amo_id,
-        models.QMSAuditFinding.audit_id == audit_id,
-        models.QMSAuditFinding.id == finding_id,
-    ).first()
-    if finding is None:
-        raise HTTPException(status_code=404, detail="Finding not found.")
-    event = QualityAuditFindingReleaseEvent(
-        amo_id=ctx.amo_id,
-        audit_id=audit_id,
-        finding_id=finding_id,
-        action=payload.action,
-        include_objective_evidence=payload.include_objective_evidence,
-        released_evidence_refs=payload.released_evidence_refs,
-        reason=payload.reason.strip(),
-        actor_user_id=ctx.user_id,
-    )
-    db.add(event)
-    db.commit()
-    return {
-        "finding_id": str(finding_id),
-        "action": event.action,
-        "released_at": event.created_at.isoformat(),
-        "include_objective_evidence": event.include_objective_evidence,
-        "released_evidence_refs": event.released_evidence_refs,
-    }
 
 
 def _latest_release_events(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> dict[uuid.UUID, QualityAuditFindingReleaseEvent]:
@@ -521,15 +486,15 @@ def exchange_audit_access(
     grant = _active_grant(db, payload.token)
     participant = grant.participant
     identity = participant.external_identity if participant else None
-    if (
-        participant is not None
-        and participant.participant_type == "EXTERNAL_AUDITOR"
-        and identity is not None
-        and identity.assurance_level == "PASSKEY"
-    ):
+    if identity is not None and identity.assurance_level == "PASSKEY":
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="Passkey verification is required before this external-auditor audit session can be activated.",
+        )
+    if identity is not None and identity.assurance_level != "EMAIL_LINK":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This external auditor must complete passkey assurance before session activation.",
+            detail="This external identity requires an assurance method that is not enabled on the current QMS access flow.",
         )
     now = _utcnow()
     grant.last_used_at = now
@@ -540,15 +505,16 @@ def exchange_audit_access(
     db.commit()
 
     max_age = max(1, int((grant.expires_at - now).total_seconds()))
+    app_env = os.getenv("APP_ENV", "").strip().lower()
     response.set_cookie(
         key=_GUEST_COOKIE,
         value=payload.token,
         max_age=max_age,
         expires=max_age,
         httponly=True,
-        secure=request.url.scheme == "https",
+        secure=request.url.scheme == "https" or app_env in {"prod", "production"},
         samesite="strict",
-        path="/quality/audit-access",
+        path=_CANONICAL_GUEST_COOKIE_PATH,
     )
     return _public_read_model(db, grant)
 
@@ -600,7 +566,18 @@ def acknowledge_released_finding(
 
 @_public_extension.delete("/audit-access/session", status_code=204)
 def end_audit_access_session(response: Response) -> Response:
-    response.delete_cookie(_GUEST_COOKIE, path="/quality/audit-access", httponly=True, samesite="strict")
+    response.delete_cookie(
+        _GUEST_COOKIE,
+        path=_CANONICAL_GUEST_COOKIE_PATH,
+        httponly=True,
+        samesite="strict",
+    )
+    response.delete_cookie(
+        _GUEST_COOKIE,
+        path=_LEGACY_GUEST_COOKIE_PATH,
+        httponly=True,
+        samesite="strict",
+    )
     return response
 
 

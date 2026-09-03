@@ -12,9 +12,9 @@ from .assurance_wiring_router import (
     ApprovalDecision,
     ControlCreate,
     ControlTestCreate,
-    create_control,
-    decide_control_approval,
-    record_control_test,
+    _create_control,
+    _decide_control_approval,
+    _record_control_test,
 )
 from .excellence_models import QualityAssuranceControl, QualityAssuranceEvidenceLink
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
@@ -50,7 +50,7 @@ def create_draft_control(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="New assurance controls must start in DRAFT status and DRAFT approval state.",
         )
-    return create_control(payload=payload, ctx=ctx, db=db)
+    return _create_control(payload=payload, ctx=ctx, db=db)
 
 
 @router.post("/controls/{control_id}/approval")
@@ -84,7 +84,7 @@ def transition_control_approval(
             detail=f"Invalid control approval transition {current} -> {requested}. Allowed: {allowed_label}.",
         )
 
-    return decide_control_approval(control_id=control_id, payload=payload, ctx=ctx, db=db)
+    return _decide_control_approval(control_id=control_id, payload=payload, ctx=ctx, db=db)
 
 
 @router.post("/controls/{control_id}/tests", status_code=status.HTTP_201_CREATED)
@@ -133,4 +133,4 @@ def record_approved_control_test(
             detail="Verify at least one current authoritative evidence record before testing this control.",
         )
 
-    return record_control_test(control_id=control_id, payload=payload, ctx=ctx, db=db)
+    return _record_control_test(control_id=control_id, payload=payload, ctx=ctx, db=db)

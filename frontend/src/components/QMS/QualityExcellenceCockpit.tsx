@@ -399,7 +399,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
         <div className="qew-header__actions">
           <span className="qew-freshness"><Activity size={14} /> {overview ? `Updated ${formatDateTime(overview.as_of)}` : "Loading live sources"}</span>
           <button type="button" onClick={() => void invalidateAssurance()}><RefreshCw size={16} /> Refresh</button>
-          <button type="button" className="is-primary" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/plan?view=list&create=1`)}><Plus size={16} /> Schedule audit</button>
+          <button type="button" className="is-primary" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`)}><Plus size={16} /> Schedule audit</button>
         </div>
       </header>
 

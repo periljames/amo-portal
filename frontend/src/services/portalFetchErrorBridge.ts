@@ -138,7 +138,12 @@ function recoveryPendingResponse(): Response {
 function isSilentBackgroundMutation(url: string): boolean {
   try {
     const parsed = new URL(url, window.location.origin);
-    return SILENT_BACKGROUND_MUTATION_PATHS.has(parsed.pathname.replace(/\/+$/, ""));
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (SILENT_BACKGROUND_MUTATION_PATHS.has(path)) return true;
+    // Live audit collaboration heartbeats are background beacons; failures must
+    // not surface as user-facing Action failed toasts during fieldwork.
+    return /\/audits\/[^/]+\/presence\/heartbeat$/i.test(path)
+      || path.endsWith("/quality/audit-access/presence/heartbeat");
   } catch {
     return false;
   }
@@ -275,17 +280,30 @@ export function installPortalFetchErrorBridge(): () => void {
       }
       if (portalRequest) notePortalResponse(response);
       if (mutation && !silent && !response.ok && response.status !== 401) {
-        const message = await responseMessage(response);
-        const target = errorTarget(upload);
-        const options = {
-          message,
-          target,
-          code: String(response.status),
-          actionLabel: target ? (upload ? "Show upload field" : "Show form") : undefined,
-          dedupeKey: `fetch:${method}:${url}:${response.status}:${message}`,
-        };
-        if (upload) reportUploadError(message, options);
-        else reportPortalError(message, { ...options, source: "api", title: "Action failed" });
+        // Expected confirmation prompts (e.g. weekend policy) are handled in-page —
+        // do not toast them as Action failed.
+        let suppressToast = false;
+        try {
+          const probe = await response.clone().json() as { detail?: { code?: string } } | null;
+          suppressToast =
+            probe?.detail?.code === "WEEKEND_CONFIRMATION_REQUIRED"
+            || probe?.detail?.code === "SCHEDULE_START_IN_PAST";
+        } catch {
+          suppressToast = false;
+        }
+        if (!suppressToast) {
+          const message = await responseMessage(response);
+          const target = errorTarget(upload);
+          const options = {
+            message,
+            target,
+            code: String(response.status),
+            actionLabel: target ? (upload ? "Show upload field" : "Show form") : undefined,
+            dedupeKey: `fetch:${method}:${url}:${response.status}:${message}`,
+          };
+          if (upload) reportUploadError(message, options);
+          else reportPortalError(message, { ...options, source: "api", title: "Action failed" });
+        }
       }
       return response;
     } catch (error) {

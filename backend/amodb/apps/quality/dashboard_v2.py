@@ -20,9 +20,9 @@ from .canonical_router import (
     _table_columns,
     qms_dashboard_lite,
     qms_inbox,
-    qms_integration_calendar,
     router as canonical_router,
 )
+from .planner_calendar_router import _qms_planner_calendar
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -481,7 +481,7 @@ def qms_operational_dashboard_v2(
 
     calendar_data: dict[str, Any] = {"items": []}
     try:
-        calendar_data = qms_integration_calendar(
+        calendar_data = _qms_planner_calendar(
             start=today,
             end=today + timedelta(days=30),
             limit=100,

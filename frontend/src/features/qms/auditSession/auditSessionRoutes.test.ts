@@ -4,6 +4,7 @@ import { auditOccurrenceResolverKey } from "../../../services/qmsAuditOccurrence
 import {
   auditSessionPath,
   auditSessionStageFromPath,
+  isAtLeastLiveStage,
 } from "./auditSessionRoutes";
 
 describe("audit session routes", () => {
@@ -11,6 +12,16 @@ describe("audit session routes", () => {
     expect(auditSessionStageFromPath("/maintenance/amo/quality/audits/QAR-26-001/live")).toBe("live");
     expect(auditSessionStageFromPath("/maintenance/amo/quality/audits/QAR-26-001/follow-up")).toBe("follow-up");
     expect(auditSessionStageFromPath("/maintenance/amo/quality/audits/QAR-26-001?tab=checklist")).toBeNull();
+  });
+
+  it("treats live and later lifecycle stages as fieldwork-eligible", () => {
+    expect(isAtLeastLiveStage("setup")).toBe(false);
+    expect(isAtLeastLiveStage("prepare")).toBe(false);
+    expect(isAtLeastLiveStage("live")).toBe(true);
+    expect(isAtLeastLiveStage("closing")).toBe(true);
+    expect(isAtLeastLiveStage("follow-up")).toBe(true);
+    expect(isAtLeastLiveStage("archive")).toBe(true);
+    expect(isAtLeastLiveStage(undefined)).toBe(false);
   });
 
   it("builds encoded canonical occurrence links", () => {

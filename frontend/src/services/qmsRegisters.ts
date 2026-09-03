@@ -14,7 +14,9 @@ export type QmsAuditRegisterPage = {
 export type QmsAuditRegisterPageParams = {
   domain?: string;
   auditId?: string;
+  findingId?: string;
   onlyWithCars?: boolean;
+  workflowStage?: "needs_review" | "with_auditee" | "implementation" | "effectiveness" | "closed";
   search?: string;
   ref?: string;
   finding?: string;
@@ -74,6 +76,8 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
   const query = new URLSearchParams();
   setIfPresent(query, "domain", params.domain);
   setIfPresent(query, "audit_id", params.auditId);
+  setIfPresent(query, "finding_id", params.findingId);
+  setIfPresent(query, "workflow_stage", params.workflowStage);
   setIfPresent(query, "search", params.search);
   setIfPresent(query, "ref", params.ref);
   setIfPresent(query, "finding", params.finding);

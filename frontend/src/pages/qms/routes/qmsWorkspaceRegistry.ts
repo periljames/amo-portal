@@ -29,8 +29,8 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "planner",
     segment: "planner",
-    label: "Planner",
-    shortLabel: "Planner",
+    label: "Calendar",
+    shortLabel: "Calendar",
     permission: "qms.calendar.view",
     description: "The temporal view of audits, surveillance, decisions, missions and assurance obligations.",
     activePrefixes: ["planner", "calendar"],
@@ -56,10 +56,10 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "assurance",
     segment: "assurance",
-    label: "Assurance Cases",
-    shortLabel: "Cases",
+    label: "Assurance",
+    shortLabel: "Assurance",
     permission: "qms.audit.view",
-    description: "Governed assurance cases and effectiveness review. Audit Assurance (audits hub), findings, CAPA and supplier/tooling exposure live under this workspace.",
+    description: "Audits, findings, corrective action, evidence, and governed assurance case review for the Quality programme.",
     activePrefixes: [
       "assurance",
       "audits",
@@ -93,8 +93,23 @@ export function qmsWorkspacePath(amoCode: string, workspace: QmsWorkspaceId): st
 export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId): string {
   const base = `/maintenance/${encodeSegment(amoCode)}/quality`;
   if (workspace === "control-room") return base;
-  if (workspace === "planner") return `${base}/calendar/month`;
+  if (workspace === "planner") return `${base}/calendar/week`;
+  // Land on the audits hub — Assurance cases remain available from Assurance related nav.
+  if (workspace === "assurance") return `${base}/audits/dashboard`;
   return `${base}?workspace=${encodeSegment(workspace)}`;
+}
+
+/** Deep-link into People & Privileges with optional tab/action/ruleType for setup CTAs. */
+export function qmsPeopleWorkspacePath(
+  amoCode: string,
+  options: { tab?: "privileges" | "rules" | "reference"; action?: string; ruleType?: string; ruleId?: string } = {},
+): string {
+  const params = new URLSearchParams({ workspace: "people" });
+  if (options.tab) params.set("tab", options.tab);
+  if (options.action) params.set("action", options.action);
+  if (options.ruleType) params.set("ruleType", options.ruleType);
+  if (options.ruleId) params.set("ruleId", options.ruleId);
+  return `/maintenance/${encodeSegment(amoCode)}/quality?${params.toString()}`;
 }
 
 export function qmsWorkspaceNavigationItems(amoCode: string): Array<QmsWorkspaceDefinition & { path: string; canonicalPath: string }> {

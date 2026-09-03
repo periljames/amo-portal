@@ -18,6 +18,7 @@ from .audit_programme_models import (
 )
 from .enums import QMSAuditScheduleFrequency
 from .planner_schedule_models import QMSPlannerScheduleMetadata
+from .schedule_weekend import annotate_notes_with_weekend_policy, resolve_schedule_window
 from .planner_schedule_router import (
     PlannerAuditScheduleCreate,
     PlannerAuditScheduleResponse,
@@ -128,11 +129,11 @@ def _validate_programme_window(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only APPROVED or ACTIVE audit programme revisions may create authoritative schedules.",
         )
-    if item.state != "PLANNED":
+    if item.state not in {"PLANNED", "DEFERRED"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": "Only a PLANNED programme requirement can be linked to a new authoritative schedule.",
+                "message": "Only a PLANNED or governed DEFERRED programme requirement can be linked to a new authoritative schedule.",
                 "current_state": item.state,
                 "schedule_id": str(item.schedule_id) if item.schedule_id else None,
             },
@@ -226,12 +227,7 @@ def list_programme_schedule_links(
     ])
 
 
-@router.post(
-    "/{programme_id}/items/{item_id}/schedule",
-    response_model=PlannerAuditScheduleResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def schedule_programme_requirement(
+def _schedule_programme_requirement(
     programme_id: str,
     item_id: str,
     payload: PlannerAuditScheduleCreate,
@@ -250,12 +246,17 @@ def schedule_programme_requirement(
         item_id=item_id,
         lock=True,
     )
-    end_date = payload.next_due_date + timedelta(days=payload.duration_days - 1)
-    _validate_one_calendar_year(start=payload.next_due_date, end=end_date)
+    start_date, end_date, duration_days = resolve_schedule_window(
+        start=payload.next_due_date,
+        duration_days=payload.duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=payload.title or item.title,
+    )
+    _validate_one_calendar_year(start=start_date, end=end_date)
     _validate_programme_window(
         programme=programme,
         item=item,
-        start_date=payload.next_due_date,
+        start_date=start_date,
         end_date=end_date,
     )
     expected_frequency = _expected_frequency(item)
@@ -289,7 +290,7 @@ def schedule_programme_requirement(
         subject_type="AUDIT_SCHEDULE",
         subject_id=f"programme:{item.id}",
         title=payload.title.strip(),
-        start_date=payload.next_due_date,
+        start_date=start_date,
         end_date=end_date,
         start_time=payload.start_time,
         end_time=payload.end_time,
@@ -322,8 +323,8 @@ def schedule_programme_requirement(
         notify_auditors=payload.notify_auditors,
         notify_auditees=payload.notify_auditees,
         reminder_interval_days=payload.reminder_interval_days,
-        duration_days=payload.duration_days,
-        next_due_date=payload.next_due_date,
+        duration_days=duration_days,
+        next_due_date=start_date,
         is_active=payload.automation_active,
         created_by_user_id=ctx.user_id,
     )
@@ -333,13 +334,13 @@ def schedule_programme_requirement(
     metadata = QMSPlannerScheduleMetadata(
         amo_id=ctx.amo_id,
         schedule_id=schedule.id,
-        occurrence_date=payload.next_due_date,
+        occurrence_date=start_date,
         end_date=end_date,
         start_time=payload.start_time,
         end_time=payload.end_time,
         timezone_name=payload.timezone_name,
         location=payload.location.strip() if payload.location else None,
-        notes=payload.notes,
+        notes=annotate_notes_with_weekend_policy(payload.notes, payload.weekend_policy),
         responsible_user_id=payload.lead_auditor_user_id,
         attendee_user_ids_json=_dump_json_list(payload.attendee_user_ids),
         external_attendees_json=_dump_json_list([entry.model_dump(mode="json") for entry in payload.external_attendees]),
@@ -397,6 +398,7 @@ def schedule_programme_requirement(
             "start_time": payload.start_time.isoformat(timespec="minutes"),
             "location": metadata.location,
             "version": metadata.version,
+            "weekend_policy": payload.weekend_policy,
             "conflict_override_reason": payload.conflict_override_reason if conflicts else None,
             "conflicts": [entry.model_dump(mode="json") for entry in conflicts],
         },

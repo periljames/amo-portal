@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, FileCheck2, History, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
 
-import { qmsResolveAudit } from "../../services/qms";
 import {
   adoptCurrentAuditReport,
   getAuditClosureState,
@@ -14,6 +13,7 @@ import {
   type AuditClosureState,
   type AuditReportRevision,
 } from "../../services/qmsAuditCloseout";
+import { resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
 import "../../styles/qms-audit-report-closeout.css";
 
 type Props = { amoCode: string; auditKey: string };
@@ -38,7 +38,11 @@ const QualityAuditReportCloseoutHost: React.FC<Props> = ({ amoCode, auditKey }) 
   const [reason, setReason] = useState("Governed audit report / assurance lifecycle decision.");
   const [error, setError] = useState("");
 
-  const auditQuery = useQuery({ queryKey: ["qms-audit-closeout-resolve", auditKey], queryFn: () => qmsResolveAudit(auditKey), staleTime: 5_000 });
+  const auditQuery = useQuery({
+    queryKey: ["qms-audit-closeout-resolve", amoCode, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
+    staleTime: 5_000,
+  });
   const audit = auditQuery.data;
   const auditId = audit?.id || "";
   const reportQueryKey = ["qms-audit-report-revisions", amoCode, auditId] as const;

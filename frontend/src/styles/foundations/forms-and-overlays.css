@@ -14,13 +14,19 @@ body :where(
   border-color: var(--input-border) !important;
   color: var(--portal-control-text) !important;
   caret-color: var(--portal-control-text);
-  -webkit-text-fill-color: var(--portal-control-text);
   box-shadow: none;
+}
+
+/* Typed value uses solid fill; placeholders stay faint (WebKit otherwise paints them solid). */
+body :where(input, textarea):not(:placeholder-shown),
+body :where(select, [contenteditable="true"]) {
+  -webkit-text-fill-color: var(--portal-control-text);
 }
 
 body :where(input, textarea)::placeholder {
   color: var(--portal-control-placeholder) !important;
-  opacity: 1;
+  -webkit-text-fill-color: var(--portal-control-placeholder) !important;
+  opacity: 0.7;
 }
 
 body :where(
@@ -168,6 +174,67 @@ body :where(.modal-backdrop, .dialog-backdrop, .drawer-backdrop, .overlay-backdr
   -webkit-backdrop-filter: blur(3px);
 }
 
+/* Dark elevated shells: charcoal glass (Origin-like). Light theme untouched. */
+body:not([data-color-scheme="light"]) :where(
+  dialog,
+  [role="dialog"],
+  [role="alertdialog"],
+  .modal,
+  .modal-content,
+  .modal-card,
+  .dialog,
+  .dialog-panel,
+  .drawer,
+  .drawer-panel,
+  .popover,
+  .popover-content,
+  .dropdown-menu,
+  .context-menu,
+  .menu-surface,
+  .confirm-dialog,
+  .prompt-dialog
+) {
+  background: linear-gradient(180deg, rgba(42, 44, 48, 0.94), rgba(31, 33, 36, 0.92)) !important;
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.48),
+    0 4px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  body:not([data-color-scheme="light"]) :where(
+    dialog,
+    [role="dialog"],
+    [role="alertdialog"],
+    .modal,
+    .modal-content,
+    .modal-card,
+    .dialog,
+    .dialog-panel,
+    .drawer,
+    .drawer-panel,
+    .popover,
+    .popover-content,
+    .dropdown-menu,
+    .context-menu,
+    .menu-surface,
+    .confirm-dialog,
+    .prompt-dialog
+  ) {
+    background: linear-gradient(180deg, rgba(43, 45, 49, 0.9), rgba(31, 33, 36, 0.88)) !important;
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+  }
+}
+
+body:not([data-color-scheme="light"]) dialog::backdrop,
+body:not([data-color-scheme="light"]) :where(.modal-backdrop, .dialog-backdrop, .drawer-backdrop, .overlay-backdrop, .scrim) {
+  background: rgba(0, 0, 0, 0.55) !important;
+  backdrop-filter: blur(6px) saturate(110%);
+  -webkit-backdrop-filter: blur(6px) saturate(110%);
+}
+
 body :where(button, [role="button"]) {
   font-family: inherit;
 }
@@ -191,4 +258,28 @@ body :where(a, [role="link"]):focus-visible {
     max-height: calc(100dvh - 1rem);
     margin: 0.5rem;
   }
+}
+
+/* dialog nested light-surface fix: keep child cards on-theme in dark shells */
+body:not([data-color-scheme="light"]):not([data-theme="light"]) :where(
+  [role="dialog"],
+  [role="alertdialog"],
+  .drawer-panel,
+  .modal,
+  .modal-content,
+  .dialog
+) :where(.card, .panel, .list-item, .action-row, [class*="action"], [class*="list-item"]) {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+body:not([data-color-scheme="light"]):not([data-theme="light"]) :where(
+  [role="dialog"],
+  [role="alertdialog"],
+  .drawer-panel,
+  .modal,
+  .modal-content,
+  .dialog
+) :where(input, textarea, select)::placeholder {
+  color: var(--portal-control-placeholder) !important;
+  -webkit-text-fill-color: var(--portal-control-placeholder) !important;
+  opacity: 0.7;
 }

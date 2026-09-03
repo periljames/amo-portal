@@ -29,8 +29,8 @@ from .car_control_loop_router import (
     _require_profile,
     _result,
     _utcnow,
-    close_control_loop as _close_control_loop_base,
-    initialize_control_loop as _initialize_control_loop_base,
+    _close_control_loop as _close_control_loop_base,
+    _initialize_control_loop as _initialize_control_loop_base,
 )
 from .tenant_security import (
     TenantContext,
@@ -236,8 +236,7 @@ def initialize_control_loop_guarded(
     return _initialize_control_loop_base(str(car_id), payload, ctx, db)
 
 
-@router.post("/deadline-changes", status_code=status.HTTP_201_CREATED)
-def request_deadline_change_guarded(
+def _request_deadline_change_guarded(
     car_id: UUID,
     payload: DeadlineChangeCreate,
     ctx: TenantContext = Depends(write_tenant_context),
@@ -305,8 +304,7 @@ def request_deadline_change_guarded(
     return _result(db, car=car, profile=profile)
 
 
-@router.post("/deadline-changes/{change_id}/decision")
-def decide_deadline_change_guarded(
+def _decide_deadline_change_guarded(
     car_id: UUID,
     change_id: UUID,
     payload: DeadlineChangeDecision,
@@ -373,8 +371,7 @@ def decide_deadline_change_guarded(
     return _result(db, car=car, profile=profile)
 
 
-@router.post("/close")
-def close_control_loop_guarded(
+def _close_control_loop_guarded(
     car_id: UUID,
     payload: CloseControlLoop,
     ctx: TenantContext = Depends(write_tenant_context),
@@ -424,7 +421,7 @@ def evaluate_control_loop_guarded(
             continue
 
         event_key = f"milestone:{milestone.id}:{milestone.current_due_date.isoformat()}:{stage}"
-        if _event_exists(db, car_id=car_id, event_key=event_key):
+        if _event_exists(db, amo_id=ctx.amo_id, car_id=car_id, event_key=event_key):
             continue
         descriptor = "overdue by" if days < 0 else "due in"
         count = abs(days) if days < 0 else days
@@ -475,7 +472,7 @@ def evaluate_control_loop_guarded(
             if deadline_stage is not None:
                 stage, severity, notification_severity = deadline_stage
                 event_key = f"dependency-deadline:{dependency.id}:{due_date.isoformat()}:{stage}"
-                if not _event_exists(db, car_id=car_id, event_key=event_key):
+                if not _event_exists(db, amo_id=ctx.amo_id, car_id=car_id, event_key=event_key):
                     descriptor = "overdue by" if days < 0 else "due in"
                     count = abs(days) if days < 0 else days
                     message = f"Dependency {dependency.title} is {descriptor} {count} day(s)."
@@ -504,7 +501,7 @@ def evaluate_control_loop_guarded(
             continue
         stage = "CRITICAL" if dependency.risk_level == "CRITICAL" else "BLOCKER"
         event_key = f"dependency:{dependency.id}:{dependency.status}:{dependency.risk_level}:{stage}"
-        if _event_exists(db, car_id=car_id, event_key=event_key):
+        if _event_exists(db, amo_id=ctx.amo_id, car_id=car_id, event_key=event_key):
             continue
         message = f"Open {dependency.risk_level.lower()}-risk dependency requires action: {dependency.title}."
         _add_event(

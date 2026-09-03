@@ -11,7 +11,7 @@ from amodb.apps.quality.planner_calendar_enrichment_router import qms_planner_ca
 from amodb.apps.quality.planner_calendar_router import (
     _active_training_lifecycle_sql,
     _calendar_page,
-    qms_planner_calendar,
+    _qms_planner_calendar,
 )
 from amodb.apps.quality.planner_router import (
     CalendarRescheduleRequest,
@@ -103,7 +103,7 @@ def test_training_projection_selects_only_latest_active_record(monkeypatch) -> N
     assert "RENEWED" in lifecycle
     assert "SUPERSEDED" in lifecycle
 
-    source = inspect.getsource(qms_planner_calendar)
+    source = inspect.getsource(_qms_planner_calendar)
     assert "ROW_NUMBER() OVER" in source
     assert "PARTITION BY r.user_id, r.course_id" in source
     assert "record_rank = 1" in source
@@ -111,6 +111,19 @@ def test_training_projection_selects_only_latest_active_record(monkeypatch) -> N
     assert "/quality/audits/{row.get('id')}/setup" in source
     assert "/quality/audits/{row.get('id')}/overview" not in source
     assert "/quality/cars/{row.get('id')}/overview" in source
+
+
+def test_calendar_audit_schedules_expose_duration_end_and_version() -> None:
+    source = inspect.getsource(_qms_planner_calendar)
+    assert "schedules.duration_days" in source
+    assert "AS ends_on" in source
+    assert "metadata.version AS schedule_version" in source
+    assert '"expected_version": row.get("schedule_version")' in source
+
+    enriched_source = inspect.getsource(qms_planner_calendar_enriched)
+    assert 'item["ends_on"] = metadata.end_date.isoformat()' in enriched_source
+    assert 'item["schedule_version"] = metadata.version' in enriched_source
+    assert 'item["expected_version"] = metadata.version' in enriched_source
 
 
 def test_calendar_page_is_stable_and_reports_next_offset() -> None:
@@ -135,7 +148,7 @@ def test_calendar_rejects_invalid_range_before_query(monkeypatch) -> None:
     monkeypatch.setattr(calendar_module, "_pg_set_read_timeout", lambda *_args, **_kwargs: None)
 
     with pytest.raises(HTTPException) as exc_info:
-        qms_planner_calendar(
+        _qms_planner_calendar(
             start=date(2026, 8, 20),
             end=date(2026, 8, 18),
             limit=120,

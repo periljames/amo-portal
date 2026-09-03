@@ -3,7 +3,6 @@ import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, FilePlus2, History, ListChecks, PanelRightClose, PanelRightOpen, Plus, ShieldAlert, Trash2 } from "lucide-react";
 
-import { qmsResolveAudit } from "../../services/qms";
 import {
   applyChecklistRevision,
   createChecklistRevision,
@@ -15,6 +14,7 @@ import {
   type ChecklistFindingTrigger,
   type ChecklistTemplateItem,
 } from "../../services/qmsChecklistTemplates";
+import { resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
 import "../../styles/qms-checklist-templates.css";
 
 type Props = { amoCode?: string; auditKey?: string | null; activeTab?: string | null };
@@ -79,9 +79,9 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "", auditKey,
     enabled: Boolean(workspaceOpen && selectedTemplateId),
   });
   const auditQuery = useQuery({
-    queryKey: ["qms-checklist-audit-resolve", auditKey],
-    queryFn: () => qmsResolveAudit(String(auditKey)),
-    enabled: Boolean(open && auditChecklist && auditKey),
+    queryKey: ["qms-checklist-audit-resolve", resolvedAmo, auditKey],
+    queryFn: ({ signal }) => resolveAuditOccurrence(resolvedAmo, String(auditKey), signal),
+    enabled: Boolean(open && auditChecklist && auditKey && resolvedAmo),
   });
   const auditId = auditQuery.data?.id || "";
   const bindingsQuery = useQuery({

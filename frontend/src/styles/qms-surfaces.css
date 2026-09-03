@@ -1,0 +1,244 @@
+/* Shared QMS surface contract — Calendar planner is the visual reference.
+   Apply `.qms-surface-root` (or use the listed roots) so light/dark inherit portal tokens. */
+
+.qms-surface-root,
+.qms-modern-planner-v2,
+.qa-workspace-shell,
+.qms-audit-prepare,
+.qms-live-audit,
+.qms-live-audit-focus,
+.qms-audit-closing,
+.qms-audit-archive,
+.qms-audit-session,
+.qms-audit-session-rail,
+.qms-occurrence-stage,
+.qms-assurance-room,
+.qms-register,
+.qms-register-page,
+.qms-car-ops,
+.qms-car-page-heading,
+.quality-evidence-viewer,
+.qa-evidence-viewer,
+.qms-audit-programme,
+.qms-ops-page,
+.qms-missions,
+.qms-mission-detail,
+.qms-people,
+.qms-intelligence,
+.qms-assurance-cases {
+  --qms-page: color-mix(in srgb, var(--surface, #f6f8fb) 92%, var(--surface-elevated, #fff) 8%);
+  --qms-panel: var(--surface-elevated, #fff);
+  --qms-line: color-mix(in srgb, var(--surface-border, #d7dee9) 82%, transparent);
+  --qms-line-soft: color-mix(in srgb, var(--surface-border, #d7dee9) 48%, transparent);
+  /* Solid muted — never mix secondary with transparent (washes nav/tabs on dark chrome). */
+  --qms-muted: var(--text-secondary, #64748b);
+  --qms-hover: color-mix(in srgb, var(--accent-primary, #2563eb) 6%, transparent);
+  --qms-selected: color-mix(in srgb, var(--accent-primary, #2563eb) 11%, var(--surface-elevated, #fff));
+  --qms-text: var(--text-primary, #0f172a);
+  --qms-text-soft: color-mix(in srgb, var(--text-primary, #0f172a) 38%, var(--text-secondary, #64748b));
+  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #0f172a) 72%, var(--text-secondary, #64748b));
+  --qms-radius: 0.55rem;
+  --qms-shadow: 0 1px 2px color-mix(in srgb, #0f172a 6%, transparent);
+
+  /* Ghost aliases used across legacy QMS CSS */
+  --surface-subtle: color-mix(in srgb, var(--qms-page) 70%, var(--qms-panel));
+  --border-color: var(--qms-line);
+  --text: var(--qms-text);
+  --text-muted: var(--qms-muted);
+  --page-bg: var(--qms-page);
+  --surface-secondary: var(--surface-subtle);
+
+  color: var(--qms-text);
+}
+
+/* Planner consumes the shared contract so calendar and AA stay aligned */
+.qms-modern-planner-v2 {
+  --planner-page: var(--qms-page);
+  --planner-panel: var(--qms-panel);
+  --planner-line: var(--qms-line);
+  --planner-line-soft: var(--qms-line-soft);
+  --planner-muted: var(--qms-muted);
+  --planner-hover: var(--qms-hover);
+  --planner-selected: var(--qms-selected);
+}
+
+html[data-color-scheme="dark"] .qms-surface-root,
+html[data-color-scheme="dark"] .qms-modern-planner-v2,
+html[data-color-scheme="dark"] .qa-workspace-shell,
+html[data-color-scheme="dark"] .qms-audit-prepare,
+html[data-color-scheme="dark"] .qms-live-audit,
+html[data-color-scheme="dark"] .qms-live-audit-focus,
+html[data-color-scheme="dark"] .qms-audit-closing,
+html[data-color-scheme="dark"] .qms-audit-archive,
+html[data-color-scheme="dark"] .qms-audit-session,
+html[data-color-scheme="dark"] .qms-audit-session-rail,
+html[data-color-scheme="dark"] .qms-occurrence-stage,
+html[data-color-scheme="dark"] .qms-assurance-room,
+html[data-color-scheme="dark"] .qms-register,
+html[data-color-scheme="dark"] .qms-register-page,
+html[data-color-scheme="dark"] .qms-car-ops,
+html[data-color-scheme="dark"] .qms-car-page-heading,
+html[data-color-scheme="dark"] .quality-evidence-viewer,
+html[data-color-scheme="dark"] .qa-evidence-viewer,
+html[data-color-scheme="dark"] .qms-audit-programme,
+html[data-color-scheme="dark"] .qms-ops-page,
+html[data-color-scheme="dark"] .qms-missions,
+html[data-color-scheme="dark"] .qms-mission-detail,
+html[data-color-scheme="dark"] .qms-people,
+html[data-color-scheme="dark"] .qms-intelligence,
+html[data-color-scheme="dark"] .qms-assurance-cases,
+body[data-color-scheme="dark"] .qms-surface-root,
+body[data-color-scheme="dark"] .qms-modern-planner-v2,
+body[data-color-scheme="dark"] .qa-workspace-shell,
+body[data-color-scheme="dark"] .qms-audit-prepare,
+body[data-color-scheme="dark"] .qms-live-audit,
+body[data-color-scheme="dark"] .qms-live-audit-focus,
+body[data-color-scheme="dark"] .qms-audit-closing,
+body[data-color-scheme="dark"] .qms-audit-archive,
+body[data-color-scheme="dark"] .qms-audit-session,
+body[data-color-scheme="dark"] .qms-audit-session-rail,
+body[data-color-scheme="dark"] .qms-occurrence-stage,
+body[data-color-scheme="dark"] .qms-assurance-room,
+body[data-color-scheme="dark"] .qms-register,
+body[data-color-scheme="dark"] .qms-register-page,
+body[data-color-scheme="dark"] .qms-car-ops,
+body[data-color-scheme="dark"] .qms-car-page-heading,
+body[data-color-scheme="dark"] .quality-evidence-viewer,
+body[data-color-scheme="dark"] .qa-evidence-viewer,
+body[data-color-scheme="dark"] .qms-audit-programme,
+body[data-color-scheme="dark"] .qms-ops-page,
+body[data-color-scheme="dark"] .qms-missions,
+body[data-color-scheme="dark"] .qms-mission-detail,
+body[data-color-scheme="dark"] .qms-people,
+body[data-color-scheme="dark"] .qms-intelligence,
+body[data-color-scheme="dark"] .qms-assurance-cases,
+[data-theme="dark"] .qms-surface-root,
+[data-theme="dark"] .qms-live-audit-focus,
+[data-theme="dark"] .qms-audit-session-rail,
+[data-theme="dark"] .qms-occurrence-stage,
+.dark .qms-surface-root,
+.dark .qms-live-audit-focus,
+.dark .qms-audit-session-rail,
+.dark .qms-occurrence-stage,
+.dark .qms-missions,
+.dark .qms-mission-detail,
+.dark .qms-people,
+.dark .qms-intelligence,
+.dark .qms-assurance-cases {
+  --qms-page: color-mix(in srgb, var(--surface, #12151a) 88%, #0b0d10 12%);
+  --qms-panel: var(--surface-elevated, #1c1f24);
+  --qms-line: color-mix(in srgb, var(--surface-border, rgba(255, 255, 255, 0.12)) 88%, transparent);
+  --qms-line-soft: color-mix(in srgb, var(--surface-border, rgba(255, 255, 255, 0.12)) 52%, transparent);
+  --qms-muted: color-mix(in srgb, var(--text-primary, #f8fafc) 58%, var(--text-secondary, #94a3b8));
+  --qms-hover: color-mix(in srgb, var(--accent-primary, #4f8cff) 10%, transparent);
+  --qms-selected: color-mix(in srgb, var(--accent-primary, #4f8cff) 16%, var(--surface-elevated, #1c1f24));
+  --qms-text: var(--text-primary, #f8fafc);
+  --qms-text-soft: color-mix(in srgb, var(--text-primary, #f8fafc) 78%, var(--text-secondary, #94a3b8));
+  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #f8fafc) 90%, var(--text-secondary, #94a3b8));
+  --qms-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --surface-subtle: color-mix(in srgb, var(--qms-page) 55%, var(--qms-panel));
+}
+
+/* Hierarchy helpers — match calendar title/meta rhythm */
+.qms-surface-root .qms-title-strong,
+.qms-surface-title {
+  color: var(--qms-text);
+  font-size: clamp(1.05rem, 1.3vw, 1.28rem);
+  font-weight: 740;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.qms-surface-root .qms-title-meta,
+.qms-surface-meta {
+  color: var(--qms-muted);
+  font-size: 0.78rem;
+  font-weight: 560;
+  line-height: 1.35;
+}
+
+.qms-surface-panel {
+  background: var(--qms-panel);
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  box-shadow: var(--qms-shadow);
+}
+
+.qms-surface-toolbar {
+  background: color-mix(in srgb, var(--qms-panel) 96%, transparent);
+  border-bottom: 1px solid var(--qms-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.qms-surface-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--qms-line-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 10%, var(--qms-panel));
+  color: var(--qms-text);
+  font-size: 0.68rem;
+  font-weight: 680;
+}
+
+html[data-color-scheme="dark"] .qms-surface-chip,
+body[data-color-scheme="dark"] .qms-surface-chip,
+[data-theme="dark"] .qms-surface-chip,
+.dark .qms-surface-chip {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 16%, var(--qms-panel));
+  border-color: var(--qms-line);
+}
+
+/* Hierarchy: AA shell + stage headers — page → toolbar → panel → meta */
+.qa-workspace-shell .qa-workspace-rail__heading > span,
+.qms-audit-prepare__header h1,
+.qms-live-audit-focus__header h1,
+.qms-audit-closing__header h1,
+.qms-audit-archive__header h1,
+.qms-occurrence-stage__header h1,
+.qms-occurrence-stage__header h2 {
+  color: var(--qms-text);
+  font-size: clamp(1.05rem, 1.3vw, 1.28rem);
+  font-weight: 740;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.qa-workspace-shell .qa-workspace-rail__tab small,
+.qa-workspace-shell .qa-workspace-rail__group-label,
+.qms-audit-prepare__header span,
+.qms-live-audit-focus__header span,
+.qms-audit-closing__header span,
+.qms-audit-archive__header span,
+.qms-occurrence-stage__header p,
+.qms-occurrence-stage__card small {
+  color: var(--qms-muted);
+}
+
+.qms-audit-prepare__card,
+.qms-live-audit-focus__references div,
+.qms-live-audit-focus__summary > section,
+.qms-audit-closing__card,
+.qms-audit-archive__card,
+.qms-occurrence-stage__card {
+  background: var(--qms-panel);
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  box-shadow: var(--qms-shadow);
+}
+
+.qms-audit-prepare__header,
+.qms-live-audit-focus__header,
+.qms-audit-closing__header,
+.qms-audit-archive__header,
+.qms-occurrence-stage__header,
+.qms-audit-session-rail {
+  background: color-mix(in srgb, var(--qms-panel) 96%, transparent);
+  border-color: var(--qms-line);
+  box-shadow: none;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}

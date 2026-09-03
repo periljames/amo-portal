@@ -19,6 +19,15 @@ from .router import _decorate_car_register_items, router
 from .schemas import CAROut, QMSAuditOut, QMSAuditRegisterRowOut, QMSFindingOut
 
 
+FindingWorkflowStage = Literal[
+    "needs_review",
+    "with_auditee",
+    "implementation",
+    "effectiveness",
+    "closed",
+]
+
+
 class QMSAuditRegisterPageOut(BaseModel):
     rows: list[QMSAuditRegisterRowOut] = Field(default_factory=list)
     total: int = 0
@@ -56,7 +65,9 @@ def _normalise_search(value: object) -> Optional[str]:
 def get_audit_register_paged(
     domain: Optional[QMSDomain] = None,
     audit_id: Optional[UUID] = None,
+    finding_id: Optional[UUID] = None,
     only_with_cars: bool = False,
+    workflow_stage: Optional[FindingWorkflowStage] = None,
     search: Optional[str] = Query(default=None, max_length=160),
     ref: Optional[str] = Query(default=None, max_length=120),
     finding: Optional[str] = Query(default=None, max_length=200),
@@ -91,6 +102,8 @@ def get_audit_register_paged(
         query = query.filter(Audit.domain == domain)
     if audit_id is not None:
         query = query.filter(Audit.id == audit_id)
+    if finding_id is not None:
+        query = query.filter(Finding.id == finding_id)
 
     linked_car_exists = (
         db.query(Car.id)
@@ -99,6 +112,32 @@ def get_audit_register_paged(
     )
     if only_with_cars:
         query = query.filter(linked_car_exists)
+    if workflow_stage:
+        car_stage_statuses = {
+            "needs_review": [models.CARStatus.DRAFT],
+            "with_auditee": [models.CARStatus.OPEN, models.CARStatus.ESCALATED],
+            "implementation": [models.CARStatus.IN_PROGRESS],
+            "effectiveness": [models.CARStatus.PENDING_VERIFICATION],
+            "closed": [models.CARStatus.CLOSED],
+        }
+        matching_stage_car_exists = (
+            db.query(Car.id)
+            .filter(
+                Car.amo_id == amo_id,
+                Car.finding_id == Finding.id,
+                Car.status.in_(car_stage_statuses[workflow_stage]),
+            )
+            .exists()
+        )
+        if workflow_stage == "needs_review":
+            query = query.filter(
+                Finding.closed_at.is_(None),
+                or_(~linked_car_exists, matching_stage_car_exists),
+            )
+        elif workflow_stage == "closed":
+            query = query.filter(or_(Finding.closed_at.is_not(None), matching_stage_car_exists))
+        else:
+            query = query.filter(Finding.closed_at.is_(None), matching_stage_car_exists)
 
     search_value = _normalise_search(search)
     if search_value:

@@ -1,11 +1,11 @@
 .qms-assurance-cases {
-  --qms-assurance-border: var(--border-color, #dfe3e8);
-  --qms-assurance-border-soft: color-mix(in srgb, var(--qms-assurance-border) 70%, transparent);
-  --qms-assurance-surface: var(--surface-primary, #fff);
-  --qms-assurance-surface-soft: var(--surface-secondary, #f7f9fc);
-  --qms-assurance-text: var(--text-primary, #182230);
-  --qms-assurance-muted: var(--text-secondary, #667085);
-  --qms-assurance-primary: var(--primary, #1d4ed8);
+  --qms-assurance-border: var(--qms-line, var(--border-color, #dfe3e8));
+  --qms-assurance-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-assurance-border) 70%, transparent));
+  --qms-assurance-surface: var(--qms-panel, var(--surface-primary, #fff));
+  --qms-assurance-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-assurance-text: var(--qms-text, var(--text-primary, #182230));
+  --qms-assurance-muted: var(--qms-muted, var(--text-secondary, #667085));
+  --qms-assurance-primary: var(--accent-primary, var(--primary, #1d4ed8));
   --qms-assurance-danger: #b42318;
   --qms-assurance-warning: #9a6700;
   --qms-assurance-positive: #16723a;
@@ -15,6 +15,7 @@
   margin: 0 auto;
   padding: 20px;
   color: var(--qms-assurance-text);
+  background: var(--qms-page, transparent);
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 

@@ -4,12 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 
 import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
+import OccurrenceToolbarPortal, { AUDIT_OCCURRENCE_MOUNT_ID } from "../../features/qms/auditSession/OccurrenceToolbarPortal";
 import MobileAuditDeepLinkState from "../../features/qms/auditSession/MobileAuditDeepLinkState";
 import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/qms-text-scale-override.css";
+import "../../styles/qms-audit-occurrence-shell.css";
 
 const AuditSetupWorkspace = lazy(() => import("../../features/qms/auditSession/AuditSetupWorkspace"));
 const AuditPrepareWorkspace = lazy(() => import("../../features/qms/auditSession/AuditPrepareWorkspace"));
@@ -26,7 +28,6 @@ const QualityChecklistTemplateHost = lazy(() => import("./QualityChecklistTempla
 const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
 const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
 const QualityPlannerStrategicHost = lazy(() => import("./QualityPlannerStrategicHost"));
-const QualityProgrammeOccurrenceHost = lazy(() => import("./QualityProgrammeOccurrenceHost"));
 
 type AuditRoute = { amoCode: string; auditKey: string };
 
@@ -78,7 +79,7 @@ const QualityDialogFocusRestorer: React.FC = () => {
       if (!(target instanceof HTMLElement) || target.closest('[role="dialog"][aria-modal="true"]')) return;
       lastExternalFocus = target;
     };
-    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => dialog.classList.contains("qms-planner-create-modal") ? document.querySelector<HTMLElement>(".qms-planner-quick-schedule") : null;
+    const canonicalDialogOpener = (dialog: HTMLElement): HTMLElement | null => dialog.classList.contains("qms-planner-create-modal") ? document.querySelector<HTMLElement>(".qms-planner-schedule-action") : null;
     const observer = new MutationObserver(() => {
       const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
       if (dialog && !activeDialog) {
@@ -145,24 +146,62 @@ const QualityEnhancementsHost: React.FC = () => {
       <QualityAuditHandoffHost amoCode={amoCode} />
       <QualityEffectivenessResponseHost amoCode={amoCode} />
       <QualityPlannerStrategicHost amoCode={amoCode} />
-      <QualityProgrammeOccurrenceHost amoCode={amoCode} />
-      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} activeTab={auditSessionStage === "prepare" ? "checklist" : null} /> : null}
+      {/* Custom occurrence FAB removed from programme workspace — see QualityProgrammeOccurrenceHost */}
+      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} /> : null}
     </Suspense> : null}
 
-    {route ? <>
-      <AuditLifecycleRail amoCode={route.amoCode} auditKey={route.auditKey} />
-      <WorkflowIntegrityGuard route={route} />
-      <MobileAuditDeepLinkState />
+    {route && auditSessionStage ? (
+      <OccurrenceToolbarPortal containerId={AUDIT_OCCURRENCE_MOUNT_ID}>
+      <div className="qms-audit-occurrence-shell">
+        <AuditLifecycleRail amoCode={route.amoCode} auditKey={route.auditKey} />
+        <div className="qms-audit-occurrence-shell__body">
+          <WorkflowIntegrityGuard route={route} />
+          <MobileAuditDeepLinkState />
 
-      {auditSessionStage === "prepare" ? <Suspense fallback={null}><QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
+          {auditSessionStage === "prepare" ? (
+            <Suspense fallback={null}>
+              <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
 
-      {auditSessionStage === "setup" ? <Suspense fallback={null}><AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {auditSessionStage === "prepare" ? <Suspense fallback={null}><AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /><AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {auditSessionStage === "live" ? <Suspense fallback={null}><LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /><LiveFindingReleasePanel amoCode={route.amoCode} auditKey={route.auditKey} /><ExternalFindingDraftReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {auditSessionStage === "closing" ? <Suspense fallback={null}><AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} /><AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {auditSessionStage === "follow-up" ? <Suspense fallback={null}><AuditFollowUpWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-      {auditSessionStage === "archive" ? <Suspense fallback={null}><AuditArchiveWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></Suspense> : null}
-    </> : null}
+          {auditSessionStage === "setup" ? (
+            <Suspense fallback={null}>
+              <AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "prepare" ? (
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading prepare workspace…</div>}>
+              <AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "live" ? (
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading live audit workspace…</div>}>
+              <LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <LiveFindingReleasePanel amoCode={route.amoCode} auditKey={route.auditKey} />
+              <ExternalFindingDraftReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "closing" ? (
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading closing workspace…</div>}>
+              <AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} />
+              <AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "follow-up" ? (
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading follow-up workspace…</div>}>
+              <AuditFollowUpWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+          {auditSessionStage === "archive" ? (
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading archive workspace…</div>}>
+              <AuditArchiveWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+            </Suspense>
+          ) : null}
+        </div>
+      </div>
+      </OccurrenceToolbarPortal>
+    ) : null}
   </>;
 };
 

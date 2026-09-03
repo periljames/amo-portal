@@ -5,6 +5,7 @@
 // Mature workflow helpers use the active Quality API contracts for detailed
 // document, audit, CAR, AeroDoc, and manpower flows.
 
+import { ApiClientError, apiRequest } from "./apiClient";
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
@@ -692,7 +693,34 @@ async function sendJson<T>(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+    let parsed: unknown = text;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+    } else {
+      parsed = null;
+    }
+    const detail =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as { detail?: unknown; message?: unknown }).detail
+          ?? (parsed as { message?: unknown }).message
+        : null;
+    const detailRecord =
+      detail && typeof detail === "object" && !Array.isArray(detail)
+        ? (detail as { message?: unknown })
+        : null;
+    const message =
+      typeof detail === "string" && detail.trim()
+        ? detail
+        : typeof detailRecord?.message === "string" && detailRecord.message.trim()
+          ? detailRecord.message
+        : detail != null
+          ? JSON.stringify(detail)
+          : text || res.statusText || `QMS API ${res.status}`;
+    throw new ApiClientError(res.status, message, parsed);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -929,6 +957,7 @@ export async function qmsCreateAuditSchedule(payload: {
   reminder_interval_days?: number;
   duration_days: number;
   next_due_date: string;
+  weekend_policy?: "INCLUDE_WEEKEND" | "SKIP_WEEKEND";
 }): Promise<QMSAuditScheduleOut> {
   return sendJson<QMSAuditScheduleOut>(
     "/quality/audits/schedules",
@@ -955,6 +984,7 @@ export async function qmsUpdateAuditSchedule(
     assistant_auditor_user_id?: string | null;
     duration_days?: number | null;
     next_due_date?: string | null;
+    weekend_policy?: "INCLUDE_WEEKEND" | "SKIP_WEEKEND" | null;
     is_active?: boolean | null;
   }
 ): Promise<QMSAuditScheduleOut> {
@@ -983,12 +1013,25 @@ export interface QMSAuditeeBrandOut {
   resolved: boolean;
 }
 
-export async function qmsListAuditPersonnelOptions(params?: {
-  search?: string;
-  limit?: number;
-}): Promise<QMSPersonOption[]> {
-  const suffix = toQuery({ search: params?.search, limit: params?.limit ?? 50 });
-  return fetchJson<QMSPersonOption[]>(`/quality/audits/personnel/options${suffix}`);
+export async function qmsListAuditPersonnelOptions(
+  _amoCode: string,
+  params?: {
+    search?: string;
+    limit?: number;
+    bypassCache?: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<QMSPersonOption[]> {
+  const suffix = toQuery({
+    search: params?.search,
+    // Backend validates limit <= 100; clamp here so assignment pickers do not 422.
+    limit: Math.min(params?.limit ?? 50, 100),
+  });
+  // Legacy quality route remains authoritative; session carries tenant AMO context.
+  return apiRequest<QMSPersonOption[]>(`/quality/audits/personnel/options${suffix}`, {
+    cacheTtlMs: params?.bypassCache ? 0 : 30_000,
+    signal,
+  });
 }
 
 function extractDomainFromEmail(value?: string | null): string | null {
@@ -1253,7 +1296,7 @@ export async function qmsRunAuditSchedule(
   scheduleId: string
 ): Promise<QMSAuditOut> {
   return sendJson<QMSAuditOut>(
-    `/quality/audits/schedules/${scheduleId}/run`,
+    `/quality/audits/schedules/${encodeURIComponent(scheduleId)}/run`,
     "POST",
     {}
   );

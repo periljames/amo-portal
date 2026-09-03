@@ -2,5 +2,73 @@
   display: none !important;
 }
 
+/* Occurrence stages own navigation — hide AA context chrome that bleeds through. */
+html.quality-audit-canonical-occurrence .quality-context-bar-host {
+  display: none !important;
+}
+
+html.quality-audit-canonical-occurrence .qms-canonical-occurrence-route-shell {
+  display: none !important;
+}
+
+/* Fixed white FAB launchers belong in the stage header, not viewport corners. */
+html.quality-audit-canonical-occurrence :is(
+  .qms-checklist-template-launcher,
+  .qms-effectiveness-response-launcher,
+  .qms-audit-governance-launcher,
+  .qms-audit-document-review-launcher
+):not(.qms-occurrence-toolbar-btn) {
+  display: none !important;
+}
+
+html.quality-audit-canonical-occurrence .qms-audit-session-rail {
+  background: var(--qms-page, var(--surface-secondary, transparent));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.quality-audit-canonical-occurrence .qms-occurrence-stage {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.quality-audit-canonical-occurrence .qms-audit-document-review {
+  left: auto;
+  right: 1rem;
+  bottom: 1rem;
+}
+
+html.quality-audit-canonical-occurrence .qms-audit-prepare-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+html.quality-audit-canonical-occurrence .qms-occurrence-toolbar-btn {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.3rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--qms-line, var(--border-color));
+  border-radius: var(--qms-radius, 8px);
+  background: var(--qms-panel, var(--surface-primary));
+  color: var(--qms-text, inherit);
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+html.quality-audit-canonical-occurrence .qms-occurrence-toolbar-btn span {
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-subtle, var(--qms-line-soft));
+  font-size: 0.68rem;
+}
+
 /* The six-stage occurrence workspace is authoritative on /setup, /prepare,
    /live, /closing, /follow-up and /archive. */

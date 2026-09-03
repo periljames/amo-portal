@@ -1,11 +1,11 @@
 .qms-control-centre {
   --qcc-accent: var(--accent-primary, #2563eb);
-  --qcc-border: var(--border, rgba(15, 23, 42, 0.13));
-  --qcc-border-soft: color-mix(in srgb, var(--qcc-border) 62%, transparent);
-  --qcc-surface: var(--surface-elevated, #fff);
-  --qcc-surface-soft: color-mix(in srgb, var(--surface, #f8fafc) 72%, var(--qcc-surface));
-  --qcc-text: var(--text-primary, #0f172a);
-  --qcc-muted: var(--text-secondary, #64748b);
+  --qcc-border: var(--qms-line, var(--border-color, var(--border, rgba(15, 23, 42, 0.13))));
+  --qcc-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qcc-border) 62%, transparent));
+  --qcc-surface: var(--qms-panel, var(--surface-elevated, #fff));
+  --qcc-surface-soft: var(--surface-subtle, color-mix(in srgb, var(--qms-page, var(--surface, #f8fafc)) 72%, var(--qcc-surface)));
+  --qcc-text: var(--qms-text, var(--text-primary, #0f172a));
+  --qcc-muted: var(--qms-muted, var(--text-muted, var(--text-secondary, #64748b)));
   --qcc-danger: var(--accent-danger, #b42318);
   --qcc-warning: var(--accent-warning, #b45309);
   --qcc-positive: var(--accent-success, #15803d);
@@ -14,6 +14,7 @@
   min-width: 0;
   padding-bottom: 1.25rem;
   color: var(--qcc-text);
+  background: var(--qms-page, transparent);
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
 
@@ -230,4 +231,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .qms-control-centre *, .qms-control-centre *::before, .qms-control-centre *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+}
+
+html[data-color-scheme="dark"] .qms-control-centre,
+body[data-color-scheme="dark"] .qms-control-centre,
+[data-theme="dark"] .qms-control-centre,
+.dark .qms-control-centre {
+  color: var(--qcc-text);
 }

@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -27,7 +27,6 @@ from .tenant_security import (
 from .tenant_timezone import resolve_tenant_timezone
 
 
-planner_calendar_router = APIRouter()
 _VALID_SOURCES = {"all", "audits", "cars", "training", "month", "week", "list", "agenda", "year"}
 
 
@@ -53,8 +52,7 @@ def _calendar_page(
     return events[offset:end_index], has_more, end_index if has_more else None
 
 
-@planner_calendar_router.get("/integrations/calendar")
-def qms_planner_calendar(
+def _qms_planner_calendar(
     start: date | None = Query(None),
     end: date | None = Query(None),
     limit: int = Query(120, ge=1, le=500),
@@ -107,9 +105,18 @@ def qms_planner_calendar(
         "end_date": end_date,
         "limit": source_limit,
     }
-    schedule_deleted = _soft_delete_filter(db, "qms_audit_schedules")
-    audit_deleted = _soft_delete_filter(db, "qms_audits")
+    schedule_deleted = _soft_delete_filter(db, "qms_audit_schedules", "schedules")
+    audit_deleted = _soft_delete_filter(db, "qms_audits", "audits")
     car_deleted = _soft_delete_filter(db, "quality_cars")
+    metadata_columns = _table_columns(db, "qms_planner_schedule_metadata")
+    has_schedule_metadata = {"amo_id", "schedule_id", "version"}.issubset(metadata_columns)
+    schedule_metadata_select = ", metadata.version AS schedule_version" if has_schedule_metadata else ", NULL AS schedule_version"
+    schedule_metadata_join = (
+        "LEFT JOIN qms_planner_schedule_metadata metadata "
+        "ON metadata.schedule_id = schedules.id AND metadata.amo_id = schedules.amo_id"
+        if has_schedule_metadata
+        else ""
+    )
 
     if requested_source in {"all", "audits", "month", "week", "list", "agenda", "year"}:
         schedule_rows = _append_calendar_rows(
@@ -119,16 +126,28 @@ def qms_planner_calendar(
             params=params,
             source_errors=source_errors,
             sql=f"""
-                SELECT id, title, kind, frequency, auditee, lead_auditor_user_id,
-                       next_due_date AS event_date
-                FROM qms_audit_schedules
-                WHERE amo_id = :amo_id
-                  AND is_active IS TRUE
-                  AND next_due_date IS NOT NULL
-                  AND next_due_date >= :start_date
-                  AND next_due_date <= :end_date
+                SELECT schedules.id, schedules.title, schedules.kind, schedules.frequency,
+                       schedules.auditee, schedules.lead_auditor_user_id,
+                       COALESCE(
+                           NULLIF(TRIM(lead_user.full_name), ''),
+                           NULLIF(TRIM(CONCAT_WS(' ', lead_user.first_name, lead_user.last_name)), ''),
+                           lead_user.email
+                       ) AS lead_auditor_name,
+                       schedules.duration_days, schedules.next_due_date AS event_date,
+                       (schedules.next_due_date + (GREATEST(COALESCE(schedules.duration_days, 1), 1) - 1)) AS ends_on
+                       {schedule_metadata_select}
+                FROM qms_audit_schedules schedules
+                LEFT JOIN users lead_user
+                  ON lead_user.id = schedules.lead_auditor_user_id
+                 AND lead_user.amo_id = schedules.amo_id
+                {schedule_metadata_join}
+                WHERE schedules.amo_id = :amo_id
+                  AND schedules.is_active IS TRUE
+                  AND schedules.next_due_date IS NOT NULL
+                  AND schedules.next_due_date <= :end_date
+                  AND (schedules.next_due_date + (GREATEST(COALESCE(schedules.duration_days, 1), 1) - 1)) >= :start_date
                   {schedule_deleted}
-                ORDER BY next_due_date ASC, id ASC
+                ORDER BY schedules.next_due_date ASC, schedules.id ASC
                 LIMIT :limit
             """,
         )
@@ -143,15 +162,22 @@ def qms_planner_calendar(
                     title=title,
                     event_date=row.get("event_date"),
                     event_type="audit_due",
-                    link=f"/maintenance/{ctx.amo_code}/quality/audits/plan?view=list&schedule_id={row.get('id')}",
+                    link=f"/maintenance/{ctx.amo_code}/quality/audits/schedules/{row.get('id')}",
                     today=today,
                     extra={
                         "audit_source": "schedule_template",
                         "calendar_group": "audit",
+                        "audit_title": row.get("title") or "Scheduled audit",
+                        "audit_ref": row.get("kind") or "Audit",
                         "kind": row.get("kind"),
                         "frequency": row.get("frequency"),
+                        "duration_days": row.get("duration_days"),
+                        "ends_on": _as_date(row.get("ends_on")),
+                        "schedule_version": row.get("schedule_version"),
+                        "expected_version": row.get("schedule_version"),
                         "auditee": row.get("auditee"),
                         "lead_auditor_user_id": row.get("lead_auditor_user_id"),
+                        "lead_auditor_name": row.get("lead_auditor_name"),
                     },
                 )
             )
@@ -163,16 +189,25 @@ def qms_planner_calendar(
             params=params,
             source_errors=source_errors,
             sql=f"""
-                SELECT id, audit_ref, title, kind, status, auditee,
-                       lead_auditor_user_id, planned_start AS event_date, planned_end
-                FROM qms_audits
-                WHERE amo_id = :amo_id
-                  AND planned_start IS NOT NULL
-                  AND planned_start >= :start_date
-                  AND planned_start <= :end_date
-                  AND COALESCE(status, 'PLANNED') NOT IN ('CLOSED', 'CANCELLED')
+                SELECT audits.id, audits.audit_ref, audits.title, audits.kind, audits.status, audits.auditee,
+                       audits.lead_auditor_user_id,
+                       COALESCE(
+                           NULLIF(TRIM(lead_user.full_name), ''),
+                           NULLIF(TRIM(CONCAT_WS(' ', lead_user.first_name, lead_user.last_name)), ''),
+                           lead_user.email
+                       ) AS lead_auditor_name,
+                       audits.planned_start AS event_date, audits.planned_end
+                FROM qms_audits audits
+                LEFT JOIN users lead_user
+                  ON lead_user.id = audits.lead_auditor_user_id
+                 AND lead_user.amo_id = audits.amo_id
+                WHERE audits.amo_id = :amo_id
+                  AND audits.planned_start IS NOT NULL
+                  AND audits.planned_start <= :end_date
+                  AND COALESCE(audits.planned_end, audits.planned_start) >= :start_date
+                  AND COALESCE(audits.status, 'PLANNED') NOT IN ('CLOSED', 'CANCELLED')
                   {audit_deleted}
-                ORDER BY planned_start ASC, id ASC
+                ORDER BY audits.planned_start ASC, audits.id ASC
                 LIMIT :limit
             """,
         )
@@ -192,10 +227,12 @@ def qms_planner_calendar(
                         "audit_source": "live_audit",
                         "calendar_group": "audit",
                         "audit_ref": row.get("audit_ref"),
+                        "audit_title": row.get("title") or "Planned audit",
                         "status": row.get("status"),
                         "kind": row.get("kind"),
                         "auditee": row.get("auditee"),
                         "lead_auditor_user_id": row.get("lead_auditor_user_id"),
+                        "lead_auditor_name": row.get("lead_auditor_name"),
                         "planned_end": _as_date(row.get("planned_end")),
                     },
                 )

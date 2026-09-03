@@ -44,6 +44,18 @@ def _seed_audit(db_session):
     db_session.commit()
     quality = _user(db_session, amo.id, account_models.AccountRole.QUALITY_MANAGER)
     tech = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
+    db_session.add(
+        quality_models.QMSAuditScope(
+            amo_id=amo.id,
+            code="MO",
+            name="Maintenance organisation",
+            party_level="FIRST_PARTY",
+            default_kind=quality_models.QMSAuditKind.INTERNAL,
+            is_active=True,
+            is_system_default=True,
+            created_by_user_id=quality.id,
+        )
+    )
     audit = quality_models.QMSAudit(
         amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
@@ -191,6 +203,7 @@ def test_schedule_creation_notifies_lead_auditor_and_auditee(db_session):
         title="Quarterly Procurement Audit",
         duration_days=3,
         next_due_date=date.today(),
+        weekend_policy="INCLUDE_WEEKEND",
         lead_auditor_user_id=lead.id,
         auditee_user_id=auditee.id,
         auditee_email=auditee.email,

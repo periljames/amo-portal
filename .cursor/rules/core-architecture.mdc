@@ -1,0 +1,31 @@
+---
+description: Core AMO Portal architecture and non-negotiable agent obligations
+alwaysApply: true
+---
+
+# Core architecture
+
+Stack: FastAPI (`backend/amodb`) + Vite/React SPA (`frontend/`). Not a JS monorepo. No BFF.
+
+## Binding docs (read before changing relevant areas)
+
+- `docs/AI_AGENT_CONTRACT.md` — always
+- `docs/qms_frontend_stabilization_guardrails.md` — QMS UI
+- `EVENT_SCHEMA.md` — realtime/SSE/MQTT
+- Existing `check:css`, `check:modals`, Vitest/Playwright scripts — treat as contracts
+
+## Before writing code
+
+1. Inspect existing routes, shells, services, and components first.
+2. Extend or reuse; never invent a silent parallel stack (second router, shell, API client, token system, or page lineage).
+3. Never replace live backend behavior with mocks in production paths.
+4. Fix root causes; do not hide failures behind catch-all fallbacks or fake success UI.
+
+## Non-negotiables
+
+- Preserve tenant isolation (`/maintenance/:amoCode`, session AMO context, cache/query scopes).
+- Preserve authentication and authorization end-to-end.
+- Frontend authz/UI gates must not substitute for backend enforcement.
+- Do not hard-code one tenant’s business rules into the multi-tenant platform.
+- Preserve API contracts unless explicitly refactoring frontend and backend together.
+- Reuse canonical components, services, routes, and shells (`DepartmentLayout`, domain shells, `components/shared`).

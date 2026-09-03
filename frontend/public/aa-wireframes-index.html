@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Audit Assurance — Target wireframes (mid-fi)</title>
+  <style>
+    :root { --ink:#1a1f2b; --line:#9aa3b2; --muted:#5c6575; --bg:#eef1f5; --panel:#fff; --accent:#1f4b7a; --warn:#8a5a00; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 13px/1.35 "Segoe UI", system-ui, sans-serif; color: var(--ink); background: #d9dee7; }
+    header.app { position: sticky; top: 0; z-index: 5; background: #102033; color: #fff; padding: 10px 16px; display: flex; gap: 16px; align-items: center; }
+    header.app nav a { color: #cfe0f5; margin-right: 10px; text-decoration: none; font-size: 12px; }
+    main { max-width: 1200px; margin: 16px auto; padding: 0 12px 48px; }
+    .wf { background: var(--panel); border: 1px solid #b8c0cc; margin: 0 0 28px; }
+    .wf h2 { margin: 0; padding: 10px 12px; background: #f4f6f9; border-bottom: 1px solid #c5ccd6; font-size: 15px; }
+    .meta { padding: 8px 12px; color: var(--muted); border-bottom: 1px dashed #c5ccd6; font-size: 12px; }
+    .frame { display: grid; grid-template-rows: 28px 28px 36px 1fr; height: 520px; border-top: 1px solid #c5ccd6; }
+    .shell { background: #243247; color: #d7e0ec; display: flex; align-items: center; padding: 0 8px; font-size: 11px; gap: 8px; }
+    .qa { background: #33465f; color: #d7e0ec; display: flex; align-items: center; padding: 0 8px; font-size: 11px; gap: 10px; }
+    .aa { background: #e8eef6; display: flex; align-items: center; padding: 0 8px; gap: 8px; border-bottom: 1px solid #c5ccd6; }
+    .aa b { color: var(--accent); }
+    .chip { border: 1px solid #9eb0c7; padding: 2px 8px; border-radius: 999px; background: #fff; font-size: 11px; }
+    .chip.on { background: #1f4b7a; color: #fff; border-color: #1f4b7a; }
+    .body { display: grid; grid-template-columns: 56px 1fr; min-height: 0; }
+    .rail { background: #f7f9fc; border-right: 1px solid #c5ccd6; padding: 6px 4px; font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .work { display: grid; grid-template-rows: 40px 1fr; min-height: 0; }
+    .toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #c5ccd6; }
+    .toolbar .grow { flex: 1; }
+    .btn { border: 1px solid #8fa0b5; background: #fff; padding: 4px 8px; font-size: 11px; }
+    .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .content { min-height: 0; overflow: hidden; padding: 8px; display: grid; gap: 8px; }
+    .grid { border: 1px solid #b8c0cc; background: #fbfcfe; height: 100%; display: grid; grid-template-rows: 28px 1fr 28px; }
+    .grid .head, .grid .foot { background: #eef2f7; border-bottom: 1px solid #c5ccd6; display: flex; align-items: center; padding: 0 8px; font-size: 11px; gap: 10px; }
+    .grid .foot { border-top: 1px solid #c5ccd6; border-bottom: 0; }
+    .rows { padding: 6px; font-size: 11px; }
+    .row { display: grid; grid-template-columns: 1.4fr 1fr .8fr .8fr .8fr .9fr .8fr; gap: 6px; padding: 6px; border-bottom: 1px solid #e1e6ee; }
+    .box { border: 1px dashed var(--line); padding: 8px; background: #fafbfd; }
+    .split { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; height: 100%; }
+    .split3 { display: grid; grid-template-columns: 180px 1fr 220px; gap: 8px; height: 100%; }
+    .note { margin: 8px 12px 12px; font-size: 12px; color: var(--muted); }
+    .warn { color: var(--warn); }
+    ul.legend { margin: 0; padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <strong>AA wireframes · mid-fi · not decorative</strong>
+    <nav>
+      <a href="#wf1">Overview</a>
+      <a href="#wf2">Programme</a>
+      <a href="#wf3">Calendar</a>
+      <a href="#wf4">Audits</a>
+      <a href="#wf5">Setup/Prepare</a>
+      <a href="#wf6">Live</a>
+      <a href="#wf7">Closing</a>
+      <a href="#wf8">Findings</a>
+      <a href="#wf9">Finding</a>
+      <a href="#wf10">CAR</a>
+      <a href="#wf11">Evidence</a>
+      <a href="#wf12">Checklists</a>
+    </nav>
+  </header>
+  <main>
+    <p class="note">Geometry rules: one AA local nav; compact toolbar; registers are viewport-contained grids with internal scroll + pagination; no CTA-only hero bands; drawers for secondary detail.</p>
+
+    <section class="wf" id="wf1">
+      <h2>1. Audit Assurance Overview</h2>
+      <div class="meta">Dominant job: what needs attention now. No KPI hero wall. ~65/35 split.</div>
+      <div class="frame">
+        <div class="shell">Portal shell (compact)</div>
+        <div class="qa">Quality context · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Overview</span><span class="chip">Plan</span><span class="chip">Audits</span><span class="chip">Findings &amp; Actions</span><span class="chip">Tools ▾</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Overview</b><span class="grow"></span><button class="btn">Refresh</button><button class="btn primary">Schedule audit</button></div>
+            <div class="content split">
+              <div>
+                <div class="box"><b>Needs attention</b><div class="rows"><div>Overdue schedule · Aircraft audit · Open programme</div><div>Live finding without CAR · Open finding</div></div></div>
+                <div class="box" style="margin-top:8px"><b>Upcoming audits</b><div class="rows">compact list / table</div></div>
+              </div>
+              <div>
+                <div class="box"><b>Programme exceptions</b><div>Unscheduled / blockers / Unavailable if no readiness</div></div>
+                <div class="box" style="margin-top:8px"><b>Recent activity</b><div>short timeline</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Scroll: page may scroll lightly. No fake zeros — use Unavailable when contract incomplete.</p>
+    </section>
+
+    <section class="wf" id="wf2">
+      <h2>2. Plan — Programme</h2>
+      <div class="meta">Plan = Programme | Calendar. Programme identity + exceptions + requirements/universe grid.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Overview</span><span class="chip on">Plan</span><span class="chip">Audits</span><span class="chip">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Plan</b> <span class="chip on">Programme</span><span class="chip">Calendar</span><span class="grow"></span><button class="btn">Edit</button><button class="btn primary">Manage coverage</button></div>
+            <div class="content" style="grid-template-rows:auto 1fr">
+              <div class="box">Identity · period · methodology · status · exception strip</div>
+              <div class="grid">
+                <div class="head">Requirements | Universe · Search · Coverage · Schedule state · More filters</div>
+                <div class="rows">AG Grid region (internal scroll)</div>
+                <div class="foot">Page 25/50/100 · Clear filters</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf3">
+      <h2>3. Plan — Calendar</h2>
+      <div class="meta">Planner V2 only. Permanent chrome: date nav, view, search, Schedule.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Overview</span><span class="chip on">Plan</span><span class="chip">Audits</span><span class="chip">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Plan</b> <span class="chip">Programme</span><span class="chip on">Calendar</span><span class="grow"></span><button class="btn">Today</button><button class="btn">Week</button><button class="btn primary">Schedule</button></div>
+            <div class="content"><div class="box" style="height:100%">Calendar canvas (internal scroll). Left/right panels collapsed by default.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf4">
+      <h2>4. Audits register</h2>
+      <div class="meta">AG Grid · segmented Mine/Upcoming/Active/Completed · row Next action CTA · no full-page scroll.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Overview</span><span class="chip">Plan</span><span class="chip on">Audits</span><span class="chip">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Audits</b> <span>n records</span><span class="grow"></span><input class="btn" style="width:180px" placeholder="Search audits" /><button class="btn">Status ▾</button><button class="btn">Period ▾</button><button class="btn">More</button><button class="btn primary">Schedule audit</button></div>
+            <div class="content" style="padding-top:0">
+              <div style="padding:6px 8px"><span class="chip on">Mine</span><span class="chip">Upcoming</span><span class="chip">Active</span><span class="chip">Completed</span></div>
+              <div class="grid" style="height:calc(100% - 34px)">
+                <div class="head">Audit · Programme · Type · Scheduled · Lead · Stage · Attention · Next action</div>
+                <div class="rows">
+                  <div class="row"><span>QAR/MO/26/001</span><span>MO</span><span>Internal</span><span>20 Jul</span><span>Lead</span><span>In progress</span><span class="warn">Window past</span><span><button class="btn primary">Continue</button></span></div>
+                  <div class="row"><span>QAR/MO/26/002</span><span>MO</span><span>Internal</span><span>31 Jul</span><span>Lead</span><span>Follow-up</span><span class="warn">Window past</span><span><button class="btn primary">Follow up</button></span></div>
+                </div>
+                <div class="foot">Rows 25 · Page 1 · Backend-bounded</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Row click → detail drawer or record. Next action from lifecycle model (never “Start” when already in progress).</p>
+    </section>
+
+    <section class="wf" id="wf5">
+      <h2>5. Audit record — Setup / Prepare</h2>
+      <div class="meta">Identity + attention + ONE next action. Secondary: Summary | Work | Findings | Evidence | Report.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Audits</span> · QAR/MO/26/001</div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Procurement Audit</b> <span class="chip">Prepare</span><span class="grow"></span><button class="btn primary">Continue preparation</button></div>
+            <div class="content split">
+              <div class="box"><b>Preparation workbench</b><ul class="legend"><li>Scope &amp; criteria</li><li>Team</li><li>Checklist</li><li>Document requests</li><li>Participants</li><li>Prior findings</li></ul>Each: Complete / Needs attention / Not required</div>
+              <div class="box"><b>Readiness</b><div class="warn">Never 100% on 0/0.</div><div>Blockers list · Open Live only when allowed</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf6">
+      <h2>6. Live fieldwork workbench</h2>
+      <div class="meta">No full-page scroll. Left checklist · Center item · Right context. Sticky prev/save/next.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Audits</span> · Live</div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Live</b> <span>stage truth</span><span class="grow"></span><button class="btn">Exit field mode</button></div>
+            <div class="content" style="grid-template-rows:1fr 36px">
+              <div class="split3">
+                <div class="box">Checklist nav</div>
+                <div class="box">Current item · response · notes · evidence</div>
+                <div class="box">Context · Create finding</div>
+              </div>
+              <div class="toolbar"><button class="btn">Previous</button><span class="grow">Autosave state</span><button class="btn">Create finding</button><button class="btn primary">Next</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">If prerequisites missing: prerequisite panel with correct next action — never empty workbench + unexplained 500.</p>
+    </section>
+
+    <section class="wf" id="wf7">
+      <h2>7. Closing sequence</h2>
+      <div class="meta">Completion checklist, not raw governance objects. One primary action by state.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Audits</span> · Closing</div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Closing</b><span class="grow"></span><button class="btn primary">Generate report draft</button></div>
+            <div class="content">
+              <div class="box">☐ Fieldwork complete · ☐ Findings reviewed · ☐ Report generated · ☐ Approved · ☐ Signed · ☐ Issue ready</div>
+              <div class="box">Blocked steps disabled. Governance details collapsed.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf8">
+      <h2>8. Findings &amp; Actions register</h2>
+      <div class="meta">AG Grid · lifecycle filters · drawer detail. Must include findings visible on audits.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Audits</span><span class="chip on">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Findings &amp; Actions</b><span class="grow"></span><input class="btn" style="width:180px" placeholder="Search" /><button class="btn">Severity ▾</button><button class="btn">More</button></div>
+            <div class="content" style="padding-top:0">
+              <div style="padding:6px 8px"><span class="chip on">Needs review</span><span class="chip">With auditee</span><span class="chip">Implementation</span><span class="chip">Effectiveness</span><span class="chip">Closed</span></div>
+              <div class="grid" style="height:calc(100% - 34px)">
+                <div class="head">Finding · Audit · Severity · Owner · CAR stage · Due · Status · Next action</div>
+                <div class="rows">AG Grid rows · Continue action</div>
+                <div class="foot">25/50/100 · URL-synced filters</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf9">
+      <h2>9. Finding detail</h2>
+      <div class="meta">Finding → CAR chain visible. Terminal load/error/empty. One Continue corrective action.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Finding F-001</b><span class="grow"></span><button class="btn primary">Continue corrective action</button></div>
+            <div class="content split">
+              <div class="box">Finding · severity · audit · requirement · owner · due</div>
+              <div class="box">Linked CAR · stage · next action · evidence links</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf10">
+      <h2>10. CAR / action detail</h2>
+      <div class="meta">RCA → CAP → Implementation → Evidence → Effectiveness → Close as one chain.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip on">Findings &amp; Actions</span></div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>CAR-…</b><span class="grow"></span><button class="btn primary">Continue stage</button></div>
+            <div class="content"><div class="box">Stepper + current stage panel + linked finding/audit</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf11">
+      <h2>11. Evidence contextual viewer</h2>
+      <div class="meta">Bounded list + maximize preview. Compact fallback when preview unavailable.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Tools</span> · Evidence</div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Evidence</b><span class="grow"></span><input class="btn" style="width:160px" placeholder="Search" /><button class="btn">Status ▾</button></div>
+            <div class="content split">
+              <div class="grid"><div class="head">List</div><div class="rows">bounded rows</div><div class="foot">15/30/50</div></div>
+              <div class="box"><b>Preview</b><div>file / type / size / Open / metadata / linkage</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wf" id="wf12">
+      <h2>12. Checklist library / editor</h2>
+      <div class="meta">List main · editor drawer/split. No dead Create button beside empty-state editor.</div>
+      <div class="frame">
+        <div class="shell">Portal shell</div>
+        <div class="qa">Quality · Audit Assurance</div>
+        <div class="aa"><span class="chip">Tools</span> · Checklists</div>
+        <div class="body">
+          <div class="rail">AA</div>
+          <div class="work">
+            <div class="toolbar"><b>Checklists</b><span class="grow"></span><button class="btn primary">Create template</button></div>
+            <div class="content split">
+              <div class="grid"><div class="head">Templates</div><div class="rows">grid/list</div><div class="foot">pagination</div></div>
+              <div class="box">Editor opens after selection/create. Hidden until valid context.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -153,6 +153,52 @@ export type AuditProgrammeOptimizer = {
 export type AuditProgrammeList = { items: AuditProgramme[]; total: number; limit: number; offset: number; has_more: boolean };
 export type AuditUniverseList = { items: AuditUniverseItem[]; total: number; limit: number; offset: number; has_more: boolean };
 
+export function readinessOf(
+  programme?: AuditProgramme,
+  optimizer?: AuditProgrammeOptimizer,
+): AuditProgrammeReadiness {
+  const items = programme?.items || [];
+  const server = programme?.readiness;
+  const blockers = server ? [...server.blockers] : ([] as Array<{ code: string; message: string }>);
+  if (!server) {
+    if (!items.length) blockers.push({ code: "NO_REQUIREMENTS", message: "No governed audit coverage is defined yet." });
+    if (!programme?.regulatory_basis?.length) blockers.push({ code: "NO_COMPLIANCE_BASIS", message: "Add the applicable compliance baseline before approval." });
+    items.forEach((item) => {
+      if (!item.target_start || !item.target_end) blockers.push({ code: "MISSING_TARGET_WINDOW", message: `${item.title}: set a target window.` });
+      if (!item.criteria?.length) blockers.push({ code: "MISSING_CRITERIA", message: `${item.title}: add audit criteria.` });
+    });
+  }
+  const mandatoryGaps = optimizer?.summary?.mandatory_coverage_gaps || 0;
+  if (mandatoryGaps && !blockers.some((entry) => entry.code === "MANDATORY_COVERAGE_GAP")) {
+    blockers.push({
+      code: "MANDATORY_COVERAGE_GAP",
+      message: `${mandatoryGaps} mandatory surveillance requirement(s) due this period are not covered.`,
+    });
+  }
+  return {
+    ready_for_approval: blockers.length === 0,
+    blockers,
+    requirement_count: server?.requirement_count ?? items.length,
+    mandatory_requirement_count: server?.mandatory_requirement_count ?? items.filter((item) => item.mandatory_surveillance).length,
+    mandatory_unscheduled_count:
+      server?.mandatory_unscheduled_count ?? items.filter((item) => item.mandatory_surveillance && item.state === "PLANNED").length,
+    high_risk_requirement_count:
+      server?.high_risk_requirement_count ??
+      items.filter((item) => ["HIGH", "CRITICAL"].includes(item.auditable_entity?.risk_classification || "")).length,
+    unscheduled_requirement_count: server?.unscheduled_requirement_count ?? items.filter((item) => item.state === "PLANNED").length,
+    mandatory_coverage_gap_count: server?.mandatory_coverage_gap_count ?? mandatoryGaps,
+  };
+}
+
+export function listedReadinessOf(programme: AuditProgramme): AuditProgrammeReadiness | null {
+  // Programme readiness is the single source of truth; list consumers must never infer it from generic audit metrics.
+  return programme.readiness ? readinessOf(programme) : null;
+}
+
+export function readinessExceptionCount(readiness: AuditProgrammeReadiness): number {
+  return readiness.blockers.length;
+}
+
 export type AuditProgrammeSchedulingQueueItem = {
   programme_id: string;
   programme_ref: string;
@@ -247,6 +293,7 @@ export type ProgrammeScheduleCreate = {
   automation_active?: boolean;
   allow_conflicts?: boolean;
   conflict_override_reason?: string;
+  weekend_policy?: "INCLUDE_WEEKEND" | "SKIP_WEEKEND";
 };
 
 export type PlannerAuditSchedule = {
@@ -297,7 +344,8 @@ export function rebuildAuditProgrammeOptimizer(amoCode: string, programmeId: str
 
 export function createAuditProgramme(amoCode: string, payload: {
   programme_year: number;
-  title: string;
+  programme_kind: "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
+  title?: string;
   objectives: string[];
   regulatory_basis: Array<string | Record<string, unknown>>;
   period_start: string;

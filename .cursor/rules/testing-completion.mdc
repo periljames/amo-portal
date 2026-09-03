@@ -1,0 +1,35 @@
+---
+description: Completion criteria — compile is not done; run scoped checks and workflow verification
+alwaysApply: true
+---
+
+# Testing & completion
+
+A task is **not complete** because TypeScript compiles or the agent claims it works.
+
+## Verify by impact (run what applies)
+
+| Touch area | Minimum checks |
+| --- | --- |
+| Any frontend change | Relevant Vitest; lint affected frontend code. If the repository-wide lint cannot reasonably run because of unrelated pre-existing failures, run the narrowest applicable lint/check and explicitly report the remaining limitation; browser console + failed network requests |
+| CSS / shared styles / shell | `npm run check:css` (cwd `frontend`) |
+| Modals / overlays | `npm run check:modals` (also part of `npm run build`) |
+| Build-sensitive / release | `npm run build` in `frontend` |
+| QMS | `npm run test:quality` (+ planner/overview scripts if touched); relevant Playwright |
+| Tenant shell / nav | `npm run test:tenant-shell` |
+| Platform / realtime client | `npm run test:platform` |
+| Rostering chunks | `npm run perf:rostering` (and browser measure if load path changed) |
+| User journey | Relevant Playwright under `frontend/tests/e2e` when workflow risk is high |
+| Backend API/schema | Existing backend tests for that app; do not ship contract drift |
+
+## Workflow bar
+
+- Confirm the actual user path in the browser when UI changed (not only unit tests).
+- Every exposed control: working or clearly unavailable.
+- Report exact commands run and outcomes. If a check cannot run, say why and what remains unverified.
+- Do not treat an unexplained 4xx/5xx browser request as acceptable merely because the visible UI renders.
+
+## Independent verification
+
+For non-trivial work, use the `verifier` subagent against the **original requirement** — do not treat the implementer’s “done” as evidence.
+---

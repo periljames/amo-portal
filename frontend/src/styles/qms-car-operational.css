@@ -7,10 +7,11 @@
   gap: 24px;
   margin-bottom: 16px;
   padding: 22px 24px;
-  border: 1px solid var(--border-color, #dfe3e8);
-  border-radius: 14px;
-  background: var(--surface-elevated, #fff);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  border: 1px solid var(--qms-line, var(--border-color, #dfe3e8));
+  border-radius: calc(var(--qms-radius, 0.55rem) + 0.2rem);
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  box-shadow: var(--qms-shadow, 0 1px 2px rgba(15, 23, 42, .04));
+  color: var(--qms-text, inherit);
 }
 
 .qms-car-page-heading .page-header__eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .055em; }
@@ -59,12 +60,12 @@
 }
 .qms-car-page-heading ~ .audit-panel .table td:last-child .secondary-chip-btn:first-child {
   border-color: var(--accent-primary, #2563eb);
-  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 10%, var(--qms-panel));
   color: var(--accent-primary, #1d4ed8);
   font-weight: 750;
 }
 .qms-car-page-heading ~ .audit-panel .table td:last-child .secondary-chip-btn:last-child:not(:first-child) { color: var(--accent-danger, #b42318); }
-.qms-car-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 9px 14px; border-top: 1px solid var(--border-color, #dfe3e8); font-size: 12.5px; }
+.qms-car-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 9px 14px; border-top: 1px solid var(--qms-line, var(--border-color, #dfe3e8)); font-size: 12.5px; }
 .qms-car-pagination .secondary-chip-btn { min-height: 36px; padding-inline: 12px; font-size: 12.5px; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] {
@@ -81,10 +82,10 @@
   margin: 0;
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--border-color, rgba(148, 163, 184, .55));
+  border: 1px solid var(--qms-line, var(--border-color, rgba(148, 163, 184, .55)));
   border-radius: 16px;
-  background: var(--surface-elevated, #fff);
-  color: var(--text-primary, #172033);
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
   box-shadow: 0 28px 90px rgba(15, 23, 42, .32);
   font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, Arial, sans-serif;
 }
@@ -104,8 +105,8 @@
   gap: 18px;
   margin: 0;
   padding: 20px 22px 17px;
-  border-bottom: 1px solid var(--border-color, #dfe3e8);
-  background: var(--surface-elevated, #fff);
+  border-bottom: 1px solid var(--qms-line, var(--border-color, #dfe3e8));
+  background: var(--qms-panel, var(--surface-elevated, #fff));
 }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__eyebrow {
@@ -127,7 +128,7 @@
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__subtitle {
   max-width: 650px;
   margin: 5px 0 0;
-  color: var(--text-secondary, #667085);
+  color: var(--qms-muted, var(--text-secondary, #667085));
   font-size: 13px;
   line-height: 1.5;
 }
@@ -141,10 +142,10 @@
   height: 40px;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border-color, #dfe3e8);
+  border: 1px solid var(--qms-line, var(--border-color, #dfe3e8));
   border-radius: 9px;
-  background: var(--surface-elevated, #fff);
-  color: var(--text-secondary, #667085);
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-muted, var(--text-secondary, #667085));
   font-size: 16px;
   cursor: pointer;
 }
@@ -166,7 +167,7 @@
 .upsell-modal__backdrop[aria-label*="corrective action"] label {
   display: grid;
   gap: 7px;
-  color: var(--text-primary, #172033);
+  color: var(--qms-text, var(--text-primary, #172033));
   font-size: 13px;
   font-weight: 700;
   line-height: 1.35;
@@ -182,10 +183,10 @@
   min-width: 0;
   min-height: 42px;
   padding: 9px 11px;
-  border: 1px solid var(--input-border, #cfd5dc);
+  border: 1px solid var(--qms-line, var(--input-border, #cfd5dc));
   border-radius: 9px;
-  background: var(--input-bg, #fff);
-  color: var(--text-primary, #172033);
+  background: var(--qms-panel, var(--input-bg, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
   font: inherit;
   font-size: 14px;
   line-height: 1.4;
@@ -197,15 +198,15 @@
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card {
   margin: 14px 22px 0;
   padding: 14px 15px;
-  border: 1px solid var(--border-color, #dfe3e8);
+  border: 1px solid var(--qms-line, var(--border-color, #dfe3e8));
   border-radius: 10px;
-  background: var(--surface, #f8fafc);
+  background: var(--surface-subtle, var(--qms-page, var(--surface, #f8fafc)));
 }
 .upsell-modal__backdrop[aria-label="Review corrective action response"] .qms-form-grid .qms-card { margin: 0; }
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card strong,
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__title { font-size: 14px; line-height: 1.35; }
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-card p,
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__subtitle { margin: 5px 0 0; color: var(--text-secondary, #667085); font-size: 12.5px; line-height: 1.5; }
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-card__subtitle { margin: 5px 0 0; color: var(--qms-muted, var(--text-secondary, #667085)); font-size: 12.5px; line-height: 1.5; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid {
   display: grid;
@@ -214,8 +215,8 @@
   margin: 0;
   padding: 20px 22px 0;
 }
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid > div { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border: 1px solid var(--border-color, #dfe3e8); border-radius: 9px; background: var(--surface, #f8fafc); }
-.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dt { color: var(--text-secondary, #667085); font-size: 11.5px; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid > div { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border: 1px solid var(--qms-line, var(--border-color, #dfe3e8)); border-radius: 9px; background: var(--surface-subtle, var(--qms-page, var(--surface, #f8fafc))); }
+.upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dt { color: var(--qms-muted, var(--text-secondary, #667085)); font-size: 11.5px; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
 .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid dd { margin: 0; overflow-wrap: anywhere; font-size: 13.5px; font-weight: 650; }
 
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__actions {
@@ -227,8 +228,8 @@
   gap: 9px;
   margin: 20px 0 0;
   padding: 14px 22px;
-  border-top: 1px solid var(--border-color, #dfe3e8);
-  background: var(--surface-elevated, #fff);
+  border-top: 1px solid var(--qms-line, var(--border-color, #dfe3e8));
+  background: var(--qms-panel, var(--surface-elevated, #fff));
 }
 .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal__actions button,
 .upsell-modal__backdrop[aria-label*="corrective action"] .primary-chip-btn,
@@ -250,4 +251,17 @@
   .upsell-modal__backdrop[aria-label="Review corrective action response"] .upsell-modal { width: 100%; max-width: none !important; max-height: 100vh; border-radius: 0; }
   .upsell-modal__backdrop[aria-label*="corrective action"] .qms-form-grid,
   .upsell-modal__backdrop[aria-label*="corrective action"] .qms-detail-grid { grid-template-columns: 1fr; }
+}
+
+html[data-color-scheme="dark"] .qms-car-page-heading,
+body[data-color-scheme="dark"] .qms-car-page-heading,
+[data-theme="dark"] .qms-car-page-heading,
+.dark .qms-car-page-heading,
+html[data-color-scheme="dark"] .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal,
+body[data-color-scheme="dark"] .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal,
+[data-theme="dark"] .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal,
+.dark .upsell-modal__backdrop[aria-label*="corrective action"] .upsell-modal {
+  color: var(--qms-text);
+  background: var(--qms-panel);
+  border-color: var(--qms-line);
 }

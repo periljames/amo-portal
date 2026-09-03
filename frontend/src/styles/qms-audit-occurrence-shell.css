@@ -1,0 +1,94 @@
+/* Occurrence stages portal into the route shell — full-bleed page, not an inset card. */
+.qms-audit-occurrence-mount {
+  min-width: 0;
+  width: 100%;
+}
+
+.qms-audit-occurrence-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  color: var(--qms-text, inherit);
+}
+
+.qms-audit-occurrence-shell__body {
+  min-width: 0;
+  width: 100%;
+}
+
+.qms-audit-occurrence-shell .qms-audit-session-rail {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  border-radius: 0;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  background: var(--qms-page, var(--surface-secondary, transparent));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.qms-audit-occurrence-shell .qms-occurrence-stage {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0.65rem 0 1.25rem;
+  background: transparent;
+}
+
+.qms-audit-occurrence-shell .qms-audit-stage-suspense {
+  display: grid;
+  place-items: center;
+  min-height: 10rem;
+  padding: 2rem 1rem;
+  color: var(--qms-muted);
+  font-weight: 700;
+}
+
+/* Kill the rounded translucent QMS card that makes stages look like a dialog. */
+html.quality-audit-canonical-occurrence .tenant-shell__content {
+  padding: 0 !important;
+}
+
+html.quality-audit-canonical-occurrence .qms-shell {
+  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.quality-audit-canonical-occurrence .qms-content {
+  display: block;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+}
+
+html.quality-audit-canonical-occurrence .qms-audit-session-rail {
+  padding-inline: 1rem;
+}
+
+html.quality-audit-canonical-occurrence .qms-audit-occurrence-shell__body {
+  padding-inline: 1rem;
+}
+
+.qms-audit-occurrence-shell .qms-live-audit-focus {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  min-height: auto;
+  height: auto;
+}

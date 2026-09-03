@@ -16,6 +16,7 @@ from amodb.database import get_read_db, get_write_db
 from . import models
 from .audit_assignment_guard import evaluate_auditor_assignment
 from .audit_occurrence_completion_models import QualityAuditAssignmentDecision
+from .people_default_rules import ensure_default_quality_privilege_rules
 from .people_models import QualityIndependenceDeclaration
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -123,11 +124,15 @@ def audit_assignment_eligibility(
     user_id: str = Query(min_length=1, max_length=36),
     assignment_role: AssignmentRole = Query(),
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    db.flush()
     audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    return _evaluate(db, audit=audit, amo_id=ctx.amo_id, user_id=user_id, role=assignment_role)
+    result = _evaluate(db, audit=audit, amo_id=ctx.amo_id, user_id=user_id, role=assignment_role)
+    db.commit()
+    return result
 
 
 @router.post("/audits/{audit_id}/independence", status_code=status.HTTP_201_CREATED)

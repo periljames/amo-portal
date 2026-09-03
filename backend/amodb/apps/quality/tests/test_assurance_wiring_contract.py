@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
+from amodb.apps.quality.assurance_lifecycle_guard_router import router as lifecycle_router
+from amodb.apps.quality.assurance_metrics_router import _readiness, router as metrics_router
 from amodb.apps.quality.assurance_lifecycle_guard_router import _ALLOWED_APPROVAL_TRANSITIONS
 from amodb.apps.quality.assurance_wiring_router import (
     SOURCE_REGISTRY,
-    _readiness,
     router as wiring_router,
 )
 
@@ -37,26 +38,30 @@ def _catchall_index(router) -> int:
 def test_wiring_router_exposes_lifecycle_source_event_and_review_contracts() -> None:
     methods = _route_methods(wiring_router)
     expected = {
-        ("/excellence/overview/full", "GET"),
         ("/excellence/source-catalog", "GET"),
         ("/excellence/source-search", "GET"),
         ("/excellence/controls", "GET"),
-        ("/excellence/controls", "POST"),
         ("/excellence/controls/{control_id}", "PATCH"),
-        ("/excellence/controls/{control_id}/approval", "POST"),
         ("/excellence/controls/{control_id}/tests", "GET"),
-        ("/excellence/controls/{control_id}/tests", "POST"),
         ("/excellence/controls/{control_id}/evidence", "POST"),
         ("/excellence/evidence/{evidence_id}", "PATCH"),
         ("/excellence/evidence-graph", "GET"),
         ("/excellence/reconcile", "POST"),
         ("/excellence/events", "GET"),
-        ("/excellence/management-review-pack", "GET"),
     }
     assert expected.issubset(methods)
+    assert {
+        ("/excellence/overview/full", "GET"),
+        ("/excellence/management-review-pack", "GET"),
+    }.issubset(_route_methods(metrics_router))
+    assert {
+        ("/excellence/controls", "POST"),
+        ("/excellence/controls/{control_id}/approval", "POST"),
+        ("/excellence/controls/{control_id}/tests", "POST"),
+    }.issubset(_route_methods(lifecycle_router))
 
 
-def test_latest_wiring_and_lifecycle_handlers_override_base_excellence_once() -> None:
+def test_each_excellence_operation_has_one_public_handler() -> None:
     canonical_prefix = "/api/maintenance/{amo_code}/quality"
     cases = (
         ("/excellence/controls", "GET", "list_controls"),

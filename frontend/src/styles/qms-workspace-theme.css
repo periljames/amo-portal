@@ -1,0 +1,306 @@
+/* Global QMS workspace theme.
+   One shared token layer for Quality tabs + Missions / People / Intelligence /
+   Assurance-cases. Surfaces come from qms-surfaces.css (--qms-page/panel/line/text).
+   Page CSS keeps structure; this file remaps locals and kills light pastels in dark. */
+
+/* ---------------------------------------------------------------------------
+   1) Quality context tabs — shared tokens (all workspaces)
+   --------------------------------------------------------------------------- */
+
+.quality-context-bar {
+  --qms-tab-idle: var(--qms-nav-idle, color-mix(in srgb, var(--text-primary, #0f172a) 78%, var(--text-secondary, #64748b)));
+  --qms-tab-active-bg: color-mix(in srgb, var(--accent-primary, #2563eb) 11%, var(--surface-elevated, #fff));
+  --qms-tab-active-ink: var(--text-primary, #0f172a);
+  --qms-tab-chip-bg: var(--surface-elevated, #fff);
+  --qms-tab-chip-line: var(--surface-border, rgba(148, 163, 184, 0.42));
+}
+
+html[data-color-scheme="dark"] .quality-context-bar,
+body[data-color-scheme="dark"] .quality-context-bar,
+[data-theme="dark"] .quality-context-bar,
+.dark .quality-context-bar {
+  --qms-tab-idle: rgba(255, 255, 255, 0.86);
+  --qms-tab-active-bg: #2f2c22;
+  --qms-tab-active-ink: #ffffff;
+  --qms-tab-chip-bg: #22252b;
+  --qms-tab-chip-line: rgba(255, 255, 255, 0.14);
+}
+
+.quality-context-bar__tabs > button {
+  background: transparent;
+  color: var(--qms-tab-idle);
+}
+
+.quality-context-bar__tabs > button.is-active {
+  background: var(--qms-tab-active-bg);
+  color: var(--qms-tab-active-ink);
+}
+
+.quality-context-bar__subtabs > button,
+.quality-context-bar__more > summary {
+  background: var(--qms-tab-chip-bg);
+  border-color: var(--qms-tab-chip-line);
+  color: var(--qms-tab-idle);
+}
+
+.quality-context-bar__subtabs > button.is-active,
+.quality-context-bar__more.is-active > summary,
+.quality-context-bar__more[open] > summary {
+  background: var(--qms-tab-active-bg);
+  color: var(--qms-tab-active-ink);
+}
+
+/* ---------------------------------------------------------------------------
+   2) Remap page-local CSS vars onto shared --qms-* surface tokens
+   --------------------------------------------------------------------------- */
+
+.qms-missions,
+.qms-mission-detail {
+  --qms-surface: var(--qms-panel, var(--surface-elevated, #fff));
+  --qms-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-border: var(--qms-line, color-mix(in srgb, var(--border-color, #cbd5e1) 82%, transparent));
+  --qms-primary: var(--accent-primary, var(--primary, #1d4ed8));
+  background: var(--qms-page, color-mix(in srgb, var(--page-bg, #eef3f8) 88%, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
+}
+
+.qms-people {
+  --qms-people-surface: var(--qms-panel, var(--surface-primary, #fff));
+  --qms-people-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-people-border: var(--qms-line, var(--border-color, #dfe3e8));
+  --qms-people-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-line, #dfe3e8) 70%, transparent));
+  --qms-people-text: var(--qms-text, var(--text-primary, #182230));
+  --qms-people-muted: var(--qms-muted, var(--text-secondary, #667085));
+  --qms-people-primary: var(--accent-primary, var(--primary, #1d4ed8));
+  background: var(--qms-page, transparent);
+  color: var(--qms-people-text);
+}
+
+.qms-intelligence {
+  --qms-intel-surface: var(--qms-panel, var(--surface-primary, #fff));
+  --qms-intel-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-intel-border: var(--qms-line, var(--border-color, #dfe3e8));
+  --qms-intel-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-line, #dfe3e8) 70%, transparent));
+  --qms-intel-text: var(--qms-text, var(--text-primary, #182230));
+  --qms-intel-muted: var(--qms-muted, var(--text-secondary, #667085));
+  --qms-intel-primary: var(--accent-primary, var(--primary, #1d4ed8));
+  background: var(--qms-page, transparent);
+  color: var(--qms-intel-text);
+}
+
+.qms-assurance-cases {
+  --qms-assurance-surface: var(--qms-panel, var(--surface-primary, #fff));
+  --qms-assurance-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
+  --qms-assurance-border: var(--qms-line, var(--border-color, #dfe3e8));
+  --qms-assurance-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-line, #dfe3e8) 70%, transparent));
+  --qms-assurance-text: var(--qms-text, var(--text-primary, #182230));
+  --qms-assurance-muted: var(--qms-muted, var(--text-secondary, #667085));
+  --qms-assurance-primary: var(--accent-primary, var(--primary, #1d4ed8));
+  background: var(--qms-page, transparent);
+  color: var(--qms-assurance-text);
+}
+
+/* ---------------------------------------------------------------------------
+   3) Dark semantic chips / pastels → charcoal tints
+   --------------------------------------------------------------------------- */
+
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases),
+[data-theme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence),
+.dark :is(.qms-missions, .qms-people, .qms-intelligence) {
+  --qms-danger-chip-bg: #3a2226;
+  --qms-danger-chip-ink: #fecaca;
+  --qms-warn-chip-bg: #3a3120;
+  --qms-warn-chip-ink: #fde68a;
+  --qms-ok-chip-bg: #1e322c;
+  --qms-ok-chip-ink: #a7f3d0;
+  --qms-info-chip-bg: #1e2a3a;
+  --qms-info-chip-ink: #bfdbfe;
+  --qms-neutral-chip-bg: #2a2e36;
+  --qms-neutral-chip-ink: rgba(255, 255, 255, 0.82);
+}
+
+/* Missions */
+html[data-color-scheme="dark"] :is(.qms-missions__tone.is-danger, .qms-mission-detail__badges .is-danger),
+body[data-color-scheme="dark"] :is(.qms-missions__tone.is-danger, .qms-mission-detail__badges .is-danger) {
+  color: var(--qms-danger-chip-ink) !important;
+  background: var(--qms-danger-chip-bg) !important;
+}
+
+html[data-color-scheme="dark"] :is(.qms-missions__tone.is-warning, .qms-mission-detail__badges .is-warning),
+body[data-color-scheme="dark"] :is(.qms-missions__tone.is-warning, .qms-mission-detail__badges .is-warning) {
+  color: var(--qms-warn-chip-ink) !important;
+  background: var(--qms-warn-chip-bg) !important;
+}
+
+html[data-color-scheme="dark"] :is(.qms-missions__tone.is-positive, .qms-mission-detail__badges .is-positive),
+body[data-color-scheme="dark"] :is(.qms-missions__tone.is-positive, .qms-mission-detail__badges .is-positive) {
+  color: var(--qms-ok-chip-ink) !important;
+  background: var(--qms-ok-chip-bg) !important;
+}
+
+html[data-color-scheme="dark"] .qms-mission-detail__badges > span:first-child,
+body[data-color-scheme="dark"] .qms-mission-detail__badges > span:first-child {
+  color: var(--qms-info-chip-ink) !important;
+  background: var(--qms-info-chip-bg) !important;
+}
+
+html[data-color-scheme="dark"] .qms-mission-detail__gate-head,
+body[data-color-scheme="dark"] .qms-mission-detail__gate-head {
+  background: var(--qms-surface-soft, #1a1d22) !important;
+  color: var(--qms-text) !important;
+}
+
+html[data-color-scheme="dark"] .qms-missions__state.is-error,
+body[data-color-scheme="dark"] .qms-missions__state.is-error {
+  color: var(--qms-danger-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qms-mission-detail__gates > header > span,
+body[data-color-scheme="dark"] .qms-mission-detail__gates > header > span {
+  color: var(--qms-warn-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qms-mission-detail__gates > header > span.is-ready,
+body[data-color-scheme="dark"] .qms-mission-detail__gates > header > span.is-ready {
+  color: var(--qms-ok-chip-ink) !important;
+}
+
+/* People */
+html[data-color-scheme="dark"] .qms-people__status--active,
+html[data-color-scheme="dark"] .qms-people__gate-grid > span.is-pass,
+html[data-color-scheme="dark"] .qms-people__eligibility.is-eligible,
+body[data-color-scheme="dark"] .qms-people__status--active,
+body[data-color-scheme="dark"] .qms-people__gate-grid > span.is-pass,
+body[data-color-scheme="dark"] .qms-people__eligibility.is-eligible {
+  background: var(--qms-ok-chip-bg) !important;
+  color: var(--qms-ok-chip-ink) !important;
+  border-color: color-mix(in srgb, #10b981 40%, transparent) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people__status--draft,
+body[data-color-scheme="dark"] .qms-people__status--draft {
+  background: var(--qms-neutral-chip-bg) !important;
+  color: var(--qms-neutral-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people__status--suspended,
+body[data-color-scheme="dark"] .qms-people__status--suspended {
+  background: var(--qms-warn-chip-bg) !important;
+  color: var(--qms-warn-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] :is(.qms-people__status--expired, .qms-people__status--revoked),
+html[data-color-scheme="dark"] .qms-people__gate-grid > span.is-block,
+html[data-color-scheme="dark"] .qms-people__eligibility.is-blocked,
+html[data-color-scheme="dark"] .qms-people__error,
+body[data-color-scheme="dark"] :is(.qms-people__status--expired, .qms-people__status--revoked),
+body[data-color-scheme="dark"] .qms-people__gate-grid > span.is-block,
+body[data-color-scheme="dark"] .qms-people__eligibility.is-blocked,
+body[data-color-scheme="dark"] .qms-people__error {
+  background: var(--qms-danger-chip-bg) !important;
+  color: var(--qms-danger-chip-ink) !important;
+  border-color: color-mix(in srgb, #ef4444 42%, transparent) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people__detail-badges > span:not(.qms-people__status),
+body[data-color-scheme="dark"] .qms-people__detail-badges > span:not(.qms-people__status) {
+  background: var(--qms-info-chip-bg) !important;
+  color: var(--qms-info-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people th,
+html[data-color-scheme="dark"] .qms-people__gate-grid > span,
+html[data-color-scheme="dark"] .qms-people__context-card,
+body[data-color-scheme="dark"] .qms-people th,
+body[data-color-scheme="dark"] .qms-people__gate-grid > span,
+body[data-color-scheme="dark"] .qms-people__context-card {
+  background: var(--qms-people-surface-soft, #1a1d22) !important;
+  color: var(--qms-people-muted, rgba(255, 255, 255, 0.72)) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people button:not(.is-primary),
+body[data-color-scheme="dark"] .qms-people button:not(.is-primary) {
+  background: var(--qms-people-surface, #22252b) !important;
+  border-color: var(--qms-people-border, rgba(255, 255, 255, 0.14)) !important;
+  color: var(--qms-people-text, rgba(255, 255, 255, 0.94)) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people__drawer,
+html[data-color-scheme="dark"] .qms-people__form footer,
+body[data-color-scheme="dark"] .qms-people__drawer,
+body[data-color-scheme="dark"] .qms-people__form footer {
+  background: var(--qms-people-surface, #1c1f24) !important;
+  border-color: var(--qms-people-border, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--qms-people-text) !important;
+}
+
+/* Intelligence */
+html[data-color-scheme="dark"] :is(
+  .qms-intelligence__error,
+  .qms-intelligence__priority-badges span.is-hard,
+  .qms-intelligence__priority-summary > span.is-hard
+),
+body[data-color-scheme="dark"] :is(
+  .qms-intelligence__error,
+  .qms-intelligence__priority-badges span.is-hard,
+  .qms-intelligence__priority-summary > span.is-hard
+) {
+  background: var(--qms-danger-chip-bg) !important;
+  color: var(--qms-danger-chip-ink) !important;
+  border-color: color-mix(in srgb, #ef4444 42%, transparent) !important;
+}
+
+html[data-color-scheme="dark"] .qms-intelligence__warning,
+body[data-color-scheme="dark"] .qms-intelligence__warning {
+  background: var(--qms-warn-chip-bg) !important;
+  color: var(--qms-warn-chip-ink) !important;
+  border-color: color-mix(in srgb, #f59e0b 42%, transparent) !important;
+}
+
+html[data-color-scheme="dark"] .qms-intelligence__priority-badges span:not(.is-hard),
+html[data-color-scheme="dark"] .qms-intelligence__targeted-list article > div:last-of-type span:not(.is-hard),
+body[data-color-scheme="dark"] .qms-intelligence__priority-badges span:not(.is-hard) {
+  background: var(--qms-neutral-chip-bg) !important;
+  color: var(--qms-neutral-chip-ink) !important;
+}
+
+html[data-color-scheme="dark"] :is(
+  .qms-intelligence th,
+  .qms-intelligence__priority-summary > span,
+  .qms-intelligence__global-factors,
+  .qms-intelligence__factor,
+  .qms-intelligence__signals > div,
+  .qms-intelligence__blockers > div,
+  .qms-intelligence__state-grid div,
+  .qms-intelligence__targeted-list,
+  .qms-intelligence__priority-rank
+),
+body[data-color-scheme="dark"] :is(
+  .qms-intelligence th,
+  .qms-intelligence__targeted-list,
+  .qms-intelligence__factor,
+  .qms-intelligence__priority-rank
+) {
+  background: var(--qms-intel-surface-soft, #1a1d22) !important;
+  color: var(--qms-intel-text, rgba(255, 255, 255, 0.92));
+  border-color: var(--qms-intel-border, rgba(255, 255, 255, 0.12));
+}
+
+html[data-color-scheme="dark"] .qms-intelligence__targeted-list article,
+body[data-color-scheme="dark"] .qms-intelligence__targeted-list article {
+  background: var(--qms-intel-surface, #22252b) !important;
+}
+
+/* Shared form controls */
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases) :is(input, select, textarea),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases) :is(input, select, textarea) {
+  background: #1a1d22 !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.94) !important;
+}
+
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence) tr.is-selected td,
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence) tr.is-selected td {
+  background: color-mix(in srgb, var(--accent-primary, #4f8cff) 14%, var(--qms-panel, #1c1f24)) !important;
+}

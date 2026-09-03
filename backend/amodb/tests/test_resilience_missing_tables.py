@@ -70,4 +70,4 @@ def test_get_cockpit_snapshot_does_not_hide_programming_error(monkeypatch):
     )
 
     with pytest.raises(ProgrammingError):
-        quality_service.get_cockpit_snapshot(_SnapshotDbStub())
+        quality_service.get_cockpit_snapshot(_SnapshotDbStub(), amo_id="amo-test")

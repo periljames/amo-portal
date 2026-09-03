@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -14,9 +14,10 @@ from .audit_programme_occurrence_models import QualityAuditProgrammeOccurrenceLi
 from .audit_source_link_models import QualityAuditSourceLink
 from .enums import QMSAuditScheduleFrequency
 from .intelligence_models import QualitySignalObservation, QualitySignalRule
-from .planner_assignment_guard_router import create_guarded_planner_audit_schedule
+from .planner_assignment_guard_router import _create_guarded_planner_audit_schedule
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 from .planner_schedule_router import PlannerAuditScheduleCreate, PlannerAuditScheduleResponse
+from .schedule_weekend import resolve_schedule_window
 from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
 router = APIRouter(tags=["Quality audit programme custom occurrences"])
@@ -54,12 +55,12 @@ def _programme_item(db: Session, *, amo_id: str, programme_id: str, item_id: str
     programme = db.query(QualityAuditProgramme).filter(
         QualityAuditProgramme.amo_id == amo_id,
         QualityAuditProgramme.id == programme_id,
-    ).first()
+    ).with_for_update().first()
     item = db.query(QualityAuditProgrammeItem).filter(
         QualityAuditProgrammeItem.amo_id == amo_id,
         QualityAuditProgrammeItem.programme_id == programme_id,
         QualityAuditProgrammeItem.id == item_id,
-    ).first()
+    ).with_for_update().first()
     if programme is None or item is None:
         raise HTTPException(status_code=404, detail="Audit programme requirement not found.")
     return programme, item
@@ -72,10 +73,15 @@ def _validate_window(programme: QualityAuditProgramme, item: QualityAuditProgram
         raise HTTPException(status_code=409, detail=f"Programme requirement in state {item.state} cannot create another occurrence.")
     if payload.frequency != QMSAuditScheduleFrequency.ONE_TIME:
         raise HTTPException(status_code=422, detail="Custom and risk-triggered programme occurrences must be authoritative ONE_TIME Planner schedules.")
-    end_date = payload.next_due_date + timedelta(days=payload.duration_days - 1)
-    if payload.next_due_date < programme.period_start or end_date > programme.period_end:
+    start_date, end_date, _duration_days = resolve_schedule_window(
+        start=payload.next_due_date,
+        duration_days=payload.duration_days,
+        weekend_policy=payload.weekend_policy,
+        title=payload.title,
+    )
+    if start_date < programme.period_start or end_date > programme.period_end:
         raise HTTPException(status_code=422, detail="Occurrence falls outside the approved programme period.")
-    if item.target_start and payload.next_due_date < item.target_start:
+    if item.target_start and start_date < item.target_start:
         raise HTTPException(status_code=422, detail="Occurrence begins before the governed programme-item target window.")
     if item.target_end and end_date > item.target_end:
         raise HTTPException(status_code=422, detail="Occurrence ends after the governed programme-item target window.")
@@ -207,7 +213,13 @@ def create_programme_occurrence(
     elif payload.signal_id:
         raise HTTPException(status_code=422, detail="CUSTOM occurrence must not supply signal_id.")
 
-    schedule = create_guarded_planner_audit_schedule(payload=payload.schedule, request=request, ctx=ctx, db=db)
+    schedule = _create_guarded_planner_audit_schedule(
+        payload=payload.schedule,
+        request=request,
+        ctx=ctx,
+        db=db,
+        commit=False,
+    )
     now = _utcnow()
     link = QualityAuditProgrammeOccurrenceLink(
         amo_id=ctx.amo_id,

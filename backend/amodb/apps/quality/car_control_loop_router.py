@@ -424,8 +424,7 @@ def get_control_loop(
     return _result(db, car=car)
 
 
-@router.post("/initialize", status_code=status.HTTP_201_CREATED)
-def initialize_control_loop(
+def _initialize_control_loop(
     car_id: str,
     payload: ControlLoopInitialize,
     ctx: TenantContext = Depends(write_tenant_context),
@@ -533,8 +532,7 @@ def update_control_profile(
     return _result(db, car=car, profile=profile)
 
 
-@router.patch("/milestones/{milestone_id}")
-def update_milestone(
+def _update_milestone(
     car_id: str,
     milestone_id: str,
     payload: MilestoneUpdate,
@@ -584,6 +582,14 @@ def update_milestone(
     )
     db.commit()
     return _result(db, car=car, profile=profile)
+
+
+def _event_exists(db: Session, *, amo_id: str, car_id: str, event_key: str) -> bool:
+    return db.query(QualityCARControlEvent.id).filter(
+        QualityCARControlEvent.amo_id == amo_id,
+        QualityCARControlEvent.car_id == car_id,
+        QualityCARControlEvent.event_key == event_key,
+    ).first() is not None
 
 
 @router.post("/dependencies", status_code=status.HTTP_201_CREATED)
@@ -674,237 +680,7 @@ def update_dependency(
     return _result(db, car=car, profile=profile)
 
 
-@router.post("/deadline-changes", status_code=status.HTTP_201_CREATED)
-def request_deadline_change(
-    car_id: str,
-    payload: DeadlineChangeCreate,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.car.manage")
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    milestone = None
-    previous_due = profile.current_due_date
-    if payload.milestone_id:
-        milestone = _assert_milestone(db, amo_id=ctx.amo_id, car_id=car_id, milestone_id=payload.milestone_id, lock=True)
-        previous_due = milestone.current_due_date
-    if payload.requested_due_date <= previous_due:
-        raise HTTPException(status_code=422, detail="A deadline extension must move the controlled due date later than its current value.")
-    if milestone is not None and payload.requested_due_date > profile.current_due_date:
-        raise HTTPException(status_code=422, detail="A milestone deadline cannot extend beyond the current final CAR deadline.")
-    pending = db.query(QualityCARDeadlineChange.id).filter(
-        QualityCARDeadlineChange.amo_id == ctx.amo_id,
-        QualityCARDeadlineChange.car_id == car.id,
-        QualityCARDeadlineChange.milestone_id == (milestone.id if milestone else None),
-        QualityCARDeadlineChange.status == "PENDING",
-    ).first()
-    if pending:
-        raise HTTPException(status_code=409, detail="A pending deadline change already exists for this controlled deadline.")
-    row = QualityCARDeadlineChange(
-        amo_id=ctx.amo_id,
-        car_id=car.id,
-        milestone_id=milestone.id if milestone else None,
-        previous_due_date=previous_due,
-        requested_due_date=payload.requested_due_date,
-        reason=payload.reason.strip(),
-        impact_statement=payload.impact_statement,
-        status="PENDING",
-        requested_by_user_id=ctx.user_id,
-    )
-    db.add(row)
-    db.flush()
-    _add_event(
-        db,
-        car=car,
-        profile=profile,
-        milestone=milestone,
-        event_type="DEADLINE_CHANGE_REQUESTED",
-        reason=payload.reason,
-        actor_user_id=ctx.user_id,
-        severity="ACTION_REQUIRED",
-    )
-    db.commit()
-    return _result(db, car=car, profile=profile)
-
-
-@router.post("/deadline-changes/{change_id}/decision")
-def decide_deadline_change(
-    car_id: str,
-    change_id: str,
-    payload: DeadlineChangeDecision,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.car.manage")
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    row = db.query(QualityCARDeadlineChange).filter(
-        QualityCARDeadlineChange.amo_id == ctx.amo_id,
-        QualityCARDeadlineChange.car_id == car.id,
-        QualityCARDeadlineChange.id == change_id,
-    ).with_for_update().first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Deadline change request not found.")
-    if row.status != "PENDING":
-        raise HTTPException(status_code=409, detail="Only a pending deadline change may be decided.")
-
-    milestone = None
-    if row.milestone_id:
-        milestone = _assert_milestone(db, amo_id=ctx.amo_id, car_id=car_id, milestone_id=str(row.milestone_id), lock=True)
-    if payload.decision == "APPROVE":
-        if milestone is not None:
-            milestone.current_due_date = row.requested_due_date
-        else:
-            profile.current_due_date = row.requested_due_date
-            car.target_closure_date = row.requested_due_date
-        row.status = "APPROVED"
-    else:
-        row.status = "REJECTED"
-    row.reviewed_by_user_id = ctx.user_id
-    row.reviewed_at = _utcnow()
-    row.review_note = payload.review_note.strip()
-    profile.updated_by_user_id = ctx.user_id
-    _add_event(
-        db,
-        car=car,
-        profile=profile,
-        milestone=milestone,
-        event_type=f"DEADLINE_CHANGE_{row.status}",
-        reason=payload.review_note,
-        actor_user_id=ctx.user_id,
-        severity="WARNING" if row.status == "REJECTED" else "INFO",
-    )
-    db.commit()
-    return _result(db, car=car, profile=profile)
-
-
-def _event_exists(db: Session, *, car_id: str, event_key: str) -> bool:
-    return db.query(QualityCARControlEvent.id).filter(
-        QualityCARControlEvent.car_id == car_id,
-        QualityCARControlEvent.event_key == event_key,
-    ).first() is not None
-
-
-def _notify_owner(db: Session, *, ctx: TenantContext, car: models.CorrectiveActionRequest, recipient_user_id: str | None, message: str, severity: str) -> None:
-    if not recipient_user_id:
-        return
-    db.add(models.QMSNotification(
-        amo_id=ctx.amo_id,
-        user_id=recipient_user_id,
-        message=message,
-        severity=severity,
-        created_by_user_id=ctx.user_id,
-        action_url=f"/maintenance/{ctx.amo_code}/quality/cars/{car.id}",
-        action_label="Open CAR control loop",
-        entity_type="quality.car",
-        entity_id=str(car.id),
-    ))
-
-
-@router.post("/evaluate")
-def evaluate_control_loop(
-    car_id: str,
-    ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db),
-) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.car.manage")
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    today = date.today()
-    created = 0
-
-    for milestone in _milestones(db, amo_id=ctx.amo_id, car_id=car_id):
-        if milestone.status in {"ACCEPTED", "COMPLETED", "WAIVED"}:
-            continue
-        days = (milestone.current_due_date - today).days
-        if days < -7:
-            stage, severity, notification_severity = "CRITICAL_OVERDUE", "CRITICAL", "WARNING"
-        elif days < 0:
-            stage, severity, notification_severity = "OVERDUE", "WARNING", "WARNING"
-        elif days <= 3:
-            stage, severity, notification_severity = "FINAL_WARNING", "WARNING", "WARNING"
-        elif days <= 7:
-            stage, severity, notification_severity = "DUE_SOON", "ACTION_REQUIRED", "ACTION_REQUIRED"
-        elif days <= 14:
-            stage, severity, notification_severity = "REMINDER", "ACTION_REQUIRED", "ACTION_REQUIRED"
-        else:
-            continue
-        event_key = f"milestone:{milestone.id}:{milestone.current_due_date.isoformat()}:{stage}"
-        if _event_exists(db, car_id=car_id, event_key=event_key):
-            continue
-        descriptor = "overdue by" if days < 0 else "due in"
-        count = abs(days) if days < 0 else days
-        message = f"{milestone.title} is {descriptor} {count} day(s)."
-        _add_event(
-            db,
-            car=car,
-            profile=profile,
-            milestone=milestone,
-            event_type=f"MILESTONE_{stage}",
-            reason=message,
-            actor_user_id=ctx.user_id,
-            severity=severity,
-            event_key=event_key,
-            system_generated=True,
-        )
-        _notify_owner(db, ctx=ctx, car=car, recipient_user_id=milestone.owner_user_id or profile.accountable_owner_user_id, message=message, severity=notification_severity)
-        created += 1
-
-    for dependency in _dependencies(db, amo_id=ctx.amo_id, car_id=car_id):
-        if dependency.status in {"RESOLVED", "MITIGATED", "ACCEPTED_RISK", "CANCELLED"}:
-            continue
-        if dependency.risk_level not in {"HIGH", "CRITICAL"} and not dependency.blocks_closure:
-            continue
-        stage = "CRITICAL" if dependency.risk_level == "CRITICAL" else "BLOCKER"
-        event_key = f"dependency:{dependency.id}:{dependency.status}:{dependency.risk_level}:{stage}"
-        if _event_exists(db, car_id=car_id, event_key=event_key):
-            continue
-        message = f"Open {dependency.risk_level.lower()}-risk dependency requires action: {dependency.title}."
-        _add_event(
-            db,
-            car=car,
-            profile=profile,
-            event_type=f"DEPENDENCY_{stage}",
-            reason=message,
-            actor_user_id=ctx.user_id,
-            severity="CRITICAL" if dependency.risk_level == "CRITICAL" else "WARNING",
-            event_key=event_key,
-            system_generated=True,
-        )
-        _notify_owner(db, ctx=ctx, car=car, recipient_user_id=dependency.owner_user_id or profile.accountable_owner_user_id, message=message, severity="WARNING")
-        created += 1
-
-    health = compute_car_health(
-        today=today,
-        car_status=str(_enum_value(car.status)),
-        final_due_date=profile.current_due_date,
-        accountable_owner_user_id=profile.accountable_owner_user_id,
-        milestones=_milestones(db, amo_id=ctx.amo_id, car_id=car_id),
-        dependencies=_dependencies(db, amo_id=ctx.amo_id, car_id=car_id),
-    )
-    if health.state in {"OVERDUE", "CRITICAL"} and str(_enum_value(car.status)) not in {"CLOSED", "CANCELLED", "ESCALATED"}:
-        transition_car(
-            db,
-            amo_id=ctx.amo_id,
-            actor_user_id=ctx.user_id,
-            car=car,
-            target_status="ESCALATED",
-            evidence_ref=None,
-        )
-        car.escalated_at = _utcnow()
-
-    db.commit()
-    result = _result(db, car=car, profile=profile)
-    result["new_events_created"] = created
-    return result
-
-
-@router.post("/close")
-def close_control_loop(
+def _close_control_loop(
     car_id: str,
     payload: CloseControlLoop,
     ctx: TenantContext = Depends(write_tenant_context),

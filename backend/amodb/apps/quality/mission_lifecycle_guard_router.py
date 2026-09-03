@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from amodb.database import get_write_db
@@ -19,6 +20,10 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 
 
 router = APIRouter(prefix="/missions", tags=["Quality mission lifecycle"])
+
+
+class MissionCancellation(BaseModel):
+    reason: str = Field(min_length=8, max_length=4000)
 
 
 def assert_mission_actor_allowed(mission, payload: MissionDecisionCreate, actor_user_id: str) -> None:
@@ -87,5 +92,44 @@ def record_governed_mission_decision(
     mission.updated_at = now
     db.commit()
 
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)
+
+
+@router.post("/{mission_id}/cancel")
+def cancel_governed_mission(
+    mission_id: str,
+    payload: MissionCancellation,
+    ctx: TenantContext = Depends(require_quality_permission("qms.change.manage")),
+    db: Session = Depends(get_write_db),
+):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
+    if mission.status in {"COMPLETE", "CANCELLED"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Mission cannot be cancelled from {mission.status}.",
+        )
+    if not mission.owner_user_id or str(mission.owner_user_id) != str(ctx.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned Mission owner may cancel this Mission.",
+        )
+    now = _utcnow()
+    db.add(QualityMissionDecision(
+        amo_id=ctx.amo_id,
+        mission_id=mission.id,
+        decision_type="CUSTOM",
+        status="REJECTED",
+        rationale=f"Mission cancelled: {payload.reason.strip()}",
+        evidence_snapshot=_decision_evidence_snapshot(mission),
+        decided_by_user_id=ctx.user_id,
+        decided_at=now,
+        created_at=now,
+    ))
+    mission.status = "CANCELLED"
+    mission.updated_by_user_id = ctx.user_id
+    mission.updated_at = now
+    db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _mission_dict(_load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id), include_detail=True)

@@ -2,14 +2,25 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
+import { hasQmsRolePermission } from "../../app/routeGuards";
 import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
 import { qmsGetAuditRegisterPage } from "../../services/qmsRegisters";
 import type { CAROut, QMSAuditOut, QMSFindingOut } from "../../services/qms";
-import { buildAuditWorkspacePath } from "../../utils/auditSlug";
+import { auditNavigationHref } from "./auditNavigation";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
+import {
+  FINDING_LIFECYCLE_OPTIONS,
+  findingLifecycleLabel,
+  findingLifecycleView,
+  findingNextAction,
+  parseFindingLifecycleView,
+  primaryLinkedCar,
+  toRegisterWorkflowStage,
+  type FindingLifecycleView,
+} from "./findingLifecycle";
 
 type RegisterTab = "findings" | "cars";
 type RegisterPageSize = 25 | 50 | 100;
@@ -47,6 +58,8 @@ const QualityAuditRegisterPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const tab: RegisterTab = rawTab === "cars" ? "cars" : "findings";
+  const stage = parseFindingLifecycleView(searchParams.get("stage"));
+  const workflowStage = toRegisterWorkflowStage(stage);
   const auditId = searchParams.get("auditId")?.trim() || "";
   const [wrapText, setWrapText] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
@@ -59,11 +72,11 @@ const QualityAuditRegisterPage: React.FC = () => {
   const [pagination, setPagination] = useState<PaginationState>({ scopeKey: "", page: 1 });
   const { density, setDensity } = useDensityPreference("audit-register", "compact");
 
-  const params = useParams<{ amoCode?: string; department?: string }>();
+  const params = useParams<{ amoCode?: string }>();
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
-  const department = params.department ?? "quality";
   const navigate = useNavigate();
+  const canCreateCar = hasQmsRolePermission("qms.car.create");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -82,6 +95,7 @@ const QualityAuditRegisterPage: React.FC = () => {
 
   const paginationScopeKey = useMemo(() => JSON.stringify([
     tab,
+    stage,
     auditId,
     debouncedQuickFilter,
     debouncedHeaderFilters.ref,
@@ -91,7 +105,7 @@ const QualityAuditRegisterPage: React.FC = () => {
     debouncedHeaderFilters.owner,
     debouncedHeaderFilters.car,
     pageSize,
-  ]), [auditId, debouncedHeaderFilters, debouncedQuickFilter, pageSize, tab]);
+  ]), [auditId, debouncedHeaderFilters, debouncedQuickFilter, pageSize, stage, tab]);
   const currentPage = pagination.scopeKey === paginationScopeKey ? pagination.page : 1;
   const setCurrentPage = (nextPage: number | ((page: number) => number)) => {
     setPagination((current) => {
@@ -106,6 +120,7 @@ const QualityAuditRegisterPage: React.FC = () => {
       "qms-audit-register-paged",
       amoCode,
       tab,
+      stage,
       auditId,
       debouncedQuickFilter,
       debouncedHeaderFilters,
@@ -116,6 +131,7 @@ const QualityAuditRegisterPage: React.FC = () => {
       domain: "AMO",
       auditId: auditId || undefined,
       onlyWithCars: tab === "cars",
+      workflowStage: tab === "findings" ? workflowStage : undefined,
       search: debouncedQuickFilter || undefined,
       ref: debouncedHeaderFilters.ref || undefined,
       finding: debouncedHeaderFilters.finding || undefined,
@@ -163,24 +179,42 @@ const QualityAuditRegisterPage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Register"
-      subtitle="Findings and linked CARs — enter canonical audit execution from each row."
+      title="Findings & Actions"
+      subtitle="One operational queue for findings, linked corrective actions, deadlines and the next governed step."
       toolbar={
-        <ResponsiveSegmentedControl
-          label="Register dataset"
-          value={tab}
-          onChange={(nextTab: RegisterTab) => {
-            const next = new URLSearchParams(searchParams);
-            next.set("tab", nextTab);
-            if (auditId) next.set("auditId", auditId);
-            setSearchParams(next);
-          }}
-          compactIconsOnMobile
-          options={[
-            { value: "findings", label: "Findings", icon: ClipboardList },
-            { value: "cars", label: "CARs", icon: ShieldAlert },
-          ]}
-        />
+        <div className="audit-workspace__view-controls">
+          <ResponsiveSegmentedControl
+            label="Register dataset"
+            value={tab}
+            onChange={(nextTab: RegisterTab) => {
+              const next = new URLSearchParams(searchParams);
+              next.set("tab", nextTab);
+              if (nextTab !== "findings") next.delete("stage");
+              if (auditId) next.set("auditId", auditId);
+              setSearchParams(next);
+            }}
+            compactIconsOnMobile
+            options={[
+              { value: "findings", label: "Findings", icon: ClipboardList },
+              { value: "cars", label: "CARs", icon: ShieldAlert },
+            ]}
+          />
+          {tab === "findings" ? (
+            <ResponsiveSegmentedControl
+              label="Finding lifecycle view"
+              value={stage}
+              onChange={(nextStage: FindingLifecycleView) => {
+                const next = new URLSearchParams(searchParams);
+                next.set("tab", "findings");
+                if (nextStage === "all") next.delete("stage");
+                else next.set("stage", nextStage);
+                if (auditId) next.set("auditId", auditId);
+                setSearchParams(next);
+              }}
+              options={FINDING_LIFECYCLE_OPTIONS.map((option) => ({ ...option, icon: TableProperties }))}
+            />
+          ) : null}
+        </div>
       }
     >
       <div className="audit-workspace audit-workspace--register-dense">
@@ -209,10 +243,13 @@ const QualityAuditRegisterPage: React.FC = () => {
         <div className="audit-panel">
           <div className="audit-panel__header audit-panel__header--dense">
             <div>
-              <h2 className="audit-panel__title">Operational register</h2>
+              <h2 className="audit-panel__title">
+                {tab === "findings" ? findingLifecycleLabel(stage) : "CAR-linked findings"}
+              </h2>
               <p className="audit-panel__subtitle">
                 {pageStart}-{pageEnd} of {total}
                 {tab === "cars" ? " · CAR-linked" : ""}
+                {tab === "findings" && stage === "all" ? " · finding + CAR lifecycle" : ""}
                 {refreshing ? " · refreshing" : ""}
               </p>
             </div>
@@ -252,7 +289,7 @@ const QualityAuditRegisterPage: React.FC = () => {
                   <th>Status / stage</th>
                   <th>Finding</th>
                   <th>Audit</th>
-                  <th>Schedule</th>
+                  <th>Due</th>
                   <th>Lead</th>
                   <th>Type</th>
                   {showOwner ? <th>Owner</th> : null}
@@ -280,43 +317,50 @@ const QualityAuditRegisterPage: React.FC = () => {
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={showOwner ? 9 : 8}>No register rows match the current filters.</td>
+                    <td colSpan={showOwner ? 9 : 8}>
+                      {tab === "findings" && stage === "needs_review"
+                        ? "No findings in RCA/CAP. Findings raised in Live that auto-create an OPEN CAR appear under Awaiting response or All."
+                        : "No register rows match the current filters."}
+                    </td>
                   </tr>
                 ) : (
                   rows.map(({ audit, finding, linkedCars }) => {
-                    const findingOpen = !finding.closed_at;
-                    const stage = findingOpen
-                      ? linkedCars.length
-                        ? "Follow-up"
-                        : "Open finding"
-                      : "Closed";
+                    const lifecycleStage = findingLifecycleView(finding, linkedCars);
+                    const primaryCar = primaryLinkedCar(linkedCars);
+                    const findingOpen = lifecycleStage !== "closed";
+                    const detailPath = `/maintenance/${amoCode}/quality/findings/${encodeURIComponent(finding.id)}/overview`;
                     return (
                       <tr key={finding.id}>
                         <td>
-                          <span className={`qms-pill${findingOpen ? " qms-pill--warn" : ""}`}>{stage}</span>
-                          <div className={`text-muted ${cellTextClass}`}>{audit.status?.replaceAll("_", " ") || "—"}</div>
+                          <span className={`qms-pill${findingOpen ? " qms-pill--warn" : ""}`}>
+                            {findingLifecycleLabel(lifecycleStage)}
+                          </span>
+                          <div className={`text-muted ${cellTextClass}`}>
+                            {primaryCar?.status.replaceAll("_", " ") || "No linked CAR"}
+                          </div>
                         </td>
                         <td>
-                          <strong title={finding.finding_ref || finding.id}>{finding.finding_ref || finding.id.slice(0, 8)}</strong>
+                          <button type="button" className="qa-register-record-link" onClick={() => navigate(detailPath)}>
+                            {finding.finding_ref || finding.id.slice(0, 8)}
+                          </button>
                           <div className={cellTextClass} title={finding.description || undefined}>{finding.description}</div>
                           {finding.level || finding.severity ? (
                             <div className={`text-muted ${cellTextClass}`}>{finding.level || finding.severity}</div>
                           ) : null}
                         </td>
                         <td>
-                          <strong title={audit.audit_ref}>{audit.audit_ref}</strong>
+                          <button
+                            type="button"
+                            className="qa-register-record-link"
+                            onClick={() => navigate(auditNavigationHref(amoCode, audit))}
+                          >
+                            {audit.audit_ref}
+                          </button>
                           <div className={`text-muted ${cellTextClass}`} title={audit.title || undefined}>{audit.title}</div>
                           <div className={`text-muted ${cellTextClass}`}>{audit.kind?.replaceAll("_", " ")}</div>
                         </td>
                         <td>
-                          {audit.planned_start || audit.planned_end || audit.actual_start ? (
-                            <span>
-                              {(audit.planned_start || audit.actual_start || "").slice(0, 10) || "—"}
-                              {audit.planned_end ? ` → ${audit.planned_end.slice(0, 10)}` : ""}
-                            </span>
-                          ) : (
-                            <span className="text-muted">No date</span>
-                          )}
+                          <span>{finding.target_close_date || primaryCar?.target_closure_date || primaryCar?.due_date || "Not set"}</span>
                         </td>
                         <td>{audit.lead_auditor_name || "Unassigned"}</td>
                         <td><span className="qms-pill">{finding.finding_type}</span></td>
@@ -341,13 +385,35 @@ const QualityAuditRegisterPage: React.FC = () => {
                           </div>
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            onClick={() => navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref }))}
-                            className="secondary-chip-btn"
-                          >
-                            Open audit
-                          </button>
+                          <div className="qa-register-primary-action">
+                            <button
+                              type="button"
+                              onClick={() => navigate(primaryCar
+                                ? `/maintenance/${amoCode}/quality/cars?carId=${encodeURIComponent(primaryCar.id)}`
+                                : canCreateCar
+                                  ? `/maintenance/${amoCode}/quality/cars/new?findingId=${encodeURIComponent(finding.id)}`
+                                  : detailPath)}
+                              className="secondary-chip-btn"
+                            >
+                              {primaryCar
+                                ? "Continue corrective action"
+                                : canCreateCar
+                                  ? "Create corrective action"
+                                  : "Review finding"}
+                            </button>
+                            <small>
+                              {!primaryCar && !canCreateCar
+                                ? "Review finding and request corrective-action assignment"
+                                : findingNextAction(lifecycleStage, Boolean(primaryCar))}
+                            </small>
+                            <button
+                              type="button"
+                              onClick={() => navigate(auditNavigationHref(amoCode, audit))}
+                              className="qa-register-audit-link"
+                            >
+                              Open audit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

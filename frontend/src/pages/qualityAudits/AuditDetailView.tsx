@@ -232,7 +232,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
 
   const personnelQuery = useQuery({
     queryKey: ["qms-audit-personnel-options", amoCode],
-    queryFn: () => qmsListAuditPersonnelOptions({ limit: 150 }),
+    queryFn: () => qmsListAuditPersonnelOptions(amoCode, { limit: 150 }),
     staleTime: 5 * 60_000,
   });
 
@@ -452,7 +452,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       <div className="qms-card">
         <h3>Schedule not found</h3>
         <p>The schedule is missing, inactive, or outside your AMO scope.</p>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/plan?view=list`)}>
+        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/calendar/week`)}>
           Back to list
         </button>
       </div>
@@ -485,7 +485,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
               aria-label="Audit route tabs"
               style={{ "--segment-count": 3, "--segment-active-index": 0 } as React.CSSProperties}
             >
-              <button type="button" className="is-active" onClick={() => navigate(`${baseQmsPath}/audits/plan?view=list`)}>Plan</button>
+              <button type="button" className="is-active" onClick={() => navigate(`${baseQmsPath}/calendar/week`)}>Plan</button>
               <button type="button" onClick={goToRegister}>Register</button>
               <button type="button" onClick={goToEvidence}>Evidence</button>
             </div>
