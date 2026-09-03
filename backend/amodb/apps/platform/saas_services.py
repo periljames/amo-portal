@@ -479,7 +479,16 @@ def update_tenant_modules(
             entity_type="module_subscription",
             entity_id=tenant_id,
             reason=reason[:1000],
-            details_json={"changes": [tenant_module_payload(row) for row in changed]},
+            details_json={
+                "changes": [
+                    {
+                        "module_code": row.module_code,
+                        "status": getattr(row.status, "value", str(row.status)),
+                        "plan_code": row.plan_code,
+                    }
+                    for row in changed
+                ]
+            },
         )
     )
     db.commit()
