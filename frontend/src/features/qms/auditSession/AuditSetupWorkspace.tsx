@@ -372,7 +372,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         location: value.modality === "ONLINE" ? null : value.location.trim() || null,
         conference_url: value.modality === "PHYSICAL" ? null : value.conferenceUrl.trim() || null,
         agenda: value.agenda.trim() || null,
-        status: (row?.status || "PLANNED") as const,
+        status: row?.status || "PLANNED",
       };
       return row ? updateAuditMeeting(amoCode, auditId, row.id, payload) : createAuditMeeting(amoCode, auditId, payload);
     },
