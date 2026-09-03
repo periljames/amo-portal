@@ -1,0 +1,103 @@
+# Self-contained single-server overlay for docker-compose.prod.yml.
+#
+# Adds a bundled PostgreSQL 16 database plus a shared uploads volume so a fresh
+# Linux server with only Docker installed can run the entire platform without any
+# external managed database or object store. For horizontally scaled fleets, omit
+# this file and point DATABASE_WRITE_URL at managed Postgres and S3 storage.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up -d
+# (scripts/install.sh wires this automatically when USE_BUNDLED_DB=1.)
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${AMO_DB_USER:-amo}"
+      POSTGRES_PASSWORD: "${AMO_DB_PASSWORD:?AMO_DB_PASSWORD must be set in .env}"
+      POSTGRES_DB: "${AMO_DB_NAME:-amodb}"
+    volumes:
+      - amo-db-data:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AMO_DB_USER:-amo} -d ${AMO_DB_NAME:-amodb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    cpus: "${AMO_DB_CPU_LIMIT:-2.0}"
+    mem_limit: "${AMO_DB_MEMORY_LIMIT:-2g}"
+
+  backend:
+    environment:
+      # Single-node deployments use a shared local volume instead of S3.
+      AMO_REQUIRE_SHARED_STORAGE: "${AMO_REQUIRE_SHARED_STORAGE:-false}"
+      AMO_STORAGE_BACKEND: "${AMO_STORAGE_BACKEND:-local}"
+      AMO_STORAGE_LOCAL_ROOT: "${AMO_STORAGE_LOCAL_ROOT:-/srv/amo/uploads}"
+    volumes:
+      - amo-uploads:/srv/amo/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  portal-worker:
+    environment:
+      AMO_REQUIRE_SHARED_STORAGE: "${AMO_REQUIRE_SHARED_STORAGE:-false}"
+      AMO_STORAGE_BACKEND: "${AMO_STORAGE_BACKEND:-local}"
+      AMO_STORAGE_LOCAL_ROOT: "${AMO_STORAGE_LOCAL_ROOT:-/srv/amo/uploads}"
+    volumes:
+      - amo-uploads:/srv/amo/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  portal-scheduler:
+    volumes:
+      - amo-uploads:/srv/amo/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  document-evidence-worker:
+    environment:
+      AMO_REQUIRE_SHARED_STORAGE: "${AMO_REQUIRE_SHARED_STORAGE:-false}"
+      AMO_STORAGE_BACKEND: "${AMO_STORAGE_BACKEND:-local}"
+      AMO_STORAGE_LOCAL_ROOT: "${AMO_STORAGE_LOCAL_ROOT:-/srv/amo/uploads}"
+    volumes:
+      - amo-uploads:/srv/amo/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  platform-ops-gateway:
+    depends_on:
+      db:
+        condition: service_healthy
+
+  platform-ops-worker:
+    depends_on:
+      db:
+        condition: service_healthy
+
+  rostering-automation:
+    environment:
+      AMO_REQUIRE_SHARED_STORAGE: "${AMO_REQUIRE_SHARED_STORAGE:-false}"
+      AMO_STORAGE_BACKEND: "${AMO_STORAGE_BACKEND:-local}"
+      AMO_STORAGE_LOCAL_ROOT: "${AMO_STORAGE_LOCAL_ROOT:-/srv/amo/uploads}"
+    volumes:
+      - amo-uploads:/srv/amo/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+volumes:
+  amo-db-data:
+  amo-uploads:
