@@ -15,6 +15,9 @@
   --platform-radius-lg: 17px;
   --platform-shadow: 0 16px 42px rgba(1, 7, 20, 0.24);
   --platform-fast: 150ms ease;
+  /* Render native controls (select lists, date pickers, checkboxes, scrollbars)
+     against the dark palette instead of the browser's default white. */
+  color-scheme: dark;
 
   --platform-bg: #07101f;
   --platform-bg-raised: #0a1426;
@@ -54,6 +57,7 @@
 }
 
 .platform-shell[data-platform-theme="light"] {
+  color-scheme: light;
   --platform-bg: #edf3fb;
   --platform-bg-raised: #f7faff;
   --platform-sidebar: #0c1728;
@@ -704,9 +708,9 @@
 .platform-form input,
 .platform-form select,
 .platform-form textarea,
-.platform-card > input,
-.platform-card > select,
-.platform-card > textarea,
+.platform-card input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
+.platform-card select,
+.platform-card textarea,
 .platform-table input,
 .platform-table select {
   width: 100%;
@@ -721,16 +725,17 @@
   transition: border-color var(--platform-fast), box-shadow var(--platform-fast), background var(--platform-fast);
 }
 .platform-form textarea,
-.platform-card > textarea { min-height: 72px; resize: vertical; line-height: 1.45; }
+.platform-card textarea { min-height: 72px; resize: vertical; line-height: 1.45; }
 .platform-form input::placeholder,
 .platform-form textarea::placeholder,
-.platform-card > textarea::placeholder { color: var(--platform-subtle); }
+.platform-card input::placeholder,
+.platform-card textarea::placeholder { color: var(--platform-subtle); }
 .platform-form input:focus,
 .platform-form select:focus,
 .platform-form textarea:focus,
-.platform-card > input:focus,
-.platform-card > select:focus,
-.platform-card > textarea:focus,
+.platform-card input:focus,
+.platform-card select:focus,
+.platform-card textarea:focus,
 .platform-table input:focus,
 .platform-table select:focus { border-color: rgba(var(--platform-accent-rgb), 0.76); box-shadow: 0 0 0 3px rgba(var(--platform-accent-rgb), 0.11); }
 .platform-form input:disabled,
