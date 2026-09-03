@@ -22,6 +22,29 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Canonical catalog of modules the platform ships with. The superadmin activates
+# or deactivates these per tenant; they are not created ad hoc. Enforcement for
+# gated modules is via ModuleSubscription.status + entitlements.require_module.
+MODULE_CATALOG: list[dict[str, str]] = [
+    {"code": "quality", "label": "Quality (QMS)", "category": "Quality & Compliance"},
+    {"code": "training", "label": "Training & Competence", "category": "Quality & Compliance"},
+    {"code": "aerodoc_hybrid_dms", "label": "Document Control (AeroDoc Hybrid DMS)", "category": "Documents"},
+    {"code": "manuals", "label": "Controlled Manuals", "category": "Documents"},
+    {"code": "maintenance_program", "label": "Maintenance Programme", "category": "Maintenance"},
+    {"code": "work", "label": "Work Orders", "category": "Maintenance"},
+    {"code": "fleet", "label": "Fleet", "category": "Maintenance"},
+    {"code": "technical_records", "label": "Technical Records", "category": "Maintenance"},
+    {"code": "reliability", "label": "Reliability", "category": "Continuing Airworthiness"},
+    {"code": "rostering", "label": "Rostering", "category": "Workforce"},
+    {"code": "workforce", "label": "Workforce", "category": "Workforce"},
+    {"code": "finance_inventory", "label": "Finance & Inventory", "category": "Commercial"},
+]
+
+
+def module_catalog() -> list[dict[str, str]]:
+    return [dict(item) for item in MODULE_CATALOG]
+
+
 def _safe_count(db: Session, model, *criteria) -> int:
     try:
         q = db.query(func.count(model.id))
@@ -930,6 +953,102 @@ def capture_infrastructure_snapshot(db: Session) -> models.PlatformInfrastructur
     db.commit()
     db.refresh(row)
     return row
+
+
+_LIVE_METRIC_STATE: dict[str, Any] = {"net": None, "net_ts": None}
+
+
+def live_system_metrics(db: Session) -> dict[str, Any]:
+    """Instant, cheap host+DB metrics for high-frequency (~1s) polling.
+
+    Uses non-blocking psutil sampling (CPU delta since the previous call, network
+    counter deltas over wall-clock) so the superadmin console can render live,
+    Task-Manager-style graphs without the 30s snapshot cadence.
+    """
+    import time as _time
+
+    cpu_percent: float | None = None
+    memory_percent: float | None = None
+    net_rx: float | None = None
+    net_tx: float | None = None
+    now = _time.monotonic()
+    try:
+        import psutil
+
+        cpu_percent = float(psutil.cpu_percent(interval=None))
+        memory_percent = float(psutil.virtual_memory().percent)
+        counters = psutil.net_io_counters()
+        prev = _LIVE_METRIC_STATE.get("net")
+        prev_ts = _LIVE_METRIC_STATE.get("net_ts")
+        if prev is not None and prev_ts is not None and now > prev_ts:
+            dt = now - prev_ts
+            if dt > 0:
+                net_rx = max(0.0, (counters.bytes_recv - prev.bytes_recv) / dt)
+                net_tx = max(0.0, (counters.bytes_sent - prev.bytes_sent) / dt)
+        _LIVE_METRIC_STATE["net"] = counters
+        _LIVE_METRIC_STATE["net_ts"] = now
+    except Exception:
+        pass
+
+    db_active = _safe_scalar(db, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()")
+    db_max = _safe_scalar(db, "SELECT setting::int FROM pg_settings WHERE name = 'max_connections'")
+    queue_depth = _safe_count(
+        db,
+        models.PlatformCommandJob,
+        models.PlatformCommandJob.status.in_(["PENDING", "RUNNING", "NEEDS_APPROVAL"]),
+    )
+    return {
+        "sampled_at": now_utc().isoformat(),
+        "cpu_percent": round(cpu_percent, 1) if cpu_percent is not None else None,
+        "memory_percent": round(memory_percent, 1) if memory_percent is not None else None,
+        "db_connections_active": int(db_active) if db_active is not None else None,
+        "db_connections_max": int(db_max) if db_max is not None else None,
+        "db_utilisation_percent": round(100.0 * db_active / db_max, 1) if (db_active and db_max) else None,
+        "queue_depth": queue_depth,
+        "network_rx_bytes_per_sec": round(net_rx, 2) if net_rx is not None else None,
+        "network_tx_bytes_per_sec": round(net_tx, 2) if net_tx is not None else None,
+    }
+
+
+def database_latency_check(db: Session, *, samples: int = 5) -> dict[str, Any]:
+    """Measure round-trip latency of trivial queries plus pool/size stats.
+
+    A lightweight, on-demand "connection speed test" for the database link.
+    """
+    import time as _time
+
+    samples = max(1, min(int(samples or 5), 25))
+    latencies: list[float] = []
+    ok = True
+    error: str | None = None
+    for _ in range(samples):
+        started = _time.perf_counter()
+        try:
+            db.execute(text("SELECT 1")).scalar()
+        except Exception as exc:  # pragma: no cover - surfaced to the operator
+            ok = False
+            error = str(exc)[:200]
+            break
+        latencies.append((_time.perf_counter() - started) * 1000.0)
+
+    active = _safe_scalar(db, "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()")
+    maxc = _safe_scalar(db, "SELECT setting::int FROM pg_settings WHERE name = 'max_connections'")
+    db_size = _safe_scalar(db, "SELECT pg_database_size(current_database())")
+    server_version = _safe_scalar(db, "SHOW server_version")
+    return {
+        "ok": ok,
+        "error": error,
+        "samples": len(latencies),
+        "min_ms": round(min(latencies), 3) if latencies else None,
+        "avg_ms": round(sum(latencies) / len(latencies), 3) if latencies else None,
+        "max_ms": round(max(latencies), 3) if latencies else None,
+        "connections_active": int(active) if active is not None else None,
+        "connections_max": int(maxc) if maxc is not None else None,
+        "utilisation_percent": round(100.0 * active / maxc, 2) if (active and maxc) else None,
+        "database_size_bytes": int(db_size) if db_size is not None else None,
+        "server_version": str(server_version) if server_version is not None else None,
+        "checked_at": now_utc().isoformat(),
+    }
 
 
 def list_feature_flags(db: Session) -> list[dict[str, Any]]:

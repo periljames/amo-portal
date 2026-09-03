@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import {
   platformApi,
+  type PlatformUser,
   type TenantModuleSubscription,
 } from "../../services/platformControl";
 import {
@@ -16,6 +17,7 @@ import {
 import { usePlatformData } from "./components/usePlatformData";
 
 const PAGE_SIZE = 25;
+const USER_PAGE_SIZE = 25;
 
 type ModuleDraft = {
   module_code: string;
@@ -41,7 +43,6 @@ export default function PlatformTenantsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState("Platform support or subscription action");
   const [moduleOverrides, setModuleOverrides] = useState<Record<string, ModuleDraft>>({});
-  const [newModule, setNewModule] = useState("quality");
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -67,24 +68,48 @@ export default function PlatformTenantsPage() {
     [selected],
     { pollMs: 15_000 },
   );
+  const [userQuery, setUserQuery] = useState("");
+  const [userOffset, setUserOffset] = useState(0);
+  // On-demand and bounded (read pool + limit, no polling) so deep drill-down
+  // never saturates the connection pool.
+  const tenantUsers = usePlatformData(
+    () => selected
+      ? platformApi.users({ tenant_id: selected, q: userQuery, limit: USER_PAGE_SIZE, offset: userOffset })
+      : Promise.resolve({ items: [] as PlatformUser[], total: 0 }),
+    [selected, userQuery, userOffset],
+    { pollMs: 0, live: false },
+  );
+  const userTotal = tenantUsers.data?.total ?? 0;
+  const catalog = usePlatformData(() => platformApi.moduleCatalog(), [], { pollMs: 0, live: false });
 
-  const moduleDrafts = useMemo(() => {
-    const rows = new Map<string, ModuleDraft>();
-    (modules.data?.items ?? []).forEach((module) => rows.set(module.module_code, {
-      module_code: module.module_code,
+  // Merge the shipped module catalog with this tenant's current subscription
+  // state (default DISABLED) plus any unsaved edits. Modules are activated, not
+  // created — the catalog is the single source of truth.
+  const moduleRows = useMemo(() => {
+    const existing = new Map<string, { status: string; plan_code: string }>();
+    (modules.data?.items ?? []).forEach((module) => existing.set(module.module_code, {
       status: module.status,
       plan_code: module.plan_code ?? "STANDARD",
     }));
-    Object.values(moduleOverrides).forEach((module) => rows.set(module.module_code, module));
-    return Array.from(rows.values()).sort((left, right) => left.module_code.localeCompare(right.module_code));
-  }, [moduleOverrides, modules.data?.items]);
+    return (catalog.data?.items ?? []).map((mod) => {
+      const override = moduleOverrides[mod.code];
+      const base = existing.get(mod.code);
+      return {
+        module_code: mod.code,
+        label: mod.label,
+        category: mod.category,
+        status: override?.status ?? base?.status ?? "DISABLED",
+        plan_code: override?.plan_code ?? base?.plan_code ?? "STANDARD",
+      };
+    });
+  }, [catalog.data?.items, modules.data?.items, moduleOverrides]);
 
   const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
   const enabledCount = useMemo(
-    () => moduleDrafts.filter((module) => module.status === "ENABLED" || module.status === "TRIAL").length,
-    [moduleDrafts],
+    () => moduleRows.filter((module) => module.status === "ENABLED" || module.status === "TRIAL").length,
+    [moduleRows],
   );
   const integrationSetupPath = selected && tenantRecord?.amo_code
     ? `/maintenance/${encodeURIComponent(String(tenantRecord.amo_code))}/admin/email-settings?tenant_id=${encodeURIComponent(selected)}`
@@ -115,8 +140,25 @@ export default function PlatformTenantsPage() {
   const selectTenant = (tenantId: string) => {
     setSelected(tenantId);
     setModuleOverrides({});
+    setUserQuery("");
+    setUserOffset(0);
     setNotice(null);
     setActionError(null);
+  };
+
+  const runUserAction = async (
+    userId: string,
+    action: "enable" | "disable" | "revoke-sessions" | "force-password-reset",
+  ) => {
+    setActionError(null);
+    setNotice(null);
+    try {
+      await platformApi.userAction(userId, action, reason);
+      setNotice(`User ${action.replaceAll("-", " ")} completed.`);
+      tenantUsers.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const tenantAction = (id: string, action: "suspend" | "reactivate" | "lock" | "unlock") => execute(
@@ -126,9 +168,14 @@ export default function PlatformTenantsPage() {
 
   const saveModules = () => {
     if (!selected) return;
+    const changes = Object.values(moduleOverrides);
+    if (!changes.length) {
+      setNotice("No module changes to save.");
+      return;
+    }
     return execute(
-      () => platformApi.updateTenantModules(selected, moduleDrafts, reason),
-      "Tenant module subscriptions updated.",
+      () => platformApi.updateTenantModules(selected, changes, reason),
+      "Tenant modules updated.",
     ).then(() => setModuleOverrides({}));
   };
 
@@ -136,18 +183,11 @@ export default function PlatformTenantsPage() {
     setModuleOverrides((current) => ({ ...current, [module.module_code]: module }));
   };
 
-  const addModuleDraft = () => {
-    const moduleCode = newModule.trim().toLowerCase().replaceAll("-", "_");
-    if (!moduleCode || moduleDrafts.some((module) => module.module_code === moduleCode)) return;
-    updateModuleDraft({ module_code: moduleCode, status: "DISABLED", plan_code: "STANDARD" });
-    setNewModule("");
-  };
-
   return (
     <PlatformShell
       title="Tenants & Institutions"
-      subtitle="Provision and inspect AMOs, control access, module subscriptions, support sessions, assets, provider setup and billing state."
-      actions={<button className="platform-btn" onClick={() => { tenants.reload(); detail.reload(); modules.reload(); }}>Refresh workspace</button>}
+      subtitle="Provision, drill into and control tenants"
+      actions={<button className="platform-btn" onClick={() => { tenants.reload(); detail.reload(); modules.reload(); }}>Refresh</button>}
     >
       {tenants.error ? <ErrorState error={tenants.error} retry={tenants.reload} /> : null}
       {actionError ? <div className="platform-error">{actionError}</div> : null}
@@ -193,12 +233,77 @@ export default function PlatformTenantsPage() {
         </div>
 
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Module subscription control</h2><p>Tenant-scoped module state synchronized with billing and entitlement enforcement.</p></div></div>
-          {!selected ? <EmptyState label="Select a tenant before editing modules." /> : null}
-          {selected && modules.error ? <ErrorState error={modules.error} retry={modules.reload} /> : null}
-          {selected ? <><div className="platform-toolbar"><input placeholder="Add module code" value={newModule} onChange={(event) => setNewModule(event.target.value)} /><button className="platform-btn" onClick={addModuleDraft}>Add module</button></div>{moduleDrafts.length ? <DataTable><thead><tr><th>Module</th><th>Plan</th><th>Status</th></tr></thead><tbody>{moduleDrafts.map((module) => <tr key={module.module_code}><td>{module.module_code}</td><td><input value={module.plan_code} onChange={(event) => updateModuleDraft({ ...module, plan_code: event.target.value.toUpperCase() })} /></td><td><select value={module.status} onChange={(event) => updateModuleDraft({ ...module, status: event.target.value })}><option value="ENABLED">Enabled</option><option value="TRIAL">Trial</option><option value="SUSPENDED">Suspended</option><option value="DISABLED">Disabled</option></select></td></tr>)}</tbody></DataTable> : <EmptyState label="No module subscriptions exist. Add the first module above." />}<button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save module subscriptions</button><p><small>Module changes are tenant-scoped and audited. Billing webhooks can also suspend or enable subscribed modules.</small></p></> : null}
+          <div className="platform-section-title"><div><h2>Modules</h2></div>{selected ? <StatusBadge value={`${enabledCount} ON`} /> : null}</div>
+          {!selected ? <EmptyState label="Select a tenant to manage modules." /> : null}
+          {selected && (modules.error || catalog.error) ? <ErrorState error={modules.error || catalog.error} retry={() => { modules.reload(); catalog.reload(); }} /> : null}
+          {selected ? (
+            <>
+              <DataTable>
+                <thead><tr><th>Module</th><th>Category</th><th>Status</th></tr></thead>
+                <tbody>
+                  {moduleRows.map((module) => (
+                    <tr key={module.module_code}>
+                      <td>{module.label}<br /><small>{module.module_code}</small></td>
+                      <td>{module.category}</td>
+                      <td>
+                        <select value={module.status} onChange={(event) => updateModuleDraft({ module_code: module.module_code, status: event.target.value, plan_code: module.plan_code })}>
+                          <option value="ENABLED">Enabled</option>
+                          <option value="TRIAL">Trial</option>
+                          <option value="SUSPENDED">Suspended</option>
+                          <option value="DISABLED">Disabled</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+              <button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save modules</button>
+            </>
+          ) : null}
         </div>
       </section>
+
+      {selected ? (
+        <section className="platform-card">
+          <div className="platform-section-title">
+            <div><h2>Users in this tenant</h2></div>
+            <StatusBadge value={`${userTotal} USERS`} />
+          </div>
+          <div className="platform-toolbar">
+            <input placeholder="Search users" value={userQuery} onChange={(event) => { setUserOffset(0); setUserQuery(event.target.value); }} />
+          </div>
+          {tenantUsers.error ? <ErrorState error={tenantUsers.error} retry={tenantUsers.reload} /> : null}
+          {tenantUsers.data?.items?.length ? (
+            <DataTable>
+              <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr></thead>
+              <tbody>
+                {tenantUsers.data.items.map((tenantUser) => (
+                  <tr key={tenantUser.id}>
+                    <td>{tenantUser.full_name || tenantUser.email}<br /><small>{tenantUser.email}</small></td>
+                    <td>{tenantUser.role}</td>
+                    <td><StatusBadge value={tenantUser.is_active ? "ACTIVE" : "DISABLED"} /></td>
+                    <td>{tenantUser.last_login_at ? new Date(tenantUser.last_login_at).toLocaleString() : "—"}</td>
+                    <td>
+                      <div className="platform-actions">
+                        {tenantUser.is_active
+                          ? <button className="platform-btn" onClick={() => runUserAction(tenantUser.id, "disable")}>Disable</button>
+                          : <button className="platform-btn" onClick={() => runUserAction(tenantUser.id, "enable")}>Enable</button>}
+                        <button className="platform-btn" onClick={() => runUserAction(tenantUser.id, "revoke-sessions")}>Revoke sessions</button>
+                        <button className="platform-btn" onClick={() => runUserAction(tenantUser.id, "force-password-reset")}>Reset password</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          ) : <EmptyState label="No users match." />}
+          <div className="platform-actions" style={{ marginTop: 10 }}>
+            <button className="platform-btn" disabled={userOffset === 0} onClick={() => setUserOffset(Math.max(0, userOffset - USER_PAGE_SIZE))}>Previous</button>
+            <span>{userTotal ? userOffset + 1 : 0}-{Math.min(userOffset + USER_PAGE_SIZE, userTotal)} of {userTotal}</span>
+            <button className="platform-btn" disabled={userOffset + USER_PAGE_SIZE >= userTotal} onClick={() => setUserOffset(userOffset + USER_PAGE_SIZE)}>Next</button>
+          </div>
+        </section>
+      ) : null}
     </PlatformShell>
   );
 }

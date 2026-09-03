@@ -15,10 +15,8 @@ function programme(partial: Partial<AuditProgramme> & Pick<AuditProgramme, "titl
   return {
     id: partial.id || "p1",
     programme_ref: "AP-2026-TEST-R01",
-    programme_series: partial.programme_series,
     programme_year: partial.programme_year ?? 2026,
     revision_no: partial.revision_no ?? 1,
-    title: partial.title,
     assurance_model: "HYBRID",
     continuous_monitoring_enabled: true,
     optimizer_version: "HYBRID_ASSURANCE_V1",

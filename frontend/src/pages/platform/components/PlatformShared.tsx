@@ -431,7 +431,6 @@ export const PlatformShell: React.FC<{
                 <div><h1>{title}</h1><p>{subtitle}</p></div>
               </div>
               <div className="platform-page-actions">
-                <span className={`platform-live-chip ${realtime.status}`}><i />{realtime.status === "live" ? "Live" : realtime.status}</span>
                 {actions}
               </div>
             </header>

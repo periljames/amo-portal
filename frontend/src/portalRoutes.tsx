@@ -159,6 +159,7 @@ const PlatformAnalyticsPage = lazyDefault(() => import("./pages/platform/Platfor
 const PlatformSecurityPage = lazyDefault(() => import("./pages/platform/PlatformSecurityPage"));
 const PlatformIntegrationsPage = lazyDefault(() => import("./pages/platform/PlatformIntegrationsPage"));
 const PlatformInfrastructurePage = lazyDefault(() => import("./pages/platform/PlatformInfrastructurePage"));
+const PlatformNetworkPage = lazyDefault(() => import("./pages/platform/PlatformNetworkPage"));
 const PasswordResetPage = lazyDefault(() => import("./pages/PasswordResetPage"));
 const DashboardPage = lazyDefault(() => import("./pages/DashboardPage"));
 const ReliabilityWorkspacePage = lazyDefault(() => import("./pages/reliability/ReliabilityWorkspacePage"));
@@ -482,6 +483,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/platform/security" element={<RequireAuth><PlatformSecurityPage /></RequireAuth>} />
       <Route path="/platform/integrations" element={<RequireAuth><PlatformIntegrationsPage /></RequireAuth>} />
       <Route path="/platform/infrastructure" element={<RequireAuth><PlatformInfrastructurePage /></RequireAuth>} />
+      <Route path="/platform/network" element={<RequireAuth><PlatformNetworkPage /></RequireAuth>} />
 
       <Route
         path="/verify/certificate/:certificateNumber"

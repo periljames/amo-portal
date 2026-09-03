@@ -49,7 +49,7 @@ export default function PlatformAnalyticsPage() {
   return (
     <PlatformShell
       title="Platform Analytics"
-      subtitle={`Operational traffic and privacy-safe product adoption · ${mode}. No generic clickstream or user-level cohort tracking.`}
+      subtitle={`Traffic and product adoption · ${mode}`}
       actions={<button className="platform-btn primary" onClick={() => platformApi.runThroughputProbe().then(reload)}>Run throughput probe</button>}
     >
       {analytics.error ? <ErrorState error={analytics.error} retry={analytics.reload} /> : null}

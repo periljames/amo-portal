@@ -306,6 +306,7 @@ export const platformApi = {
   modulePrices: (params: { module_code?: string; include_inactive?: boolean; limit?: number; offset?: number } = {}) => request<PlatformList<SaaSModulePrice>>(`/platform/saas/module-prices${qs(params)}`),
   createModulePrice: (payload: Record<string, unknown>) => request<SaaSModulePrice>("/platform/saas/module-prices", { method: "POST", body: JSON.stringify(payload) }),
   updateModulePrice: (id: string, payload: Record<string, unknown>) => request<SaaSModulePrice>(`/platform/saas/module-prices/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  moduleCatalog: () => request<PlatformList<{ code: string; label: string; category: string }>>("/platform/modules/catalog"),
   tenantModules: (tenantId: string) => request<PlatformList<TenantModuleSubscription>>(`/platform/saas/tenants/${encodeURIComponent(tenantId)}/modules`),
   updateTenantModules: (tenantId: string, changes: Record<string, unknown>[], reason: string) => request<PlatformList<TenantModuleSubscription>>(`/platform/saas/tenants/${encodeURIComponent(tenantId)}/modules`, { method: "PATCH", body: JSON.stringify({ changes, reason }) }),
   createManualInvoice: (tenantId: string, payload: Record<string, unknown>) => request<Record<string, unknown>>(`/platform/saas/billing/tenants/${encodeURIComponent(tenantId)}/manual-invoices`, { method: "POST", body: JSON.stringify(payload) }),

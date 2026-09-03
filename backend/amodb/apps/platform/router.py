@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 from amodb.apps.accounts import models as account_models
-from . import diagnostics, metrics, models, services
+from . import diagnostics, metrics, models, network_diagnostics, services
 
 router = APIRouter(prefix="/platform", tags=["platform-control-plane"])
 
@@ -253,6 +253,12 @@ def tenant_insights(tenant_id: str, db: Session = Depends(get_read_db), user=Dep
 @router.get("/tenants/{tenant_id}/resource-usage")
 def tenant_resources(tenant_id: str, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
     return services.latest_resource_snapshot(db, tenant_id) or {"tenant_id": tenant_id, "empty": True}
+
+
+@router.get("/modules/catalog")
+def modules_catalog(user=Depends(require_platform_superuser)):
+    """Canonical list of shipped modules the superadmin activates per tenant."""
+    return {"items": services.module_catalog()}
 
 
 @router.get("/tenants/{tenant_id}/entitlements")
@@ -585,6 +591,135 @@ def providers(db: Session = Depends(get_read_db), user=Depends(require_platform_
 def provider_update(provider_id: str, payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)): return {"id": provider_id, "status": "NOT_CONFIGURED", "detail": "Provider secrets are stored redacted only when configured by a provider-specific workflow."}
 @router.post("/integrations/providers/{provider_id}/health-check")
 def provider_health(provider_id: str, payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)): return services.job_payload(services.create_command_job(db, payload={"command_name":"RUN_NETWORK_DIAGNOSTIC", "reason":"Provider health check"}, actor_id=_actor_id(user)))
+
+
+@router.get("/infrastructure/live")
+def infrastructure_live(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    """Instant host/DB metrics for ~1s real-time polling (Task-Manager style)."""
+    return services.live_system_metrics(db)
+
+
+@router.get("/diagnostics/ping")
+def diagnostics_ping(user=Depends(require_platform_superuser)):
+    """Tiny response so the browser can measure control-plane round-trip latency."""
+    return {"ok": True, "server_time": services.now_utc().isoformat()}
+
+
+@router.post("/diagnostics/db-check")
+def diagnostics_db_check(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """On-demand database connection speed/latency check."""
+    samples = (payload or {}).get("samples")
+    try:
+        samples = int(samples) if samples is not None else 5
+    except (TypeError, ValueError):
+        samples = 5
+    return services.database_latency_check(db, samples=samples)
+
+
+_SPEEDTEST_MAX_BYTES = 64 * 1024 * 1024
+
+
+@router.get("/diagnostics/speedtest/download")
+def diagnostics_speedtest_download(bytes: int = 8_000_000, user=Depends(require_platform_superuser)):
+    """Stream incompressible random bytes so the browser can measure download throughput."""
+    import os as _os
+    from fastapi.responses import StreamingResponse
+
+    size = max(1024, min(int(bytes or 0), _SPEEDTEST_MAX_BYTES))
+    chunk_size = 64 * 1024
+
+    def _generate():
+        remaining = size
+        while remaining > 0:
+            piece = _os.urandom(min(chunk_size, remaining))
+            remaining -= len(piece)
+            yield piece
+
+    headers = {
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
+        "X-Speedtest-Bytes": str(size),
+    }
+    return StreamingResponse(_generate(), media_type="application/octet-stream", headers=headers)
+
+
+@router.post("/diagnostics/speedtest/upload")
+async def diagnostics_speedtest_upload(request: Request, user=Depends(require_platform_superuser)):
+    """Consume an uploaded payload and report received size + duration for upload throughput."""
+    import time as _time
+
+    started = _time.perf_counter()
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _SPEEDTEST_MAX_BYTES:
+            break
+    elapsed = _time.perf_counter() - started
+    return {"bytes_received": total, "server_ms": round(elapsed * 1000, 2)}
+
+
+@router.post("/diagnostics/network/internet")
+def diagnostics_network_internet(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Run a server -> internet speed test (provider/ISP SLA) and log it."""
+    payload = payload or {}
+    kwargs: dict[str, Any] = {}
+    if payload.get("download_bytes"):
+        kwargs["download_bytes"] = int(payload["download_bytes"])
+    if payload.get("upload_bytes"):
+        kwargs["upload_bytes"] = int(payload["upload_bytes"])
+    if payload.get("host"):
+        kwargs["host"] = str(payload["host"])
+    result = network_diagnostics.run_internet_speedtest(**kwargs)
+    network_diagnostics.persist_probe(db, scenario="server_internet", source="manual", data=result)
+    return result
+
+
+@router.post("/diagnostics/network/database")
+def diagnostics_network_database(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Run a server <-> database latency/throughput test and log it."""
+    payload = payload or {}
+    kwargs: dict[str, Any] = {}
+    if payload.get("payload_bytes"):
+        kwargs["payload_bytes"] = int(payload["payload_bytes"])
+    result = network_diagnostics.run_database_throughput(db, **kwargs)
+    network_diagnostics.persist_probe(db, scenario="server_database", source="manual", data=result)
+    return result
+
+
+@router.post("/diagnostics/network/client")
+def diagnostics_network_client(payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Log a browser-measured result (client -> portal or client -> internet)."""
+    scenario = str(payload.get("scenario") or "").strip()
+    if scenario not in {"client_portal", "client_internet"}:
+        raise HTTPException(status_code=422, detail="scenario must be client_portal or client_internet")
+
+    def _to_bps(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    data = {
+        "target": payload.get("target"),
+        "ok": bool(payload.get("ok", True)),
+        "latency_ms": _to_bps(payload.get("latency_ms")),
+        "jitter_ms": _to_bps(payload.get("jitter_ms")),
+        "download_bps": _to_bps(payload.get("download_bps")),
+        "upload_bps": _to_bps(payload.get("upload_bps")),
+        "download_bytes": payload.get("download_bytes"),
+        "upload_bytes": payload.get("upload_bytes"),
+        "error": payload.get("error"),
+    }
+    row = network_diagnostics.persist_probe(db, scenario=scenario, source="client", data=data)
+    return {"id": row.id, "scenario": scenario, "captured_at": row.captured_at}
+
+
+@router.get("/diagnostics/network/history")
+def diagnostics_network_history(window: str = "24h", scenario: str | None = None, sla_download_mbps: float | None = None, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    """Historical network diagnostics with 24h / 7d / 30d aggregates + SLA breaches."""
+    return network_diagnostics.history(db, window=window, scenario=scenario, sla_download_mbps=sla_download_mbps)
 
 
 @router.get("/infrastructure/summary")

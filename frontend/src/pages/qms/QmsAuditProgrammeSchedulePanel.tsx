@@ -406,7 +406,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<QmsAuditProgrammeSchedulePanelPro
                     [item.target_start, programme.period_start, new Date().toISOString().slice(0, 10)]
                       .filter(Boolean)
                       .sort()
-                      .at(-1)
+                      .at(-1) ?? undefined
                   }
                   max={item.target_end || programme.period_end}
                   value={form.next_due_date}

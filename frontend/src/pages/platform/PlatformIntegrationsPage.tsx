@@ -298,7 +298,7 @@ export default function PlatformIntegrationsPage() {
   return (
     <PlatformShell
       title="Integrations, API & Support"
-      subtitle="Manage encrypted provider credentials, email delivery, durable jobs, API access, webhooks and tenant support from one live operations workspace."
+      subtitle="Providers, email, jobs, webhooks and support"
       actions={<button className="platform-btn" onClick={() => { providers.reload(); summary.reload(); if (tab === "jobs") jobs.reload(); if (tab === "support") tickets.reload(); }}>Refresh workspace</button>}
     >
       {summary.error ? <ErrorState error={summary.error} retry={summary.reload} /> : null}

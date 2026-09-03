@@ -157,7 +157,7 @@ export default function PlatformUsersPage() {
   return (
     <PlatformShell
       title="Global User Hub"
-      subtitle="Cursor-based platform-wide account visibility with MFA/login risk filters and audited bounded bulk security actions."
+      subtitle="All accounts across tenants"
       actions={<button className="platform-btn" onClick={users.reload}>Refresh directory</button>}
     >
       {users.error ? <ErrorState error={users.error} retry={users.reload} /> : null}

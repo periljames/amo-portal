@@ -51,7 +51,7 @@ export default function PlatformSecurityPage() {
   return (
     <PlatformShell
       title="Security & Compliance"
-      subtitle="Live failed-login, suspicious-access, privileged-action, support-session and compliance oversight."
+      subtitle="Alerts, audit log and compliance"
       actions={<button className="platform-btn" onClick={() => { summaryQuery.reload(); alertsQuery.reload(); auditQuery.reload(); }}>Refresh security data</button>}
     >
       {summaryQuery.error ? <ErrorState error={summaryQuery.error} retry={summaryQuery.reload} /> : null}
