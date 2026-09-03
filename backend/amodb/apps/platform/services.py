@@ -22,6 +22,29 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Canonical catalog of modules the platform ships with. The superadmin activates
+# or deactivates these per tenant; they are not created ad hoc. Enforcement for
+# gated modules is via ModuleSubscription.status + entitlements.require_module.
+MODULE_CATALOG: list[dict[str, str]] = [
+    {"code": "quality", "label": "Quality (QMS)", "category": "Quality & Compliance"},
+    {"code": "training", "label": "Training & Competence", "category": "Quality & Compliance"},
+    {"code": "aerodoc_hybrid_dms", "label": "Document Control (AeroDoc Hybrid DMS)", "category": "Documents"},
+    {"code": "manuals", "label": "Controlled Manuals", "category": "Documents"},
+    {"code": "maintenance_program", "label": "Maintenance Programme", "category": "Maintenance"},
+    {"code": "work", "label": "Work Orders", "category": "Maintenance"},
+    {"code": "fleet", "label": "Fleet", "category": "Maintenance"},
+    {"code": "technical_records", "label": "Technical Records", "category": "Maintenance"},
+    {"code": "reliability", "label": "Reliability", "category": "Continuing Airworthiness"},
+    {"code": "rostering", "label": "Rostering", "category": "Workforce"},
+    {"code": "workforce", "label": "Workforce", "category": "Workforce"},
+    {"code": "finance_inventory", "label": "Finance & Inventory", "category": "Commercial"},
+]
+
+
+def module_catalog() -> list[dict[str, str]]:
+    return [dict(item) for item in MODULE_CATALOG]
+
+
 def _safe_count(db: Session, model, *criteria) -> int:
     try:
         q = db.query(func.count(model.id))

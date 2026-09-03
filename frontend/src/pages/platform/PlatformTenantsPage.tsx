@@ -43,7 +43,6 @@ export default function PlatformTenantsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState("Platform support or subscription action");
   const [moduleOverrides, setModuleOverrides] = useState<Record<string, ModuleDraft>>({});
-  const [newModule, setNewModule] = useState("quality");
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -81,24 +80,36 @@ export default function PlatformTenantsPage() {
     { pollMs: 0, live: false },
   );
   const userTotal = tenantUsers.data?.total ?? 0;
+  const catalog = usePlatformData(() => platformApi.moduleCatalog(), [], { pollMs: 0, live: false });
 
-  const moduleDrafts = useMemo(() => {
-    const rows = new Map<string, ModuleDraft>();
-    (modules.data?.items ?? []).forEach((module) => rows.set(module.module_code, {
-      module_code: module.module_code,
+  // Merge the shipped module catalog with this tenant's current subscription
+  // state (default DISABLED) plus any unsaved edits. Modules are activated, not
+  // created — the catalog is the single source of truth.
+  const moduleRows = useMemo(() => {
+    const existing = new Map<string, { status: string; plan_code: string }>();
+    (modules.data?.items ?? []).forEach((module) => existing.set(module.module_code, {
       status: module.status,
       plan_code: module.plan_code ?? "STANDARD",
     }));
-    Object.values(moduleOverrides).forEach((module) => rows.set(module.module_code, module));
-    return Array.from(rows.values()).sort((left, right) => left.module_code.localeCompare(right.module_code));
-  }, [moduleOverrides, modules.data?.items]);
+    return (catalog.data?.items ?? []).map((mod) => {
+      const override = moduleOverrides[mod.code];
+      const base = existing.get(mod.code);
+      return {
+        module_code: mod.code,
+        label: mod.label,
+        category: mod.category,
+        status: override?.status ?? base?.status ?? "DISABLED",
+        plan_code: override?.plan_code ?? base?.plan_code ?? "STANDARD",
+      };
+    });
+  }, [catalog.data?.items, modules.data?.items, moduleOverrides]);
 
   const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
   const enabledCount = useMemo(
-    () => moduleDrafts.filter((module) => module.status === "ENABLED" || module.status === "TRIAL").length,
-    [moduleDrafts],
+    () => moduleRows.filter((module) => module.status === "ENABLED" || module.status === "TRIAL").length,
+    [moduleRows],
   );
   const integrationSetupPath = selected && tenantRecord?.amo_code
     ? `/maintenance/${encodeURIComponent(String(tenantRecord.amo_code))}/admin/email-settings?tenant_id=${encodeURIComponent(selected)}`
@@ -157,21 +168,19 @@ export default function PlatformTenantsPage() {
 
   const saveModules = () => {
     if (!selected) return;
+    const changes = Object.values(moduleOverrides);
+    if (!changes.length) {
+      setNotice("No module changes to save.");
+      return;
+    }
     return execute(
-      () => platformApi.updateTenantModules(selected, moduleDrafts, reason),
-      "Tenant module subscriptions updated.",
+      () => platformApi.updateTenantModules(selected, changes, reason),
+      "Tenant modules updated.",
     ).then(() => setModuleOverrides({}));
   };
 
   const updateModuleDraft = (module: ModuleDraft) => {
     setModuleOverrides((current) => ({ ...current, [module.module_code]: module }));
-  };
-
-  const addModuleDraft = () => {
-    const moduleCode = newModule.trim().toLowerCase().replaceAll("-", "_");
-    if (!moduleCode || moduleDrafts.some((module) => module.module_code === moduleCode)) return;
-    updateModuleDraft({ module_code: moduleCode, status: "DISABLED", plan_code: "STANDARD" });
-    setNewModule("");
   };
 
   return (
@@ -224,10 +233,33 @@ export default function PlatformTenantsPage() {
         </div>
 
         <div className="platform-card">
-          <div className="platform-section-title"><div><h2>Module subscription control</h2><p>Tenant-scoped module state synchronized with billing and entitlement enforcement.</p></div></div>
-          {!selected ? <EmptyState label="Select a tenant before editing modules." /> : null}
-          {selected && modules.error ? <ErrorState error={modules.error} retry={modules.reload} /> : null}
-          {selected ? <><div className="platform-toolbar"><input placeholder="Add module code" value={newModule} onChange={(event) => setNewModule(event.target.value)} /><button className="platform-btn" onClick={addModuleDraft}>Add module</button></div>{moduleDrafts.length ? <DataTable><thead><tr><th>Module</th><th>Plan</th><th>Status</th></tr></thead><tbody>{moduleDrafts.map((module) => <tr key={module.module_code}><td>{module.module_code}</td><td><input value={module.plan_code} onChange={(event) => updateModuleDraft({ ...module, plan_code: event.target.value.toUpperCase() })} /></td><td><select value={module.status} onChange={(event) => updateModuleDraft({ ...module, status: event.target.value })}><option value="ENABLED">Enabled</option><option value="TRIAL">Trial</option><option value="SUSPENDED">Suspended</option><option value="DISABLED">Disabled</option></select></td></tr>)}</tbody></DataTable> : <EmptyState label="No modules yet — add one above." />}<button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save modules</button></> : null}
+          <div className="platform-section-title"><div><h2>Modules</h2></div>{selected ? <StatusBadge value={`${enabledCount} ON`} /> : null}</div>
+          {!selected ? <EmptyState label="Select a tenant to manage modules." /> : null}
+          {selected && (modules.error || catalog.error) ? <ErrorState error={modules.error || catalog.error} retry={() => { modules.reload(); catalog.reload(); }} /> : null}
+          {selected ? (
+            <>
+              <DataTable>
+                <thead><tr><th>Module</th><th>Category</th><th>Status</th></tr></thead>
+                <tbody>
+                  {moduleRows.map((module) => (
+                    <tr key={module.module_code}>
+                      <td>{module.label}<br /><small>{module.module_code}</small></td>
+                      <td>{module.category}</td>
+                      <td>
+                        <select value={module.status} onChange={(event) => updateModuleDraft({ module_code: module.module_code, status: event.target.value, plan_code: module.plan_code })}>
+                          <option value="ENABLED">Enabled</option>
+                          <option value="TRIAL">Trial</option>
+                          <option value="SUSPENDED">Suspended</option>
+                          <option value="DISABLED">Disabled</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+              <button className="platform-btn primary" style={{ marginTop: 10 }} onClick={saveModules}>Save modules</button>
+            </>
+          ) : null}
         </div>
       </section>
 

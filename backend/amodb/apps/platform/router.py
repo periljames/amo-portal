@@ -255,6 +255,12 @@ def tenant_resources(tenant_id: str, db: Session = Depends(get_read_db), user=De
     return services.latest_resource_snapshot(db, tenant_id) or {"tenant_id": tenant_id, "empty": True}
 
 
+@router.get("/modules/catalog")
+def modules_catalog(user=Depends(require_platform_superuser)):
+    """Canonical list of shipped modules the superadmin activates per tenant."""
+    return {"items": services.module_catalog()}
+
+
 @router.get("/tenants/{tenant_id}/entitlements")
 def tenant_entitlements(tenant_id: str, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
     return services.get_tenant_detail(db, tenant_id).get("modules", [])
