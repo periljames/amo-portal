@@ -839,8 +839,12 @@ def capture_infrastructure_snapshot(db: Session) -> models.PlatformInfrastructur
 
     try:
         bandwidth = (metrics.live_summary() or {}).get("bandwidth") or {}
-        net_rx_rate = _coerce_float(bandwidth.get("rx_bytes_per_sec"))
-        net_tx_rate = _coerce_float(bandwidth.get("tx_bytes_per_sec"))
+        net_rx_rate = _coerce_float(
+            bandwidth.get("current_ingress_bytes_per_second")
+            if bandwidth.get("current_ingress_bytes_per_second") is not None
+            else bandwidth.get("average_total_bytes_per_second")
+        )
+        net_tx_rate = _coerce_float(bandwidth.get("current_egress_bytes_per_second"))
     except Exception:
         bandwidth = {}
 
