@@ -361,7 +361,36 @@ def mark_invoice_paid(invoice_id: str, payload: dict[str, Any], db: Session = De
 
 @router.post("/billing/tenants/{tenant_id}/manual-invoice")
 def manual_invoice(tenant_id: str, payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
-    raise HTTPException(status_code=501, detail="Manual invoice creation requires the billing ledger workflow to be wired through command jobs. No fake invoice was created.")
+    amount_cents = payload.get("amount_cents")
+    if amount_cents is None and payload.get("amount") is not None:
+        try:
+            amount_cents = int(round(float(payload["amount"]) * 100))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="amount must be a number")
+    if amount_cents is None:
+        raise HTTPException(status_code=422, detail="amount_cents (or amount) is required")
+    due_at = None
+    raw_due = payload.get("due_at")
+    if isinstance(raw_due, str) and raw_due.strip():
+        try:
+            due_at = datetime.fromisoformat(raw_due.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="due_at must be an ISO-8601 datetime")
+    try:
+        return services.create_manual_invoice(
+            db,
+            tenant_id=tenant_id,
+            amount_cents=int(amount_cents),
+            currency=str(payload.get("currency") or "USD"),
+            description=payload.get("description"),
+            mark_paid=bool(payload.get("mark_paid")),
+            due_at=due_at,
+            actor_id=_actor_id(user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        _bad(exc)
 
 
 @router.post("/billing/tenants/{tenant_id}/override-entitlements")
