@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 from amodb.apps.accounts import models as account_models
-from . import diagnostics, metrics, models, services
+from . import diagnostics, metrics, models, network_diagnostics, services
 
 router = APIRouter(prefix="/platform", tags=["platform-control-plane"])
 
@@ -656,6 +656,70 @@ async def diagnostics_speedtest_upload(request: Request, user=Depends(require_pl
             break
     elapsed = _time.perf_counter() - started
     return {"bytes_received": total, "server_ms": round(elapsed * 1000, 2)}
+
+
+@router.post("/diagnostics/network/internet")
+def diagnostics_network_internet(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Run a server -> internet speed test (provider/ISP SLA) and log it."""
+    payload = payload or {}
+    kwargs: dict[str, Any] = {}
+    if payload.get("download_bytes"):
+        kwargs["download_bytes"] = int(payload["download_bytes"])
+    if payload.get("upload_bytes"):
+        kwargs["upload_bytes"] = int(payload["upload_bytes"])
+    if payload.get("host"):
+        kwargs["host"] = str(payload["host"])
+    result = network_diagnostics.run_internet_speedtest(**kwargs)
+    network_diagnostics.persist_probe(db, scenario="server_internet", source="manual", data=result)
+    return result
+
+
+@router.post("/diagnostics/network/database")
+def diagnostics_network_database(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Run a server <-> database latency/throughput test and log it."""
+    payload = payload or {}
+    kwargs: dict[str, Any] = {}
+    if payload.get("payload_bytes"):
+        kwargs["payload_bytes"] = int(payload["payload_bytes"])
+    result = network_diagnostics.run_database_throughput(db, **kwargs)
+    network_diagnostics.persist_probe(db, scenario="server_database", source="manual", data=result)
+    return result
+
+
+@router.post("/diagnostics/network/client")
+def diagnostics_network_client(payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    """Log a browser-measured result (client -> portal or client -> internet)."""
+    scenario = str(payload.get("scenario") or "").strip()
+    if scenario not in {"client_portal", "client_internet"}:
+        raise HTTPException(status_code=422, detail="scenario must be client_portal or client_internet")
+
+    def _to_bps(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    data = {
+        "target": payload.get("target"),
+        "ok": bool(payload.get("ok", True)),
+        "latency_ms": _to_bps(payload.get("latency_ms")),
+        "jitter_ms": _to_bps(payload.get("jitter_ms")),
+        "download_bps": _to_bps(payload.get("download_bps")),
+        "upload_bps": _to_bps(payload.get("upload_bps")),
+        "download_bytes": payload.get("download_bytes"),
+        "upload_bytes": payload.get("upload_bytes"),
+        "error": payload.get("error"),
+    }
+    row = network_diagnostics.persist_probe(db, scenario=scenario, source="client", data=data)
+    return {"id": row.id, "scenario": scenario, "captured_at": row.captured_at}
+
+
+@router.get("/diagnostics/network/history")
+def diagnostics_network_history(window: str = "24h", scenario: str | None = None, sla_download_mbps: float | None = None, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    """Historical network diagnostics with 24h / 7d / 30d aggregates + SLA breaches."""
+    return network_diagnostics.history(db, window=window, scenario=scenario, sla_download_mbps=sla_download_mbps)
 
 
 @router.get("/infrastructure/summary")

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 
 from amodb.database import WriteSessionLocal
-from amodb.apps.platform import diagnostics, models, services
+from amodb.apps.platform import diagnostics, models, network_diagnostics, services
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,35 @@ def capture_health_once(include_network: bool = False) -> dict | None:
         db.close()
 
 
+def run_network_probes_once(*, prune_days: int = 30) -> dict | None:
+    """Run server->internet and server<->database probes, log them, and prune old rows."""
+    db = WriteSessionLocal()
+    try:
+        internet = network_diagnostics.run_internet_speedtest()
+        network_diagnostics.persist_probe(db, scenario="server_internet", source="scheduled", data=internet)
+        database = network_diagnostics.run_database_throughput(db)
+        network_diagnostics.persist_probe(db, scenario="server_database", source="scheduled", data=database)
+        network_diagnostics.prune(db, days=prune_days)
+        _touch_heartbeat(db, INFRASTRUCTURE_WORKER_NAME)
+        db.commit()
+        return {
+            "internet_download_mbps": round((internet.get("download_bps") or 0) / 1_000_000, 2),
+            "internet_ok": internet.get("ok"),
+            "database_latency_ms": database.get("latency_ms"),
+        }
+    except Exception:
+        logger.exception("network probe cycle failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
     print(capture_infrastructure_once())
     print(capture_health_once(include_network=False))
+    print(run_network_probes_once())

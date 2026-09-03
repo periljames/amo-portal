@@ -330,6 +330,35 @@ class PlatformInfrastructureSnapshot(Base):
     details_json = Column(JSONB, nullable=True)
 
 
+class PlatformNetworkProbe(Base):
+    """A single network diagnostic measurement, retained for SLA trend analysis.
+
+    Scenarios: client_portal, client_internet, server_internet, server_database.
+    Throughput is stored in bits/sec so it renders directly as Mbps.
+    """
+
+    __tablename__ = "platform_network_probes"
+    __table_args__ = (
+        Index("ix_platform_network_probes_captured", "captured_at"),
+        Index("ix_platform_network_probes_scenario", "scenario", "captured_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    captured_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    scenario = Column(String(32), nullable=False)
+    source = Column(String(16), nullable=False, default="manual")
+    target = Column(String(255), nullable=True)
+    ok = Column(Boolean, nullable=False, default=True)
+    latency_ms = Column(Float, nullable=True)
+    jitter_ms = Column(Float, nullable=True)
+    download_bps = Column(Float, nullable=True)
+    upload_bps = Column(Float, nullable=True)
+    download_bytes = Column(Integer, nullable=True)
+    upload_bytes = Column(Integer, nullable=True)
+    error = Column(String(500), nullable=True)
+    details_json = Column(JSONB, nullable=True)
+
+
 class PlatformWorkerHeartbeat(Base):
     __tablename__ = "platform_worker_heartbeats"
     __table_args__ = (UniqueConstraint("worker_name", name="uq_platform_worker_name"), Index("ix_platform_worker_heartbeats_status", "status", "last_seen_at"),)
