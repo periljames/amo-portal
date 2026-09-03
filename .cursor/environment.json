@@ -1,0 +1,17 @@
+{
+  "name": "AMO Portal",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "dev-runtime",
+      "command": ".venv/bin/python scripts/dev_runtime.py --env-file .env.development",
+      "description": "Supervised Venspera dev runtime: portal API (8080), Platform Ops gateway (8090), durable/scheduled/evidence/ops/rostering workers, and the Vite frontend (5173)."
+    }
+  ],
+  "ports": [
+    { "name": "frontend", "port": 5173 },
+    { "name": "api", "port": 8080 },
+    { "name": "platform-ops", "port": 8090 }
+  ]
+}
