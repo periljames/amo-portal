@@ -33,8 +33,11 @@ from .audit_checklist_execution_router import (
     _locked_governance,
     _mutation_hash,
     _normalise_client_timestamp,
+    _fieldwork_write_blocker,
+    _mark_fieldwork_started,
+    _require_fieldwork_write_window,
 )
-from .audit_external_access_router import _GUEST_COOKIE, _active_grant, _hash_token
+from .audit_external_access_router import _GUEST_COOKIE, _active_grant, _audit_for_tenant, _hash_token
 from .audit_external_access_models import QualityAuditAccessGrant
 from .router import public_router
 
@@ -137,7 +140,11 @@ def get_external_auditor_fieldwork(
     grant = _external_auditor_grant(db, amo_qms_audit_guest, permission="audit:read_assigned")
     participant = grant.participant
     scope = set(grant.scope_json or [])
-    items = db.query(models.QualityAuditChecklistItem).filter(
+    audit = _audit_for_tenant(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    fieldwork_blocker = _fieldwork_write_blocker(db, amo_id=grant.amo_id, audit=audit)
+    status_value = str(getattr(audit.status, "value", audit.status) or "").upper()
+    read_only_complete = audit.actual_end is not None or status_value == "CLOSED"
+    items = [] if fieldwork_blocker and not read_only_complete else db.query(models.QualityAuditChecklistItem).filter(
         models.QualityAuditChecklistItem.amo_id == grant.amo_id,
         models.QualityAuditChecklistItem.audit_id == grant.audit_id,
     ).order_by(models.QualityAuditChecklistItem.section.asc(), models.QualityAuditChecklistItem.sort_order.asc()).limit(1000).all()
@@ -154,14 +161,19 @@ def get_external_auditor_fieldwork(
         audit_id=grant.audit_id,
         participant_id=participant.id,
     )
-    can_draft_findings = "audit:finding_draft" in scope
+    can_execute = fieldwork_blocker is None and "audit:checklist_execute" in scope
+    can_create_evidence = fieldwork_blocker is None and "audit:evidence_create" in scope
+    can_draft_findings = fieldwork_blocker is None and "audit:finding_draft" in scope
     return {
         "audit_id": str(grant.audit_id),
         "participant_id": participant.id,
         "csrf_token": _csrf_for_session(amo_qms_audit_guest),
-        "can_execute_checklist": "audit:checklist_execute" in scope,
+        "fieldwork_available": fieldwork_blocker is None,
+        "fieldwork_blocker": fieldwork_blocker,
+        "can_execute_checklist": can_execute,
+        "can_create_evidence": can_create_evidence,
         "can_draft_findings": can_draft_findings,
-        "finding_draft_blocker": None if can_draft_findings else "This external audit assignment does not permit finding drafts.",
+        "finding_draft_blocker": fieldwork_blocker or (None if can_draft_findings else "This external audit assignment does not permit finding drafts."),
         "items": [
             _external_item_dict(item, by_item.get(item.id), contributions.get(item.id))
             for item in items
@@ -182,6 +194,9 @@ def mutate_external_auditor_checklist(
     _require_csrf(amo_qms_audit_guest, x_qms_csrf)
     grant = _external_auditor_grant(db, amo_qms_audit_guest, permission="audit:checklist_execute")
     participant = grant.participant
+    audit = _audit_for_tenant(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    _require_fieldwork_write_window(db, amo_id=grant.amo_id, audit=audit)
+    _mark_fieldwork_started(audit)
 
     if payload.canonical_response_status in {"NONCOMPLIANT", "OBSERVATION"}:
         raise HTTPException(

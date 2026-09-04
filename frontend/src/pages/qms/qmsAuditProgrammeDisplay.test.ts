@@ -12,17 +12,20 @@ import {
 } from "./qmsAuditProgrammeDisplay";
 
 function programme(partial: Partial<AuditProgramme> & Pick<AuditProgramme, "title" | "programme_series">): AuditProgramme {
+  const { programme_series, title, ...overrides } = partial;
   return {
-    id: partial.id || "p1",
+    id: overrides.id || "p1",
     programme_ref: "AP-2026-TEST-R01",
-    programme_year: partial.programme_year ?? 2026,
-    revision_no: partial.revision_no ?? 1,
+    programme_series,
+    programme_year: overrides.programme_year ?? 2026,
+    revision_no: overrides.revision_no ?? 1,
+    title,
     assurance_model: "HYBRID",
     continuous_monitoring_enabled: true,
     optimizer_version: "HYBRID_ASSURANCE_V1",
     objectives: [],
     regulatory_basis: [],
-    status: partial.status ?? "DRAFT",
+    status: overrides.status ?? "DRAFT",
     period_start: "2026-01-01",
     period_end: "2026-12-31",
     metrics: {
@@ -33,7 +36,7 @@ function programme(partial: Partial<AuditProgramme> & Pick<AuditProgramme, "titl
       follow_up_audit_count: 0,
       scheduled_audit_count: 0,
     },
-    ...partial,
+    ...overrides,
   };
 }
 

@@ -26,7 +26,7 @@ import {
   type AuditDispositionMode,
   type AuditRetentionStart,
 } from "../../../services/qmsAuditArchiveGovernance";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { saveDownloadedFile } from "../../../utils/downloads";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
@@ -85,7 +85,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [downloadBusy, setDownloadBusy] = useState(false);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-archive-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });

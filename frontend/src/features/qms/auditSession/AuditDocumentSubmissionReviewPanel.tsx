@@ -10,7 +10,7 @@ import {
   listControlledDocumentSubmissions,
   listGovernedAuditDocumentRequests,
 } from "../../../services/qmsAuditOccurrenceCompletion";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { saveDownloadedFile } from "../../../utils/downloads";
 import OccurrenceToolbarPortal, { AUDIT_PREPARE_TOOLBAR_ID } from "./OccurrenceToolbarPortal";
 import "../../../styles/qms-audit-document-review.css";
@@ -30,7 +30,7 @@ const AuditDocumentSubmissionReviewPanel: React.FC<Props> = ({ amoCode, auditKey
   const [error, setError] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-prepare-document-review-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });

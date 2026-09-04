@@ -14,6 +14,9 @@ def test_legacy_kcar_titles_resolve_to_canonical_2025_roles():
     assert AccountRole("HOLM") is AccountRole.LINE_MAINTENANCE_MANAGER
     assert AccountRole("Head of Workshop") is AccountRole.WORKSHOP_MANAGER
     assert AccountRole("Head of Quality") is AccountRole.QUALITY_MANAGER
+    assert AccountRole("Quality Officer") is AccountRole.QUALITY_OFFICER
+    assert AccountRole("QO") is AccountRole.QUALITY_OFFICER
+    assert infer_regulated_role("Quality Officer") is None
 
 
 def test_role_catalogue_has_unique_aliases_and_separates_admin_from_management():
@@ -27,3 +30,5 @@ def test_role_catalogue_has_unique_aliases_and_separates_admin_from_management()
     accountable = next(item for item in catalogue if item.key == "ACCOUNTABLE_EXECUTIVE")
     assert accountable.can_manage_accounts is False
     assert accountable.can_have_supervisor is False
+    quality_officer = next(item for item in catalogue if item.key == "QUALITY_OFFICER")
+    assert quality_officer.can_manage_accounts is False

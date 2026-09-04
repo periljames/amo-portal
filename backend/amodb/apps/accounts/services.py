@@ -530,7 +530,10 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         is_auditor=bool(
             data.is_auditor
             if data.is_auditor is not None
-            else resolved_role == models.AccountRole.AUDITOR
+            else resolved_role in {
+                models.AccountRole.AUDITOR,
+                models.AccountRole.QUALITY_OFFICER,
+            }
         ),
         must_change_password=True,
         # is_system_account defaults to False in the model â€“ human by default.
@@ -777,7 +780,10 @@ def update_user(
     if data.is_auditor is not None:
         user.is_auditor = data.is_auditor
     elif explicit_role:
-        user.is_auditor = user.role == models.AccountRole.AUDITOR
+        user.is_auditor = user.role in {
+            models.AccountRole.AUDITOR,
+            models.AccountRole.QUALITY_OFFICER,
+        }
 
     clear_management_supervisor_links(db, user)
     sync_regulated_postholder_assignment(db, user)

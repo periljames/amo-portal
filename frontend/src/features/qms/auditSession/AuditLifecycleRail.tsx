@@ -1,24 +1,15 @@
 import React, { useMemo } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, Circle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
-import {
-  buildAuditProgrammeLinkIndex,
-  programmeLabelForAudit,
-} from "../../../pages/qualityAudits/auditsWorkspaceModel";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
-import {
-  getAuditProgramme,
-  listAuditProgrammeScheduleLinks,
-  listAuditProgrammes,
-} from "../../../services/qmsAuditProgramme";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession, type AuditSessionStageId } from "../../../services/qmsAuditSession";
 import {
-  AUDIT_OCCURRENCE_FUNCTIONAL_TABS,
   AUDIT_SESSION_STAGES,
   auditOccurrenceFunctionalPath,
   auditOccurrenceFunctionalTabFromLocation,
+  auditOccurrenceFunctionalTabsForStage,
   auditSessionPath,
   auditSessionStageFromPath,
 } from "./auditSessionRoutes";
@@ -41,7 +32,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const functionalTab = auditOccurrenceFunctionalTabFromLocation(location.pathname, location.hash);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-audit-session-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
@@ -54,55 +45,6 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     refetchInterval: routeStage === "live" ? 5_000 : 15_000,
   });
 
-  const programmeYear = new Date().getUTCFullYear();
-  const programmesQuery = useQuery({
-    queryKey: ["qms-audits-workspace-programmes", amoCode, programmeYear],
-    queryFn: ({ signal }) => listAuditProgrammes(amoCode, programmeYear, signal),
-    staleTime: 60_000,
-    enabled: Boolean(auditQuery.data?.title),
-  });
-  const programmeSummaries = (programmesQuery.data?.items ?? []).filter(
-    (programme) => (programme.metrics?.scheduled_audit_count || 0) > 0 || (programme.readiness?.requirement_count || 0) > 0,
-  ).slice(0, 8);
-
-  const programmeDetailQueries = useQueries({
-    queries: programmeSummaries.map((programme) => ({
-      queryKey: ["qms-audit-programme", amoCode, programme.id],
-      queryFn: ({ signal }: { signal?: AbortSignal }) => getAuditProgramme(amoCode, programme.id, signal),
-      staleTime: 60_000,
-      enabled: Boolean(programme.id && auditQuery.data?.title),
-    })),
-  });
-  const scheduleLinkQueries = useQueries({
-    queries: programmeSummaries.map((programme) => ({
-      queryKey: ["qms-audit-programme-schedule-links", amoCode, programme.id],
-      queryFn: ({ signal }: { signal?: AbortSignal }) =>
-        listAuditProgrammeScheduleLinks(amoCode, programme.id, signal),
-      staleTime: 60_000,
-      enabled: Boolean(programme.id && auditQuery.data?.title),
-    })),
-  });
-
-  const programmeLabel = useMemo(() => {
-    if (!auditQuery.data) return null;
-    const detailed = programmeDetailQueries
-      .map((query) => query.data)
-      .filter((programme): programme is NonNullable<typeof programme> => Boolean(programme));
-    if (!detailed.length && !programmeSummaries.length) return null;
-    const programmes = detailed.length ? detailed : programmeSummaries;
-    const linksByProgrammeId = new Map(
-      programmeSummaries.map((programme, index) => [
-        programme.id,
-        scheduleLinkQueries[index]?.data?.items ?? [],
-      ]),
-    );
-    const label = programmeLabelForAudit(
-      auditQuery.data,
-      buildAuditProgrammeLinkIndex(programmes, linksByProgrammeId),
-    );
-    return label === "Direct audit" ? null : label;
-  }, [auditQuery.data, programmeDetailQueries, programmeSummaries, scheduleLinkQueries]);
-
   const stageState = useMemo(() => {
     const serverStages = new Map(sessionQuery.data?.stages.map((stage) => [stage.id, stage]) || []);
     return AUDIT_SESSION_STAGES.map((id) => ({ id, server: serverStages.get(id) }));
@@ -113,9 +55,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const nextStageHref = authoritativeId ? auditSessionPath(amoCode, auditKey, authoritativeId) : null;
   const nextStageIndex = authoritativeId ? AUDIT_SESSION_STAGES.indexOf(authoritativeId) : -1;
 
-  const programmeParts = programmeLabel?.split(" · ") ?? [];
-  const programmeRef = programmeParts[0] || null;
-  const requirementTitle = programmeParts.length > 1 ? programmeParts.slice(1).join(" · ") : null;
+  const stageTabs = auditOccurrenceFunctionalTabsForStage(routeStage);
   const auditRef = auditQuery.data?.audit_ref || auditKey;
   const auditTitle = (auditQuery.data?.title || "").trim() || auditRef;
   const stageChip =
@@ -143,12 +83,6 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
               </span>
             )}
           </div>
-          {programmeRef ? (
-            <small className="qms-audit-session-rail__programme">
-              Programme {programmeRef}
-              {requirementTitle ? ` · ${requirementTitle}` : ""}
-            </small>
-          ) : null}
         </div>
       </div>
 
@@ -214,8 +148,10 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       ) : null}
 
-      <nav className="qms-audit-session-rail__functional" aria-label="Occurrence workspace">
-        {AUDIT_OCCURRENCE_FUNCTIONAL_TABS.map((tab) => {
+      {stageTabs.length > 1 ? (
+        <nav className="qms-audit-session-rail__functional" aria-label={`${stageChip || "Current stage"} workspace`}>
+          <span className="qms-audit-session-rail__functional-label">This stage</span>
+          {stageTabs.map((tab) => {
           const selected = functionalTab === tab.id;
           return (
             <Link
@@ -227,8 +163,9 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
               {tab.label}
             </Link>
           );
-        })}
-      </nav>
+          })}
+        </nav>
+      ) : null}
     </section>
   );
 };

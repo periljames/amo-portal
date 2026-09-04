@@ -64,6 +64,16 @@ class ChecklistBindingCreate(BaseModel):
     allow_existing_items: bool = False
 
 
+class RealtimeAuditChecklistCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=255)
+    description: str | None = Field(default=None, max_length=8000)
+    reason: str = Field(min_length=8, max_length=4000)
+    items: list[ChecklistTemplateItem] = Field(min_length=1, max_length=1000)
+    canonical_document_id: str | None = Field(default=None, max_length=36)
+    canonical_revision_id: str | None = Field(default=None, max_length=36)
+    allow_existing_items: bool = False
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -135,6 +145,76 @@ def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
     if row is None:
         raise HTTPException(status_code=404, detail="Audit not found.")
     return row
+
+
+def _assert_checklist_can_change(audit: models.QMSAudit) -> None:
+    if str(getattr(audit.status, "value", audit.status)).upper() == "CLOSED":
+        raise HTTPException(status_code=409, detail="A closed audit cannot receive a new checklist binding.")
+    if audit.actual_end is not None:
+        raise HTTPException(status_code=409, detail="Fieldwork is complete. Reopen the governed audit lifecycle before changing its checklist.")
+
+
+def _instantiate_binding(
+    db: Session,
+    *,
+    ctx: TenantContext,
+    audit: models.QMSAudit,
+    template: QualityAuditChecklistTemplate,
+    revision: QualityAuditChecklistTemplateRevision,
+    reason: str,
+    allow_existing_items: bool,
+) -> QualityAuditChecklistBinding:
+    existing_items = db.query(models.QualityAuditChecklistItem).filter(
+        models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit.id,
+    ).count()
+    if existing_items and not allow_existing_items:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "The audit already contains live checklist rows.",
+                "existing_items": existing_items,
+                "required_action": "Review the existing checklist and explicitly allow additive application if this checklist is intended to supplement it.",
+            },
+        )
+
+    item_ids: list[str] = []
+    for item in list(revision.items or []):
+        prompt = str(item.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=409, detail="Issued checklist template contains an empty prompt and cannot be instantiated.")
+        live = models.QualityAuditChecklistItem(
+            amo_id=ctx.amo_id,
+            audit_id=audit.id,
+            section=item.get("section") or item.get("category"),
+            checklist_ref=item.get("checklist_ref") or template.template_code,
+            requirement_ref=item.get("requirement_ref") or item.get("regulatory_source_ref") or item.get("manual_source_ref"),
+            prompt=prompt,
+            response_status="PENDING",
+            objective_evidence=None,
+            sort_order=int(item.get("sort_order") or 0),
+            created_by_user_id=ctx.user_id,
+        )
+        db.add(live)
+        db.flush()
+        item_ids.append(str(live.id))
+
+    binding = QualityAuditChecklistBinding(
+        amo_id=ctx.amo_id,
+        audit_id=audit.id,
+        template_id=template.id,
+        template_revision_id=revision.id,
+        template_code=template.template_code,
+        revision_no=revision.revision_no,
+        content_sha256=revision.content_sha256,
+        item_snapshot=list(revision.items or []),
+        source_references=list(revision.source_references or []),
+        instantiated_item_ids=item_ids,
+        application_reason=reason.strip(),
+        applied_by_user_id=ctx.user_id,
+    )
+    db.add(binding)
+    return binding
 
 
 @router.get("/audit-checklist-templates")
@@ -289,8 +369,7 @@ def apply_checklist_revision(
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    if str(getattr(audit.status, "value", audit.status)) == "CLOSED":
-        raise HTTPException(status_code=409, detail="A closed audit cannot receive a new checklist template binding.")
+    _assert_checklist_can_change(audit)
     revision = db.query(QualityAuditChecklistTemplateRevision).options(selectinload(QualityAuditChecklistTemplateRevision.template)).filter(
         QualityAuditChecklistTemplateRevision.amo_id == ctx.amo_id,
         QualityAuditChecklistTemplateRevision.id == payload.template_revision_id,
@@ -305,55 +384,104 @@ def apply_checklist_revision(
     ).first()
     if existing_binding is not None:
         raise HTTPException(status_code=409, detail="This checklist template revision is already bound to the audit.")
-    existing_items = db.query(models.QualityAuditChecklistItem).filter(
-        models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
-        models.QualityAuditChecklistItem.audit_id == audit_id,
-    ).count()
-    if existing_items and not payload.allow_existing_items:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "The audit already contains live checklist rows.",
-                "existing_items": existing_items,
-                "required_action": "Review the existing checklist and explicitly allow additive template application if the new revision is intended to supplement it.",
-            },
-        )
-
-    item_ids: list[str] = []
-    for item in list(revision.items or []):
-        live = models.QualityAuditChecklistItem(
-            amo_id=ctx.amo_id,
-            audit_id=audit.id,
-            section=item.get("section") or item.get("category"),
-            checklist_ref=item.get("checklist_ref") or revision.template.template_code,
-            requirement_ref=item.get("requirement_ref") or item.get("regulatory_source_ref") or item.get("manual_source_ref"),
-            prompt=str(item.get("prompt") or "").strip(),
-            response_status="PENDING",
-            objective_evidence=None,
-            sort_order=int(item.get("sort_order") or 0),
-            created_by_user_id=ctx.user_id,
-        )
-        if not live.prompt:
-            raise HTTPException(status_code=409, detail="Issued checklist template contains an empty prompt and cannot be instantiated.")
-        db.add(live)
-        db.flush()
-        item_ids.append(str(live.id))
-
-    binding = QualityAuditChecklistBinding(
-        amo_id=ctx.amo_id,
-        audit_id=audit.id,
-        template_id=revision.template_id,
-        template_revision_id=revision.id,
-        template_code=revision.template.template_code,
-        revision_no=revision.revision_no,
-        content_sha256=revision.content_sha256,
-        item_snapshot=list(revision.items or []),
-        source_references=list(revision.source_references or []),
-        instantiated_item_ids=item_ids,
-        application_reason=payload.reason.strip(),
-        applied_by_user_id=ctx.user_id,
+    binding = _instantiate_binding(
+        db,
+        ctx=ctx,
+        audit=audit,
+        template=revision.template,
+        revision=revision,
+        reason=payload.reason,
+        allow_existing_items=payload.allow_existing_items,
     )
-    db.add(binding)
+    db.commit()
+    db.refresh(binding)
+    return _binding_dict(binding)
+
+
+@router.post("/audits/{audit_id}/checklists/realtime", status_code=status.HTTP_201_CREATED)
+def create_realtime_audit_checklist(
+    audit_id: uuid.UUID,
+    payload: RealtimeAuditChecklistCreate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Create, issue, and bind an audit-scoped checklist as one transaction."""
+    assert_quality_permission(db, ctx, "qms.audit.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    _assert_checklist_can_change(audit)
+
+    source_references: list[dict[str, Any] | str] = [{
+        "source_system": "REALTIME_AUDIT_PREPARATION",
+        "audit_id": str(audit.id),
+        "audit_ref": audit.audit_ref,
+    }]
+    if payload.canonical_document_id or payload.canonical_revision_id:
+        from .audit_occurrence_completion_router import _enum_value, _validate_canonical_controlled_source
+
+        document, revision = _validate_canonical_controlled_source(
+            db,
+            amo_id=ctx.amo_id,
+            document_id=payload.canonical_document_id,
+            revision_id=payload.canonical_revision_id,
+            user_id=ctx.user_id,
+            require_revision=True,
+        )
+        if document is None or revision is None:
+            raise HTTPException(status_code=422, detail="Select an exact controlled DMS revision for the checklist source.")
+        source_references.append({
+            "source_system": "DOCUMENT_CONTROL",
+            "document_id": str(document.id),
+            "revision_id": str(revision.id),
+            "document_code": document.code,
+            "document_title": document.title,
+            "manual_type": document.manual_type,
+            "issue_number": revision.issue_number,
+            "revision_number": revision.rev_number,
+            "revision_status": _enum_value(revision.status_enum),
+            "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
+            "source_sha256": revision.source_sha256,
+        })
+
+    items = [item.model_dump() for item in payload.items]
+    now = _utcnow()
+    template = QualityAuditChecklistTemplate(
+        amo_id=ctx.amo_id,
+        template_code=f"AUD-{uuid.uuid4().hex[:12].upper()}",
+        title=payload.title.strip(),
+        description=(payload.description or "").strip() or None,
+        category="AUDIT_SPECIFIC",
+        audit_kind=str(getattr(audit.kind, "value", audit.kind) or "").upper() or None,
+        status="ACTIVE",
+        created_by_user_id=ctx.user_id,
+        updated_by_user_id=ctx.user_id,
+    )
+    db.add(template)
+    db.flush()
+    revision = QualityAuditChecklistTemplateRevision(
+        amo_id=ctx.amo_id,
+        template_id=template.id,
+        revision_no=1,
+        status="ISSUED",
+        items=items,
+        source_references=source_references,
+        content_sha256=_hash_content(items, source_references),
+        change_reason=f"{payload.reason.strip()}\nISSUE: Created and issued during audit preparation.",
+        issued_by_user_id=ctx.user_id,
+        issued_at=now,
+        created_by_user_id=ctx.user_id,
+    )
+    db.add(revision)
+    db.flush()
+    binding = _instantiate_binding(
+        db,
+        ctx=ctx,
+        audit=audit,
+        template=template,
+        revision=revision,
+        reason=payload.reason,
+        allow_existing_items=payload.allow_existing_items,
+    )
     db.commit()
     db.refresh(binding)
     return _binding_dict(binding)

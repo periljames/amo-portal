@@ -32,3 +32,15 @@ export function getAuditSession(amoCode: string, auditId: string, signal?: Abort
     signal,
   });
 }
+
+export function completeAuditFieldwork(amoCode: string, auditId: string) {
+  return apiRequest<Record<string, unknown>>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/fieldwork/complete`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      timeoutMs: 30_000,
+    },
+  );
+}

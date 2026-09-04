@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_metrics_router import SOURCE_REGISTRY
-from amodb.apps.quality.tenant_security import _QUALITY_ROLE_PERMISSIONS
+from amodb.apps.quality.tenant_security import _QUALITY_ROLE_PERMISSIONS, _has_role_permission
 
 
 def _route(router, path: str, method: str):
@@ -39,3 +41,33 @@ def test_inspectors_and_auditors_can_read_cross_module_assurance_without_managem
         assert "qms.risk.view" in permissions
         assert "qms.change.view" in permissions
         assert "qms.settings.manage" not in permissions
+
+
+def test_quality_officer_and_accountable_executive_permissions_are_bounded() -> None:
+    officer = _QUALITY_ROLE_PERMISSIONS["QUALITY_OFFICER"]
+    assert "qms.audit.execute" in officer
+    assert "qms.audit.manage" not in officer
+    assert "qms.audit.notice.manage" in officer
+    assert "qms.car.manage" in officer
+    assert "qms.car.close" not in officer
+    assert "qms.settings.manage" not in officer
+    assert "qms.reports.view" in officer
+    assert "qms.external.view" in officer
+
+    accountable = _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"]
+    assert "qms.external.view" in accountable
+    assert "qms.reports.export" in accountable
+    assert "qms.reports.attest_authority" in accountable
+    assert "qms.audit.manage" not in accountable
+    assert "qms.external.view" in _QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"]
+    assert "qms.reports.attest_authority" not in _QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"]
+
+
+def test_attestation_permission_ignores_qms_wildcard_roles() -> None:
+    quality_manager = SimpleNamespace(role="QUALITY_MANAGER", is_superuser=False, is_platform_context=False)
+    amo_admin = SimpleNamespace(role="AMO_ADMIN", is_superuser=False, is_platform_context=False)
+    accountable = SimpleNamespace(role="ACCOUNTABLE_EXECUTIVE", is_superuser=False, is_platform_context=False)
+
+    assert _has_role_permission(quality_manager, "qms.reports.attest_authority") is False
+    assert _has_role_permission(amo_admin, "qms.reports.attest_authority") is False
+    assert _has_role_permission(accountable, "qms.reports.attest_authority") is True

@@ -121,12 +121,12 @@ function getDepartmentFromUser(user: PortalUser | null, contextDepartment?: stri
   const fromContext = normalizeDepartmentCode(contextDepartment || "");
   if (fromContext) return fromContext;
   return normalizeDepartmentCode(
-    (user as any)?.department?.code || (user as any)?.department_code || "",
+    user?.department?.code || user?.department_code || "",
   );
 }
 
 function titleContext(user: PortalUser | null): string {
-  return `${user?.position_title || ""} ${(user as any)?.department?.name || ""}`.toLowerCase();
+  return `${user?.position_title || ""} ${user?.department?.name || ""}`.toLowerCase();
 }
 
 function hasRecordsTitle(user: PortalUser | null): boolean {
@@ -159,7 +159,7 @@ export function getUserCapabilities(
   if (["PRODUCTION_ENGINEER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"].includes(role)) caps.add("supervisor");
   if (role === "CERTIFYING_ENGINEER" || role === "CERTIFYING_TECHNICIAN") caps.add("certifying");
   if (role === "TECHNICIAN") caps.add("technician");
-  if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "AUDITOR") caps.add("quality");
+  if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "QUALITY_OFFICER" || role === "AUDITOR") caps.add("quality");
   if (role === "SAFETY_MANAGER") caps.add("safety");
   if (role === "PROCUREMENT_OFFICER") caps.add("procurement");
   if (["STORES", "STORES_MANAGER", "STOREKEEPER"].includes(role)) caps.add("stores");

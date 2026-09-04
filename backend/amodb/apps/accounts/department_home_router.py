@@ -44,6 +44,7 @@ ROLE_DEPARTMENTS: dict[str, set[str]] = {
     "TECHNICIAN": {"maintenance"},
     "QUALITY_MANAGER": {"quality", "document-control"},
     "QUALITY_INSPECTOR": {"quality", "document-control"},
+    "QUALITY_OFFICER": {"quality"},
     "AUDITOR": {"quality"},
     "SAFETY_MANAGER": {"safety"},
     "STORES": {"stores"},

@@ -252,7 +252,7 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const rows = useMemo(() => data?.items || [], [data?.items]);
   const columns = useMemo(() => deriveColumns(rows, data?.columns), [data?.columns, rows]);
   const currentUser = getCachedUser();
-  const diagnosticsAuthorized = Boolean(currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_INSPECTOR");
+  const diagnosticsAuthorized = Boolean(currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_OFFICER" || currentUser?.role === "QUALITY_INSPECTOR");
 
   if (!context) return <Navigate to="." replace />;
   const { amoCode, module, view } = context;

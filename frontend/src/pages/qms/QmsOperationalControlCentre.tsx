@@ -38,6 +38,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
     currentUser?.is_superuser
     || currentUser?.is_amo_admin
     || currentUser?.role === "QUALITY_MANAGER"
+    || currentUser?.role === "QUALITY_OFFICER"
     || currentUser?.role === "QUALITY_INSPECTOR",
   );
 

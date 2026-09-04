@@ -133,8 +133,8 @@ def _execution_readiness(db: Session, *, amo_id: str, audit: models.QMSAudit) ->
     issued = next((row for row in report_rows if row.status == "ISSUED"), None)
     governed_report_required = bool(report_rows)
     blockers: list[dict[str, Any]] = []
-    if _status_value(audit.status) != "CLOSED":
-        blockers.append({"type": "AUDIT_STATUS", "reason": "The authoritative audit engine has not closed execution."})
+    if audit.actual_end is None:
+        blockers.append({"type": "FIELDWORK", "reason": "Fieldwork has not been formally completed."})
     if governed_report_required and issued is None:
         blockers.append({"type": "REPORT", "reason": "Governed report revisions exist but none is ISSUED."})
     return {
@@ -292,6 +292,7 @@ def record_follow_up_complete(
     row.follow_up_completion_reason = payload.reason.strip()
     row.follow_up_evidence_snapshot = readiness
     row.updated_at = _utcnow()
+    audit.status = models.QMSAuditStatus.CLOSED
     _add_event(db, ctx=ctx, row=row, event_type="FOLLOW_UP_COMPLETED", reason=payload.reason, evidence=readiness)
     db.commit()
     loaded = db.query(QualityAuditClosureState).options(selectinload(QualityAuditClosureState.events)).filter(QualityAuditClosureState.id == row.id).one()
@@ -321,6 +322,7 @@ def reopen_follow_up(
     row.follow_up_completion_reason = None
     row.follow_up_evidence_snapshot = evidence
     row.updated_at = _utcnow()
+    audit.status = models.QMSAuditStatus.CAP_OPEN if evidence["counts"]["findings_total"] else models.QMSAuditStatus.IN_PROGRESS
     _add_event(db, ctx=ctx, row=row, event_type="FOLLOW_UP_REOPENED", reason=payload.reason, evidence=evidence)
     db.commit()
     loaded = db.query(QualityAuditClosureState).options(selectinload(QualityAuditClosureState.events)).filter(QualityAuditClosureState.id == row.id).one()

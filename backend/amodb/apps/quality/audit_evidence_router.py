@@ -19,8 +19,11 @@ from .audit_checklist_execution_router import (
     _canonical_from_legacy,
     _governance_snapshot,
     _internal_fieldwork_actor,
+    _internal_fieldwork_viewer,
     _item,
     _locked_governance,
+    _mark_fieldwork_started,
+    _require_fieldwork_write_window,
 )
 from .audit_evidence_models import QualityAuditEvidenceArtifact
 from .audit_evidence_storage import resolve_audit_evidence, store_audit_evidence
@@ -30,10 +33,11 @@ from .audit_external_access_router import (
     _GUEST_COOKIE,
     _active_grant,
     _append_access_event,
+    _audit_for_tenant,
     _latest_release_events,
 )
 from .audit_external_fieldwork_router import _external_auditor_grant, _require_csrf
-from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context, write_tenant_context
+from .tenant_security import TenantContext, assert_quality_permission_any, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
 
 router = APIRouter(tags=["Quality audit evidence"])
@@ -130,6 +134,7 @@ def list_audit_evidence(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id)
     query = db.query(QualityAuditEvidenceArtifact).filter(
         QualityAuditEvidenceArtifact.amo_id == ctx.amo_id,
         QualityAuditEvidenceArtifact.audit_id == audit_id,
@@ -154,14 +159,13 @@ async def upload_internal_audit_evidence(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    from .tenant_security import assert_quality_permission
-    assert_quality_permission(db, ctx, "qms.audit.manage")
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     existing = _existing_by_mutation(db, amo_id=ctx.amo_id, audit_id=audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
         return {"artifact": _artifact_dict(existing), "replayed": True}
 
-    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
     _assert_base_version(payload_base_version=base_version, client_mutation_id=client_mutation_id, item=item, governance=governance)
@@ -212,6 +216,7 @@ def download_internal_audit_evidence(
     db: Session = Depends(get_read_db),
 ):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id)
     row = db.query(QualityAuditEvidenceArtifact).filter(
         QualityAuditEvidenceArtifact.id == artifact_id,
         QualityAuditEvidenceArtifact.amo_id == ctx.amo_id,
@@ -239,6 +244,9 @@ async def upload_external_auditor_evidence(
     _require_csrf(amo_qms_audit_guest, x_qms_csrf)
     grant = _external_auditor_grant(db, amo_qms_audit_guest, permission="audit:evidence_create")
     participant = grant.participant
+    audit = _audit_for_tenant(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    _require_fieldwork_write_window(db, amo_id=grant.amo_id, audit=audit)
+    _mark_fieldwork_started(audit)
     existing = _existing_by_mutation(db, amo_id=grant.amo_id, audit_id=grant.audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
         return {"artifact": _artifact_dict(existing), "replayed": True}

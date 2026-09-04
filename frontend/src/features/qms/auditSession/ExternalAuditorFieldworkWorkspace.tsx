@@ -222,7 +222,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   };
 
   const uploadEvidence = async () => {
-    if (!model || !selected || !evidenceFile || uploading) return;
+    if (!model || !model.can_create_evidence || !selected || !evidenceFile || uploading) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       setError("Evidence files require an online governed upload. Structured checklist notes and responses remain available through the encrypted offline queue.");
       return;
@@ -266,6 +266,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       </div>
       {error ? <div className="qms-public-audit__error" role="alert"><AlertTriangle size={15} /> {error}</div> : null}
       {notice ? <div className="qms-external-auditor-fieldwork__notice" role="status"><CheckCircle2 size={15} /> {notice}</div> : null}
+      {!model.fieldwork_available && model.fieldwork_blocker ? <div className="qms-external-auditor-fieldwork__blocker" role="alert"><AlertTriangle size={15} /><span>{model.fieldwork_blocker}</span></div> : null}
       {model.finding_draft_blocker ? <div className="qms-external-auditor-fieldwork__blocker"><AlertTriangle size={15} /><span>{model.finding_draft_blocker}</span></div> : null}
 
       <div className="qms-external-auditor-fieldwork__layout">
@@ -289,14 +290,14 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
             <label><span>Text evidence references · one per line</span><textarea rows={3} value={evidence[selected.checklist_item_id] ?? evidenceText(selected.my_evidence_references)} onChange={(event) => setEvidence((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
             <button type="button" className="qms-external-auditor-fieldwork__save" disabled={!model.can_execute_checklist || saving} onClick={() => void save(selected, selected.canonical_response_status)}><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
 
-            <section className="qms-external-auditor-fieldwork__evidence">
+            {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
               <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · immutable checksum and participant attribution retained</small></div></header>
               {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB · ` : ""}{artifact.sha256 ? `SHA ${artifact.sha256.slice(0, 12)}…` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
               <label><span>File</span><input type="file" accept={EVIDENCE_ACCEPT} disabled={uploading} onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} /></label>
               <label><span>Evidence context</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="What this evidence demonstrates" /></label>
               <button type="button" disabled={!evidenceFile || uploading || (typeof navigator !== "undefined" && !navigator.onLine)} onClick={() => void uploadEvidence()}><FileUp size={15} /> {uploading ? "Uploading…" : "Attach governed evidence"}</button>
               {typeof navigator !== "undefined" && !navigator.onLine ? <small>File upload is paused offline; structured fieldwork can still be queued securely.</small> : null}
-            </section>
+            </section> : <div className="qms-external-auditor-fieldwork__blocker"><ShieldAlert size={15} /><span>This invitation does not permit governed evidence upload.</span></div>}
 
             {model.can_draft_findings ? <ExternalAuditorFindingDraftPanel model={model} item={selected} /> : null}
           </div>

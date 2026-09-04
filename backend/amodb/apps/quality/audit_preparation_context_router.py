@@ -210,7 +210,7 @@ def get_audit_preparation_context(
         table_names=("qms_audit_opening_meetings", "qms_audit_meetings", "quality_audit_meetings"),
         amo_id=ctx.amo_id,
         audit_id=audit.id,
-        preferred_fields=("id", "meeting_type", "status", "scheduled_at", "held_at", "attendees", "agenda", "notes", "minutes", "created_at"),
+        preferred_fields=("id", "meeting_type", "status", "scheduled_at", "held_at", "attendees", "notes", "minutes", "created_at"),
         limit=25,
     )
 

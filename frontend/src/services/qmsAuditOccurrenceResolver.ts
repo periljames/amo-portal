@@ -31,6 +31,11 @@ export function auditOccurrenceResolverKey(auditKey: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** One cache identity for every panel that resolves the same audit occurrence. */
+export function auditOccurrenceQueryKey(amoCode: string, auditKey: string) {
+  return ["qms", "audit-occurrence", amoCode.trim().toLowerCase(), auditOccurrenceResolverKey(auditKey)] as const;
+}
+
 export function resolveAuditOccurrence(amoCode: string, auditKey: string, signal?: AbortSignal): Promise<QMSAuditOut> {
   const key = auditOccurrenceResolverKey(auditKey);
   if (!key) return Promise.reject(new Error("Audit occurrence key is required."));

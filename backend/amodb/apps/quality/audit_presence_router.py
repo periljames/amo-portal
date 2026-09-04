@@ -32,14 +32,26 @@ def _value(value: object | None) -> str | None:
     return str(getattr(value, "value", value) or "") or None
 
 
-def _require_tenant_audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> None:
-    exists = db.query(models.QMSAudit.id).filter(
-        models.QMSAudit.amo_id == amo_id,
+def _require_internal_presence_access(db: Session, *, ctx: TenantContext, audit_id: uuid.UUID):
+    from . import router as quality_router
+
+    audit = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == ctx.amo_id,
         models.QMSAudit.id == audit_id,
         models.QMSAudit.deleted_at.is_(None),
     ).first()
-    if exists is None:
+    if audit is None:
         raise HTTPException(status_code=404, detail="Audit occurrence not found.")
+    user = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.id == ctx.user_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if user is None:
+        raise HTTPException(status_code=403, detail="Active internal Quality identity is required.")
+    if not quality_router._is_quality_admin(user) and not quality_router._audit_allows_user_by_audit(audit, user.id):
+        raise HTTPException(status_code=403, detail="Audit presence is limited to the assigned audit team and Quality management.")
+    return user
 
 
 def _row_dict(row: QualityAuditPresence) -> dict[str, Any]:
@@ -102,13 +114,7 @@ def heartbeat_internal_audit_presence(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _require_tenant_audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    user = db.query(account_models.User).filter(
-        account_models.User.amo_id == ctx.amo_id,
-        account_models.User.id == ctx.user_id,
-    ).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="Audit presence user not found.")
+    user = _require_internal_presence_access(db, ctx=ctx, audit_id=audit_id)
     display_name = str(getattr(user, "full_name", None) or getattr(user, "email", None) or ctx.user_id)
     role = _value(getattr(user, "role", None)) or str(getattr(user, "position_title", None) or "Audit team")
     row = _upsert(
@@ -133,7 +139,7 @@ def list_internal_audit_presence(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _require_tenant_audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    _require_internal_presence_access(db, ctx=ctx, audit_id=audit_id)
     cutoff = _utcnow() - timedelta(seconds=PRESENCE_TTL_SECONDS)
     rows = db.query(QualityAuditPresence).filter(
         QualityAuditPresence.amo_id == ctx.amo_id,

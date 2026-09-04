@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from fastapi import Depends, HTTPException, Path, status
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,20 @@ from amodb.database import get_read_db, get_write_db
 from amodb.security import get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.platform import models as platform_models
+
+
+_TENANT_CONTEXT_KEY = "quality_tenant_context"
+
+
+@event.listens_for(Session, "after_begin")
+def _restore_postgres_tenant_context(session: Session, transaction, connection) -> None:  # noqa: ARG001
+    """Restore transaction-local RLS settings after a commit opens a new transaction."""
+    context = session.info.get(_TENANT_CONTEXT_KEY)
+    if not context or connection.dialect.name != "postgresql":
+        return
+    amo_id, user_id = context
+    connection.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})
+    connection.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": user_id})
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,30 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.evidence.view",
         "qms.evidence.download",
     },
+    "QUALITY_OFFICER": {
+        "qms.dashboard.view",
+        "qms.inbox.view",
+        "qms.calendar.view",
+        "qms.audit.view",
+        "qms.audit.execute",
+        "qms.audit.notice.manage",
+        "qms.finding.view",
+        "qms.finding.create",
+        "qms.car.view",
+        "qms.car.manage",
+        "qms.document.view",
+        "qms.evidence.view",
+        "qms.evidence.download",
+        "qms.management_review.view",
+        "qms.supplier.view",
+        "qms.equipment.view",
+        "qms.risk.view",
+        "qms.change.view",
+        "qms.training.view",
+        "qms.reports.view",
+        "qms.reports.export",
+        "qms.external.view",
+    },
     "VIEW_ONLY": {
         "qms.dashboard.view",
         "qms.inbox.view",
@@ -69,6 +107,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.change.view",
         "qms.management_review.view",
         "qms.reports.view",
+        "qms.external.view",
         "qms.evidence.view",
         "qms.evidence.download",
     },
@@ -77,6 +116,13 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
 # The Accountable Executive has governed oversight visibility, not Quality
 # mutation rights. Quality independence remains with the Quality Manager.
 _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"] = set(_QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"])
+_QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"].update(
+    {
+        "qms.external.view",
+        "qms.reports.export",
+        "qms.reports.attest_authority",
+    }
+)
 
 _READ_ONLY_SUPPORT_PERMISSIONS = {
     "qms.dashboard.view",
@@ -129,6 +175,8 @@ def _has_role_permission(user: account_models.User, permission: str) -> bool:
     if _is_platform_superuser(user):
         return False
     role_name = _normalise(getattr(user, "role", ""))
+    if permission == "qms.reports.attest_authority":
+        return role_name == "ACCOUNTABLE_EXECUTIVE"
     grants = _QUALITY_ROLE_PERMISSIONS.get(role_name, set())
     return any(_permission_matches(grant, permission) for grant in grants)
 
@@ -215,7 +263,8 @@ def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
 
 
 def set_postgres_tenant_context(db: Session, *, amo_id: str, user_id: str) -> None:
-    """Set request-local PostgreSQL context used by RLS policies."""
+    """Set and remember request-local PostgreSQL context used by RLS policies."""
+    db.info[_TENANT_CONTEXT_KEY] = (str(amo_id), str(user_id))
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return
@@ -305,6 +354,10 @@ def require_quality_permission(permission: str) -> Callable[[TenantContext, acco
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_read_db),
     ) -> TenantContext:
+        if permission == "qms.reports.attest_authority":
+            if not ctx.is_superuser and _has_role_permission(current_user, permission):
+                return ctx
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
         if ctx.is_superuser:
             if _support_level_allows(ctx.support_access_level, permission):
                 return ctx
@@ -324,6 +377,8 @@ def require_quality_permission(permission: str) -> Callable[[TenantContext, acco
 def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> bool:
     """Return whether the resolved tenant user/support session has a Quality permission."""
     if ctx.is_superuser:
+        if permission == "qms.reports.attest_authority":
+            return False
         return _support_level_allows(ctx.support_access_level, permission)
     user = db.query(account_models.User).filter(
         account_models.User.id == ctx.user_id,
@@ -332,6 +387,8 @@ def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> 
     ).first()
     if not user or _is_platform_superuser(user):
         return False
+    if permission == "qms.reports.attest_authority":
+        return _has_role_permission(user, permission)
     capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
     if capability_result is not None:
         return bool(capability_result)
@@ -343,3 +400,15 @@ def assert_quality_permission(db: Session, ctx: TenantContext, permission: str) 
     if has_quality_permission(db, ctx, permission):
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
+
+
+def assert_quality_permission_any(db: Session, ctx: TenantContext, *permissions: str) -> None:
+    """Require at least one Quality capability without bypassing tenant authorization."""
+    if not permissions:
+        raise ValueError("At least one Quality permission is required.")
+    if any(has_quality_permission(db, ctx, permission) for permission in permissions):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Permission '{permissions[0]}' is required.",
+    )

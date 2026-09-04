@@ -39,6 +39,7 @@ class AccountRole(str, enum.Enum):
     STOREKEEPER = "STOREKEEPER"
     PROCUREMENT_OFFICER = "PROCUREMENT_OFFICER"
     QUALITY_INSPECTOR = "QUALITY_INSPECTOR"
+    QUALITY_OFFICER = "QUALITY_OFFICER"
     AUDITOR = "AUDITOR"
 
     @classmethod
@@ -178,6 +179,15 @@ _DEFINITIONS = (
     AccountRoleDefinition("CERTIFYING_TECHNICIAN", "Certifying Technician", "OPERATIONAL", "Certifying technician access; scope remains controlled by authorisations."),
     AccountRoleDefinition("TECHNICIAN", "Technician", "OPERATIONAL", "Maintenance technician access."),
     AccountRoleDefinition("QUALITY_INSPECTOR", "Quality Inspector", "OPERATIONAL", "Quality inspection and controlled review access."),
+    AccountRoleDefinition(
+        "QUALITY_OFFICER",
+        "Quality Officer",
+        "OPERATIONAL",
+        "Assists Head of Quality: finding follow-up, CAR chase, QMS reporting. Not a nominated Head of Quality.",
+        aliases=("quality officer", "qo", "quality officer amo", "officer quality"),
+        regulated=False,
+        can_manage_accounts=False,
+    ),
     AccountRoleDefinition("AUDITOR", "Auditor", "OPERATIONAL", "Audit execution access without management approval authority."),
     AccountRoleDefinition(
         "STORES_MANAGER", "Stores Manager", "SUPPORT", "Stores management access.",

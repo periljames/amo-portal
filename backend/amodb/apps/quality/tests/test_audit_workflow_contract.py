@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 from amodb.apps.quality import router
 from amodb.apps.quality.audit_workflow_contract import (
     STAGE_ORDER,
     WorkflowFacts,
+    _audit_setup_ready,
     _stage_definitions,
 )
 from amodb.apps.quality.schemas import QMSAuditWorkspaceOut
@@ -53,6 +56,23 @@ def test_stage_order_matches_the_visible_audit_workspace():
         "evidence",
         "closeout",
     )
+
+
+def test_setup_gate_requires_scope_and_applicable_criteria():
+    complete = {
+        "planned_start": "2026-09-11",
+        "planned_end": "2026-09-12",
+        "scope": "Line maintenance and release records",
+        "criteria": "KCARs Part 145 and company CAME/MOE",
+        "lead_auditor_user_id": "lead-1",
+        "auditee": "Maintenance Manager",
+        "auditee_email": None,
+        "auditee_user_id": None,
+    }
+
+    assert _audit_setup_ready(SimpleNamespace(**complete)) is True
+    assert _audit_setup_ready(SimpleNamespace(**{**complete, "scope": "  "})) is False
+    assert _audit_setup_ready(SimpleNamespace(**{**complete, "criteria": None})) is False
 
 
 def test_car_stage_cannot_complete_before_report_or_with_unlinked_nc():

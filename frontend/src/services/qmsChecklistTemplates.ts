@@ -98,3 +98,22 @@ export function applyChecklistRevision(amoCode: string, auditId: string, templat
     allow_existing_items: allowExistingItems,
   }));
 }
+
+export function createRealtimeAuditChecklist(
+  amoCode: string,
+  auditId: string,
+  payload: {
+    title: string;
+    description?: string | null;
+    reason: string;
+    items: ChecklistTemplateItem[];
+    canonical_document_id?: string | null;
+    canonical_revision_id?: string | null;
+    allow_existing_items: boolean;
+  },
+) {
+  return apiRequest<ChecklistBinding>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklists/realtime`),
+    json("POST", payload),
+  );
+}

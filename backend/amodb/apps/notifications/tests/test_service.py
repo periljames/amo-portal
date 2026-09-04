@@ -140,6 +140,49 @@ def test_send_email_provider_success(db_session, monkeypatch):
     assert log.context_json["_delivery"]["message_id"] == "email_123"
 
 
+def test_send_email_passes_attachment_without_persisting_content(db_session, monkeypatch):
+    amo = _create_amo(db_session)
+    _create_user(db_session, amo.id)
+    captured: dict = {}
+
+    class FakeProvider(notification_providers.EmailProvider):
+        config = {"per_minute_limit": 10, "daily_limit": 500}
+
+        def send(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "provider": "resend",
+                "message_id": "email_with_notice",
+                "mode": "SANDBOX",
+                "recipient": kwargs["recipient"],
+                "original_recipient": kwargs["recipient"],
+                "template_id": None,
+            }
+
+    monkeypatch.setattr(notification_providers, "get_email_provider", lambda **_: (FakeProvider(), True))
+    payload = b"%PDF-1.7\ncontrolled notice"
+    log = notification_service.send_email(
+        "qms_audit_notice_memo",
+        "notify@example.com",
+        "Audit notice",
+        {"audit_ref": "QAR-26-001"},
+        correlation_id="audit-notice:test",
+        email_class="CRITICAL",
+        amo_id=amo.id,
+        db=db_session,
+        attachments=[{"filename": "notice.pdf", "content": payload, "content_type": "application/pdf"}],
+    )
+
+    assert log.status == notification_models.EmailStatus.SENT
+    assert captured["attachments"] == [
+        {"filename": "notice.pdf", "content": payload, "content_type": "application/pdf"}
+    ]
+    assert log.context_json["_attachments"] == [
+        {"filename": "notice.pdf", "content_type": "application/pdf", "size_bytes": len(payload)}
+    ]
+    assert payload not in str(log.context_json).encode()
+
+
 def test_send_email_reuses_successful_correlation_id(db_session, monkeypatch):
     amo = _create_amo(db_session)
     _create_user(db_session, amo.id)

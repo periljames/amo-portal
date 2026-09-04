@@ -266,11 +266,23 @@ def get_audit_session(
         raise HTTPException(status_code=404, detail="Audit not found.")
 
     workflow = build_authoritative_audit_workflow(db, audit)
-    preparation_issued = db.query(QualityAuditPreparationRevision.id).filter(
+    latest_preparation = db.query(QualityAuditPreparationRevision).filter(
         QualityAuditPreparationRevision.amo_id == ctx.amo_id,
         QualityAuditPreparationRevision.audit_id == audit.id,
-        QualityAuditPreparationRevision.status == "ISSUED",
-    ).first() is not None
+    ).order_by(QualityAuditPreparationRevision.revision_no.desc()).first()
+    preparation_issued = bool(latest_preparation and latest_preparation.status == "ISSUED")
+    if preparation_issued:
+        from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
+
+        current_preparation = _capture_sources(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        preparation_issued = (
+            not _preparation_readiness_blockers(current_preparation)
+            and latest_preparation.source_fingerprint == current_preparation["source_fingerprint"]
+        )
     closure = db.query(QualityAuditClosureState).filter(
         QualityAuditClosureState.amo_id == ctx.amo_id,
         QualityAuditClosureState.audit_id == audit.id,

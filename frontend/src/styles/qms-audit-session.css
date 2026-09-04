@@ -225,10 +225,21 @@
 
 .qms-audit-session-rail__functional {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 0.1rem 0.15rem;
   padding-top: 0.25rem;
   border-top: 1px solid color-mix(in srgb, var(--qms-line) 55%, transparent);
+}
+
+.qms-audit-session-rail__functional-label {
+  margin-right: 0.3rem;
+  color: var(--qms-muted);
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .qms-audit-session-rail__functional-link {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PortalUser } from "../services/auth";
+import { userHasQmsRolePermission } from "./routeGuards";
 import {
   buildPortalNavigation,
   flattenPortalNavigation,
@@ -61,6 +62,36 @@ function depth(item: PortalNavItem): number {
 }
 
 describe("portal route manifest", () => {
+  it("routes a Quality Officer to Quality without exposing account administration", () => {
+    const officer = user({ role: "QUALITY_OFFICER", position_title: "Quality Officer" });
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: officer,
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+
+    expect(items.some((item) => item.id === "department-quality")).toBe(true);
+    expect(items.some((item) => item.id === "admin-users")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.car.manage")).toBe(true);
+    expect(userHasQmsRolePermission(officer, "qms.audit.manage")).toBe(false);
+  });
+
+  it("keeps Accountable Executive Quality access read-only except Authority attestation", () => {
+    const accountable = user({ role: "ACCOUNTABLE_EXECUTIVE", position_title: "Accountable Executive" });
+    const items = flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "tenant-a",
+      user: accountable,
+      contextDepartment: "quality",
+      adminModeActive: false,
+    }));
+
+    expect(items.some((item) => item.id === "department-quality")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.audit.view")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.reports.attest_authority")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.audit.manage")).toBe(false);
+  });
+
   it("shows only the assigned department to a normal tenant user", () => {
     const groups = buildPortalNavigation({
       amoCode: "safarilink",

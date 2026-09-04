@@ -5,6 +5,7 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
+import { hasQmsRolePermission } from "../app/routeGuards";
 import { getCachedUser, getContext } from "../services/auth";
 import { saveDownloadedFile } from "../utils/downloads";
 import {
@@ -298,11 +299,7 @@ const QualityCarsPage: React.FC = () => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const canManageCars = Boolean(
-    currentUser?.is_superuser
-      || currentUser?.is_amo_admin
-      || currentUser?.role === "QUALITY_MANAGER",
-  );
+  const canManageCars = hasQmsRolePermission("qms.car.manage");
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(registerSearch.trim()), 300);
@@ -389,7 +386,7 @@ const QualityCarsPage: React.FC = () => {
   const safePage = Math.min(currentPage, totalPages);
   const rangeStart = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = total === 0 ? 0 : Math.min(total, (safePage - 1) * pageSize + cars.length);
-  const assignees = assigneesQuery.data ?? [];
+  const assignees = useMemo(() => assigneesQuery.data ?? [], [assigneesQuery.data]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);

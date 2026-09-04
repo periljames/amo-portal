@@ -128,7 +128,8 @@ export type AccountRole =
   | "STORES_MANAGER"
   | "STOREKEEPER"
   | "PROCUREMENT_OFFICER"
-  | "QUALITY_INSPECTOR";
+  | "QUALITY_INSPECTOR"
+  | "QUALITY_OFFICER";
 
 export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
 
@@ -140,6 +141,8 @@ export interface PortalUser {
   id: string;
   amo_id: string | null;
   department_id: string | null;
+  department?: { code?: string | null; name?: string | null } | null;
+  department_code?: string | null;
   staff_code: string;
 
   email: string;

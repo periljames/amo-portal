@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from amodb.apps.notifications import providers as notification_providers
-from amodb.apps.platform import resend_email_policy, saas_admin_policy, saas_services
+from amodb.apps.platform import resend_adapter, resend_email_policy, saas_admin_policy, saas_services
 from amodb.jobs import saas_worker_safe
 
 
@@ -135,3 +135,30 @@ def test_safe_worker_routes_resend_health_to_resend_authentication_handler(monke
 
     assert saas_worker_safe._process_job(db, job) == expected
     handler.assert_called_once_with(db, job)
+
+
+def test_resend_adapter_serializes_binary_attachments_for_sdk(monkeypatch: pytest.MonkeyPatch):
+    captured: dict = {}
+
+    def fake_send(params, options):
+        captured["params"] = params
+        captured["options"] = options
+        return {"id": "email_notice_1"}
+
+    monkeypatch.setattr(resend_adapter.resend.Emails, "send", fake_send)
+    result = resend_adapter.send_email(
+        api_key="re_test_key",
+        api_url="https://api.resend.com",
+        from_value="Quality <quality@example.com>",
+        to_email="auditee@example.com",
+        subject="Audit notice",
+        text="Please see the attached audit notice.",
+        idempotency_key="audit-notice:1",
+        attachments=[{"filename": "notice.pdf", "content": b"%PDF", "content_type": "application/pdf"}],
+    )
+
+    assert result["message_id"] == "email_notice_1"
+    assert captured["params"]["attachments"] == [
+        {"filename": "notice.pdf", "content": [37, 80, 68, 70], "content_type": "application/pdf"}
+    ]
+    assert captured["options"] == {"idempotency_key": "audit-notice:1"}

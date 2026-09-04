@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import relationship
 
 from amodb.database import Base
@@ -93,6 +93,43 @@ class QualityAuditNotice(Base):
         order_by="QualityAuditNoticeEvent.created_at",
         lazy="selectin",
     )
+    artifact = relationship(
+        "QualityAuditNoticeArtifact",
+        back_populates="notice",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+        lazy="selectin",
+    )
+
+
+class QualityAuditNoticeArtifact(Base):
+    __tablename__ = "quality_audit_notice_artifacts"
+    __table_args__ = (
+        UniqueConstraint("notice_id", name="uq_quality_audit_notice_artifact_notice"),
+        CheckConstraint("source_type IN ('GENERATED','UPLOADED')", name="ck_quality_audit_notice_artifact_source"),
+        CheckConstraint("size_bytes > 0", name="ck_quality_audit_notice_artifact_size"),
+        Index("ix_quality_audit_notice_artifact_audit", "amo_id", "audit_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
+    notice_id = Column(String(36), ForeignKey("quality_audit_notices.id", ondelete="CASCADE"), nullable=False)
+    source_type = Column(String(16), nullable=False)
+    storage_ref = Column(Text, nullable=False)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(128), nullable=False, default="application/pdf", server_default="application/pdf")
+    size_bytes = Column(BigInteger, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    signed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signed_by_name = Column(String(255), nullable=True)
+    signed_by_title = Column(String(255), nullable=True)
+    signed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    notice = relationship("QualityAuditNotice", back_populates="artifact", lazy="joined")
 
 
 class QualityAuditNoticeEvent(Base):

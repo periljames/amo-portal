@@ -13,7 +13,7 @@ import {
   type AuditAssignmentEligibility,
   type AuditAssignmentRole,
 } from "../../../services/qmsAuditAssignments";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { qmsPeopleWorkspacePath } from "../../../pages/qms/routes/qmsWorkspaceRegistry";
 
 type Props = { amoCode: string; auditKey: string };
@@ -90,7 +90,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
   const [notice, setNotice] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-setup-assignment-audit", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
@@ -133,7 +133,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
   const allSelectedEligible = ROLE_CONFIG.every(({ field, role }) => !draft[field] || eligibilityByRole.get(role)?.eligible === true);
   const selectedIds = ROLE_CONFIG.map(({ field }) => draft[field]).filter(Boolean);
   const duplicateSelection = selectedIds.length !== new Set(selectedIds).size;
-  const configurationGap = useMemo(() => {
+  const configurationGap = (() => {
     for (const { field, role } of ROLE_CONFIG) {
       if (!draft[field]) continue;
       const row = eligibilityByRole.get(role);
@@ -142,7 +142,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
       }
     }
     return null;
-  }, [draft, eligibilityByRole]);
+  })();
   const peopleSetupPath = configurationGap
     ? qmsPeopleWorkspacePath(amoCode, { tab: "rules", action: "CREATE_RULE", ruleType: configurationGap.ruleType })
     : qmsPeopleWorkspacePath(amoCode, { tab: "privileges", action: "CREATE" });
@@ -159,9 +159,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
       setError(null);
       setNotice("Team assignments committed.");
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["qms-setup-assignment-audit", amoCode, auditKey] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-setup-audit-resolve", amoCode, auditKey] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-audit-session-resolve", amoCode, auditKey] }),
+        queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       ]);
     },

@@ -10,7 +10,7 @@ import {
   releaseAuditFinding,
   type AuditFindingReleaseState,
 } from "../../../services/qmsAuditExternalAccess";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { listChecklistExecutionGovernance } from "../../../services/qmsChecklistExecutionGovernance";
 import "../../../styles/qms-live-finding-release.css";
 
@@ -39,7 +39,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [error, setError] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-live-release-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     enabled: canManage,
     staleTime: 5_000,

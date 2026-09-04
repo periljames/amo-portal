@@ -90,6 +90,9 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
       queryClient.invalidateQueries({ queryKey: ["qms-audit-notices", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-notice-policies", amoCode] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-context", auditKey] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
     ]);
   };
 

@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { apiBlob } from "./typedApi";
 
 export type AuditPreparationRevision = {
   id: string;
@@ -55,7 +56,31 @@ export type AuditNotice = {
   delivered_at?: string | null;
   acknowledged_at?: string | null;
   created_at: string;
+  artifact?: {
+    id: string;
+    source_type: "GENERATED" | "UPLOADED";
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+    sha256: string;
+    signed_by_user_id?: string | null;
+    signed_by_name?: string | null;
+    signed_by_title?: string | null;
+    signed_at?: string | null;
+    created_at: string;
+  } | null;
   events: Array<{ id: string; event_type: string; reason: string; created_at: string }>;
+};
+
+export type AuditNoticeSubmitResult = {
+  notice: AuditNotice;
+  delivery_complete: boolean;
+  dispatch: {
+    attempted: number;
+    sent: number;
+    failed: number;
+    items: Array<{ email: string; role?: string | null; status: string; message_id?: string | null; error?: string | null }>;
+  };
 };
 
 function json(method: string, body: unknown): RequestInit {
@@ -162,5 +187,45 @@ export function transitionAuditNotice(
   return apiRequest<AuditNotice>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/transitions`),
     json("POST", payload),
+  );
+}
+
+export function uploadAuditNoticeAttachment(
+  amoCode: string,
+  auditId: string,
+  noticeId: string,
+  file: File,
+) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiRequest<AuditNotice>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/attachment`),
+    { method: "POST", body: form, timeoutMs: 90_000, offline: { queueMutation: false } },
+  );
+}
+
+export function previewAuditNoticePdf(amoCode: string, auditId: string, noticeId: string) {
+  return apiBlob(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/preview`),
+    { headers: { Accept: "application/pdf" } },
+  );
+}
+
+export function downloadAuditNoticeDocument(amoCode: string, auditId: string, noticeId: string) {
+  return apiBlob(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/document`),
+    { headers: { Accept: "application/pdf" } },
+  );
+}
+
+export function submitAuditNotice(
+  amoCode: string,
+  auditId: string,
+  noticeId: string,
+  reason: string,
+) {
+  return apiRequest<AuditNoticeSubmitResult>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/submit`),
+    json("POST", { reason }),
   );
 }

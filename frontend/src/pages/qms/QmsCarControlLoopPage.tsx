@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
-import { getCachedUser, getContext } from "../../services/auth";
+import { getContext } from "../../services/auth";
 import { qmsListCarAssignees, type CARAssignee } from "../../services/qms";
+import { canCloseCars, canManageCars } from "../../features/qms/auditSession/qmsAuditActionGates";
 import QmsCarControlOperations from "./QmsCarControlOperations";
 import {
   closeCarControlLoop,
@@ -91,10 +92,10 @@ const QmsCarControlLoopPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const context = getContext();
-  const currentUser = getCachedUser();
   const amoCode = params.amoCode || context.amoSlug || context.amoCode || "UNKNOWN";
   const carId = params.carId || searchParams.get("control") || searchParams.get("carId") || "";
-  const canManage = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER");
+  const canManage = canManageCars();
+  const canClose = canCloseCars();
 
   const [busy, setBusy] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -375,7 +376,7 @@ const QmsCarControlLoopPage: React.FC = () => {
               <div className="card__header"><div><h2>Closure readiness</h2><p>Closure remains gated by the existing server-controlled CAR state machine, evidence requirements and training gate.</p></div><span className={`badge ${control.closure_readiness.ready ? "badge--success" : "badge--warning"}`}>{control.closure_readiness.ready ? "Ready" : "Not ready"}</span></div>
               {control.closure_readiness.blockers.length ? <ul>{control.closure_readiness.blockers.map((blocker, index) => <li key={`${blocker.code}-${index}`}>{blocker.message}</li>)}</ul> : <p>All staged closure controls are satisfied.</p>}
               {canManage ? <div className="toolbar"><button className="btn" type="button" disabled={busy !== null} onClick={() => void runAction("evaluate", () => evaluateCarControlLoop(amoCode, carId), "Risk, reminder and escalation controls evaluated.")}>Evaluate reminders & escalation</button></div> : null}
-              {canManage && control.closure_readiness.ready && control.car.status !== "CLOSED" ? <div className="form-grid"><label>Closure evidence reference<input className="input" value={closureEvidence} onChange={(event) => setClosureEvidence(event.target.value)} placeholder="Optional when milestone evidence is already linked" /></label><label>Closure rationale<input className="input" value={closureReason} onChange={(event) => setClosureReason(event.target.value)} placeholder="Why Quality accepts the CAR as complete" /></label><div><button className="btn btn--primary" type="button" disabled={closureReason.trim().length < 8 || busy !== null} onClick={() => void runAction("close", () => closeCarControlLoop(amoCode, carId, { evidence_ref: closureEvidence || undefined, closure_reason: closureReason.trim() }), "CAR closed through the governed state machine.")}>Close CAR</button></div></div> : null}
+              {canManage && control.closure_readiness.ready && control.car.status !== "CLOSED" ? <div className="form-grid"><label>Closure evidence reference<input className="input" value={closureEvidence} onChange={(event) => setClosureEvidence(event.target.value)} placeholder="Optional when milestone evidence is already linked" /></label><label>Closure rationale<input className="input" value={closureReason} onChange={(event) => setClosureReason(event.target.value)} placeholder="Why Quality accepts the CAR as complete" /></label><div><button className="btn btn--primary" type="button" disabled={!canClose || closureReason.trim().length < 8 || busy !== null} title={!canClose ? "Explicit qms.car.close authority is required" : undefined} onClick={() => void runAction("close", () => closeCarControlLoop(amoCode, carId, { evidence_ref: closureEvidence || undefined, closure_reason: closureReason.trim() }), "CAR closed through the governed state machine.")}>Close CAR</button></div></div> : null}
             </section>
 
             <section className="card">

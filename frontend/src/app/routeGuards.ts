@@ -31,6 +31,16 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.training.view",
 ]);
 
+// Keep this set aligned with backend/apps/quality/tenant_security.py.
+const QMS_OFFICER_PERMISSIONS = new Set([
+  ...QMS_INSPECTOR_PERMISSIONS,
+  "qms.audit.notice.manage",
+  "qms.car.manage",
+  "qms.reports.view",
+  "qms.reports.export",
+  "qms.external.view",
+]);
+
 // Keep this set aligned with backend/apps/quality/tenant_security.py VIEW_ONLY.
 const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.dashboard.view",
@@ -50,6 +60,12 @@ const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.evidence.view",
   "qms.evidence.download",
   "qms.training.view",
+]);
+
+const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
+  ...QMS_VIEW_ONLY_PERMISSIONS,
+  "qms.reports.export",
+  "qms.reports.attest_authority",
 ]);
 
 export function isPlatformSuperuser(): boolean {
@@ -72,11 +88,16 @@ export function userHasQmsRolePermission(
   // AMO tenant QMS user.
   if (user.is_superuser || !user.amo_id) return false;
 
+  if (permission === "qms.reports.attest_authority") {
+    return user.role === "ACCOUNTABLE_EXECUTIVE";
+  }
+
   if (user.is_amo_admin || user.role === "AMO_ADMIN") {
     return permission.startsWith("qms.");
   }
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
-  if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_VIEW_ONLY_PERMISSIONS.has(permission);
+  if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);
+  if (user.role === "QUALITY_OFFICER") return QMS_OFFICER_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR") {
     return QMS_INSPECTOR_PERMISSIONS.has(permission);
   }
@@ -104,7 +125,7 @@ export function userHasTrainingRolePermission(
   }
   const department = (contextDepartment || "").trim().toUpperCase().replaceAll("_", "-");
   if (["TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"].includes(department)) return permission.startsWith("training.");
-  if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR" || department === "QUALITY" || department === "QUALITY-ASSURANCE") {
+  if (user.role === "QUALITY_INSPECTOR" || user.role === "QUALITY_OFFICER" || user.role === "AUDITOR" || department === "QUALITY" || department === "QUALITY-ASSURANCE") {
     return TRAINING_READ.has(permission) || ["training.plan.review", "training.budget.review", "training.assessment.review", "training.attendance.correct"].includes(permission);
   }
   if (user.role === "FINANCE_MANAGER" || user.role === "ACCOUNTS_OFFICER") return ["training.view", "training.plan.view", "training.budget.view", "training.budget.review", "training.budget.approve", "training.report.view", "training.report.export"].includes(permission);

@@ -32,7 +32,7 @@ import {
   X,
 } from "lucide-react";
 
-import { getCachedUser } from "../../services/auth";
+import { hasQmsRolePermission } from "../../app/routeGuards";
 import {
   createAssuranceControl,
   decideControlApproval,
@@ -159,9 +159,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const user = getCachedUser();
-  const role = String(user?.role || "").toUpperCase();
-  const canManage = Boolean(user?.is_superuser || user?.is_amo_admin || role === "QUALITY_MANAGER" || role === "AMO_ADMIN");
+  const canManage = hasQmsRolePermission("qms.settings.manage") || hasQmsRolePermission("qms.audit.manage");
   const view = activeHub(location.search);
 
   const [feedback, setFeedback] = useState<string | null>(null);

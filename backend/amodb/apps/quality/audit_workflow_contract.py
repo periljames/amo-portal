@@ -70,6 +70,18 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
 
 
+def _audit_setup_ready(audit: models.QMSAudit) -> bool:
+    """Return whether the manual-defined audit basis and accountable parties exist."""
+    return bool(
+        audit.planned_start
+        and audit.planned_end
+        and (audit.scope or "").strip()
+        and (audit.criteria or "").strip()
+        and audit.lead_auditor_user_id
+        and (audit.auditee or audit.auditee_email or audit.auditee_user_id)
+    )
+
+
 def _stage_definitions(facts: WorkflowFacts, *, audit_ref: str, audit_status: str) -> list[dict[str, Any]]:
     checklist_ready = facts.checklist_source_present or facts.checklist_total > 0
     findings_complete = facts.fieldwork_closed or facts.report_complete
@@ -90,7 +102,7 @@ def _stage_definitions(facts: WorkflowFacts, *, audit_ref: str, audit_status: st
             "id": "war-room",
             "label": "War room",
             "complete": facts.war_room_ready,
-            "helper": "Schedule, scope, lead auditor and auditee are assigned.",
+            "helper": "Schedule, scope, criteria, lead auditor and auditee are assigned.",
             "metric": f"{audit_ref} · {audit_status}",
         },
         {
@@ -266,12 +278,7 @@ def _workflow_facts(db: Session, audit: models.QMSAudit) -> tuple[WorkflowFacts,
 
     status_value = _enum_value(audit.status).upper()
     facts = WorkflowFacts(
-        war_room_ready=bool(
-            audit.planned_start
-            and audit.planned_end
-            and audit.lead_auditor_user_id
-            and (audit.auditee or audit.auditee_email or audit.auditee_user_id)
-        ),
+        war_room_ready=_audit_setup_ready(audit),
         checklist_source_present=checklist_source_present,
         checklist_total=checklist_total,
         checklist_completed=checklist_completed,

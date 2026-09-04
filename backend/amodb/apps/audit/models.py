@@ -40,7 +40,11 @@ class AuditEvent(Base):
     occurred_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
     before = Column(JSON, nullable=True)
     after = Column(JSON, nullable=True)
-    correlation_id = Column(String(64), nullable=True)
+    # Governed workflows use readable composite trace keys (for example,
+    # ``qms-planner-assignment-gate:<uuid>:<date>``).  Those keys legitimately
+    # exceed 64 characters, so keep the ORM contract aligned with the database
+    # migration that widened this indexed column.
+    correlation_id = Column(String(255), nullable=True)
     metadata_json = Column("metadata", JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

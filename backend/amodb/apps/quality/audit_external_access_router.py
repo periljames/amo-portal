@@ -417,12 +417,25 @@ def _public_read_model(db: Session, grant: QualityAuditAccessGrant) -> dict[str,
         }
 
     if "audit:read_progress" in scope:
-        rows = db.query(QualityAuditChecklistExecutionGovernance).filter(
+        items = db.query(models.QualityAuditChecklistItem).filter(
+            models.QualityAuditChecklistItem.amo_id == grant.amo_id,
+            models.QualityAuditChecklistItem.audit_id == grant.audit_id,
+        ).all()
+        governance_rows = db.query(QualityAuditChecklistExecutionGovernance).filter(
             QualityAuditChecklistExecutionGovernance.amo_id == grant.amo_id,
             QualityAuditChecklistExecutionGovernance.audit_id == grant.audit_id,
         ).all()
-        total = len(rows)
-        pending = sum(1 for row in rows if row.canonical_response_status == "NOT_VERIFIED")
+        governance = {row.checklist_item_id: row for row in governance_rows}
+        total = len(items)
+        pending = sum(
+            1
+            for item in items
+            if (
+                governance[item.id].canonical_response_status
+                if item.id in governance
+                else ("NOT_VERIFIED" if item.response_status == "PENDING" else item.response_status)
+            ) == "NOT_VERIFIED"
+        )
         payload["progress"] = {
             "total": total,
             "completed": total - pending,

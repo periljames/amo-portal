@@ -98,7 +98,6 @@ class AuditMeetingCreate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
-    agenda: str | None = Field(default=None, max_length=12000)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] = "PLANNED"
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -109,7 +108,6 @@ class AuditMeetingUpdate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
-    agenda: str | None = Field(default=None, max_length=12000)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] | None = None
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -321,7 +319,6 @@ def _meeting_dict(row: QualityAuditMeeting, *, public: bool = False) -> dict[str
         "scheduled_end": row.scheduled_end.isoformat() if row.scheduled_end else None,
         "location": row.location,
         "conference_url": row.conference_url,
-        "agenda": row.agenda,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -329,6 +326,25 @@ def _meeting_dict(row: QualityAuditMeeting, *, public: bool = False) -> dict[str
     if not public:
         payload["notes"] = row.notes
     return payload
+
+
+def _current_meeting_rows(rows: list[QualityAuditMeeting]) -> list[QualityAuditMeeting]:
+    """Hide cancelled and superseded singleton meetings without deleting history."""
+    singleton: dict[str, QualityAuditMeeting] = {}
+    retained: list[QualityAuditMeeting] = []
+    for row in rows:
+        if row.status == "CANCELLED":
+            continue
+        if row.meeting_type not in {"OPENING", "CLOSING"}:
+            retained.append(row)
+            continue
+        current = singleton.get(row.meeting_type)
+        row_stamp = row.updated_at or row.created_at or row.scheduled_start
+        current_stamp = (current.updated_at or current.created_at or current.scheduled_start) if current else None
+        if current is None or (row_stamp.isoformat(), str(row.id)) > (current_stamp.isoformat(), str(current.id)):
+            singleton[row.meeting_type] = row
+    retained.extend(singleton.values())
+    return sorted(retained, key=lambda row: (row.scheduled_start, str(row.id)))
 
 
 def _narrative_dict(row: QualityAuditClosingNarrative | None) -> dict[str, Any]:
@@ -494,6 +510,8 @@ def create_governed_document_request(
     )
     db.add(metadata)
     db.commit()
+    # PostgreSQL RLS context is transaction-local; restore it before post-commit reads.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     db.refresh(metadata)
     return _doc_request_dict(row, metadata)
@@ -586,6 +604,7 @@ def update_governed_document_request(
     metadata.updated_by_user_id = ctx.user_id
     metadata.updated_at = _utcnow()
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     db.refresh(metadata)
     return _doc_request_dict(row, metadata)
@@ -603,7 +622,7 @@ def list_audit_meetings(
         QualityAuditMeeting.amo_id == ctx.amo_id,
         QualityAuditMeeting.audit_id == audit_id,
     ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
-    return {"items": [_meeting_dict(row) for row in rows]}
+    return {"items": [_meeting_dict(row) for row in _current_meeting_rows(rows)]}
 
 
 @router.post("/audits/{audit_id}/meetings", status_code=status.HTTP_201_CREATED)
@@ -619,22 +638,35 @@ def create_audit_meeting(
     end = _normalise_datetime(payload.scheduled_end) if payload.scheduled_end else None
     if end and end < start:
         raise HTTPException(status_code=422, detail="Meeting end cannot be before its start.")
-    row = QualityAuditMeeting(
-        amo_id=ctx.amo_id,
-        audit_id=audit_id,
-        meeting_type=payload.meeting_type,
-        scheduled_start=start,
-        scheduled_end=end,
-        location=(payload.location or "").strip() or None,
-        conference_url=(payload.conference_url or "").strip() or None,
-        agenda=(payload.agenda or "").strip() or None,
-        status=payload.status,
-        notes=(payload.notes or "").strip() or None,
-        created_by_user_id=ctx.user_id,
-        updated_by_user_id=ctx.user_id,
-    )
-    db.add(row)
+    # Opening and closing are singleton governance events. A client retry must
+    # update the committed row instead of creating duplicates when a prior
+    # response failed after commit.
+    row = None
+    if payload.meeting_type in {"OPENING", "CLOSING"}:
+        row = db.query(QualityAuditMeeting).filter(
+            QualityAuditMeeting.amo_id == ctx.amo_id,
+            QualityAuditMeeting.audit_id == audit_id,
+            QualityAuditMeeting.meeting_type == payload.meeting_type,
+            QualityAuditMeeting.status != "CANCELLED",
+        ).order_by(QualityAuditMeeting.updated_at.desc()).with_for_update().first()
+    if row is None:
+        row = QualityAuditMeeting(
+            amo_id=ctx.amo_id,
+            audit_id=audit_id,
+            meeting_type=payload.meeting_type,
+            created_by_user_id=ctx.user_id,
+        )
+        db.add(row)
+    row.scheduled_start = start
+    row.scheduled_end = end
+    row.location = (payload.location or "").strip() or None
+    row.conference_url = (payload.conference_url or "").strip() or None
+    row.status = payload.status
+    row.notes = (payload.notes or "").strip() or None
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     return _meeting_dict(row)
 
@@ -667,6 +699,7 @@ def update_audit_meeting(
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     return _meeting_dict(row)
 
@@ -708,6 +741,7 @@ def update_closing_narrative(
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     return _narrative_dict(row)
 
@@ -763,7 +797,7 @@ def get_public_occurrence_collaboration(
                 })
 
     return {
-        "meetings": [_meeting_dict(row, public=True) for row in meetings],
+        "meetings": [_meeting_dict(row, public=True) for row in _current_meeting_rows(meetings)],
         "cars": cars,
         "closing_narrative": _narrative_dict(narrative),
     }

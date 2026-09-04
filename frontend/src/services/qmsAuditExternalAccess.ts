@@ -146,7 +146,10 @@ export type ExternalAuditorFieldworkModel = {
   audit_id: string;
   participant_id: string;
   csrf_token: string;
+  fieldwork_available: boolean;
+  fieldwork_blocker: string | null;
   can_execute_checklist: boolean;
+  can_create_evidence: boolean;
   can_draft_findings: boolean;
   finding_draft_blocker: string | null;
   items: ExternalAuditorFieldworkItem[];

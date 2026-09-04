@@ -60,6 +60,7 @@ def test_repository_heads_include_completed_assurance_lineage() -> None:
         pending.extend(script.get_revision(parent) for parent in parents)
 
     assert "quality_260809_checklist_exec" in ancestry
+    assert "quality_260904_notice_pdf" in ancestry
 
 
 def test_people_router_exposes_governed_privilege_and_independence_contract() -> None:
@@ -123,6 +124,10 @@ def test_full_audit_governance_contract() -> None:
         ("/audit-notice-policies/{policy_id}", "PATCH"),
         ("/audits/{audit_id}/notices", "GET"),
         ("/audits/{audit_id}/notices", "POST"),
+        ("/audits/{audit_id}/notices/{notice_id}/attachment", "POST"),
+        ("/audits/{audit_id}/notices/{notice_id}/preview", "GET"),
+        ("/audits/{audit_id}/notices/{notice_id}/document", "GET"),
+        ("/audits/{audit_id}/notices/{notice_id}/submit", "POST"),
         ("/audits/{audit_id}/notices/{notice_id}/revisions", "POST"),
         ("/audits/{audit_id}/notices/{notice_id}/transitions", "POST"),
     }.issubset(_methods(audit_notice_router))
@@ -134,6 +139,7 @@ def test_full_audit_governance_contract() -> None:
         ("/audit-checklist-templates/{template_id}/revisions/{revision_id}/issue", "POST"),
         ("/audits/{audit_id}/checklist-bindings", "GET"),
         ("/audits/{audit_id}/checklist-bindings", "POST"),
+        ("/audits/{audit_id}/checklists/realtime", "POST"),
     }.issubset(_methods(audit_checklist_template_router))
     assert {
         ("/audits/{audit_id}/checklist-execution-governance", "GET"),
@@ -176,7 +182,7 @@ def test_new_operating_system_models_are_registered_in_shared_metadata() -> None
         "quality_assurance_cases", "quality_investigation_entries", "quality_effectiveness_plans", "quality_assurance_case_events",
         "quality_signal_rules", "quality_signal_observations", "quality_requirement_nodes", "quality_requirement_links",
         "quality_audit_preparation_revisions", "quality_audit_preparation_events",
-        "quality_audit_notice_policies", "quality_audit_notices", "quality_audit_notice_events",
+        "quality_audit_notice_policies", "quality_audit_notices", "quality_audit_notice_artifacts", "quality_audit_notice_events",
         "quality_audit_checklist_templates", "quality_audit_checklist_template_revisions", "quality_audit_checklist_bindings",
         "quality_audit_checklist_execution_governance", "quality_audit_checklist_execution_events",
         "quality_audit_report_revisions", "quality_audit_report_events",
@@ -203,8 +209,11 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         ("/audits/{audit_id}/preparation-revisions", "GET", "list_preparation_revisions"),
         ("/audit-notice-policies", "GET", "list_notice_policies"),
         ("/audits/{audit_id}/notices", "GET", "list_audit_notices"),
+        ("/audits/{audit_id}/notices/{notice_id}/preview", "GET", "preview_audit_notice_pdf"),
+        ("/audits/{audit_id}/notices/{notice_id}/submit", "POST", "submit_and_deliver_audit_notice"),
         ("/audit-checklist-templates", "GET", "list_checklist_templates"),
         ("/audits/{audit_id}/checklist-bindings", "POST", "apply_checklist_revision"),
+        ("/audits/{audit_id}/checklists/realtime", "POST", "create_realtime_audit_checklist"),
         ("/audits/{audit_id}/checklist-execution-governance", "GET", "list_checklist_execution_governance"),
         ("/audits/{audit_id}/checklist-items/{item_id}/execution-governance", "PATCH", "update_checklist_execution_governance"),
         ("/audits/{audit_id}/report-revisions", "GET", "list_report_revisions"),

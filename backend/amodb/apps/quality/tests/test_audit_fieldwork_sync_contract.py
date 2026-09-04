@@ -14,6 +14,7 @@ from amodb.apps.quality.audit_checklist_execution_router import (
     _legacy_from_canonical,
     _mutation_hash,
 )
+from amodb.apps.quality.audit_preparation_router import _preparation_readiness_blockers
 from amodb.apps.quality.enums import FindingLevel, QMSFindingType
 
 
@@ -123,3 +124,26 @@ def test_atomic_finding_rejects_response_classification_mismatch():
     with pytest.raises(HTTPException) as exc:
         _finding_classification(invalid)
     assert exc.value.status_code == 422
+
+
+def test_preparation_requires_checklist_and_acceptance_of_required_requests():
+    blockers = _preparation_readiness_blockers({
+        "checklist_snapshot": [],
+        "document_request_snapshot": [
+            {"id": "required", "is_required": True, "status": "UPLOADED"},
+            {"id": "optional", "is_required": False, "status": "REQUESTED"},
+        ],
+    })
+    assert [blocker["type"] for blocker in blockers] == ["CHECKLIST", "DOCUMENT_REQUEST"]
+    assert blockers[1]["count"] == 1
+
+
+def test_preparation_is_ready_with_checklist_and_accepted_required_requests():
+    blockers = _preparation_readiness_blockers({
+        "checklist_snapshot": [{"id": "item-1", "prompt": "Verify the controlled record."}],
+        "document_request_snapshot": [
+            {"id": "required", "is_required": True, "status": "ACCEPTED"},
+            {"id": "optional", "is_required": False, "status": "REQUESTED"},
+        ],
+    })
+    assert blockers == []

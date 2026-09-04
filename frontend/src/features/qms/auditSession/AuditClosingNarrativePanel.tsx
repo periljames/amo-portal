@@ -17,7 +17,7 @@ import {
   updateAuditMeeting,
   type AuditClosingNarrative,
 } from "../../../services/qmsAuditOccurrenceCompletion";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 
 type Props = { amoCode: string; auditKey: string };
 
@@ -57,7 +57,7 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [notice, setNotice] = useState<string | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["qms-closing-narrative-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
@@ -169,7 +169,7 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
         <aside>
           <article className="qms-occurrence-stage__card">
             <header><Users size={18} /><div><h3>Closing meeting</h3><small>Same occurrence meeting configured in Setup and visible to authorised auditee participants.</small></div></header>
-            {closingMeeting ? <><dl><div><dt>Start</dt><dd>{new Date(closingMeeting.scheduled_start).toLocaleString()}</dd></div><div><dt>End</dt><dd>{closingMeeting.scheduled_end ? new Date(closingMeeting.scheduled_end).toLocaleString() : "—"}</dd></div><div><dt>Location</dt><dd>{closingMeeting.location || "—"}</dd></div><div><dt>Status</dt><dd>{closingMeeting.status.replaceAll("_", " ")}</dd></div></dl>{closingMeeting.agenda ? <p>{closingMeeting.agenda}</p> : null}<footer className="qms-occurrence-stage__actions">{canManage && closingMeeting.status === "PLANNED" ? <button type="button" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "IN_PROGRESS" })}>Start closing meeting</button> : null}{canManage && closingMeeting.status === "IN_PROGRESS" ? <button type="button" className="is-primary" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "COMPLETED" })}>Record meeting complete</button> : null}</footer></> : <div className="qms-occurrence-stage__message is-error"><AlertTriangle size={15} /> No closing meeting is configured. Return to Setup to create one.</div>}
+            {closingMeeting ? <><dl><div><dt>Start</dt><dd>{new Date(closingMeeting.scheduled_start).toLocaleString()}</dd></div><div><dt>End</dt><dd>{closingMeeting.scheduled_end ? new Date(closingMeeting.scheduled_end).toLocaleString() : "—"}</dd></div><div><dt>Location</dt><dd>{closingMeeting.location || "—"}</dd></div><div><dt>Status</dt><dd>{closingMeeting.status.replaceAll("_", " ")}</dd></div></dl><footer className="qms-occurrence-stage__actions">{canManage && closingMeeting.status === "PLANNED" ? <button type="button" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "IN_PROGRESS" })}>Start closing meeting</button> : null}{canManage && closingMeeting.status === "IN_PROGRESS" ? <button type="button" className="is-primary" onClick={() => meetingMutation.mutate({ id: closingMeeting.id, status: "COMPLETED" })}>Record meeting complete</button> : null}</footer></> : <div className="qms-occurrence-stage__message is-error"><AlertTriangle size={15} /> No closing meeting is configured. Return to Setup to create one.</div>}
           </article>
         </aside>
       </div>

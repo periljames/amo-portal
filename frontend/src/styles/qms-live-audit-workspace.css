@@ -97,6 +97,11 @@
   color: #fff;
 }
 
+.qms-live-audit-focus__closing-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .qms-live-audit-focus__sections-title {
   margin: 0 0 0.55rem;
   font-size: 0.78rem;

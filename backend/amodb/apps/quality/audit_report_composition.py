@@ -171,7 +171,6 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
                 "scheduled_end": row.scheduled_end,
                 "location": row.location,
                 "conference_url": row.conference_url,
-                "agenda": row.agenda,
                 "status": row.status,
             }
             for row in meetings

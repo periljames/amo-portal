@@ -67,7 +67,6 @@ export type AuditMeeting = {
   scheduled_end: string | null;
   location: string | null;
   conference_url: string | null;
-  agenda: string | null;
   status: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
   notes?: string | null;
   created_at: string | null;
@@ -209,7 +208,6 @@ export function createAuditMeeting(
     scheduled_end?: string | null;
     location?: string | null;
     conference_url?: string | null;
-    agenda?: string | null;
     status?: AuditMeeting["status"];
     notes?: string | null;
   },

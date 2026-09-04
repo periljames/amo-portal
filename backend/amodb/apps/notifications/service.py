@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import inspect
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -100,6 +101,33 @@ def _requires_isolated_delivery_session(audit_context: Optional[dict]) -> bool:
     return purpose == "password-reset"
 
 
+def _normalise_attachments(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows = list(attachments or [])
+    if len(rows) > 10:
+        raise ValueError("An email may contain at most 10 attachments")
+    cleaned: list[dict[str, Any]] = []
+    total_bytes = 0
+    for index, row in enumerate(rows):
+        filename = Path(str(row.get("filename") or "")).name.strip()
+        content = row.get("content")
+        if not filename:
+            raise ValueError(f"attachments[{index}].filename is required")
+        if not isinstance(content, (bytes, bytearray, memoryview)):
+            raise ValueError(f"attachments[{index}].content must be bytes")
+        payload = bytes(content)
+        if not payload:
+            raise ValueError(f"attachments[{index}].content is empty")
+        total_bytes += len(payload)
+        if total_bytes > 25 * 1024 * 1024:
+            raise ValueError("Email attachments exceed the 25 MiB portal limit")
+        cleaned.append({
+            "filename": filename[:255],
+            "content": payload,
+            "content_type": str(row.get("content_type") or "application/octet-stream")[:128],
+        })
+    return cleaned
+
+
 def send_email(
     template_key: str,
     recipient: Optional[str],
@@ -113,6 +141,7 @@ def send_email(
     email_class: policy.EmailClass | str = policy.EmailClass.ROUTINE,
     recipient_user_id: Optional[str] = None,
     audit_context: Optional[dict] = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> models.EmailLog:
     if not amo_id:
         raise ValueError("amo_id is required to create an email log entry")
@@ -136,10 +165,20 @@ def send_email(
             return existing
 
         delivery_context = dict(context or {})
+        delivery_attachments = _normalise_attachments(attachments)
         safe_context = dict(audit_context if audit_context is not None else delivery_context)
         classification = policy.normalize_email_class(email_class, critical=critical)
         delivery_context.setdefault("_email_class", classification.value)
         safe_context["_email_class"] = classification.value
+        if delivery_attachments:
+            safe_context["_attachments"] = [
+                {
+                    "filename": item["filename"],
+                    "content_type": item["content_type"],
+                    "size_bytes": len(item["content"]),
+                }
+                for item in delivery_attachments
+            ]
         log = models.EmailLog(
             amo_id=amo_id,
             recipient=normalized_recipient,
@@ -204,12 +243,17 @@ def send_email(
 
         try:
             _enforce_rate_limits(db, config=getattr(provider, "config", {}))
+            provider_kwargs: dict[str, Any] = {
+                "template_key": template_key,
+                "recipient": cleaned_recipient,
+                "subject": subject,
+                "context": delivery_context,
+                "correlation_id": correlation_id or f"email-log:{log.id}",
+            }
+            if delivery_attachments:
+                provider_kwargs["attachments"] = delivery_attachments
             result = provider.send(
-                template_key=template_key,
-                recipient=cleaned_recipient,
-                subject=subject,
-                context=delivery_context,
-                correlation_id=correlation_id or f"email-log:{log.id}",
+                **provider_kwargs,
             ) or {}
             delivery = {
                 "provider": str(result.get("provider") or "resend"),

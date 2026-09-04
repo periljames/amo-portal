@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { auditOccurrenceResolverKey } from "../../../services/qmsAuditOccurrenceResolver";
 import {
+  auditOccurrenceQueryKey,
+  auditOccurrenceResolverKey,
+} from "../../../services/qmsAuditOccurrenceResolver";
+import {
+  auditOccurrenceFunctionalTabsForStage,
   auditSessionPath,
   auditSessionStageFromPath,
   isAtLeastLiveStage,
@@ -36,5 +40,25 @@ describe("audit session routes", () => {
     expect(auditOccurrenceResolverKey("11111111-1111-4111-8111-111111111111")).toBe(
       "11111111-1111-4111-8111-111111111111",
     );
+  });
+
+  it("shares one tenant-scoped resolver cache key across occurrence panels", () => {
+    expect(auditOccurrenceQueryKey(" Safarilink ", "QAR/AC/26/001")).toEqual([
+      "qms",
+      "audit-occurrence",
+      "safarilink",
+      "qar-ac-26-001",
+    ]);
+  });
+
+  it("keeps workspace tabs inside the lifecycle stage being viewed", () => {
+    expect(auditOccurrenceFunctionalTabsForStage("setup").map((tab) => tab.id)).toEqual(["overview", "team"]);
+    expect(auditOccurrenceFunctionalTabsForStage("live").map((tab) => tab.id)).toEqual([
+      "checklist",
+      "evidence",
+      "findings",
+    ]);
+    expect(auditOccurrenceFunctionalTabsForStage("prepare")).toEqual([]);
+    expect(auditOccurrenceFunctionalTabsForStage("follow-up")).toEqual([]);
   });
 });

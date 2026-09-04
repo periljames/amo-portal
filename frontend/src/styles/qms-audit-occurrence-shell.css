@@ -2,6 +2,8 @@
 .qms-audit-occurrence-mount {
   min-width: 0;
   width: 100%;
+  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  background: color-mix(in srgb, var(--qms-page, #eef3f7) 88%, #dce5ec);
 }
 
 .qms-audit-occurrence-shell {
@@ -9,8 +11,13 @@
   flex-direction: column;
   gap: 0;
   min-width: 0;
-  width: 100%;
+  width: min(100%, 104rem);
+  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  margin-inline: auto;
+  border-inline: 1px solid var(--qms-line, #d0d8e1);
+  background: var(--qms-page, var(--surface-secondary, #f4f7fa));
   color: var(--qms-text, inherit);
+  box-shadow: 0 0 2.25rem rgb(15 23 42 / 0.06);
 }
 
 .qms-audit-occurrence-shell__body {
@@ -91,4 +98,18 @@ html.quality-audit-canonical-occurrence .qms-audit-occurrence-shell__body {
   z-index: auto;
   min-height: auto;
   height: auto;
+}
+
+@media (max-width: 104rem) {
+  .qms-audit-occurrence-shell {
+    border-inline: 0;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 640px) {
+  html.quality-audit-canonical-occurrence .qms-audit-session-rail,
+  html.quality-audit-canonical-occurrence .qms-audit-occurrence-shell__body {
+    padding-inline: 0.7rem;
+  }
 }

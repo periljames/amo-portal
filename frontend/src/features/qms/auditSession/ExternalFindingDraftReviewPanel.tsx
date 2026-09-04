@@ -7,17 +7,19 @@ import {
   promoteExternalFindingDraft,
   returnExternalFindingDraft,
 } from "../../../services/qmsExternalFindingDraftReview";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { canGovernAudit } from "./qmsAuditActionGates";
 import "../../../styles/qms-external-finding-draft-review.css";
 
 type Props = { amoCode: string; auditKey: string };
 
 const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
+  const canManage = canGovernAudit();
   const [open, setOpen] = useState(true);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const auditQuery = useQuery({
-    queryKey: ["qms", "external-draft-review-audit", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
@@ -66,7 +68,7 @@ const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey })
         <FileWarning size={16} /> External drafts · {actionable.length}
       </button>
       {open ? <div className="qms-external-draft-review__body">
-        <header><div><strong>External finding drafts</strong><small>Submitted proposals remain drafts until Quality explicitly promotes them.</small></div><button type="button" onClick={() => setOpen(false)} aria-label="Close external draft review"><X size={16} /></button></header>
+        <header><div><strong>External finding drafts</strong><small>{canManage ? "Submitted proposals remain drafts until Quality explicitly promotes them." : "Quality management review is required before fieldwork can be completed."}</small></div><button type="button" onClick={() => setOpen(false)} aria-label="Close external draft review"><X size={16} /></button></header>
         {draftsQuery.error ? <div role="alert"><AlertTriangle size={14} /> {draftsQuery.error instanceof Error ? draftsQuery.error.message : "Draft review unavailable."}</div> : null}
         {mutationError ? <div role="alert"><AlertTriangle size={14} /> {mutationError instanceof Error ? mutationError.message : "Draft review action failed."}</div> : null}
         <div className="qms-external-draft-review__list">
@@ -76,11 +78,11 @@ const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey })
               <strong>{draft.requirement_ref || "No requirement reference"}</strong>
               <p>{draft.description}</p>
               <small>External participant {draft.participant_id.slice(0, 8)} · draft {draft.id.slice(0, 8)}</small>
-              <label><span>Quality review note</span><textarea rows={2} value={notes[draft.id] || ""} onChange={(event) => setNotes((current) => ({ ...current, [draft.id]: event.target.value }))} placeholder="Decision rationale or revision instructions" /></label>
+              {canManage ? <><label><span>Quality review note</span><textarea rows={2} value={notes[draft.id] || ""} onChange={(event) => setNotes((current) => ({ ...current, [draft.id]: event.target.value }))} placeholder="Decision rationale or revision instructions" /></label>
               <footer>
                 <button type="button" disabled={returnMutation.isPending || promoteMutation.isPending || (notes[draft.id] || "").trim().length < 4} onClick={() => returnMutation.mutate({ draftId: draft.id, reviewNote: (notes[draft.id] || "").trim() })}><CornerDownLeft size={14} /> Return for revision</button>
                 <button type="button" disabled={returnMutation.isPending || promoteMutation.isPending} onClick={() => promoteMutation.mutate({ draftId: draft.id, reviewNote: (notes[draft.id] || "").trim() })}><CheckCircle2 size={14} /> Promote to official finding</button>
-              </footer>
+              </footer></> : null}
             </article>
           ))}
         </div>

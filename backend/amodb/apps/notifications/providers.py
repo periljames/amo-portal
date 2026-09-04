@@ -23,6 +23,7 @@ class EmailProvider:
         subject: str,
         context: dict[str, Any],
         correlation_id: str | None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -36,6 +37,7 @@ class NoopProvider(EmailProvider):
         subject: str,
         context: dict[str, Any],
         correlation_id: str | None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {"provider": "none", "skipped": True}
 
@@ -129,6 +131,7 @@ class ResendProvider(EmailProvider):
         subject: str,
         context: dict[str, Any],
         correlation_id: str | None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from amodb.apps.platform.resend_adapter import send_email
 
@@ -180,6 +183,7 @@ class ResendProvider(EmailProvider):
                 {"name": "template", "value": re.sub(r"[^A-Za-z0-9_-]", "_", template_key)[:256]},
                 {"name": "email_class", "value": str(context.get("_email_class") or "ROUTINE")[:256]},
             ],
+            attachments=attachments,
         )
         return {
             **result,

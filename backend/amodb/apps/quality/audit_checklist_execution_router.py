@@ -22,9 +22,10 @@ from .audit_checklist_execution_models import (
     QualityAuditChecklistExecutionGovernance,
     QualityAuditFieldworkMutationReceipt,
 )
+from .audit_preparation_models import QualityAuditPreparationRevision
 from .enums import FindingLevel, QMSAuditStatus, QMSFindingSeverity, QMSFindingType
 from .service import compute_target_close_date, normalize_finding_level
-from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
+from .tenant_security import TenantContext, assert_quality_permission_any, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
 
 router = APIRouter(tags=["Quality audit checklist execution governance"])
@@ -250,14 +251,53 @@ def _publish_persisted_event(row: audit_models.AuditEvent) -> None:
         return
 
 
-def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid.UUID):
+def _fieldwork_write_blocker(db: Session, *, amo_id: str, audit: models.QMSAudit) -> str | None:
+    status_value = str(getattr(audit.status, "value", audit.status) or "").upper()
+    if status_value == "CLOSED" or audit.actual_end is not None:
+        return "Fieldwork is complete and read-only. Reopen the governed audit lifecycle before recording further work."
+    prepared = db.query(QualityAuditPreparationRevision).filter(
+        QualityAuditPreparationRevision.amo_id == amo_id,
+        QualityAuditPreparationRevision.audit_id == audit.id,
+    ).order_by(QualityAuditPreparationRevision.revision_no.desc()).first()
+    if prepared is None or prepared.status != "ISSUED":
+        return "Issue the controlled preparation revision before checklist execution, evidence capture, or finding creation."
+    from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
+
+    current = _capture_sources(db, amo_id=amo_id, audit=audit)
+    if _preparation_readiness_blockers(current):
+        return "Preparation is incomplete. Bind a governed checklist and accept every required document request before fieldwork continues."
+    if prepared.source_fingerprint != current["source_fingerprint"]:
+        return "Preparation changed after its last issue. Create and issue a fresh controlled preparation revision before fieldwork continues."
+    return None
+
+
+def _require_fieldwork_write_window(db: Session, *, amo_id: str, audit: models.QMSAudit) -> None:
+    blocker = _fieldwork_write_blocker(db, amo_id=amo_id, audit=audit)
+    if blocker:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "FIELDWORK_LIFECYCLE_BLOCKED", "message": blocker},
+        )
+
+
+def _mark_fieldwork_started(audit: models.QMSAudit) -> None:
+    if audit.actual_start is None:
+        audit.actual_start = date.today()
+    if audit.status == QMSAuditStatus.PLANNED:
+        audit.status = QMSAuditStatus.IN_PROGRESS
+
+
+def _internal_fieldwork_viewer(db: Session, *, ctx: TenantContext, audit_id: uuid.UUID, lock: bool = False):
     from . import router as quality_router
 
-    audit = db.query(models.QMSAudit).filter(
+    audit_query = db.query(models.QMSAudit).filter(
         models.QMSAudit.amo_id == ctx.amo_id,
         models.QMSAudit.id == audit_id,
         models.QMSAudit.deleted_at.is_(None),
-    ).with_for_update().first()
+    )
+    if lock:
+        audit_query = audit_query.with_for_update()
+    audit = audit_query.first()
     if audit is None:
         raise HTTPException(status_code=404, detail="Audit not found.")
     user = db.query(account_models.User).filter(
@@ -266,8 +306,17 @@ def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid
         account_models.User.is_active.is_(True),
     ).first()
     if user is None:
-        raise HTTPException(status_code=403, detail="Active internal auditor identity is required.")
+        raise HTTPException(status_code=403, detail="Active internal Quality identity is required.")
+    if not quality_router._is_quality_admin(user) and not quality_router._audit_allows_user_by_audit(audit, user.id):
+        raise HTTPException(status_code=403, detail="Private fieldwork is limited to the assigned audit team and Quality management.")
+    return audit, user, quality_router
+
+
+def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid.UUID):
+    audit, user, quality_router = _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
     quality_router._require_audit_fieldwork_write_access(user, audit)
+    _require_fieldwork_write_window(db, amo_id=ctx.amo_id, audit=audit)
+    _mark_fieldwork_started(audit)
     return audit, user, quality_router
 
 
@@ -386,6 +435,7 @@ def list_checklist_execution_governance(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id)
     items = db.query(models.QualityAuditChecklistItem).filter(
         models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
         models.QualityAuditChecklistItem.audit_id == audit_id,
@@ -415,8 +465,9 @@ def update_checklist_execution_governance(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.audit.manage")
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
     governance = _apply_execution_update(db, ctx=ctx, item=item, payload=payload, governance=governance)
@@ -435,7 +486,7 @@ def mutate_live_fieldwork(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.audit.manage")
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     payload_hash = _mutation_hash(payload)
@@ -522,8 +573,9 @@ def create_atomic_fieldwork_finding(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
-    assert_quality_permission(db, ctx, "qms.audit.manage")
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     payload_hash = _mutation_hash(payload)
     existing = _existing_receipt_or_none(
         db,
@@ -542,7 +594,6 @@ def create_atomic_fieldwork_finding(
 
     published_events: list[audit_models.AuditEvent] = []
     try:
-        audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
         item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
         governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
         current_version = _assert_base_version(

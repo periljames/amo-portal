@@ -66,6 +66,7 @@ def send_email(
     template_variables: dict[str, str | int] | None = None,
     idempotency_key: str | None = None,
     tags: list[dict[str, str]] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not from_value.strip() or not to_email.strip():
         raise ValueError("Resend sender and recipient are required.")
@@ -90,6 +91,15 @@ def send_email(
             params["text"] = text
     if tags:
         params["tags"] = tags
+    if attachments:
+        params["attachments"] = [
+            {
+                "filename": str(item["filename"]),
+                "content": list(bytes(item["content"])),
+                "content_type": str(item.get("content_type") or "application/octet-stream"),
+            }
+            for item in attachments
+        ]
 
     options: dict[str, Any] | None = None
     if idempotency_key:

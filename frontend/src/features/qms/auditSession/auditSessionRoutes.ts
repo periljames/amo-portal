@@ -41,6 +41,12 @@ export const AUDIT_OCCURRENCE_FUNCTIONAL_TABS: readonly {
   { id: "report", label: "Report", stage: "closing", hash: "report" },
 ] as const;
 
+/** Keep secondary navigation inside the stage currently being viewed. */
+export function auditOccurrenceFunctionalTabsForStage(stage: AuditSessionStageId | null) {
+  if (!stage) return [];
+  return AUDIT_OCCURRENCE_FUNCTIONAL_TABS.filter((entry) => entry.stage === stage);
+}
+
 export function auditSessionStageFromPath(pathname: string): AuditSessionStageId | null {
   const tail = pathname.split("?")[0].split("#")[0].split("/").filter(Boolean).at(-1)?.toLowerCase();
   return AUDIT_SESSION_STAGES.includes((tail || "") as AuditSessionStageId)

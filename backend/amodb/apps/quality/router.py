@@ -1413,6 +1413,13 @@ def _is_quality_manager(current_user: account_models.User) -> bool:
     }
 
 
+def _is_quality_officer(current_user: account_models.User) -> bool:
+    return _role_value(current_user) in {
+        account_models.AccountRole.QUALITY_OFFICER,
+        "QUALITY_OFFICER",
+    }
+
+
 def _is_system_quality_admin(current_user: account_models.User) -> bool:
     role_value = _role_value(current_user)
     return bool(
@@ -1445,6 +1452,15 @@ def _is_quality_scheduler(current_user: account_models.User) -> bool:
 def _require_quality_scheduler(current_user: account_models.User) -> None:
     if not _is_quality_scheduler(current_user):
         raise HTTPException(status_code=403, detail="Only Quality team roles can schedule audits or issue CARs")
+
+
+def _is_quality_car_actor(current_user: account_models.User) -> bool:
+    return _is_quality_admin(current_user) or _is_quality_officer(current_user) or _is_quality_scheduler(current_user)
+
+
+def _require_quality_car_actor(current_user: account_models.User) -> None:
+    if not _is_quality_car_actor(current_user):
+        raise HTTPException(status_code=403, detail="Only authorized Quality team roles can manage corrective actions")
 
 
 def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str, *, amo_id: str) -> bool:
@@ -1548,8 +1564,8 @@ def _require_car_review_access(db: Session, current_user: account_models.User, c
     audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit and _audit_lead_allows_user_by_audit(audit, current_user.id):
         return
-    if _is_quality_manager(current_user):
-        raise HTTPException(status_code=403, detail="Quality Managers may receive or flag deferrals for review, but cannot accept/reject CARs unless assigned as the lead auditor.")
+    if _is_quality_manager(current_user) or _is_quality_officer(current_user):
+        raise HTTPException(status_code=403, detail="Quality Managers and Quality Officers may receive or flag deferrals for review, but cannot accept/reject CARs unless assigned as the lead auditor.")
     raise HTTPException(status_code=403, detail="Only the lead auditor, AMO Admin, or Superuser may review CAR responses or deferrals.")
 
 
@@ -1575,6 +1591,8 @@ def _require_car_write_access(
     car: Optional[models.CorrectiveActionRequest] = None,
     allow_assignee: bool = False,
 ) -> None:
+    if _is_quality_officer(current_user):
+        return
     if car and allow_assignee and current_user.id == car.assigned_to_user_id:
         return
     if car and _current_user_can_modify_car(db, current_user, car):
@@ -1955,6 +1973,47 @@ def complete_audit_fieldwork(
 ):
     audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     _require_audit_access(current_user, audit)
+    if not _is_system_quality_admin(current_user) and not _audit_lead_allows_user_by_audit(audit, current_user.id):
+        raise HTTPException(status_code=403, detail="Only the lead auditor, AMO Admin, or Superuser may complete fieldwork.")
+    from .audit_checklist_execution_router import _require_fieldwork_write_window
+
+    _require_fieldwork_write_window(db, amo_id=str(audit.amo_id), audit=audit)
+    checklist = db.query(models.QualityAuditChecklistItem).filter(
+        models.QualityAuditChecklistItem.amo_id == audit.amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit.id,
+    ).all()
+    if not checklist:
+        raise HTTPException(status_code=409, detail="A governed checklist is required before fieldwork can be completed.")
+    pending = [item for item in checklist if item.response_status == "PENDING"]
+    adverse_without_finding = [
+        item for item in checklist
+        if item.response_status in {"NON_CONFORMING", "OBSERVATION"} and item.finding_id is None
+    ]
+    blockers: list[dict[str, Any]] = []
+    if pending:
+        blockers.append({"type": "CHECKLIST", "count": len(pending), "reason": "Checklist items remain not verified."})
+    if adverse_without_finding:
+        blockers.append({"type": "FINDING", "count": len(adverse_without_finding), "reason": "Adverse checklist responses must be linked to governed findings."})
+    from .audit_external_finding_draft_models import QualityAuditExternalFindingDraft
+
+    external_drafts = db.query(QualityAuditExternalFindingDraft).filter(
+        QualityAuditExternalFindingDraft.amo_id == audit.amo_id,
+        QualityAuditExternalFindingDraft.audit_id == audit.id,
+    ).all()
+    unresolved_external_drafts = [
+        draft
+        for draft in external_drafts
+        if (draft.events[-1].event_type if draft.events else "CREATED") in {"CREATED", "SUBMITTED", "RETURNED"}
+    ]
+    if unresolved_external_drafts:
+        blockers.append({"type": "EXTERNAL_FINDING_DRAFT", "count": len(unresolved_external_drafts), "reason": "External-auditor finding drafts must be promoted or withdrawn."})
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "FIELDWORK_COMPLETION_BLOCKED", "message": "Fieldwork is not ready for completion.", "blockers": blockers},
+        )
+    if audit.actual_end is not None:
+        raise HTTPException(status_code=409, detail="Fieldwork has already been completed for this audit.")
     settings = _get_or_create_workflow_settings(db, amo_id=str(audit.amo_id), actor_user_id=current_user.id)
     actual_end = payload.actual_end or date.today()
     audit.actual_end = actual_end
@@ -5313,7 +5372,7 @@ def create_car_request(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_quality_scheduler(current_user)
+    _require_quality_car_actor(current_user)
     _require_car_write_access(db, current_user, payload.finding_id)
     finding = _get_finding_for_amo(
         db,

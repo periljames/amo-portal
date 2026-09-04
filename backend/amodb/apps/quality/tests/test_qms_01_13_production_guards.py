@@ -263,10 +263,10 @@ def test_manual_change_request_model_has_required_tenant_key() -> None:
     assert {foreign_key.target_fullname for foreign_key in amo_column.foreign_keys} == {"amos.id"}
 
 
-def test_qms13_migration_is_the_single_alembic_head() -> None:
+def test_audit_notice_artifact_migration_is_the_single_alembic_head() -> None:
     config = Config(str(QUALITY_DIR.parents[1] / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["quality_260902_qms13_gate"]
+    assert scripts.get_heads() == ["quality_260904_notice_pdf"]
 
 
 def test_qms13_migration_backfills_and_constrains_tenant(monkeypatch) -> None:

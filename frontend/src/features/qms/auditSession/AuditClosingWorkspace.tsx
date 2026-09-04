@@ -10,6 +10,7 @@ import {
   FileSignature,
   Fingerprint,
   KeyRound,
+  Printer,
   RefreshCw,
   ShieldAlert,
   Stamp,
@@ -49,17 +50,24 @@ import {
   verifyAuditWebAuthnRegistration,
   type AuditSignatureEvidence,
 } from "../../../services/qmsAuditClosingAssurance";
-import { resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import {
   downloadGeneratedAuditReport,
   generateAuditClosingReport,
   getAuditReportComposition,
   type GeneratedAuditReportArtifact,
 } from "../../../services/qmsAuditReportComposition";
+import {
+  attestAuthoritySubmission,
+  downloadAuthorityPack,
+  generateAuthorityPack,
+  getAuthorityAttestation,
+} from "../../../services/qmsAuthorityPack";
 import { saveDownloadedFile } from "../../../utils/downloads";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
 import { auditSessionPath } from "./auditSessionRoutes";
+import { canAttestAuthority, canExportReports, canGovernAudit } from "./qmsAuditActionGates";
 import {
   closingCardTone,
   closingLockedReason,
@@ -88,16 +96,21 @@ function sameRevisionSignature(revision: AuditReportRevision | null, signatures:
 
 const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
-  const canManage = hasQmsRolePermission("qms.audit.manage");
+  const canGovern = canGovernAudit();
+  const canAttest = canAttestAuthority();
+  const canExport = canExportReports();
+  const canDownloadReport = canGovern || hasQmsRolePermission("qms.audit.view");
   const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
   const [ceremonyBusy, setCeremonyBusy] = useState<CeremonyBusy>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [passkeyNickname, setPasskeyNickname] = useState("Quality approval passkey");
   const [signReason, setSignReason] = useState("Quality approval of the exact governed audit report presented at the closing meeting.");
+  const [authorityRationale, setAuthorityRationale] = useState("The issued audit report is complete and authorized for submission to the aviation Authority.");
+  const [authorityBusy, setAuthorityBusy] = useState<"download" | "print" | null>(null);
   const [verificationUrl, setVerificationUrl] = useState<string | null>(null);
   const auditQuery = useQuery({
-    queryKey: ["qms-closing-resolve", amoCode, auditKey],
+    queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
     queryFn: ({ signal }) => resolveAuditOccurrence(amoCode, auditKey, signal),
     staleTime: 5_000,
   });
@@ -108,8 +121,10 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const policyQuery = useQuery({ queryKey: ["qms-audit-output-policy", amoCode], queryFn: ({ signal }) => getAuditOutputPolicy(amoCode, signal), enabled: Boolean(auditId), staleTime: 5_000 });
   const signaturesQuery = useQuery({ queryKey: ["qms-audit-signatures", amoCode, auditId], queryFn: ({ signal }) => listAuditSignatureEvidence(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const acknowledgementsQuery = useQuery({ queryKey: ["qms-audit-closing-acks", amoCode, auditId], queryFn: ({ signal }) => listAuditClosingAcknowledgements(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
-  const passkeysQuery = useQuery({ queryKey: ["qms-audit-passkeys", amoCode], queryFn: ({ signal }) => listAuditWebAuthnCredentials(amoCode, signal), enabled: Boolean(auditId) && canManage, staleTime: 3_000 });
+  const passkeysQuery = useQuery({ queryKey: ["qms-audit-passkeys", amoCode], queryFn: ({ signal }) => listAuditWebAuthnCredentials(amoCode, signal), enabled: Boolean(auditId) && canGovern, staleTime: 3_000 });
   const assuranceArtifactsQuery = useQuery({ queryKey: ["qms-audit-assurance-artifacts", amoCode, auditId], queryFn: ({ signal }) => listAuditAssuranceArtifacts(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
+  const issuedForAuthority = revisionsQuery.data?.items.find((revision) => revision.status === "ISSUED") || null;
+  const authorityQuery = useQuery({ queryKey: ["qms-authority-attestation", amoCode, auditId], queryFn: ({ signal }) => getAuthorityAttestation(amoCode, auditId, signal), enabled: Boolean(auditId && issuedForAuthority), staleTime: 1_500 });
   const invalidateClosing = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms-audit-report-composition", amoCode, auditId] }),
@@ -119,6 +134,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-closing-acks", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-passkeys", amoCode] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-assurance-artifacts", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-authority-attestation", amoCode, auditId] }),
     ]);
   };
   const generateMutation = useMutation({
@@ -146,12 +162,29 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onSuccess: async () => { setLocalError(null); setNotice("Policy-controlled assurance artifact generated from the issued report and signature evidence."); await invalidateClosing(); },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Assurance artifact generation failed."),
   });
+  const authorityAttestationMutation = useMutation({
+    mutationFn: () => {
+      if (!issuedForAuthority) throw new Error("An issued report revision is required before attestation.");
+      return attestAuthoritySubmission(amoCode, auditId, {
+        report_revision_id: issuedForAuthority.id,
+        report_sha256: issuedForAuthority.sha256,
+        rationale: authorityRationale.trim(),
+      });
+    },
+    onSuccess: async (result) => {
+      setLocalError(null);
+      setNotice("Accountable Executive attestation recorded against the exact issued report checksum.");
+      queryClient.setQueryData(["qms-authority-attestation", amoCode, auditId], result);
+      await authorityQuery.refetch();
+    },
+    onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Authority submission attestation failed."),
+  });
   const composition = compositionQuery.data;
   const pending = composition?.checklist_counts?.NOT_VERIFIED || 0;
   const latestGenerated = composition?.artifacts[0] || null;
   const revisions = revisionsQuery.data?.items || [];
   const activeRevision = revisions.find((revision) => ["DRAFT", "INTERNAL_REVIEW", "APPROVED"].includes(revision.status)) || null;
-  const issuedRevision = revisions.find((revision) => revision.status === "ISSUED") || null;
+  const issuedRevision = issuedForAuthority;
   const currentRevision = activeRevision || issuedRevision || revisions[0] || null;
   const signatures = signaturesQuery.data?.items || [];
   const currentSignature = sameRevisionSignature(currentRevision, signatures);
@@ -163,13 +196,14 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const supplementaryPolicy = Boolean(policy && ["APPROVAL_LETTER", "CERTIFICATE", "ATTESTATION"].includes(policy.artifact_policy));
   const assuranceArtifacts = assuranceArtifactsQuery.data?.items || [];
   const currentAssuranceArtifact = issuedRevision && currentSignature ? assuranceArtifacts.find((artifact) => artifact.source_report_revision_id === issuedRevision.id && artifact.signature_evidence_id === currentSignature.id) || null : null;
-  const canGenerate = Boolean(canManage && composition?.audit?.actual_end && pending === 0);
-  const canSubmit = Boolean(canManage && activeRevision?.status === "DRAFT");
-  const canApprove = Boolean(canManage && activeRevision?.status === "INTERNAL_REVIEW");
-  const canSign = Boolean(canManage && activeRevision?.status === "APPROVED" && !currentSignature);
-  const canIssue = Boolean(canManage && activeRevision?.status === "APPROVED" && currentSignature);
-  const canExecutionClose = Boolean(canManage && issuedRevision && currentSignature && closure?.execution_status !== "CLOSED" && closure?.execution_readiness?.ready);
-  const canGenerateAssurance = Boolean(canManage && supplementaryPolicy && currentSignature && issuedRevision && !currentAssuranceArtifact);
+  const authorityAttestation = authorityQuery.data?.attestation || null;
+  const canGenerate = Boolean(canGovern && composition?.audit?.actual_end && pending === 0);
+  const canSubmit = Boolean(canGovern && activeRevision?.status === "DRAFT");
+  const canApprove = Boolean(canGovern && activeRevision?.status === "INTERNAL_REVIEW");
+  const canSign = Boolean(canGovern && activeRevision?.status === "APPROVED" && !currentSignature);
+  const canIssue = Boolean(canGovern && activeRevision?.status === "APPROVED" && currentSignature);
+  const canExecutionClose = Boolean(canGovern && issuedRevision && currentSignature && closure?.execution_status !== "CLOSED" && closure?.execution_readiness?.ready);
+  const canGenerateAssurance = Boolean(canGovern && supplementaryPolicy && currentSignature && issuedRevision && !currentAssuranceArtifact);
   /** Progressive closing: current gate dominates; later gates stay locked. */
   const activeClosingStep = resolveActiveClosingStep({
     hasGeneratedDraft: Boolean(latestGenerated),
@@ -200,6 +234,26 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     try { saveDownloadedFile(await downloadGeneratedAuditReport(amoCode, auditId, artifact.id), artifact.filename); }
     catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Generated report download failed."); }
     finally { setDownloadBusy(null); }
+  };
+  const downloadAuthoritySubmission = async (printCover: boolean) => {
+    setAuthorityBusy(printCover ? "print" : "download");
+    setLocalError(null);
+    try {
+      let current = authorityAttestation;
+      if (!current?.pack_sha256) {
+        const generated = await generateAuthorityPack(amoCode, auditId);
+        current = generated.attestation;
+        queryClient.setQueryData(["qms-authority-attestation", amoCode, auditId], generated);
+      }
+      if (!current) throw new Error("Accountable Executive attestation is required before download.");
+      await downloadAuthorityPack(amoCode, auditId);
+      setNotice("Authority submission pack downloaded with its integrity manifest.");
+      if (printCover) window.print();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : "Authority submission pack download failed.");
+    } finally {
+      setAuthorityBusy(null);
+    }
   };
   const registerPasskey = async () => {
     setCeremonyBusy("register"); setLocalError(null); setNotice(null);
@@ -241,7 +295,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
   const refresh = async () => { setLocalError(null); await queryClient.invalidateQueries({ queryKey: ["qms-audit-output-policy", amoCode] }); await invalidateClosing(); };
   const prerequisiteError = compositionQuery.error || revisionsQuery.error || closureQuery.error || policyQuery.error || signaturesQuery.error || acknowledgementsQuery.error || assuranceArtifactsQuery.error || passkeysQuery.error;
-  if (auditQuery.isLoading || compositionQuery.isLoading || revisionsQuery.isLoading || closureQuery.isLoading || policyQuery.isLoading || signaturesQuery.isLoading || acknowledgementsQuery.isLoading || assuranceArtifactsQuery.isLoading || (canManage && passkeysQuery.isLoading)) return <div className="qms-audit-closing qms-audit-closing--loading">Preparing governed closing meeting workspace…</div>;
+  if (auditQuery.isLoading || compositionQuery.isLoading || revisionsQuery.isLoading || closureQuery.isLoading || policyQuery.isLoading || signaturesQuery.isLoading || acknowledgementsQuery.isLoading || assuranceArtifactsQuery.isLoading || (canGovern && passkeysQuery.isLoading)) return <div className="qms-audit-closing qms-audit-closing--loading">Preparing governed closing meeting workspace…</div>;
   if (auditQuery.error || !auditQuery.data) {
     return (
       <AuditStageLoadError
@@ -295,7 +349,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <div className="qms-audit-closing__metrics"><div><strong>{counts.compliant}</strong><span>Compliant</span></div><div><strong>{counts.noncompliant}</strong><span>Noncompliant</span></div><div><strong>{counts.observations}</strong><span>Observations</span></div><div><strong>{composition.findings_count}</strong><span>Findings</span></div><div><strong>{composition.cars_count}</strong><span>CARs</span></div><div><strong>{pending}</strong><span>Not verified</span></div></div>
           {!composition.audit.actual_end ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> Fieldwork must be formally completed before a closing snapshot can be generated.</div> : null}
           {pending > 0 ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> {pending} checklist item(s) remain NOT_VERIFIED.</div> : null}
-          <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canGenerate || !stepAllowsActions(1) || generateMutation.isPending} onClick={() => generateMutation.mutate()}>{generateMutation.isPending ? "Generating…" : "Generate closing report draft"}</button>{latestGenerated ? <button type="button" onClick={() => void download(latestGenerated)} disabled={downloadBusy === latestGenerated.id}><Download size={15} /> {downloadBusy === latestGenerated.id ? "Downloading…" : "Preview / download"}</button> : null}{latestGenerated && !activeRevision ? <button type="button" disabled={!canManage || !stepAllowsActions(1) || adoptMutation.isPending} onClick={() => adoptMutation.mutate(latestGenerated.id)}><FileSignature size={15} /> {adoptMutation.isPending ? "Adopting…" : "Adopt governed draft"}</button> : null}</div>
+          <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canGenerate || !stepAllowsActions(1) || generateMutation.isPending} onClick={() => generateMutation.mutate()}>{generateMutation.isPending ? "Generating…" : "Generate closing report draft"}</button>{latestGenerated && canDownloadReport ? <button type="button" onClick={() => void download(latestGenerated)} disabled={downloadBusy === latestGenerated.id}><Download size={15} /> {downloadBusy === latestGenerated.id ? "Downloading…" : "Preview / download"}</button> : null}{latestGenerated && !activeRevision ? <button type="button" disabled={!canGovern || !stepAllowsActions(1) || adoptMutation.isPending} onClick={() => adoptMutation.mutate(latestGenerated.id)}><FileSignature size={15} /> {adoptMutation.isPending ? "Adopting…" : "Adopt governed draft"}</button> : null}</div>
           {latestGenerated ? <dl className="qms-audit-closing__artifact"><div><dt>Artifact</dt><dd>{latestGenerated.filename}</dd></div><div><dt>Size</dt><dd>{bytes(latestGenerated.size_bytes)}</dd></div><div className="is-wide"><dt>Source snapshot SHA-256</dt><dd><code>{latestGenerated.source_snapshot_hash}</code></dd></div><div className="is-wide"><dt>Artifact SHA-256</dt><dd><code>{latestGenerated.sha256}</code></dd></div></dl> : <p className="qms-audit-closing__empty">No generated closing report exists yet.</p>}
         </section>
         <section className={closingCardClass(2)} aria-current={activeClosingStep === 2 ? "step" : undefined}>
@@ -312,14 +366,14 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <button type="button" className="is-primary" disabled={!canSubmit || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "SUBMIT" })}>Submit acknowledged draft for review</button>
             </div>
           ) : null}
-          {activeRevision?.status === "INTERNAL_REVIEW" ? <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canApprove || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "APPROVE" })}>Approve exact report revision</button><button type="button" disabled={!stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "RETURN" })}>Return to draft</button></div> : null}
+          {activeRevision?.status === "INTERNAL_REVIEW" ? <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canApprove || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "APPROVE" })}>Approve exact report revision</button><button type="button" disabled={!canGovern || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "RETURN" })}>Return to draft</button></div> : null}
           {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> R{activeRevision.revision_no} is approved and locked to SHA-256 <code>{activeRevision.sha256}</code>.</div> : null}
         </section>
         <section className={closingCardClass(4)} aria-current={activeClosingStep === 4 ? "step" : undefined}>
           <header><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision/hash. Password re-auth is not treated as equivalent evidence.</small></div></header>
           {lockedReason(4) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(4)}</div> : null}
           {!isWebAuthnSupported() || !isSecureContextAvailable() ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> This browser/origin does not currently expose a secure WebAuthn context.</div> : null}
-          {!passkeys.length ? <div className="qms-audit-closing__passkey-setup"><label><span>Passkey label</span><input value={passkeyNickname} onChange={(event) => setPasskeyNickname(event.target.value)} maxLength={80} /></label><button type="button" disabled={!canManage || ceremonyBusy !== null} onClick={() => void registerPasskey()}><KeyRound size={15} /> {ceremonyBusy === "register" ? "Registering…" : "Register passkey"}</button></div> : <p>{passkeys.length} active passkey{passkeys.length === 1 ? "" : "s"} registered for this Quality user.</p>}
+          {!passkeys.length ? <div className="qms-audit-closing__passkey-setup"><label><span>Passkey label</span><input value={passkeyNickname} onChange={(event) => setPasskeyNickname(event.target.value)} maxLength={80} /></label><button type="button" disabled={!canGovern || ceremonyBusy !== null} onClick={() => void registerPasskey()}><KeyRound size={15} /> {ceremonyBusy === "register" ? "Registering…" : "Register passkey"}</button></div> : <p>{passkeys.length} active passkey{passkeys.length === 1 ? "" : "s"} registered for this Quality user.</p>}
           {activeRevision?.status === "APPROVED" && !currentSignature ? <div className="qms-audit-closing__passkey-sign"><label><span>Approval reason</span><textarea rows={3} value={signReason} onChange={(event) => setSignReason(event.target.value)} /></label><button type="button" className="is-primary" disabled={!canSign || !stepAllowsActions(4) || !passkeys.length || ceremonyBusy !== null || signReason.trim().length < 8} onClick={() => void signWithPasskey()}><Fingerprint size={15} /> {ceremonyBusy === "sign" ? "Verifying passkey…" : "Approve exact report with passkey"}</button></div> : null}
           {currentSignature ? <dl className="qms-audit-closing__artifact"><div><dt>Method</dt><dd>{currentSignature.method}</dd></div><div><dt>Signed</dt><dd>{currentSignature.signed_at ? new Date(currentSignature.signed_at).toLocaleString() : "—"}</dd></div><div className="is-wide"><dt>Ceremony SHA-256</dt><dd><code>{currentSignature.ceremony_sha256 || currentSignature.signature_digest}</code></dd></div></dl> : null}
         </section>
@@ -347,11 +401,33 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <p>Output policy: <strong>{policy?.artifact_policy || "Not configured"}</strong>{policy?.rationale ? ` · ${policy.rationale}` : ""}</p>
           <div className="qms-audit-closing__actions">
             {canGenerateAssurance && currentSignature ? <button type="button" className="is-primary" disabled={!stepAllowsActions(7) || assuranceArtifactMutation.isPending} onClick={() => assuranceArtifactMutation.mutate(currentSignature.id)}>{assuranceArtifactMutation.isPending ? "Generating…" : `Generate ${(policy?.artifact_policy || "assurance artifact").replaceAll("_", " ")}`}</button> : null}
-            {issuedRevision && currentSignature ? <button type="button" disabled={!stepAllowsActions(7) || ceremonyBusy !== null} onClick={() => void createVerification()}><ExternalLink size={15} /> {ceremonyBusy === "verify-link" ? "Creating…" : "Create public verification link"}</button> : null}
+            {issuedRevision && currentSignature ? <button type="button" disabled={!canGovern || !stepAllowsActions(7) || ceremonyBusy !== null} onClick={() => void createVerification()}><ExternalLink size={15} /> {ceremonyBusy === "verify-link" ? "Creating…" : "Create public verification link"}</button> : null}
           </div>
           {currentAssuranceArtifact ? <dl className="qms-audit-closing__artifact"><div><dt>Artifact</dt><dd>{currentAssuranceArtifact.filename}</dd></div><div><dt>Type</dt><dd>{currentAssuranceArtifact.artifact_type.replaceAll("_", " ")}</dd></div><div className="is-wide"><dt>SHA-256</dt><dd><code>{currentAssuranceArtifact.sha256}</code></dd></div></dl> : null}
           {verificationUrl ? <div className="qms-audit-closing__verification"><strong>Verification URL</strong><a href={verificationUrl} target="_blank" rel="noreferrer">{verificationUrl}</a></div> : null}
         </section>
+        {issuedRevision ? <section className="qms-audit-closing__card qms-authority-pack-cover">
+          <style>{`@media print {
+            body * { visibility: hidden !important; }
+            .qms-authority-pack-cover, .qms-authority-pack-cover * { visibility: visible !important; }
+            .qms-authority-pack-cover { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; border: 0 !important; box-shadow: none !important; }
+            .qms-authority-pack-cover .qms-authority-pack-cover__actions,
+            .qms-authority-pack-cover textarea,
+            .qms-authority-pack-cover label { display: none !important; }
+          }`}</style>
+          <header><Printer size={19} /><div><h3>8 · Authority submission</h3><small>The pack binds the issued PDF, Accountable Executive attestation, integrity hashes, and the public verification path.</small></div></header>
+          <dl className="qms-audit-closing__artifact">
+            <div><dt>Audit</dt><dd>{composition.audit.audit_ref}</dd></div>
+            <div><dt>Revision</dt><dd>R{issuedRevision.revision_no} · ISSUED</dd></div>
+            <div className="is-wide"><dt>Issued report SHA-256</dt><dd><code>{issuedRevision.sha256}</code></dd></div>
+            {authorityAttestation ? <><div><dt>Attested by</dt><dd>{authorityAttestation.attested_by_user_id}</dd></div><div><dt>Attested at</dt><dd>{new Date(authorityAttestation.attested_at).toLocaleString()}</dd></div><div className="is-wide"><dt>Rationale</dt><dd>{authorityAttestation.rationale}</dd></div>{authorityAttestation.pack_sha256 ? <div className="is-wide"><dt>Pack SHA-256</dt><dd><code>{authorityAttestation.pack_sha256}</code></dd></div> : null}</> : null}
+          </dl>
+          {authorityQuery.isError ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> {authorityQuery.error instanceof Error ? authorityQuery.error.message : "Authority attestation state could not be loaded."}</div> : null}
+          {!authorityAttestation && canAttest ? <div className="qms-audit-closing__passkey-sign"><label><span>Authority submission rationale</span><textarea rows={4} value={authorityRationale} onChange={(event) => setAuthorityRationale(event.target.value)} /></label><button type="button" className="is-primary" disabled={authorityRationale.trim().length < 8 || authorityAttestationMutation.isPending} onClick={() => authorityAttestationMutation.mutate()}>{authorityAttestationMutation.isPending ? "Attesting…" : "Attest for Authority submission"}</button></div> : null}
+          {!authorityAttestation && canGovern ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> Waiting for Accountable Executive attestation.</div> : null}
+          {!authorityAttestation && !canAttest && !canGovern ? <p className="qms-audit-closing__empty">Accountable Executive attestation is required before the Authority pack becomes available.</p> : null}
+          {authorityAttestation && canExport ? <div className="qms-audit-closing__actions qms-authority-pack-cover__actions"><button type="button" className="is-primary" disabled={authorityBusy !== null} onClick={() => void downloadAuthoritySubmission(false)}><Download size={15} /> {authorityBusy === "download" ? "Preparing pack…" : "Download authority pack"}</button><button type="button" disabled={authorityBusy !== null} onClick={() => void downloadAuthoritySubmission(true)}><Printer size={15} /> {authorityBusy === "print" ? "Preparing cover…" : "Print pack cover"}</button></div> : null}
+        </section> : null}
       </main></div>
     </div>
   );

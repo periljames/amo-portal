@@ -14,7 +14,7 @@ class AuditEventCreate(BaseModel):
     occurred_at: Optional[datetime] = None
     before: Optional[dict] = None
     after: Optional[dict] = None
-    correlation_id: Optional[str] = None
+    correlation_id: Optional[str] = Field(default=None, max_length=255)
     metadata: Optional[dict] = None
 
     @model_validator(mode="before")

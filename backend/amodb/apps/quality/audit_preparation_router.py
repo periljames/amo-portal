@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session, selectinload
 from amodb.database import get_read_db, get_write_db
 
 from . import models
+from .audit_checklist_template_models import QualityAuditChecklistBinding
+from .audit_occurrence_completion_models import QualityAuditDocumentRequestMetadata
 from .audit_preparation_models import QualityAuditPreparationEvent, QualityAuditPreparationRevision
 from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
@@ -61,6 +63,15 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         models.QualityAuditDocumentRequest.amo_id == amo_id,
         models.QualityAuditDocumentRequest.audit_id == audit.id,
     ).order_by(models.QualityAuditDocumentRequest.created_at.asc()).all()
+    bindings = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.amo_id == amo_id,
+        QualityAuditChecklistBinding.audit_id == audit.id,
+    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).all()
+    request_metadata = db.query(QualityAuditDocumentRequestMetadata).filter(
+        QualityAuditDocumentRequestMetadata.amo_id == amo_id,
+        QualityAuditDocumentRequestMetadata.audit_id == audit.id,
+    ).all()
+    metadata_by_request = {row.request_id: row for row in request_metadata}
 
     audit_snapshot = {
         "audit_id": str(audit.id),
@@ -97,8 +108,10 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         }
         for item in checklist
     ]
-    request_snapshot = [
-        {
+    request_snapshot = []
+    for item in requests:
+        metadata = metadata_by_request.get(item.id)
+        request_snapshot.append({
             "id": str(item.id),
             "title": item.title,
             "description": item.description,
@@ -107,9 +120,16 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             "file_ref": item.file_ref,
             "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-        }
-        for item in requests
-    ]
+            "request_type": metadata.request_type if metadata else "DOCUMENT",
+            "linked_criterion": metadata.linked_criterion if metadata else None,
+            "is_required": metadata.is_required if metadata else True,
+            "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
+            "controlled_source_system": metadata.controlled_source_system if metadata else "QMS_LOCAL",
+            "controlled_document_id": str(metadata.controlled_document_id) if metadata and metadata.controlled_document_id else None,
+            "controlled_revision_id": str(metadata.controlled_revision_id) if metadata and metadata.controlled_revision_id else None,
+            "canonical_document_id": metadata.canonical_document_id if metadata else None,
+            "canonical_revision_id": metadata.canonical_revision_id if metadata else None,
+        })
     source_references = [
         {"source_type": "QMS_AUDIT", "source_id": str(audit.id), "source_route": f"/quality/audit/{audit.id}/run"},
         *[
@@ -120,11 +140,51 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             {"source_type": "QUALITY_AUDIT_DOCUMENT_REQUEST", "source_id": str(item.id), "source_route": f"/quality/audit/{audit.id}/run"}
             for item in requests
         ],
+        *[
+            {
+                "source_type": "QUALITY_AUDIT_CHECKLIST_BINDING",
+                "source_id": str(binding.id),
+                "template_revision_id": str(binding.template_revision_id),
+                "template_code": binding.template_code,
+                "revision_no": binding.revision_no,
+                "content_sha256": binding.content_sha256,
+            }
+            for binding in bindings
+        ],
+        *[
+            {
+                **source,
+                "checklist_binding_id": str(binding.id),
+                "source_type": source.get("source_system", "CHECKLIST_SOURCE"),
+            }
+            for binding in bindings
+            for source in list(binding.source_references or [])
+            if isinstance(source, dict)
+        ],
     ]
     fingerprint_payload = {
-        "audit": audit_snapshot,
-        "checklist": checklist_snapshot,
+        # Execution status and fieldwork answers are outcomes, not preparation
+        # inputs. Excluding them prevents a legitimate first fieldwork update
+        # from making the issued preparation snapshot appear stale.
+        "audit": {key: value for key, value in audit_snapshot.items() if key != "status"},
+        "checklist": [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"response_status", "objective_evidence", "finding_id", "updated_at"}
+            }
+            for item in checklist_snapshot
+        ],
         "document_requests": request_snapshot,
+        "checklist_bindings": [
+            {
+                "id": str(binding.id),
+                "template_revision_id": str(binding.template_revision_id),
+                "content_sha256": binding.content_sha256,
+                "source_references": list(binding.source_references or []),
+            }
+            for binding in bindings
+        ],
     }
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -136,6 +196,24 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         "source_references": source_references,
         "source_fingerprint": fingerprint,
     }
+
+
+def _preparation_readiness_blockers(captured: dict[str, Any]) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    if not captured.get("checklist_snapshot"):
+        blockers.append({"type": "CHECKLIST", "reason": "At least one governed checklist item must be prepared before issue."})
+    unresolved_required = [
+        request
+        for request in captured.get("document_request_snapshot", [])
+        if request.get("is_required", True) and request.get("status") != "ACCEPTED"
+    ]
+    if unresolved_required:
+        blockers.append({
+            "type": "DOCUMENT_REQUEST",
+            "count": len(unresolved_required),
+            "reason": "All required preparation document requests must be accepted before issue.",
+        })
+    return blockers
 
 
 def _event_dict(row: QualityAuditPreparationEvent) -> dict[str, Any]:
@@ -260,6 +338,16 @@ def issue_preparation_revision(
     if row.status != "DRAFT":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only a DRAFT preparation revision may be issued.")
     current = _capture_sources(db, amo_id=ctx.amo_id, audit=audit)
+    readiness_blockers = _preparation_readiness_blockers(current)
+    if readiness_blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PREPARATION_NOT_READY",
+                "message": "Audit preparation is not ready to issue.",
+                "blockers": readiness_blockers,
+            },
+        )
     if current["source_fingerprint"] != row.source_fingerprint:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

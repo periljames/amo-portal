@@ -75,6 +75,13 @@ function findingClassification(severity?: string | null, level?: string | null):
   return values.length ? values.join(" · ") : "Finding";
 }
 
+function controlledIds(request: PublicGovernedAuditDocumentRequest): { documentId: string | null; revisionId: string | null } {
+  if (request.controlled_source_system === "DOCUMENT_CONTROL") {
+    return { documentId: request.canonical_document_id, revisionId: request.canonical_revision_id };
+  }
+  return { documentId: request.controlled_document_id, revisionId: request.controlled_revision_id };
+}
+
 type ReleasedEvidenceArtifact = {
   artifactId: string;
   filename: string;
@@ -172,7 +179,10 @@ const PublicAuditAccessPage: React.FC = () => {
     }
   };
 
-  useEffect(() => { void load(inviteToken); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [inviteToken]);
+  // The invitation path is the lifecycle trigger; load intentionally captures the
+  // latest local helpers without turning every render into a session exchange.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(inviteToken); }, [inviteToken]);
 
   useEffect(() => {
     if (!data) return undefined;
@@ -183,6 +193,7 @@ const PublicAuditAccessPage: React.FC = () => {
     void heartbeat();
     const timer = window.setInterval(() => void heartbeat(), 20_000);
     return () => { cancelled = true; window.clearInterval(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.audit.id, data?.participant.participant_type]);
 
   const acknowledge = async (findingId: string) => {
@@ -197,13 +208,14 @@ const PublicAuditAccessPage: React.FC = () => {
   };
 
   const linkControlled = async (request: PublicGovernedAuditDocumentRequest) => {
-    if (!request.controlled_document_id) return;
+    const { documentId, revisionId } = controlledIds(request);
+    if (!documentId) return;
     setControlledBusy(request.id); setError(null); setNotice(null);
     try {
       await linkPublicControlledDocumentRequest(request.id, {
         source_system: request.controlled_source_system,
-        document_id: request.controlled_document_id,
-        revision_id: request.controlled_revision_id,
+        document_id: documentId,
+        revision_id: revisionId,
         response_comment: controlledComments[request.id]?.trim() || null,
       });
       await load(null);
@@ -261,7 +273,7 @@ const PublicAuditAccessPage: React.FC = () => {
   const canAcknowledge = data.permissions.includes("audit:acknowledge");
   const canSubmitDocuments = data.permissions.includes("audit:document_submit");
   const canReadReleasedEvidence = data.permissions.includes("audit:read_released_evidence");
-  const requestRows = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, request_type: "DOCUMENT" as const, linked_criterion: null, is_required: true, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, controlled_submission: null }));
+  const requestRows: PublicGovernedAuditDocumentRequest[] = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, status: row.status as PublicGovernedAuditDocumentRequest["status"], request_type: "DOCUMENT" as const, linked_criterion: null, is_required: true, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, canonical_document_id: null, canonical_revision_id: null, controlled_submission: null }));
 
   return (
     <main className="qms-public-audit">
@@ -275,12 +287,12 @@ const PublicAuditAccessPage: React.FC = () => {
       <div className="qms-public-audit__content">
         <section className="qms-public-audit__card qms-public-audit__summary"><header><ShieldCheck size={19} /><div><strong>Audit scope shared with you</strong><small>Server-filtered external projection; this is not an employee session.</small></div></header><dl><div><dt>Scope</dt><dd>{data.audit.scope || "—"}</dd></div><div><dt>Criteria</dt><dd>{data.audit.criteria || "—"}</dd></div><div><dt>Planned start</dt><dd>{dateTime(data.audit.planned_start)}</dd></div><div><dt>Planned end</dt><dd>{dateTime(data.audit.planned_end)}</dd></div></dl><p className="qms-public-audit__privacy-note">{isExternalAuditor ? "Only your assigned audit data and attributable contributions are available here." : "Private auditor notes, draft findings, internal Quality deliberations and unrelated tenant data are never sent to this page."}</p></section>
 
-        {collaboration?.meetings.length ? <section className="qms-public-audit__card"><header><CalendarClock size={19} /><div><strong>Audit meetings</strong><small>Opening, closing and follow-up meetings explicitly scheduled for this occurrence.</small></div></header><div className="qms-public-audit__requests">{collaboration.meetings.map((meeting) => <article key={meeting.id}><div><strong>{meeting.meeting_type.replaceAll("_", " ")}</strong><p>{meeting.agenda || "No agenda published."}</p><small>{dateTime(meeting.scheduled_start)}{meeting.scheduled_end ? ` – ${dateTime(meeting.scheduled_end)}` : ""}</small><small>{meeting.location || "No physical location"}{meeting.conference_url ? ` · ${meeting.conference_url}` : ""} · {meeting.status.replaceAll("_", " ")}</small></div></article>)}</div></section> : null}
+        {collaboration?.meetings.length ? <section className="qms-public-audit__card"><header><CalendarClock size={19} /><div><strong>Audit meetings</strong><small>Opening, closing and follow-up meetings explicitly scheduled for this occurrence.</small></div></header><div className="qms-public-audit__requests">{collaboration.meetings.map((meeting) => <article key={meeting.id}><div><strong>{meeting.meeting_type.replaceAll("_", " ")}</strong><small>{dateTime(meeting.scheduled_start)}{meeting.scheduled_end ? ` – ${dateTime(meeting.scheduled_end)}` : ""}</small><small>{meeting.location || "No physical location"}{meeting.conference_url ? ` · ${meeting.conference_url}` : ""} · {meeting.status.replaceAll("_", " ")}</small></div></article>)}</div></section> : null}
 
         {data.progress ? <section className="qms-public-audit__card qms-public-audit__progress"><header><Eye size={19} /><div><strong>Fieldwork progress</strong><small>{data.progress.completed} of {data.progress.total} checklist items completed</small></div></header><div className="qms-public-audit__meter"><span style={{ width: `${data.progress.percent}%` }} /></div><strong>{data.progress.percent}%</strong></section> : null}
 
         {isExternalAuditor ? <ExternalAuditorFieldworkWorkspace /> : <>
-          <section className="qms-public-audit__card"><header><FileClock size={19} /><div><strong>Preparation requests</strong><small>Respond by secure upload or, where Quality preselected one, by linking the controlled DMS record without duplicating it.</small></div></header>{!requestRows.length ? <p className="qms-public-audit__empty">No preparation documents are currently requested.</p> : <div className="qms-public-audit__requests">{requestRows.map((request) => <article key={request.id}><div><strong>{request.title}</strong><p>{request.description || "No additional instructions."}</p><small>{request.request_type.replaceAll("_", " ")} · {request.is_required ? "Required" : "Optional"} · due {request.due_date || "not specified"} · {request.status.replaceAll("_", " ")}</small>{request.linked_criterion ? <blockquote><strong>Criterion:</strong> {request.linked_criterion}</blockquote> : null}{request.review_note ? <blockquote>Quality review: {request.review_note}</blockquote> : null}</div>{canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <div>{request.source_mode !== "CONTROLLED_DMS" ? <GuestDocumentSubmit requestId={request.id} onSubmitted={() => load(null)} /> : null}{request.controlled_document_id && request.source_mode !== "UPLOAD" ? <div className="qms-public-audit__controlled-link"><Link2 size={15} /><strong>Controlled DMS record authorised for this request</strong><small>Document {request.controlled_document_id}{request.controlled_revision_id ? ` · revision ${request.controlled_revision_id}` : ""}</small>{request.controlled_submission ? <small>Linked {dateTime(request.controlled_submission.created_at)}</small> : <><textarea rows={2} value={controlledComments[request.id] || ""} onChange={(event) => setControlledComments((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Optional response note" /><button type="button" disabled={controlledBusy === request.id} onClick={() => void linkControlled(request)}>{controlledBusy === request.id ? "Linking…" : "Use this controlled record"}</button></>}</div> : null}</div> : null}</article>)}</div>}</section>
+          <section className="qms-public-audit__card"><header><FileClock size={19} /><div><strong>Preparation requests</strong><small>Respond by secure upload or, where Quality preselected one, by linking the controlled DMS record without duplicating it.</small></div></header>{!requestRows.length ? <p className="qms-public-audit__empty">No preparation documents are currently requested.</p> : <div className="qms-public-audit__requests">{requestRows.map((request) => { const source = controlledIds(request); return <article key={request.id}><div><strong>{request.title}</strong><p>{request.description || "No additional instructions."}</p><small>{request.request_type.replaceAll("_", " ")} · {request.is_required ? "Required" : "Optional"} · due {request.due_date || "not specified"} · {request.status.replaceAll("_", " ")}</small>{request.linked_criterion ? <blockquote><strong>Criterion:</strong> {request.linked_criterion}</blockquote> : null}{request.review_note ? <blockquote>Quality review: {request.review_note}</blockquote> : null}</div>{canSubmitDocuments && !["ACCEPTED", "WAIVED"].includes(request.status) ? <div>{request.source_mode !== "CONTROLLED_DMS" ? <GuestDocumentSubmit requestId={request.id} onSubmitted={() => load(null)} /> : null}{source.documentId && request.source_mode !== "UPLOAD" ? <div className="qms-public-audit__controlled-link"><Link2 size={15} /><strong>Controlled DMS record authorised for this request</strong><small>Document {source.documentId}{source.revisionId ? ` · revision ${source.revisionId}` : ""}</small>{request.controlled_submission ? <small>Linked {dateTime(request.controlled_submission.created_at)}</small> : <><textarea rows={2} value={controlledComments[request.id] || ""} onChange={(event) => setControlledComments((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Optional response note" /><button type="button" disabled={controlledBusy === request.id} onClick={() => void linkControlled(request)}>{controlledBusy === request.id ? "Linking…" : "Use this controlled record"}</button></>}</div> : null}</div> : null}</article>; })}</div>}</section>
 
           <section className="qms-public-audit__card"><header><MessageSquareText size={19} /><div><strong>Released findings</strong><small>Only findings deliberately released by Quality are visible.</small></div></header>{!data.released_findings.length ? <p className="qms-public-audit__empty">No findings have been released to you.</p> : <div className="qms-public-audit__findings">{data.released_findings.map((finding) => { const artifacts = finding.released_evidence_refs.map(releasedEvidenceArtifact).filter((artifact): artifact is ReleasedEvidenceArtifact => Boolean(artifact)); return <article key={finding.id}><div><span>{findingClassification(finding.severity, finding.level)}</span><strong>{finding.finding_ref || "Finding"}</strong><small>{finding.requirement_ref || "No requirement reference"}</small><p>{finding.description}</p>{finding.objective_evidence ? <blockquote>{finding.objective_evidence}</blockquote> : null}{canReadReleasedEvidence && artifacts.length ? <div>{artifacts.map((artifact) => <button type="button" key={artifact.artifactId} disabled={evidenceBusy === artifact.artifactId} onClick={() => void downloadEvidence(finding.id, artifact)}><Download size={14} /> {artifact.filename}{artifact.sha256 ? ` · ${shortHash(artifact.sha256)}` : ""}</button>)}</div> : null}</div>{canAcknowledge && !finding.acknowledged_at ? <button type="button" disabled={actionId === finding.id} onClick={() => void acknowledge(finding.id)}>Acknowledge finding</button> : <small>{finding.acknowledged_at ? `Acknowledged · ${dateTime(finding.acknowledged_at)}` : ""}</small>}</article>; })}</div>}</section>
 

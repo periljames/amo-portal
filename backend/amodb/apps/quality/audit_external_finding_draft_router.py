@@ -17,6 +17,8 @@ from amodb.database import get_db, get_read_db, get_write_db
 from . import models
 from .audit_external_access_router import _GUEST_COOKIE
 from .audit_external_fieldwork_router import _external_auditor_grant, _require_csrf
+from .audit_checklist_execution_router import _internal_fieldwork_viewer, _mark_fieldwork_started, _require_fieldwork_write_window
+from .audit_external_access_router import _audit_for_tenant
 from .audit_external_finding_draft_models import QualityAuditExternalFindingDraft, QualityAuditExternalFindingDraftEvent
 from .enums import FindingLevel, QMSFindingSeverity, QMSFindingType
 from .router import public_router
@@ -228,6 +230,9 @@ def create_external_finding_draft(
     _require_csrf(amo_qms_audit_guest, x_qms_csrf)
     grant = _external_auditor_grant(db, amo_qms_audit_guest, permission="audit:finding_draft")
     participant = grant.participant
+    audit = _audit_for_tenant(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    _require_fieldwork_write_window(db, amo_id=grant.amo_id, audit=audit)
+    _mark_fieldwork_started(audit)
     _assert_classification(payload)
 
     item = db.query(models.QualityAuditChecklistItem).filter(
@@ -307,6 +312,8 @@ def submit_external_finding_draft(
     _require_csrf(amo_qms_audit_guest, x_qms_csrf)
     grant = _external_auditor_grant(db, amo_qms_audit_guest, permission="audit:finding_draft")
     participant = grant.participant
+    audit = _audit_for_tenant(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    _require_fieldwork_write_window(db, amo_id=grant.amo_id, audit=audit)
     row = _load_draft(db, amo_id=grant.amo_id, audit_id=grant.audit_id, draft_id=draft_id, participant_id=participant.id)
     if _status(row) != "CREATED":
         raise HTTPException(status_code=409, detail="Only a newly created draft revision may be submitted to Quality.")
@@ -353,6 +360,7 @@ def list_external_finding_drafts_for_quality(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id)
     rows = db.query(QualityAuditExternalFindingDraft).options(selectinload(QualityAuditExternalFindingDraft.events)).filter(
         QualityAuditExternalFindingDraft.amo_id == ctx.amo_id,
         QualityAuditExternalFindingDraft.audit_id == audit_id,

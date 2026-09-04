@@ -69,6 +69,7 @@ function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
       return "maintenance";
     case "QUALITY_MANAGER":
     case "QUALITY_INSPECTOR":
+    case "QUALITY_OFFICER":
     case "AUDITOR":
       return "quality";
     case "SAFETY_MANAGER":
@@ -94,7 +95,7 @@ export function getAssignedDepartment(
   }
 
   const userDepartmentRaw = normalizeDepartmentCode(
-    (user as any)?.department?.code || (user as any)?.department_code || ""
+    user?.department?.code || user?.department_code || ""
   );
   if (userDepartmentRaw && isDepartmentId(userDepartmentRaw)) {
     return userDepartmentRaw;
@@ -124,6 +125,7 @@ export function getAllowedDepartments(
     "STOREKEEPER",
     "QUALITY_MANAGER",
     "QUALITY_INSPECTOR",
+    "QUALITY_OFFICER",
     "FINANCE_MANAGER",
     "ACCOUNTS_OFFICER",
     "PLANNING_ENGINEER",
