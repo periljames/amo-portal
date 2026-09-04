@@ -54,6 +54,7 @@ jobs:
       ALLOW_SQLITE_FOR_TESTS: "1"
       DATABASE_URL: "sqlite+pysqlite:///:memory:"
       SECRET_KEY: "ci-only-platform-control-plane-key"
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,6 +67,14 @@ jobs:
       - name: Compile control-plane modules
         run: |
           python -m py_compile \
+            backend/amodb/apps/platform/ai_access.py \
+            backend/amodb/apps/platform/ai_execution_policy.py \
+            backend/amodb/apps/platform/ai_gateway.py \
+            backend/amodb/apps/platform/ai_openai.py \
+            backend/amodb/apps/platform/ai_router.py \
+            backend/amodb/apps/platform/managed_ai_provider_policy.py \
+            backend/amodb/apps/platform/saas_execution_policy.py \
+            backend/amodb/apps/platform/saas_side_effects.py \
             backend/amodb/apps/platform/ops_broker.py \
             backend/amodb/apps/platform/ops_console_router.py \
             backend/amodb/apps/platform/ops_gateway.py \
@@ -89,6 +98,14 @@ jobs:
             backend/amodb/observability.py \
             backend/amodb/storage.py \
             backend/amodb/database.py
+      - name: Prove governed AI tenant isolation and billing integrity
+        run: |
+          pytest -q \
+            backend/amodb/apps/platform/tests/test_ai_gateway.py \
+            backend/amodb/apps/platform/tests/test_ai_execution_policy.py \
+            backend/amodb/apps/platform/tests/test_managed_ai_provider_policy.py \
+            backend/amodb/apps/platform/tests/test_saas_execution_policy.py \
+            backend/amodb/apps/platform/tests/test_saas_side_effect_safety.py
       - name: Prove browser fan-out does not multiply refresh work
         run: pytest -q backend/amodb/apps/platform/tests/test_ops_broker.py
       - name: Prove durable queue fencing and approval boundary

@@ -1,40 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
-from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
+from amodb.apps.platform import ai_access, ai_gateway
 
 from .knowledge_assistant_router import DocumentationAssistRequest, SearchContext
 
 
-def governed_source_url(
-    tenant: manual_models.Tenant,
-    manual_id: str,
-    revision_id: str,
-    *,
-    page: int | None,
-    anchor: str | None,
-) -> str:
-    """Keep assistant source navigation inside the governed DMS document centre.
-
-    Revision/page/anchor context is preserved in the URL so the document workspace
-    can hand the user into the immutable reader without losing source provenance.
-    """
-    base = f"/maintenance/{tenant.slug.upper()}/document-control/library/{manual_id}"
-    params = ["tab=content", f"revision={quote(str(revision_id), safe='')}"]
-    if page:
-        params.append(f"page={int(page)}")
-    if anchor:
-        params.append(f"anchor={quote(anchor, safe='')}")
-    return f"{base}?{'&'.join(params)}"
-
-
-def _source_manual_ids(context: SearchContext, request_payload: DocumentationAssistRequest, source_ids: list[str]) -> list[str]:
+def _source_manual_ids(
+    context: SearchContext,
+    request_payload: DocumentationAssistRequest,
+    source_ids: list[str],
+) -> list[str]:
     if request_payload.manual_id and request_payload.manual_id in context.manuals:
         return [request_payload.manual_id]
 
@@ -108,7 +91,12 @@ def audit_assist_safely(
                 if revision and revision.manual_id == manual_id:
                     relevant_source_ids.append(source_id)
 
-        revision_id = _source_revision_id(context, request_payload, relevant_source_ids, manual_id)
+        revision_id = _source_revision_id(
+            context,
+            request_payload,
+            relevant_source_ids,
+            manual_id,
+        )
         db.add(
             manual_models.ManualAIHookEvent(
                 tenant_id=context.tenant.id,
@@ -119,7 +107,9 @@ def audit_assist_safely(
                     "actor_contact_id": getattr(current_user, "contact_id", None),
                     "manual_id": manual_id,
                     "source_manual_id": manual_id,
-                    "query_sha256": hashlib.sha256(request_payload.query.strip().lower().encode("utf-8")).hexdigest(),
+                    "query_sha256": hashlib.sha256(
+                        request_payload.query.strip().lower().encode("utf-8")
+                    ).hexdigest(),
                     "query_length": len(request_payload.query),
                     "requested_mode": request_payload.mode,
                     "provider_mode": provider_mode,
@@ -129,17 +119,130 @@ def audit_assist_safely(
                     "source_count": len(relevant_source_ids),
                     "total_source_count": len(source_ids),
                     "fallback_warning": warning,
-                    "scope": "DOCUMENT" if request_payload.manual_id else "LIBRARY_RESULT_DOCUMENT",
+                    "scope": (
+                        "DOCUMENT"
+                        if request_payload.manual_id
+                        else "LIBRARY_RESULT_DOCUMENT"
+                    ),
                 },
             )
         )
 
 
+def _actor_tenant_ai_access(
+    db: Session,
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> tuple[bool, str | None]:
+    """Use the shared AI tenant-data authority before provider prompt assembly."""
+    try:
+        ai_access.require_tenant_data_access(
+            db,
+            tenant_id=str(tenant_id),
+            actor_user_id=str(user_id),
+        )
+        return True, None
+    except PermissionError as exc:
+        return False, str(exc)
+
+
+def _governed_synthesis(
+    db: Session,
+    tenant_id: str,
+    user_id: str,
+    query: str,
+    sources: list[dict[str, Any]],
+) -> tuple[str | None, list[str], str | None]:
+    """Run controlled-document synthesis with explicit tenant request context.
+
+    Tenant authorization is checked before provider source snippets are assembled.
+    The common AI gateway then applies entitlement, model, budget, credential,
+    privacy and metering rules to the request.
+    """
+    allowed, scope_warning = _actor_tenant_ai_access(
+        db,
+        tenant_id=str(tenant_id),
+        user_id=str(user_id),
+    )
+    if not allowed:
+        return None, [], f"{scope_warning} Deterministic results are shown instead."
+
+    provider_sources = [
+        {
+            "id": source["id"],
+            "document": f"{source['code']} — {source['title']}",
+            "heading": source.get("heading"),
+            "page": source.get("page_number"),
+            "snippet": str(source.get("snippet") or "")[:900],
+        }
+        for source in sources[:8]
+    ]
+    allowed_ids = {str(source["id"]) for source in provider_sources}
+    instructions = (
+        "You are the AMO Portal controlled-document assistant. Use only the supplied authorised source excerpts. "
+        "Do not use outside knowledge to fill gaps. Return only one JSON object with keys answer and source_ids. "
+        "answer must be concise and source_ids must contain only IDs from the supplied sources that directly support the answer. "
+        "If the sources do not support an answer, return an empty answer and an empty source_ids array."
+    )
+    prompt = json.dumps(
+        {"question": query, "sources": provider_sources},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    try:
+        result = ai_gateway.run_ai(
+            db,
+            prompt=prompt,
+            instructions=instructions,
+            actor_user_id=user_id,
+            tenant_id=tenant_id,
+            billing_scope="TENANT",
+            feature_code="document_control.assisted_search",
+            requires_external_documents=True,
+        )
+        raw = str(result.get("text") or "").strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            raw = "\n".join(lines[1:-1]).strip() if len(lines) >= 3 else raw
+            if raw.lower().startswith("json\n"):
+                raw = raw[5:].strip()
+        structured = json.loads(raw)
+        if not isinstance(structured, dict):
+            raise ValueError("AI synthesis did not return a JSON object")
+        cited = [
+            str(value)
+            for value in structured.get("source_ids", [])
+            if str(value) in allowed_ids
+        ]
+        answer = str(structured.get("answer") or "").strip()
+        if not answer or not cited:
+            return (
+                None,
+                [],
+                "AI synthesis returned no verifiable controlled-source citation; deterministic results are shown instead.",
+            )
+        return answer[:1600], cited[:8], None
+    except PermissionError as exc:
+        return (
+            None,
+            [],
+            f"AI synthesis is unavailable under the tenant AI policy: {exc}. Deterministic results are shown instead.",
+        )
+    except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        return (
+            None,
+            [],
+            f"AI synthesis could not be verified ({type(exc).__name__}); deterministic results are shown instead.",
+        )
+
+
 def install() -> None:
     # Endpoint functions resolve these module globals at request time. Installing
-    # the hardened implementations here avoids a duplicate FastAPI route while
-    # keeping the existing public contract stable.
+    # only the AI/audit implementations keeps the canonical reader route owned by
+    # knowledge_assistant_router and prevents runtime imports from rewriting it.
     from . import knowledge_assistant_router as assistant
 
-    assistant._reader_url = governed_source_url
     assistant._audit_assist = audit_assist_safely
+    assistant._openai_synthesis = _governed_synthesis

@@ -10,6 +10,7 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
 from amodb.observability import operation_span, record_provider_call
 
+from . import ai_access, ai_gateway
 from . import saas_models as models
 from . import saas_execution_policy, saas_providers, saas_secrets, saas_services
 
@@ -86,8 +87,6 @@ def process_etims_fiscalization(
             )
         provider_status = "SUCCESS"
     except Exception as exc:
-        # A transport exception cannot prove whether the certified control unit
-        # accepted the invoice. Do not blindly POST it again.
         fiscalization = db.get(models.SaaSInvoiceFiscalization, fiscalization.id)
         if fiscalization is not None:
             fiscalization.status = "RECONCILIATION_REQUIRED"
@@ -135,12 +134,29 @@ def process_ai_support_reply(
 
     payload = job.payload_json or {}
     ticket_id = str(payload.get("ticket_id") or "")
-    credential = db.get(models.SaaSProviderCredential, str(payload.get("credential_id") or ""))
     ticket = db.get(platform_models.PlatformSupportTicket, ticket_id)
     detail = db.get(models.SaaSSupportTicketDetail, ticket_id)
-    if credential is None or ticket is None or detail is None:
-        raise ValueError("Support ticket or OpenAI credential is missing")
-    saas_execution_policy.require_operational_provider(credential, label="OpenAI")
+    if ticket is None or detail is None:
+        raise ValueError("Support ticket is missing")
+
+    support_session_id = str(payload.get("support_session_id") or "").strip() or None
+    if ticket.tenant_id:
+        # Revalidate both tenant opt-in and the exact support session immediately
+        # before tenant text is assembled for the provider. A queued job cannot
+        # outlive either consent boundary.
+        policy = ai_gateway.tenant_policy(db, str(ticket.tenant_id))
+        if not bool(policy.get("enabled")):
+            raise PermissionError("Tenant AI is no longer enabled for external support drafting")
+        if not support_session_id:
+            raise PermissionError("Tenant support AI job is missing its governed support-session binding")
+        validated_session_id = ai_access.require_tenant_data_access(
+            db,
+            tenant_id=str(ticket.tenant_id),
+            actor_user_id=str(job.created_by or ""),
+            support_session_id=support_session_id,
+        )
+        if validated_session_id != support_session_id:
+            raise PermissionError("Tenant support AI job no longer has valid support-session access")
 
     messages = list(
         reversed(
@@ -156,45 +172,39 @@ def process_ai_support_reply(
     )
     transcript = "\n".join(f"{row.author_type}: {row.body}" for row in messages)
     instructions = (
-        "You are the AMO Portal support assistant. Give a factual, safe troubleshooting reply. "
+        "You are the AMO Portal support assistant. Give a factual, safe troubleshooting draft. "
         "Do not claim that actions were performed. Do not expose secrets. Escalate aviation safety, billing disputes, "
         "security incidents, tax/fiscalization issues, or account access changes to a human support agent."
     )
-    secret = saas_secrets.decrypt_secret(credential.encrypted_secret)
-    provider_started = time.perf_counter()
-    provider_status = "ERROR"
-    try:
-        with operation_span("provider.ai.fetch", provider="AI", operation="FETCH"):
-            draft = saas_providers.openai_support_response(
-                secret=secret,
-                config=credential.config_json or {},
-                instructions=instructions,
-                user_message=(
-                    f"Ticket: {ticket.title}\n"
-                    f"Category: {detail.category}\n"
-                    f"Priority: {ticket.priority}\n"
-                    f"Description: {detail.description}\n"
-                    f"Conversation:\n{transcript}"
-                ),
-            )
-        provider_status = "SUCCESS"
-    finally:
-        record_provider_call(
-            provider="AI",
-            operation="FETCH",
-            status=provider_status,
-            duration_seconds=time.perf_counter() - provider_started,
-        )
+    prompt = (
+        f"Ticket: {ticket.title}\n"
+        f"Category: {detail.category}\n"
+        f"Priority: {ticket.priority}\n"
+        f"Description: {detail.description}\n"
+        f"Conversation:\n{transcript}"
+    )
+
+    draft = ai_gateway.run_ai(
+        db,
+        prompt=prompt,
+        instructions=instructions,
+        actor_user_id=job.created_by,
+        tenant_id=ticket.tenant_id,
+        billing_scope="PLATFORM",
+        feature_code="support.ai_reply",
+    )
 
     reply = str(draft.get("text") or "").strip()
     if not reply:
         raise NonRepeatableJobError("AI provider returned an empty support draft")
 
+    # AI output is a draft, not a tenant communication. It remains internal until
+    # a human support operator reviews/edits and deliberately posts a PUBLIC reply.
     message = models.SaaSSupportTicketMessage(
         ticket_id=ticket_id,
         author_user_id=job.created_by,
         author_type="AI_ASSISTANT",
-        visibility="PUBLIC",
+        visibility="INTERNAL",
         body=reply,
         source_job_id=job.id,
     )
@@ -208,4 +218,7 @@ def process_ai_support_reply(
         "provider": draft.get("provider"),
         "model": draft.get("model"),
         "usage": draft.get("usage"),
+        "provider_cost_microusd": draft.get("provider_cost_microusd"),
+        "billing_scope": draft.get("billing_scope"),
+        "visibility": "INTERNAL",
     }

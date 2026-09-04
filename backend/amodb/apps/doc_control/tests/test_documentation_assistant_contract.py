@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from amodb.apps.doc_control import knowledge_assistant_router as assistant
+from amodb.apps.doc_control import knowledge_assistant_runtime_guard as guard
 
 
 def _source(source_id: str = "section:rev:sec") -> dict:
@@ -22,73 +23,78 @@ def _repository_root() -> Path:
     return Path(__file__).resolve().parents[5]
 
 
-def test_provider_is_off_by_default_and_never_calls_external_network(monkeypatch) -> None:
-    monkeypatch.delenv("DOCUMENT_AI_PROVIDER", raising=False)
-    monkeypatch.delenv("DOCUMENT_AI_ALLOW_EXTERNAL", raising=False)
-    monkeypatch.setattr(
-        assistant.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network called")),
-    )
+def test_base_provider_helper_is_fail_closed_without_runtime_guard() -> None:
+    source = Path(assistant.__file__).read_text(encoding="utf-8")
+    helper_start = source.index("def _openai_synthesis(")
+    helper_end = source.index("\ndef _audit_assist(", helper_start)
+    helper_source = source[helper_start:helper_end]
 
-    answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
-
-    assert answer is None
-    assert citations == []
-    assert warning is None
+    assert "External AI synthesis requires the governed tenant AI runtime" in helper_source
+    assert "OPENAI_API_KEY" not in helper_source
+    assert "ai_gateway.run_ai" not in helper_source
+    assert "requests." not in helper_source
 
 
-def test_external_provider_request_is_server_side_non_storing_and_citation_limited(monkeypatch) -> None:
+def test_governed_synthesis_uses_explicit_tenant_gateway_context_and_filters_citations(
+    monkeypatch,
+) -> None:
     captured: dict = {}
+    access: dict = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    def fake_require_tenant_data_access(_db, **kwargs):
+        access.update(kwargs)
+        return None
 
-        def __exit__(self, *_args):
-            return False
-
-        def read(self) -> bytes:
-            content = json.dumps(
+    def fake_run_ai(_db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "text": json.dumps(
                 {
                     "answer": "Open QAM 51 and verify the controlled form.",
                     "source_ids": ["section:rev:sec", "invented"],
                 }
-            )
-            return json.dumps(
-                {"output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}]}
-            ).encode()
+            ),
+            "model": "gpt-5.6-luna",
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        }
 
-    def fake_open(request, timeout):
-        captured["url"] = request.full_url
-        captured["timeout"] = timeout
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = json.loads(request.data.decode())
-        return FakeResponse()
-
-    monkeypatch.setenv("DOCUMENT_AI_PROVIDER", "openai")
-    monkeypatch.setenv("DOCUMENT_AI_ALLOW_EXTERNAL", "true")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
-    monkeypatch.setenv("DOCUMENT_AI_MODEL", "configured-model")
-    monkeypatch.setattr(assistant.urllib.request, "urlopen", fake_open)
-
-    answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
+    monkeypatch.setattr(
+        guard.ai_access,
+        "require_tenant_data_access",
+        fake_require_tenant_data_access,
+    )
+    monkeypatch.setattr(guard.ai_gateway, "run_ai", fake_run_ai)
+    db = SimpleNamespace()
+    answer, citations, warning = guard._governed_synthesis(
+        db,
+        "amo-1",
+        "user-1",
+        "Where is QAM 51?",
+        [_source()],
+    )
 
     assert answer == "Open QAM 51 and verify the controlled form."
     assert citations == ["section:rev:sec"]
     assert warning is None
-    assert captured["url"] == "https://api.openai.com/v1/responses"
-    assert captured["timeout"] == 12
-    assert captured["body"]["store"] is False
-    assert captured["body"]["model"] == "configured-model"
-    assert captured["body"]["text"]["format"]["type"] == "json_schema"
-    assert "test-only-key" not in json.dumps(captured["body"])
+    assert access == {"tenant_id": "amo-1", "actor_user_id": "user-1"}
+    assert captured["tenant_id"] == "amo-1"
+    assert captured["actor_user_id"] == "user-1"
+    assert captured["billing_scope"] == "TENANT"
+    assert captured["feature_code"] == "document_control.assisted_search"
+    assert captured["requires_external_documents"] is True
+    assert "Use QAM 51 for the inspection record." in captured["prompt"]
 
 
 def test_navigation_url_carries_precise_page_and_anchor() -> None:
     tenant = SimpleNamespace(slug="safarilink")
-    url = assistant._reader_url(tenant, "manual-1", "revision-2", page=51, anchor="qam-51")
-    assert url == "/maintenance/SAFARILINK/document-control/library/manual-1?tab=content&revision=revision-2&page=51&anchor=qam-51"
+    url = assistant._reader_url(
+        tenant,
+        "manual-1",
+        "revision-2",
+        page=51,
+        anchor="qam-51",
+    )
+    assert url == "/maintenance/SAFARILINK/publications/manual-1/rev/revision-2/read?page=51&anchor=qam-51"
 
 
 def test_results_are_ranked_and_deduplicated_by_revision_location() -> None:
@@ -102,8 +108,9 @@ def test_results_are_ranked_and_deduplicated_by_revision_location() -> None:
     assert [row["rank"] for row in result] == [1, 2]
 
 
-def test_route_contract_filters_access_before_retrieval_and_audits_only_query_hash() -> None:
+def test_route_contract_filters_access_and_has_no_direct_openai_secret_path() -> None:
     source = Path(assistant.__file__).read_text(encoding="utf-8")
+    guard_source = Path(guard.__file__).read_text(encoding="utf-8")
     assert "if can_read_manual(user, profiles.get(manual.id))" in source
     assert "manual.current_published_rev_id" in source
     assert "not current_effective and not is_control_user(user)" in source
@@ -111,8 +118,16 @@ def test_route_contract_filters_access_before_retrieval_and_audits_only_query_ha
     assert '"query_sha256": _query_hash(request_payload.query)' in source
     assert '"query_text"' not in source
     assert '"controlled_source_is_authoritative": True' in source
-    assert '"store": False' in source
-    assert "https://api.openai.com/v1/responses" in source
+    assert "OPENAI_API_KEY" not in source
+    assert "DOCUMENT_AI_MODEL" not in source
+    assert "https://api.openai.com/v1/responses" not in source
+    assert "ContextVar" not in guard_source
+    assert "_AI_CONTEXT" not in guard_source
+    assert "ai_gateway.run_ai" in guard_source
+    assert 'billing_scope="TENANT"' in guard_source
+    assert "requires_external_documents=True" in guard_source
+    assert "tenant_id: str" in guard_source
+    assert "user_id: str" in guard_source
 
 
 def test_assistant_route_precedes_compatibility_workspace_routes() -> None:
@@ -149,8 +164,6 @@ def test_frontend_assistant_remains_contextual_and_not_permanent_dms_chrome() ->
     assert "controlled_source_is_authoritative" in service
     assert "amo:publication-navigate" in panel
     assert "The controlled source remains authoritative" in panel
-    # Assisted search remains available in the controlled-reading and Library
-    # contexts, but it must not become a permanent chat-first DMS surface.
     assert "DocumentationAssistantPanel" in reader
     assert "PublicationAssistedNavigationBridge" in reader
     assert "DocumentationAssistantPanel" in shell

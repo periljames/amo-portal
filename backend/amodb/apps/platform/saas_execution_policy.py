@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 
+from . import ai_access, ai_gateway
 from . import models as platform_models
 from . import saas_models as models
 from . import saas_queue, saas_services
@@ -39,7 +40,7 @@ def _ticket_jobs(db: Session, *, ticket_id: str, tenant_id: str | None) -> list[
     return [
         row
         for row in rows
-        if str((row.payload_json or {}).get("ticket_id") or "") == ticket_id
+        if str((getattr(row, "payload_json", None) or {}).get("ticket_id") or "") == ticket_id
     ]
 
 
@@ -92,12 +93,34 @@ def install_saas_execution_policy() -> None:
         if ticket is None:
             raise ValueError("Support ticket not found")
 
+        # Support drafting is a platform-operated service and therefore uses the
+        # platform-owned OpenAI credential. No tenant credential or BYOK fallback
+        # is permitted for this managed workflow.
         credential = saas_services.get_provider_credential(
             db,
             provider="openai",
-            tenant_id=ticket.tenant_id,
+            tenant_id=None,
+            allow_platform_fallback=False,
         )
         require_operational_provider(credential, label="OpenAI")
+
+        # A tenant support ticket contains tenant data. External AI processing is
+        # therefore allowed only after the tenant has explicitly enabled AI and
+        # the platform actor holds a governed support session for this exact AMO.
+        support_session_id: str | None = None
+        if ticket.tenant_id:
+            policy = ai_gateway.tenant_policy(db, str(ticket.tenant_id))
+            if not bool(policy.get("enabled")):
+                raise PermissionError("Tenant AI is not enabled for external support drafting")
+            support_session_id = ai_access.require_tenant_data_access(
+                db,
+                tenant_id=str(ticket.tenant_id),
+                actor_user_id=str(actor_user_id),
+            )
+            if not support_session_id:
+                raise PermissionError(
+                    "Tenant support AI drafting requires an active governed platform support session"
+                )
 
         prior_jobs = _ticket_jobs(db, ticket_id=ticket_id, tenant_id=ticket.tenant_id)
         for job in reversed(prior_jobs):
@@ -115,6 +138,7 @@ def install_saas_execution_policy() -> None:
             payload={
                 "ticket_id": ticket_id,
                 "credential_id": credential.id,
+                "support_session_id": support_session_id,
                 "request_version": ticket_version,
                 "request_sequence": sequence,
             },

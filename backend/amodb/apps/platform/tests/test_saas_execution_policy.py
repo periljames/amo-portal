@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from amodb.apps.platform import (
     saas_execution_policy,
@@ -13,11 +15,21 @@ from amodb.apps.platform import (
     tenant_saas_job_router,
 )
 
+saas_router_module = importlib.import_module("amodb.apps.platform.saas_router")
+
 
 def _job_query(rows: list[object]) -> MagicMock:
     query = MagicMock()
     query.filter.return_value.order_by.return_value.all.return_value = rows
     return query
+
+
+def _enable_tenant_ai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        saas_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": True}),
+    )
 
 
 def test_tenant_job_router_remains_importable_as_a_module() -> None:
@@ -78,6 +90,86 @@ def test_disabled_openai_provider_cannot_enqueue(monkeypatch: pytest.MonkeyPatch
         )
 
 
+def test_tenant_support_ai_requires_tenant_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(tenant_id="amo-1")
+    monkeypatch.setattr(
+        saas_services,
+        "get_provider_credential",
+        MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
+    )
+    monkeypatch.setattr(
+        saas_execution_policy.ai_gateway,
+        "tenant_policy",
+        MagicMock(return_value={"enabled": False}),
+    )
+    access = MagicMock()
+    monkeypatch.setattr(
+        saas_execution_policy.ai_access,
+        "require_tenant_data_access",
+        access,
+    )
+    enqueue = MagicMock()
+    monkeypatch.setattr(saas_queue, "enqueue_job", enqueue)
+
+    with pytest.raises(PermissionError, match="Tenant AI is not enabled"):
+        saas_services.enqueue_ai_support_reply(
+            db,
+            ticket_id="ticket-1",
+            actor_user_id="platform-user",
+        )
+    access.assert_not_called()
+    enqueue.assert_not_called()
+
+
+def test_tenant_support_ai_cannot_enqueue_without_governed_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(tenant_id="amo-1")
+    monkeypatch.setattr(
+        saas_services,
+        "get_provider_credential",
+        MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
+    )
+    _enable_tenant_ai(monkeypatch)
+    monkeypatch.setattr(
+        saas_execution_policy.ai_access,
+        "require_tenant_data_access",
+        MagicMock(side_effect=PermissionError("support session required")),
+    )
+    enqueue = MagicMock()
+    monkeypatch.setattr(saas_queue, "enqueue_job", enqueue)
+
+    with pytest.raises(PermissionError, match="support session required"):
+        saas_services.enqueue_ai_support_reply(
+            db,
+            ticket_id="ticket-1",
+            actor_user_id="platform-user",
+        )
+    enqueue.assert_not_called()
+
+
+def test_support_ai_permission_denial_is_forbidden_not_unauthorized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        saas_router_module.saas_services,
+        "enqueue_ai_support_reply",
+        MagicMock(side_effect=PermissionError("support session required")),
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        saas_router_module.support_ai_reply(
+            "ticket-1",
+            db=MagicMock(),
+            user=SimpleNamespace(id="platform-user"),
+        )
+
+    assert raised.value.status_code == 403
+    assert raised.value.detail == "support session required"
+
+
 def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -97,6 +189,12 @@ def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
         saas_services,
         "get_provider_credential",
         MagicMock(return_value=credential),
+    )
+    _enable_tenant_ai(monkeypatch)
+    monkeypatch.setattr(
+        saas_execution_policy.ai_access,
+        "require_tenant_data_access",
+        MagicMock(return_value="support-1"),
     )
     queued = SimpleNamespace(id="new-job")
     enqueue = MagicMock(return_value=queued)
@@ -121,6 +219,7 @@ def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
     assert first_call["idempotency_key"].endswith(":2")
     assert first_call["payload"]["request_sequence"] == 2
     assert first_call["payload"]["request_version"] == 1784800800000000
+    assert first_call["payload"]["support_session_id"] == "support-1"
 
 
 def test_duplicate_ai_submission_returns_active_job_without_reenqueue(
@@ -142,6 +241,13 @@ def test_duplicate_ai_submission_returns_active_job_without_reenqueue(
         "get_provider_credential",
         MagicMock(return_value=SimpleNamespace(id="credential-1", status="HEALTHY")),
     )
+    _enable_tenant_ai(monkeypatch)
+    access = MagicMock(return_value="support-1")
+    monkeypatch.setattr(
+        saas_execution_policy.ai_access,
+        "require_tenant_data_access",
+        access,
+    )
     enqueue = MagicMock()
     monkeypatch.setattr(saas_queue, "enqueue_job", enqueue)
 
@@ -152,4 +258,9 @@ def test_duplicate_ai_submission_returns_active_job_without_reenqueue(
     )
 
     assert result is active_job
+    access.assert_called_once_with(
+        db,
+        tenant_id="amo-1",
+        actor_user_id="user-1",
+    )
     enqueue.assert_not_called()

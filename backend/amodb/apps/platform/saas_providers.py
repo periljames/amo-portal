@@ -38,7 +38,7 @@ _PROVIDER_DEFINITIONS = (
     ProviderDefinition("azure_openai", "Azure OpenAI", "AI", ("api_key",), ("endpoint", "deployment", "api_version"), "Server-side Azure OpenAI deployment."),
     ProviderDefinition("zendesk", "Zendesk", "SUPPORT", ("api_token",), ("subdomain", "email"), "External support desk synchronization."),
     ProviderDefinition("jira", "Jira Service Management", "SUPPORT", ("api_token",), ("base_url", "email", "project_key"), "External service desk synchronization."),
-    ProviderDefinition("freshdesk", "Freshdesk", "SUPPORT", ("api_key",), ("domain",), "External support desk synchronization."),
+    ProviderDefinition("freshdesk", "Freshdesk", "SUPPORT", ("api_key",), ("domain",), "External service desk synchronization."),
 )
 
 PROVIDERS = {definition.code: definition for definition in _PROVIDER_DEFINITIONS}
@@ -202,50 +202,6 @@ def create_stripe_checkout_session(
         "checkout_url": response.get("url"),
         "customer": response.get("customer"),
         "subscription": response.get("subscription"),
-        "latency_ms": elapsed,
-    }
-
-
-def openai_support_response(
-    *,
-    secret: dict[str, Any],
-    config: dict[str, Any],
-    instructions: str,
-    user_message: str,
-) -> dict[str, Any]:
-    api_key = str(secret.get("api_key") or "").strip()
-    if not api_key:
-        raise ValueError("OpenAI api_key is not configured")
-    api_base = _safe_url(str(config.get("api_base_url") or "https://api.openai.com"))
-    model = str(config.get("model") or "gpt-5-mini").strip()
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    if config.get("project"):
-        headers["OpenAI-Project"] = str(config["project"])
-    if config.get("organization"):
-        headers["OpenAI-Organization"] = str(config["organization"])
-    status, response, elapsed = _json_request(
-        f"{api_base}/v1/responses",
-        method="POST",
-        headers=headers,
-        body={"model": model, "instructions": instructions, "input": user_message},
-        timeout=20,
-    )
-    if status < 200 or status >= 300 or not isinstance(response, dict):
-        raise RuntimeError(f"OpenAI request failed ({status})")
-    text = response.get("output_text")
-    if not text:
-        parts: list[str] = []
-        for item in response.get("output") or []:
-            for content in item.get("content") or []:
-                if content.get("type") in {"output_text", "text"} and content.get("text"):
-                    parts.append(str(content["text"]))
-        text = "\n".join(parts).strip()
-    return {
-        "provider": "openai",
-        "response_id": response.get("id"),
-        "model": response.get("model") or model,
-        "text": text or "No assistant response was returned.",
-        "usage": response.get("usage") or {},
         "latency_ms": elapsed,
     }
 
