@@ -1,7 +1,7 @@
 # backend/amodb/apps/quality/schemas.py
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Annotated, Any, List, Literal, Optional
 from uuid import UUID
 
@@ -304,12 +304,16 @@ class QMSAuditCreate(BaseModel):
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    supporting_auditor_user_ids: List[str] = Field(default_factory=list, max_length=50)
+    location: Optional[str] = Field(default=None, max_length=255)
     notify_auditors: bool = True
     notify_auditees: bool = True
     reminder_interval_days: int = Field(default=7, ge=1, le=60)
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
+    planned_start_time: Optional[time] = None
+    planned_end_time: Optional[time] = None
 
 
 class QMSAuditUpdate(BaseModel):
@@ -328,12 +332,16 @@ class QMSAuditUpdate(BaseModel):
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    supporting_auditor_user_ids: Optional[List[str]] = Field(default=None, max_length=50)
+    location: Optional[str] = Field(default=None, max_length=255)
     notify_auditors: Optional[bool] = None
     notify_auditees: Optional[bool] = None
     reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=60)
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
+    planned_start_time: Optional[time] = None
+    planned_end_time: Optional[time] = None
     actual_start: Optional[date] = None
     actual_end: Optional[date] = None
 
@@ -373,12 +381,16 @@ class QMSAuditOut(BaseModel):
     observer_auditor_name: Optional[str] = None
     assistant_auditor_user_id: Optional[str]
     assistant_auditor_name: Optional[str] = None
+    supporting_auditor_user_ids: List[str] = Field(default_factory=list)
+    location: Optional[str] = None
     notify_auditors: bool = True
     notify_auditees: bool = True
     reminder_interval_days: int = 7
 
     planned_start: Optional[date]
     planned_end: Optional[date]
+    planned_start_time: Optional[time] = None
+    planned_end_time: Optional[time] = None
     actual_start: Optional[date]
     actual_end: Optional[date]
 
@@ -393,6 +405,8 @@ class QMSAuditOut(BaseModel):
     deleted_at: Optional[datetime] = None
     deleted_by_user_id: Optional[str] = None
     delete_reason: Optional[str] = None
+    purge_at: Optional[datetime] = None
+    days_remaining: Optional[int] = None
 
 
 class QMSAuditWorkflowStageOut(BaseModel):
@@ -661,6 +675,8 @@ class QMSAuditScheduleOut(BaseModel):
     deleted_at: Optional[datetime] = None
     deleted_by_user_id: Optional[str] = None
     delete_reason: Optional[str] = None
+    purge_at: Optional[datetime] = None
+    days_remaining: Optional[int] = None
 
 
 class QMSCAPUpsert(BaseModel):
@@ -1339,6 +1355,7 @@ class QMSPersonOptionOut(BaseModel):
     department_id: Optional[str] = None
     position_title: Optional[str] = None
     avatar_url: Optional[str] = None
+    auditor_roles: List[str] = Field(default_factory=list)
 
 
 class AuditorStatsOut(BaseModel):

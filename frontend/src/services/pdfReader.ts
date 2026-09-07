@@ -9,6 +9,8 @@ export type PdfReaderCapabilities = {
   processor: "PDFium" | string;
   processor_version: string;
   source_sha256: string;
+  reader_source_sha256?: string | null;
+  reader_size_bytes?: number | null;
   page_count: number;
   has_acroform: boolean;
   has_javascript: boolean;

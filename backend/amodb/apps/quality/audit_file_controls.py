@@ -57,6 +57,7 @@ def _require_checklist_editor(current_user: account_models.User, audit: object) 
             getattr(audit, "lead_auditor_user_id", None),
             getattr(audit, "observer_auditor_user_id", None),
             getattr(audit, "assistant_auditor_user_id", None),
+            *(getattr(audit, "supporting_auditor_user_ids", None) or []),
         )
         if value
     }

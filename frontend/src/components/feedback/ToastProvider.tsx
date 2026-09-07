@@ -8,7 +8,8 @@ import React, {
   useState,
 } from "react";
 import { BellRing, CheckCircle2, CircleAlert, Info, X } from "lucide-react";
-import { playNotificationCue } from "../../services/notificationPreferences";
+import * as notificationPreferences from "../../services/notificationPreferences";
+import { TOAST_AUTO_CLOSE_MS } from "./toastPolicy";
 import {
   PORTAL_ERROR_EVENT,
   portalErrorMessage,
@@ -57,16 +58,112 @@ function ToastIcon({ variant }: { variant: ToastVariant }) {
   return <Info size={19} />;
 }
 
-function defaultDuration(variant: ToastVariant): number {
-  if (variant === "error") return 0;
-  if (variant === "warning") return 9000;
-  return 5000;
+type ToastCardProps = {
+  toast: Toast;
+  onDismiss: (id: string) => void;
+  onElement: (toast: Toast, element: HTMLElement | null) => void;
+};
+
+function ToastCard({ toast, onDismiss, onElement }: ToastCardProps) {
+  const variant = toast.variant ?? "info";
+  const urgent = variant === "warning" || variant === "error";
+  const duration = Math.max(0, Number(toast.duration || 0));
+  const remainingRef = useRef(duration);
+  const startedAtRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
+  const [paused, setPaused] = useState(false);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    clearTimer();
+    if (!duration || paused) return;
+    startedAtRef.current = performance.now();
+    timerRef.current = window.setTimeout(
+      () => onDismiss(toast.id),
+      remainingRef.current,
+    );
+    return clearTimer;
+  }, [clearTimer, duration, onDismiss, paused, toast.id]);
+
+  const pauseTimer = useCallback(() => {
+    if (!duration || paused) return;
+    if (startedAtRef.current) {
+      remainingRef.current = Math.max(
+        0,
+        remainingRef.current - (performance.now() - startedAtRef.current),
+      );
+    }
+    clearTimer();
+    setPaused(true);
+  }, [clearTimer, duration, paused]);
+
+  const resumeTimer = useCallback(() => {
+    if (!duration || !paused) return;
+    if (remainingRef.current <= 0) {
+      onDismiss(toast.id);
+      return;
+    }
+    setPaused(false);
+  }, [duration, onDismiss, paused, toast.id]);
+
+  return (
+    <article
+      ref={(element) => onElement(toast, element)}
+      className={`toast toast--${variant} ${toast.persistent ? "toast--persistent" : ""} ${paused ? "toast--paused" : ""}`}
+      role={urgent ? "alert" : "status"}
+      aria-live={urgent ? "assertive" : "polite"}
+      aria-atomic="true"
+      tabIndex={variant === "error" ? -1 : undefined}
+      data-error-source={toast.source}
+      onMouseEnter={pauseTimer}
+      onMouseLeave={resumeTimer}
+      onFocus={pauseTimer}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) resumeTimer();
+      }}
+      style={{ "--toast-duration": `${duration}ms` } as React.CSSProperties}
+    >
+      <div className="toast__icon-wrap" aria-hidden="true"><ToastIcon variant={variant} /></div>
+      <div className="toast__content">
+        <div className="toast__title">{toast.title}</div>
+        {toast.message ? <div className="toast__message">{toast.message}</div> : null}
+        {toast.code ? <div className="toast__code">Reference: {toast.code}</div> : null}
+        {toast.actionLabel && toast.action ? (
+          <button
+            type="button"
+            className="toast__action"
+            onClick={() => void Promise.resolve(toast.action?.()).catch(() => undefined)}
+          >
+            {toast.actionLabel}
+          </button>
+        ) : null}
+      </div>
+      <button type="button" className="toast__close" aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)}><X size={16} /></button>
+      {duration ? <span className="toast__timer" aria-hidden="true" /> : null}
+    </article>
+  );
 }
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const errorRefs = useRef(new Map<string, HTMLElement>());
   const invalidGuard = useRef<{ form: HTMLFormElement | null; at: number }>({ form: null, at: 0 });
+
+  useEffect(() => {
+    // The audio pre-warm helper was added after the original notification
+    // service. Access it through the module namespace so a partially applied
+    // frontend delta cannot prevent the entire application from booting.
+    const prepareAudio = (
+      notificationPreferences as typeof notificationPreferences & {
+        prepareNotificationAudio?: () => void;
+      }
+    ).prepareNotificationAudio;
+    prepareAudio?.();
+  }, []);
 
   const removeToast = useCallback((id: string) => {
     errorRefs.current.delete(id);
@@ -76,14 +173,16 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const pushToast = useCallback((toast: Omit<Toast, "id">): string => {
     const id = randomId();
     const variant = toast.variant ?? "info";
-    const persistent = toast.persistent ?? variant === "error";
+    const persistent = toast.persistent ?? false;
     const nextToast: Toast = {
       id,
-      duration: persistent ? 0 : defaultDuration(variant),
-      sound: variant !== "info",
       ...toast,
       variant,
       persistent,
+      // Enforce one predictable portal-wide display window. Hover and focus
+      // pause this timer in ToastCard so a user can finish reading or act.
+      duration: TOAST_AUTO_CLOSE_MS,
+      sound: toast.sound ?? true,
     };
 
     setToasts((previous) => {
@@ -95,15 +194,12 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         : [...deduplicated, nextToast];
       return ordered.slice(0, 5);
     });
-    if (nextToast.sound !== false) playNotificationCue(variant);
-    if (nextToast.duration && nextToast.duration > 0) {
-      window.setTimeout(() => removeToast(id), nextToast.duration);
-    }
+    if (nextToast.sound !== false) notificationPreferences.playNotificationCue(variant);
     return id;
-  }, [removeToast]);
+  }, []);
 
   const showError = useCallback((toast: Omit<Toast, "id" | "variant" | "persistent">): string => (
-    pushToast({ ...toast, variant: "error", persistent: true })
+    pushToast({ ...toast, variant: "error", persistent: false })
   ), [pushToast]);
 
   useEffect(() => {
@@ -188,54 +284,30 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [showError]);
 
   const value = useMemo(() => ({ pushToast, showError, dismissToast: removeToast }), [pushToast, removeToast, showError]);
+  const registerToastElement = useCallback((toast: Toast, element: HTMLElement | null) => {
+    if (element && toast.variant === "error") errorRefs.current.set(toast.id, element);
+    else errorRefs.current.delete(toast.id);
+  }, []);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
       <div className="toast-stack" aria-label="System notifications">
-        {toasts.map((toast) => {
-          const variant = toast.variant ?? "info";
-          const urgent = variant === "warning" || variant === "error";
-          return (
-            <article
-              key={toast.id}
-              ref={(element) => {
-                if (element && variant === "error") errorRefs.current.set(toast.id, element);
-                else errorRefs.current.delete(toast.id);
-              }}
-              className={`toast toast--${variant} ${toast.persistent ? "toast--persistent" : ""}`}
-              role={urgent ? "alert" : "status"}
-              aria-live={urgent ? "assertive" : "polite"}
-              aria-atomic="true"
-              tabIndex={variant === "error" ? -1 : undefined}
-              data-error-source={toast.source}
-              style={{ "--toast-duration": `${toast.duration || 0}ms` } as React.CSSProperties}
-            >
-              <div className="toast__icon-wrap" aria-hidden="true"><ToastIcon variant={variant} /></div>
-              <div className="toast__content">
-                <div className="toast__title">{toast.title}</div>
-                {toast.message ? <div className="toast__message">{toast.message}</div> : null}
-                {toast.code ? <div className="toast__code">Reference: {toast.code}</div> : null}
-                {toast.actionLabel && toast.action ? (
-                  <button
-                    type="button"
-                    className="toast__action"
-                    onClick={() => void Promise.resolve(toast.action?.()).catch(() => undefined)}
-                  >
-                    {toast.actionLabel}
-                  </button>
-                ) : null}
-              </div>
-              <button type="button" className="toast__close" aria-label="Dismiss notification" onClick={() => removeToast(toast.id)}><X size={16} /></button>
-              {toast.duration ? <span className="toast__timer" aria-hidden="true" /> : null}
-            </article>
-          );
-        })}
+        {toasts.map((toast) => (
+          <ToastCard
+            key={toast.id}
+            toast={toast}
+            onDismiss={removeToast}
+            onElement={registerToastElement}
+          />
+        ))}
       </div>
     </ToastContext.Provider>
   );
 };
 
+// The provider and its companion hook intentionally share one context module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = (): ToastContextValue => {
   const context = useContext(ToastContext);
   if (!context) throw new Error("useToast must be used within a ToastProvider");

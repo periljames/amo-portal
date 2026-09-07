@@ -114,7 +114,12 @@ def get_document(doc_id: str, db: Session = Depends(get_db), current_user: accou
     doc = db.query(models.ControlledDocument).filter_by(tenant_id=_tenant_id(current_user), doc_id=doc_id).first()
     if not doc:
         raise HTTPException(404, "Document not found")
-    if doc.restricted_flag and not (current_user.is_superuser or current_user.is_amo_admin):
+    restricted_read_roles = {
+        account_models.AccountRole.QUALITY_MANAGER,
+        account_models.AccountRole.QUALITY_OFFICER,
+        account_models.AccountRole.DOCUMENT_CONTROL_OFFICER,
+    }
+    if doc.restricted_flag and current_user.role not in restricted_read_roles:
         raise HTTPException(403, "Restricted document")
     return doc
 

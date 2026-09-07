@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import {
   fetchOnboardingStatus,
@@ -22,6 +22,8 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
+const DocControlGeneratedRecordPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordPage })));
 const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
 const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
 const DocControlDistributionPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDistributionPage })));
@@ -186,6 +188,11 @@ function ProcurementRouteSurface() {
   );
 }
 
+function DocumentControlFallback() {
+  const { amoCode = "" } = useParams();
+  return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/document-control`} replace />;
+}
+
 function DocumentControlRouteSurface() {
   return (
     <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
@@ -193,12 +200,14 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/structure/records/:recordId" element={<WorkspaceRequireAuth><DocControlGeneratedRecordPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlReportsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlAdministrationPage /></WorkspaceRequireAuth>} />
-        <Route path="*" element={<Navigate to="." replace />} />
+        <Route path="*" element={<DocumentControlFallback />} />
       </Routes>
     </Suspense>
   );

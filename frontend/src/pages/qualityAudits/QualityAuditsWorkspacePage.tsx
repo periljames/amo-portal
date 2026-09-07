@@ -1,6 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import type {
   ColDef,
   GridApi,
@@ -10,19 +26,44 @@ import type {
   RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { Activity, CalendarClock, CheckCircle2, CircleUserRound, Search } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CalendarClock,
+  CalendarPlus,
+  CheckCircle2,
+  CircleUserRound,
+  ListChecks,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
+import { useToast } from "../../components/feedback/ToastProvider";
 import { getCachedUser, getContext } from "../../services/auth";
+import { hasQmsRolePermission } from "../../app/routeGuards";
 import {
+  addAuditProgrammeItem,
+  createAuditUniverseItem,
   getAuditProgramme,
+  listAuditUniverse,
   listAuditProgrammeScheduleLinks,
   listAuditProgrammes,
+  type AuditProgramme,
+  type AuditUniverseEntityType,
 } from "../../services/qmsAuditProgramme";
-import { qmsListAudits, type QMSAuditOut } from "../../services/qmsCore";
+import {
+  qmsDeleteAudit,
+  qmsListAudits,
+  type QMSAuditOut,
+} from "../../services/qmsCore";
 import { auditNavigationHref } from "./auditNavigation";
 import { auditNextAction } from "./auditNextAction";
+import AuditLaunchDrawer, { type AuditLaunchMode } from "./AuditLaunchDrawer";
+import { workingDayCount } from "../qms/qmsAuditProgrammePlanning";
 import {
   AUDITS_LIST_BOUND,
   attentionLabel,
@@ -52,11 +93,21 @@ type AuditGridRow = QMSAuditOut & {
   nextActionHref: string;
 };
 
+const AUDIT_DELETE_FAILURE_MESSAGE =
+  "The audit could not be moved to the recycle bin. No records were changed. Try again; if the problem continues, contact an administrator.";
+
+type ProgrammePrompt = {
+  audit: QMSAuditOut;
+};
+
 function AuditIdentityCell(params: ICellRendererParams<AuditGridRow>) {
   const row = params.data;
   if (!row) return null;
   return (
-    <Link className="qa-audits-grid__identity qa-audits-grid__identity-link" to={row.nextActionHref}>
+    <Link
+      className="qa-audits-grid__identity qa-audits-grid__identity-link"
+      to={row.nextActionHref}
+    >
       <span className="qa-audits-list__ref">{row.audit_ref}</span>
       <strong>{row.title}</strong>
     </Link>
@@ -73,7 +124,9 @@ function StageCell(params: ICellRendererParams<AuditGridRow>) {
   const row = params.data;
   if (!row) return null;
   return (
-    <span className={`qa-audits-list__status qa-audits-list__status--${row.status.toLowerCase()}`}>
+    <span
+      className={`qa-audits-list__status qa-audits-list__status--${row.status.toLowerCase()}`}
+    >
       {row.stageLabel}
     </span>
   );
@@ -92,12 +145,30 @@ function NextActionCell(params: ICellRendererParams<AuditGridRow>) {
 const QualityAuditsWorkspacePage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { pushToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const context = getContext();
   const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
   const currentUser = getCachedUser();
   const gridApiRef = useRef<GridApi<AuditGridRow> | null>(null);
   const syncingPaginationRef = useRef(false);
+  const canDeleteAudit = hasQmsRolePermission("qms.audit.manage");
+  const canCreateAudit = hasQmsRolePermission("qms.audit.manage");
+  const [launchMode, setLaunchMode] = useState<AuditLaunchMode | null>(null);
+  const [programmePrompt, setProgrammePrompt] =
+    useState<ProgrammePrompt | null>(null);
+  const [programmePromptError, setProgrammePromptError] = useState<
+    string | null
+  >(null);
+  const [targetProgrammeId, setTargetProgrammeId] = useState("");
+  const [targetUniverseId, setTargetUniverseId] = useState("__new__");
+  const [newUniverseLabel, setNewUniverseLabel] = useState("");
+  const [newUniverseType, setNewUniverseType] =
+    useState<AuditUniverseEntityType>("DEPARTMENT");
+  const [deleteTarget, setDeleteTarget] = useState<QMSAuditOut | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const view = parseWorkspaceView(searchParams.get("view"));
   const search = searchParams.get("q") ?? "";
@@ -118,7 +189,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
 
   const setView = (nextView: WorkspaceView) => {
     patchParams({
-      view: nextView === "mine" ? null : nextView,
+      view: nextView === "all" ? null : nextView,
       page: null,
     });
   };
@@ -132,15 +203,20 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   const programmeYear = new Date().getUTCFullYear();
   const programmesQuery = useQuery({
     queryKey: ["qms-audits-workspace-programmes", amoCode, programmeYear],
-    queryFn: ({ signal }) => listAuditProgrammes(amoCode, programmeYear, signal),
+    queryFn: ({ signal }) =>
+      listAuditProgrammes(amoCode, programmeYear, signal),
     staleTime: 60_000,
   });
-  const programmeSummaries = programmesQuery.data?.items ?? [];
+  const programmeSummaries = useMemo(
+    () => programmesQuery.data?.items ?? [],
+    [programmesQuery.data?.items],
+  );
 
   const programmeDetailQueries = useQueries({
     queries: programmeSummaries.map((programme) => ({
       queryKey: ["qms-audit-programme", amoCode, programme.id],
-      queryFn: ({ signal }: { signal?: AbortSignal }) => getAuditProgramme(amoCode, programme.id, signal),
+      queryFn: ({ signal }: { signal?: AbortSignal }) =>
+        getAuditProgramme(amoCode, programme.id, signal),
       staleTime: 60_000,
       enabled: Boolean(programme.id),
     })),
@@ -156,14 +232,21 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     })),
   });
 
+  const programmeDetails = useMemo<AuditProgramme[]>(
+    () =>
+      programmeDetailQueries
+        .map((query) => query.data)
+        .filter((programme): programme is AuditProgramme => Boolean(programme)),
+    [programmeDetailQueries],
+  );
+
   const programmeIndex = useMemo(() => {
-    const detailed = programmeDetailQueries
-      .map((query) => query.data)
-      .filter((programme): programme is NonNullable<typeof programme> => Boolean(programme));
-    if (!detailed.length && !programmeSummaries.length) {
+    if (!programmeDetails.length && !programmeSummaries.length) {
       return buildAuditProgrammeLinkIndex([], new Map());
     }
-    const programmes = detailed.length ? detailed : programmeSummaries;
+    const programmes = programmeDetails.length
+      ? programmeDetails
+      : programmeSummaries;
     const linksByProgrammeId = new Map(
       programmeSummaries.map((programme, index) => [
         programme.id,
@@ -171,7 +254,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       ]),
     );
     return buildAuditProgrammeLinkIndex(programmes, linksByProgrammeId);
-  }, [programmeDetailQueries, programmeSummaries, scheduleLinkQueries]);
+  }, [programmeDetails, programmeSummaries, scheduleLinkQueries]);
 
   const filteredAudits = useMemo(
     () =>
@@ -184,7 +267,169 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     [auditsQuery.data, currentUser?.id, programmeIndex, search, view],
   );
 
-  const safePage = clampWorkspacePage(pageFromUrl, filteredAudits.length, pageSize);
+  const editableProgrammes = useMemo(
+    () =>
+      programmeDetails.filter((programme) =>
+        ["DRAFT", "UNDER_REVIEW"].includes(programme.status),
+      ),
+    [programmeDetails],
+  );
+  const compatibleProgrammeTargets = useMemo(
+    () =>
+      programmePrompt
+        ? editableProgrammes.filter(
+            (programme) =>
+              (programme.programme_kind || "INTERNAL") ===
+              programmePrompt.audit.kind,
+          )
+        : [],
+    [editableProgrammes, programmePrompt],
+  );
+  const universeQuery = useQuery({
+    queryKey: ["qms-audit-universe", amoCode],
+    queryFn: ({ signal }) => listAuditUniverse(amoCode, signal),
+    staleTime: 60_000,
+    enabled: Boolean(programmePrompt),
+  });
+
+  const addToProgrammeMutation = useMutation({
+    mutationFn: async () => {
+      const audit = programmePrompt?.audit;
+      const programme = compatibleProgrammeTargets.find(
+        (entry) => entry.id === targetProgrammeId,
+      );
+      if (!audit || !programme)
+        throw new Error("Select an editable audit programme.");
+      if (!audit.planned_start)
+        throw new Error("The audit needs a planned date before it can recur.");
+
+      let universeItemId = targetUniverseId;
+      if (targetUniverseId === "__new__") {
+        if (newUniverseLabel.trim().length < 2)
+          throw new Error("Enter a coverage area name.");
+        const universeItem = await createAuditUniverseItem(amoCode, {
+          entity_type: newUniverseType,
+          display_label: newUniverseLabel.trim(),
+          source_owner_module: "QUALITY",
+          source_type: "AUDIT_OCCURRENCE",
+          source_id: audit.id,
+          source_route: auditNavigationHref(amoCode, audit),
+          risk_classification: "MEDIUM",
+          regulatory_criticality: "MEDIUM",
+          mandatory_surveillance: false,
+          notes: `Coverage created from ${audit.audit_ref}.`,
+        });
+        universeItemId = universeItem.id;
+      }
+      if (!universeItemId || universeItemId === "__new__")
+        throw new Error("Select a coverage area.");
+
+      const monthDay = audit.planned_start.slice(5);
+      return addAuditProgrammeItem(amoCode, programme.id, {
+        universe_item_id: universeItemId,
+        audit_type:
+          audit.kind === "INTERNAL"
+            ? "INTERNAL"
+            : audit.kind === "THIRD_PARTY"
+              ? "REGULATORY"
+              : "SUPPLIER",
+        title: audit.title,
+        purpose: `Recurring assurance requirement created from ${audit.audit_ref}.`,
+        scope: audit.scope?.trim() || audit.title,
+        criteria: audit.criteria?.trim() ? [audit.criteria.trim()] : [],
+        mandatory_surveillance: false,
+        recurrence: "FIXED_DATES",
+        fixed_dates: [monthDay],
+        non_working_day_policy: "NEXT_WORKING_DAY",
+        default_start_time: audit.planned_start_time?.slice(0, 5) || "09:00",
+        default_end_time: audit.planned_end_time?.slice(0, 5) || "17:00",
+        default_duration_days: workingDayCount(
+          audit.planned_start,
+          audit.planned_end,
+        ),
+        default_location: audit.location || undefined,
+        lead_auditor_user_id: audit.lead_auditor_user_id || undefined,
+        observer_auditor_user_id: audit.observer_auditor_user_id || undefined,
+        supporting_auditor_user_ids: audit.supporting_auditor_user_ids || [],
+        auditee_user_id: audit.auditee_user_id || undefined,
+        notify_auditors: audit.notify_auditors ?? true,
+        notify_auditees: audit.notify_auditees ?? true,
+        auto_schedule: true,
+        prioritization_basis: [
+          {
+            driver: "DIRECT_AUDIT_REUSE",
+            source_audit_id: audit.id,
+            source_audit_ref: audit.audit_ref,
+          },
+        ],
+      });
+    },
+    onSuccess: async () => {
+      const audit = programmePrompt?.audit;
+      setProgrammePrompt(null);
+      setProgrammePromptError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["qms-audits-workspace-programmes", amoCode],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["qms-audit-universe", amoCode],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["qms-audit-programme"] }),
+      ]);
+      pushToast({
+        title: "Added to audit programme",
+        message:
+          "The audit will recur on this calendar date; weekends move to the next working day.",
+        variant: "success",
+      });
+      if (audit) navigate(auditNavigationHref(amoCode, audit));
+    },
+    onError: (reason: Error) =>
+      setProgrammePromptError(
+        reason.message || "The audit could not be added to the programme.",
+      ),
+  });
+
+  const safePage = clampWorkspacePage(
+    pageFromUrl,
+    filteredAudits.length,
+    pageSize,
+  );
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ auditId, reason }: { auditId: string; reason?: string }) =>
+      qmsDeleteAudit(auditId, reason),
+    onSuccess: (_result, variables) => {
+      queryClient.setQueryData<QMSAuditOut[]>(
+        ["qms-audits-workspace", amoCode],
+        (current) => current?.filter((audit) => audit.id !== variables.auditId),
+      );
+      setDeleteTarget(null);
+      setDeleteReason("");
+      setDeleteError(null);
+      void queryClient.invalidateQueries({
+        queryKey: ["qms-audits-workspace", amoCode],
+        refetchType: "none",
+      });
+    },
+    onError: () => setDeleteError(AUDIT_DELETE_FAILURE_MESSAGE),
+  });
+
+  useEffect(() => {
+    if (!deleteTarget || deleteMutation.isPending) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDeleteTarget(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [deleteMutation.isPending, deleteTarget]);
+
+  const requestDelete = useCallback((audit: QMSAuditOut) => {
+    setDeleteTarget(audit);
+    setDeleteReason("");
+    setDeleteError(null);
+  }, []);
 
   useEffect(() => {
     if (safePage !== pageFromUrl) {
@@ -197,12 +442,22 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       filteredAudits.map((audit) => {
         const action = auditNextAction(audit);
         const href = auditNavigationHref(amoCode, audit);
+        const programmeLabel = programmeLabelForAudit(audit, programmeIndex);
         return {
           ...audit,
-          programmeLabel: programmeLabelForAudit(audit, programmeIndex),
-          typeLabel: audit.kind.replaceAll("_", " ").toLowerCase(),
-          scheduledLabel: `${formatAuditDate(audit.planned_start)} – ${formatAuditDate(audit.planned_end)}`,
-          stageLabel: lifecycleLabel(audit.status),
+          programmeLabel:
+            programmeLabel === "Direct audit" ? "One-off" : programmeLabel,
+          typeLabel: audit.title
+            .trim()
+            .toLowerCase()
+            .startsWith("surveillance ·")
+            ? "Surveillance"
+            : "Scheduled audit",
+          scheduledLabel:
+            `${formatAuditDate(audit.planned_start)} ${audit.planned_start_time?.slice(0, 5) || ""} – ${formatAuditDate(audit.planned_end)} ${audit.planned_end_time?.slice(0, 5) || ""}`
+              .replaceAll("  ", " ")
+              .trim(),
+          stageLabel: lifecycleLabel(audit.status, audit),
           attentionText: attentionLabel(audit) ?? "",
           nextActionLabel: action.label,
           nextActionHref: href,
@@ -222,21 +477,25 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         flex: 1.4,
         cellRenderer: AuditIdentityCell,
         comparator: (_a, _b, nodeA, nodeB) =>
-          (nodeA?.data?.audit_ref || "").localeCompare(nodeB?.data?.audit_ref || ""),
+          (nodeA?.data?.audit_ref || "").localeCompare(
+            nodeB?.data?.audit_ref || "",
+          ),
       },
       {
-        headerName: "Programme",
+        headerName: "Source",
         field: "programmeLabel",
         minWidth: 110,
         flex: 0.9,
       },
       {
-        headerName: "Type",
+        headerName: "Activity",
         field: "typeLabel",
         minWidth: 100,
         flex: 0.7,
         valueFormatter: (p) =>
-          p.value ? String(p.value).replace(/\b\w/g, (ch: string) => ch.toUpperCase()) : "",
+          p.value
+            ? String(p.value).replace(/\b\w/g, (ch: string) => ch.toUpperCase())
+            : "",
       },
       {
         headerName: "Scheduled",
@@ -280,8 +539,31 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         sortable: false,
         cellRenderer: NextActionCell,
       },
+      {
+        headerName: "",
+        colId: "delete",
+        pinned: "right",
+        width: 54,
+        minWidth: 54,
+        maxWidth: 54,
+        sortable: false,
+        resizable: false,
+        suppressHeaderMenuButton: true,
+        cellRenderer: (params: ICellRendererParams<AuditGridRow>) =>
+          params.data && canDeleteAudit ? (
+            <button
+              type="button"
+              className="qa-audits-list__delete"
+              aria-label={`Delete ${params.data.audit_ref} ${params.data.title}`}
+              title="Delete audit and associated records"
+              onClick={() => requestDelete(params.data!)}
+            >
+              <Trash2 size={15} aria-hidden />
+            </button>
+          ) : null,
+      },
     ],
-    [],
+    [canDeleteAudit, requestDelete],
   );
 
   const defaultColDef = useMemo<ColDef<AuditGridRow>>(
@@ -332,7 +614,9 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       if (syncingPaginationRef.current || !event.api) return;
       const nextPage = event.api.paginationGetCurrentPage() + 1;
       const nextSize = event.api.paginationGetPageSize() as WorkspacePageSize;
-      const normalizedSize = WORKSPACE_PAGE_SIZES.includes(nextSize) ? nextSize : pageSize;
+      const normalizedSize = WORKSPACE_PAGE_SIZES.includes(nextSize)
+        ? nextSize
+        : pageSize;
       patchParams({
         page: nextPage <= 1 ? null : String(nextPage),
         pageSize: normalizedSize === 25 ? null : String(normalizedSize),
@@ -351,13 +635,66 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     [navigate],
   );
 
-  const loadedCount = auditsQuery.data?.length ?? 0;
-  const boundHit = loadedCount >= AUDITS_LIST_BOUND;
+  const openAudit = useCallback(
+    (audit: QMSAuditOut) => {
+      setLaunchMode(null);
+      navigate(auditNavigationHref(amoCode, audit));
+    },
+    [amoCode, navigate],
+  );
+
+  const handleAuditCreated = useCallback(
+    (audit: QMSAuditOut, creation: { offerProgramme: boolean }) => {
+      queryClient.setQueryData<QMSAuditOut[]>(
+        ["qms-audits-workspace", amoCode],
+        (current) => [
+          audit,
+          ...(current || []).filter((entry) => entry.id !== audit.id),
+        ],
+      );
+      void queryClient.invalidateQueries({
+        queryKey: ["qms-audits-workspace", amoCode],
+        refetchType: "none",
+      });
+      setLaunchMode(null);
+      pushToast({
+        title:
+          audit.status === "IN_PROGRESS"
+            ? "Surveillance started"
+            : "Audit created",
+        message:
+          audit.status === "IN_PROGRESS"
+            ? `${audit.audit_ref} is open in fieldwork.`
+            : `${audit.audit_ref} is ready for setup and preparation.`,
+        variant: "success",
+        sound: true,
+      });
+      if (creation.offerProgramme) {
+        const compatible = editableProgrammes.find(
+          (programme) =>
+            (programme.programme_kind || "INTERNAL") === audit.kind,
+        );
+        setTargetProgrammeId(compatible?.id || "");
+        setTargetUniverseId("__new__");
+        setNewUniverseLabel(
+          audit.auditee_user_name || audit.auditee || audit.title,
+        );
+        setNewUniverseType(
+          audit.audit_scope_code === "MO" ? "FACILITY" : "DEPARTMENT",
+        );
+        setProgrammePromptError(null);
+        setProgrammePrompt({ audit });
+        return;
+      }
+      navigate(auditNavigationHref(amoCode, audit));
+    },
+    [amoCode, editableProgrammes, navigate, pushToast, queryClient],
+  );
 
   return (
     <QualityAuditsSectionLayout
       title="Audits"
-      subtitle="Open the audit that needs attention and continue from its current lifecycle stage."
+      subtitle="Create, conduct, and close scheduled audits or unscheduled surveillance."
       toolbar={
         <ResponsiveSegmentedControl
           label="Audit workspace view"
@@ -365,26 +702,45 @@ const QualityAuditsWorkspacePage: React.FC = () => {
           onChange={setView}
           compactIconsOnMobile
           options={[
-            { value: "mine", label: "MY AUDITS", shortLabel: "Mine", icon: CircleUserRound },
-            { value: "upcoming", label: "UPCOMING", shortLabel: "Upcoming", icon: CalendarClock },
-            { value: "active", label: "ACTIVE", shortLabel: "Active", icon: Activity },
-            { value: "completed", label: "COMPLETED", shortLabel: "Completed", icon: CheckCircle2 },
+            {
+              value: "all",
+              label: "ALL AUDITS",
+              shortLabel: "All",
+              icon: ListChecks,
+            },
+            {
+              value: "mine",
+              label: "MY AUDITS",
+              shortLabel: "Mine",
+              icon: CircleUserRound,
+            },
+            {
+              value: "upcoming",
+              label: "UPCOMING",
+              shortLabel: "Upcoming",
+              icon: CalendarClock,
+            },
+            {
+              value: "active",
+              label: "ACTIVE",
+              shortLabel: "Active",
+              icon: Activity,
+            },
+            {
+              value: "completed",
+              label: "COMPLETED",
+              shortLabel: "Completed",
+              icon: CheckCircle2,
+            },
           ]}
         />
       }
     >
-      <section className="qa-audits-list qa-audits-list--register" aria-live="polite">
+      <section
+        className="qa-audits-list qa-audits-list--register"
+        aria-live="polite"
+      >
         <header className="qa-audits-list__toolbar">
-          <div className="qa-audits-list__summary">
-            <div>
-              <strong>{filteredAudits.length}</strong>
-              <span>{view === "mine" ? "assigned audits" : `${view} audits`}</span>
-            </div>
-            <small>
-              Client page of up to {AUDITS_LIST_BOUND} current tenant records
-              {boundHit ? " (bound reached)" : ""}. Opening an audit does not change its lifecycle.
-            </small>
-          </div>
           <label className="qa-audits-list__search" aria-label="Search audits">
             <Search size={15} aria-hidden />
             <input
@@ -398,10 +754,34 @@ const QualityAuditsWorkspacePage: React.FC = () => {
               placeholder="Search audits"
             />
           </label>
+          {canCreateAudit ? (
+            <div
+              className="qa-audits-list__create-actions"
+              aria-label="Create assurance activity"
+            >
+              <button
+                type="button"
+                className="qa-audits-list__create qa-audits-list__create--secondary"
+                onClick={() => setLaunchMode("surveillance")}
+              >
+                <ShieldCheck size={16} aria-hidden /> Surveillance
+              </button>
+              <button
+                type="button"
+                className="qa-audits-list__create"
+                onClick={() => setLaunchMode("audit")}
+              >
+                <CalendarPlus size={16} aria-hidden /> Audit
+              </button>
+            </div>
+          ) : null}
         </header>
 
         {auditsQuery.isError ? (
-          <div className="qa-audits-list__state qa-audits-list__state--error" role="alert">
+          <div
+            className="qa-audits-list__state qa-audits-list__state--error"
+            role="alert"
+          >
             <strong>Audits could not be loaded.</strong>
             <span>Check your connection, then try again.</span>
             <button type="button" onClick={() => void auditsQuery.refetch()}>
@@ -429,12 +809,275 @@ const QualityAuditsWorkspacePage: React.FC = () => {
             rowClass="qa-audits-grid__row"
             loading={auditsQuery.isLoading}
             overlayLoadingTemplate='<span class="qa-audits-grid__overlay">Loading audits…</span>'
-            overlayNoRowsTemplate='<span class="qa-audits-grid__overlay"><strong>No audits in this view</strong><br/>Choose another view, clear search, or schedule from Calendar.</span>'
+            overlayNoRowsTemplate='<span class="qa-audits-grid__overlay"><strong>No audits in this view</strong><br/>Create a scheduled audit or start surveillance.</span>'
             domLayout="normal"
             containerStyle={{ width: "100%", height: "100%" }}
           />
         </div>
       </section>
+      {launchMode ? (
+        <AuditLaunchDrawer
+          key={launchMode}
+          amoCode={amoCode}
+          isOpen
+          mode={launchMode}
+          programmes={
+            programmeDetails.length ? programmeDetails : programmeSummaries
+          }
+          existingAudits={auditsQuery.data || []}
+          onClose={() => setLaunchMode(null)}
+          onCreated={handleAuditCreated}
+          onOpenExisting={openAudit}
+        />
+      ) : null}
+      {programmePrompt ? (
+        <div
+          className="qa-audit-programme-prompt"
+          role="presentation"
+          onMouseDown={() =>
+            !addToProgrammeMutation.isPending && setProgrammePrompt(null)
+          }
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="qa-audit-programme-prompt-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <CalendarPlus size={19} aria-hidden />
+                <h2 id="qa-audit-programme-prompt-title">
+                  Schedule this audit automatically next time?
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                disabled={addToProgrammeMutation.isPending}
+                onClick={() => setProgrammePrompt(null)}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p>
+              Add{" "}
+              <strong>
+                {programmePrompt.audit.audit_ref} ·{" "}
+                {programmePrompt.audit.title}
+              </strong>{" "}
+              to the annual programme. It will recur every year on{" "}
+              <strong>{programmePrompt.audit.planned_start?.slice(5)}</strong>;
+              weekend dates move to the next working day.
+            </p>
+            {compatibleProgrammeTargets.length ? (
+              <div className="qa-audit-programme-prompt__form">
+                <label>
+                  Audit programme
+                  <select
+                    value={targetProgrammeId}
+                    onChange={(event) =>
+                      setTargetProgrammeId(event.target.value)
+                    }
+                  >
+                    {compatibleProgrammeTargets.map((programme) => (
+                      <option key={programme.id} value={programme.id}>
+                        {programme.programme_ref} · {programme.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Coverage area
+                  <select
+                    value={targetUniverseId}
+                    onChange={(event) =>
+                      setTargetUniverseId(event.target.value)
+                    }
+                    disabled={universeQuery.isLoading}
+                  >
+                    <option value="__new__">
+                      Create coverage area from this audit
+                    </option>
+                    {(universeQuery.data?.items || [])
+                      .filter((item) => item.active)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.display_label} ·{" "}
+                          {item.entity_type.replaceAll("_", " ").toLowerCase()}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {targetUniverseId === "__new__" ? (
+                  <div className="qa-audit-programme-prompt__grid">
+                    <label>
+                      Coverage name
+                      <input
+                        value={newUniverseLabel}
+                        onChange={(event) =>
+                          setNewUniverseLabel(event.target.value)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Coverage type
+                      <select
+                        value={newUniverseType}
+                        onChange={(event) =>
+                          setNewUniverseType(
+                            event.target.value as AuditUniverseEntityType,
+                          )
+                        }
+                      >
+                        <option value="DEPARTMENT">Department</option>
+                        <option value="FACILITY">Facility / hangar</option>
+                        <option value="STATION">Line station</option>
+                        <option value="PROCESS">Process</option>
+                        <option value="CAPABILITY">Capability</option>
+                        <option value="SUPPLIER">Supplier</option>
+                        <option value="OTHER">Other</option>
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="qa-audit-programme-prompt__empty">
+                <strong>No editable programme is available.</strong>
+                <span>
+                  Create or amend this year’s programme before adding
+                  recurrence.
+                </span>
+              </div>
+            )}
+            {programmePromptError ? (
+              <p className="qa-audit-programme-prompt__error" role="alert">
+                {programmePromptError}
+              </p>
+            ) : null}
+            <footer>
+              <button
+                type="button"
+                disabled={addToProgrammeMutation.isPending}
+                onClick={() => {
+                  const audit = programmePrompt.audit;
+                  setProgrammePrompt(null);
+                  navigate(auditNavigationHref(amoCode, audit));
+                }}
+              >
+                Keep as one-off
+              </button>
+              {compatibleProgrammeTargets.length ? (
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={
+                    addToProgrammeMutation.isPending ||
+                    !targetProgrammeId ||
+                    universeQuery.isError
+                  }
+                  onClick={() => addToProgrammeMutation.mutate()}
+                >
+                  <CalendarPlus size={15} aria-hidden />{" "}
+                  {addToProgrammeMutation.isPending
+                    ? "Adding…"
+                    : "Add annual schedule"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="is-primary"
+                  onClick={() => {
+                    setProgrammePrompt(null);
+                    navigate(`/maintenance/${amoCode}/quality/audits/program`);
+                  }}
+                >
+                  Open audit programme
+                </button>
+              )}
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {deleteTarget ? (
+        <div
+          className="qa-audit-delete-modal"
+          role="presentation"
+          onMouseDown={() => !deleteMutation.isPending && setDeleteTarget(null)}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="qa-audit-delete-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <AlertTriangle size={20} aria-hidden />
+                <h2 id="qa-audit-delete-title">Move audit to recycle bin?</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                disabled={deleteMutation.isPending}
+                onClick={() => setDeleteTarget(null)}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p>
+              <strong>
+                {deleteTarget.audit_ref} · {deleteTarget.title}
+              </strong>{" "}
+              will leave active Assurance views. Its workflow, findings,
+              corrective actions, checklists, evidence, notices, and files
+              remain intact for restoration.
+            </p>
+            <label className="qa-audit-delete-modal__reason">
+              Reason <span>Optional</span>
+              <textarea
+                value={deleteReason}
+                maxLength={1000}
+                placeholder="Add context for other Quality team members"
+                onChange={(event) => setDeleteReason(event.target.value)}
+              />
+            </label>
+            {deleteError ? (
+              <p className="qa-audit-delete-modal__error" role="alert">
+                {deleteError}
+              </p>
+            ) : null}
+            <div className="qa-audit-delete-modal__notice">
+              Recoverable for 30 days. Permanent deletion is available only in
+              the Recycle Bin.
+            </div>
+            <footer>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="is-danger"
+                disabled={deleteMutation.isPending}
+                onClick={() =>
+                  deleteMutation.mutate({
+                    auditId: deleteTarget.id,
+                    reason: deleteReason,
+                  })
+                }
+              >
+                <Trash2 size={15} />{" "}
+                {deleteMutation.isPending ? "Moving…" : "Move to recycle bin"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </QualityAuditsSectionLayout>
   );
 };

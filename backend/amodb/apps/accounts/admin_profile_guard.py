@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import text
@@ -10,7 +11,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
-from . import models
+from . import models, role_registry
 
 
 PROFILE_ROUTE_MARKER = "/accounts/admin/admin-profile/"
@@ -18,7 +19,31 @@ PROFILE_ROUTE_MARKER = "/accounts/admin/admin-profile/"
 
 def _normalise_role(user: models.User) -> str:
     value = getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))
-    return str(value or "").upper()
+    return role_registry.canonical_role_key(value) or str(value or "").upper()
+
+
+def require_active_admin_profile_or_roles(*allowed_roles: str) -> Callable[..., models.User]:
+    """Allow a prescribed tenant role or a currently elevated administrator.
+
+    This keeps operational authority independent from tenant administration while
+    ensuring administrators use cross-cutting configuration endpoints only from
+    an active, governed administrator session.
+    """
+    canonical_allowed = {
+        role_registry.canonical_role_key(value) or str(value or "").upper()
+        for value in allowed_roles
+    }
+
+    def dependency(
+        request: Request,
+        current_user: models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> models.User:
+        if _normalise_role(current_user) in canonical_allowed:
+            return current_user
+        return require_active_admin_profile(request=request, current_user=current_user, db=db)
+
+    return dependency
 
 
 def _is_current_implicit_admin(user: models.User) -> bool:
@@ -45,21 +70,19 @@ def _auth_session_id(user: models.User) -> str:
 
 
 def _mark_request_as_admin_profile(user: models.User) -> None:
-    """Expose elevation to legacy dependencies without persisting role changes.
+    """Expose temporary elevation without changing the user's job persona.
 
     Existing administration handlers still depend on `require_admin` or
-    `require_roles(..., AMO_ADMIN)`. FastAPI resolves this router dependency
-    first and reuses the same current-user object for later dependencies.
-    `set_committed_value` changes only the request-scoped ORM identity state and
-    does not mark the mapped role fields dirty for database persistence.
+    `require_roles(..., AMO_ADMIN)`, both of which accept the administrator
+    overlay. FastAPI resolves this router dependency first and reuses the same
+    current-user object for later dependencies. The regulated/operational role
+    must remain visible throughout the request for segregation-of-duty checks.
     """
     try:
         set_committed_value(user, "is_amo_admin", True)
-        set_committed_value(user, "role", models.AccountRole.AMO_ADMIN)
     except Exception:
         # Lightweight test doubles are not SQLAlchemy-mapped instances.
         setattr(user, "is_amo_admin", True)
-        setattr(user, "role", models.AccountRole.AMO_ADMIN)
     setattr(user, "_admin_profile_elevated", True)
 
 

@@ -161,7 +161,8 @@ describe("Quality workflow integrity and public CAR UI contracts", () => {
   );
 
   it("fails closed when the authoritative audit workflow is unavailable", () => {
-    expect(enhancementsHostSource).toContain("data?.degraded === true");
+    expect(enhancementsHostSource).toContain("occurrenceQuery.isError || sessionQuery.isError");
+    expect(enhancementsHostSource).not.toContain("getQueryCache().subscribe");
     expect(enhancementsHostSource).toContain("Authoritative workflow unavailable");
     expect(enhancementsHostSource).toContain("It will not use locally invented completion values");
     expect(enhancementsHostSource).toContain("quality-workflow-is-degraded");

@@ -274,3 +274,44 @@
   .dc-node-inspector__flow { grid-template-columns: 1fr; }
   .dc-node-inspector__flow > svg { transform: rotate(90deg); justify-self: center; }
 }
+
+.dc-record-detail { display: grid; gap: 0.8rem; }
+.dc-record-detail__identity { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--dc-border); border-radius: 0.5rem; overflow: hidden; background: var(--dc-surface); }
+.dc-record-detail__identity > div { min-width: 0; display: grid; align-content: center; gap: 0.3rem; padding: 0.72rem; border-right: 1px solid var(--dc-border); }
+.dc-record-detail__identity > div:last-child { border-right: 0; }
+.dc-record-detail__identity span:first-child { color: var(--dc-muted); font-size: 0.62rem; font-weight: 720; text-transform: uppercase; }
+.dc-record-detail__identity strong { overflow: hidden; font-size: 0.72rem; text-overflow: ellipsis; }
+.dc-record-detail__artifact { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.7rem; border: 1px solid var(--dc-border); border-radius: 0.45rem; }
+.dc-record-detail__artifact > svg { color: var(--dc-accent); }
+.dc-record-detail__artifact > div { min-width: 0; display: grid; gap: 0.15rem; }
+.dc-record-detail__artifact strong,.dc-record-detail__artifact span,.dc-record-detail__artifact small { overflow-wrap: anywhere; }
+.dc-record-detail__artifact span,.dc-record-detail__artifact small { color: var(--dc-muted); font-size: 0.65rem; line-height: 1.45; }
+.dc-record-detail__lineage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin: 0; }
+.dc-record-detail__lineage > div { min-width: 0; padding: 0.65rem; border: 1px solid var(--dc-border); border-radius: 0.42rem; }
+.dc-record-detail__lineage > div:last-child { grid-column: 1 / -1; }
+.dc-record-detail__lineage dt { color: var(--dc-muted); font-size: 0.61rem; font-weight: 740; text-transform: uppercase; }
+.dc-record-detail__lineage dd { margin: 0.2rem 0 0; font-size: 0.72rem; overflow-wrap: anywhere; }
+.dc-record-detail__lineage pre { max-height: 13rem; margin: 0; overflow: auto; color: inherit; font: 0.65rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+.dc-record-detail__review { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+.dc-record-detail__review label { display: grid; gap: 0.3rem; color: var(--dc-muted); font-size: 0.66rem; font-weight: 700; }
+.dc-record-detail__review textarea { min-width: 0; resize: vertical; border: 1px solid var(--dc-border); border-radius: 0.4rem; padding: 0.6rem; background: var(--dc-surface); color: var(--dc-ink); }
+.dc-record-detail__review > div { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.45rem; }
+.dc-record-detail__review button { min-height: 36px; display: inline-flex; align-items: center; gap: 0.35rem; border: 1px solid var(--dc-border); border-radius: 0.38rem; padding: 0 0.65rem; background: var(--dc-surface); color: var(--dc-ink); font-weight: 700; cursor: pointer; }
+.dc-record-detail__review button.is-primary { border-color: var(--dc-accent); background: var(--dc-accent); color: #fff; }
+.dc-record-detail__review button:disabled { opacity: 0.5; cursor: not-allowed; }
+.dc-record-detail__readonly { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem; border: 1px solid var(--dc-border); border-radius: 0.45rem; background: var(--dc-surface); }
+.dc-record-detail__readonly > svg { color: var(--dc-accent); }
+.dc-record-detail__readonly span { display: grid; gap: 0.15rem; color: var(--dc-muted); font-size: 0.68rem; }
+.dc-record-detail__readonly strong { color: var(--dc-ink); }
+
+@media (max-width: 900px) {
+  .dc-record-detail__identity { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dc-record-detail__identity > div { border-bottom: 1px solid var(--dc-border); }
+  .dc-record-detail__artifact { grid-template-columns: auto minmax(0, 1fr); }
+  .dc-record-detail__artifact .dc-button { grid-column: 1 / -1; justify-self: start; }
+}
+
+@media (max-width: 600px) {
+  .dc-record-detail__identity,.dc-record-detail__lineage,.dc-record-detail__review { grid-template-columns: 1fr; }
+  .dc-record-detail__lineage > div:last-child,.dc-record-detail__review > div { grid-column: auto; }
+}

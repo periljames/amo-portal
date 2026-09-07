@@ -413,7 +413,7 @@ const QMSTrainingUserPage: React.FC = () => {
   const department = params.department ?? ctx.department ?? "quality";
   const userId = params.userId ?? params.staffId ?? cachedUser?.id ?? "";
   const isOwnProfile = Boolean(cachedUser && userId === cachedUser.id);
-  const canEdit = Boolean(cachedUser?.is_superuser || cachedUser?.is_amo_admin || cachedUser?.role === "QUALITY_MANAGER");
+  const canEdit = Boolean(cachedUser?.capability_codes?.includes("training.people.manage"));
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);

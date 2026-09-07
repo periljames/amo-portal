@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
 ENTRY = ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
-CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV3.tsx"
+CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
 LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
 STYLES = ROOT / "frontend/src/pages/manuals/pdfReaderEngineV3.css"
 LIVE_E2E = ROOT / "frontend/tests/e2e/publications-reader-live.spec.ts"
@@ -30,7 +30,7 @@ def test_tanstack_virtualizer_owns_page_mounting_and_render_priority() -> None:
     assert "virtualizer.getVirtualItems()" in source
     assert "orderedVirtualItems.map" in source
     assert "hotIndexes" in source
-    assert "const limit = profile.mode" in source
+    assert "profile.hotPageLimit" in source
     assert "pages.map((page)" not in source
     assert "IntersectionObserver" not in source
 
@@ -67,7 +67,7 @@ def test_document_source_is_resolved_once_before_pdf_mount() -> None:
     assert "cachedReadOnly" in entry
     assert "reader_pdf_url || props.fileUrl" in entry
     assert "if (!readerFileUrl)" in entry
-    assert "sourceChanged || sourceUrlChanged" in entry
+    assert "sourceChanged || readerChanged || sourceUrlChanged" in entry
     assert "sourceCachePending" not in entry
     assert "Opening cached document" not in entry
 
@@ -100,8 +100,8 @@ def test_zoom_and_first_render_hide_every_unfinished_canvas() -> None:
     source = _source(CORE)
     styles = _source(STYLES)
 
-    assert "setReady(false)" in source
-    assert "}, [page, width]);" in source
+    assert "const [ready, setReady] = useState(false)" in source
+    assert 'key={`${page}:${Math.round(pageWidthFor(page))}`}' in source
     assert "pdfv3-page-skeleton" in source
     assert "onRenderSuccess" in source
     assert ".pdfv3-page-surface" in styles

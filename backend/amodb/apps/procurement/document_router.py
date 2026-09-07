@@ -23,7 +23,6 @@ router = APIRouter(
 )
 
 DOCUMENT_UPLOAD_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PROCUREMENT_OFFICER,
     account_models.AccountRole.STORES_MANAGER,
     account_models.AccountRole.STOREKEEPER,
@@ -38,13 +37,11 @@ DOCUMENT_UPLOAD_ROLES = (
     account_models.AccountRole.ACCOUNTS_OFFICER,
 )
 DOCUMENT_CONTROL_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PROCUREMENT_OFFICER,
     account_models.AccountRole.QUALITY_MANAGER,
     account_models.AccountRole.QUALITY_INSPECTOR,
 )
 QUALITY_DOCUMENT_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.QUALITY_MANAGER,
     account_models.AccountRole.QUALITY_INSPECTOR,
 )
@@ -249,7 +246,7 @@ def procurement_document_void(
         document_id=document_id,
         reason=payload.reason,
         actor_user_id=current_user.id,
-        actor_is_quality=current_user.role in set(QUALITY_DOCUMENT_ROLES) or current_user.is_superuser,
+        actor_is_quality=current_user.role in set(QUALITY_DOCUMENT_ROLES),
     )
     db.commit()
     db.refresh(record)

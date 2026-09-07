@@ -196,6 +196,11 @@ async function responseMessage(response: Response): Promise<string> {
       const body = await clone.json() as { detail?: unknown; message?: unknown; error?: unknown } | null;
       const detail = body?.detail ?? body?.message ?? body?.error;
       if (typeof detail === "string" && detail.trim()) return detail;
+      if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+        const nested = detail as { message?: unknown; detail?: unknown; error?: unknown };
+        const nestedMessage = nested.message ?? nested.detail ?? nested.error;
+        if (typeof nestedMessage === "string" && nestedMessage.trim()) return nestedMessage;
+      }
       if (Array.isArray(detail)) {
         const messages = detail.map((item) => {
           if (typeof item === "string") return item;
@@ -294,10 +299,11 @@ export function installPortalFetchErrorBridge(): () => void {
         if (!suppressToast) {
           const message = await responseMessage(response);
           const target = errorTarget(upload);
+          const requestId = response.headers.get("X-Request-ID") || response.headers.get("X-Correlation-ID") || undefined;
           const options = {
             message,
             target,
-            code: String(response.status),
+            code: requestId,
             actionLabel: target ? (upload ? "Show upload field" : "Show form") : undefined,
             dedupeKey: `fetch:${method}:${url}:${response.status}:${message}`,
           };

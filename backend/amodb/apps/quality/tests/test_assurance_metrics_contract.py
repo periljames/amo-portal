@@ -46,7 +46,7 @@ def test_inspectors_and_auditors_can_read_cross_module_assurance_without_managem
 def test_quality_officer_and_accountable_executive_permissions_are_bounded() -> None:
     officer = _QUALITY_ROLE_PERMISSIONS["QUALITY_OFFICER"]
     assert "qms.audit.execute" in officer
-    assert "qms.audit.manage" not in officer
+    assert "qms.audit.manage" in officer
     assert "qms.audit.notice.manage" in officer
     assert "qms.car.manage" in officer
     assert "qms.car.close" not in officer

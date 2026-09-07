@@ -75,6 +75,8 @@ def _audit_setup_ready(audit: models.QMSAudit) -> bool:
     return bool(
         audit.planned_start
         and audit.planned_end
+        and audit.planned_start_time
+        and audit.planned_end_time
         and (audit.scope or "").strip()
         and (audit.criteria or "").strip()
         and audit.lead_auditor_user_id

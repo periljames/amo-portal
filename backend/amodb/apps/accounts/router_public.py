@@ -27,7 +27,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.notifications import service as notification_service
 from amodb.security import get_current_active_user
-from . import models, schemas, services, session_service
+from . import access_control, models, schemas, services, session_service
 from ..training import compliance as training_compliance
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -323,6 +323,8 @@ def login(
         services.set_user_active_context(db, user=user, active_amo_id=None, data_mode=models.DataMode.REAL)
         db.commit()
 
+    access_control.attach_user_access(db, user)
+
     return schemas.Token(
         access_token=token,
         expires_in=expires_in,
@@ -465,6 +467,7 @@ def extend_session(
         db.commit()
     except Exception:
         db.rollback()
+    access_control.attach_user_access(db, current_user)
     return schemas.Token(
         access_token=token,
         expires_in=expires_in,
@@ -511,6 +514,7 @@ def refresh_session(
         raw_token=rotated.refresh_token,
         expires_at=rotated.expires_at,
     )
+    access_control.attach_user_access(db, rotated.user)
     return schemas.Token(
         access_token=token,
         expires_in=expires_in,
@@ -554,6 +558,7 @@ def dev_seed_login(
         )
 
     token, expires_in = services.issue_access_token_for_user(user)
+    access_control.attach_user_access(db, user)
     return schemas.Token(
         access_token=token,
         expires_in=expires_in,
@@ -794,7 +799,7 @@ def read_current_user(
         "- Creates a user with:\n"
         "  - `role = SUPERUSER`\n"
         "  - `is_superuser = True`\n"
-        "  - `is_amo_admin = True`\n\n"
+        "  - `is_amo_admin = False` (tenant administration is a separate overlay)\n\n"
         "The caller does NOT supply `amo_id` or licence fields; these are "
         "handled on the server."
     ),
@@ -867,7 +872,7 @@ def create_first_superuser(
         )
 
     user.is_superuser = True
-    user.is_amo_admin = True
+    user.is_amo_admin = False
     db.add(user)
     db.commit()
     db.refresh(user)

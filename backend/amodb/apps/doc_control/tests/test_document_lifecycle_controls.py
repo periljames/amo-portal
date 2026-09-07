@@ -12,12 +12,14 @@ from amodb.apps.doc_control.workspace_document_lifecycle_router import (
 def test_document_type_choices_have_reconciliation_safe_storage_tokens() -> None:
     assert DOCUMENT_TYPES == {
         "MANUAL",
+        "REGULATION",
         "POLICY",
         "PROCEDURE",
         "WORK_INSTRUCTION",
         "FORM",
         "CHECKLIST",
         "REGISTER",
+        "RECORD",
         "EXTERNAL_DOCUMENT",
     }
     assert set(TYPE_STORAGE_VALUE) == DOCUMENT_TYPES
@@ -27,6 +29,8 @@ def test_document_type_choices_have_reconciliation_safe_storage_tokens() -> None
     assert TYPE_STORAGE_VALUE["CHECKLIST"] == "CHECKLIST"
     assert TYPE_STORAGE_VALUE["REGISTER"] == "REGISTER"
     assert TYPE_STORAGE_VALUE["POLICY"] == "POLICY"
+    assert TYPE_STORAGE_VALUE["REGULATION"] == "REGULATION"
+    assert TYPE_STORAGE_VALUE["RECORD"] == "RECORD"
     assert STRUCTURAL_STORAGE_VALUES == set(TYPE_STORAGE_VALUE.values())
 
 

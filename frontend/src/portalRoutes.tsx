@@ -17,7 +17,10 @@ import {
   type OnboardingStatus,
 } from "./services/auth";
 import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } from "./utils/roleAccess";
+import { getOperationalAccessUser } from "./utils/departmentAccess";
 import { hasQmsRolePermission, hasTrainingRolePermission, isPlatformSuperuser } from "./app/routeGuards";
+import { reportPortalError } from "./services/portalError";
+import { readCachedAdminProfileState } from "./services/adminProfileMode";
 
 const CHUNK_RECOVERY_PREFIX = "amoportal:route-chunk-recovery:";
 const CHUNK_RECOVERY_WINDOW_MS = 60_000;
@@ -159,7 +162,6 @@ const PlatformAnalyticsPage = lazyDefault(() => import("./pages/platform/Platfor
 const PlatformSecurityPage = lazyDefault(() => import("./pages/platform/PlatformSecurityPage"));
 const PlatformIntegrationsPage = lazyDefault(() => import("./pages/platform/PlatformIntegrationsPage"));
 const PlatformInfrastructurePage = lazyDefault(() => import("./pages/platform/PlatformInfrastructurePage"));
-const PlatformNetworkPage = lazyDefault(() => import("./pages/platform/PlatformNetworkPage"));
 const PasswordResetPage = lazyDefault(() => import("./pages/PasswordResetPage"));
 const DashboardPage = lazyDefault(() => import("./pages/DashboardPage"));
 const ReliabilityWorkspacePage = lazyDefault(() => import("./pages/reliability/ReliabilityWorkspacePage"));
@@ -192,6 +194,7 @@ const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 const QualityAuditAssuranceDashboardPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditAssuranceDashboardPage"));
 const QualityAuditsWorkspacePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditsWorkspacePage"));
 const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditPlanSchedulePage"));
+const QualityAuditScopesPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditScopesPage"));
 const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
 const QualityFindingDetailPage = lazyDefault(() => import("./pages/qualityAudits/QualityFindingDetailPage"));
 const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
@@ -201,6 +204,7 @@ const QualityEvidenceViewerPage = lazyDefault(() => import("./pages/QualityEvide
 const ManualReaderPage = lazyDefault(() => import("./pages/manuals/ManualReaderPage"));
 const ProductionWorkspacePage = lazyDefault(() => import("./pages/ProductionWorkspacePage"));
 const UserProfilePage = lazyDefault(() => import("./pages/UserProfilePage"));
+const AdminAccessGovernancePage = lazyDefault(() => import("./pages/AdminAccessGovernancePage"));
 const MaintenanceDashboardPage = lazyDefault(() => import("./pages/maintenance/MaintenanceDashboardPage"));
 const MaintenanceWorkOrdersPage = lazyDefault(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
 const MaintenanceWorkOrderDetailPage = lazyDefault(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
@@ -337,7 +341,11 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname);
   const currentUser = getCachedUser();
-  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+  const isTenantAdmin = Boolean(
+    currentUser?.is_superuser
+    || currentUser?.is_amo_admin
+    || (amoCode && readCachedAdminProfileState(amoCode)?.active),
+  );
 
   if (!currentUser) {
     const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
@@ -385,7 +393,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   const workforceSettings = feature === "rostering.settings"
     && new URLSearchParams(location.search).get("section") === "workforce";
   if (workforceSettings) return children;
-  if (!canViewFeature(currentUser, feature, getContext().department)) {
+  if (!canViewFeature(getOperationalAccessUser(currentUser), feature, getContext().department)) {
     return <Navigate to={getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department)} replace />;
   }
   return children;
@@ -405,33 +413,41 @@ type PortalRouteErrorBoundaryInnerProps = {
   resetKey: string;
 };
 
-class PortalRouteErrorBoundaryInner extends React.Component<PortalRouteErrorBoundaryInnerProps, { hasError: boolean; message: string }> {
+class PortalRouteErrorBoundaryInner extends React.Component<PortalRouteErrorBoundaryInnerProps, { hasError: boolean }> {
   constructor(props: PortalRouteErrorBoundaryInnerProps) {
     super(props);
-    this.state = { hasError: false, message: "" };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, message: error?.message || "Unexpected portal rendering error." };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
   componentDidUpdate(previousProps: PortalRouteErrorBoundaryInnerProps) {
     if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
-      this.setState({ hasError: false, message: "" });
+      this.setState({ hasError: false });
     }
   }
 
   componentDidCatch(error: Error) {
     console.error("Portal route render failure", error);
+    reportPortalError(error, {
+      source: "runtime",
+      title: "This page encountered a display problem",
+      message: "The page can be retried safely. Records already saved to the server are not affected.",
+      dedupeKey: `route-boundary:${this.props.resetKey}`,
+    });
   }
+
+  private retry = () => this.setState({ hasError: false });
 
   render() {
     if (this.state.hasError) {
       return (
         <div className="page-loading" role="alert">
           <div className="page-loading__card">
-            <div className="page-loading__label">Portal page could not be rendered. {this.state.message}</div>
-            <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
+            <div className="page-loading__label">This page encountered a temporary display problem. Your saved records are safe.</div>
+            <button type="button" className="btn btn-primary" onClick={this.retry}>Try again</button>
           </div>
         </div>
       );
@@ -483,7 +499,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/platform/security" element={<RequireAuth><PlatformSecurityPage /></RequireAuth>} />
       <Route path="/platform/integrations" element={<RequireAuth><PlatformIntegrationsPage /></RequireAuth>} />
       <Route path="/platform/infrastructure" element={<RequireAuth><PlatformInfrastructurePage /></RequireAuth>} />
-      <Route path="/platform/network" element={<RequireAuth><PlatformNetworkPage /></RequireAuth>} />
 
       <Route
         path="/verify/certificate/:certificateNumber"
@@ -567,6 +582,15 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AdminUserNewPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/access-governance"
+        element={
+          <RequireAuth>
+            <AdminAccessGovernancePage />
           </RequireAuth>
         }
       />
@@ -794,9 +818,11 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/audits/program" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/program/:programmeId/items/:itemId/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/checklists" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../../calendar/week" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/templates" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../checklists" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../plan?create=1" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
       {/* Authoritative schedule create/edit (weekend confirmation lives here). Do not redirect to calendar. */}
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/scopes" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScopesPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../plan" relative="path" replace /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRegisterPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/findings-actions" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><Navigate to="../register?tab=findings" replace /></RequireQmsPermission></RequireAuth>} />

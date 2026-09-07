@@ -26,6 +26,7 @@ const LEADER_TTL_MS = 45_000;
 const HEALTHY_PROBE_MS = 30_000;
 const CONNECTIVITY_PROBE_TIMEOUT_MS = 1_500;
 const BACKOFF_MS = [2_000, 5_000, 10_000, 20_000, 40_000, 60_000];
+const READINESS_NEUTRAL_PATHS = new Set(["/", "/livez", "/health", "/time"]);
 const tabId = typeof crypto !== "undefined" && "randomUUID" in crypto
   ? crypto.randomUUID()
   : `${Date.now()}-${Math.random()}`;
@@ -161,10 +162,10 @@ async function requestConnectivityProbe(): Promise<{ response: Response; legacy:
     signal: controller.signal,
   };
   try {
-    const response = await fetch(apiUrl("/livez"), init);
+    const response = await fetch(apiUrl("/readyz"), init);
     if (response.status !== 404) return { response, legacy: false };
-    // Older instances may not expose /livez yet. /health is process-only and
-    // avoids the PostgreSQL/migration work performed by /readyz and /healthz.
+    const healthResponse = await fetch(apiUrl("/healthz"), init);
+    if (healthResponse.status !== 404) return { response: healthResponse, legacy: true };
     return { response: await fetch(apiUrl("/health"), init), legacy: true };
   } finally {
     globalThis.clearTimeout(timeout);
@@ -224,6 +225,15 @@ export function markPortalSessionExpired(reason = "session-expired"): void {
   if (typeof window !== "undefined" && timer !== null) window.clearTimeout(timer);
 }
 
+function responseIsReadinessNeutral(response: Response): boolean {
+  if (!response.url) return false;
+  try {
+    return READINESS_NEUTRAL_PATHS.has(new URL(response.url, "http://portal.local").pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function notePortalResponse(response: Response): void {
   if (response.status === 503) {
     const delay = retryAfterMs(response) ?? nextDelay();
@@ -238,6 +248,10 @@ export function notePortalResponse(response: Response): void {
     schedule(delay);
     return;
   }
+  // A process-only endpoint can remain healthy while PostgreSQL, migrations or
+  // another required dependency is unavailable. It must never flip the whole
+  // portal ONLINE and trigger a refetch storm after a dependency 503.
+  if (response.ok && responseIsReadinessNeutral(response)) return;
   if (response.ok && snapshot.state !== "SESSION_EXPIRED") {
     const now = Date.now();
     const changed = snapshot.state !== "ONLINE" || snapshot.reason !== null;

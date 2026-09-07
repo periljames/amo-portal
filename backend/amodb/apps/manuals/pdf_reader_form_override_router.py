@@ -163,6 +163,56 @@ def _safe_reader_cache_path(revision: models.ManualRevision, source_sha256: str)
     return target
 
 
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _reader_source_metadata(
+    revision: models.ManualRevision,
+    inspection: PdfInspection,
+) -> tuple[str, int]:
+    """Return the checksum and size of the exact byte-stream given to PDF.js."""
+
+    if not inspection.has_javascript:
+        source = _source_path(revision)
+        return inspection.source_sha256, source.stat().st_size
+
+    reader_path = _safe_reader_cache_path(revision, inspection.source_sha256)
+    sidecar = reader_path.with_suffix(".metadata.json")
+    size = reader_path.stat().st_size
+    if sidecar.exists() and sidecar.is_file():
+        try:
+            cached = json.loads(sidecar.read_text(encoding="utf-8"))
+            checksum = str(cached.get("sha256") or "").strip().lower()
+            if len(checksum) == 64 and int(cached.get("size_bytes") or 0) == size:
+                return checksum, size
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            sidecar.unlink(missing_ok=True)
+
+    checksum = _sha256_path(reader_path)
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{inspection.source_sha256}-reader-",
+        suffix=".tmp",
+        dir=reader_path.parent,
+        delete=False,
+        mode="w",
+        encoding="utf-8",
+    ) as handle:
+        temporary = Path(handle.name).resolve()
+        json.dump({"sha256": checksum, "size_bytes": size}, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, sidecar)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return checksum, size
+
+
 def _normalized_widget_value(widget: Any) -> str:
     value = getattr(widget, "field_value", None)
     if value is None:
@@ -301,10 +351,16 @@ def pdf_reader_capabilities_override(
         execution_allowed=can_execute_profile(current_user, execution) if execution is not None else True,
     )
     if inspection.has_javascript:
+        reader_sha256, reader_size_bytes = _reader_source_metadata(revision, inspection)
         payload["reader_pdf_url"] = (
             f"/manuals/t/{tenant_slug.lower()}/{manual_id}/rev/{revision_id}/script-disabled.pdf"
             f"?v={inspection.source_sha256}"
         )
+        payload["reader_source_sha256"] = reader_sha256
+        payload["reader_size_bytes"] = reader_size_bytes
+    else:
+        payload["reader_source_sha256"] = inspection.source_sha256
+        payload["reader_size_bytes"] = _source_path(revision).stat().st_size
     return payload
 
 
@@ -329,6 +385,11 @@ async def script_disabled_reader_pdf(
     except PdfEngineError as exc:
         raise _engine_http_error(exc) from exc
     safe_code = "_".join(str(manual.code or "publication").split())
+    reader_sha256, _reader_size = await run_in_threadpool(
+        _reader_source_metadata,
+        revision,
+        inspection,
+    )
     headers = {
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Disposition": f'inline; filename="{safe_code}_SCRIPT_DISABLED.pdf"',
@@ -336,6 +397,7 @@ async def script_disabled_reader_pdf(
         "X-Publication-Source": "script-disabled-working-template",
         "X-AcroForm-Policy": "fillable-no-scripting",
         "X-PDF-Template-SHA256": inspection.source_sha256,
+        "X-PDF-Reader-SHA256": reader_sha256,
     }
     return FileResponse(path, media_type="application/pdf", headers=headers)
 

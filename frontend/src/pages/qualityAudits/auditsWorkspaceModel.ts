@@ -1,7 +1,7 @@
 import type { AuditProgramme, AuditProgrammeScheduleLink } from "../../services/qmsAuditProgramme";
 import type { QMSAuditOut } from "../../services/qmsCore";
 
-export type WorkspaceView = "mine" | "upcoming" | "active" | "completed";
+export type WorkspaceView = "all" | "mine" | "upcoming" | "active" | "completed";
 
 export type AuditProgrammeLinkHit = {
   programmeRef: string;
@@ -52,7 +52,10 @@ export function buildAuditProgrammeLinkIndex(
     }
 
     for (const item of items) {
-      if (!["SCHEDULED", "COMPLETED", "FOLLOW_UP_REQUIRED"].includes(item.state)) continue;
+      // A direct occurrence can now be issued from a governed requirement before
+      // the recurring schedule is activated. Its exact title still establishes
+      // the programme source; cancelled requirements remain excluded.
+      if (item.state === "CANCELLED") continue;
       const requirementTitle = item.title.trim();
       if (!requirementTitle) continue;
       remember(requirementTitle, { programmeRef, requirementTitle });
@@ -76,6 +79,7 @@ export function programmeLabelForAudit(
 }
 
 export const WORKSPACE_VIEWS: readonly WorkspaceView[] = [
+  "all",
   "mine",
   "upcoming",
   "active",
@@ -92,7 +96,7 @@ const ACTIVE_STATUSES = new Set<QMSAuditOut["status"]>(["IN_PROGRESS", "CAP_OPEN
 
 export function parseWorkspaceView(raw: string | null | undefined): WorkspaceView {
   const value = (raw || "").trim().toLowerCase();
-  return WORKSPACE_VIEWS.includes(value as WorkspaceView) ? (value as WorkspaceView) : "mine";
+  return WORKSPACE_VIEWS.includes(value as WorkspaceView) ? (value as WorkspaceView) : "all";
 }
 
 export function parseWorkspacePageSize(raw: string | null | undefined): WorkspacePageSize {
@@ -125,10 +129,12 @@ export function formatAuditDate(value?: string | null): string {
   }).format(parsed);
 }
 
-export function lifecycleLabel(status: QMSAuditOut["status"]): string {
+export function lifecycleLabel(status: QMSAuditOut["status"], audit?: QMSAuditOut): string {
   switch (status) {
     case "PLANNED":
-      return "Scheduled";
+      return audit && (!audit.planned_start || !audit.planned_end || !audit.lead_auditor_user_id)
+        ? "Draft setup"
+        : "Upcoming";
     case "IN_PROGRESS":
       return "In progress";
     case "CAP_OPEN":
@@ -164,6 +170,7 @@ export function matchesWorkspaceView(
   view: WorkspaceView,
   userId?: string | null,
 ): boolean {
+  if (view === "all") return true;
   if (view === "mine") return isAssignedTo(audit, userId);
   if (view === "upcoming") return audit.status === "PLANNED";
   if (view === "active") return ACTIVE_STATUSES.has(audit.status);
@@ -182,7 +189,7 @@ export function auditSearchHaystack(
     audit.kind,
     audit.lead_auditor_name,
     audit.auditee,
-    lifecycleLabel(audit.status),
+    lifecycleLabel(audit.status, audit),
     attentionLabel(audit) ?? "",
   ]
     .filter(Boolean)

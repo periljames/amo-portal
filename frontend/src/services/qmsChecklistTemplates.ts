@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import type { PublicationUploadPayload } from "./publications";
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
 
@@ -41,10 +42,35 @@ export type ChecklistTemplate = {
   description?: string | null;
   category?: string | null;
   audit_kind?: string | null;
+  canonical_document_id?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
   revisions?: ChecklistTemplateRevision[];
+};
+
+export type DmsChecklistLibraryItem = {
+  document_id: string;
+  code: string;
+  title: string;
+  document_type: "CHECKLIST" | "FORM";
+  hierarchy_path?: string | null;
+  owner_department?: string | null;
+  current_revision: {
+    id: string;
+    issue_number?: string | null;
+    revision_number: string;
+    effective_date?: string | null;
+    source_filename?: string | null;
+    source_sha256?: string | null;
+  };
+  reason?: string;
+  usage_count?: number;
+};
+
+export type DmsChecklistLibrary = {
+  items: DmsChecklistLibraryItem[];
+  recommendation?: DmsChecklistLibraryItem | null;
 };
 
 export type ChecklistBinding = {
@@ -61,6 +87,22 @@ export type ChecklistBinding = {
   application_reason: string;
   applied_by_user_id?: string | null;
   applied_at: string;
+};
+
+export type ChecklistAIDraft = {
+  draft: {
+    title: string;
+    description: string;
+    category: string;
+    audit_kind: string;
+    items: ChecklistTemplateItem[];
+    source_references: Array<Record<string, unknown>>;
+  };
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  request_id: string;
 };
 
 function json(method: string, body: unknown): RequestInit {
@@ -116,4 +158,75 @@ export function createRealtimeAuditChecklist(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklists/realtime`),
     json("POST", payload),
   );
+}
+
+export function generateChecklistDraft(
+  amoCode: string,
+  payload: {
+    source_document_ids: string[];
+    title: string;
+    audit_kind: string;
+    focus?: string;
+    max_items: number;
+  },
+) {
+  return apiRequest<ChecklistAIDraft>(
+    qmsPath(amoCode, "/audit-checklist-templates/ai-draft"),
+    { ...json("POST", payload), timeoutMs: 120_000 },
+  );
+}
+
+export function listCurrentDmsChecklists(
+  amoCode: string,
+  auditId: string,
+  filters: { q?: string; documentType?: "CHECKLIST" | "FORM" } = {},
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams();
+  if (filters.q?.trim()) query.set("q", filters.q.trim());
+  if (filters.documentType) query.set("document_type", filters.documentType);
+  const suffix = query.toString() ? `?${query}` : "";
+  return apiRequest<DmsChecklistLibrary>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library${suffix}`), {
+    timeoutMs: 15_000,
+    cacheTtlMs: 5_000,
+    signal,
+  });
+}
+
+export function bindCurrentDmsChecklist(
+  amoCode: string,
+  auditId: string,
+  documentId: string,
+  reason: string,
+  allowExistingItems: boolean,
+) {
+  return apiRequest<ChecklistBinding>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/${encodeURIComponent(documentId)}/bind-current`),
+    json("POST", { reason, allow_existing_items: allowExistingItems }),
+  );
+}
+
+export function uploadDmsChecklistFromAudit(
+  amoCode: string,
+  auditId: string,
+  payload: PublicationUploadPayload,
+) {
+  const body = new FormData();
+  body.append("code", payload.code);
+  body.append("title", payload.title);
+  body.append("revision_number", payload.rev_number);
+  body.append("issue_number", payload.issue_number || "00");
+  if (payload.effective_date) body.append("effective_date", payload.effective_date);
+  body.append("owner_department", payload.owner_role || "QUALITY");
+  body.append("reason", payload.change_log || "Uploaded and registered during governed audit preparation.");
+  body.append("control_metadata_json", JSON.stringify(payload.control_metadata || { document_type: "CHECKLIST" }));
+  body.append("file", payload.file);
+  return apiRequest<{
+    document: { id: string; code: string; title: string; document_type: string; revision_id: string; revision_status: string; workflow_required: boolean };
+    binding: ChecklistBinding | null;
+  }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/upload`), {
+    method: "POST",
+    body,
+    timeoutMs: 120_000,
+  });
 }

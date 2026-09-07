@@ -175,17 +175,23 @@ export type HrPosition = {
   id: string; code: string; canonical_title: string; job_family_id?: string | null; job_family_name?: string | null;
   grade_id?: string | null; grade_name?: string | null; description?: string | null;
   role_source: "TENANT" | "KCAR_2025"; role_key?: string | null; management_level: HrManagementLevel;
+  access_profile_id?: string | null; access_profile_name?: string | null; access_base_role_key?: string | null;
+  reports_to_position_id?: string | null; reports_to_position_title?: string | null;
   can_have_supervisor: boolean; is_locked: boolean; is_supervisory: boolean; is_active: boolean;
 };
 export type HrPositionWrite = {
   code: string; canonical_title: string; job_family_id?: string | null; grade_id?: string | null;
   description?: string | null; management_level: HrManagementLevel; tenant_function?: HrTenantFunction | null;
+  access_profile_id?: string | null; reports_to_position_id?: string | null;
   is_supervisory: boolean; is_active: boolean;
+};
+export type HrPositionAccessProfile = {
+  id: string; code: string; display_name: string; base_role_key: string; category: string; is_regulated: boolean;
 };
 export type HrHierarchyRoleStatus = {
   key: string; code: string; title: string; management_level: "MANAGER" | "EXECUTIVE";
   description: string; status: "READY" | "MATCH_AVAILABLE" | "MISSING";
-  position_id?: string | null; can_have_supervisor: false;
+  position_id?: string | null; can_have_supervisor: boolean;
 };
 export type HrTenantFunctionStatus = {
   key: HrTenantFunction; label: string; suggested_code: string; suggested_title: string;

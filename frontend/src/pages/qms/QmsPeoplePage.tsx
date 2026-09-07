@@ -851,7 +851,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div>
           <span>People & Privileges</span>
           <h1>Quality authorization board</h1>
-          <p>Configure privilege rules, grant or suspend authorizations, and verify audit assignment eligibility. Privileges are append-only records — revoke or suspend instead of deleting. AMO admins with training governance permission control rules and decisions.</p>
+          <p>Configure internal Quality-auditor privilege rules, grant or suspend privileges, and verify audit-assignment eligibility. These append-only decisions are controlled by the Quality Manager; portal administration alone grants no Quality authority.</p>
         </div>
         <div className="qms-people__hero-actions">
           <button type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} aria-hidden="true" /> Refresh</button>

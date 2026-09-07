@@ -60,9 +60,7 @@ const MyTasksPage: React.FC = () => {
   const currentUser = getCachedUser();
 
   const canViewOthers = Boolean(
-    currentUser?.is_superuser ||
-      currentUser?.is_amo_admin ||
-      currentUser?.role === "QUALITY_MANAGER"
+    currentUser?.role === "QUALITY_MANAGER"
   );
 
   const myTasksQuery = useQuery({

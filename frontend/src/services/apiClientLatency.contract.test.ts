@@ -47,10 +47,11 @@ describe("API client latency retry policy", () => {
     expect(offlineHttpSource).not.toContain('if (getPortalConnectivity().state === "RECOVERING") {\n    await waitForPortalReadiness();');
   });
 
-  it("uses lightweight liveness for interactive connectivity instead of dependency readiness", () => {
-    expect(connectivitySource).toContain('fetch(apiUrl("/livez"), init)');
+  it("uses dependency readiness so process-only health cannot cause a refetch storm", () => {
+    expect(connectivitySource).toContain('fetch(apiUrl("/readyz"), init)');
+    expect(connectivitySource).toContain('fetch(apiUrl("/healthz"), init)');
     expect(connectivitySource).toContain('fetch(apiUrl("/health"), init)');
-    expect(connectivitySource).not.toContain('apiUrl("/readyz")');
+    expect(connectivitySource).toContain("responseIsReadinessNeutral(response)");
     expect(connectivitySource).toContain("CONNECTIVITY_PROBE_TIMEOUT_MS");
   });
 

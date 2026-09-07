@@ -4,7 +4,6 @@ import { Navigate, useLocation, useParams } from "react-router-dom";
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
-import QmsAssurancePage from "./QmsAssurancePage";
 import QmsIntelligencePage from "./QmsIntelligencePage";
 import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
@@ -63,6 +62,10 @@ const QmsOverviewPage: React.FC = () => {
     return <Navigate to={`${qualityRoot}/calendar/week`} replace />;
   }
 
+  if (workspace === "assurance") {
+    return <Navigate to={`${qualityRoot}/audits/register`} replace />;
+  }
+
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
       {hub
@@ -73,9 +76,7 @@ const QmsOverviewPage: React.FC = () => {
             ? <QmsMissionsPage amoCode={amoCode} />
             : workspace === "people"
               ? <QmsPeoplePage amoCode={amoCode} />
-              : workspace === "assurance"
-                ? <QmsAssurancePage amoCode={amoCode} />
-                : <QmsIntelligencePage amoCode={amoCode} />}
+              : <QmsIntelligencePage amoCode={amoCode} />}
     </DepartmentLayout>
   );
 };

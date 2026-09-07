@@ -163,8 +163,7 @@ def _quality_users(db: Session, amo_id: str) -> list[account_models.User]:
     result: list[account_models.User] = []
     for user in rows:
         role = _enum(getattr(user, "role", None))
-        department = getattr(getattr(user, "department", None), "code", None)
-        if role in {"QUALITY_MANAGER", "AMO_ADMIN", "ADMIN"} or str(department or "").upper() == "QUALITY":
+        if role in {"QUALITY_MANAGER", "QUALITY_OFFICER"}:
             result.append(user)
     return result
 
@@ -1427,8 +1426,6 @@ def install_training_workflow_completion(router_module) -> None:
         current_user: account_models.User = Depends(get_current_active_user),
     ):
         manager_roles = {
-            "SUPERUSER",
-            "AMO_ADMIN",
             "ACCOUNTABLE_EXECUTIVE",
             "BASE_MAINTENANCE_MANAGER",
             "LINE_MAINTENANCE_MANAGER",

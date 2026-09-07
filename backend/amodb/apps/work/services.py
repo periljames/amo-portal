@@ -220,10 +220,10 @@ def _ensure_valid_work_order_transition(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="CRS is required to close this work order or provide NO_CRS_REQUIRED.",
                 )
-            if actor.role not in {AccountRole.AMO_ADMIN, AccountRole.QUALITY_MANAGER}:
+            if actor.role != AccountRole.QUALITY_MANAGER:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only AMO admin or quality manager can close without CRS.",
+                    detail="Only the Quality Manager can authorize closure without CRS.",
                 )
 
 

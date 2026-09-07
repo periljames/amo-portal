@@ -15,7 +15,7 @@ def _utcnow() -> datetime:
 class QualityAuditProgrammeOccurrenceLink(Base):
     __tablename__ = "quality_audit_programme_occurrence_links"
     __table_args__ = (
-        CheckConstraint("occurrence_type IN ('CUSTOM','RISK_TRIGGERED')", name="ck_quality_audit_programme_occurrence_type"),
+        CheckConstraint("occurrence_type IN ('CUSTOM','RISK_TRIGGERED','FIXED_DATE')", name="ck_quality_audit_programme_occurrence_type"),
         UniqueConstraint("amo_id", "schedule_id", name="uq_quality_audit_programme_occurrence_schedule"),
         UniqueConstraint("amo_id", "programme_item_id", "occurrence_key", name="uq_quality_audit_programme_occurrence_key"),
         Index("ix_quality_audit_programme_occurrence_item", "amo_id", "programme_item_id", "created_at"),

@@ -142,14 +142,35 @@ class WorkforcePosition(Base):
     description = Column(Text, nullable=True)
     role_source = Column(String(24), nullable=False, default="TENANT")
     role_key = Column(String(64), nullable=True)
+    access_profile_id = Column(
+        String(36),
+        ForeignKey("auth_role_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reports_to_position_id = Column(
+        String(36),
+        ForeignKey("workforce_positions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     management_level = Column(String(24), nullable=False, default="STAFF")
     is_supervisory = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    job_family = relationship("WorkforceJobFamily", lazy="joined")
-    grade = relationship("WorkforceGrade", lazy="joined")
+    # Select-in loading avoids PostgreSQL FOR UPDATE attempting to lock the
+    # nullable side of eager outer joins during governed position edits.
+    job_family = relationship("WorkforceJobFamily", lazy="selectin")
+    grade = relationship("WorkforceGrade", lazy="selectin")
+    access_profile = relationship("AuthRoleDefinition", lazy="selectin")
+    reports_to_position = relationship(
+        "WorkforcePosition",
+        remote_side=[id],
+        foreign_keys=[reports_to_position_id],
+        lazy="selectin",
+    )
 
 
 class WorkforcePersonPlacement(Base):

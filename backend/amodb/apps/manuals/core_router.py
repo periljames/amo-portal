@@ -67,11 +67,9 @@ def _role_value(current_user: account_models.User) -> str:
 def _is_manual_control_user(current_user: account_models.User) -> bool:
     role_value = _role_value(current_user)
     return bool(
-        getattr(current_user, "is_superuser", False)
-        or role_value in {
-            "AMO_ADMIN",
+        role_value in {
             "QUALITY_MANAGER",
-            "QUALITY_INSPECTOR",
+            "QUALITY_OFFICER",
             "DOCUMENT_CONTROL_OFFICER",
         }
     )
@@ -1040,6 +1038,7 @@ async def upload_docx_revision(
     issue_number: str = Form(""),
     effective_date: str | None = Form(None),
     change_log: str | None = Form(None),
+    control_metadata_json: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -1078,6 +1077,12 @@ async def upload_docx_revision(
         manual.manual_type = manual_type_value or manual.manual_type
         if owner_role.strip():
             manual.owner_role = owner_role.strip()
+
+    if db.query(models.ManualRevision.id).filter(
+        models.ManualRevision.manual_id == manual.id,
+        models.ManualRevision.rev_number == rev_value,
+    ).first():
+        raise HTTPException(status_code=409, detail=f"Revision {rev_value} already exists for {manual.code}.")
 
     rev = models.ManualRevision(
         manual_id=manual.id,
@@ -1173,6 +1178,38 @@ async def upload_docx_revision(
             min_reading_time=max(1, words // 180),
         ))
 
+    control_metadata = None
+    # Direct service-level callers receive FastAPI's Form sentinel when this
+    # optional value is omitted. Only a real non-empty string is JSON metadata.
+    normalized_control_metadata = (
+        control_metadata_json.strip()
+        if isinstance(control_metadata_json, str) and control_metadata_json.strip()
+        else None
+    )
+    if normalized_control_metadata:
+        from amodb.apps.doc_control.intake_service import (
+            apply_controlled_document_metadata,
+            ensure_intake_workflow,
+            parse_intake_metadata,
+        )
+
+        control_metadata = apply_controlled_document_metadata(
+            db,
+            tenant=tenant,
+            manual=manual,
+            user=current_user,
+            metadata=parse_intake_metadata(normalized_control_metadata),
+            origin="DMS_UPLOAD",
+        )
+        workflow = ensure_intake_workflow(
+            db,
+            tenant=tenant,
+            manual=manual,
+            revision=rev,
+            user=current_user,
+        )
+        control_metadata["workflow"] = {"id": workflow.id, "state": workflow.state}
+
     _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {
         "filename": file.filename,
         "paragraphs": paragraph_count,
@@ -1181,6 +1218,7 @@ async def upload_docx_revision(
         "metadata": metadata,
         "storage_path": storage_path,
         "source_sha256": source_sha,
+        "control_metadata": control_metadata,
     })
     db.commit()
     return {
@@ -1191,6 +1229,7 @@ async def upload_docx_revision(
         "source_type": "DOCX",
         "source_storage_path": storage_path,
         "source_sha256": source_sha,
+        "control_metadata": control_metadata,
     }
 
 
@@ -1206,6 +1245,7 @@ async def upload_pdf_revision(
     issue_number: str = Form(""),
     effective_date: str | None = Form(None),
     change_log: str | None = Form(None),
+    control_metadata_json: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -1244,6 +1284,12 @@ async def upload_pdf_revision(
         manual.manual_type = manual_type_value or manual.manual_type
         if owner_role.strip():
             manual.owner_role = owner_role.strip()
+
+    if db.query(models.ManualRevision.id).filter(
+        models.ManualRevision.manual_id == manual.id,
+        models.ManualRevision.rev_number == rev_value,
+    ).first():
+        raise HTTPException(status_code=409, detail=f"Revision {rev_value} already exists for {manual.code}.")
 
     rev = models.ManualRevision(
         manual_id=manual.id,
@@ -1346,6 +1392,36 @@ async def upload_pdf_revision(
             min_reading_time=max(1, (words + block_count) // 180),
         ))
 
+    control_metadata = None
+    normalized_control_metadata = (
+        control_metadata_json.strip()
+        if isinstance(control_metadata_json, str) and control_metadata_json.strip()
+        else None
+    )
+    if normalized_control_metadata:
+        from amodb.apps.doc_control.intake_service import (
+            apply_controlled_document_metadata,
+            ensure_intake_workflow,
+            parse_intake_metadata,
+        )
+
+        control_metadata = apply_controlled_document_metadata(
+            db,
+            tenant=tenant,
+            manual=manual,
+            user=current_user,
+            metadata=parse_intake_metadata(normalized_control_metadata),
+            origin="DMS_UPLOAD",
+        )
+        workflow = ensure_intake_workflow(
+            db,
+            tenant=tenant,
+            manual=manual,
+            revision=rev,
+            user=current_user,
+        )
+        control_metadata["workflow"] = {"id": workflow.id, "state": workflow.state}
+
     _audit(db, tenant.id, get_current_actor_id(), "revision.pdf_uploaded", "manual_revision", rev.id, request, {
         "filename": file.filename,
         "page_count": page_count,
@@ -1354,6 +1430,7 @@ async def upload_pdf_revision(
         "metadata": metadata,
         "storage_path": storage_path,
         "source_sha256": source_sha,
+        "control_metadata": control_metadata,
     })
     db.commit()
     return {
@@ -1364,6 +1441,7 @@ async def upload_pdf_revision(
         "source_type": "PDF",
         "source_storage_path": storage_path,
         "source_sha256": source_sha,
+        "control_metadata": control_metadata,
     }
 
 

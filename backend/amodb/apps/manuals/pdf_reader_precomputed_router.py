@@ -14,6 +14,7 @@ from amodb.security import get_current_active_user
 from .pdf_reader_form_override_router import (
     _engine_http_error,
     _load_direct_context,
+    _reader_source_metadata,
     _safe_form_capabilities,
     _safe_reader_cache_path,
 )
@@ -59,6 +60,13 @@ async def precomputed_pdf_reader_capabilities(
             else True
         ),
     )
+    reader_sha256, reader_size_bytes = await run_in_threadpool(
+        _reader_source_metadata,
+        revision,
+        inspection,
+    )
+    payload["reader_source_sha256"] = reader_sha256
+    payload["reader_size_bytes"] = reader_size_bytes
     if inspection.has_javascript:
         payload["reader_pdf_url"] = (
             f"/manuals/t/{tenant_slug.lower()}/{manual_id}/rev/{revision_id}/script-disabled.pdf"
@@ -100,6 +108,11 @@ async def precomputed_script_disabled_reader_pdf(
         raise _engine_http_error(exc) from exc
 
     safe_code = "_".join(str(manual.code or "publication").split())
+    reader_sha256, _reader_size = await run_in_threadpool(
+        _reader_source_metadata,
+        revision,
+        inspection,
+    )
     headers = {
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Disposition": f'inline; filename="{safe_code}_SCRIPT_DISABLED.pdf"',
@@ -107,6 +120,7 @@ async def precomputed_script_disabled_reader_pdf(
         "X-Publication-Source": "script-disabled-working-template",
         "X-AcroForm-Policy": "fillable-no-scripting",
         "X-PDF-Template-SHA256": inspection.source_sha256,
+        "X-PDF-Reader-SHA256": reader_sha256,
         "X-PDF-Capability-Cache": "checksum-keyed",
     }
     return FileResponse(path, media_type="application/pdf", headers=headers)

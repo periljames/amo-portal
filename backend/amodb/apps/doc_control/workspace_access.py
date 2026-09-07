@@ -34,6 +34,26 @@ _ENDPOINT_AUTHORIZED_WORKSPACE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = 
         re.compile(r"^/doc-control/workspace/t/[^/]+/knowledge/tree/?$"),
     ),
     (
+        "GET",
+        re.compile(
+            r"^/doc-control/workspace/t/[^/]+/knowledge/nodes/[^/]+/connections/?$"
+        ),
+    ),
+    (
+        "GET",
+        re.compile(r"^/doc-control/workspace/t/[^/]+/knowledge/records/?$"),
+    ),
+    (
+        "GET",
+        re.compile(r"^/doc-control/workspace/t/[^/]+/knowledge/records/[^/]+/?$"),
+    ),
+    (
+        "POST",
+        re.compile(
+            r"^/doc-control/workspace/t/[^/]+/knowledge/records/[^/]+/review/?$"
+        ),
+    ),
+    (
         "POST",
         re.compile(r"^/doc-control/workspace/t/[^/]+/knowledge/assist/?$"),
     ),

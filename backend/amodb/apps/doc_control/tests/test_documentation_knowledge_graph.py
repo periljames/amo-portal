@@ -38,12 +38,14 @@ def test_hierarchy_contract_covers_iso_documented_information_levels() -> None:
         "ROOT",
         "MANAGEMENT_SYSTEM",
         "MANUAL",
+        "REGULATION",
         "POLICY",
         "PROCEDURE",
         "WORK_INSTRUCTION",
         "FORM",
         "CHECKLIST",
         "REGISTER",
+        "RECORD",
         "EXTERNAL_DOCUMENT",
         "RECORD_SERIES",
     }
@@ -53,6 +55,8 @@ def test_hierarchy_contract_covers_iso_documented_information_levels() -> None:
     assert "PROCEDURE" in ALLOWED_CHILDREN["MANUAL"]
     assert "WORK_INSTRUCTION" in ALLOWED_CHILDREN["PROCEDURE"]
     assert {"FORM", "CHECKLIST", "REGISTER"}.issubset(ALLOWED_CHILDREN["WORK_INSTRUCTION"])
+    assert {"POLICY", "PROCEDURE"}.issubset(ALLOWED_CHILDREN["REGULATION"])
+    assert "RECORD" in ALLOWED_CHILDREN["FORM"]
     assert ALLOWED_CHILDREN["RECORD_SERIES"] == set()
 
 
@@ -113,7 +117,7 @@ def test_knowledge_routes_are_registered_before_generic_compatibility_routes() -
 def test_frontend_reader_and_canonical_library_surface_the_graph() -> None:
     root = Path(__file__).resolve().parents[5]
     pdf_viewer = (root / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx").read_text(encoding="utf-8")
-    reader_core = (root / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx").read_text(encoding="utf-8")
+    reader_core = (root / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx").read_text(encoding="utf-8")
     linked_panel = (root / "frontend/src/pages/manuals/LinkedDocumentationPanel.tsx").read_text(encoding="utf-8")
     library = (root / "frontend/src/pages/documentControl/DocumentLibraryHubPage.tsx").read_text(encoding="utf-8")
     record_actions = (root / "frontend/src/pages/documentControl/DocumentControlRecordActions.tsx").read_text(encoding="utf-8")
@@ -139,3 +143,16 @@ def test_node_connection_reader_is_access_filtered_and_record_scoped() -> None:
     assert "DocumentationRecord.submitted_by_user_id == user.id" in reader
     assert 'records_scope = "ALL" if is_control_user(user) else "OWN"' in reader
     assert "/knowledge/nodes/${encodeURIComponent(nodeId)}/connections" in service
+
+
+def test_read_only_lineage_and_owned_record_routes_bypass_only_the_coarse_controller_gate() -> None:
+    root = Path(__file__).resolve().parents[5]
+    access = (root / "backend/amodb/apps/doc_control/workspace_access.py").read_text(encoding="utf-8")
+    records = (root / "backend/amodb/apps/doc_control/knowledge_records_router.py").read_text(encoding="utf-8")
+    assert "knowledge/nodes/[^/]+/connections" in access
+    assert "knowledge/records/?$" in access
+    assert "knowledge/records/[^/]+/?$" in access
+    assert "DocumentationRecord.submitted_by_user_id == current_user.id" in records
+    assert "can_read_manual(user, profiles.get(str(row.id)))" in records
+    assert '"records_scope": "ALL" if control else "OWN"' in records
+    assert "require_decision_approver(current_user)" in records

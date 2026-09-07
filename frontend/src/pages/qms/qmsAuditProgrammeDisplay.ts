@@ -26,7 +26,8 @@ export function programmeKindTitle(kind: ProgrammeKind, year: number): string {
   return `${KIND_PREFIX[kind]} (${year})`;
 }
 
-export function programmeKindOf(programme: Pick<AuditProgramme, "title">): ProgrammeKindSlot {
+export function programmeKindOf(programme: Pick<AuditProgramme, "title"> & { programme_kind?: ProgrammeKind }): ProgrammeKindSlot {
+  if (programme.programme_kind && KIND_PREFIX[programme.programme_kind]) return programme.programme_kind;
   const normalized = programme.title.trim().toLowerCase();
   if (normalized.startsWith("internal audit")) return "INTERNAL";
   if (normalized.startsWith("external audit")) return "EXTERNAL";
@@ -83,8 +84,11 @@ export function programmePortfolioSummary(
 }
 
 export function programmeStatusHint(status: AuditProgrammeStatus): string | null {
-  if (status === "DRAFT" || status === "UNDER_REVIEW") {
+  if (status === "DRAFT") {
     return "Programmes cannot be deleted. Finish approval or ask Quality to close an unwanted draft.";
+  }
+  if (status === "UNDER_REVIEW") {
+    return "The submitted revision is frozen. A reviewer must return it to draft before any content changes.";
   }
   if (status === "APPROVED" || status === "ACTIVE") {
     return "Published programmes are protected. Create an amendment to change coverage.";

@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.utils.identifiers import generate_uuid7
-from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import access_control, models as account_models
 from amodb.apps.fleet import models as fleet_models
 from amodb.apps.tasks import models as task_models
 from amodb.apps.work import models as work_models
@@ -204,37 +204,18 @@ def tenant_id(user: account_models.User) -> str:
 
 def capabilities_for_user(db: Session, user: account_models.User) -> List[str]:
     if getattr(user, "is_superuser", False):
-        return list(ALL_CAPABILITIES)
-    amo_id = tenant_id(user)
-    try:
-        rows = db.execute(
-            text(
-                """
-                SELECT DISTINCT cd.code
-                FROM auth_user_role_assignments ura
-                JOIN auth_role_capability_bindings rcb ON rcb.role_id = ura.role_id
-                JOIN auth_capability_definitions cd ON cd.id = rcb.capability_id
-                WHERE ura.amo_id = :amo_id
-                  AND ura.user_id = :user_id
-                  AND cd.module = 'reliability'
-                  AND (ura.valid_from IS NULL OR ura.valid_from <= CURRENT_TIMESTAMP)
-                  AND (ura.valid_to IS NULL OR ura.valid_to >= CURRENT_TIMESTAMP)
-                ORDER BY cd.code
-                """
-            ),
-            {"amo_id": amo_id, "user_id": str(user.id)},
-        ).scalars().all()
-        return [str(row) for row in rows]
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Reliability authorization capability service unavailable.",
-        ) from exc
+        # Platform support may inspect controlled evidence, but platform
+        # identity is never a tenant approval or operational-management role.
+        return ["reliability.read", "reliability.audit.read"]
+    tenant_id(user)
+    return sorted(
+        code
+        for code in access_control.capability_codes_for_user(db, user=user)
+        if code in ALL_CAPABILITIES
+    )
 
 
 def require_capability(db: Session, user: account_models.User, capability: str) -> None:
-    if getattr(user, "is_superuser", False):
-        return
     if capability not in capabilities_for_user(db, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

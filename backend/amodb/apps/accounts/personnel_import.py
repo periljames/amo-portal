@@ -9,7 +9,7 @@ from typing import Any, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import access_control, models, schemas
 from .services import get_password_hash
 
 STATUS_ACTIVE = "Active"
@@ -417,7 +417,9 @@ def import_personnel_rows(
                     first_name=parsed.first_name,
                     last_name=parsed.last_name,
                     full_name=parsed.full_name or f"{parsed.first_name} {parsed.last_name}".strip(),
-                    role=models.AccountRole.TECHNICIAN,
+                    # Imported position text is workforce evidence, never an
+                    # authorization decision. Access is assigned explicitly.
+                    role=models.AccountRole.USER,
                     position_title=parsed.position_title,
                     phone=parsed.phone_number,
                     secondary_phone=parsed.secondary_phone,
@@ -430,6 +432,7 @@ def import_personnel_rows(
                 )
                 db.add(existing_user)
                 db.flush()
+                access_control.assign_default_profile_for_role(db, user=existing_user)
                 created_accounts += 1
         else:
             updated_accounts += 1

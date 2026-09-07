@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 const page = readFileSync(new URL("./PublicationsReaderPage.tsx", import.meta.url), "utf-8");
 const panel = readFileSync(new URL("./PublicationGovernancePanel.tsx", import.meta.url), "utf-8");
 const viewer = readFileSync(new URL("./PublicationPdfLayoutViewer.tsx", import.meta.url), "utf-8");
-const core = readFileSync(new URL("./PdfReaderCoreV3.tsx", import.meta.url), "utf-8");
+const core = readFileSync(new URL("./PdfReaderCoreV4.tsx", import.meta.url), "utf-8");
 
 describe("Publication reader governance architecture", () => {
   it("layers governance around the reader instead of taking over PDF navigation", () => {
@@ -28,7 +28,7 @@ describe("Publication reader governance architecture", () => {
     expect(panel).toContain("getEvidenceSnapshot");
   });
 
-  it("renders governed annotations in V3's non-navigation overlay slot", () => {
+  it("renders governed annotations in the active reader's non-navigation overlay slot", () => {
     expect(page).toContain("governedAnnotations={readerAnnotations}");
     expect(page).toContain("onAnnotationsChanged={setReaderAnnotations}");
     expect(viewer).toContain("publication-governed-annotation-mark");

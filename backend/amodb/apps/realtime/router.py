@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
@@ -45,21 +46,6 @@ def get_current_active_realtime_user(
 
 def _flush_outbox() -> None:
     gateway.gateway.flush_pending()
-
-def _require_notification_admin(user: account_models.User) -> None:
-    role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", "")) or "").upper()
-    if (
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or role in {"SUPERUSER", "AMO_ADMIN"}
-    ):
-        return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Only an AMO administrator may change tenant email delivery preferences",
-    )
-
-
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
 def issue_realtime_token(
@@ -352,9 +338,8 @@ def notification_preferences_update(
 @router.get("/notifications/tenant-preferences")
 def notification_tenant_preferences(
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_realtime_user),
+    current_user: account_models.User = Depends(require_active_admin_profile),
 ):
-    _require_notification_admin(current_user)
     return notification_preferences.get_tenant_preferences(db, user=current_user)
 
 
@@ -362,9 +347,8 @@ def notification_tenant_preferences(
 def notification_tenant_preferences_update(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_realtime_user),
+    current_user: account_models.User = Depends(require_active_admin_profile),
 ):
-    _require_notification_admin(current_user)
     return notification_preferences.update_tenant_preferences(
         db,
         user=current_user,

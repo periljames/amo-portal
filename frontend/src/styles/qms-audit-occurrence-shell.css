@@ -11,7 +11,7 @@
   flex-direction: column;
   gap: 0;
   min-width: 0;
-  width: min(100%, 104rem);
+  width: min(100%, 92rem);
   min-height: calc(100vh - var(--tenant-header-height, 56px));
   margin-inline: auto;
   border-inline: 1px solid var(--qms-line, #d0d8e1);
@@ -100,7 +100,7 @@ html.quality-audit-canonical-occurrence .qms-audit-occurrence-shell__body {
   height: auto;
 }
 
-@media (max-width: 104rem) {
+@media (max-width: 92rem) {
   .qms-audit-occurrence-shell {
     border-inline: 0;
     box-shadow: none;

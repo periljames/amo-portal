@@ -36,6 +36,7 @@ import {
   getPublicationReaderBootstrap,
   getPublicationReaderContent,
   readCachedPublicationBootstrap,
+  readPersistedPublicationBootstrap,
   searchPublicationReader,
   updatePublicationReaderPosition,
   type PublicationAcknowledgement,
@@ -266,40 +267,50 @@ export default function PublicationsReaderPage() {
       return;
     }
     let active = true;
-    const existing = readCachedPublicationBootstrap(tenant, manualId, revId);
-    if (existing) {
-      applyBootstrap(existing);
-      setLoading(false);
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-      setRefreshing(false);
-    }
+    let workflowTimer: number | null = null;
+    setLoading(true);
+    setRefreshing(false);
     setError("");
     setAcknowledgementError("");
-    getPublicationReaderBootstrap(tenant, manualId, revId)
-      .then((bootstrap) => {
-        if (!active) return;
-        applyBootstrap(bootstrap);
-        setError("");
-      })
-      .catch((caught: unknown) => {
-        if (!active || existing) return;
-        setError(caught instanceof Error ? caught.message : "The publication could not be loaded.");
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      });
 
-    const idle = window.setTimeout(() => {
-      getRevisionWorkflow(tenant, manualId, revId).then((value) => active && setWorkflow(value)).catch(() => undefined);
-    }, existing ? 150 : 700);
+    const open = async () => {
+      const existing = readCachedPublicationBootstrap(tenant, manualId, revId)
+        || await readPersistedPublicationBootstrap(tenant, manualId, revId);
+      if (!active) return;
+      if (existing) {
+        applyBootstrap(existing);
+        setLoading(false);
+        setRefreshing(navigator.onLine !== false);
+      }
+
+      if (navigator.onLine !== false) {
+        try {
+          const bootstrap = await getPublicationReaderBootstrap(tenant, manualId, revId);
+          if (!active) return;
+          applyBootstrap(bootstrap);
+          setError("");
+        } catch (caught) {
+          if (!active || existing) return;
+          setError(caught instanceof Error ? caught.message : "The publication could not be loaded.");
+        }
+      } else if (!existing) {
+        setError("This publication has not been saved for offline use on this device.");
+      }
+
+      if (!active) return;
+      setLoading(false);
+      setRefreshing(false);
+      workflowTimer = window.setTimeout(() => {
+        getRevisionWorkflow(tenant, manualId, revId)
+          .then((value) => active && setWorkflow(value))
+          .catch(() => undefined);
+      }, existing ? 150 : 700);
+    };
+
+    void open();
     return () => {
       active = false;
-      window.clearTimeout(idle);
+      if (workflowTimer !== null) window.clearTimeout(workflowTimer);
     };
   }, [applyBootstrap, manualId, revId, tenant]);
 
@@ -692,7 +703,7 @@ export default function PublicationsReaderPage() {
           <header className="publication-document-header">
             <div className="publication-document-header__title">
               <button type="button" className="publication-mobile-nav-button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open table of contents"><Menu size={18} /></button>
-              <div><p>{metadata.manual_type || "Publication"}</p><h1>{metadata.title}</h1><span>{metadata.code} · Issue {metadata.issue_number || "—"} · Revision {metadata.revision_number || "—"}</span><span className={`publication-control-status ${isPublished ? "publication-control-status--controlled" : "publication-control-status--uncontrolled"}`}>{isPublished ? "Controlled publication" : "Uncontrolled draft"}</span></div>
+              <div><p>{metadata.manual_type || "Publication"}</p><h1>{metadata.title}</h1><span>{metadata.code} · Issue {metadata.issue_number || "—"} · Revision {metadata.revision_number || "—"}</span><span className={`publication-control-status ${isPublished ? "publication-control-status--controlled" : "publication-control-status--uncontrolled"}`}>{isPublished ? "Controlled publication" : "Controlled draft"}</span></div>
             </div>
             <div className="publication-document-header__actions">
               {refreshing ? <span className="publication-cache-state">Refreshing index…</span> : <span className="publication-cache-state">Reader ready</span>}
@@ -706,7 +717,7 @@ export default function PublicationsReaderPage() {
             </div>
           </header>
 
-          {!isPublished ? <div className="publication-control-banner" role="status"><TriangleAlert size={18} /><div><strong>Uncontrolled draft</strong>The source is shown exactly as uploaded. A translucent non-destructive reader watermark remains behind the page content; downloaded and printed draft copies remain formally marked uncontrolled.</div></div> : null}
+          {!isPublished ? <div className="publication-control-banner" role="status"><TriangleAlert size={18} /><div><strong>Controlled draft — not yet issued</strong>This revision is registered in DMS and moving through its approval workflow. Downloads and printouts remain marked as uncontrolled copies until publication.</div></div> : null}
 
           <div className="publication-floating-header">
             {navigationCollapsed ? <button type="button" className="publication-nav-restore" onClick={() => setNavigationCollapsed(false)} aria-label="Show document navigation"><PanelLeftOpen size={17} /></button> : <button type="button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open document navigation"><Menu size={17} /></button>}
@@ -743,6 +754,7 @@ export default function PublicationsReaderPage() {
                     viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       title={metadata.title}
+                      sourceByteLength={metadata.source_size_bytes || metadata.rendered_pdf_size_bytes}
                       uncontrolled={!isPublished}
                       navigationRequest={pdfNavigationRequest}
                       initialPage={payload.progress?.last_page_number || localPosition.page || 1}

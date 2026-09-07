@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,6 +23,7 @@ import {
   ChevronsRight,
   Download,
   FilePenLine,
+  HardDriveDownload,
   LoaderCircle,
   Maximize2,
   Minimize2,
@@ -88,17 +90,20 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-const PdfDocument = Document as unknown as FC<any>;
-const PdfPage = Page as unknown as FC<any>;
+const PdfDocument = Document as unknown as FC<Record<string, unknown>>;
+const PdfPage = Page as unknown as FC<Record<string, unknown>>;
 const PAGE_GAP = 18;
 const PAGE_TOP_INSET = 14;
 const NAVIGATION_TIMEOUT_MS = 4_000;
 
 type PdfDocumentHandle = {
   numPages: number;
-  getOutline?: () => Promise<any[] | null>;
-  getDestination?: (name: string) => Promise<any[] | null>;
+  getOutline?: () => Promise<PdfOutlineSourceItem[] | null>;
+  getDestination?: (name: string) => Promise<unknown[] | null>;
   getPageIndex?: (value: unknown) => Promise<number>;
+  getPage: (pageNumber: number) => Promise<{
+    getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
+  }>;
   getFieldObjects?: () => Promise<Record<string, Array<Record<string, unknown>>> | null>;
   saveDocument?: () => Promise<Uint8Array>;
   annotationStorage?: {
@@ -115,6 +120,19 @@ type PdfItemClickTarget = {
   pageNumber?: number | null;
   url?: string | null;
   unsafeUrl?: string | null;
+  fieldType?: string | null;
+};
+
+type PdfOutlineSourceItem = {
+  title?: string | null;
+  dest?: string | unknown[] | null;
+  items?: PdfOutlineSourceItem[];
+};
+
+type PdfLoadedPage = {
+  originalWidth?: number;
+  originalHeight?: number;
+  view?: number[];
 };
 
 export type PdfReaderOutlineItem = {
@@ -129,23 +147,34 @@ export type PdfReaderNavigationRequest = {
   token: number;
 };
 
+export type PdfReaderOfflineControl = {
+  state: "CHECKING" | "UNAVAILABLE" | "AVAILABLE" | "SAVING" | "ERROR";
+  error?: string;
+  supported: boolean;
+  onSave: () => Promise<void>;
+  onRemove: () => Promise<void>;
+};
+
 export type PdfReaderCoreProps = {
   fileUrl: string;
   originalDownloadUrl?: string;
   title: string;
   filename?: string | null;
+  sourceByteLength?: number | null;
   identity: PdfWorkingCopyIdentity;
   uncontrolled?: boolean;
   initialPage?: number;
   initialZoom?: number;
   navigationRequest?: PdfReaderNavigationRequest | null;
   capabilities?: PdfReaderCapabilities | null;
+  offlineControl?: PdfReaderOfflineControl;
   compact?: boolean;
   renderPageOverlay?: (pageNumber: number) => ReactNode;
   onPageChange?: (pageNumber: number) => void;
   onZoomChange?: (zoomPercent: number) => void;
   onAcroFormDetected?: (hasAcroForm: boolean) => void;
   onOutlineReady?: (items: PdfReaderOutlineItem[]) => void;
+  onSourceLoadError?: (error: unknown) => void;
   onDirtyChange?: (dirty: boolean) => void;
   onSubmitWorkingCopy?: (file: File) => Promise<DocumentationRecord>;
   onRecordCreated?: (record: DocumentationRecord) => void;
@@ -179,7 +208,7 @@ async function resolveOutline(pdf: PdfDocumentHandle): Promise<PdfReaderOutlineI
   if (!Array.isArray(source)) return [];
   const rows: PdfReaderOutlineItem[] = [];
 
-  const visit = async (items: any[], level: number, prefix: string): Promise<void> => {
+  const visit = async (items: PdfOutlineSourceItem[], level: number, prefix: string): Promise<void> => {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       let destination = item?.dest;
@@ -225,6 +254,7 @@ function detectedFormPages(
 function VirtualPdfPage({
   page,
   width,
+  ratio,
   safeForm,
   query,
   searchOptions,
@@ -232,6 +262,7 @@ function VirtualPdfPage({
   active,
   renderOverlay,
   maxDevicePixelRatio,
+  maxCanvasPixels,
   onMetrics,
   onFormDetected,
   onEdited,
@@ -241,6 +272,7 @@ function VirtualPdfPage({
 }: {
   page: number;
   width: number;
+  ratio: number;
   safeForm: boolean;
   query: string;
   searchOptions: PdfSearchOptions;
@@ -248,6 +280,7 @@ function VirtualPdfPage({
   active: boolean;
   renderOverlay?: (pageNumber: number) => ReactNode;
   maxDevicePixelRatio: number;
+  maxCanvasPixels: number;
   onMetrics: (page: number, ratio: number, originalWidth: number) => void;
   onFormDetected: (page: number) => void;
   onEdited: (page: number) => void;
@@ -261,14 +294,6 @@ function VirtualPdfPage({
   const [failed, setFailed] = useState("");
   const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
   const [internalPages, setInternalPages] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    annotationGenerationRef.current += 1;
-    setReady(false);
-    setFailed("");
-    setInternalTargets({});
-    setInternalPages({});
-  }, [page, width]);
 
   useEffect(() => {
     if (!ready || !pageRef.current) return;
@@ -291,7 +316,10 @@ function VirtualPdfPage({
       id={`pdf-page-${page}`}
       className={`pdfv3-page${ready ? " is-ready" : ""}${active ? " is-current" : ""}`}
       data-page-number={page}
-      style={{ "--pdfv3-page-width": `${width}px` } as CSSProperties}
+      style={{
+        "--pdfv3-page-width": `${width}px`,
+        "--pdfv3-page-ratio": String(ratio),
+      } as CSSProperties}
       onClickCapture={(event) => {
         const target = event.target;
         if (!(target instanceof Element)) return;
@@ -339,14 +367,19 @@ function VirtualPdfPage({
           renderTextLayer
           renderAnnotationLayer
           renderForms={safeForm}
-          devicePixelRatio={pdfDevicePixelRatio(maxDevicePixelRatio)}
+          devicePixelRatio={pdfDevicePixelRatio(
+            maxDevicePixelRatio,
+            width,
+            width * ratio,
+            maxCanvasPixels,
+          )}
           customTextRenderer={({ str }: { str: string }) => (
             highlightPdfText(str, query, searchOptions, false)
           )}
           loading={null}
           error={null}
           onGetAnnotationsSuccess={(annotations: PdfItemClickTarget[]) => {
-            if (annotations.some((item) => item?.subtype === "Widget" || (item as any)?.fieldType)) {
+            if (annotations.some((item) => item?.subtype === "Widget" || item.fieldType)) {
               onFormDetected(page);
             }
 
@@ -374,7 +407,7 @@ function VirtualPdfPage({
               ));
             });
           }}
-          onLoadSuccess={(loaded: any) => {
+          onLoadSuccess={(loaded: PdfLoadedPage) => {
             const originalWidth = Number(loaded?.originalWidth || loaded?.view?.[2] || 612);
             const originalHeight = Number(
               loaded?.originalHeight || loaded?.view?.[3] || originalWidth * 1.414,
@@ -410,12 +443,14 @@ export default function PdfReaderCoreV4({
   initialZoom = 100,
   navigationRequest,
   capabilities: suppliedCapabilities,
+  offlineControl,
   compact = false,
   renderPageOverlay,
   onPageChange,
   onZoomChange,
   onAcroFormDetected,
   onOutlineReady,
+  onSourceLoadError,
   onDirtyChange,
   onSubmitWorkingCopy,
   onRecordCreated,
@@ -446,7 +481,7 @@ export default function PdfReaderCoreV4({
   const [pageInput, setPageInput] = useState(String(Math.max(1, initialPage)));
   const [pageRatios, setPageRatios] = useState<Record<number, number>>({});
   const [pageOriginalWidths, setPageOriginalWidths] = useState<Record<number, number>>({});
-  const [hostSize, setHostSize] = useState({ width: 960, height: 720 });
+  const [hostSize, setHostSize] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(clampPdfZoom(initialZoom));
   const [fitMode, setFitMode] = useState<PdfScaleMode>(initialZoom === 100 ? "AUTO" : "CUSTOM");
   const [formPages, setFormPages] = useState<number[]>([]);
@@ -486,17 +521,35 @@ export default function PdfReaderCoreV4({
       && !capabilities.encrypted,
   );
 
-  const availableWidth = Math.max(280, Math.min(1800, hostSize.width - (compact ? 16 : 34)));
-  const currentRatio = pageRatios[currentPage] || 1.414;
-  const currentActualWidth = pageOriginalWidths[currentPage] || 612;
-  const pageWidth = pdfPageWidth({
+  const measuredRatios = Object.values(pageRatios);
+  const measuredWidths = Object.values(pageOriginalWidths);
+  const fallbackRatio = pageRatios[currentPage] || pageRatios[1] || measuredRatios[0] || 1.414;
+  const fallbackActualWidth = pageOriginalWidths[currentPage]
+    || pageOriginalWidths[1]
+    || measuredWidths[0]
+    || 612;
+  const availableWidth = Math.max(1, Math.min(1800, hostSize.width - (compact ? 16 : 34)));
+  const availableHeight = Math.max(1, hostSize.height - (PAGE_TOP_INSET * 2));
+  const pageWidthFor = useCallback((page: number) => pdfPageWidth({
     mode: fitMode,
     zoom,
     availableWidth,
-    availableHeight: hostSize.height - 48,
-    pageRatio: currentRatio,
-    actualWidth: currentActualWidth,
-  });
+    availableHeight,
+    pageRatio: pageRatios[page] || fallbackRatio,
+    actualWidth: pageOriginalWidths[page] || fallbackActualWidth,
+  }), [
+    availableHeight,
+    availableWidth,
+    fallbackActualWidth,
+    fallbackRatio,
+    fitMode,
+    pageOriginalWidths,
+    pageRatios,
+    zoom,
+  ]);
+  const currentActualWidth = pageOriginalWidths[currentPage] || fallbackActualWidth;
+  const pageWidth = pageWidthFor(currentPage);
+  const viewportReady = hostSize.width > 0 && hostSize.height > 0;
 
   const rangeExtractor = useCallback((range: Range) => {
     const visible = defaultRangeExtractor(range);
@@ -508,9 +561,9 @@ export default function PdfReaderCoreV4({
     count: pageCount,
     getScrollElement: () => viewportRef.current,
     estimateSize: (index) => (
-      Math.round(pageWidth * (pageRatios[index + 1] || 1.414)) + PAGE_GAP
+      Math.round(pageWidthFor(index + 1) * (pageRatios[index + 1] || fallbackRatio)) + PAGE_GAP
     ),
-    overscan: profile.mode === "constrained" ? 1 : profile.mode === "burst" ? 3 : 2,
+    overscan: profile.renderRadius,
     rangeExtractor,
     getItemKey: (index) => index + 1,
   });
@@ -542,19 +595,17 @@ export default function PdfReaderCoreV4({
     setPageInput(String(next));
     onPageChange?.(next);
 
-    setHotIndexes((current) => {
-      const candidates = [
-        next - 1,
-        next,
-        next + 1,
-        ...current.map((index) => index + 1),
-      ]
-        .filter((value) => value >= 1 && value <= pageCount)
-        .map((value) => value - 1);
-      const limit = profile.mode === "burst" ? 10 : profile.mode === "constrained" ? 4 : 7;
-      return [...new Set(candidates)].slice(0, limit);
+    setHotIndexes(() => {
+      const candidates: number[] = [];
+      for (let distance = 0; distance <= profile.renderRadius; distance += 1) {
+        if (distance === 0) candidates.push(next - 1);
+        else candidates.push(next - 1 + distance, next - 1 - distance);
+      }
+      return [...new Set(candidates)]
+        .filter((index) => index >= 0 && index < pageCount)
+        .slice(0, profile.hotPageLimit);
     });
-  }, [onPageChange, pageCount, profile.mode, settleNavigation]);
+  }, [onPageChange, pageCount, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
     const viewport = viewportRef.current;
@@ -726,24 +777,40 @@ export default function PdfReaderCoreV4({
     setEditedState,
   ]);
 
-  useEffect(() => {
-    const host = hostRef.current;
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!host || !viewport) return;
+    if (!viewport) return;
+    let frame: number | null = null;
 
-    const update = () => setHostSize({
-      width: Math.max(320, viewport.clientWidth),
-      height: Math.max(420, viewport.clientHeight),
-    });
+    const update = (entry?: ResizeObserverEntry) => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const width = Math.floor(entry?.contentRect.width || viewport.clientWidth);
+        const height = Math.floor(entry?.contentRect.height || viewport.clientHeight);
+        if (width <= 0 || height <= 0) return;
+        setHostSize((current) => (
+          current.width === width && current.height === height ? current : { width, height }
+        ));
+      });
+    };
     update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver((entries) => update(entries[0]));
     observer?.observe(viewport);
-    return () => observer?.disconnect();
+    const handleWindowResize = () => update();
+    window.addEventListener("resize", handleWindowResize);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
     virtualizer.measure();
-  }, [pageRatios, pageOriginalWidths, pageWidth, virtualizer]);
+  }, [availableHeight, availableWidth, fitMode, pageOriginalWidths, pageRatios, virtualizer, zoom]);
 
   useEffect(() => {
     const percent = Math.max(1, Math.round((pageWidth / Math.max(1, currentActualWidth)) * 100));
@@ -1067,7 +1134,7 @@ export default function PdfReaderCoreV4({
 
     try {
       const rows = await searchPdfDocument(
-        pdfRef.current as any,
+        pdfRef.current,
         query.trim(),
         searchOptions,
         controller.signal,
@@ -1216,6 +1283,38 @@ export default function PdfReaderCoreV4({
         </div>
 
         <div className="pdfv3-actions">
+          {offlineControl?.supported ? (
+            <details className="pdfv3-menu pdfv3-offline-menu">
+              <summary
+                aria-label={offlineControl.state === "AVAILABLE" ? "Available offline" : "Offline access"}
+                title={offlineControl.state === "AVAILABLE" ? "Available offline" : "Offline access"}
+                data-state={offlineControl.state}
+              >
+                {offlineControl.state === "SAVING"
+                  ? <LoaderCircle className="is-spinning" size={16} />
+                  : <HardDriveDownload size={16} />}
+              </summary>
+              <div>
+                <strong>
+                  {offlineControl.state === "AVAILABLE" ? "Available offline" : "Offline access"}
+                </strong>
+                <small>Encrypted on this device and bound to this controlled revision.</small>
+                {offlineControl.state === "AVAILABLE" ? (
+                  <button type="button" onClick={() => void offlineControl.onRemove()}>
+                    Remove offline copy
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={offlineControl.state === "SAVING" || offlineControl.state === "CHECKING"}
+                    onClick={() => void offlineControl.onSave()}
+                  >
+                    {offlineControl.state === "SAVING" ? "Saving…" : "Save for offline use"}
+                  </button>
+                )}
+              </div>
+            </details>
+          ) : null}
           <button
             type="button"
             aria-label={viewLinkCopied ? "Current view link copied" : "Copy current view link"}
@@ -1408,6 +1507,12 @@ export default function PdfReaderCoreV4({
           {actionError}
         </div>
       ) : null}
+      {offlineControl?.error ? (
+        <div className="pdfv3-error" role="alert">
+          <AlertTriangle size={17} />
+          {offlineControl.error}
+        </div>
+      ) : null}
       {record ? (
         <div className="pdfv3-success">
           <CheckCircle2 size={17} />
@@ -1437,6 +1542,7 @@ export default function PdfReaderCoreV4({
           onLoadSuccess={loadDocument}
           onLoadError={(error: unknown) => {
             setLoadError(error instanceof Error ? error.message : "The PDF could not be opened.");
+            onSourceLoadError?.(error);
           }}
           onItemClick={(target: PdfItemClickTarget) => { void followPdfItem(target); }}
           loading={(
@@ -1450,8 +1556,9 @@ export default function PdfReaderCoreV4({
             className="pdfv3-virtual-canvas"
             style={{ height: `${virtualizer.getTotalSize()}px` }}
           >
-            {orderedVirtualItems.map((item) => {
+            {viewportReady ? orderedVirtualItems.map((item) => {
               const page = item.index + 1;
+              const ratio = pageRatios[page] || fallbackRatio;
               return (
                 <div
                   key={item.key}
@@ -1466,8 +1573,10 @@ export default function PdfReaderCoreV4({
                   }}
                 >
                   <VirtualPdfPage
+                    key={`${page}:${Math.round(pageWidthFor(page))}`}
                     page={page}
-                    width={pageWidth}
+                    width={pageWidthFor(page)}
+                    ratio={ratio}
                     safeForm={safeForm}
                     query={query}
                     searchOptions={searchOptions}
@@ -1475,6 +1584,7 @@ export default function PdfReaderCoreV4({
                     active={page === currentPage}
                     renderOverlay={renderPageOverlay}
                     maxDevicePixelRatio={profile.maxDevicePixelRatio}
+                    maxCanvasPixels={profile.maxCanvasPixels}
                     onMetrics={(pageNumber, nextRatio, originalWidth) => {
                       setPageRatios((values) => (
                         Math.abs((values[pageNumber] || 0) - nextRatio) < 0.0001
@@ -1506,7 +1616,7 @@ export default function PdfReaderCoreV4({
                   />
                 </div>
               );
-            })}
+            }) : null}
           </div>
         </PdfDocument>
       </div>

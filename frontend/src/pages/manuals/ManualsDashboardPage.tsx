@@ -1,1 +1,2 @@
-export { default, resolveNextRevisionId } from "./PublicationsDashboardPage";
+export { default } from "./PublicationsDashboardPage";
+export { resolveNextRevisionId } from "./revisionSelection";

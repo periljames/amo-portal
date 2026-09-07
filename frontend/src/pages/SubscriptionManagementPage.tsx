@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
   addPaymentMethod,
   cancelSubscription,
@@ -109,7 +110,7 @@ const SubscriptionManagementPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
-  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+  const isTenantAdmin = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || hasActiveTenantAdminProfile(amoCode));
 
   const [catalog, setCatalog] = useState<CatalogSKU[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);

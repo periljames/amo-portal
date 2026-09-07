@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { auditSetupReadiness } from "./auditSetupModel";
+import { auditSetupIssues, auditSetupReadiness } from "./auditSetupModel";
 
 const completeSetup = {
   title: "Internal compliance audit",
@@ -8,6 +8,8 @@ const completeSetup = {
   criteria: "KCARs Part 145, company CAME/MOE and applicable procedures",
   plannedStart: "2026-09-11",
   plannedEnd: "2026-09-12",
+  plannedStartTime: "09:00",
+  plannedEndTime: "17:00",
   auditee: "Maintenance Manager",
   auditeeEmail: "",
   leadAuditorUserId: "lead-1",
@@ -36,6 +38,8 @@ describe("audit setup readiness", () => {
       criteria: "",
       plannedStart: "2026-09-12",
       plannedEnd: "2026-09-11",
+      plannedStartTime: "09:00",
+      plannedEndTime: "17:00",
       auditee: "",
       auditeeEmail: "",
       leadAuditorUserId: null,
@@ -47,8 +51,18 @@ describe("audit setup readiness", () => {
       "Define the audit scope.",
       "Identify the applicable audit criteria and standards.",
       "Planned end cannot be before planned start.",
-      "Identify the auditee or provide the auditee email.",
+      "Identify the auditee representative or provide their email.",
       "Assign an eligible lead auditor.",
+    ]);
+  });
+
+  it("identifies the exact first control that should receive one-time setup guidance", () => {
+    const issues = auditSetupIssues({ ...completeSetup, scope: "", criteria: "", leadAuditorUserId: null });
+
+    expect(issues).toEqual([
+      { field: "scope", tile: "definition", message: "Define the audit scope." },
+      { field: "criteria", tile: "definition", message: "Identify the applicable audit criteria and standards." },
+      { field: "leadAuditorUserId", tile: "team", message: "Assign an eligible lead auditor." },
     ]);
   });
 });

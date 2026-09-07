@@ -7,6 +7,8 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
 import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRouteGate";
+import PortalAuxiliaryBoundary from "./components/feedback/PortalAuxiliaryBoundary";
+import { ToastProvider } from "./components/feedback/ToastProvider";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
@@ -172,32 +174,36 @@ startPortalConnectivity();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <PersistQueryClientProvider
-      client={queryClient}
-      persistOptions={{
-        persister: queryPersister,
-        buster: "amo-portal-query-v4",
-        maxAge: QUERY_MAX_AGE_MS,
-        dehydrateOptions: {
-          shouldDehydrateQuery: shouldPersistQuery,
-          shouldDehydrateMutation: (mutation) => mutation.state.isPaused,
-        },
-      }}
-      onSuccess={() => {
-        // The readiness subscriber owns recovery ordering: revoke a pending
-        // logout, recover authentication, then resume work. Hydration alone is
-        // never permission to send persisted mutations.
-        if (isPortalReady()) void probePortalReadiness(true);
-      }}
-    >
-      <RealtimeProvider>
-        <BrowserRouter>
-          <App />
-          <QualityEnhancementsRouteGate />
-        </BrowserRouter>
-        <OfflineSyncIndicator />
-      </RealtimeProvider>
-    </PersistQueryClientProvider>
+    <ToastProvider>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister: queryPersister,
+          buster: "amo-portal-query-v4",
+          maxAge: QUERY_MAX_AGE_MS,
+          dehydrateOptions: {
+            shouldDehydrateQuery: shouldPersistQuery,
+            shouldDehydrateMutation: (mutation) => mutation.state.isPaused,
+          },
+        }}
+        onSuccess={() => {
+          // The readiness subscriber owns recovery ordering: revoke a pending
+          // logout, recover authentication, then resume work. Hydration alone is
+          // never permission to send persisted mutations.
+          if (isPortalReady()) void probePortalReadiness(true);
+        }}
+      >
+        <RealtimeProvider>
+          <BrowserRouter>
+            <App />
+            <QualityEnhancementsRouteGate />
+          </BrowserRouter>
+          <PortalAuxiliaryBoundary surface="Connection, messaging and sync controls">
+            <OfflineSyncIndicator />
+          </PortalAuxiliaryBoundary>
+        </RealtimeProvider>
+      </PersistQueryClientProvider>
+    </ToastProvider>
   </React.StrictMode>,
 );
 

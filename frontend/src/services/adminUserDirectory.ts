@@ -16,6 +16,7 @@ export interface AdminUserDirectoryPageParams {
   page_size?: number;
   search?: string;
   role?: AccountRole | "all";
+  access_profile_id?: string | "all";
   account_status?: AdminUserAccountFilter;
   department_id?: string | "all" | "unassigned";
   sort_by?: AdminUserSortField;
@@ -42,6 +43,9 @@ export async function getAdminUserDirectoryPage(
   searchParams.set("page_size", String(Math.min(100, Math.max(10, params.page_size ?? 50))));
   if (params.search?.trim()) searchParams.set("search", params.search.trim());
   if (params.role && params.role !== "all") searchParams.set("role", params.role);
+  if (params.access_profile_id && params.access_profile_id !== "all") {
+    searchParams.set("access_profile_id", params.access_profile_id);
+  }
   if (params.account_status && params.account_status !== "all") {
     searchParams.set("account_status", params.account_status);
   }

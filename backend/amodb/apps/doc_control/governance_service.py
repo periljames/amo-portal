@@ -162,7 +162,10 @@ def serialize_assignment(
     elif row.assignee_type == "ORG_UNIT":
         target = {"id": row.assignee_org_unit_id, "name": row.provenance_json.get("org_unit_name") or "Organization unit"}
     else:
-        target = {"role": row.assignee_role, "name": (row.assignee_role or "Role").replace("_", " ").title()}
+        target = {
+            "role": row.assignee_role,
+            "name": row.provenance_json.get("access_profile_name") or (row.assignee_role or "Access profile").replace("_", " ").title(),
+        }
     return {
         "id": row.id,
         "manual_id": row.manual_id,
@@ -329,7 +332,7 @@ def document_governance_payload(
     if target and not target.source_sha256:
         issues.append({"code": "MISSING_SOURCE_CHECKSUM", "severity": "HIGH", "count": 1})
 
-    assignment_options = {"users": [], "departments": [], "org_units": []}
+    assignment_options = {"users": [], "departments": [], "org_units": [], "access_profiles": []}
     if is_control_user(current_user):
         from amodb.apps.workforce.governance_models import WorkforceOrgUnit
 
@@ -355,6 +358,13 @@ def document_governance_payload(
                     WorkforceOrgUnit.amo_id == tenant.amo_id,
                     WorkforceOrgUnit.is_active.is_(True),
                 ).order_by(WorkforceOrgUnit.sort_order.asc(), WorkforceOrgUnit.name.asc()).limit(2000).all()
+            ],
+            "access_profiles": [
+                {"id": row.id, "code": row.tenant_code, "name": row.display_name, "category": row.category}
+                for row in db.query(account_models.AuthRoleDefinition).filter(
+                    account_models.AuthRoleDefinition.amo_id == tenant.amo_id,
+                    account_models.AuthRoleDefinition.is_active.is_(True),
+                ).order_by(account_models.AuthRoleDefinition.display_name.asc()).all()
             ],
         }
 

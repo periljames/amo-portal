@@ -513,8 +513,8 @@ body[data-color-scheme="light"] .pdfv5-shell {
 
 .publication-reader-page--dense-pdf-reader .publication-linked-layout,
 .publication-reader-page--dense-pdf-reader .publication-native-pdf {
-  height: calc(100dvh - var(--tenant-topbar-height, 50px) - 118px);
-  min-height: 520px;
+  height: var(--publication-reader-available-height, 640px);
+  min-height: min(520px, var(--publication-reader-available-height, 640px));
 }
 
 @media (max-width: 1024px) {
@@ -592,8 +592,8 @@ body[data-color-scheme="light"] .pdfv5-shell {
 
   .publication-reader-page--dense-pdf-reader .publication-linked-layout,
   .publication-reader-page--dense-pdf-reader .publication-native-pdf {
-    height: calc(100dvh - var(--tenant-topbar-height, 50px) - 92px);
-    min-height: 440px;
+    height: var(--publication-reader-available-height, 520px);
+    min-height: min(440px, var(--publication-reader-available-height, 520px));
   }
 }
 

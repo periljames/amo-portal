@@ -20,12 +20,14 @@ from typing import Final
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
+from .security import apply_module_access_boundary, require_module_access
 
 from .database import WriteSessionLocal, close_session_safely, dispose_engines
 from .apps.accounts.router_public import router as accounts_public_router
@@ -49,6 +51,8 @@ from .apps.events.router import router as events_router
 from .apps.manuals.router import router as manuals_router
 from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.doc_control.router import router as doc_control_router
+from .apps.ai.router import router as ai_router
+from .apps.platform.tenant_saas_router import router as tenant_saas_router
 
 
 logger = logging.getLogger(__name__)
@@ -66,6 +70,8 @@ PROFILE_MODULES: Final[tuple[str, ...]] = (
     "events",
     "manuals",
     "doc_control",
+    "ai",
+    "platform_tenant_saas",
 )
 OMITTED_OPERATIONAL_MODULES: Final[tuple[str, ...]] = (
     "fleet",
@@ -255,20 +261,32 @@ def deployment_profile() -> dict[str, object]:
     }
 
 
+# Apply the same profile-level read/write boundary used by the full portal.
+# This keeps the bounded QMS deployment from interpreting ``view`` as write
+# authority when an endpoint's legacy persona check would otherwise pass.
+apply_module_access_boundary(quality_router, "quality")
+apply_module_access_boundary(canonical_quality_router, "quality")
+apply_module_access_boundary(training_router, "training")
+apply_module_access_boundary(manuals_router, "documents")
+apply_module_access_boundary(doc_control_router, "documents")
+
+
 # Authentication and tenant/module administration.
 app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_onboarding_router)
 app.include_router(bootstrap_router)
+app.include_router(tenant_saas_router, prefix="/platform")
+app.include_router(ai_router)
 
 # QMS operations and public CAR response surfaces.
 app.include_router(quality_public_router)
-app.include_router(quality_router)
-app.include_router(canonical_quality_router)
+app.include_router(quality_router, dependencies=[Depends(require_module_access("quality"))])
+app.include_router(canonical_quality_router, dependencies=[Depends(require_module_access("quality"))])
 
 # Required Quality dependencies and evidence sources.
-app.include_router(training_router)
+app.include_router(training_router, dependencies=[Depends(require_module_access("training"))])
 app.include_router(training_public_router)
 app.include_router(audit_router)
 app.include_router(audit_events_router)
@@ -276,6 +294,6 @@ app.include_router(notifications_router)
 app.include_router(tasks_router)
 app.include_router(integrations_router)
 app.include_router(events_router)
-app.include_router(manuals_router)
+app.include_router(manuals_router, dependencies=[Depends(require_module_access("documents"))])
 app.include_router(manuals_branding_router)
-app.include_router(doc_control_router)
+app.include_router(doc_control_router, dependencies=[Depends(require_module_access("documents"))])

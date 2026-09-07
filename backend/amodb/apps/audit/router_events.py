@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
-from amodb.security import require_roles
-from amodb.apps.accounts.models import AccountRole, User
+from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile_or_roles
+from amodb.apps.accounts.models import User
 from amodb.database import get_db
 
 from . import schemas, services
@@ -31,13 +31,7 @@ def list_audit_events(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.QUALITY_MANAGER,
-            AccountRole.SUPERUSER,
-        )
-    ),
+    current_user: User = Depends(require_active_admin_profile_or_roles("QUALITY_MANAGER")),
 ):
     return services.list_audit_events(
         db,

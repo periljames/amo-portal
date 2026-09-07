@@ -34,7 +34,7 @@ from amodb.apps.tasks import models as task_models
 from amodb.security import get_current_active_user, require_admin, require_roles
 from amodb.apps.platform import models as platform_models
 from amodb.apps.platform import services as platform_services
-from . import models, schemas, services, role_registry
+from . import access_control, models, schemas, services, role_registry
 from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
@@ -388,6 +388,7 @@ def _protect_tenant_admin_continuity(
     users: list[models.User],
     resulting_active: Optional[bool] = None,
     resulting_role: Optional[models.AccountRole] = None,
+    resulting_admin: Optional[bool] = None,
     deleting: bool = False,
 ) -> None:
     """Reject self-lockout and removal of a tenant's last canonical admin."""
@@ -400,10 +401,9 @@ def _protect_tenant_admin_continuity(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You cannot disable or delete the current signed-in user.",
             )
-        next_admin = (
-            next_role == models.AccountRole.AMO_ADMIN
-            if resulting_role is not None
-            else bool(user.is_amo_admin or next_role == models.AccountRole.AMO_ADMIN)
+        next_admin = bool(
+            (user.is_amo_admin if resulting_admin is None else resulting_admin)
+            or next_role == models.AccountRole.AMO_ADMIN
         )
         removes_access = _canonical_tenant_admin(user) and not (next_active and next_admin)
         if not removes_access:
@@ -1022,70 +1022,6 @@ def _set_profile_employment_state(
         profile.department = department_name
     if position_title is not None:
         profile.position_title = position_title
-
-
-def _delete_user_hard(
-    db: Session,
-    *,
-    actor: models.User,
-    user: models.User,
-    commit: bool = True,
-    check_admin_continuity: bool = True,
-) -> None:
-    if str(actor.id) == str(user.id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='You cannot permanently delete the current signed-in user.')
-    if check_admin_continuity:
-        _protect_tenant_admin_continuity(db, actor=actor, users=[user], deleting=True)
-
-    amo_id = str(user.amo_id)
-    user_id = str(user.id)
-    user_email = (user.email or '').lower()
-    before = {
-        'id': user_id,
-        'email': user.email,
-        'staff_code': user.staff_code,
-        'full_name': user.full_name,
-    }
-
-    profiles = (
-        db.query(models.PersonnelProfile)
-        .filter(
-            models.PersonnelProfile.amo_id == amo_id,
-            or_(
-                models.PersonnelProfile.user_id == user_id,
-                func.lower(models.PersonnelProfile.email) == user_email,
-                models.PersonnelProfile.person_id == user.staff_code,
-            ),
-        )
-        .all()
-    )
-    for profile in profiles:
-        db.delete(profile)
-
-    db.delete(user)
-    if commit:
-        try:
-            db.commit()
-        except IntegrityError as exc:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Unable to permanently delete this user because related operational records still require it: {getattr(exc, "orig", exc)}',
-            ) from exc
-
-    audit_services.log_event(
-        db,
-        amo_id=amo_id,
-        actor_user_id=str(actor.id),
-        entity_type='accounts.user',
-        entity_id=user_id,
-        action='HARD_DELETED',
-        before=before,
-        after=None,
-        metadata={'module': 'accounts'},
-    )
-    if commit:
-        db.commit()
 
 
 def _build_user_export_payload(db: Session, *, user: models.User) -> dict:
@@ -2099,6 +2035,27 @@ def create_user_admin(
             )
         payload = payload.model_copy(update={"amo_id": root_amo.id, "department_id": None})
 
+    if payload.role == models.AccountRole.AMO_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="AMO_ADMIN is an access overlay, not an organization role. Select an operational access profile and assign administrator access separately.",
+        )
+    if not creating_platform_superuser and not payload.access_profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select an active tenant access profile. Raw account-role creation is retired.",
+        )
+    if payload.is_amo_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant-administrator access must use the governed administrator-grant workflow.",
+        )
+    if payload.is_auditor:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Personal audit authority must be assigned through the governed QMS People workflow.",
+        )
+
     try:
         user = services.create_user(db, payload)
     except ValueError as exc:
@@ -2106,6 +2063,7 @@ def create_user_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    access_control.attach_user_access(db, user)
     audit_services.log_event(
         db,
         amo_id=user.amo_id,
@@ -2159,7 +2117,7 @@ def list_users_admin(
         )
 
     q = q.order_by(models.User.full_name.asc()).offset(skip).limit(limit)
-    return q.all()
+    return [access_control.attach_user_access(db, user) for user in q.all()]
 
 
 @router.get(
@@ -2172,7 +2130,10 @@ def get_user_admin(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    return _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    return access_control.attach_user_access(
+        db,
+        _get_managed_user_or_404(db, current_user=current_user, user_id=user_id),
+    )
 
 
 @router.put(
@@ -2209,6 +2170,22 @@ def update_user_admin(
 
     update_data = payload.model_dump(exclude_unset=True)
 
+    if "role" in update_data and payload.role != user.role:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Assign an access profile to change a tenant user's portal persona; raw account-role changes are retired.",
+        )
+    if "is_amo_admin" in update_data and bool(update_data["is_amo_admin"]) != bool(user.is_amo_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant-administrator access must use the governed administrator-grant workflow.",
+        )
+    if "is_auditor" in update_data and bool(update_data["is_auditor"]) != bool(user.is_auditor):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Personal audit authority must be assigned through the governed QMS People workflow.",
+        )
+
     if not current_user.is_superuser:
         if "amo_id" in update_data or "is_superuser" in update_data:
             raise HTTPException(
@@ -2220,20 +2197,20 @@ def update_user_admin(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You cannot assign SUPERUSER role.",
             )
-
-    if payload.role is not None:
-        _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
     _protect_tenant_admin_continuity(
         db,
         actor=current_user,
         users=[user],
         resulting_active=payload.is_active,
         resulting_role=payload.role,
+        resulting_admin=payload.is_amo_admin,
     )
 
     # NOTE: services.update_user() should also enforce what fields are allowed.
     try:
-        user = services.update_user(db, user, payload)
+        user = services.update_user(
+            db, user, payload, actor_user_id=str(current_user.id)
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2249,22 +2226,27 @@ def update_user_admin(
         after=update_data,
         metadata={"module": "accounts"},
     )
-    return user
+    return access_control.attach_user_access(db, user)
 
 
 @router.delete(
     "/users/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Permanently delete user (scoped to current AMO for admins; any AMO for superuser)",
+    status_code=status.HTTP_410_GONE,
+    summary="Retired permanent user deletion endpoint",
 )
 def delete_user_admin(
     user_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
-    _delete_user_hard(db, actor=current_user, user=user)
-    return
+    _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Permanent user deletion is retired to preserve regulated attribution and audit history. "
+            "Disable the account, revoke its sessions, and complete the employment lifecycle instead."
+        ),
+    )
 
 
 @router.post(
@@ -2656,19 +2638,28 @@ def bulk_user_action(
     if len(users) != len(set(user_ids)):
         raise HTTPException(status_code=404, detail='One or more selected users could not be found in scope.')
 
-    if payload.action == 'change_role' and payload.role is not None:
-        for user in users:
-            _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
-    if payload.action in {'disable', 'delete'} or (
-        payload.action == 'change_role' and payload.role != models.AccountRole.AMO_ADMIN
-    ):
+    if payload.action == 'change_role':
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='Raw role changes are retired; use assign_access_profile.',
+        )
+    if payload.action == 'delete':
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=(
+                'Permanent user deletion is retired to preserve regulated attribution and audit history. '
+                'Use disable and the employment lifecycle actions instead.'
+            ),
+        )
+    if payload.action == 'assign_access_profile' and not payload.access_profile_id:
+        raise HTTPException(status_code=400, detail='access_profile_id is required for profile assignment.')
+    if payload.action == 'disable':
         _protect_tenant_admin_continuity(
             db,
             actor=current_user,
             users=users,
-            resulting_active=False if payload.action in {'disable', 'delete'} else None,
+            resulting_active=False,
             resulting_role=payload.role if payload.action == 'change_role' else None,
-            deleting=payload.action == 'delete',
         )
 
     affected_ids: list[str] = []
@@ -2707,27 +2698,16 @@ def bulk_user_action(
         elif payload.action == 'clear_department':
             user.department_id = None
             _set_profile_employment_state(_get_personnel_profile_for_user(db, user=user), department_name='')
-        elif payload.action == 'change_role':
-            if payload.role is None:
-                raise HTTPException(status_code=400, detail='role is required for role changes.')
+        elif payload.action == 'assign_access_profile':
             try:
-                resolved_role = services.require_role_matches_workforce(
-                    db, user=user, requested_role=payload.role,
+                access_control.assign_primary_access_profile(
+                    db,
+                    user=user,
+                    profile_id=str(payload.access_profile_id),
+                    actor_user_id=str(current_user.id),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
-            user.role = resolved_role
-            user.is_superuser = resolved_role == models.AccountRole.SUPERUSER
-            user.is_amo_admin = resolved_role in {
-                models.AccountRole.SUPERUSER,
-                models.AccountRole.AMO_ADMIN,
-            }
-            user.is_auditor = resolved_role == models.AccountRole.AUDITOR
-            definition = role_registry.role_definition(resolved_role)
-            if definition.regulated:
-                user.position_title = definition.label
-            services.clear_management_supervisor_links(db, user)
-            services.sync_regulated_postholder_assignment(db, user)
         elif payload.action == 'add_group':
             if user.amo_id != target_group.amo_id:
                 raise HTTPException(status_code=400, detail='Selected group does not belong to every chosen user.')
@@ -2746,33 +2726,13 @@ def bulk_user_action(
                 db, amo_id=user.amo_id, user_id=user.id, status_value='ON_DUTY', note=payload.note,
                 effective_from=payload.effective_from, effective_to=payload.effective_to, actor_user_id=current_user.id
             )
-        elif payload.action == 'delete':
-            _delete_user_hard(
-                db,
-                actor=current_user,
-                user=user,
-                commit=False,
-                check_admin_continuity=False,
-            )
-            affected_ids.append(str(user.id))
-            continue
         else:
             raise HTTPException(status_code=400, detail='Unsupported bulk action.')
         services.sync_regulated_postholder_assignment(db, user)
         db.add(user)
         affected_ids.append(str(user.id))
 
-    if payload.action != 'delete':
-        db.commit()
-    else:
-        try:
-            db.commit()
-        except IntegrityError as exc:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'No users were deleted because related operational records still require one or more selections: {getattr(exc, "orig", exc)}',
-            ) from exc
+    db.commit()
 
     return schemas.BulkUserActionResult(
         action=payload.action,
@@ -2796,7 +2756,10 @@ def user_employment_action(
     user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
     profile = _get_personnel_profile_for_user(db, user=user)
     if payload.role is not None:
-        _validate_role_transition(actor=current_user, user=user, requested_role=payload.role)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='Employment actions change Workforce records; assign a governed access profile separately.',
+        )
     _protect_tenant_admin_continuity(
         db,
         actor=current_user,
@@ -2814,26 +2777,6 @@ def user_employment_action(
 
     if payload.position_title is not None:
         user.position_title = (payload.position_title or '').strip() or None
-    if payload.role is not None:
-        try:
-            resolved_role = services.require_role_matches_workforce(
-                db, user=user, requested_role=payload.role,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        user.role = resolved_role
-        user.is_superuser = resolved_role == models.AccountRole.SUPERUSER
-        user.is_amo_admin = resolved_role in {
-            models.AccountRole.SUPERUSER,
-            models.AccountRole.AMO_ADMIN,
-        }
-        user.is_auditor = resolved_role == models.AccountRole.AUDITOR
-        definition = role_registry.role_definition(resolved_role)
-        if definition.regulated:
-            user.position_title = definition.label
-        services.clear_management_supervisor_links(db, user)
-        services.sync_regulated_postholder_assignment(db, user)
-
     action = payload.action
     lifecycle_start = payload.effective_from.date() if payload.effective_from else None
     reemployment_contract_id = None
@@ -2851,9 +2794,10 @@ def user_employment_action(
             position_title=user.position_title,
         )
     elif action in {'promote', 'demote'}:
-        if payload.role is None and payload.position_title is None:
-            raise HTTPException(status_code=400, detail='Provide a role or title for promotion/demotion.')
-        _set_profile_employment_state(profile, position_title=user.position_title)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='Promotion and demotion require an effective-dated Workforce position change; this lifecycle endpoint cannot alter organization authority.',
+        )
     elif action == 'transfer':
         if payload.department_id is None and payload.position_title is None:
             raise HTTPException(status_code=400, detail='Provide a department or title for transfer.')
@@ -3786,16 +3730,17 @@ def get_overview_summary(
 
 
 # ---------------------------------------------------------------------------
-# AUTHORISATIONS (AMO ADMIN / QUALITY MANAGER / SUPERUSER)
+# LEGACY AUTHORISATION REGISTER (QUALITY MANAGER ONLY)
 # ---------------------------------------------------------------------------
 
 
-def _require_quality_or_admin(user: models.User) -> models.User:
+def _require_quality_manager(user: models.User) -> models.User:
     """
     Helper gate for authorisation management.
 
-    - SUPERUSER or AMO admin always allowed.
-    - QUALITY_MANAGER allowed for their AMO.
+    This register contains personal maintenance/certifying privileges, not
+    portal access. Tenant administration and platform support therefore do not
+    confer authority to create, issue, amend, revoke or delete these records.
     - System/service accounts are blocked even if flags are set.
     """
     if getattr(user, "is_system_account", False):
@@ -3804,13 +3749,11 @@ def _require_quality_or_admin(user: models.User) -> models.User:
             detail="System/service accounts cannot manage authorisations.",
         )
 
-    if user.is_superuser or user.is_amo_admin:
-        return user
     if user.role == models.AccountRole.QUALITY_MANAGER:
         return user
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Quality Manager or AMO Admin required.",
+        detail="Quality Manager authority is required for certifying-authorization records.",
     )
 
 
@@ -3831,7 +3774,7 @@ def create_authorisation_type(
     - Normal admins / QMs: can only create for their AMO.
     - SUPERUSER: can create for any AMO by setting payload.amo_id.
     """
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
 
     if not current_user.is_superuser and payload.amo_id != current_user.amo_id:
         raise HTTPException(
@@ -3920,7 +3863,7 @@ def grant_user_authorisation(
     - granted_by_user_id is ALWAYS set to the authenticated current_user.id
       (client is not allowed to spoof this).
     """
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
 
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     atype = (
@@ -3972,7 +3915,7 @@ def update_authorisation_type(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
     item = _get_managed_authorisation_type_or_404(
         db, current_user=current_user, authorisation_type_id=authorisation_type_id
     )
@@ -3988,21 +3931,19 @@ def update_authorisation_type(
 @router.delete(
     "/authorisation-types/{authorisation_type_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Permanently delete an authorisation type and its linked grants",
+    summary="Retire an authorisation type while preserving its history",
 )
 def delete_authorisation_type(
     authorisation_type_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
     item = _get_managed_authorisation_type_or_404(
         db, current_user=current_user, authorisation_type_id=authorisation_type_id
     )
-    db.query(models.UserAuthorisation).filter(
-        models.UserAuthorisation.authorisation_type_id == item.id
-    ).delete(synchronize_session=False)
-    db.delete(item)
+    item.is_active = False
+    db.add(item)
     db.commit()
     return
 
@@ -4017,7 +3958,7 @@ def list_user_authorisations(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
     q = db.query(models.UserAuthorisation).join(models.User, models.User.id == models.UserAuthorisation.user_id)
     if current_user.is_superuser:
         if user_id:
@@ -4040,7 +3981,7 @@ def update_user_authorisation(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
     item = _get_managed_user_authorisation_or_404(
         db, current_user=current_user, user_authorisation_id=user_authorisation_id
     )
@@ -4056,18 +3997,21 @@ def update_user_authorisation(
 @router.delete(
     "/user-authorisations/{user_authorisation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Permanently delete a granted user permission",
+    summary="Revoke a personal authorisation while preserving its history",
 )
 def delete_user_authorisation(
     user_authorisation_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    _require_quality_or_admin(current_user)
+    _require_quality_manager(current_user)
     item = _get_managed_user_authorisation_or_404(
         db, current_user=current_user, user_authorisation_id=user_authorisation_id
     )
-    db.delete(item)
+    if item.revoked_at is None:
+        item.revoked_at = datetime.now(timezone.utc)
+        item.revoked_reason = "Revoked through the legacy authorization register; historical record retained."
+        db.add(item)
     db.commit()
     return
 
@@ -4840,6 +4784,7 @@ def get_user_workspace_admin(
         schemas.UserWorkspaceMetricRead(key="availability_entries", label="Availability", value=len(availability)),
     ]
 
+    access_control.attach_user_access(db, user)
     return schemas.AdminUserWorkspaceRead(
         user=schemas.UserRead.model_validate(user),
         department_name=departments.get(str(user.department_id)) if user.department_id else None,

@@ -29,6 +29,7 @@ REQUIRED_SCHEMA_TABLES = frozenset(
     }
 )
 REQUIRED_SESSION_COLUMNS = frozenset({"auth_session_id"})
+REQUIRED_APPROVAL_COLUMNS = frozenset({"approver_role"})
 
 
 class AdminGrantRequest(BaseModel):
@@ -65,17 +66,12 @@ def _is_implicit_admin(user: models.User) -> bool:
 
 
 def _is_management_approver(user: models.User) -> bool:
-    if _is_implicit_admin(user):
-        return True
     role = _normalise_role(user)
-    title = str(getattr(user, "position_title", "") or "").lower()
-    inferred = role_registry.infer_regulated_role(title)
-    return (
-        role in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER", "SAFETY_MANAGER"}
-        or inferred == models.AccountRole.ACCOUNTABLE_EXECUTIVE
-        or "human resources manager" in title
-        or title.strip() == "hr manager"
-    )
+    # Tenant administration is the subject of this control, not a source of
+    # approval authority. Keep the two-person grant decision with the
+    # accountable and independent compliance functions. Free-text titles,
+    # existing admin status and temporary admin grants never qualify.
+    return role in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}
 
 
 def _auth_session_id(user: models.User) -> str:
@@ -102,6 +98,11 @@ def _ensure_schema(db: Session) -> None:
             if "admin_profile_sessions" in existing
             else set()
         )
+        approval_columns = (
+            {str(column["name"]) for column in schema.get_columns("admin_access_grant_approvals")}
+            if "admin_access_grant_approvals" in existing
+            else set()
+        )
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -110,7 +111,8 @@ def _ensure_schema(db: Session) -> None:
 
     missing = sorted(REQUIRED_SCHEMA_TABLES - existing)
     missing_columns = sorted(REQUIRED_SESSION_COLUMNS - session_columns)
-    if missing or missing_columns:
+    missing_approval_columns = sorted(REQUIRED_APPROVAL_COLUMNS - approval_columns)
+    if missing or missing_columns or missing_approval_columns:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -118,6 +120,7 @@ def _ensure_schema(db: Session) -> None:
                 "message": "Run Alembic migrations before using Admin profile.",
                 "missing_tables": missing,
                 "missing_session_columns": missing_columns,
+                "missing_approval_columns": missing_approval_columns,
             },
         )
 
@@ -192,6 +195,23 @@ def _approval_count(db: Session, grant_id: str) -> int:
         {"grant_id": grant_id},
     ).scalar()
     return int(value or 0)
+
+
+def _approval_roles(db: Session, grant_id: str) -> set[str]:
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT approver_role
+            FROM admin_access_grant_approvals
+            WHERE grant_id = :grant_id
+              AND decision = 'APPROVED'
+              AND approver_role IS NOT NULL
+        """),
+        {"grant_id": grant_id},
+    ).scalars().all()
+    return {
+        role_registry.canonical_role_key(value) or str(value or "").upper()
+        for value in rows
+    }
 
 
 def _eligible_grant(db: Session, *, amo_id: str, user_id: str, now: datetime) -> dict[str, Any] | None:
@@ -319,7 +339,10 @@ def _require_active_profile(db: Session, *, amo: models.AMO, user: models.User) 
 def _require_governance_approver(db: Session, *, amo: models.AMO, user: models.User) -> None:
     if _is_management_approver(user):
         return
-    _require_active_profile(db, amo=amo, user=user)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Accountable Executive or Quality Manager approval is required for administrator grants.",
+    )
 
 
 @router.get("/{amo_code}/state")
@@ -454,19 +477,86 @@ def list_admin_grants(
 ) -> dict[str, Any]:
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
-    _require_active_profile(db, amo=amo, user=current_user)
+    _ensure_schema(db)
+    if not _is_management_approver(current_user):
+        _require_active_profile(db, amo=amo, user=current_user)
     rows = db.execute(
         text("""
             SELECT g.*,
+                   target.full_name AS user_name,
+                   target.email AS user_email,
+                   requester.full_name AS requested_by_name,
                    (
                        SELECT COUNT(DISTINCT a.approver_user_id)
                        FROM admin_access_grant_approvals a
                        WHERE a.grant_id = g.id AND a.decision = 'APPROVED'
-                   ) AS approval_count
+                   ) AS approval_count,
+                   EXISTS (
+                       SELECT 1 FROM admin_access_grant_approvals a
+                       WHERE a.grant_id = g.id
+                         AND a.decision = 'APPROVED'
+                         AND a.approver_role = 'ACCOUNTABLE_EXECUTIVE'
+                   ) AS accountable_executive_approved,
+                   EXISTS (
+                       SELECT 1 FROM admin_access_grant_approvals a
+                       WHERE a.grant_id = g.id
+                         AND a.decision = 'APPROVED'
+                         AND a.approver_role = 'QUALITY_MANAGER'
+                   ) AS quality_manager_approved,
+                   EXISTS (
+                       SELECT 1 FROM admin_access_grant_approvals a
+                       WHERE a.grant_id = g.id
+                         AND a.approver_user_id = :current_user_id
+                   ) AS current_user_decided
             FROM admin_access_grants g
+            JOIN users target ON target.id = g.user_id AND target.amo_id = g.amo_id
+            JOIN users requester ON requester.id = g.requested_by_user_id AND requester.amo_id = g.amo_id
             WHERE g.amo_id = :amo_id
             ORDER BY g.created_at DESC
             LIMIT 500
+        """),
+        {"amo_id": str(amo.id), "current_user_id": str(current_user.id)},
+    ).mappings().all()
+    return {
+        "items": [dict(row) for row in rows],
+        "required_approver_roles": ["ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"],
+    }
+
+
+@router.get("/{amo_code}/grant-candidates")
+def list_admin_grant_candidates(
+    amo_code: str,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    amo = _resolve_amo(db, amo_code)
+    _assert_tenant_member(current_user, amo)
+    _require_active_profile(db, amo=amo, user=current_user)
+    rows = db.execute(
+        text("""
+            SELECT u.id, u.full_name, u.email, u.position_title,
+                   profile.display_name AS access_profile_name
+            FROM users u
+            LEFT JOIN auth_user_role_assignments assignment
+              ON assignment.user_id = u.id
+             AND assignment.amo_id = u.amo_id
+             AND assignment.is_primary = TRUE
+             AND assignment.valid_to IS NULL
+            LEFT JOIN auth_role_definitions profile ON profile.id = assignment.role_id
+            WHERE u.amo_id = :amo_id
+              AND u.is_active = TRUE
+              AND u.is_superuser = FALSE
+              AND u.is_amo_admin = FALSE
+              AND CAST(u.role AS VARCHAR) <> 'SUPERUSER'
+              AND CAST(u.role AS VARCHAR) NOT IN ('ACCOUNTABLE_EXECUTIVE', 'QUALITY_MANAGER')
+              AND NOT EXISTS (
+                  SELECT 1 FROM admin_access_grants g
+                  WHERE g.amo_id = u.amo_id
+                    AND g.user_id = u.id
+                    AND g.status IN ('PENDING', 'ACTIVE')
+              )
+            ORDER BY COALESCE(u.full_name, u.email), u.email
+            LIMIT 1000
         """),
         {"amo_id": str(amo.id)},
     ).mappings().all()
@@ -486,10 +576,34 @@ def request_admin_grant(
     target = (
         db.query(models.User)
         .filter(models.User.id == payload.user_id, models.User.amo_id == amo.id)
+        .with_for_update()
         .first()
     )
     if not target or not target.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active tenant user was not found.")
+    if (
+        target.is_superuser
+        or target.is_amo_admin
+        or _normalise_role(target) in {"SUPERUSER", "ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account is not eligible for a governed tenant-administrator grant.",
+        )
+    existing_grant = db.execute(
+        text("""
+            SELECT id FROM admin_access_grants
+            WHERE amo_id = :amo_id AND user_id = :user_id
+              AND status IN ('PENDING', 'ACTIVE')
+            LIMIT 1
+        """),
+        {"amo_id": str(amo.id), "user_id": str(target.id)},
+    ).first()
+    if existing_grant:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This user already has a pending or active administrator grant.",
+        )
 
     valid_from = _as_utc(payload.valid_from) or _utcnow()
     valid_until = _as_utc(payload.valid_until)
@@ -562,15 +676,15 @@ def approve_admin_grant(
     _ensure_schema(db)
     _require_governance_approver(db, amo=amo, user=current_user)
     grant = db.execute(
-        text("SELECT * FROM admin_access_grants WHERE id = :grant_id AND amo_id = :amo_id"),
+        text("SELECT * FROM admin_access_grants WHERE id = :grant_id AND amo_id = :amo_id FOR UPDATE"),
         {"grant_id": grant_id, "amo_id": str(amo.id)},
     ).mappings().first()
     if not grant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Administrator grant request was not found.")
     if grant["status"] not in {"PENDING", "ACTIVE"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This administrator grant is no longer awaiting approval.")
-    if str(grant["requested_by_user_id"]) == str(current_user.id) or str(grant["user_id"]) == str(current_user.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The requester and grantee cannot approve this grant.")
+    if str(grant["user_id"]) == str(current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The grantee cannot approve their own administrator access.")
 
     now = _utcnow()
     existing = db.execute(
@@ -582,25 +696,48 @@ def approve_admin_grant(
     ).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This manager has already approved the grant.")
+    approver_role = _normalise_role(current_user)
+    role_decision = db.execute(
+        text("""
+            SELECT 1 FROM admin_access_grant_approvals
+            WHERE grant_id = :grant_id
+              AND decision = 'APPROVED'
+              AND approver_role = :approver_role
+        """),
+        {"grant_id": grant_id, "approver_role": approver_role},
+    ).first()
+    if role_decision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The {role_registry.role_definition(approver_role).label} approval is already recorded.",
+        )
 
     db.execute(
         text("""
             INSERT INTO admin_access_grant_approvals (
-                id, grant_id, approver_user_id, decision, comment, created_at
+                id, grant_id, approver_user_id, approver_role,
+                decision, comment, created_at
             ) VALUES (
-                :id, :grant_id, :approver_user_id, 'APPROVED', :comment, :created_at
+                :id, :grant_id, :approver_user_id, :approver_role,
+                'APPROVED', :comment, :created_at
             )
         """),
         {
             "id": str(uuid4()),
             "grant_id": grant_id,
             "approver_user_id": str(current_user.id),
+            "approver_role": approver_role,
             "comment": payload.comment,
             "created_at": now,
         },
     )
     count = _approval_count(db, grant_id)
-    next_status = "ACTIVE" if count >= REQUIRED_APPROVALS else "PENDING"
+    approval_roles = _approval_roles(db, grant_id)
+    next_status = (
+        "ACTIVE"
+        if {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}.issubset(approval_roles)
+        else "PENDING"
+    )
     if next_status == "ACTIVE":
         db.execute(
             text("""
@@ -625,6 +762,8 @@ def approve_admin_grant(
         "status": next_status,
         "approval_count": count,
         "required_approvals": REQUIRED_APPROVALS,
+        "accountable_executive_approved": "ACCOUNTABLE_EXECUTIVE" in approval_roles,
+        "quality_manager_approved": "QUALITY_MANAGER" in approval_roles,
     }
 
 
@@ -639,13 +778,20 @@ def revoke_admin_grant(
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
-    _require_governance_approver(db, amo=amo, user=current_user)
     grant = db.execute(
-        text("SELECT id, user_id FROM admin_access_grants WHERE id = :grant_id AND amo_id = :amo_id"),
+        text("SELECT id, user_id, requested_by_user_id, status FROM admin_access_grants WHERE id = :grant_id AND amo_id = :amo_id FOR UPDATE"),
         {"grant_id": grant_id, "amo_id": str(amo.id)},
     ).mappings().first()
     if not grant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Administrator grant was not found.")
+    is_requester_cancelling = (
+        grant["status"] == "PENDING"
+        and str(grant["requested_by_user_id"]) == str(current_user.id)
+    )
+    if is_requester_cancelling:
+        _require_active_profile(db, amo=amo, user=current_user)
+    else:
+        _require_governance_approver(db, amo=amo, user=current_user)
 
     now = _utcnow()
     db.execute(

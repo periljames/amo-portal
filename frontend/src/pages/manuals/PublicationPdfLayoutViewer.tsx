@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -33,6 +34,7 @@ export type PdfOutlineItem = PdfReaderOutlineItem;
 type PublicationPdfLayoutViewerProps = {
   fileUrl: string;
   title: string;
+  sourceByteLength?: number | null;
   uncontrolled?: boolean;
   navigationRequest?: PdfReaderNavigationRequest | null;
   initialPage?: number;
@@ -128,6 +130,7 @@ function searchResultPage(button: Element): number | null {
 export default function PublicationPdfLayoutViewer({
   fileUrl,
   title,
+  sourceByteLength,
   uncontrolled = false,
   navigationRequest,
   initialPage = 1,
@@ -180,11 +183,11 @@ export default function PublicationPdfLayoutViewer({
 
   useEffect(() => {
     if (!navigationRequest) return;
-    dispatchReaderNavigation(navigationRequest);
+    const frame = window.requestAnimationFrame(() => dispatchReaderNavigation(navigationRequest));
+    return () => window.cancelAnimationFrame(frame);
   }, [
     dispatchReaderNavigation,
-    navigationRequest?.page,
-    navigationRequest?.token,
+    navigationRequest,
   ]);
 
   useEffect(() => {
@@ -312,7 +315,8 @@ export default function PublicationPdfLayoutViewer({
   }, [identity, references.length]);
 
   useEffect(() => {
-    setSelectedReferenceId(activeReferenceId || null);
+    const frame = window.requestAnimationFrame(() => setSelectedReferenceId(activeReferenceId || null));
+    return () => window.cancelAnimationFrame(frame);
   }, [activeReferenceId]);
 
   const allReferences = references.length ? references : automaticReferences;
@@ -355,6 +359,43 @@ export default function PublicationPdfLayoutViewer({
     setPageLinkCopied(true);
     window.setTimeout(() => setPageLinkCopied(false), 1800);
   };
+
+  useLayoutEffect(() => {
+    const root = readerRootRef.current;
+    if (!root) return;
+    let frame: number | null = null;
+
+    const measureAvailableHeight = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const visualViewport = window.visualViewport;
+        const viewportTop = visualViewport?.offsetTop || 0;
+        const viewportBottom = viewportTop + (visualViewport?.height || window.innerHeight);
+        const rootTop = Math.max(viewportTop, root.getBoundingClientRect().top);
+        const available = Math.max(280, Math.floor(viewportBottom - rootTop));
+        root.style.setProperty("--publication-reader-available-height", `${available}px`);
+      });
+    };
+
+    measureAvailableHeight();
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(measureAvailableHeight);
+    if (root.parentElement) observer?.observe(root.parentElement);
+    window.addEventListener("resize", measureAvailableHeight, { passive: true });
+    window.addEventListener("scroll", measureAvailableHeight, { passive: true });
+    window.visualViewport?.addEventListener("resize", measureAvailableHeight);
+    window.visualViewport?.addEventListener("scroll", measureAvailableHeight);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureAvailableHeight);
+      window.removeEventListener("scroll", measureAvailableHeight);
+      window.visualViewport?.removeEventListener("resize", measureAvailableHeight);
+      window.visualViewport?.removeEventListener("scroll", measureAvailableHeight);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   if (!identity) {
     return (
@@ -457,6 +498,7 @@ export default function PublicationPdfLayoutViewer({
           fileUrl={fileUrl}
           originalDownloadUrl={fileUrl}
           title={title}
+          sourceByteLength={sourceByteLength}
           filename={`${title}.pdf`}
           identity={identity}
           uncontrolled={uncontrolled}

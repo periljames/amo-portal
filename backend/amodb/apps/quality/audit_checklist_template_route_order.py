@@ -15,6 +15,10 @@ def _is_checklist_governance_route(route_item) -> bool:
         or ("/qms/audits/" in path and "/checklist-bindings" in path)
         or ("/quality/audits/" in path and "/checklists/realtime" in path)
         or ("/qms/audits/" in path and "/checklists/realtime" in path)
+        or ("/quality/audits/" in path and "/checklist-library" in path)
+        or ("/qms/audits/" in path and "/checklist-library" in path)
+        or ("/quality/audits/" in path and "/checklist-recommendations" in path)
+        or ("/qms/audits/" in path and "/checklist-recommendations" in path)
     )
 
 

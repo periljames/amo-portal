@@ -46,10 +46,12 @@ def test_assigned_auditor_can_execute_but_unassigned_auditor_cannot() -> None:
     assert exc.value.status_code == 403
 
 
-def test_quality_officer_can_manage_car_follow_up_but_not_govern_or_close() -> None:
+def test_quality_officer_can_prepare_audits_but_not_review_approve_or_close() -> None:
     officer = _user("QUALITY_OFFICER")
     assert _has_role_permission(officer, "qms.audit.execute") is True
-    assert _has_role_permission(officer, "qms.audit.manage") is False
+    assert _has_role_permission(officer, "qms.audit.manage") is True
+    assert _has_role_permission(officer, "qms.audit.programme.quality_review") is False
+    assert _has_role_permission(officer, "qms.audit.programme.approve") is False
     assert _has_role_permission(officer, "qms.audit.notice.manage") is True
     assert _has_role_permission(officer, "qms.car.manage") is True
     assert _has_role_permission(officer, "qms.car.close") is False
@@ -62,8 +64,14 @@ def test_authority_attestation_is_accountable_executive_only() -> None:
     assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.reports.export") is True
     assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.external.view") is True
     assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.manage") is False
+    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.quality_review") is False
+    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.approve") is True
     assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.reports.attest_authority") is False
+    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.quality_review") is True
+    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.approve") is False
     assert _has_role_permission(_user("AMO_ADMIN"), "qms.reports.attest_authority") is False
+    assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.programme.quality_review") is False
+    assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.programme.approve") is False
     assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.notice.manage") is True
     assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.notice.manage") is True
 

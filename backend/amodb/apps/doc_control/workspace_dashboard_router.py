@@ -16,7 +16,7 @@ from . import domain_models as dm
 from . import governance_models as gm
 from .workspace_capabilities import document_control_capabilities, reader_capabilities
 from .workspace_router import OPEN_CHANGE_STATUSES, OPEN_WORKFLOW_STATES, dashboard as _get_full_dashboard
-from .workspace_service import can_read_manual, is_control_user, resolve_tenant, role_value
+from .workspace_service import can_read_manual, is_control_user, resolve_tenant, role_assignment_tokens
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Dashboard"])
@@ -138,13 +138,12 @@ def _responsibilities_for_user(
     current_user: account_models.User,
 ) -> dict[str, set[str]]:
     today = date.today()
-    role = role_value(current_user)
-    role_aliases = {role, role.replace("_", " "), role.replace("_", " ").title()}
     assignee_conditions = [gm.DocumentResponsibilityAssignment.assignee_user_id == current_user.id]
     if current_user.department_id:
         assignee_conditions.append(gm.DocumentResponsibilityAssignment.assignee_department_id == current_user.department_id)
-    if role:
-        assignee_conditions.append(gm.DocumentResponsibilityAssignment.assignee_role.in_(sorted(role_aliases)))
+    role_tokens = role_assignment_tokens(db, current_user)
+    if role_tokens:
+        assignee_conditions.append(gm.DocumentResponsibilityAssignment.assignee_role.in_(role_tokens))
 
     assignments = (
         db.query(gm.DocumentResponsibilityAssignment)

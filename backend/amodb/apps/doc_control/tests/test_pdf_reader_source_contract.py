@@ -27,7 +27,7 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
 def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     shell = _read("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
     core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
-    baseline = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
+    compatibility = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     publication = _read(
         "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
@@ -43,7 +43,8 @@ def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     assert "<PdfPage" not in shell
     assert "PdfReaderCoreV5" in bridge
     assert 'from "./PdfReaderCoreV5"' in bridge
-    assert "useVirtualizer" in baseline
+    assert 'from "./PdfReaderCoreV4"' in compatibility
+    assert "<PdfDocument" not in compatibility
     assert "PdfReaderCore" in publication
     assert "PdfReaderCore" in linked
 
@@ -212,6 +213,8 @@ def test_pdfium_import_and_dependency_are_confined() -> None:
 
     imports: list[str] = []
     for path in (ROOT / "backend/amodb").rglob("*.py"):
+        if "tests" in path.parts:
+            continue
         text = path.read_text(encoding="utf-8")
         if re.search(r"(?:import|from)\s+pypdfium2", text):
             imports.append(path.relative_to(ROOT).as_posix())

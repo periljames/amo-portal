@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import TenantEmailPreferencesPanel from "../components/notifications/TenantEmailPreferencesPanel";
+import { aiApi, type AIFeature, type AIHealth, type AIModel, type AISettings } from "../services/ai";
 import { getCachedUser } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import {
@@ -29,7 +30,7 @@ function coerceField(value: string): string | number | boolean {
 
 function statusTone(value: string): string {
   const normalized = value.toUpperCase();
-  if (["HEALTHY", "CONFIGURED", "SUCCEEDED", "ENABLED", "FISCALIZED", "PAID"].includes(normalized)) return "good";
+  if (["HEALTHY", "CONNECTED", "CONFIGURED", "SUCCEEDED", "ENABLED", "FISCALIZED", "PAID"].includes(normalized)) return "good";
   if (["FAILED", "DEAD", "UNHEALTHY", "RECONCILIATION_REQUIRED", "SUSPENDED"].includes(normalized)) return "bad";
   return "warn";
 }
@@ -61,6 +62,9 @@ const FIELD_HINTS: Record<string, string> = {
   certified: "Set true only after formal provider/regulator testing",
   environment: "sandbox or production",
   model: "Server-side model identifier",
+  default_model: "Tenant default model is governed in the AI plan below",
+  lightweight_model: "Tenant lightweight model is governed in the AI plan below",
+  embedding_model: "Tenant embedding model is governed in the AI plan below",
   project: "Optional provider project identifier",
   organization: "Optional provider organization identifier",
   use_tls: "true for STARTTLS",
@@ -90,8 +94,14 @@ export default function AdminSaaSSettingsPage() {
   const [providerEnabled, setProviderEnabled] = useState(true);
   const [clearSecret, setClearSecret] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [aiSettings, setAISettings] = useState<AISettings | null>(null);
+  const [aiHealth, setAIHealth] = useState<AIHealth | null>(null);
+  const [aiModels, setAIModels] = useState<AIModel[]>([]);
+  const [aiFeatures, setAIFeatures] = useState<AIFeature[]>([]);
+  const [aiReason, setAIReason] = useState("Tenant AI plan updated by an authorised administrator");
 
   const effectiveTenantId = isSuperuser ? tenantScope.trim() || null : null;
+  const canLoadTenantAI = !isSuperuser || Boolean(effectiveTenantId);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,12 +112,37 @@ export default function AdminSaaSSettingsPage() {
       setSelectedProviderCode((current) => current && data.providers.some((row) => row.provider === current)
         ? current
         : data.providers[0]?.provider ?? null);
+      if (!canLoadTenantAI) {
+        setAISettings(null);
+        setAIHealth(null);
+        setAIModels([]);
+        setAIFeatures([]);
+        return;
+      }
+      try {
+        const aiData = await Promise.all([
+          aiApi.settings(effectiveTenantId),
+          aiApi.health(effectiveTenantId),
+          aiApi.models(effectiveTenantId),
+        ]);
+        setAISettings(aiData[0]);
+        setAIHealth(aiData[1]);
+        setAIModels(aiData[2].items);
+        setAIFeatures(aiData[2].features);
+      } catch (aiLoadError) {
+        setAISettings(null);
+        setAIHealth(null);
+        setAIModels([]);
+        setAIFeatures([]);
+        const detail = aiLoadError instanceof Error ? aiLoadError.message : String(aiLoadError);
+        setError(`Integration settings loaded, but tenant AI controls are unavailable: ${detail}`);
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
     }
-  }, [effectiveTenantId]);
+  }, [canLoadTenantAI, effectiveTenantId]);
 
   useEffect(() => {
     setCheckoutLink(null);
@@ -192,11 +227,62 @@ export default function AdminSaaSSettingsPage() {
 
   const testProvider = async () => {
     if (!provider) return;
+    if (provider.provider === "openai") {
+      await run(
+        "test:openai",
+        () => aiApi.test(aiSettings?.default_model, effectiveTenantId),
+        "OpenAI connectivity verified server-side. Token usage and latency were recorded for this tenant.",
+      );
+      return;
+    }
     await run(
       `test:${provider.provider}`,
       () => saasSettingsApi.testProvider(provider.provider, effectiveTenantId),
       `${provider.display_name} health check queued in the backend pipeline.`,
     );
+  };
+
+  const updateAINumber = (field: keyof Pick<AISettings, "monthly_token_allowance" | "monthly_request_allowance" | "max_input_tokens_per_request" | "max_output_tokens_per_request">, value: string) => {
+    const numeric = Math.max(0, Number.parseInt(value || "0", 10) || 0);
+    setAISettings((current) => current ? { ...current, [field]: numeric } : current);
+  };
+
+  const saveAISettings = async () => {
+    if (!aiSettings) return;
+    if (!aiReason.trim()) {
+      setError("An AI plan change reason is required.");
+      return;
+    }
+    const settingsPayload = {
+      enabled: aiSettings.enabled,
+      provider: aiSettings.provider,
+      default_model: aiSettings.default_model,
+      lightweight_model: aiSettings.lightweight_model,
+      embedding_model: aiSettings.embedding_model,
+      plan_type: aiSettings.plan_type,
+      monthly_token_allowance: aiSettings.monthly_token_allowance,
+      monthly_request_allowance: aiSettings.monthly_request_allowance,
+      max_input_tokens_per_request: aiSettings.max_input_tokens_per_request,
+      max_output_tokens_per_request: aiSettings.max_output_tokens_per_request,
+      usage_limits: aiSettings.usage_limits,
+      enabled_features: aiSettings.enabled_features,
+      allow_external_document_context: aiSettings.allow_external_document_context,
+    };
+    await run(
+      "save:ai-settings",
+      () => aiApi.updateSettings({ ...settingsPayload, reason: aiReason.trim() }, effectiveTenantId),
+      "Tenant AI plan saved. Model selection and usage limits now apply to backend AI workflows.",
+    );
+  };
+
+  const toggleAIFeature = (code: string, enabled: boolean) => {
+    setAISettings((current) => {
+      if (!current) return current;
+      const next = enabled
+        ? Array.from(new Set([...current.enabled_features, code]))
+        : current.enabled_features.filter((item) => item !== code);
+      return { ...current, enabled_features: next };
+    });
   };
 
   const checkout = async (priceId: string) => {
@@ -251,6 +337,11 @@ export default function AdminSaaSSettingsPage() {
 
   const tenantLabel = setup?.tenant?.name || (setup?.scope === "PLATFORM" ? "Platform defaults" : amoCode);
   const jobs: SaaSAdminJob[] = setup?.jobs ?? [];
+  const chatModels = aiModels.filter((item) => item.purpose !== "embedding");
+  const embeddingModels = aiModels.filter((item) => item.purpose === "embedding");
+  const providerConfigFields = provider?.provider === "openai"
+    ? provider.config_fields.filter((field) => !["model", "default_model", "lightweight_model", "embedding_model"].includes(field))
+    : provider?.config_fields ?? [];
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="admin">
@@ -348,7 +439,7 @@ export default function AdminSaaSSettingsPage() {
                     <span>{provider.secret_fingerprint || "Secret values are never returned to the frontend."}</span>
                   </div>
                   <div className="saas-admin__form-grid">
-                    {provider.config_fields.map((field) => (
+                    {providerConfigFields.map((field) => (
                       <label key={field}>
                         <span>{field.replaceAll("_", " ")}</span>
                         <input
@@ -384,12 +475,111 @@ export default function AdminSaaSSettingsPage() {
                     <label><input type="checkbox" checked={providerEnabled} onChange={(event) => setProviderEnabled(event.target.checked)} /> Provider enabled</label>
                     <label><input type="checkbox" checked={clearSecret} onChange={(event) => setClearSecret(event.target.checked)} /> Clear stored secret</label>
                   </div>
+                  {provider.provider === "openai" ? (
+                    <section className="saas-admin__ai-plan" aria-labelledby="tenant-ai-plan-heading">
+                      <div className="saas-admin__card-heading">
+                        <div>
+                          <h3 id="tenant-ai-plan-heading">Tenant AI plan & model policy</h3>
+                          <p>
+                            The API key above is encrypted server-side and never returned. This policy controls which backend workflows may use it and records usage for the selected tenant.
+                          </p>
+                        </div>
+                        <Status value={aiHealth?.connection_status || (canLoadTenantAI ? "NOT CONFIGURED" : "SELECT TENANT")} />
+                      </div>
+                      {!canLoadTenantAI ? (
+                        <div className="saas-admin__alert">Select a tenant scope to configure its AI plan. Platform credentials remain available as inherited, write-only defaults.</div>
+                      ) : aiSettings ? (
+                        <>
+                          <div className="saas-admin__ai-usage">
+                            <div><span>Credential source</span><strong>{aiHealth?.credential_source || "—"}</strong></div>
+                            <div><span>Requests this month</span><strong>{aiSettings.monthly_usage?.requests ?? 0}{aiSettings.monthly_request_allowance ? ` / ${aiSettings.monthly_request_allowance}` : " / unlimited"}</strong></div>
+                            <div><span>Tokens this month</span><strong>{aiSettings.monthly_usage?.tokens ?? 0}{aiSettings.monthly_token_allowance ? ` / ${aiSettings.monthly_token_allowance}` : " / unlimited"}</strong></div>
+                          </div>
+                          <div className="saas-admin__form-grid">
+                            <label>
+                              <span>Plan type</span>
+                              <input value={aiSettings.plan_type} onChange={(event) => setAISettings({ ...aiSettings, plan_type: event.target.value.toUpperCase() })} placeholder="DEVELOPMENT, STANDARD or ENTERPRISE" />
+                            </label>
+                            <label>
+                              <span>Default model</span>
+                              <select value={aiSettings.default_model} onChange={(event) => setAISettings({ ...aiSettings, default_model: event.target.value })}>
+                                {chatModels.map((item) => <option key={item.model} value={item.model}>{item.model} · {item.purpose}</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Lightweight model</span>
+                              <select value={aiSettings.lightweight_model} onChange={(event) => setAISettings({ ...aiSettings, lightweight_model: event.target.value })}>
+                                {chatModels.map((item) => <option key={item.model} value={item.model}>{item.model} · {item.purpose}</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Embedding model</span>
+                              <select value={aiSettings.embedding_model} onChange={(event) => setAISettings({ ...aiSettings, embedding_model: event.target.value })}>
+                                {embeddingModels.map((item) => <option key={item.model} value={item.model}>{item.model}</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Monthly token allowance</span>
+                              <input type="number" min="0" value={aiSettings.monthly_token_allowance} onChange={(event) => updateAINumber("monthly_token_allowance", event.target.value)} />
+                              <small>0 means unlimited; set the commercial plan allowance here.</small>
+                            </label>
+                            <label>
+                              <span>Monthly request allowance</span>
+                              <input type="number" min="0" value={aiSettings.monthly_request_allowance} onChange={(event) => updateAINumber("monthly_request_allowance", event.target.value)} />
+                              <small>0 means unlimited.</small>
+                            </label>
+                            <label>
+                              <span>Maximum input tokens per request</span>
+                              <input type="number" min="0" value={aiSettings.max_input_tokens_per_request} onChange={(event) => updateAINumber("max_input_tokens_per_request", event.target.value)} />
+                              <small>0 delegates the ceiling to the selected provider/model.</small>
+                            </label>
+                            <label>
+                              <span>Maximum output tokens per request</span>
+                              <input type="number" min="0" value={aiSettings.max_output_tokens_per_request} onChange={(event) => updateAINumber("max_output_tokens_per_request", event.target.value)} />
+                              <small>0 delegates the ceiling to the selected provider/model.</small>
+                            </label>
+                            <label className="saas-admin__wide">
+                              <span>AI policy audit reason</span>
+                              <input value={aiReason} onChange={(event) => setAIReason(event.target.value)} />
+                            </label>
+                          </div>
+                          <fieldset className="saas-admin__feature-grid">
+                            <legend>Enabled governed workflows</legend>
+                            {aiFeatures.map((feature) => (
+                              <label key={feature.code}>
+                                <input
+                                  type="checkbox"
+                                  checked={aiSettings.enabled_features.includes(feature.code)}
+                                  onChange={(event) => toggleAIFeature(feature.code, event.target.checked)}
+                                />
+                                <span><strong>{feature.label}</strong><small>{feature.context_kind.replaceAll("_", " ")}</small></span>
+                              </label>
+                            ))}
+                          </fieldset>
+                          <div className="saas-admin__checks saas-admin__checks--stacked">
+                            <label><input type="checkbox" checked={aiSettings.enabled} onChange={(event) => setAISettings({ ...aiSettings, enabled: event.target.checked })} /> Enable AI for this tenant</label>
+                            <label>
+                              <input type="checkbox" checked={aiSettings.allow_external_document_context} onChange={(event) => setAISettings({ ...aiSettings, allow_external_document_context: event.target.checked })} />
+                              Permit authorised controlled-document excerpts to be sent to the configured provider
+                            </label>
+                          </div>
+                          <div className="saas-admin__actions">
+                            <button type="button" className="primary" onClick={() => void saveAISettings()} disabled={busyAction !== null}>
+                              {busyAction === "save:ai-settings" ? "Saving AI plan…" : "Save tenant AI plan"}
+                            </button>
+                          </div>
+                        </>
+                      ) : <div className="saas-admin__alert">AI settings could not be loaded for this tenant.</div>}
+                    </section>
+                  ) : null}
                   <div className="saas-admin__actions">
                     <button type="button" className="primary" onClick={() => void saveProvider()} disabled={busyAction !== null}>
                       {busyAction === `save:${provider.provider}` ? "Saving…" : "Save encrypted configuration"}
                     </button>
                     <button type="button" onClick={() => void testProvider()} disabled={busyAction !== null}>
-                      {busyAction === `test:${provider.provider}` ? "Queueing…" : "Queue backend health check"}
+                      {busyAction === `test:${provider.provider}`
+                        ? provider.provider === "openai" ? "Testing…" : "Queueing…"
+                        : provider.provider === "openai" ? "Test AI connection now" : "Queue backend health check"}
                     </button>
                   </div>
                   {provider.last_health_detail ? <p className="saas-admin__health-detail">Last check: {provider.last_health_detail} {provider.last_latency_ms != null ? `(${provider.last_latency_ms} ms)` : ""}</p> : null}

@@ -13,6 +13,7 @@ import zipfile
 from typing import Optional, List, Iterator, Any
 from uuid import UUID
 import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header, Form, Body
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -31,6 +32,15 @@ from amodb.database import get_db, get_read_db
 
 from . import models
 from .schedule_weekend import resolve_schedule_window
+from .audit_deletion_service import (
+    AuditDeletionError,
+    build_audit_deletion_impact,
+    permanently_delete_audit,
+    recycle_bin_days_remaining,
+    recycle_bin_purge_at,
+)
+from .audit_schedule_rules import validate_planned_window
+from .tenant_security import set_postgres_tenant_context
 from . import transitions as car_transitions
 from .schemas import (
     CARActionCreate,
@@ -238,8 +248,8 @@ def _scope_default_code_for_kind(kind: models.QMSAuditKind) -> str:
 
 
 def _require_scope_admin(current_user: account_models.User) -> None:
-    if not _is_quality_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only AMO Admins or Quality Managers can manage audit scopes")
+    if not _is_quality_manager(current_user):
+        raise HTTPException(status_code=403, detail="Only the Quality Manager can govern audit scopes")
 
 
 def _validate_one_calendar_year(*, start: Optional[date], end: Optional[date], duration_days: Optional[int] = None) -> None:
@@ -310,8 +320,17 @@ def _car_query_for_amo(db: Session, amo_id: str):
     return db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.amo_id == amo_id)
 
 
-def _get_schedule_for_amo(db: Session, *, amo_id: str, schedule_id: UUID) -> models.QMSAuditSchedule:
-    schedule = _schedule_query_for_amo(db, amo_id).filter(models.QMSAuditSchedule.id == schedule_id).first()
+def _get_schedule_for_amo(
+    db: Session,
+    *,
+    amo_id: str,
+    schedule_id: UUID,
+    include_deleted: bool = False,
+) -> models.QMSAuditSchedule:
+    query = _schedule_query_for_amo(db, amo_id).filter(models.QMSAuditSchedule.id == schedule_id)
+    if not include_deleted:
+        query = query.filter(models.QMSAuditSchedule.deleted_at.is_(None))
+    schedule = query.first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Audit schedule not found")
     return schedule
@@ -323,15 +342,23 @@ def _get_car_for_amo(db: Session, *, amo_id: str, car_id: UUID) -> models.Correc
         raise HTTPException(status_code=404, detail="CAR not found")
     return car
 
-def _get_audit_for_amo(db: Session, *, amo_id: str, audit_id: UUID) -> models.QMSAudit:
-    audit = (
+def _get_audit_for_amo(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: UUID,
+    include_deleted: bool = False,
+) -> models.QMSAudit:
+    query = (
         db.query(models.QMSAudit)
         .filter(
             models.QMSAudit.id == audit_id,
             models.QMSAudit.amo_id == amo_id,
         )
-        .first()
     )
+    if not include_deleted:
+        query = query.filter(models.QMSAudit.deleted_at.is_(None))
+    audit = query.first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
     return audit
@@ -635,10 +662,10 @@ def _amo_login_slug(db: Session, amo_id: Optional[str]) -> str:
 def _audit_workspace_notification_url(db: Session, audit: Optional[models.QMSAudit], *, tab: str = "cars", car_id: Optional[UUID] = None) -> Optional[str]:
     if not audit:
         return None
-    params = f"tab={tab}"
-    if car_id:
-        params += f"&carId={car_id}"
-    return f"/maintenance/{_amo_login_slug(db, audit.amo_id)}/quality/audits/{audit.id}?{params}"
+    stage = {"cars": "follow-up", "report": "closing"}.get(str(tab).lower(), "live")
+    audit_key = quote(str(audit.audit_ref or audit.id), safe="")
+    suffix = f"?carId={quote(str(car_id), safe='')}" if car_id else ""
+    return f"/maintenance/{_amo_login_slug(db, audit.amo_id)}/quality/audits/{audit_key}/{stage}{suffix}"
 
 
 def _notify_user(
@@ -886,19 +913,20 @@ def _quality_manager_recipient_ids(db: Session, amo_id: str) -> set[str]:
 
 def _quality_governance_recipient_ids(db: Session, amo_id: str) -> set[str]:
     roles = {
-        account_models.AccountRole.AMO_ADMIN,
+        account_models.AccountRole.ACCOUNTABLE_EXECUTIVE,
         account_models.AccountRole.QUALITY_MANAGER,
         account_models.AccountRole.AUDITOR,
-        "AMO_ADMIN",
+        account_models.AccountRole.QUALITY_OFFICER,
+        "ACCOUNTABLE_EXECUTIVE",
         "QUALITY_MANAGER",
         "AUDITOR",
+        "QUALITY_OFFICER",
     }
     recipients: set[str] = set()
     users = db.query(account_models.User).filter(account_models.User.amo_id == amo_id, account_models.User.is_active.is_(True)).all()
     for user in users:
         role_value = getattr(user.role, "value", user.role)
-        title = (getattr(user, "position_title", None) or "").upper()
-        if role_value in roles or "ACCOUNTABLE MANAGER" in title:
+        if role_value in roles:
             recipients.add(user.id)
     return recipients
 
@@ -1125,7 +1153,11 @@ def _external_auditee_summary(external_auditees: list[dict[str, Optional[str]]])
 
 
 def _serialize_schedule(schedule: models.QMSAuditSchedule) -> QMSAuditScheduleOut:
-    return QMSAuditScheduleOut.model_validate(schedule, from_attributes=True)
+    serialized = QMSAuditScheduleOut.model_validate(schedule, from_attributes=True)
+    return serialized.model_copy(update={
+        "purge_at": recycle_bin_purge_at(schedule.deleted_at),
+        "days_remaining": recycle_bin_days_remaining(schedule.deleted_at),
+    })
 
 
 def _looks_like_portal_identifier(value: Optional[str]) -> bool:
@@ -1192,7 +1224,10 @@ def _audit_person_display_names(db: Session, audit: models.QMSAudit) -> dict[str
 
 
 def _serialize_audit(audit: models.QMSAudit, db: Optional[Session] = None) -> QMSAuditOut:
-    serialized = QMSAuditOut.model_validate(audit, from_attributes=True)
+    serialized = QMSAuditOut.model_validate(audit, from_attributes=True).model_copy(update={
+        "purge_at": recycle_bin_purge_at(audit.deleted_at),
+        "days_remaining": recycle_bin_days_remaining(audit.deleted_at),
+    })
     if db is None:
         return serialized
     return serialized.model_copy(update=_audit_person_display_names(db, audit))
@@ -1206,6 +1241,7 @@ def _collect_audit_notice_recipients(
     auditee_user_id: Optional[str],
     auditee_email: Optional[str],
     auditee_label: Optional[str],
+    supporting_auditor_user_ids: Optional[list[str]] = None,
     external_auditees: Optional[list[dict[str, Optional[str]]]] = None,
     notify_auditors: bool = True,
     notify_auditees: bool = True,
@@ -1237,6 +1273,17 @@ def _collect_audit_notice_recipients(
             email=getattr(lead_user, "email", None),
             label=_user_display_name(lead_user),
         )
+
+    if notify_auditors:
+        for user_id in supporting_auditor_user_ids or []:
+            supporting_user = _load_user(db, user_id, amo_id=amo_id)
+            if supporting_user is not None:
+                _add(
+                    "supporting_auditor",
+                    user=supporting_user,
+                    email=getattr(supporting_user, "email", None),
+                    label=_user_display_name(supporting_user),
+                )
 
     auditee_user = _load_user(db, auditee_user_id, amo_id=amo_id)
     provided_auditee_email = _normalized_email(auditee_email)
@@ -1292,6 +1339,11 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
         db,
         amo_id=amo_id,
         lead_auditor_user_id=schedule.lead_auditor_user_id,
+        supporting_auditor_user_ids=[
+            value
+            for value in (schedule.observer_auditor_user_id, schedule.assistant_auditor_user_id)
+            if value
+        ],
         auditee_user_id=schedule.auditee_user_id,
         auditee_email=schedule.auditee_email,
         auditee_label=schedule.auditee,
@@ -1306,7 +1358,15 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
             _notify_user(
                 db,
                 recipient["user_id"],
-                f"You have been assigned as lead auditor for scheduled audit {schedule.title} due {schedule.next_due_date.isoformat()}.",
+                f"You have been assigned as lead auditor for {schedule.title} due {schedule.next_due_date.isoformat()}.",
+                models.QMSNotificationSeverity.INFO,
+                amo_id=amo_id,
+            )
+        elif role == "supporting_auditor" and recipient["user_id"]:
+            _notify_user(
+                db,
+                recipient["user_id"],
+                f"You have been assigned to the audit team for {schedule.title} due {schedule.next_due_date.isoformat()}.",
                 models.QMSNotificationSeverity.INFO,
                 amo_id=amo_id,
             )
@@ -1342,65 +1402,6 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
         )
 
 
-def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) -> None:
-    planned_start = audit.planned_start.isoformat() if audit.planned_start else None
-    planned_end = audit.planned_end.isoformat() if audit.planned_end else None
-    lead_user = _load_user(db, audit.lead_auditor_user_id, amo_id=amo_id)
-    lead_label = _user_display_name(lead_user)
-    recipients = _collect_audit_notice_recipients(
-        db,
-        amo_id=amo_id,
-        lead_auditor_user_id=audit.lead_auditor_user_id,
-        auditee_user_id=audit.auditee_user_id,
-        auditee_email=audit.auditee_email,
-        auditee_label=audit.auditee,
-        external_auditees=_deserialize_external_auditees(audit.external_auditees_json),
-        notify_auditors=bool(audit.notify_auditors),
-        notify_auditees=bool(audit.notify_auditees),
-    )
-    for recipient in recipients:
-        role = recipient["role"] or "recipient"
-        recipient_label = recipient["label"] or recipient["email"] or "recipient"
-        if role == "lead_auditor" and recipient["user_id"]:
-            _notify_user(
-                db,
-                recipient["user_id"],
-                f"Audit notice memo issued: {audit.audit_ref} · {audit.title} starts {planned_start or 'TBD'}.",
-                models.QMSNotificationSeverity.ACTION_REQUIRED,
-                amo_id=amo_id,
-            )
-        elif role.startswith("auditee") and recipient["user_id"]:
-            _notify_user(
-                db,
-                recipient["user_id"],
-                f"Audit notice memo issued to auditee: {audit.audit_ref} · {audit.title} starts {planned_start or 'TBD'}.",
-                models.QMSNotificationSeverity.ACTION_REQUIRED,
-                amo_id=amo_id,
-            )
-        _send_notice_email(
-            db,
-            amo_id=amo_id,
-            template_key="qms_audit_notice_memo",
-            recipient=recipient["email"],
-            subject=f"Audit Notice Memo · {audit.audit_ref}",
-            context={
-                "recipient_role": role,
-                "recipient_label": recipient_label,
-                "audit_ref": audit.audit_ref,
-                "title": audit.title,
-                "planned_start": planned_start,
-                "planned_end": planned_end,
-                "scope": audit.scope,
-                "criteria": audit.criteria,
-                "auditee": audit.auditee,
-                "external_auditees": _deserialize_external_auditees(audit.external_auditees_json),
-                "lead_auditor": lead_label,
-                "reminder_interval_days": audit.reminder_interval_days,
-            },
-            correlation_id=str(audit.id),
-        )
-
-
 def _role_value(current_user: account_models.User) -> str | account_models.AccountRole | None:
     role_value = getattr(current_user, "role", None)
     return getattr(role_value, "value", role_value)
@@ -1420,38 +1421,27 @@ def _is_quality_officer(current_user: account_models.User) -> bool:
     }
 
 
-def _is_system_quality_admin(current_user: account_models.User) -> bool:
-    role_value = _role_value(current_user)
-    return bool(
-        getattr(current_user, "is_superuser", False)
-        or getattr(current_user, "is_amo_admin", False)
-        or role_value
-        in {
-            account_models.AccountRole.SUPERUSER,
-            account_models.AccountRole.AMO_ADMIN,
-            "SUPERUSER",
-            "AMO_ADMIN",
-        }
-    )
-
-
 def _is_quality_admin(current_user: account_models.User) -> bool:
-    return _is_system_quality_admin(current_user) or _is_quality_manager(current_user)
+    # Tenant/platform administration is configuration authority, never a
+    # substitute for the approved Quality Manager appointment.
+    return _is_quality_manager(current_user)
 
 
 def _is_quality_scheduler(current_user: account_models.User) -> bool:
-    role_value = _role_value(current_user)
-    return _is_quality_admin(current_user) or role_value in {
-        account_models.AccountRole.AUDITOR,
-        account_models.AccountRole.QUALITY_INSPECTOR,
-        "AUDITOR",
-        "QUALITY_INSPECTOR",
-    }
+    return _is_quality_manager(current_user) or _is_quality_officer(current_user)
 
 
 def _require_quality_scheduler(current_user: account_models.User) -> None:
     if not _is_quality_scheduler(current_user):
         raise HTTPException(status_code=403, detail="Only Quality team roles can schedule audits or issue CARs")
+
+
+def _require_quality_audit_manager(current_user: account_models.User) -> None:
+    if not (_is_quality_admin(current_user) or _is_quality_officer(current_user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Quality Officer or Quality Manager may manage deleted audits.",
+        )
 
 
 def _is_quality_car_actor(current_user: account_models.User) -> bool:
@@ -1488,11 +1478,75 @@ def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str, *,
 
 
 def _audit_allows_user_by_audit(audit: models.QMSAudit, user_id: str) -> bool:
-    return user_id in {
+    assigned_ids = {
         audit.lead_auditor_user_id,
         audit.observer_auditor_user_id,
         audit.assistant_auditor_user_id,
     }
+    assigned_ids.update(str(value) for value in (getattr(audit, "supporting_auditor_user_ids", None) or []) if value)
+    return user_id in assigned_ids
+
+
+def _normalise_supporting_auditor_ids(values: Optional[list[str]], *, lead_user_id: Optional[str]) -> list[str]:
+    result: list[str] = []
+    for value in values or []:
+        user_id = str(value or "").strip()
+        if user_id and user_id != lead_user_id and user_id not in result:
+            result.append(user_id)
+    return result
+
+
+def _validate_audit_team_members(db: Session, *, amo_id: str, user_ids: list[str | None]) -> None:
+    selected = {str(value) for value in user_ids if value}
+    if not selected:
+        return
+    existing = {
+        str(row[0])
+        for row in db.query(account_models.User.id).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(selected),
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        ).all()
+    }
+    if existing != selected:
+        raise HTTPException(status_code=422, detail="Every selected auditor must be an active human user in this tenant.")
+
+
+def _validate_audit_team_privileges(
+    db: Session,
+    *,
+    amo_id: str,
+    lead_user_id: str | None,
+    observer_user_id: str | None = None,
+    assistant_user_id: str | None = None,
+    supporting_user_ids: list[str] | None = None,
+) -> None:
+    from .planner_schedule_router import _validate_auditor_assignments
+
+    _validate_auditor_assignments(
+        db,
+        amo_id=amo_id,
+        lead_user_id=lead_user_id,
+        observer_user_id=observer_user_id,
+        assistant_user_id=assistant_user_id,
+        supporting_user_ids=supporting_user_ids,
+    )
+
+
+def _validate_audit_location(db: Session, *, amo_id: str, location_code: Optional[str]) -> None:
+    code = str(location_code or "").strip()
+    if not code:
+        return
+    from amodb.apps.foundations import models as foundation_models
+
+    exists = db.query(foundation_models.BaseStation.id).filter(
+        foundation_models.BaseStation.amo_id == amo_id,
+        foundation_models.BaseStation.code == code,
+        foundation_models.BaseStation.is_active.is_(True),
+    ).first()
+    if exists is None:
+        raise HTTPException(status_code=422, detail="Select an active physical location configured for this tenant.")
 
 
 def _audit_lead_allows_user_by_audit(audit: models.QMSAudit, user_id: str) -> bool:
@@ -1517,21 +1571,17 @@ def _audit_for_finding(db: Session, finding_id: Optional[UUID], *, amo_id: str) 
 
 
 def _current_user_can_modify_finding(current_user: account_models.User, finding: models.QMSAuditFinding, audit: models.QMSAudit) -> bool:
-    if _is_system_quality_admin(current_user):
-        return True
     if _audit_lead_allows_user_by_audit(audit, current_user.id):
         return True
     return False
 
 
 def _require_audit_fieldwork_write_access(current_user: account_models.User, audit: models.QMSAudit) -> None:
-    if _is_system_quality_admin(current_user):
-        return
     if _audit_allows_user_by_audit(audit, current_user.id):
         return
     if _is_quality_manager(current_user):
         raise HTTPException(status_code=403, detail="Quality Managers may flag fieldwork records for review, but cannot create or modify findings unless assigned to the audit team.")
-    raise HTTPException(status_code=403, detail="Only the assigned audit team, AMO Admin, or Superuser may record audit findings.")
+    raise HTTPException(status_code=403, detail="Only the assigned audit team may record audit findings.")
 
 
 def _require_finding_owner_access(current_user: account_models.User, finding: models.QMSAuditFinding, audit: models.QMSAudit) -> None:
@@ -1539,12 +1589,10 @@ def _require_finding_owner_access(current_user: account_models.User, finding: mo
         return
     if _is_quality_manager(current_user):
         raise HTTPException(status_code=403, detail="Quality Managers may flag audit findings for review, but cannot modify finding details, evidence, or linked CARs unless assigned as the lead auditor.")
-    raise HTTPException(status_code=403, detail="Only the lead auditor, AMO Admin, or Superuser may modify this finding.")
+    raise HTTPException(status_code=403, detail="Only the assigned lead auditor may modify this finding.")
 
 
 def _current_user_can_modify_car(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> bool:
-    if _is_system_quality_admin(current_user):
-        return True
     audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit:
         return _audit_lead_allows_user_by_audit(audit, current_user.id)
@@ -1559,14 +1607,12 @@ def _require_car_not_escalated(car: models.CorrectiveActionRequest) -> None:
 
 
 def _require_car_review_access(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> None:
-    if _is_system_quality_admin(current_user):
-        return
     audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
     if audit and _audit_lead_allows_user_by_audit(audit, current_user.id):
         return
     if _is_quality_manager(current_user) or _is_quality_officer(current_user):
         raise HTTPException(status_code=403, detail="Quality Managers and Quality Officers may receive or flag deferrals for review, but cannot accept/reject CARs unless assigned as the lead auditor.")
-    raise HTTPException(status_code=403, detail="Only the lead auditor, AMO Admin, or Superuser may review CAR responses or deferrals.")
+    raise HTTPException(status_code=403, detail="Only the assigned lead auditor may review CAR responses or deferrals.")
 
 
 def _require_audit_access(
@@ -1602,11 +1648,11 @@ def _require_car_write_access(
         finding_id,
         amo_id=car.amo_id if car is not None else _current_amo_id(current_user),
     )
-    if audit and (_is_system_quality_admin(current_user) or _audit_lead_allows_user_by_audit(audit, current_user.id)):
+    if audit and _audit_lead_allows_user_by_audit(audit, current_user.id):
         return
     if _is_quality_manager(current_user):
         raise HTTPException(status_code=403, detail="Quality Managers may flag CARs/findings for review, but cannot modify them unless assigned as the lead auditor.")
-    raise HTTPException(status_code=403, detail="Only the lead auditor, requester, AMO Admin, or Superuser may modify CARs")
+    raise HTTPException(status_code=403, detail="Only the assigned lead auditor, requester, or authorized Quality Officer may modify CARs")
 
 
 def _assignee_can_request_extension(
@@ -1973,8 +2019,8 @@ def complete_audit_fieldwork(
 ):
     audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     _require_audit_access(current_user, audit)
-    if not _is_system_quality_admin(current_user) and not _audit_lead_allows_user_by_audit(audit, current_user.id):
-        raise HTTPException(status_code=403, detail="Only the lead auditor, AMO Admin, or Superuser may complete fieldwork.")
+    if not _audit_lead_allows_user_by_audit(audit, current_user.id):
+        raise HTTPException(status_code=403, detail="Only the assigned lead auditor may complete fieldwork.")
     from .audit_checklist_execution_router import _require_fieldwork_write_window
 
     _require_fieldwork_write_window(db, amo_id=str(audit.amo_id), audit=audit)
@@ -3008,7 +3054,29 @@ def create_audit(
 ):
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
+    supporting_auditor_user_ids = _normalise_supporting_auditor_ids(
+        payload.supporting_auditor_user_ids,
+        lead_user_id=payload.lead_auditor_user_id,
+    )
+    _validate_audit_team_members(
+        db,
+        amo_id=scoped_amo_id,
+        user_ids=[payload.lead_auditor_user_id, *supporting_auditor_user_ids],
+    )
+    _validate_audit_team_privileges(
+        db,
+        amo_id=scoped_amo_id,
+        lead_user_id=payload.lead_auditor_user_id,
+        supporting_user_ids=supporting_auditor_user_ids,
+    )
+    _validate_audit_location(db, amo_id=scoped_amo_id, location_code=payload.location)
     _validate_one_calendar_year(start=payload.planned_start, end=payload.planned_end)
+    planned_start_time, planned_end_time = validate_planned_window(
+        planned_start=payload.planned_start,
+        planned_end=payload.planned_end,
+        planned_start_time=payload.planned_start_time,
+        planned_end_time=payload.planned_end_time,
+    )
     audit_scope = _resolve_audit_scope(
         db,
         amo_id=scoped_amo_id,
@@ -3047,11 +3115,15 @@ def create_audit(
         lead_auditor_user_id=payload.lead_auditor_user_id,
         observer_auditor_user_id=payload.observer_auditor_user_id,
         assistant_auditor_user_id=payload.assistant_auditor_user_id,
+        supporting_auditor_user_ids=supporting_auditor_user_ids,
+        location=payload.location,
         notify_auditors=payload.notify_auditors,
         notify_auditees=payload.notify_auditees,
         reminder_interval_days=payload.reminder_interval_days,
         planned_start=payload.planned_start,
         planned_end=payload.planned_end,
+        planned_start_time=planned_start_time,
+        planned_end_time=planned_end_time,
         created_by_user_id=get_actor(),
     )
     db.add(audit)
@@ -3067,7 +3139,6 @@ def create_audit(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
-    _dispatch_audit_notice(db, audit=audit, amo_id=str(audit.amo_id))
     db.commit()
     db.refresh(audit)
     return _serialize_audit(audit, db)
@@ -3079,17 +3150,27 @@ def list_audits(
     domain: Optional[QMSDomain] = None,
     status_: Optional[models.QMSAuditStatus] = None,
     kind: Optional[models.QMSAuditKind] = None,
+    deleted_only: bool = False,
+    include_deleted: bool = False,
     limit: int = Query(default=250, ge=1, le=1000),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     qs = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == _current_amo_id(current_user))
+    if deleted_only:
+        qs = qs.filter(models.QMSAudit.deleted_at.is_not(None))
+    elif not include_deleted:
+        qs = qs.filter(models.QMSAudit.deleted_at.is_(None))
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
     if status_:
         qs = qs.filter(models.QMSAudit.status == status_)
     if kind:
         qs = qs.filter(models.QMSAudit.kind == kind)
-    audits = qs.order_by(models.QMSAudit.planned_start.desc().nullslast(), models.QMSAudit.created_at.desc()).limit(limit).all()
+    if deleted_only:
+        qs = qs.order_by(models.QMSAudit.deleted_at.desc())
+    else:
+        qs = qs.order_by(models.QMSAudit.planned_start.desc().nullslast(), models.QMSAudit.created_at.desc())
+    audits = qs.limit(limit).all()
     return [_serialize_audit(audit, db) for audit in audits]
 
 
@@ -3104,7 +3185,10 @@ def list_findings_bulk(
     qs = (
         db.query(models.QMSAuditFinding)
         .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
-        .filter(models.QMSAudit.amo_id == scoped_amo_id)
+        .filter(
+            models.QMSAudit.amo_id == scoped_amo_id,
+            models.QMSAudit.deleted_at.is_(None),
+        )
     )
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
@@ -3123,7 +3207,10 @@ def get_audit_register(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     scoped_amo_id = _current_amo_id(current_user)
-    audit_query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == scoped_amo_id)
+    audit_query = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == scoped_amo_id,
+        models.QMSAudit.deleted_at.is_(None),
+    )
     if domain:
         audit_query = audit_query.filter(models.QMSAudit.domain == domain)
     audits = audit_query.order_by(models.QMSAudit.created_at.desc()).all()
@@ -3170,15 +3257,26 @@ def list_audit_schedules(
     db: Session = Depends(get_db),
     domain: Optional[QMSDomain] = None,
     active: Optional[bool] = None,
+    deleted_only: bool = False,
+    include_deleted: bool = False,
+    limit: int = Query(default=250, ge=1, le=1000),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     scoped_amo_id = _current_amo_id(current_user)
     qs = db.query(models.QMSAuditSchedule).filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
     if domain:
         qs = qs.filter(models.QMSAuditSchedule.domain == domain)
+    if deleted_only:
+        qs = qs.filter(models.QMSAuditSchedule.deleted_at.is_not(None))
+    elif not include_deleted:
+        qs = qs.filter(models.QMSAuditSchedule.deleted_at.is_(None))
     if active is not None:
         qs = qs.filter(models.QMSAuditSchedule.is_active.is_(active))
-    schedules = qs.order_by(models.QMSAuditSchedule.next_due_date.asc()).all()
+    if deleted_only:
+        qs = qs.order_by(models.QMSAuditSchedule.deleted_at.desc())
+    else:
+        qs = qs.order_by(models.QMSAuditSchedule.next_due_date.asc())
+    schedules = qs.limit(limit).all()
     return [_serialize_schedule(schedule) for schedule in schedules]
 
 
@@ -3221,8 +3319,14 @@ def list_audit_personnel_options(
         .all()
     )
 
+    from .planner_schedule_router import _auditor_roles_by_user
+
+    auditor_roles = _auditor_roles_by_user(db, amo_id=amo_id)
     results: list[QMSPersonOptionOut] = []
     for user in users:
+        roles = sorted(auditor_roles.get(str(user.id), set()))
+        if not roles:
+            continue
         full_name = (getattr(user, "full_name", None) or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip() or getattr(user, "email", None) or getattr(user, "staff_code", None) or str(user.id))
         role_value = getattr(user, "role", None)
         role_value = getattr(role_value, "value", role_value)
@@ -3235,6 +3339,7 @@ def list_audit_personnel_options(
                 role=str(role_value) if role_value else None,
                 department_id=getattr(user, "department_id", None),
                 position_title=getattr(user, "position_title", None),
+                auditor_roles=roles,
             )
         )
     return results
@@ -3249,6 +3354,22 @@ def create_audit_schedule(
 ):
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
+    _validate_audit_team_members(
+        db,
+        amo_id=scoped_amo_id,
+        user_ids=[
+            payload.lead_auditor_user_id,
+            payload.observer_auditor_user_id,
+            payload.assistant_auditor_user_id,
+        ],
+    )
+    _validate_audit_team_privileges(
+        db,
+        amo_id=scoped_amo_id,
+        lead_user_id=payload.lead_auditor_user_id,
+        observer_user_id=payload.observer_auditor_user_id,
+        assistant_user_id=payload.assistant_auditor_user_id,
+    )
     start_date, _end_date, duration_days = resolve_schedule_window(
         start=payload.next_due_date,
         duration_days=payload.duration_days,
@@ -3330,6 +3451,7 @@ def update_audit_schedule(
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
         .filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
+        .filter(models.QMSAuditSchedule.deleted_at.is_(None))
         .first()
     )
     if not schedule:
@@ -3353,6 +3475,26 @@ def update_audit_schedule(
     }
 
     changes = payload.model_dump(exclude_unset=True)
+    if {
+        "lead_auditor_user_id",
+        "observer_auditor_user_id",
+        "assistant_auditor_user_id",
+    }.intersection(changes):
+        candidate_lead = changes.get("lead_auditor_user_id", schedule.lead_auditor_user_id)
+        candidate_observer = changes.get("observer_auditor_user_id", schedule.observer_auditor_user_id)
+        candidate_assistant = changes.get("assistant_auditor_user_id", schedule.assistant_auditor_user_id)
+        _validate_audit_team_members(
+            db,
+            amo_id=scoped_amo_id,
+            user_ids=[candidate_lead, candidate_observer, candidate_assistant],
+        )
+        _validate_audit_team_privileges(
+            db,
+            amo_id=scoped_amo_id,
+            lead_user_id=candidate_lead,
+            observer_user_id=candidate_observer,
+            assistant_user_id=candidate_assistant,
+        )
     next_start = changes.get("next_due_date", schedule.next_due_date)
     next_duration = changes.get("duration_days", schedule.duration_days)
     weekend_policy = changes.pop("weekend_policy", None)
@@ -3474,18 +3616,13 @@ def update_audit_schedule(
 def delete_audit_schedule(
     schedule_id: UUID,
     request: Request,
+    reason: Optional[str] = Query(default=None, max_length=1000),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_quality_scheduler(current_user)
-    schedule = (
-        db.query(models.QMSAuditSchedule)
-        .filter(models.QMSAuditSchedule.id == schedule_id)
-        .filter(models.QMSAuditSchedule.amo_id == _current_amo_id(current_user))
-        .first()
-    )
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Audit schedule not found")
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    schedule = _get_schedule_for_amo(db, amo_id=amo_id, schedule_id=schedule_id)
 
     before = {
         "title": schedule.title,
@@ -3493,19 +3630,94 @@ def delete_audit_schedule(
         "next_due_date": str(schedule.next_due_date),
     }
 
-    db.delete(schedule)
+    schedule.deleted_at = datetime.now(timezone.utc)
+    schedule.deleted_by_user_id = str(current_user.id)
+    schedule.delete_reason = (reason or "").strip() or None
     audit_services.log_event(
         db,
-        amo_id=_current_amo_id(current_user),
+        amo_id=amo_id,
         actor_user_id=current_user.id,
         entity_type="qms_audit_schedule",
         entity_id=str(schedule_id),
-        action="delete",
+        action="move_to_recycle_bin",
         before=before,
+        after={"deleted_at": schedule.deleted_at.isoformat(), "reason_provided": bool(schedule.delete_reason)},
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
         critical=True,
     )
+    db.commit()
+    return None
+
+
+@router.post("/audits/schedules/{schedule_id}/restore", response_model=QMSAuditScheduleOut)
+def restore_audit_schedule(
+    schedule_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    schedule = _get_schedule_for_amo(
+        db,
+        amo_id=amo_id,
+        schedule_id=schedule_id,
+        include_deleted=True,
+    )
+    if schedule.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Audit schedule is not in the recycle bin")
+    deleted_at = schedule.deleted_at
+    schedule.deleted_at = None
+    schedule.deleted_by_user_id = None
+    schedule.delete_reason = None
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule.id),
+        action="restore_from_recycle_bin",
+        before={"deleted_at": deleted_at.isoformat()},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+    db.commit()
+    db.refresh(schedule)
+    return _serialize_schedule(schedule)
+
+
+@router.delete("/audits/schedules/{schedule_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_audit_schedule(
+    schedule_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    schedule = _get_schedule_for_amo(
+        db,
+        amo_id=amo_id,
+        schedule_id=schedule_id,
+        include_deleted=True,
+    )
+    if schedule.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Move the schedule to the recycle bin before deleting it forever")
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule.id),
+        action="purge_from_recycle_bin",
+        before={"title": schedule.title, "deleted_at": schedule.deleted_at.isoformat()},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+    db.delete(schedule)
     db.commit()
     return None
 
@@ -3523,12 +3735,21 @@ def run_audit_schedule(
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
         .filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
+        .filter(models.QMSAuditSchedule.deleted_at.is_(None))
         .first()
     )
     if not schedule:
         raise HTTPException(status_code=404, detail="Audit schedule not found")
     if not schedule.is_active:
         raise HTTPException(status_code=400, detail="Audit schedule is inactive")
+
+    _validate_audit_team_privileges(
+        db,
+        amo_id=scoped_amo_id,
+        lead_user_id=schedule.lead_auditor_user_id,
+        observer_user_id=schedule.observer_auditor_user_id,
+        assistant_user_id=schedule.assistant_auditor_user_id,
+    )
 
     planned_start = schedule.next_due_date
     planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
@@ -3561,6 +3782,11 @@ def run_audit_schedule(
         lead_auditor_user_id=schedule.lead_auditor_user_id,
         observer_auditor_user_id=schedule.observer_auditor_user_id,
         assistant_auditor_user_id=schedule.assistant_auditor_user_id,
+        supporting_auditor_user_ids=[
+            value
+            for value in (schedule.observer_auditor_user_id, schedule.assistant_auditor_user_id)
+            if value
+        ],
         notify_auditors=schedule.notify_auditors,
         notify_auditees=schedule.notify_auditees,
         reminder_interval_days=schedule.reminder_interval_days,
@@ -3603,7 +3829,6 @@ def run_audit_schedule(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
-    _dispatch_audit_notice(db, audit=audit, amo_id=str(audit.amo_id))
     db.commit()
     db.refresh(audit)
     return _serialize_audit(audit, db)
@@ -3625,6 +3850,7 @@ def run_audit_reminders(
     amo_id = _current_amo_id(current_user)
     audits_q = db.query(models.QMSAudit).filter(
         models.QMSAudit.status == models.QMSAuditStatus.PLANNED,
+        models.QMSAudit.deleted_at.is_(None),
         models.QMSAudit.planned_start.isnot(None),
         models.QMSAudit.planned_start >= today,
         models.QMSAudit.planned_start <= upcoming_end,
@@ -3890,23 +4116,14 @@ def issue_audit_notice(
 ):
     _require_quality_scheduler(current_user)
     audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    _dispatch_audit_notice(db, audit=audit, amo_id=str(_current_amo_id(current_user)))
-    sent_at = datetime.now(timezone.utc)
-    audit.upcoming_notice_sent_at = audit.upcoming_notice_sent_at or sent_at
-    db.add(audit)
-    audit_services.log_event(
-        db,
-        amo_id=_current_amo_id(current_user),
-        actor_user_id=current_user.id,
-        entity_type="qms_audit",
-        entity_id=str(audit.id),
-        action="issue_notice",
-        after={"sent_at": sent_at.isoformat()},
-        correlation_id=str(uuid.uuid4()),
-        metadata={"module": "quality"},
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "CONTROLLED_AUDIT_NOTICE_REQUIRED",
+            "message": "Create, generate, review and send the controlled PDF from the audit Setup notice section.",
+            "audit_id": str(audit.id),
+        },
     )
-    db.commit()
-    return QMSAuditNoticeDispatchOut(audit_id=audit.id, dispatched=True, sent_at=sent_at, message="Audit notice dispatched.")
 
 
 @router.get("/audits/{audit_id}/evidence-pack")
@@ -4125,33 +4342,28 @@ def share_audit_report(
     )
 
     if "accountable_manager" in recipient_groups:
-        add_user_ids(
-            base_user_query.filter(
-                or_(
-                    account_models.User.role == account_models.AccountRole.AMO_ADMIN,
-                    account_models.User.position_title.ilike("%accountable manager%"),
-                )
-            ).all()
-        )
+        add_user_ids(base_user_query.filter(
+            account_models.User.role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE,
+        ).all())
 
     if "quality_manager" in recipient_groups:
         add_user_ids(base_user_query.filter(account_models.User.role == account_models.AccountRole.QUALITY_MANAGER).all())
 
     if "department_heads" in recipient_groups:
         add_user_ids(
-            base_user_query.filter(
-                or_(
-                    account_models.User.position_title.ilike("%head%"),
-                    account_models.User.position_title.ilike("%manager%"),
-                    account_models.User.role.in_(
-                        [
-                            account_models.AccountRole.PLANNING_ENGINEER,
-                            account_models.AccountRole.PRODUCTION_ENGINEER,
-                            account_models.AccountRole.STORES_MANAGER,
-                        ]
-                    ),
-                )
-            ).all()
+            base_user_query.filter(account_models.User.role.in_([
+                account_models.AccountRole.ACCOUNTABLE_EXECUTIVE,
+                account_models.AccountRole.BASE_MAINTENANCE_MANAGER,
+                account_models.AccountRole.LINE_MAINTENANCE_MANAGER,
+                account_models.AccountRole.WORKSHOP_MANAGER,
+                account_models.AccountRole.QUALITY_MANAGER,
+                account_models.AccountRole.SAFETY_MANAGER,
+                account_models.AccountRole.STORES_MANAGER,
+                account_models.AccountRole.FINANCE_MANAGER,
+                account_models.AccountRole.HUMAN_RESOURCES_MANAGER,
+                account_models.AccountRole.MAINTENANCE_SUPERVISOR,
+                account_models.AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
+            ])).all()
         )
 
     if "audited_department" in recipient_groups and audit.auditee_user_id:
@@ -4222,29 +4434,124 @@ def share_audit_report(
     }
 
 
-@router.delete("/audits/{audit_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.get("/audits/{audit_id}/deletion-impact")
+def get_audit_deletion_impact(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
+    audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id, include_deleted=True)
+    impact = build_audit_deletion_impact(db, audit=audit)
+    impact.pop("storage_refs", None)
+    return impact
+
+
+@router.delete("/audits/{audit_id}")
 def delete_audit(
+    audit_id: UUID,
+    request: Request,
+    reason: Optional[str] = Query(default=None, max_length=1000),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
+    audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id)
+    before = {"audit_ref": audit.audit_ref, "title": audit.title, "status": audit.status.value}
+    audit.deleted_at = datetime.now(timezone.utc)
+    audit.deleted_by_user_id = str(current_user.id)
+    audit.delete_reason = (reason or "").strip() or None
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="move_to_recycle_bin",
+        before=before,
+        after={"deleted_at": audit.deleted_at.isoformat(), "reason_provided": bool(audit.delete_reason)},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    db.commit()
+    return {
+        "deleted": True,
+        "recoverable": True,
+        "purge_at": recycle_bin_purge_at(audit.deleted_at),
+    }
+
+
+@router.post("/audits/{audit_id}/restore", response_model=QMSAuditOut)
+def restore_audit(
     audit_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_quality_scheduler(current_user)
-    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
-    before = {"audit_ref": audit.audit_ref, "title": audit.title, "status": audit.status.value}
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
+    audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id, include_deleted=True)
+    if audit.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Audit is not in the recycle bin")
+    deleted_at = audit.deleted_at
+    audit.deleted_at = None
+    audit.deleted_by_user_id = None
+    audit.delete_reason = None
     audit_services.log_event(
         db,
-        amo_id=_current_amo_id(current_user),
+        amo_id=amo_id,
         actor_user_id=current_user.id,
         entity_type="qms_audit",
         entity_id=str(audit.id),
-        action="delete",
-        before=before,
+        action="restore_from_recycle_bin",
+        before={"deleted_at": deleted_at.isoformat()},
+        after={"status": audit.status.value},
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
+        critical=True,
     )
-    db.delete(audit)
     db.commit()
+    db.refresh(audit)
+    return _serialize_audit(audit, db)
+
+
+@router.delete("/audits/{audit_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_audit(
+    audit_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_audit_manager(current_user)
+    amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
+    audit = _get_audit_for_amo(db, amo_id=amo_id, audit_id=audit_id, include_deleted=True)
+    if audit.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Move the audit to the recycle bin before deleting it forever")
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="purge_from_recycle_bin",
+        before={"audit_ref": audit.audit_ref, "title": audit.title, "deleted_at": audit.deleted_at.isoformat()},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+    try:
+        permanently_delete_audit(db, audit=audit, actor_user_id=str(current_user.id))
+    except AuditDeletionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": exc.code, "message": exc.public_message},
+        ) from exc
     return None
 
 
@@ -4271,7 +4578,9 @@ def update_audit(
     protected_identity_fields = {
         "title", "kind", "scope", "criteria", "auditee", "auditee_email", "auditee_user_id",
         "external_auditees", "lead_auditor_user_id", "observer_auditor_user_id", "assistant_auditor_user_id",
+        "supporting_auditor_user_ids", "location",
         "planned_start", "planned_end", "audit_scope_id", "audit_scope_code",
+        "planned_start_time", "planned_end_time",
         "notify_auditors", "notify_auditees", "reminder_interval_days",
     }
     if not _external_audit_is_editable(audit.kind) and any(field in changes for field in protected_identity_fields):
@@ -4281,6 +4590,45 @@ def update_audit(
     prospective_start = changes.get("planned_start", audit.planned_start)
     prospective_end = changes.get("planned_end", audit.planned_end)
     _validate_one_calendar_year(start=prospective_start, end=prospective_end)
+    prospective_start_time, prospective_end_time = validate_planned_window(
+        planned_start=prospective_start,
+        planned_end=prospective_end,
+        planned_start_time=changes.get("planned_start_time", audit.planned_start_time),
+        planned_end_time=changes.get("planned_end_time", audit.planned_end_time),
+    )
+    if "supporting_auditor_user_ids" in changes:
+        changes["supporting_auditor_user_ids"] = _normalise_supporting_auditor_ids(
+            changes["supporting_auditor_user_ids"],
+            lead_user_id=changes.get("lead_auditor_user_id", audit.lead_auditor_user_id),
+        )
+    if {
+        "lead_auditor_user_id",
+        "observer_auditor_user_id",
+        "assistant_auditor_user_id",
+        "supporting_auditor_user_ids",
+    }.intersection(changes):
+        candidate_lead = changes.get("lead_auditor_user_id", audit.lead_auditor_user_id)
+        candidate_observer = changes.get("observer_auditor_user_id", audit.observer_auditor_user_id)
+        candidate_assistant = changes.get("assistant_auditor_user_id", audit.assistant_auditor_user_id)
+        candidate_supporting = changes.get(
+            "supporting_auditor_user_ids",
+            list(getattr(audit, "supporting_auditor_user_ids", None) or []),
+        )
+        _validate_audit_team_members(
+            db,
+            amo_id=str(audit.amo_id),
+            user_ids=[candidate_lead, candidate_observer, candidate_assistant, *candidate_supporting],
+        )
+        _validate_audit_team_privileges(
+            db,
+            amo_id=str(audit.amo_id),
+            lead_user_id=candidate_lead,
+            observer_user_id=candidate_observer,
+            assistant_user_id=candidate_assistant,
+            supporting_user_ids=candidate_supporting,
+        )
+    if "location" in changes:
+        _validate_audit_location(db, amo_id=str(audit.amo_id), location_code=changes["location"])
 
     reference_needs_regeneration = False
     if "kind" in changes and changes["kind"] is not None:
@@ -4305,8 +4653,10 @@ def update_audit(
     for field in (
         "status", "scope", "criteria", "auditee", "auditee_email",
         "planned_start", "planned_end", "actual_start", "actual_end",
+        "planned_start_time", "planned_end_time",
         "report_file_ref", "checklist_file_ref", "auditee_user_id",
         "lead_auditor_user_id", "observer_auditor_user_id", "assistant_auditor_user_id",
+        "supporting_auditor_user_ids", "location",
         "notify_auditors", "notify_auditees", "reminder_interval_days",
     ):
         if field in changes and changes[field] is not None:
@@ -4314,6 +4664,11 @@ def update_audit(
             if field == "planned_start":
                 planned_start_changed = True
                 reference_needs_regeneration = True
+
+    if prospective_start is not None:
+        audit.planned_start_time = prospective_start_time
+    if prospective_end is not None:
+        audit.planned_end_time = prospective_end_time
 
     if reference_needs_regeneration and _external_audit_is_editable(audit.kind):
         audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
@@ -4749,7 +5104,7 @@ def flag_finding_for_review(
         audit_id=audit_id,
     )
     _require_audit_access(current_user, audit)
-    if not (_is_quality_manager(current_user) or _is_system_quality_admin(current_user) or _audit_allows_user_by_audit(audit, current_user.id)):
+    if not (_is_quality_manager(current_user) or _audit_allows_user_by_audit(audit, current_user.id)):
         raise HTTPException(status_code=403, detail="Insufficient privileges to flag finding for review")
 
     reason = payload.reason.strip()
@@ -7018,7 +7373,7 @@ def get_auditor_stats(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    qs = db.query(models.QMSAudit)
+    qs = db.query(models.QMSAudit).filter(models.QMSAudit.deleted_at.is_(None))
     amo_id = _current_amo_id(current_user)
     if amo_id:
         qs = qs.filter(models.QMSAudit.amo_id == amo_id)
@@ -7248,14 +7603,11 @@ def _is_aerodoc_control_role(current_user: account_models.User) -> bool:
     role_value = getattr(current_user, "role", None)
     role_value = getattr(role_value, "value", role_value)
     return bool(
-        getattr(current_user, "is_superuser", False)
-        or role_value in {
-            account_models.AccountRole.AMO_ADMIN,
+        role_value in {
             account_models.AccountRole.QUALITY_MANAGER,
-            account_models.AccountRole.QUALITY_INSPECTOR,
-            "AMO_ADMIN",
+            account_models.AccountRole.QUALITY_OFFICER,
             "QUALITY_MANAGER",
-            "QUALITY_INSPECTOR",
+            "QUALITY_OFFICER",
             "DOCUMENT_CONTROL_OFFICER",
         }
     )
@@ -7263,7 +7615,7 @@ def _is_aerodoc_control_role(current_user: account_models.User) -> bool:
 
 def _enforce_aerodoc_control(current_user: account_models.User) -> None:
     if not _is_aerodoc_control_role(current_user):
-        raise HTTPException(status_code=403, detail="Document Control Officer or AMO Admin rights required")
+        raise HTTPException(status_code=403, detail="Document Control Officer or Quality control rights required")
 
 
 def _store_aerodoc_upload(doc_id: UUID, rev_id: UUID, file: UploadFile) -> tuple[str, int, str]:

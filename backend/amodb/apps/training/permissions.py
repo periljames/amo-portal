@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
-from ..accounts import models as account_models
+from ..accounts import access_control, models as account_models
 
 
 class TrainingCapability(str, Enum):
@@ -121,16 +121,6 @@ def _role_value(user: account_models.User) -> str:
     return str(raw or "").strip().upper()
 
 
-def _department_code(user: account_models.User) -> str:
-    department = getattr(user, "department", None)
-    code = getattr(department, "code", "") if department is not None else ""
-    return str(code or "").strip().upper().replace("_", "-")
-
-
-def _position_title(user: account_models.User) -> str:
-    return str(getattr(user, "position_title", "") or "").strip().lower()
-
-
 def tenant_id_for(user: account_models.User) -> str:
     value = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None)
     if not value:
@@ -150,15 +140,11 @@ def default_training_capabilities(user: account_models.User) -> set[str]:
 
     if not user or getattr(user, "is_system_account", False):
         return set()
-    if getattr(user, "is_amo_admin", False) or _role_value(user) == "AMO_ADMIN":
-        return set(ALL_TRAINING_CAPABILITIES)
-
     role = _role_value(user)
-    department = _department_code(user)
-    position = _position_title(user)
-
     if role == "QUALITY_MANAGER":
         return set(ALL_TRAINING_CAPABILITIES)
+    if role == "QUALITY_OFFICER":
+        return set(_TRAINING_OFFICER)
     if role in {
         "ACCOUNTABLE_EXECUTIVE",
         "BASE_MAINTENANCE_MANAGER",
@@ -166,13 +152,22 @@ def default_training_capabilities(user: account_models.User) -> set[str]:
         "WORKSHOP_MANAGER",
     }:
         return set(_READ)
-    if role in {"QUALITY_INSPECTOR", "AUDITOR"}:
-        return set(_QUALITY_REVIEW)
-    if department in {"QUALITY", "QUALITY-ASSURANCE"}:
-        return set(_QUALITY_REVIEW)
-    if department in {"TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"}:
-        manager = any(token in position for token in ("head", "manager", "lead"))
-        return set(ALL_TRAINING_CAPABILITIES if manager else _TRAINING_OFFICER)
+    if role in {
+        "QUALITY_INSPECTOR",
+        "AUDITOR",
+        "DOCUMENT_CONTROL_OFFICER",
+        "QUALITY_SUPPORT_OFFICER",
+    }:
+        return set(_READ)
+    if role in {"HUMAN_RESOURCES_MANAGER", "HUMAN_RESOURCES_OFFICER"}:
+        capabilities = _READ | {
+            TrainingCapability.PEOPLE_MANAGE.value,
+            TrainingCapability.PLAN_MANAGE.value,
+            TrainingCapability.SESSION_MANAGE.value,
+            TrainingCapability.ATTENDANCE_MANAGE.value,
+            TrainingCapability.REPORT_EXPORT.value,
+        }
+        return set(capabilities)
     if role in {"FINANCE_MANAGER", "ACCOUNTS_OFFICER"}:
         return _SELF | {
             TrainingCapability.VIEW.value,
@@ -183,16 +178,9 @@ def default_training_capabilities(user: account_models.User) -> set[str]:
             TrainingCapability.REPORT_VIEW.value,
             TrainingCapability.REPORT_EXPORT.value,
         }
-    if any(token in position for token in ("assessor", "instructor", "trainer")):
-        return _SELF | {
-            TrainingCapability.VIEW.value,
-            TrainingCapability.PEOPLE_VIEW.value,
-            TrainingCapability.SESSION_VIEW.value,
-            TrainingCapability.ATTENDANCE_VIEW.value,
-            TrainingCapability.ATTENDANCE_MANAGE.value,
-            TrainingCapability.ASSESSMENT_VIEW.value,
-            TrainingCapability.ASSESSMENT_PERFORM.value,
-        }
+    # Department names and free-text titles are intentionally excluded. An
+    # instructor, assessor or training specialist receives explicit Training
+    # capability bindings; a label alone must never create workflow authority.
     return set(_SELF)
 
 
@@ -253,12 +241,19 @@ def training_capabilities_for(db: Session, *, user: account_models.User) -> set[
     if getattr(user, "is_superuser", False):
         if not _platform_support_session_active(db, user=user, amo_id=amo_id):
             return set()
-        return set(ALL_TRAINING_CAPABILITIES)
+        return set(_READ)
 
     if db.get_bind().dialect.name == "postgresql":
         db.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})
         db.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": str(user.id)})
-    return default_training_capabilities(user) | _database_capabilities(db, user=user, amo_id=amo_id)
+    # The effective primary tenant access profile is the sole database-backed
+    # role assignment. Legacy Training-specific roles may remain as historical
+    # rows, but they cannot silently preserve authority after a profile change.
+    return {
+        code
+        for code in access_control.capability_codes_for_user(db, user=user)
+        if code in ALL_TRAINING_CAPABILITIES
+    }
 
 
 def has_training_capability(

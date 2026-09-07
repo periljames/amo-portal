@@ -9,7 +9,7 @@ Work orders and task cards API.
 
 Role model (from security / AccountRole):
 - Planning / production write access:
-  SUPERUSER, AMO_ADMIN, PLANNING_ENGINEER, PRODUCTION_ENGINEER
+  approved maintenance managers, planning/production engineers and supervisors
 - Non-routine creation + own task updates:
   CERTIFYING_ENGINEER, CERTIFYING_TECHNICIAN, TECHNICIAN
 - VIEW_ONLY and above can read.
@@ -49,12 +49,13 @@ router = APIRouter(
 )
 
 PLANNING_ROLES = {
-    AccountRole.AMO_ADMIN,
     AccountRole.BASE_MAINTENANCE_MANAGER,
     AccountRole.LINE_MAINTENANCE_MANAGER,
     AccountRole.WORKSHOP_MANAGER,
     AccountRole.PLANNING_ENGINEER,
     AccountRole.PRODUCTION_ENGINEER,
+    AccountRole.MAINTENANCE_SUPERVISOR,
+    AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
 }
 
 ENGINEERING_ROLES = {
@@ -62,6 +63,31 @@ ENGINEERING_ROLES = {
     AccountRole.CERTIFYING_TECHNICIAN,
     AccountRole.TECHNICIAN,
 }
+
+
+INSPECTION_ROLES = {
+    AccountRole.CERTIFYING_ENGINEER,
+    AccountRole.CERTIFYING_TECHNICIAN,
+    AccountRole.QUALITY_INSPECTOR,
+}
+
+
+def _require_current_inspection_authorisation(db: Session, user: User) -> None:
+    """Require both an inspection persona and a live personal authorization.
+
+    Portal administration, position wording and module access are deliberately
+    insufficient for a maintenance inspection sign-off.
+    """
+    if user.role not in INSPECTION_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inspection sign-off requires an authorized certifying or Quality Inspector account.",
+        )
+    if not account_services.get_active_authorisations_for_user(db, user=user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No current personal maintenance authorization is recorded for this inspector.",
+        )
 
 
 def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str, amo_id: str) -> None:
@@ -184,17 +210,15 @@ def create_work_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
     """
     Create a new work order.
 
-    Only planning / production / AMO admin (and SUPERUSER via require_roles)
-    are allowed to create work orders.
+    Only governed maintenance managers, planning/production engineers and
+    supervisors are allowed to create work orders.
     """
     existing = (
         db.query(models.WorkOrder)
@@ -240,16 +264,14 @@ def update_work_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
     """
     Update a work order (planning / status / description).
 
-    Restricted to planning / production / AMO admin.
+    Restricted to governed maintenance planning and control roles.
     """
     wo = db.query(models.WorkOrder).filter(models.WorkOrder.id == work_order_id).first()
     if not wo:
@@ -277,9 +299,7 @@ def delete_work_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
@@ -385,10 +405,7 @@ def create_task(
 
     _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number, current_user.effective_amo_id)
 
-    is_planning = (
-        current_user.is_superuser
-        or current_user.role in PLANNING_ROLES
-    )
+    is_planning = current_user.role in PLANNING_ROLES
     is_engineering = current_user.role in ENGINEERING_ROLES
 
     if not (is_planning or is_engineering):
@@ -505,10 +522,7 @@ def update_task(
             return claim.row.response_json
         raise HTTPException(status_code=409, detail={"error_code": "COMMAND_IN_PROGRESS", "retryable": True})
 
-    is_planning = (
-        current_user.is_superuser
-        or current_user.role in PLANNING_ROLES
-    )
+    is_planning = current_user.role in PLANNING_ROLES
     is_engineering = current_user.role in ENGINEERING_ROLES
 
     data = payload.model_dump(exclude_unset=True)
@@ -625,9 +639,7 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
@@ -666,9 +678,7 @@ def create_task_steps(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
@@ -726,7 +736,7 @@ def execute_task_step(
         )
         .first()
     )
-    is_planning = current_user.is_superuser or current_user.role in PLANNING_ROLES
+    is_planning = current_user.role in PLANNING_ROLES
     if not (assignment or is_planning):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -766,14 +776,9 @@ def inspect_task(
     task_id: int,
     payload: schemas.InspectorSignOffCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.CERTIFYING_ENGINEER,
-            AccountRole.CERTIFYING_TECHNICIAN,
-        )
-    ),
+    current_user: User = Depends(get_current_active_user),
 ):
+    _require_current_inspection_authorisation(db, current_user)
     task = (
         db.query(models.TaskCard)
         .filter(
@@ -805,14 +810,9 @@ def inspect_work_order(
     work_order_id: int,
     payload: schemas.InspectorSignOffCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.CERTIFYING_ENGINEER,
-            AccountRole.CERTIFYING_TECHNICIAN,
-        )
-    ),
+    current_user: User = Depends(get_current_active_user),
 ):
+    _require_current_inspection_authorisation(db, current_user)
     work_order = (
         db.query(models.WorkOrder)
         .filter(
@@ -872,14 +872,12 @@ def create_assignment(
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.PLANNING_ENGINEER,
-            AccountRole.PRODUCTION_ENGINEER,
+            *PLANNING_ROLES,
         )
     ),
 ):
     """
-    Create a task assignment (planning / production / AMO admin only).
+    Create a task assignment for governed maintenance planning/control roles.
     """
     task = (
         db.query(models.TaskCard)
@@ -933,10 +931,7 @@ def update_assignment(
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
 
-    is_planning = (
-        current_user.is_superuser
-        or current_user.role in PLANNING_ROLES
-    )
+    is_planning = current_user.role in PLANNING_ROLES
 
     data = payload.model_dump(exclude_unset=True)
 
@@ -1003,7 +998,7 @@ def create_work_log(
 
     Allowed for:
     - Users assigned to the task.
-    - Planning / production / AMO admin (and SUPERUSER).
+    - Governed maintenance planning/control roles.
     """
     task = (
         db.query(models.TaskCard)
@@ -1016,10 +1011,7 @@ def create_work_log(
     if not task:
         raise HTTPException(status_code=404, detail="Task card not found")
 
-    is_planning = (
-        current_user.is_superuser
-        or current_user.role in PLANNING_ROLES
-    )
+    is_planning = current_user.role in PLANNING_ROLES
 
     is_assigned = (
         db.query(models.TaskAssignment)

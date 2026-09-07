@@ -27,7 +27,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: start;
-  pointer-events: none;
+  pointer-events: auto;
   animation: toast-enter 180ms ease-out;
 }
 
@@ -163,6 +163,10 @@
   background: currentColor;
   opacity: 0.28;
   animation: toast-timer var(--toast-duration) linear forwards;
+}
+
+.toast--paused .toast__timer {
+  animation-play-state: paused;
 }
 
 [data-portal-error-target="true"] {

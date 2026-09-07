@@ -19,10 +19,12 @@ import hashlib
 import os
 from contextvars import ContextVar, Token
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Callable, Union, Set
+from typing import Optional, Callable, Union, Set, Sequence
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.dependencies.utils import get_parameterless_sub_dependant
+from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
@@ -383,6 +385,8 @@ def get_current_active_user(
 
     setattr(current_user, "active_amo_id", active_amo_id)
     setattr(current_user, "effective_amo_id", effective_amo_id)
+    from amodb.apps.accounts import access_control
+    access_control.attach_user_access(db, current_user)
     return current_user
 
 
@@ -400,9 +404,6 @@ def require_admin(
     if getattr(current_user, "is_superuser", False) or getattr(
         current_user, "is_amo_admin", False
     ):
-        return current_user
-
-    if current_user.role == AccountRole.AMO_ADMIN:
         return current_user
 
     raise HTTPException(
@@ -424,37 +425,18 @@ def require_capability(
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db),
     ) -> account_models.User:
-        if getattr(current_user, "is_superuser", False):
-            return current_user
         try:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT 1
-                    FROM auth_user_role_assignments ura
-                    JOIN auth_role_capability_bindings rcb ON rcb.role_id = ura.role_id
-                    JOIN auth_capability_definitions cd ON cd.id = rcb.capability_id
-                    WHERE ura.amo_id = :amo_id
-                      AND ura.user_id = :user_id
-                      AND cd.code = :capability_code
-                      AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
-                      AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "amo_id": str(current_user.amo_id),
-                    "user_id": str(current_user.id),
-                    "capability_code": capability_code,
-                },
-            ).fetchall()
+            from amodb.apps.accounts import access_control
+            allowed = access_control.user_has_capability(
+                db, user=current_user, capability_code=capability_code
+            )
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Authorization capability service unavailable",
             )
 
-        if rows:
+        if allowed:
             return current_user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -462,6 +444,173 @@ def require_capability(
         )
 
     return dependency
+
+
+def require_module_access(
+    module_code: str,
+    level: str = "view",
+) -> Callable[[account_models.User, Session], account_models.User]:
+    """Enforce the tenant profile's module boundary before route logic.
+
+    Module grants may narrow a compatibility persona. Existing operation-level
+    role, scope, segregation-of-duties and personal-authorization checks remain
+    authoritative inside each module and cannot be bypassed by this gate.
+    """
+    normalized_module = str(module_code or "").strip().lower()
+    normalized_level = str(level or "view").strip().lower()
+    if normalized_level not in {"view", "manage"}:
+        raise ValueError("Module access level must be 'view' or 'manage'")
+
+    def dependency(
+        current_user: account_models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> account_models.User:
+        if getattr(current_user, "is_superuser", False):
+            if normalized_level == "view":
+                return current_user
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform support identity cannot perform tenant operational mutations",
+            )
+        from amodb.apps.accounts import access_control
+        if normalized_module not in access_control.MODULE_CODES:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unknown portal module access boundary",
+            )
+        required = f"portal.{normalized_module}.{normalized_level}"
+        if access_control.user_has_capability(db, user=current_user, capability_code=required):
+            return current_user
+        if normalized_level == "view" and access_control.user_has_capability(
+            db,
+            user=current_user,
+            capability_code=f"portal.{normalized_module}.manage",
+        ):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your tenant access profile does not include {normalized_module.replace('_', ' ')} access",
+        )
+
+    return dependency
+
+
+def require_any_module_access(
+    *module_codes: str,
+    level: str = "view",
+) -> Callable[[account_models.User, Session], account_models.User]:
+    """Allow a shared router when any one of its owning modules is granted."""
+    normalized_modules = tuple(
+        dict.fromkeys(str(code or "").strip().lower() for code in module_codes if str(code or "").strip())
+    )
+    normalized_level = str(level or "view").strip().lower()
+    if not normalized_modules:
+        raise ValueError("At least one module access boundary is required")
+    if normalized_level not in {"view", "manage"}:
+        raise ValueError("Module access level must be 'view' or 'manage'")
+
+    def dependency(
+        current_user: account_models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> account_models.User:
+        if getattr(current_user, "is_superuser", False):
+            if normalized_level == "view":
+                return current_user
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform support identity cannot perform tenant operational mutations",
+            )
+        from amodb.apps.accounts import access_control
+        unknown = [code for code in normalized_modules if code not in access_control.MODULE_CODES]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unknown portal module access boundary",
+            )
+        for module_code in normalized_modules:
+            if access_control.user_has_capability(
+                db, user=current_user, capability_code=f"portal.{module_code}.{normalized_level}"
+            ):
+                return current_user
+            if normalized_level == "view" and access_control.user_has_capability(
+                db, user=current_user, capability_code=f"portal.{module_code}.manage"
+            ):
+                return current_user
+        labels = ", ".join(code.replace("_", " ") for code in normalized_modules)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your tenant access profile does not include any of: {labels}",
+        )
+
+    return dependency
+
+
+_MUTATING_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def apply_module_access_boundary(
+    router: APIRouter,
+    *module_codes: str,
+    path_prefixes: Sequence[str] | None = None,
+) -> None:
+    """Enforce profile ``view``/``manage`` grants on an existing router.
+
+    FastAPI copies routes when routers are composed, so this is called after
+    module composition and before application mounting.  Operation-level role,
+    assignment, authorization and segregation checks remain authoritative.
+    ``path_prefixes`` lets a shared aggregate (currently Stores/Procurement)
+    retain separate module ownership instead of granting cross-module access.
+    """
+    normalized_modules = tuple(
+        dict.fromkeys(
+            str(code or "").strip().lower()
+            for code in module_codes
+            if str(code or "").strip()
+        )
+    )
+    if not normalized_modules:
+        raise ValueError("At least one module access boundary is required")
+    normalized_prefixes = tuple(
+        prefix for prefix in (path_prefixes or ()) if str(prefix or "").strip()
+    )
+    view_dependency = (
+        require_module_access(normalized_modules[0], "view")
+        if len(normalized_modules) == 1
+        else require_any_module_access(*normalized_modules, level="view")
+    )
+    manage_dependency = (
+        require_module_access(normalized_modules[0], "manage")
+        if len(normalized_modules) == 1
+        else require_any_module_access(*normalized_modules, level="manage")
+    )
+    boundary_key = (normalized_modules, normalized_prefixes)
+
+    def attach(route: APIRoute, dependency: Callable) -> None:
+        depends = Depends(dependency)
+        route.dependencies.append(depends)
+        route.dependant.dependencies.insert(
+            0,
+            get_parameterless_sub_dependant(
+                depends=depends,
+                path=route.path_format,
+            ),
+        )
+
+    for route in router.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if normalized_prefixes and not any(
+            str(route.path).startswith(prefix) for prefix in normalized_prefixes
+        ):
+            continue
+        applied = set(getattr(route, "_portal_module_boundaries", set()))
+        if boundary_key in applied:
+            continue
+        attach(route, view_dependency)
+        if bool((route.methods or set()) & _MUTATING_HTTP_METHODS):
+            attach(route, manage_dependency)
+        applied.add(boundary_key)
+        setattr(route, "_portal_module_boundaries", applied)
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +625,10 @@ def require_roles(
     Dependency factory to enforce that the current user has one of the given roles.
 
     Behaviour:
-    - SUPERUSER always passes, even if not explicitly listed in `allowed_roles`.
-    - Otherwise, the user's writer-side role must be in the allowed set.
+    - Platform SUPERUSER passes only when explicitly listed in `allowed_roles`.
+    - The user's writer-side operational role must otherwise be in the set.
+    - Tenant administration is an independent overlay and passes only when
+      AMO_ADMIN is explicitly part of the endpoint's configuration authority.
     """
     normalised_roles: Set[AccountRole] = set()
     for r in allowed_roles:
@@ -492,8 +643,10 @@ def require_roles(
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
     ) -> account_models.User:
-        # Global override: SUPERUSER can do anything
-        if getattr(current_user, "is_superuser", False):
+        if (
+            getattr(current_user, "is_amo_admin", False)
+            and AccountRole.AMO_ADMIN in normalised_roles
+        ):
             return current_user
 
         if current_user.role not in normalised_roles:

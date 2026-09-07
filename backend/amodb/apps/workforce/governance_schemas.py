@@ -154,6 +154,11 @@ class PositionRead(GovernanceSchema):
     description: str | None = None
     role_source: Literal["TENANT", "KCAR_2025"] = "TENANT"
     role_key: str | None = None
+    access_profile_id: str | None = None
+    access_profile_name: str | None = None
+    access_base_role_key: str | None = None
+    reports_to_position_id: str | None = None
+    reports_to_position_title: str | None = None
     management_level: Literal["STAFF", "SUPERVISOR", "MANAGER", "EXECUTIVE"] = "STAFF"
     can_have_supervisor: bool = True
     is_locked: bool = False
@@ -169,8 +174,19 @@ class PositionWrite(GovernanceSchema):
     description: str | None = Field(default=None, max_length=2000)
     management_level: Literal["STAFF", "SUPERVISOR", "MANAGER", "EXECUTIVE"] = "STAFF"
     tenant_function: Literal["HUMAN_RESOURCES", "INFORMATION_TECHNOLOGY", "FINANCE"] | None = None
+    access_profile_id: str | None = None
+    reports_to_position_id: str | None = None
     is_supervisory: bool = False
     is_active: bool = True
+
+
+class PositionAccessProfileRead(GovernanceSchema):
+    id: str
+    code: str
+    display_name: str
+    base_role_key: str
+    category: str
+    is_regulated: bool = False
 
 
 class HierarchyRoleStatus(GovernanceSchema):

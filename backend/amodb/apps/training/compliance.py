@@ -13,6 +13,7 @@ from . import course_lifecycle as training_course_lifecycle
 from . import models as training_models
 from . import workbook_models as training_workbook_models
 from . import record_lifecycle as training_record_lifecycle
+from . import role_targeting
 from . import schemas as training_schemas
 from .permissions import TrainingCapability, default_training_capabilities
 
@@ -195,6 +196,7 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
                 training_models.TrainingRequirement.course_id,
                 training_models.TrainingRequirement.scope,
                 training_models.TrainingRequirement.department_code,
+                training_models.TrainingRequirement.access_profile_id,
                 training_models.TrainingRequirement.job_role,
                 training_models.TrainingRequirement.user_id,
                 training_models.TrainingRequirement.is_active,
@@ -212,7 +214,11 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
     )
 
     dept_code = get_user_department_code(user)
-    job_role = get_user_job_role(user)
+    access_profile = role_targeting.primary_profiles_for_users(
+        db,
+        amo_id=str(user.amo_id),
+        user_ids=[str(user.id)],
+    ).get(str(user.id))
     required_course_ids: List[str] = []
 
     today = date.today()
@@ -229,7 +235,14 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
                 required_course_ids.append(req.course_id)
             elif req.scope == training_models.TrainingRequirementScope.DEPARTMENT and dept_code and req.department_code and req.department_code.upper() == dept_code:
                 required_course_ids.append(req.course_id)
-            elif req.scope == training_models.TrainingRequirementScope.JOB_ROLE and job_role and req.job_role and req.job_role.strip().lower() == job_role.lower():
+            elif (
+                req.scope == training_models.TrainingRequirementScope.JOB_ROLE
+                and role_targeting.requirement_matches_user(
+                    req,
+                    user=user,
+                    profile=access_profile,
+                )
+            ):
                 required_course_ids.append(req.course_id)
     else:
         required_course_ids = [

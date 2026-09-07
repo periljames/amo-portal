@@ -169,7 +169,7 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
         <label>Occurrence key<input value={occurrenceKey} onChange={(event) => setOccurrenceKey(event.target.value)} /></label>
         <label>Audit title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <div className="qms-programme-occurrence-grid"><label>Date<input type="date" value={date} min={selectedItem?.target_start || undefined} max={selectedItem?.target_end || undefined} onChange={(event) => setDate(event.target.value)} /></label><label>Start time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div>
-        <label>Lead auditor<select value={leadAuditor} onChange={(event) => setLeadAuditor(event.target.value)}><option value="">Unassigned</option>{optionsQuery.data?.people.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>
+        <label>Lead auditor<select value={leadAuditor} onChange={(event) => setLeadAuditor(event.target.value)}><option value="">Unassigned</option>{optionsQuery.data?.people.filter((person) => (person.auditor_roles || []).includes("LEAD_AUDITOR")).map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>
         <label>Location<input value={locationText} onChange={(event) => setLocationText(event.target.value)} /></label>
         <label>Scope<textarea value={scope} onChange={(event) => setScope(event.target.value)} /></label>
         <label>Criteria<textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} /></label>

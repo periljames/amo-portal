@@ -28,6 +28,11 @@ type EnhancedCapabilities = DocumentDetailResponse["capabilities"] & {
 type Mode = "properties" | "upload" | "publish" | null;
 type UploadState = "DRAFT" | "APPROVED";
 
+const DOCUMENT_TYPES = [
+  "MANUAL", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "POLICY",
+  "REGULATION", "EXTERNAL_DOCUMENT", "RECORD",
+] as const;
+
 function distributionPolicy(metadata: Record<string, unknown>): {
   auto_issue_on_publish: boolean;
   audience_mode: string;
@@ -50,17 +55,18 @@ export default function DocumentControlPrimaryActions({ detail, tenant, basePath
   const canEdit = Boolean(capabilities.edit_properties ?? capabilities.control);
   const canUpload = Boolean(capabilities.upload_revision ?? capabilities.control);
   const canPublish = Boolean(capabilities.publish ?? capabilities.approve);
+  const canAdvance = Boolean(workflow?.allowed_actions?.length);
   const publishReady = canPublish && workflow?.state === "SCHEDULED_FOR_EFFECTIVITY";
   const [mode, setMode] = useState<Mode>(null);
 
-  if (!canEdit && !canUpload && !canPublish) return null;
+  if (!canEdit && !canUpload && !canPublish && !canAdvance) return null;
 
   return <>
     {canEdit ? <button type="button" className="dc-button" onClick={() => setMode("properties")}><Pencil size={14} /> Edit properties</button> : null}
     {canUpload ? <button type="button" className="dc-button" onClick={() => setMode("upload")}><FileUp size={14} /> Upload revision</button> : null}
-    {canPublish ? publishReady
+    {publishReady
       ? <button type="button" className="dc-button dc-button--primary" onClick={() => setMode("publish")}><Rocket size={14} /> Publish revision</button>
-      : <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${detail.document.id}?tab=workflow`)}><Rocket size={14} /> Continue approval</button> : null}
+      : canAdvance ? <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library/${detail.document.id}?tab=workflow`)}><Rocket size={14} /> Continue workflow</button> : null}
 
     {mode === "properties" ? <PropertiesDialog detail={detail} tenant={tenant} onClose={() => setMode(null)} onChanged={onChanged} /> : null}
     {mode === "upload" ? <RevisionUploadDialog detail={detail} tenant={tenant} onClose={() => setMode(null)} onChanged={onChanged} /> : null}
@@ -80,7 +86,6 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
   const [title, setTitle] = useState(document.title);
   const [code, setCode] = useState(document.code);
   const [manualType, setManualType] = useState(document.manual_type);
-  const [ownerRole, setOwnerRole] = useState(document.owner_role);
   const [documentClass, setDocumentClass] = useState(document.profile.document_class);
   const [ownerDepartment, setOwnerDepartment] = useState(document.profile.owner_department);
   const [language, setLanguage] = useState(document.profile.language);
@@ -100,7 +105,7 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      await updateDocumentMetadata(tenant, document.id, { title, code, manual_type: manualType, owner_role: ownerRole });
+      await updateDocumentMetadata(tenant, document.id, { title, code, manual_type: manualType, owner_role: ownerDepartment });
       await upsertDocumentProfile(tenant, document.id, {
         document_class: documentClass, owner_department: ownerDepartment, owner_user_id: document.profile.owner_user_id,
         language, criticality, regulated_flag: regulated, restricted_flag: restricted,
@@ -115,23 +120,27 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
     finally { setBusy(false); }
   };
 
-  return <DialogShell title="Edit controlled document properties" description="Changes are tenant-scoped, audited, and do not alter immutable published revision content." busy={busy} onClose={onClose}><form className="dc-form" onSubmit={submit}>
+  return <DialogShell title="Edit document details" description="Update the register information. Published files remain immutable." busy={busy} onClose={onClose}><form className="dc-form" onSubmit={submit}>
     <label><span>Document code</span><input value={code} onChange={(event) => setCode(event.target.value)} required /></label>
-    <label><span>Document class</span><select value={documentClass} onChange={(event) => setDocumentClass(event.target.value as typeof documentClass)}><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External technical data</option><option value="RECORD">Record or evidence</option></select></label>
+    <label><span>Document type</span><select value={manualType} onChange={(event) => setManualType(event.target.value)}>{DOCUMENT_TYPES.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
     <label className="wide"><span>Title</span><input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
-    <label><span>Publication type</span><input value={manualType} onChange={(event) => setManualType(event.target.value)} required /></label>
-    <label><span>Owner role</span><input value={ownerRole} onChange={(event) => setOwnerRole(event.target.value)} required /></label>
-    <label><span>Owner department</span><input value={ownerDepartment} onChange={(event) => setOwnerDepartment(event.target.value)} required /></label>
-    <label><span>Language</span><input value={language} onChange={(event) => setLanguage(event.target.value)} required /></label>
+    <label><span>Responsible department</span><input value={ownerDepartment} onChange={(event) => setOwnerDepartment(event.target.value)} required /></label>
     <label><span>Criticality</span><select value={criticality} onChange={(event) => setCriticality(event.target.value as typeof criticality)}><option value="STANDARD">Standard</option><option value="IMPORTANT">Important</option><option value="CRITICAL">Critical</option></select></label>
-    <label><span>Review interval (months)</span><input type="number" min={1} max={120} value={reviewInterval} onChange={(event) => setReviewInterval(event.target.value)} required /></label>
-    <label><span>Next review due</span><input type="date" value={nextReview} onChange={(event) => setNextReview(event.target.value)} /></label>
-    <label><span><input type="checkbox" checked={regulated} onChange={(event) => setRegulated(event.target.checked)} /> Regulated document</span></label>
-    <label><span><input type="checkbox" checked={restricted} onChange={(event) => setRestricted(event.target.checked)} /> Restricted access</span></label>
-    <label><span><input type="checkbox" checked={authority} onChange={(event) => setAuthority(event.target.checked)} /> Authority approval required</span></label>
-    <label><span><input type="checkbox" checked={ackRequired} onChange={(event) => setAckRequired(event.target.checked)} /> Read-and-understand acknowledgement required</span></label>
-    <label><span><input type="checkbox" checked={autoIssue} onChange={(event) => setAutoIssue(event.target.checked)} /> Notify all eligible active users automatically on publish</span></label>
-    <label><span>Acknowledgement due (days)</span><input type="number" min={1} max={365} value={ackDueDays} onChange={(event) => setAckDueDays(event.target.value)} required /></label>
+    <details className="dc-form__advanced wide">
+      <summary>Advanced governance controls</summary>
+      <div className="dc-form__advanced-grid">
+        <label><span>Document class</span><select value={documentClass} onChange={(event) => setDocumentClass(event.target.value as typeof documentClass)}><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External technical data</option><option value="RECORD">Record or evidence</option></select></label>
+        <label><span>Language</span><input value={language} onChange={(event) => setLanguage(event.target.value)} required /></label>
+        <label><span>Review interval (months)</span><input type="number" min={1} max={120} value={reviewInterval} onChange={(event) => setReviewInterval(event.target.value)} required /></label>
+        <label><span>Next review due</span><input type="date" value={nextReview} onChange={(event) => setNextReview(event.target.value)} /></label>
+        <label><span><input type="checkbox" checked={regulated} onChange={(event) => setRegulated(event.target.checked)} /> Regulated document</span></label>
+        <label><span><input type="checkbox" checked={restricted} onChange={(event) => setRestricted(event.target.checked)} /> Restricted access</span></label>
+        <label><span><input type="checkbox" checked={authority} onChange={(event) => setAuthority(event.target.checked)} /> Authority approval required</span></label>
+        <label><span><input type="checkbox" checked={ackRequired} onChange={(event) => setAckRequired(event.target.checked)} /> Require acknowledgement on issue</span></label>
+        <label><span><input type="checkbox" checked={autoIssue} onChange={(event) => setAutoIssue(event.target.checked)} /> Notify eligible users on publication</span></label>
+        <label><span>Acknowledgement due (days)</span><input type="number" min={1} max={365} value={ackDueDays} onChange={(event) => setAckDueDays(event.target.value)} required /></label>
+      </div>
+    </details>
     {error ? <div className="dc-form__error">{error}</div> : null}
     <div className="dc-form__actions"><button type="button" className="dc-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy}>{busy ? "Saving…" : "Save properties"}</button></div>
   </form></DialogShell>;
@@ -191,7 +200,7 @@ function RevisionUploadDialog({ detail, tenant, onClose, onChanged }: { detail: 
 
   return <DialogShell title="Upload a controlled revision" description="Create a working draft, or register the exact final PDF when an authority approval already exists." busy={busy} onClose={onClose}><form className="dc-form" onSubmit={submit}>
     <label className="wide"><span>PDF or DOCX source</span><input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void inspect(event.target.files?.[0] || null)} required /></label>
-    <label><span>Intake state</span><select value={uploadState} onChange={(event) => setUploadState(event.target.value as UploadState)}><option value="DRAFT">Uncontrolled draft</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select></label>
+    <label><span>Intake state</span><select value={uploadState} onChange={(event) => setUploadState(event.target.value as UploadState)}><option value="DRAFT">Controlled draft (not issued)</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select></label>
     <label><span>Issue</span><input value={issue} onChange={(event) => setIssue(event.target.value)} required /></label>
     <label><span>Revision</span><input value={revision} onChange={(event) => setRevision(event.target.value)} required /></label>
     <label><span>{uploadState === "APPROVED" ? "Effective date" : "Proposed effective date"}</span><input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></label>

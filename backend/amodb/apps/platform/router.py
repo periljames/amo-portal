@@ -668,8 +668,15 @@ def diagnostics_network_internet(payload: dict[str, Any] | None = None, db: Sess
     if payload.get("upload_bytes"):
         kwargs["upload_bytes"] = int(payload["upload_bytes"])
     if payload.get("host"):
-        kwargs["host"] = str(payload["host"])
-    result = network_diagnostics.run_internet_speedtest(**kwargs)
+        requested_host = network_diagnostics._validated_host(str(payload["host"]))
+        configured_host = network_diagnostics._validated_host(network_diagnostics.DEFAULT_SPEEDTEST_HOST)
+        if requested_host != configured_host:
+            raise HTTPException(status_code=422, detail="Speed-test target is controlled by PLATFORM_NET_SPEEDTEST_HOST")
+        kwargs["host"] = requested_host
+    try:
+        result = network_diagnostics.run_internet_speedtest(**kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     network_diagnostics.persist_probe(db, scenario="server_internet", source="manual", data=result)
     return result
 
@@ -711,6 +718,7 @@ def diagnostics_network_client(payload: dict[str, Any], db: Session = Depends(ge
         "download_bytes": payload.get("download_bytes"),
         "upload_bytes": payload.get("upload_bytes"),
         "error": payload.get("error"),
+        "details": payload.get("details") if isinstance(payload.get("details"), dict) else None,
     }
     row = network_diagnostics.persist_probe(db, scenario=scenario, source="client", data=data)
     return {"id": row.id, "scenario": scenario, "captured_at": row.captured_at}

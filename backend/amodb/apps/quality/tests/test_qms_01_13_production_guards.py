@@ -263,10 +263,39 @@ def test_manual_change_request_model_has_required_tenant_key() -> None:
     assert {foreign_key.target_fullname for foreign_key in amo_column.foreign_keys} == {"amos.id"}
 
 
-def test_audit_notice_artifact_migration_is_the_single_alembic_head() -> None:
+def test_certified_backend_merge_is_the_single_alembic_head() -> None:
     config = Config(str(QUALITY_DIR.parents[1] / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["quality_260904_notice_pdf"]
+    assert scripts.get_heads() == ["backend_260906_certified"]
+
+
+def test_certified_backend_merge_repairs_orphan_times_and_removes_defaults(monkeypatch) -> None:
+    migration = importlib.import_module(
+        "amodb.alembic.versions.backend_20260906_certified_merge"
+    )
+    executed: list[str] = []
+    altered: list[tuple[str, str, object]] = []
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: executed.append(str(statement)),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "alter_column",
+        lambda table, column, **kwargs: altered.append(
+            (table, column, kwargs.get("server_default"))
+        ),
+    )
+
+    migration.upgrade()
+
+    assert any("planned_start IS NULL" in statement for statement in executed)
+    assert any("planned_end IS NULL" in statement for statement in executed)
+    assert altered == [
+        ("qms_audits", "planned_start_time", None),
+        ("qms_audits", "planned_end_time", None),
+    ]
 
 
 def test_qms13_migration_backfills_and_constrains_tenant(monkeypatch) -> None:

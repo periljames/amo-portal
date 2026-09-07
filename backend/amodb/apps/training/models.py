@@ -357,6 +357,16 @@ class TrainingRequirement(Base):
         Index("idx_training_requirements_user", "amo_id", "user_id"),
         Index("idx_training_requirements_dept", "amo_id", "department_code"),
         Index("idx_training_requirements_role", "amo_id", "job_role"),
+        Index("ix_training_requirements_access_profile", "amo_id", "access_profile_id"),
+        Index(
+            "uq_training_requirements_profile_identity",
+            "amo_id",
+            "course_id",
+            "scope",
+            "access_profile_id",
+            unique=True,
+            postgresql_where=text("access_profile_id IS NOT NULL"),
+        ),
         Index("idx_training_requirements_course", "amo_id", "course_id"),
         # Soft guard against duplication (NULLs are allowed; still helpful)
         UniqueConstraint(
@@ -398,6 +408,12 @@ class TrainingRequirement(Base):
     )
 
     department_code = Column(String(64), nullable=True, index=True)
+    access_profile_id = Column(
+        String(36),
+        ForeignKey("auth_role_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="Stable tenant access-profile target when scope=JOB_ROLE",
+    )
     job_role = Column(String(128), nullable=True, index=True)
 
     user_id = Column(
@@ -407,6 +423,8 @@ class TrainingRequirement(Base):
         index=True,
         doc="Only required when scope=USER",
     )
+
+    access_profile = relationship("AuthRoleDefinition", lazy="selectin")
 
     is_mandatory = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)

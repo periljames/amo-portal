@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
-from ..accounts import models as account_models
+from ..accounts import access_control, models as account_models
 from ..audit import services as audit_services
 from . import governance_directory, governance_schemas, hierarchy_roles, permissions, services
 
@@ -286,6 +286,42 @@ def positions(
 ):
     _view(db, current_user)
     return governance_directory.list_positions(db, amo_id=_amo(current_user), include_inactive=include_inactive)
+
+
+@router.get(
+    "/positions/access-profiles",
+    response_model=list[governance_schemas.PositionAccessProfileRead],
+)
+def position_access_profiles(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Expose assignable tenant profiles to governed Workforce editors.
+
+    This is read-only organization metadata. Tenant account-administration
+    commands remain on the protected accounts router.
+    """
+    _view(db, current_user)
+    rows = db.query(account_models.AuthRoleDefinition).filter(
+        account_models.AuthRoleDefinition.amo_id == _amo(current_user),
+        account_models.AuthRoleDefinition.is_active.is_(True),
+        account_models.AuthRoleDefinition.base_role_key.isnot(None),
+        account_models.AuthRoleDefinition.base_role_key.notin_(("SUPERUSER", "AMO_ADMIN")),
+    ).order_by(
+        account_models.AuthRoleDefinition.category.asc(),
+        account_models.AuthRoleDefinition.display_name.asc(),
+    ).all()
+    return [
+        governance_schemas.PositionAccessProfileRead(
+            id=str(row.id),
+            code=str(row.tenant_code or row.code),
+            display_name=str(row.display_name or row.tenant_code or row.code),
+            base_role_key=str(row.base_role_key),
+            category=str(row.category or "CUSTOM"),
+            is_regulated=bool(row.is_regulated),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/positions/hierarchy-blueprint", response_model=governance_schemas.HierarchyBlueprintRead)

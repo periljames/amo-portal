@@ -38,6 +38,11 @@ export type AuditNotice = {
   id: string;
   audit_id: string;
   policy_id?: string | null;
+  template_document_id?: string | null;
+  template_revision_id?: string | null;
+  form_number?: string | null;
+  form_issue_date?: string | null;
+  form_revision?: string | null;
   revision_no: number;
   status: "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "GENERATED" | "DELIVERED" | "ACKNOWLEDGED" | "SUPERSEDED" | "CANCELLED";
   required_notice_days: number;
@@ -81,6 +86,24 @@ export type AuditNoticeSubmitResult = {
     failed: number;
     items: Array<{ email: string; role?: string | null; status: string; message_id?: string | null; error?: string | null }>;
   };
+};
+
+export type AuditNoticeTemplateOption = {
+  document_id: string;
+  code: string;
+  title: string;
+  manual_type: string;
+  current_revision_id?: string | null;
+  current_revision?: string | null;
+  issue_number?: string | null;
+  effective_date?: string | null;
+  ready: boolean;
+};
+
+export type AuditNoticeTemplateSettings = {
+  selected_document_id?: string | null;
+  selected_current_revision_id?: string | null;
+  items: AuditNoticeTemplateOption[];
 };
 
 function json(method: string, body: unknown): RequestInit {
@@ -147,6 +170,7 @@ export function createAuditNotice(
   auditId: string,
   payload: {
     policy_id?: string;
+    template_document_id?: string;
     notice_date: string;
     exception_type?: "EMERGENCY" | "UNANNOUNCED";
     exception_reason?: string;
@@ -164,6 +188,7 @@ export function reviseAuditNotice(
   noticeId: string,
   payload: {
     policy_id?: string;
+    template_document_id?: string;
     notice_date: string;
     exception_type?: "EMERGENCY" | "UNANNOUNCED";
     exception_reason?: string;
@@ -190,6 +215,20 @@ export function transitionAuditNotice(
   );
 }
 
+export function getAuditNoticeTemplate(amoCode: string, signal?: AbortSignal) {
+  return apiRequest<AuditNoticeTemplateSettings>(
+    qmsPath(amoCode, "/audit-notice-template"),
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+  );
+}
+
+export function updateAuditNoticeTemplate(amoCode: string, documentId: string) {
+  return apiRequest<AuditNoticeTemplateSettings>(
+    qmsPath(amoCode, "/audit-notice-template"),
+    json("PUT", { document_id: documentId }),
+  );
+}
+
 export function uploadAuditNoticeAttachment(
   amoCode: string,
   auditId: string,
@@ -208,6 +247,18 @@ export function previewAuditNoticePdf(amoCode: string, auditId: string, noticeId
   return apiBlob(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/preview`),
     { headers: { Accept: "application/pdf" } },
+  );
+}
+
+export function prepareAuditNoticeDocument(
+  amoCode: string,
+  auditId: string,
+  noticeId: string,
+  reason: string,
+) {
+  return apiRequest<AuditNotice>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/prepare-document`),
+    json("POST", { reason }),
   );
 }
 

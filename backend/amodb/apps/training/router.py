@@ -64,6 +64,7 @@ from . import models as training_models
 from . import schemas as training_schemas
 from . import compliance as training_compliance
 from . import record_lifecycle as training_record_lifecycle
+from . import role_targeting as training_role_targeting
 from . import operating_service as training_operating_service
 from .permissions import TrainingCapability, default_training_capabilities, has_training_capability
 from ..workflow import apply_transition, TransitionError
@@ -1729,7 +1730,9 @@ def _require_training_editor(
 
 
 def _is_training_editor(user: accounts_models.User) -> bool:
-    return TrainingCapability.COURSE_MANAGE.value in default_training_capabilities(user)
+    return TrainingCapability.COURSE_MANAGE.value in set(
+        getattr(user, "capability_codes", ()) or ()
+    )
 
 
 def _get_user_department_code(user: accounts_models.User) -> Optional[str]:
@@ -2123,6 +2126,12 @@ def _requirement_to_read(r: training_models.TrainingRequirement) -> training_sch
         course_name=getattr(course, "course_name", None),
         scope=r.scope,
         department_code=r.department_code,
+        access_profile_id=r.access_profile_id,
+        access_profile_name=(
+            training_role_targeting.profile_display_name(r.access_profile)
+            if getattr(r, "access_profile", None) is not None
+            else r.job_role
+        ),
         job_role=r.job_role,
         user_id=r.user_id,
         is_mandatory=r.is_mandatory,
@@ -2150,9 +2159,10 @@ def _validate_requirement_target(
     amo_id: str,
     scope: training_models.TrainingRequirementScope,
     department_code: Optional[str],
+    access_profile_id: Optional[str],
     job_role: Optional[str],
     user_id: Optional[str],
-) -> None:
+) -> tuple[Optional[str], Optional[str]]:
     if scope == training_models.TrainingRequirementScope.DEPARTMENT:
         code = str(department_code or "").strip().upper()
         if not code:
@@ -2165,8 +2175,27 @@ def _validate_requirement_target(
         if not department:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The selected department is not active in this AMO.")
     elif scope == training_models.TrainingRequirementScope.JOB_ROLE:
-        if not str(job_role or "").strip():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_role is required for scope=JOB_ROLE.")
+        if not str(access_profile_id or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="access_profile_id is required for scope=JOB_ROLE; editable role titles are not stable identifiers.",
+            )
+        profile = training_role_targeting.resolve_active_profile(
+            db,
+            amo_id=amo_id,
+            profile_id=str(access_profile_id),
+        )
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The selected access profile is inactive or belongs to another AMO.",
+            )
+        if profile.base_role_key in {"SUPERUSER", "AMO_ADMIN", None}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Administrative overlays are not operational training roles.",
+            )
+        return str(profile.id), training_role_targeting.profile_display_name(profile)
     elif scope == training_models.TrainingRequirementScope.USER:
         if not user_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required for scope=USER.")
@@ -2178,6 +2207,7 @@ def _validate_requirement_target(
         ).first()
         if not user:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The selected user is inactive, a system account, or belongs to another AMO.")
+    return None, None
 
 
 def _validate_requirement_governance(
@@ -2687,11 +2717,12 @@ def create_requirement(
     if not course:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid course for this AMO.")
 
-    _validate_requirement_target(
+    access_profile_id, access_profile_name = _validate_requirement_target(
         db,
         amo_id=current_user.amo_id,
         scope=payload.scope,
         department_code=payload.department_code,
+        access_profile_id=payload.access_profile_id,
         job_role=payload.job_role,
         user_id=payload.user_id,
     )
@@ -2708,7 +2739,8 @@ def create_requirement(
         course_id=course.id,
         scope=payload.scope,
         department_code=(payload.department_code.strip().upper() if payload.department_code else None),
-        job_role=(payload.job_role.strip() if payload.job_role else None),
+        access_profile_id=access_profile_id,
+        job_role=access_profile_name,
         user_id=payload.user_id,
         is_mandatory=payload.is_mandatory,
         is_active=payload.is_active,
@@ -2775,28 +2807,35 @@ def update_requirement(
 
     if "department_code" in data and data["department_code"]:
         data["department_code"] = data["department_code"].strip().upper()
-    if "job_role" in data and data["job_role"]:
-        data["job_role"] = data["job_role"].strip()
+    # The display label is a server-owned snapshot of the stable access
+    # profile. Never accept a caller-supplied title as an authorization key.
+    data.pop("job_role", None)
 
     scope = data.get("scope", req.scope)
     if "scope" in data:
         if scope != training_models.TrainingRequirementScope.DEPARTMENT:
             data["department_code"] = None
         if scope != training_models.TrainingRequirementScope.JOB_ROLE:
+            data["access_profile_id"] = None
             data["job_role"] = None
         if scope != training_models.TrainingRequirementScope.USER:
             data["user_id"] = None
     department_code = data.get("department_code", req.department_code)
+    access_profile_id = data.get("access_profile_id", req.access_profile_id)
     job_role = data.get("job_role", req.job_role)
     user_id = data.get("user_id", req.user_id)
-    _validate_requirement_target(
+    validated_profile_id, validated_profile_name = _validate_requirement_target(
         db,
         amo_id=current_user.amo_id,
         scope=scope,
         department_code=department_code,
+        access_profile_id=access_profile_id,
         job_role=job_role,
         user_id=user_id,
     )
+    if scope == training_models.TrainingRequirementScope.JOB_ROLE:
+        data["access_profile_id"] = validated_profile_id
+        data["job_role"] = validated_profile_name
 
     source_type, source_id = _validate_requirement_governance(
         source_type=data.get("source_type", req.source_type),

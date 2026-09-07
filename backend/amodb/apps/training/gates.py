@@ -11,6 +11,7 @@ from amodb.apps.accounts import models as account_models
 
 from . import models
 from . import record_lifecycle
+from . import role_targeting
 
 
 def _enum_text(value: Any) -> str:
@@ -58,6 +59,11 @@ def _target_users(
         .all()
     )
     users = {str(row.id): row for row in rows}
+    access_profiles = role_targeting.primary_profiles_for_users(
+        db,
+        amo_id=amo_id,
+        user_ids=users,
+    )
     targets: dict[str, set[str]] = {}
     malformed: list[dict[str, str]] = []
     for requirement in requirements:
@@ -75,12 +81,15 @@ def _target_users(
                 for user_id, user in users.items()
                 if str(getattr(getattr(user, "department", None), "code", "") or "").strip().upper() == required_code
             }
-        elif scope == "JOB_ROLE" and requirement.job_role:
-            required_role = str(requirement.job_role).strip().casefold()
+        elif scope == "JOB_ROLE":
             selected = {
                 user_id
                 for user_id, user in users.items()
-                if str(getattr(user, "position_title", "") or "").strip().casefold() == required_role
+                if role_targeting.requirement_matches_user(
+                    requirement,
+                    user=user,
+                    profile=access_profiles.get(user_id),
+                )
             }
         if not selected:
             malformed.append({"requirement_id": str(requirement.id), "reason": "NO_ACTIVE_TARGETS"})

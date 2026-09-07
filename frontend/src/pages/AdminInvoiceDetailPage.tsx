@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
   fetchInvoiceDetail,
   fetchInvoiceDocument,
@@ -42,7 +43,7 @@ const AdminInvoiceDetailPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
-  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+  const isTenantAdmin = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || hasActiveTenantAdminProfile(amoCode));
 
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);

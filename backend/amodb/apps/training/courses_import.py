@@ -9,7 +9,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from ..accounts import models as accounts_models
-from . import models, schemas
+from . import models, role_targeting, schemas
 from .licence_rules import infer_licence_authority
 
 
@@ -102,17 +102,27 @@ def _derive_requirement_rule(
     amo_id: str,
     is_mandatory: bool,
     raw_scope: Optional[str],
-) -> tuple[Optional[models.TrainingRequirementScope], Optional[str], Optional[str], Optional[str]]:
+) -> tuple[Optional[models.TrainingRequirementScope], Optional[str], Optional[str], Optional[str], Optional[str]]:
     if not is_mandatory:
-        return None, None, None, None
+        return None, None, None, None, None
 
     scope, department_code, job_role, user_id = _parse_scope_parts(raw_scope)
     if scope is not None:
-        return scope, department_code, job_role, user_id
+        access_profile_id = None
+        if scope == models.TrainingRequirementScope.JOB_ROLE:
+            profile = role_targeting.resolve_legacy_profile(
+                db,
+                amo_id=amo_id,
+                role_text=job_role,
+            )
+            if profile is not None:
+                access_profile_id = str(profile.id)
+                job_role = role_targeting.profile_display_name(profile)
+        return scope, department_code, access_profile_id, job_role, user_id
 
     raw = _clean(raw_scope)
     if not raw:
-        return None, None, None, None
+        return None, None, None, None, None
 
     norm = _normalized_scope_text(raw)
 
@@ -123,9 +133,9 @@ def _derive_requirement_rule(
     )
     for item in departments:
         if norm == _normalized_scope_text(item.code) or norm == _normalized_scope_text(item.name):
-            return models.TrainingRequirementScope.DEPARTMENT, item.code.upper(), None, None
+            return models.TrainingRequirementScope.DEPARTMENT, item.code.upper(), None, None, None
 
-    return None, None, None, None
+    return None, None, None, None, None
 
 
 def _find_existing_requirement(
@@ -135,6 +145,7 @@ def _find_existing_requirement(
     course_pk: str,
     scope: models.TrainingRequirementScope,
     department_code: Optional[str],
+    access_profile_id: Optional[str],
     job_role: Optional[str],
     user_id: Optional[str],
 ) -> Optional[models.TrainingRequirement]:
@@ -145,7 +156,11 @@ def _find_existing_requirement(
     )
 
     query = query.filter(models.TrainingRequirement.department_code == department_code if department_code is not None else models.TrainingRequirement.department_code.is_(None))
-    query = query.filter(models.TrainingRequirement.job_role == job_role if job_role is not None else models.TrainingRequirement.job_role.is_(None))
+    if access_profile_id is not None:
+        query = query.filter(models.TrainingRequirement.access_profile_id == access_profile_id)
+    else:
+        query = query.filter(models.TrainingRequirement.access_profile_id.is_(None))
+        query = query.filter(models.TrainingRequirement.job_role == job_role if job_role is not None else models.TrainingRequirement.job_role.is_(None))
     query = query.filter(models.TrainingRequirement.user_id == user_id if user_id is not None else models.TrainingRequirement.user_id.is_(None))
     return query.first()
 
@@ -357,7 +372,7 @@ def import_courses_rows(
         if existing is None:
             created_courses += 1
             if dry_run:
-                scope, department_code, job_role, user_id = _derive_requirement_rule(
+                scope, department_code, access_profile_id, job_role, user_id = _derive_requirement_rule(
                     db, amo_id=amo_id, is_mandatory=parsed.is_mandatory, raw_scope=parsed.scope
                 )
                 if scope is not None:
@@ -398,7 +413,7 @@ def import_courses_rows(
                 existing.updated_by_user_id = actor_user_id
                 db.add(existing)
 
-        scope, department_code, job_role, user_id = _derive_requirement_rule(
+        scope, department_code, access_profile_id, job_role, user_id = _derive_requirement_rule(
             db, amo_id=amo_id, is_mandatory=parsed.is_mandatory, raw_scope=parsed.scope
         )
         if scope is None:
@@ -410,6 +425,7 @@ def import_courses_rows(
             course_pk=existing.id,
             scope=scope,
             department_code=department_code,
+            access_profile_id=access_profile_id,
             job_role=job_role,
             user_id=user_id,
         )
@@ -423,6 +439,7 @@ def import_courses_rows(
                         course_id=existing.id,
                         scope=scope,
                         department_code=department_code,
+                        access_profile_id=access_profile_id,
                         job_role=job_role,
                         user_id=user_id,
                         is_mandatory=True,

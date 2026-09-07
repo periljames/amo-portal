@@ -335,8 +335,8 @@ export default function PlatformDashboardPage() {
   const openSupport = Number(data.open_support_tickets ?? data.active_support_tickets ?? 0);
   const providerCount = Number(data.provider_count ?? 0);
   const configuredProviders = Number(data.configured_providers ?? 0);
-  const trafficTrend = metrics.trend_series ?? [];
-  const networkTrend = bandwidth.series ?? [];
+  const trafficTrend = useMemo(() => metrics.trend_series ?? [], [metrics.trend_series]);
+  const networkTrend = useMemo(() => bandwidth.series ?? [], [bandwidth.series]);
 
   const attentionCount = useMemo(
     () => Number(data.critical_security_alerts ?? 0)
@@ -412,12 +412,15 @@ export default function PlatformDashboardPage() {
 
   return (
     <PlatformShell
-      title="Platform Control"
-      subtitle="Live operating view for tenant health, revenue, throughput, bandwidth, providers, support, security and privileged platform work."
+      title="Platform Overview"
+      subtitle="Live tenant health, revenue, traffic, infrastructure, providers, support and security in one operating view."
       actions={(
-        <button className="platform-btn primary" disabled={probing} onClick={runProbe}>
-          {probing ? "Running probe…" : "Run health probe"}
-        </button>
+        <div className="platform-actions">
+          <Link className="platform-btn" to="/platform/control?view=operations">Advanced operations</Link>
+          <button className="platform-btn primary" disabled={probing} onClick={runProbe}>
+            {probing ? "Running probe…" : "Run health probe"}
+          </button>
+        </div>
       )}
     >
       <div className="platform-dashboard">

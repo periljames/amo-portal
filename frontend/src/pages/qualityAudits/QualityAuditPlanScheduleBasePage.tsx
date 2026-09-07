@@ -20,6 +20,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
+import { uniqueById } from "./auditDashboardModel";
 import "./quality-audit-dashboard.css";
 import SectionCard from "../../components/shared/SectionCard";
 import Button from "../../components/UI/Button";
@@ -39,8 +40,6 @@ import {
   qmsDeleteAuditSchedule,
   qmsListAuditPersonnelOptions,
   qmsListAuditScopes,
-  qmsCreateAuditScope,
-  qmsUpdateAuditScope,
   qmsListAudits,
   qmsListAuditSchedules,
   qmsRunAuditSchedule,
@@ -59,17 +58,6 @@ type PlannedRecordFilter = "all" | "needsAssignment" | "scheduled" | "dueSoon" |
 type PlannedRecordDensity = "comfortable" | "compact";
 type DrawerTab = "overview" | "participants" | "review";
 type AuditKind = "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
-
-type AuditScopeFormState = {
-  id: string | null;
-  code: string;
-  name: string;
-  description: string;
-  party_level: "FIRST_PARTY" | "SECOND_PARTY" | "THIRD_PARTY" | "REGULATORY";
-  default_kind: AuditKind;
-  is_active: boolean;
-  sort_order: string;
-};
 
 type ScheduleViewModel = QMSAuditScheduleOut & {
   is_preview?: boolean;
@@ -230,17 +218,6 @@ const defaultPlannedAudit: PlannedAuditFormState = {
   notify_auditors: true,
   notify_auditees: true,
   reminder_interval_days: "7",
-};
-
-const defaultAuditScopeForm: AuditScopeFormState = {
-  id: null,
-  code: "",
-  name: "",
-  description: "",
-  party_level: "FIRST_PARTY",
-  default_kind: "INTERNAL",
-  is_active: true,
-  sort_order: "100",
 };
 
 function plannerViewOptions() {
@@ -596,8 +573,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
-  const [scopeDrawerOpen, setScopeDrawerOpen] = useState(false);
-  const [scopeForm, setScopeForm] = useState<AuditScopeFormState>(defaultAuditScopeForm);
   const [auditForm, setAuditForm] = useState<PlannedAuditFormState>(defaultPlannedAudit);
   const [editingAuditId, setEditingAuditId] = useState<string | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(
@@ -657,13 +632,16 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   });
 
   const auditScopesQuery = useQuery({
-    queryKey: ["qms-audit-scopes", amoCode],
+    queryKey: ["qms-audit-scopes", amoCode, { active: true }],
     queryFn: () => qmsListAuditScopes({ active: true }),
     staleTime: 5 * 60_000,
   });
 
   const schedules = useMemo(() => schedulesQuery.data ?? [], [schedulesQuery.data]);
-  const plannedAudits = useMemo(() => plannedAuditsQuery.data ?? [], [plannedAuditsQuery.data]);
+  const plannedAudits = useMemo(
+    () => uniqueById(plannedAuditsQuery.data ?? []),
+    [plannedAuditsQuery.data],
+  );
   const personnelOptions = useMemo(() => personnelQuery.data ?? [], [personnelQuery.data]);
   const auditScopes = useMemo(() => auditScopesQuery.data ?? [], [auditScopesQuery.data]);
   const peopleById = useMemo(() => {
@@ -676,44 +654,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     auditScopes.forEach((scope) => next.set(scope.code, scope));
     return next;
   }, [auditScopes]);
-
-  const beginScopeEdit = (scope?: QMSAuditScopeOut) => {
-    setScopeForm(scope ? {
-      id: scope.id,
-      code: scope.code,
-      name: scope.name,
-      description: scope.description || "",
-      party_level: (scope.party_level as AuditScopeFormState["party_level"]) || "FIRST_PARTY",
-      default_kind: (scope.default_kind || "INTERNAL") as AuditKind,
-      is_active: scope.is_active,
-      sort_order: String(scope.sort_order ?? 100),
-    } : defaultAuditScopeForm);
-    setScopeDrawerOpen(true);
-  };
-
-  const saveAuditScope = useMutation({
-    mutationFn: async () => {
-      if (!scopeForm.code.trim()) throw new Error("Scope code is required.");
-      if (!scopeForm.name.trim()) throw new Error("Scope name is required.");
-      const payload = {
-        code: scopeForm.code.trim().toUpperCase(),
-        name: scopeForm.name.trim(),
-        description: scopeForm.description.trim() || null,
-        party_level: scopeForm.party_level,
-        default_kind: scopeForm.default_kind,
-        is_active: scopeForm.is_active,
-        sort_order: Math.max(0, Number(scopeForm.sort_order) || 100),
-      };
-      return scopeForm.id ? qmsUpdateAuditScope(scopeForm.id, payload) : qmsCreateAuditScope(payload);
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["qms-audit-scopes", amoCode] });
-      setScopeForm(defaultAuditScopeForm);
-      setScopeDrawerOpen(false);
-      pushToast({ title: "Audit scope saved", message: "Future audit references will use the configured scope code.", variant: "success" });
-    },
-    onError: (e: Error) => pushToast({ title: "Scope not saved", message: e.message || "The audit scope could not be saved.", variant: "error" }),
-  });
 
   const plannedRecordStats = useMemo(() => {
     const buckets: Record<PlannedRecordFilter, number> = { all: plannedAudits.length, needsAssignment: 0, scheduled: 0, dueSoon: 0, deferred: 0 };
@@ -1122,7 +1062,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         setDrawerOpen(false);
       }
       await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode, department] });
-      pushToast({ title: "Schedule deleted", message: `${schedule.title} has been removed from the planner.`, variant: "success" });
+      pushToast({ title: "Schedule moved to recycle bin", message: `${schedule.title} can be restored for 30 days.`, variant: "success" });
     },
     onError: (e: Error) => {
       pushToast({ title: "Delete failed", message: e.message || "The schedule could not be deleted.", variant: "error" });
@@ -1181,7 +1121,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     onSuccess: async (audit) => {
       if (editingAuditId === audit.id) resetAuditEdit();
       await queryClient.invalidateQueries({ queryKey: ["qms-audits-planned", amoCode, department] });
-      pushToast({ title: "Planned audit deleted", message: `${audit.audit_ref} has been removed.`, variant: "success" });
+      pushToast({ title: "Audit moved to recycle bin", message: `${audit.audit_ref} can be restored for 30 days.`, variant: "success" });
     },
     onError: (e: Error) => {
       pushToast({ title: "Delete failed", message: e.message || "The planned audit could not be deleted.", variant: "error" });
@@ -1234,13 +1174,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   };
 
   const handleDelete = (schedule: QMSAuditScheduleOut) => {
-    const confirmDelete = window.confirm(`Delete schedule "${schedule.title}" due ${formatDate(schedule.next_due_date)}?`);
+    const confirmDelete = window.confirm(`Move schedule "${schedule.title}" due ${formatDate(schedule.next_due_date)} to the recycle bin? It can be restored for 30 days.`);
     if (!confirmDelete) return;
     deleteSchedule.mutate(schedule);
   };
 
   const handleDeleteAudit = (audit: QMSAuditOut) => {
-    const confirmDelete = window.confirm(`Delete planned audit "${audit.audit_ref} - ${audit.title}"?`);
+    const confirmDelete = window.confirm(`Move planned audit "${audit.audit_ref} - ${audit.title}" to the recycle bin? Its workflow and linked records will be preserved.`);
     if (!confirmDelete) return;
     deletePlannedAudit.mutate(audit);
   };
@@ -1360,7 +1300,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           <span className="qa-audit-row__team qa-audit-row__team--auditee">
             <PersonAvatar person={auditee} fallback={auditeeName} size="sm" />
             <span>
-              <small>Auditee</small>
+              <small>Auditee representative</small>
               <strong>{auditeeName}</strong>
             </span>
           </span>
@@ -1389,7 +1329,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               <PersonChip label="Lead" person={leadUser} muted={!leadUser} />
               <PersonChip label="Observer" person={observerUser} fallback="Optional" muted={!observerUser} />
               <PersonChip label="Assistant" person={assistantUser} fallback="Optional" muted={!assistantUser} />
-              <PersonChip label="Auditee" person={auditee} fallback={auditeeName} muted={!auditeeName || auditeeName === "Not set"} />
+              <PersonChip label="Auditee representative" person={auditee} fallback={auditeeName} muted={!auditeeName || auditeeName === "Not set"} />
               <div className="qa-detail-tile qa-detail-tile--wide"><small>Scope</small><strong>{audit.scope || "No scope added yet"}</strong></div>
               <div className="qa-detail-tile qa-detail-tile--wide"><small>Criteria</small><strong>{audit.criteria || "No criteria added yet"}</strong></div>
             </div>
@@ -1464,7 +1404,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             <th>Audit</th>
             <th>Window</th>
             <th>Lead auditor</th>
-            <th>Auditee</th>
+            <th>Auditee representative</th>
             <th>Status</th>
             <th>Action</th>
           </tr>
@@ -1532,7 +1472,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             <th>Frequency</th>
             <th>Next due</th>
             <th>Lead auditor</th>
-            <th>Auditee</th>
+            <th>Auditee representative</th>
             <th>Schedule</th>
             <th>Action</th>
           </tr>
@@ -1574,8 +1514,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Create / run schedules"
-      subtitle="Create schedule templates and run them into planned audits. Browse and reschedule on Planner V2."
+      title="Planner & schedules"
+      subtitle="Create recurring schedules and planned audits here; use the calendar to browse and reschedule dated work."
       toolbar={
         <div className="planner-toolbar-actions">
           <Button variant="secondary" size="sm" onClick={() => navigate(plannerV2Href)}>
@@ -1636,8 +1576,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 <Plus size={15} />
                 Create schedule
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => beginScopeEdit()}>
-                Manage audit scopes
+              <Button size="sm" variant="secondary" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/scopes`)}>
+                Audit scopes
               </Button>
               <span className="planner-inline-note">Scopes drive references such as QAR/AC/26/001 and are tenant-specific.</span>
             </div>
@@ -1790,7 +1730,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 onSelect={(personId) => applyAuditPerson("assistant_auditor_user_id", personId)}
               />
               <PersonLookupField
-                label="Auditee"
+                label="Auditee representative"
                 value={auditForm.auditee_user_id}
                 query={auditPersonSearch.auditee_user_id}
                 options={personnelOptions}
@@ -1834,70 +1774,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           <div className="planner-drawer-layout__footer">
             <Button variant="secondary" onClick={resetAuditEdit}>Cancel</Button>
             <Button onClick={() => savePlannedAudit.mutate()} loading={savePlannedAudit.isPending}>Save planned audit</Button>
-          </div>
-        </div>
-      </Drawer>
-
-      <Drawer
-        title="Audit scope setup"
-        isOpen={scopeDrawerOpen}
-        onClose={() => { setScopeDrawerOpen(false); setScopeForm(defaultAuditScopeForm); }}
-        side="right"
-        panelClassName="drawer-panel--planner"
-      >
-        <div className="planner-drawer-layout">
-          <div className="planner-drawer-layout__body">
-            <p className="planner-inline-note">Only AMO Admins and Quality Managers should maintain this list. Scope codes are tenant-specific and become the middle part of the system-generated reference.</p>
-            <div className="planner-scope-list">
-              {auditScopes.map((scope) => (
-                <button key={scope.id} type="button" className="planner-scope-row" onClick={() => beginScopeEdit(scope)}>
-                  <strong>{scope.code}</strong>
-                  <span>{scope.name}</span>
-                  <em>{scope.party_level.replaceAll("_", " ")} · {scope.default_kind.replaceAll("_", " ")}</em>
-                </button>
-              ))}
-            </div>
-            <div className="planner-drawer-form__grid">
-              <label className="profile-inline-field">
-                <span>Scope code</span>
-                <input className="input" value={scopeForm.code} onChange={(e) => setScopeForm((prev) => ({ ...prev, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16) }))} placeholder="AC" />
-              </label>
-              <label className="profile-inline-field">
-                <span>Scope name</span>
-                <input className="input" value={scopeForm.name} onChange={(e) => setScopeForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Aircraft audit" />
-              </label>
-              <label className="profile-inline-field">
-                <span>Party level</span>
-                <select className="input" value={scopeForm.party_level} onChange={(e) => setScopeForm((prev) => ({ ...prev, party_level: e.target.value as AuditScopeFormState["party_level"] }))}>
-                  <option value="FIRST_PARTY">1st party / internal</option>
-                  <option value="SECOND_PARTY">2nd party / supplier-subcontractor</option>
-                  <option value="THIRD_PARTY">3rd party / external</option>
-                  <option value="REGULATORY">Regulatory external</option>
-                </select>
-              </label>
-              <label className="profile-inline-field">
-                <span>Default audit type</span>
-                <select className="input" value={scopeForm.default_kind} onChange={(e) => setScopeForm((prev) => ({ ...prev, default_kind: e.target.value as AuditKind }))}>
-                  {auditKinds.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
-                </select>
-              </label>
-              <label className="profile-inline-field">
-                <span>Sort order</span>
-                <input className="input" type="number" min={0} value={scopeForm.sort_order} onChange={(e) => setScopeForm((prev) => ({ ...prev, sort_order: e.target.value }))} />
-              </label>
-              <label className="planner-checkbox-row">
-                <input type="checkbox" checked={scopeForm.is_active} onChange={(e) => setScopeForm((prev) => ({ ...prev, is_active: e.target.checked }))} />
-                <span>Available for new audits</span>
-              </label>
-              <label className="profile-inline-field planner-form-span-2">
-                <span>Description</span>
-                <textarea className="input" rows={3} value={scopeForm.description} onChange={(e) => setScopeForm((prev) => ({ ...prev, description: e.target.value }))} />
-              </label>
-            </div>
-          </div>
-          <div className="planner-drawer-layout__footer">
-            <Button variant="secondary" onClick={() => { setScopeForm(defaultAuditScopeForm); setScopeDrawerOpen(false); }}>Cancel</Button>
-            <Button onClick={() => saveAuditScope.mutate()} loading={saveAuditScope.isPending}>Save scope</Button>
           </div>
         </div>
       </Drawer>
@@ -2042,7 +1918,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 {form.kind === "INTERNAL" ? (
                   <>
                     <PersonLookupField
-                      label="Auditee"
+                      label="Auditee representative"
                       value={form.auditee_user_id}
                       query={personSearch.auditee_user_id}
                       options={personnelOptions}

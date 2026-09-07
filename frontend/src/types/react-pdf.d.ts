@@ -18,6 +18,7 @@ declare module "react-pdf" {
 
   export interface PageProps {
     pageNumber: number;
+    width?: number;
     className?: string;
     renderAnnotationLayer?: boolean;
     renderTextLayer?: boolean;

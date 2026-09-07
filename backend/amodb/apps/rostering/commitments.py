@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
 from ..quality import models as quality_models
+from ..quality.planner_schedule_models import QMSPlannerScheduleMetadata
 from ..training import models as training_models
 from ..workforce import models as workforce_models
 
@@ -317,6 +318,15 @@ def _quality_commitments(
         quality_models.QMSAudit.audit_ref.asc(),
         quality_models.QMSAudit.id.asc(),
     ).all()
+    source_schedule_by_audit = {
+        str(row.audit_id): str(row.source_schedule_id)
+        for row in db.query(QMSPlannerScheduleMetadata).filter(
+            QMSPlannerScheduleMetadata.amo_id == amo_id,
+            QMSPlannerScheduleMetadata.audit_id.in_([audit.id for audit in rows] or [None]),
+            QMSPlannerScheduleMetadata.source_schedule_id.isnot(None),
+        ).all()
+        if row.audit_id and row.source_schedule_id
+    }
 
     items: list[RosterCommitmentRead] = []
     for audit in rows:
@@ -329,6 +339,10 @@ def _quality_commitments(
         ):
             if user_id and str(user_id) in people:
                 roles[str(user_id)].append(label)
+        for user_id in list(getattr(audit, "supporting_auditor_user_ids", None) or []):
+            key = str(user_id)
+            if key in people:
+                roles[key].append("Audit team")
         audit_start = audit.actual_start or audit.planned_start
         audit_end = audit.actual_end or audit.planned_end or audit_start
         if not audit_start:
@@ -336,8 +350,13 @@ def _quality_commitments(
         starts_at, ends_at = _date_window(audit_start, audit_end, zone)
         for user_id, labels in roles.items():
             user = people[user_id]
+            source_schedule_id = source_schedule_by_audit.get(str(audit.id))
             items.append(RosterCommitmentRead(
-                id=f"quality-audit:{audit.id}:{user_id}",
+                id=(
+                    f"quality-schedule:{source_schedule_id}:{user_id}"
+                    if source_schedule_id
+                    else f"quality-audit:{audit.id}:{user_id}"
+                ),
                 **_person_fields(user),
                 kind="QMS_AUDIT",
                 source_module="QUALITY",
@@ -351,6 +370,107 @@ def _quality_commitments(
                 provisional=_enum_value(audit.status) == "PLANNED",
                 status=_enum_value(audit.status),
                 detail=", ".join(labels),
+            ))
+    return items
+
+
+def _quality_schedule_commitments(
+    db: Session,
+    *,
+    amo_id: str,
+    people: dict[str, account_models.User],
+    from_date: date,
+    to_date: date,
+    zone: ZoneInfo,
+) -> list[RosterCommitmentRead]:
+    """Project approved Quality schedule templates before they become live audits.
+
+    The QMS planner owns these records. The unified personal feed reads them so
+    assigned auditors and internal auditees receive schedule changes without
+    logging in. Once an occurrence becomes a live audit, the live audit
+    projection above replaces the template occurrence to avoid duplicates.
+    """
+    if not people:
+        return []
+    rows = db.query(quality_models.QMSAuditSchedule).filter(
+        quality_models.QMSAuditSchedule.amo_id == amo_id,
+        quality_models.QMSAuditSchedule.deleted_at.is_(None),
+        quality_models.QMSAuditSchedule.is_active.is_(True),
+        quality_models.QMSAuditSchedule.next_due_date >= from_date - timedelta(days=90),
+        quality_models.QMSAuditSchedule.next_due_date <= to_date,
+    ).order_by(
+        quality_models.QMSAuditSchedule.next_due_date.asc(),
+        quality_models.QMSAuditSchedule.title.asc(),
+        quality_models.QMSAuditSchedule.id.asc(),
+    ).all()
+    if not rows:
+        return []
+    schedule_ids = [row.id for row in rows]
+    metadata_rows = db.query(QMSPlannerScheduleMetadata).filter(
+        QMSPlannerScheduleMetadata.amo_id == amo_id,
+        QMSPlannerScheduleMetadata.schedule_id.in_(schedule_ids),
+    ).all()
+    metadata_by_schedule = {str(row.schedule_id): row for row in metadata_rows if row.schedule_id}
+    live_occurrences = {
+        (str(row.source_schedule_id), row.occurrence_date)
+        for row in db.query(QMSPlannerScheduleMetadata).filter(
+            QMSPlannerScheduleMetadata.amo_id == amo_id,
+            QMSPlannerScheduleMetadata.source_schedule_id.in_(schedule_ids),
+            QMSPlannerScheduleMetadata.audit_id.isnot(None),
+        ).all()
+        if row.source_schedule_id and row.occurrence_date
+    }
+
+    items: list[RosterCommitmentRead] = []
+    for schedule in rows:
+        metadata = metadata_by_schedule.get(str(schedule.id))
+        if metadata and metadata.lifecycle_status != "ACTIVE":
+            continue
+        occurrence_date = metadata.occurrence_date if metadata and metadata.occurrence_date else schedule.next_due_date
+        if (str(schedule.id), occurrence_date) in live_occurrences:
+            continue
+        end_date = (
+            metadata.end_date
+            if metadata and metadata.end_date
+            else occurrence_date + timedelta(days=max(1, int(schedule.duration_days or 1)) - 1)
+        )
+        if occurrence_date > to_date or end_date < from_date:
+            continue
+        start_time = metadata.start_time if metadata and metadata.start_time else time(hour=9)
+        end_time = metadata.end_time if metadata and metadata.end_time else time(hour=17)
+        starts_at = datetime.combine(occurrence_date, start_time, tzinfo=zone).astimezone(UTC)
+        ends_at = datetime.combine(end_date, end_time, tzinfo=zone).astimezone(UTC)
+        roles: dict[str, list[str]] = defaultdict(list)
+        for label, user_id in (
+            ("Lead auditor", schedule.lead_auditor_user_id),
+            ("Observer", schedule.observer_auditor_user_id),
+            ("Assistant auditor", schedule.assistant_auditor_user_id),
+            ("Auditee", schedule.auditee_user_id),
+        ):
+            key = str(user_id) if user_id else ""
+            if key and key in people:
+                roles[key].append(label)
+        for user_id in metadata.attendee_user_ids if metadata else []:
+            if user_id in people:
+                roles[user_id].append("Audit team")
+        for user_id, labels in roles.items():
+            user = people[user_id]
+            items.append(RosterCommitmentRead(
+                id=f"quality-schedule:{schedule.id}:{user_id}",
+                **_person_fields(user),
+                kind="QMS_AUDIT_SCHEDULE",
+                source_module="QUALITY",
+                source_type="QMS_AUDIT_SCHEDULE",
+                source_id=str(schedule.id),
+                title=f"Audit schedule · {schedule.title}",
+                starts_at=starts_at,
+                ends_at=ends_at,
+                all_day=False,
+                blocking=True,
+                provisional=True,
+                status="SCHEDULED",
+                location_label=metadata.location if metadata else None,
+                detail=", ".join(dict.fromkeys(labels)),
             ))
     return items
 
@@ -395,6 +515,14 @@ def list_commitments(
             zone=zone,
         ),
         *_quality_commitments(
+            db,
+            amo_id=amo_id,
+            people=people,
+            from_date=from_date,
+            to_date=to_date,
+            zone=zone,
+        ),
+        *_quality_schedule_commitments(
             db,
             amo_id=amo_id,
             people=people,

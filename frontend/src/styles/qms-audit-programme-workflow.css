@@ -175,3 +175,18 @@ body[data-color-scheme="dark"] .qms-chip,
   background: color-mix(in srgb, var(--accent-primary, #4f8cff) 16%, var(--qms-panel));
   border-color: var(--qms-line);
 }
+.qms-audit-programme-flow__approval-route{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.qms-audit-programme-flow__readiness-stats--four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.qms-audit-programme-flow__approval-route article{display:grid;grid-template-columns:auto 1fr;gap:10px;position:relative;min-height:126px;padding:14px 14px 34px;border:1px solid #d7e0ec;border-radius:12px;background:#fff}
+.qms-audit-programme-flow__approval-route article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#eef3fb;color:#526078}
+.qms-audit-programme-flow__approval-route article>div{min-width:0}.qms-audit-programme-flow__approval-route small{display:block;color:#64748b;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.qms-audit-programme-flow__approval-route strong{display:block;margin-top:3px;font-size:13px;color:#1d2939}.qms-audit-programme-flow__approval-route p{margin:5px 0 0;color:#526078;font-size:11px;line-height:1.45}
+.qms-audit-programme-flow__approval-route article>b{position:absolute;right:12px;bottom:10px;padding:3px 8px;border-radius:999px;background:#eef2f7;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.03em}
+.qms-audit-programme-flow__approval-route article.is-current{border-color:#7ba2ef;background:#f6f9ff;box-shadow:inset 0 0 0 1px #b8cff9}.qms-audit-programme-flow__approval-route article.is-current>span{background:#dbe8ff;color:#1d4ed8}.qms-audit-programme-flow__approval-route article.is-current>b{background:#dbe8ff;color:#1d4ed8}
+.qms-audit-programme-flow__approval-route article.is-complete{border-color:#b7e4ce;background:#f6fdf9}.qms-audit-programme-flow__approval-route article.is-complete>span{background:#dcfce7;color:#15803d}.qms-audit-programme-flow__approval-route article.is-complete>b{background:#dcfce7;color:#166534}
+.qms-audit-programme-flow__role-boundary{display:flex;align-items:flex-start;gap:9px;margin:0 0 14px;padding:10px 12px;border:1px solid #d8e1ee;border-radius:10px;background:#f8fafc;color:#526078;font-size:11px;line-height:1.45}.qms-audit-programme-flow__role-boundary svg{flex:0 0 auto;margin-top:1px;color:#334155}.qms-audit-programme-flow__role-boundary strong{color:#27364f}
+.qms-audit-programme-flow__detail-toolbar>div:first-child>small{display:block;margin-top:2px;color:#64748b;font-size:11px}.qms-audit-programme-flow__detail-actions button{display:inline-flex;align-items:center;gap:6px}
+.qms-audit-programme-flow__approval-copy{display:grid;gap:3px}.qms-audit-programme-flow__approval-copy strong{font-size:13px;color:#1d2939}.qms-audit-programme-flow__approval-copy p{margin:0!important;color:#526078;font-size:12px;line-height:1.45}
+.qms-audit-programme-flow__action-feedback{display:flex;align-items:center;gap:7px;margin-top:10px;padding:9px 11px;border:1px solid #b7e4ce;border-radius:9px;background:#f0fdf4;color:#166534;font-size:12px}
+.qms-audit-programme-flow__approval-actions button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.qms-audit-programme-flow__waiting{display:block;margin-top:10px;color:#6b7280;font-size:11px}
+@media(max-width:1050px){.qms-audit-programme-flow__approval-route{grid-template-columns:1fr}.qms-audit-programme-flow__approval-route article{min-height:auto}.qms-audit-programme-flow__readiness-stats--four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.qms-audit-programme-flow__readiness-stats--four{grid-template-columns:1fr}}

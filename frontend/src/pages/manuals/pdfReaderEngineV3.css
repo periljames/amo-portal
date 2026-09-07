@@ -275,13 +275,12 @@
   justify-content: center;
   width: 100%;
   padding-bottom: 18px;
-  will-change: transform;
 }
 
 .pdfv3-page {
   position: relative;
   width: var(--pdfv3-page-width);
-  min-height: calc(var(--pdfv3-page-width) * 1.414);
+  min-height: calc(var(--pdfv3-page-width) * var(--pdfv3-page-ratio, 1.414));
   overflow: hidden;
   background: #fff;
   color: #172033;

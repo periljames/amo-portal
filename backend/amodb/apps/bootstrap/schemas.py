@@ -92,13 +92,14 @@ class BootstrapComponentResult(BaseModel):
 class BootstrapUserCreate(BaseModel):
     amo_id: Optional[str] = None
     amo_code: Optional[str] = None
-    department_id: Optional[int] = None
+    department_id: Optional[str] = None
     staff_code: Optional[str] = None
     email: str
     first_name: str
     last_name: str
     full_name: Optional[str] = None
-    role: AccountRole = AccountRole.AMO_ADMIN
+    role: AccountRole = AccountRole.USER
+    access_profile_id: str
     position_title: Optional[str] = None
     phone: Optional[str] = None
     password: str

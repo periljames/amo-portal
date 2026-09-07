@@ -55,12 +55,12 @@ def _programme_item(db: Session, *, amo_id: str, programme_id: str, item_id: str
     programme = db.query(QualityAuditProgramme).filter(
         QualityAuditProgramme.amo_id == amo_id,
         QualityAuditProgramme.id == programme_id,
-    ).with_for_update().first()
+    ).with_for_update(of=QualityAuditProgramme).first()
     item = db.query(QualityAuditProgrammeItem).filter(
         QualityAuditProgrammeItem.amo_id == amo_id,
         QualityAuditProgrammeItem.programme_id == programme_id,
         QualityAuditProgrammeItem.id == item_id,
-    ).with_for_update().first()
+    ).with_for_update(of=QualityAuditProgrammeItem).first()
     if programme is None or item is None:
         raise HTTPException(status_code=404, detail="Audit programme requirement not found.")
     return programme, item

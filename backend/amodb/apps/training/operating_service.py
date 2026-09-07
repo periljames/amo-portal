@@ -25,6 +25,7 @@ from . import operating_models as models
 from . import operating_schemas as schemas
 from . import operating_rules as rules
 from . import record_lifecycle as training_record_lifecycle
+from . import role_targeting
 from . import workbook_models
 from .permissions import require_not_self_approval
 
@@ -1971,6 +1972,11 @@ def _tenant_training_counts(db: Session, *, amo_id: str, today: date) -> dict[st
         account_models.User.is_active.is_(True),
         account_models.User.is_system_account.is_(False),
     ).all()
+    access_profiles = role_targeting.primary_profiles_for_users(
+        db,
+        amo_id=amo_id,
+        user_ids=[str(row[0]) for row in users],
+    )
     courses = db.query(legacy_models.TrainingCourse).filter(
         legacy_models.TrainingCourse.amo_id == amo_id,
         legacy_models.TrainingCourse.is_active.is_(True),
@@ -1987,6 +1993,7 @@ def _tenant_training_counts(db: Session, *, amo_id: str, today: date) -> dict[st
     required_for_all: set[str] = set()
     required_by_user: dict[str, set[str]] = {}
     required_by_department: dict[str, set[str]] = {}
+    required_by_profile: dict[str, set[str]] = {}
     required_by_job: dict[str, set[str]] = {}
     for requirement in requirements:
         course_id = str(requirement.course_id)
@@ -1997,8 +2004,12 @@ def _tenant_training_counts(db: Session, *, amo_id: str, today: date) -> dict[st
             required_by_user.setdefault(str(requirement.user_id), set()).add(course_id)
         elif scope == "DEPARTMENT" and requirement.department_code:
             required_by_department.setdefault(requirement.department_code.strip().upper(), set()).add(course_id)
+        elif scope == "JOB_ROLE" and requirement.access_profile_id:
+            required_by_profile.setdefault(str(requirement.access_profile_id), set()).add(course_id)
         elif scope == "JOB_ROLE" and requirement.job_role:
-            required_by_job.setdefault(requirement.job_role.strip().lower(), set()).add(course_id)
+            legacy_term = role_targeting.normalize_role_term(requirement.job_role)
+            if legacy_term:
+                required_by_job.setdefault(legacy_term, set()).add(course_id)
     fallback_courses = {str(course.id) for course in courses if bool(course.is_mandatory)} if not requirements else set()
 
     role_courses_by_user: dict[str, set[str]] = {}
@@ -2116,8 +2127,15 @@ def _tenant_training_counts(db: Session, *, amo_id: str, today: date) -> dict[st
         required.update(required_by_user.get(user_key, set()))
         if department_code:
             required.update(required_by_department.get(str(department_code).strip().upper(), set()))
-        if position_title:
-            required.update(required_by_job.get(str(position_title).strip().lower(), set()))
+        profile = access_profiles.get(user_key)
+        if profile is not None:
+            required.update(required_by_profile.get(str(profile.id), set()))
+        role_terms = role_targeting.profile_terms(profile)
+        position_term = role_targeting.normalize_role_term(position_title)
+        if position_term:
+            role_terms.add(position_term)
+        for role_term in role_terms:
+            required.update(required_by_job.get(role_term, set()))
         required.update(role_courses_by_user.get(user_key, set()))
         if staff_code:
             required.update(role_courses_by_staff.get(str(staff_code).strip().upper(), set()))

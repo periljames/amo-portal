@@ -80,6 +80,7 @@ export type DocumentRevisionSummary = {
 export type DocumentReadTarget = {
   revision_id?: string | null;
   kind: "PUBLISHED" | "UNCONTROLLED" | "NONE";
+  control_status?: "PUBLISHED" | "CONTROLLED_DRAFT" | "NO_READABLE_REVISION";
   label: string;
   uncontrolled: boolean;
 };
@@ -93,6 +94,7 @@ export type DocumentLibraryItem = {
   status: string;
   current_published_revision_id?: string | null;
   profile: DocumentControlProfile;
+  current_revision?: DocumentRevisionSummary | null;
   latest_revision?: DocumentRevisionSummary | null;
   read_target: DocumentReadTarget;
   workflow?: DocumentWorkflow | null;
@@ -143,6 +145,7 @@ export type DocumentWorkflow = {
   updated_at?: string | null;
   blockers?: DocumentWorkflowBlocker[];
   decisions?: DocumentWorkflowDecision[];
+  allowed_actions?: string[];
 };
 
 export type DocumentChangeRequest = {

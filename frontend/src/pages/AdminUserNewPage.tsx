@@ -1,6 +1,7 @@
 // src/pages/AdminUserNewPage.tsx
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   createAdminUser,
@@ -18,7 +19,8 @@ import type {
 } from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
 import { portalErrorMessage } from "../services/portalError";
-import { useAdminAccountRoles } from "../hooks/useAdminAccountRoles";
+import { readCachedAdminProfileState } from "../services/adminProfileMode";
+import { getTenantAccessFramework } from "../services/accessProfiles";
 import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import "../styles/admin-user-management.css";
@@ -38,8 +40,14 @@ const AdminUserNewPage: React.FC = () => {
 
   const isAdmin = useMemo(() => {
     if (!currentUser) return false;
-    return currentUser.role === "SUPERUSER" || currentUser.role === "AMO_ADMIN";
-  }, [currentUser]);
+    return Boolean(
+      currentUser.is_superuser
+      || currentUser.is_amo_admin
+      || currentUser.role === "SUPERUSER"
+      || currentUser.role === "AMO_ADMIN"
+      || readCachedAdminProfileState(amoCode ?? ctx.amoCode ?? "UNKNOWN")?.active
+    );
+  }, [amoCode, ctx.amoCode, currentUser]);
 
   const isSuperuser = !!currentUser?.is_superuser;
 
@@ -60,7 +68,7 @@ const AdminUserNewPage: React.FC = () => {
     password: "",
     confirmPassword: "",
   });
-  const roleCatalogue = useAdminAccountRoles(form.role);
+  const [accessProfileId, setAccessProfileId] = useState("");
   const [staffCodeOptions, setStaffCodeOptions] = useState<string[]>([]);
   const [staffCodeLoading, setStaffCodeLoading] = useState(false);
   const [staffCodeError, setStaffCodeError] = useState<string | null>(null);
@@ -95,6 +103,22 @@ const AdminUserNewPage: React.FC = () => {
   const accountTargetAmoId = isSuperuser
     ? (creatingPlatformSuperuser ? platformRootAmo?.id || "" : selectedAmoId)
     : currentUser?.amo_id || "";
+  const accessFrameworkQuery = useQuery({
+    queryKey: ["accounts", "access-framework", accountTargetAmoId],
+    queryFn: () => getTenantAccessFramework(accountTargetAmoId),
+    enabled: Boolean(accountTargetAmoId) && !creatingPlatformSuperuser,
+    staleTime: 30_000,
+  });
+  const activeProfiles = useMemo(
+    () => (accessFrameworkQuery.data?.profiles || []).filter(
+      (profile) => profile.is_active && !profile.is_regulated,
+    ),
+    [accessFrameworkQuery.data?.profiles],
+  );
+  const selectedAccessProfile = useMemo(
+    () => activeProfiles.find((profile) => profile.id === accessProfileId) || null,
+    [accessProfileId, activeProfiles],
+  );
 
   const pageTitle = useMemo(() => {
     const label = creatingPlatformSuperuser
@@ -114,12 +138,7 @@ const AdminUserNewPage: React.FC = () => {
     const { name, value } = e.target;
     if (name === "role") {
       const role = value as AccountRole;
-      const definition = roleCatalogue.roles.find((item) => item.key === role);
-      setForm((prev) => ({
-        ...prev,
-        role,
-        positionTitle: definition?.regulated ? definition.label : prev.positionTitle,
-      }));
+      setForm((prev) => ({ ...prev, role }));
       return;
     }
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -159,6 +178,9 @@ const AdminUserNewPage: React.FC = () => {
     }
     if (!creatingPlatformSuperuser && activeDepartments.length > 0 && !selectedDepartmentId) {
       return "Select a department for this user.";
+    }
+    if (!creatingPlatformSuperuser && !accessProfileId) {
+      return "Select a tenant access profile for this user.";
     }
     if (!selectedStaffCode) {
       return "Select a staff code suggestion before creating the user.";
@@ -278,6 +300,26 @@ const AdminUserNewPage: React.FC = () => {
   }, [creatingPlatformSuperuser, currentUser, isSuperuser, selectedAmoId]);
 
   React.useEffect(() => {
+    if (creatingPlatformSuperuser) {
+      setAccessProfileId("");
+      return;
+    }
+    setAccessProfileId((current) => {
+      if (activeProfiles.some((profile) => profile.id === current)) return current;
+      return activeProfiles.find((profile) => profile.code === "GENERAL_USER")?.id || activeProfiles[0]?.id || "";
+    });
+  }, [activeProfiles, creatingPlatformSuperuser]);
+
+  React.useEffect(() => {
+    if (!selectedAccessProfile) return;
+    setForm((current) => ({
+      ...current,
+      role: selectedAccessProfile.base_role_key,
+      positionTitle: selectedAccessProfile.is_regulated ? selectedAccessProfile.display_name : current.positionTitle,
+    }));
+  }, [selectedAccessProfile]);
+
+  React.useEffect(() => {
     const first = form.firstName.trim();
     const last = form.lastName.trim();
     const targetAmoId = accountTargetAmoId;
@@ -353,7 +395,8 @@ const AdminUserNewPage: React.FC = () => {
         first_name: first,
         last_name: last,
         full_name: `${first} ${last}`.trim(),
-        role: form.role,
+        role: creatingPlatformSuperuser ? "SUPERUSER" : selectedAccessProfile!.base_role_key,
+        access_profile_id: creatingPlatformSuperuser ? undefined : accessProfileId,
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
@@ -617,8 +660,8 @@ const AdminUserNewPage: React.FC = () => {
             />
           </div>
 
-          <div className="form-row form-row--span-2">
-            <label htmlFor="role">Role</label>
+          {isSuperuser ? <div className="form-row form-row--span-2">
+            <label htmlFor="role">Account kind</label>
             <select
               id="role"
               name="role"
@@ -626,31 +669,39 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               disabled={submitting}
             >
-              {roleCatalogue.roles.filter((role) => isSuperuser || role.key !== "SUPERUSER").map(
-                (role) => (
-                  <option key={role.key} value={role.key}>
-                    {role.regulated ? "KCAR 2025 · " : ""}{role.label}
-                  </option>
-                )
-              )}
+              <option value="USER">Tenant user</option>
+              <option value="SUPERUSER">Platform superuser</option>
             </select>
             <p className="form-hint">
-              {roleCatalogue.selected?.description || "Role controls access; position records remain in Workforce."}
-              {roleCatalogue.selected?.aliases.length ? ` Accepted aliases: ${roleCatalogue.selected.aliases.join(", ")}.` : ""}
+              Platform superusers are ROOT-scoped support identities. Tenant operational access is assigned below.
             </p>
-          </div>
+          </div> : null}
+
+          {!creatingPlatformSuperuser ? <div className="form-row form-row--span-2">
+            <div className="form-row__header"><label htmlFor="accessProfile">Tenant access profile</label><button type="button" className="admin-link-btn" onClick={() => navigate(`${backTarget}?tab=roles`)}>Manage profiles</button></div>
+            <select id="accessProfile" value={accessProfileId} onChange={(event) => setAccessProfileId(event.target.value)} disabled={submitting || accessFrameworkQuery.isPending} required>
+              <option value="">{accessFrameworkQuery.isPending ? "Loading profiles…" : "Select an access profile"}</option>
+              {activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.is_regulated ? "KCAR 2025 · " : ""}{profile.display_name}</option>)}
+            </select>
+            <p className="form-hint">{selectedAccessProfile?.description || "Profiles control module entry. Prescribed management appointments are assigned in Workforce; workflow decisions and personal certifying authorizations remain separate."}</p>
+            {accessFrameworkQuery.isError ? <p className="form-hint">{portalErrorMessage(accessFrameworkQuery.error, "Access profiles could not be loaded.")}</p> : null}
+            {!accessFrameworkQuery.isPending && !activeProfiles.length ? <InlineAlert tone="warning" title="Access framework required"><span>Open Access profiles and apply the AMO/MRO framework before creating tenant users.</span></InlineAlert> : null}
+          </div> : null}
+
+          {!creatingPlatformSuperuser ? <InlineAlert tone="info" title="Governed tenant administration" className="form-row--span-2"><span>Create the user first, then use Access governance for Accountable Executive and Quality Manager approval. Platform support cannot bypass that tenant decision.</span></InlineAlert> : null}
 
           <div className="form-row">
-            <label htmlFor="positionTitle">Position Title</label>
+            <label htmlFor="positionTitle">Employment / display title</label>
             <input
               id="positionTitle"
               name="positionTitle"
               type="text"
               value={form.positionTitle}
               onChange={handleChange}
-              placeholder="e.g. Maintenance Manager"
+              placeholder="Descriptive title from Workforce"
               disabled={submitting}
             />
+            <p className="form-hint">Changing this text never changes portal authority.</p>
           </div>
 
           <div className="form-row form-row--span-2">

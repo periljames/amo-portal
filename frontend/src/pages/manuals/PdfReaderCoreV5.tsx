@@ -14,6 +14,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   getPublicationReaderBootstrap,
   readCachedPublicationBootstrap,
+  readPersistedPublicationBootstrap,
   searchPublicationReader,
   type PublicationSearchResult,
 } from "../../services/publications";
@@ -110,6 +111,9 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   const [searchResults, setSearchResults] = useState<PublicationSearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState("");
+  const publicationTenant = props.identity.tenant;
+  const publicationManualId = props.identity.manualId;
+  const publicationRevisionId = props.identity.revisionId;
 
   const pageCount = Math.max(
     0,
@@ -213,7 +217,9 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
   }, []);
 
   useEffect(() => {
-    const { tenant, manualId, revisionId } = props.identity;
+    const tenant = publicationTenant;
+    const manualId = publicationManualId;
+    const revisionId = publicationRevisionId;
     if (!tenant || !manualId || !revisionId) return;
     let active = true;
 
@@ -224,13 +230,19 @@ export default function PdfReaderCoreV5(props: PdfReaderCoreProps) {
 
     const cached = readCachedPublicationBootstrap(tenant, manualId, revisionId);
     apply(cached);
-    if (cached) return () => { active = false; };
-
-    void getPublicationReaderBootstrap(tenant, manualId, revisionId)
-      .then((bootstrap) => apply(bootstrap))
-      .catch(() => undefined);
+    if (!cached) {
+      void readPersistedPublicationBootstrap(tenant, manualId, revisionId)
+        .then((persisted) => {
+          apply(persisted);
+          if (!persisted && navigator.onLine !== false) {
+            return getPublicationReaderBootstrap(tenant, manualId, revisionId).then((bootstrap) => apply(bootstrap));
+          }
+          return undefined;
+        })
+        .catch(() => undefined);
+    }
     return () => { active = false; };
-  }, [props.identity.manualId, props.identity.revisionId, props.identity.tenant]);
+  }, [publicationManualId, publicationRevisionId, publicationTenant]);
 
   useEffect(() => {
     if (tab !== "search") return;

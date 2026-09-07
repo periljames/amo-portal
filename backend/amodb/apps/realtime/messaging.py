@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts.admin_profile_access import active_admin_profile_session
 from amodb.utils.identifiers import generate_uuid7
 
 from . import models, schemas
@@ -29,12 +30,18 @@ def effective_amo_id(user: account_models.User) -> str:
     return str(raw)
 
 
-def _is_tenant_admin(user: account_models.User) -> bool:
-    return bool(
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or getattr(user, "role", None) == account_models.AccountRole.AMO_ADMIN
-    )
+def _is_tenant_admin(db: Session, user: account_models.User) -> bool:
+    """Resolve moderation authority from this exact authenticated session.
+
+    A standing flag or approved grant is not enough: the governed Admin profile
+    must be active for the current login. Platform superusers do not inherit
+    tenant messaging/moderation authority.
+    """
+    if getattr(user, "is_superuser", False):
+        return False
+    amo_id = effective_amo_id(user)
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    return bool(amo and active_admin_profile_session(db, user, amo))
 
 
 def _active_user(db: Session, *, amo_id: str, user_id: str) -> account_models.User:
@@ -185,7 +192,7 @@ def open_department_thread(db: Session, *, user: account_models.User, department
     )
     if not department:
         raise HTTPException(status_code=404, detail="Department not found")
-    if str(user.department_id or "") != department_id and not _is_tenant_admin(user):
+    if str(user.department_id or "") != department_id and not _is_tenant_admin(db, user):
         raise HTTPException(status_code=403, detail="Only department members or AMO administrators may open this channel")
 
     scope_key = f"department:{department_id}"
@@ -260,7 +267,7 @@ def open_user_group_thread(db: Session, *, user: account_models.User, group_id: 
     amo_id = effective_amo_id(user)
     group = _group_record(db, amo_id=amo_id, group_id=group_id)
     member_ids = _group_member_ids(db, amo_id=amo_id, group_id=group_id)
-    allowed = str(user.id) in member_ids or str(group.get("owner_user_id") or "") == str(user.id) or _is_tenant_admin(user)
+    allowed = str(user.id) in member_ids or str(group.get("owner_user_id") or "") == str(user.id) or _is_tenant_admin(db, user)
     if not allowed:
         raise HTTPException(status_code=403, detail="User is not a member of this group")
     if str(user.id) not in member_ids:
@@ -362,7 +369,7 @@ def directory(db: Session, *, user: account_models.User) -> dict[str, Any]:
             LIMIT 1000
             """
         ),
-        {"amo_id": amo_id, "user_id": str(user.id), "is_admin": _is_tenant_admin(user)},
+        {"amo_id": amo_id, "user_id": str(user.id), "is_admin": _is_tenant_admin(db, user)},
     ).mappings().all()
     return {
         "users": [
@@ -377,7 +384,7 @@ def directory(db: Session, *, user: account_models.User) -> dict[str, Any]:
         "departments": [
             {"id": str(row.id), "code": row.code, "name": row.name}
             for row in departments
-            if _is_tenant_admin(user) or str(user.department_id or "") == str(row.id)
+            if _is_tenant_admin(db, user) or str(user.department_id or "") == str(row.id)
         ],
         "groups": [dict(row) for row in group_rows],
     }
@@ -831,7 +838,7 @@ def edit_message(db: Session, *, user: account_models.User, message_id: str, bod
     if not row:
         raise HTTPException(status_code=404, detail="Message not found")
     _thread_for_user(db, amo_id=amo_id, thread_id=row.thread_id, user_id=str(user.id))
-    if str(row.sender_id or "") != str(user.id) and not _is_tenant_admin(user):
+    if str(row.sender_id or "") != str(user.id) and not _is_tenant_admin(db, user):
         raise HTTPException(status_code=403, detail="Only the sender or an AMO administrator may edit this message")
     clean = body.strip()
     if not clean:
@@ -853,7 +860,7 @@ def delete_message(db: Session, *, user: account_models.User, message_id: str) -
     if not row:
         raise HTTPException(status_code=404, detail="Message not found")
     _thread_for_user(db, amo_id=amo_id, thread_id=row.thread_id, user_id=str(user.id))
-    if str(row.sender_id or "") != str(user.id) and not _is_tenant_admin(user):
+    if str(row.sender_id or "") != str(user.id) and not _is_tenant_admin(db, user):
         raise HTTPException(status_code=403, detail="Only the sender or an AMO administrator may delete this message")
     row.deleted_at = row.deleted_at or utcnow()
     row.body_bin = b""

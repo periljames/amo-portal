@@ -307,10 +307,6 @@ def update_authority(
     return row
 
 
-def _is_admin(user: account_models.User) -> bool:
-    return bool(getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False))
-
-
 def _matching_authorities(
     db: Session,
     *,
@@ -337,8 +333,6 @@ def can_approve_scope(
     department_id: Optional[str],
     base_station_id: Optional[str],
 ) -> bool:
-    if _is_admin(user):
-        return True
     amo_id = common.effective_amo_id(user)
     if any(row.can_approve for row in _matching_authorities(
         db,
@@ -366,8 +360,6 @@ def can_publish_scope(
 ) -> bool:
     """Publication is an explicit appointment, not a job-title inference."""
 
-    if _is_admin(user):
-        return True
     amo_id = common.effective_amo_id(user)
     return any(row.can_publish for row in _matching_authorities(
         db,

@@ -55,6 +55,8 @@ describe("QMS route registry", () => {
     expect(classifyQmsPath("/maintenance/SAF/quality").kind).toBe("overview");
     expect(classifyQmsPath("/maintenance/SAF/quality/calendar/day").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/schedule").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/plan").kind).toBe("known");
+    expect(classifyQmsPath("/maintenance/SAF/quality/audits/scopes").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/cars/91/overview").kind).toBe("known");
     expect(classifyQmsPath("/maintenance/SAF/quality/audits/2ad3f9c2-0bc9-431a-9e68-4b51f4ae5128/live").kind).toBe("known");
     expect(

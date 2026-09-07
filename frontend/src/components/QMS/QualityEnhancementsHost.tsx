@@ -1,12 +1,15 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import React, { Suspense, lazy, useEffect, useMemo } from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 
 import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
 import OccurrenceToolbarPortal, { AUDIT_OCCURRENCE_MOUNT_ID } from "../../features/qms/auditSession/OccurrenceToolbarPortal";
 import MobileAuditDeepLinkState from "../../features/qms/auditSession/MobileAuditDeepLinkState";
-import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
+import { auditSetupIssues } from "../../features/qms/auditSession/auditSetupModel";
+import { auditSessionPath, auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
+import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
+import { getAuditSession } from "../../services/qmsAuditSession";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
@@ -23,7 +26,6 @@ const AuditClosingNarrativePanel = lazy(() => import("../../features/qms/auditSe
 const AuditClosingWorkspace = lazy(() => import("../../features/qms/auditSession/AuditClosingWorkspace"));
 const AuditFollowUpWorkspace = lazy(() => import("../../features/qms/auditSession/AuditFollowUpWorkspace"));
 const AuditArchiveWorkspace = lazy(() => import("../../features/qms/auditSession/AuditArchiveWorkspace"));
-const QualityAuditGovernancePanelHost = lazy(() => import("./QualityAuditGovernancePanelHost"));
 const QualityChecklistTemplateHost = lazy(() => import("./QualityChecklistTemplateHost"));
 const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
 const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
@@ -105,20 +107,52 @@ const QualityDialogFocusRestorer: React.FC = () => {
 };
 
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
+  const location = useLocation();
   const queryClient = useQueryClient();
-  const [cacheRevision, setCacheRevision] = useState(0);
-  const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
-  useEffect(() => queryClient.getQueryCache().subscribe(() => { setCacheRevision((current) => current + 1); }), [queryClient]);
-  const state = queryClient.getQueryState(queryKey);
-  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
-  const degraded = data?.degraded === true || state?.status === "error";
-  void cacheRevision;
+  const occurrenceKey = auditOccurrenceQueryKey(route.amoCode, route.auditKey);
+  const occurrenceQuery = useQuery({
+    queryKey: occurrenceKey,
+    queryFn: ({ signal }) => resolveAuditOccurrence(route.amoCode, route.auditKey, signal),
+    staleTime: 5_000,
+  });
+  const auditId = occurrenceQuery.data?.id || "";
+  const sessionKey = ["qms-audit-session", route.amoCode, auditId] as const;
+  const sessionQuery = useQuery({
+    queryKey: sessionKey,
+    queryFn: ({ signal }) => getAuditSession(route.amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 2_000,
+  });
+  const degraded = occurrenceQuery.isError || sessionQuery.isError;
   useEffect(() => {
     document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
     return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
   }, [degraded]);
+  const routeStage = auditSessionStageFromPath(location.pathname);
+  if (sessionQuery.data?.current_stage_id === "setup" && routeStage && routeStage !== "setup" && occurrenceQuery.data) {
+    const firstIssue = auditSetupIssues({
+      title: occurrenceQuery.data.title || "",
+      scope: occurrenceQuery.data.scope || "",
+      criteria: occurrenceQuery.data.criteria || "",
+      plannedStart: (occurrenceQuery.data.planned_start || "").slice(0, 10),
+      plannedEnd: (occurrenceQuery.data.planned_end || "").slice(0, 10),
+      plannedStartTime: (occurrenceQuery.data.planned_start_time || "").slice(0, 5),
+      plannedEndTime: (occurrenceQuery.data.planned_end_time || "").slice(0, 5),
+      auditee: occurrenceQuery.data.auditee || "",
+      auditeeEmail: occurrenceQuery.data.auditee_email || "",
+      leadAuditorUserId: occurrenceQuery.data.lead_auditor_user_id,
+    })[0];
+    const search = new URLSearchParams({ from: routeStage, setupRequired: "1" });
+    if (firstIssue) search.set("required", firstIssue.field);
+    return (
+      <Navigate
+        replace
+        to={`${auditSessionPath(route.amoCode, route.auditKey, "setup")}?${search.toString()}#setup-required`}
+      />
+    );
+  }
   if (!degraded) return null;
-  return <div className="quality-workflow-integrity-blocker" role="alertdialog" aria-modal="true" aria-label="Audit workflow unavailable"><section><ShieldAlert size={28} /><div><p>Authoritative workflow unavailable</p><h2>Audit progress has been placed in safe read-only mode.</h2><span>The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend. It will not use locally invented completion values or permit workflow advancement.</span></div><div className="quality-workflow-integrity-blocker__actions"><button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey })}><RefreshCcw size={17} /> Retry workflow</button><a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a></div></section></div>;
+  return <div className="quality-workflow-integrity-blocker" role="alertdialog" aria-modal="true" aria-label="Audit workflow unavailable"><section><ShieldAlert size={28} /><div><p>Authoritative workflow unavailable</p><h2>Audit progress has been placed in safe read-only mode.</h2><span>The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend. It will not use locally invented completion values or permit workflow advancement.</span></div><div className="quality-workflow-integrity-blocker__actions"><button type="button" onClick={() => void Promise.all([queryClient.invalidateQueries({ queryKey: occurrenceKey }), queryClient.invalidateQueries({ queryKey: sessionKey })])}><RefreshCcw size={17} /> Retry workflow</button><a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a></div></section></div>;
 };
 
 const QualityEnhancementsHost: React.FC = () => {
@@ -157,12 +191,6 @@ const QualityEnhancementsHost: React.FC = () => {
         <div className="qms-audit-occurrence-shell__body">
           <WorkflowIntegrityGuard route={route} />
           <MobileAuditDeepLinkState />
-
-          {auditSessionStage === "prepare" ? (
-            <Suspense fallback={null}>
-              <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
-            </Suspense>
-          ) : null}
 
           {auditSessionStage === "setup" ? (
             <Suspense fallback={null}>

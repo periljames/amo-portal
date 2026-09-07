@@ -1,5 +1,5 @@
 // src/app/routeGuards.ts
-import { getActiveAmoId, getCachedUser, getContext, type PortalUser } from "../services/auth";
+import { getCachedUser, getContext, type PortalUser } from "../services/auth";
 
 const TRAINING_READ = new Set([
   "training.view", "training.people.view", "training.course.view", "training.requirement.view",
@@ -34,6 +34,7 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
 // Keep this set aligned with backend/apps/quality/tenant_security.py.
 const QMS_OFFICER_PERMISSIONS = new Set([
   ...QMS_INSPECTOR_PERMISSIONS,
+  "qms.audit.manage",
   "qms.audit.notice.manage",
   "qms.car.manage",
   "qms.reports.view",
@@ -66,6 +67,7 @@ const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
   ...QMS_VIEW_ONLY_PERMISSIONS,
   "qms.reports.export",
   "qms.reports.attest_authority",
+  "qms.audit.programme.approve",
 ]);
 
 export function isPlatformSuperuser(): boolean {
@@ -88,13 +90,20 @@ export function userHasQmsRolePermission(
   // AMO tenant QMS user.
   if (user.is_superuser || !user.amo_id) return false;
 
-  if (permission === "qms.reports.attest_authority") {
+  // Tenant module grants are a narrowing boundary. They never create a QMS
+  // decision right, but removing Quality from a profile must also remove the
+  // corresponding route and action surface.
+  const qualityLevel = user.module_access?.quality;
+  if (user.module_access !== undefined && !qualityLevel) return false;
+  if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
+
+  if (permission === "qms.reports.attest_authority" || permission === "qms.audit.programme.approve") {
     return user.role === "ACCOUNTABLE_EXECUTIVE";
   }
-
-  if (user.is_amo_admin || user.role === "AMO_ADMIN") {
-    return permission.startsWith("qms.");
+  if (permission === "qms.audit.programme.quality_review") {
+    return user.role === "QUALITY_MANAGER";
   }
+
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_OFFICER") return QMS_OFFICER_PERMISSIONS.has(permission);
@@ -117,20 +126,37 @@ export function userHasTrainingRolePermission(
   contextDepartment?: string | null,
 ): boolean {
   if (!user) return false;
-  if (user.is_superuser) return Boolean(getActiveAmoId()) && permission.startsWith("training.");
+  if (user.is_superuser) return false;
   if (!user.amo_id) return false;
-  if (user.is_amo_admin || user.role === "AMO_ADMIN" || user.role === "QUALITY_MANAGER") return permission.startsWith("training.");
+  const trainingLevel = user.module_access?.training;
+  if (user.module_access !== undefined && !trainingLevel) return false;
+  if (trainingLevel === "view" && !TRAINING_READ.has(permission)) return false;
+  if (user.capability_codes?.includes(permission)) return true;
+  if (user.role === "QUALITY_MANAGER") return permission.startsWith("training.");
+  if (user.role === "QUALITY_OFFICER") {
+    return TRAINING_READ.has(permission) || [
+      "training.people.manage", "training.course.manage", "training.requirement.manage",
+      "training.plan.manage", "training.budget.manage", "training.session.manage",
+      "training.attendance.manage", "training.assessment.create", "training.assessment.perform",
+      "training.authorization.prepare", "training.certificate.issue", "training.report.export",
+    ].includes(permission);
+  }
   if (["ACCOUNTABLE_EXECUTIVE", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"].includes(user.role)) {
     return TRAINING_READ.has(permission);
   }
-  const department = (contextDepartment || "").trim().toUpperCase().replaceAll("_", "-");
-  if (["TRAINING", "TRAINING-AND-COMPETENCE", "TRAINING-&-COMPETENCE"].includes(department)) return permission.startsWith("training.");
-  if (user.role === "QUALITY_INSPECTOR" || user.role === "QUALITY_OFFICER" || user.role === "AUDITOR" || department === "QUALITY" || department === "QUALITY-ASSURANCE") {
-    return TRAINING_READ.has(permission) || ["training.plan.review", "training.budget.review", "training.assessment.review", "training.attendance.correct"].includes(permission);
+  if (["QUALITY_INSPECTOR", "AUDITOR", "DOCUMENT_CONTROL_OFFICER", "QUALITY_SUPPORT_OFFICER"].includes(user.role)) {
+    return TRAINING_READ.has(permission);
+  }
+  if (["HUMAN_RESOURCES_MANAGER", "HUMAN_RESOURCES_OFFICER"].includes(user.role)) {
+    return TRAINING_READ.has(permission) || [
+      "training.people.manage", "training.plan.manage", "training.session.manage",
+      "training.attendance.manage", "training.report.export",
+    ].includes(permission);
   }
   if (user.role === "FINANCE_MANAGER" || user.role === "ACCOUNTS_OFFICER") return ["training.view", "training.plan.view", "training.budget.view", "training.budget.review", "training.budget.approve", "training.report.view", "training.report.export"].includes(permission);
-  const position = (user.position_title || "").toLowerCase();
-  if (/assessor|instructor|trainer/.test(position)) return ["training.view", "training.people.view", "training.session.view", "training.attendance.view", "training.assessment.view", "training.assessment.perform"].includes(permission);
+  // `contextDepartment` remains in the signature for route-call compatibility,
+  // but labels and department membership never manufacture Training authority.
+  void contextDepartment;
   return false;
 }
 

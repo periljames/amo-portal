@@ -5,7 +5,7 @@ import io
 import json
 import os
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from uuid import UUID
@@ -36,7 +36,7 @@ def _basename_only(value: str, fallback: str) -> str:
 def _serialize_value(value: Any) -> Any:
     if isinstance(value, enum.Enum):
         return value.value
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)

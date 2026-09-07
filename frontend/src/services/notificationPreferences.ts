@@ -69,6 +69,15 @@ function bindAudioUnlock(AudioCtx: typeof AudioContext): void {
   unlockBound = true;
 }
 
+/**
+ * Register the browser audio unlock before an asynchronous notification can
+ * arrive. Browsers require a user gesture before Web Audio may play.
+ */
+export function prepareNotificationAudio(): void {
+  const AudioCtx = audioConstructor();
+  if (AudioCtx) bindAudioUnlock(AudioCtx);
+}
+
 function playTone(ctx: AudioContext, frequency: number, start: number, duration: number, volume: number): void {
   const oscillator = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -87,7 +96,7 @@ export function playNotificationCue(cue: NotificationCue = "info"): void {
   if (typeof window === "undefined" || !getNotificationPreferences().audioEnabled) return;
   const AudioCtx = audioConstructor();
   if (!AudioCtx) return;
-  bindAudioUnlock(AudioCtx);
+  prepareNotificationAudio();
   if (!sharedAudioCtx || sharedAudioCtx.state !== "running") {
     if (sharedAudioCtx?.state === "suspended") void sharedAudioCtx.resume().catch(() => undefined);
     return;

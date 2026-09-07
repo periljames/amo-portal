@@ -143,8 +143,6 @@ PAYROLL = EMPLOYEE | {
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "SUPERUSER": ALL_PERMISSIONS,
-    "AMO_ADMIN": ALL_PERMISSIONS,
     "USER": EMPLOYEE,
     "ACCOUNTABLE_EXECUTIVE": ACCOUNTABLE_EXECUTIVE,
     "BASE_MAINTENANCE_MANAGER": BASE_MANAGER,
@@ -158,6 +156,13 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "BASE_MANAGER": BASE_MANAGER,
     "LINE_MANAGER": DEPARTMENT_HEAD,
     "QUALITY_MANAGER": QUALITY,
+    "QUALITY_OFFICER": QUALITY - {
+        PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
+        PermissionCode.ROSTER_MANAGE_RULES.value,
+        PermissionCode.ROSTER_MANAGE_SHIFT_SEMANTICS.value,
+        PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
+    },
+    "QUALITY_SUPPORT_OFFICER": EMPLOYEE | {PermissionCode.ROSTER_VIEW_DEPARTMENT.value},
     "QUALITY_INSPECTOR": QUALITY - {
         PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
         PermissionCode.ROSTER_MANAGE_RULES.value,
@@ -165,6 +170,19 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PermissionCode.ROSTER_MANAGE_CONTROLLED_OUTPUT.value,
     },
     "AUDITOR": {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
+    "DOCUMENT_CONTROL_OFFICER": EMPLOYEE | {PermissionCode.ROSTER_VIEW_DEPARTMENT.value},
+    "SAFETY_OFFICER": EMPLOYEE | {PermissionCode.ROSTER_VIEW_DEPARTMENT.value},
+    "MAINTENANCE_SUPERVISOR": SUPERVISOR,
+    "TECHNICAL_RECORDS_SUPERVISOR": SUPERVISOR | {
+        PermissionCode.ROSTER_VIEW_ALL.value,
+        PermissionCode.ROSTER_VALIDATE.value,
+    },
+    "TECHNICAL_RECORDS_OFFICER": EMPLOYEE | {PermissionCode.ROSTER_VIEW_DEPARTMENT.value},
+    "MAINTENANCE_SUPPORT": EMPLOYEE,
+    "HUMAN_RESOURCES_OFFICER": HR - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.PAYROLL_EXPORT.value},
+    "HUMAN_RESOURCES_MANAGER": HR | {PermissionCode.PAYROLL_EXPORT.value},
+    # Compatibility for imported historical policy rows; these are not
+    # canonical account-role enum values.
     "HR_OFFICER": HR - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.PAYROLL_EXPORT.value},
     "HR_MANAGER": HR | {PermissionCode.PAYROLL_EXPORT.value},
     "PAYROLL_OFFICER": PAYROLL,
@@ -206,8 +224,6 @@ def default_permissions_for(user: account_models.User) -> set[str]:
 
     if not user or getattr(user, "is_system_account", False):
         return set()
-    if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
-        return set(ALL_PERMISSIONS)
     return set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
 
 

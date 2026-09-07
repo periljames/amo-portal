@@ -348,16 +348,16 @@ def issue_preparation_revision(
                 "blockers": readiness_blockers,
             },
         )
+    # A DRAFT is intentionally mutable. Refresh it from the authoritative audit
+    # sources at the moment of issue so an early draft cannot deadlock the audit
+    # after a checklist or document request is added. The issued snapshot remains
+    # immutable and its fingerprint always matches the exact fieldwork inputs.
     if current["source_fingerprint"] != row.source_fingerprint:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "The live audit preparation sources changed after this draft snapshot was created.",
-                "draft_fingerprint": row.source_fingerprint,
-                "current_fingerprint": current["source_fingerprint"],
-                "required_action": "Create a fresh preparation revision so the issued snapshot matches the current controlled checklist, audit criteria and document requests.",
-            },
-        )
+        row.audit_snapshot = current["audit_snapshot"]
+        row.checklist_snapshot = current["checklist_snapshot"]
+        row.document_request_snapshot = current["document_request_snapshot"]
+        row.source_references = current["source_references"]
+        row.source_fingerprint = current["source_fingerprint"]
     row.status = "ISSUED"
     row.issued_by_user_id = ctx.user_id
     row.issued_at = _utcnow()

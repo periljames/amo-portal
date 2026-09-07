@@ -23,8 +23,6 @@ from .publication_sources import get_publication_adapters
 router = APIRouter(prefix="/records", tags=["technical_records"], dependencies=[Depends(require_module("work"))])
 
 EDITOR_ROLES = {
-    AccountRole.SUPERUSER,
-    AccountRole.AMO_ADMIN,
     AccountRole.BASE_MAINTENANCE_MANAGER,
     AccountRole.LINE_MAINTENANCE_MANAGER,
     AccountRole.WORKSHOP_MANAGER,
@@ -32,21 +30,22 @@ EDITOR_ROLES = {
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,
+    AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
+    AccountRole.TECHNICAL_RECORDS_OFFICER,
 }
 PLANNING_EDITOR_ROLES = {
-    AccountRole.SUPERUSER,
-    AccountRole.AMO_ADMIN,
     AccountRole.PLANNING_ENGINEER,
+    AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
 }
 PRODUCTION_EXECUTION_ROLES = {
-    AccountRole.SUPERUSER,
-    AccountRole.AMO_ADMIN,
     AccountRole.BASE_MAINTENANCE_MANAGER,
     AccountRole.LINE_MAINTENANCE_MANAGER,
     AccountRole.WORKSHOP_MANAGER,
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,
+    AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
+    AccountRole.TECHNICAL_RECORDS_OFFICER,
 }
 WATCHLIST_REVIEW_OPEN_STATUSES = ("Matched", "Under Review")
 COMPLIANCE_OPEN_STATUSES = ("Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification")
@@ -307,7 +306,7 @@ def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get
 
 
 @router.put("/settings", response_model=schemas.TechnicalRecordSettingsRead)
-def update_settings(payload: schemas.TechnicalRecordSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN))):
+def update_settings(payload: schemas.TechnicalRecordSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(AccountRole.TECHNICAL_RECORDS_SUPERVISOR, AccountRole.BASE_MAINTENANCE_MANAGER))):
     row = _get_settings(db, current_user.effective_amo_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)

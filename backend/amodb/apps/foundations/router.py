@@ -12,11 +12,21 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
+from ..accounts.admin_profile_guard import (
+    require_active_admin_profile,
+    require_active_admin_profile_or_roles,
+)
 from ..audit import services as audit_services
 from . import airport_catalog, department_schemas, models, schemas, services
 from .tenant_scope import get_bound_foundation_amo_id, get_bound_foundation_write_amo_id
 
 router = APIRouter(prefix="/foundations", tags=["foundations"])
+
+require_foundation_manager = require_active_admin_profile_or_roles(
+    "QUALITY_MANAGER",
+    "PLANNING_ENGINEER",
+    "PRODUCTION_ENGINEER",
+)
 
 
 def _effective_amo_id(user: account_models.User) -> str:
@@ -33,18 +43,6 @@ def _can_manage_foundations(user: account_models.User) -> bool:
         account_models.AccountRole.PLANNING_ENGINEER,
         account_models.AccountRole.PRODUCTION_ENGINEER,
     }
-
-
-def _require_foundation_manager(user: account_models.User) -> None:
-    if not _can_manage_foundations(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges for shared foundation changes")
-
-
-def _require_tenant_admin(user: account_models.User) -> None:
-    if getattr(user, "is_system_account", False) or not (
-        getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False)
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AMO administrator privileges are required")
 
 
 def _department_read(db: Session, department: account_models.Department) -> department_schemas.DepartmentCatalogRead:
@@ -119,9 +117,8 @@ def list_departments(
 def create_department(
     payload: department_schemas.DepartmentCatalogCreate,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_active_admin_profile),
 ):
-    _require_tenant_admin(current_user)
     amo_id = _effective_amo_id(current_user)
     duplicate = db.query(account_models.Department).filter(
         account_models.Department.amo_id == amo_id,
@@ -159,9 +156,8 @@ def update_department(
     department_id: str,
     payload: department_schemas.DepartmentCatalogUpdate,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_active_admin_profile),
 ):
-    _require_tenant_admin(current_user)
     amo_id = _effective_amo_id(current_user)
     department = db.query(account_models.Department).filter(
         account_models.Department.id == department_id,
@@ -185,6 +181,17 @@ def update_department(
         "sort_order": department.sort_order,
         "is_active": department.is_active,
     }
+    if data.get("is_active") is False and department.is_active:
+        active_users = db.query(func.count(account_models.User.id)).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.department_id == department.id,
+            account_models.User.is_active.is_(True),
+        ).scalar() or 0
+        if active_users:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Department has {int(active_users)} active user(s). Reassign them before deactivation.",
+            )
     for field, value in data.items():
         if field == "default_route":
             value = (value or "").strip() or None
@@ -210,9 +217,8 @@ def update_department(
 def delete_department(
     department_id: str,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_active_admin_profile),
 ):
-    _require_tenant_admin(current_user)
     amo_id = _effective_amo_id(current_user)
     department = db.query(account_models.Department).filter(
         account_models.Department.id == department_id,
@@ -223,26 +229,23 @@ def delete_department(
     assigned = db.query(func.count(account_models.User.id)).filter(
         account_models.User.amo_id == amo_id,
         account_models.User.department_id == department.id,
+        account_models.User.is_active.is_(True),
     ).scalar() or 0
     if assigned:
         raise HTTPException(
             status_code=409,
-            detail=f"Department has {int(assigned)} assigned user(s). Reassign them or deactivate the department before deletion.",
+            detail=f"Department has {int(assigned)} active user(s). Reassign them before deactivation.",
         )
-    before = {"code": department.code, "name": department.name}
-    db.delete(department)
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Department is still referenced by operational records and cannot be deleted.") from exc
+    before = {"code": department.code, "name": department.name, "is_active": department.is_active}
+    department.is_active = False
+    db.add(department)
     audit_services.log_event(
         db,
         amo_id=amo_id,
         actor_user_id=str(current_user.id),
         entity_type="accounts.department",
         entity_id=str(department_id),
-        action="DELETED",
+        action="DEACTIVATED",
         before=before,
         metadata={"module": "foundations", "source": "setup_centre"},
     )
@@ -261,9 +264,8 @@ def search_airport_catalog(
     latitude: Optional[float] = Query(default=None, ge=-90, le=90),
     longitude: Optional[float] = Query(default=None, ge=-180, le=180),
     limit: int = Query(default=10, ge=1, le=25),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     try:
         return airport_catalog.search_airports(query=q, latitude=latitude, longitude=longitude, limit=limit)
     except airport_catalog.AirportCatalogUnavailable as exc:
@@ -290,9 +292,8 @@ def create_base_station(
     payload: schemas.BaseStationCreate,
     amo_id: str = Depends(get_bound_foundation_write_amo_id),
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     try:
         item = services.create_base_station(db, amo_id=amo_id, actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -312,9 +313,8 @@ def update_base_station(
     payload: schemas.BaseStationUpdate,
     amo_id: str = Depends(get_bound_foundation_write_amo_id),
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     item = services.get_base_station(db, amo_id=amo_id, base_station_id=base_station_id)
     if not item:
         raise HTTPException(status_code=404, detail="Base station not found")
@@ -369,9 +369,8 @@ def contribute_base_location(
 def get_base_location_consensus(
     base_station_id: str,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     amo_id = _effective_amo_id(current_user)
     item = services.get_base_station(db, amo_id=amo_id, base_station_id=base_station_id)
     if not item:
@@ -387,9 +386,8 @@ def approve_base_location_consensus(
     base_station_id: str,
     payload: schemas.BaseLocationConsensusApproval,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     amo_id = _effective_amo_id(current_user)
     item = services.get_base_station(db, amo_id=amo_id, base_station_id=base_station_id)
     if not item:
@@ -428,9 +426,8 @@ def approve_base_location_consensus(
 def clear_base_location_observations(
     base_station_id: str,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     amo_id = _effective_amo_id(current_user)
     item = services.get_base_station(db, amo_id=amo_id, base_station_id=base_station_id)
     if not item:
@@ -478,9 +475,8 @@ def evaluate_location(
 def create_user_base_assignment(
     payload: schemas.UserBaseAssignmentCreate,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     try:
         item = services.create_user_base_assignment(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -505,9 +501,8 @@ def list_availability(
 def create_availability(
     payload: schemas.AvailabilityCreate,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_foundation_manager),
 ):
-    _require_foundation_manager(current_user)
     try:
         item = services.create_availability(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()

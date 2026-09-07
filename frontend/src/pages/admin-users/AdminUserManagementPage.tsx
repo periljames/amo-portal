@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,7 +15,6 @@ import {
   Search,
   ShieldCheck,
   ShieldOff,
-  Trash2,
   UserCheck,
   UserPlus,
   UserRoundCog,
@@ -25,28 +24,24 @@ import {
 } from "lucide-react";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
-import { useAdminAccountRoles } from "../../hooks/useAdminAccountRoles";
 import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
+import { readCachedAdminProfileState } from "../../services/adminProfileMode";
+import { getTenantAccessFramework } from "../../services/accessProfiles";
 import {
   LS_ACTIVE_AMO_ID,
   applyAdminUserEmploymentAction,
   bulkAdminUserAction,
-  createAdminAuthorisationType,
   createAdminGroup,
-  deleteAdminAuthorisationType,
   deleteAdminGroup,
   disableAdminUser,
   downloadAdminUsersExport,
   enableAdminUser,
   forceAdminUserPasswordReset,
-  listAdminAuthorisationTypes,
   listAdminDepartments,
   listAdminGroups,
   listAdminUserSummaries,
   revokeAdminUserAccess,
   updateAdminUser,
-  type AccountRole,
-  type AdminAuthorisationTypeCreatePayload,
   type AdminDepartmentRead,
   type AdminUserDirectoryItem,
   type AdminUserGroupRead,
@@ -62,8 +57,10 @@ import {
 import "../../styles/admin-user-management-v2.css";
 
 type UrlParams = { amoCode?: string };
-type WorkspaceTab = "directory" | "groups" | "permissions" | "lifecycle";
+type WorkspaceTab = "directory" | "roles" | "groups" | "permissions" | "lifecycle";
 type BatchAction = BulkUserActionPayload["action"] | "export_csv" | "";
+
+const AccessRolesPanel = React.lazy(() => import("./AccessRolesPanel"));
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -141,25 +138,35 @@ function IconButton({
 export default function AdminUserManagementPage() {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const ctx = getContext();
   const currentUser = useMemo(() => getCachedUser(), []);
   const [sessionActive, setSessionActive] = useState(() => Boolean(getToken()));
   const isSuperuser = Boolean(currentUser?.is_superuser);
   const canAccessAdmin = Boolean(
-    sessionActive && currentUser && (currentUser.is_superuser || currentUser.is_amo_admin),
+    sessionActive && currentUser && (
+      currentUser.is_superuser
+      || currentUser.is_amo_admin
+      || readCachedAdminProfileState(amoCode ?? ctx.amoCode ?? "UNKNOWN")?.active
+    ),
   );
   const effectiveAmoId = isSuperuser
     ? localStorage.getItem(LS_ACTIVE_AMO_ID) || currentUser?.amo_id || null
     : currentUser?.amo_id || null;
   const basePath = `/maintenance/${amoCode ?? ctx.amoCode ?? "UNKNOWN"}/admin/users`;
 
-  const [tab, setTab] = useState<WorkspaceTab>("directory");
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<WorkspaceTab>(() =>
+    (["directory", "roles", "groups", "permissions", "lifecycle"] as WorkspaceTab[]).includes(requestedTab as WorkspaceTab)
+      ? requestedTab as WorkspaceTab
+      : "directory",
+  );
   const [searchInput, setSearchInput] = useState("");
   const search = useDebouncedValue(searchInput.trim(), 350);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [roleFilter, setRoleFilter] = useState<AccountRole | "all">("all");
+  const [accessProfileFilter, setAccessProfileFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState<AdminUserAccountFilter>("all");
   const [departmentFilter, setDepartmentFilter] = useState<"all" | "unassigned" | string>("all");
   const [sortBy, setSortBy] = useState<AdminUserSortField>("name");
@@ -168,34 +175,20 @@ export default function AdminUserManagementPage() {
   const [feedback, setFeedback] = useState("");
   const [batchAction, setBatchAction] = useState<BatchAction>("");
   const [batchDepartmentId, setBatchDepartmentId] = useState("");
-  const [batchRole, setBatchRole] = useState<AccountRole | "">("");
+  const [batchAccessProfileId, setBatchAccessProfileId] = useState("");
 
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupCode, setNewGroupCode] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
-  const [permissionForm, setPermissionForm] = useState<AdminAuthorisationTypeCreatePayload>({
-    amo_id: effectiveAmoId || "",
-    code: "",
-    name: "",
-    description: "",
-    maintenance_scope: "LINE",
-    regulation_reference: "",
-    can_issue_crs: false,
-    requires_dual_sign: false,
-    requires_valid_licence: false,
-  });
-
   const [lifecycleSearch, setLifecycleSearch] = useState("");
   const debouncedLifecycleSearch = useDebouncedValue(lifecycleSearch.trim(), 350);
   const [lifecycleUserId, setLifecycleUserId] = useState("");
   const [lifecycleAction, setLifecycleAction] = useState<UserEmploymentActionPayload["action"]>("transfer");
-  const [lifecycleRole, setLifecycleRole] = useState<AccountRole | "">("");
   const [lifecycleDepartmentId, setLifecycleDepartmentId] = useState("");
   const [lifecycleTitle, setLifecycleTitle] = useState("");
   const [lifecycleNote, setLifecycleNote] = useState("");
   const [lifecycleFrom, setLifecycleFrom] = useState("");
   const [lifecycleTo, setLifecycleTo] = useState("");
-  const roleCatalogue = useAdminAccountRoles(batchRole || lifecycleRole || (roleFilter === "all" ? "" : roleFilter));
 
   useEffect(() => {
     return onSessionEvent((detail) => {
@@ -211,7 +204,14 @@ export default function AdminUserManagementPage() {
   useEffect(() => {
     setPage(1);
     setSelectedIds([]);
-  }, [search, roleFilter, accountFilter, departmentFilter, pageSize, sortBy, sortDirection]);
+  }, [search, accessProfileFilter, accountFilter, departmentFilter, pageSize, sortBy, sortDirection]);
+
+  useEffect(() => {
+    const nextTab = (["directory", "roles", "groups", "permissions", "lifecycle"] as WorkspaceTab[]).includes(requestedTab as WorkspaceTab)
+      ? requestedTab as WorkspaceTab
+      : "directory";
+    setTab(nextTab);
+  }, [requestedTab]);
 
   useEffect(() => {
     setPermissionForm((current) => ({ ...current, amo_id: effectiveAmoId || "" }));
@@ -231,7 +231,7 @@ export default function AdminUserManagementPage() {
       page,
       pageSize,
       search,
-      roleFilter,
+      accessProfileFilter,
       accountFilter,
       departmentFilter,
       sortBy,
@@ -243,7 +243,7 @@ export default function AdminUserManagementPage() {
         page,
         page_size: pageSize,
         search,
-        role: roleFilter,
+        access_profile_id: accessProfileFilter,
         account_status: accountFilter,
         department_id: departmentFilter,
         sort_by: sortBy,
@@ -262,15 +262,15 @@ export default function AdminUserManagementPage() {
     enabled: canAccessAdmin && Boolean(effectiveAmoId),
     staleTime: 60_000,
   });
-  const groupsQuery = useQuery({
-    queryKey: ["admin-user-groups", effectiveAmoId],
-    queryFn: () => listAdminGroups(effectiveAmoId),
+  const accessFrameworkQuery = useQuery({
+    queryKey: ["accounts", "access-framework", effectiveAmoId],
+    queryFn: () => getTenantAccessFramework(effectiveAmoId),
     enabled: canAccessAdmin && Boolean(effectiveAmoId),
     staleTime: 30_000,
   });
-  const permissionTypesQuery = useQuery({
-    queryKey: ["admin-user-authorisation-types", effectiveAmoId],
-    queryFn: () => listAdminAuthorisationTypes(effectiveAmoId),
+  const groupsQuery = useQuery({
+    queryKey: ["admin-user-groups", effectiveAmoId],
+    queryFn: () => listAdminGroups(effectiveAmoId),
     enabled: canAccessAdmin && Boolean(effectiveAmoId),
     staleTime: 30_000,
   });
@@ -291,7 +291,7 @@ export default function AdminUserManagementPage() {
   const metrics = data?.metrics;
   const departments = departmentsQuery.data ?? [];
   const groups = groupsQuery.data ?? [];
-  const permissionTypes = permissionTypesQuery.data ?? [];
+  const accessProfiles = (accessFrameworkQuery.data?.profiles ?? []).filter((profile) => profile.is_active);
   const allPageSelected = items.length > 0 && items.every((item) => selectedIds.includes(item.id));
 
   const refreshDirectory = async () => {
@@ -300,7 +300,6 @@ export default function AdminUserManagementPage() {
   const refreshSupportingData = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin-user-groups"] }),
-      queryClient.invalidateQueries({ queryKey: ["admin-user-authorisation-types"] }),
       queryClient.invalidateQueries({ queryKey: ["admin-user-departments"] }),
     ]);
   };
@@ -373,31 +372,10 @@ export default function AdminUserManagementPage() {
     onSuccess: refreshSupportingData,
     onError: (error: Error) => setFeedback(error.message),
   });
-  const createPermissionMutation = useMutation({
-    mutationFn: () => createAdminAuthorisationType(permissionForm),
-    onSuccess: async () => {
-      setPermissionForm((current) => ({
-        ...current,
-        code: "",
-        name: "",
-        description: "",
-        regulation_reference: "",
-      }));
-      setFeedback("Permission type created.");
-      await refreshSupportingData();
-    },
-    onError: (error: Error) => setFeedback(error.message),
-  });
-  const deletePermissionMutation = useMutation({
-    mutationFn: (permissionId: string) => deleteAdminAuthorisationType(permissionId),
-    onSuccess: refreshSupportingData,
-    onError: (error: Error) => setFeedback(error.message),
-  });
   const lifecycleMutation = useMutation({
     mutationFn: () =>
       applyAdminUserEmploymentAction(lifecycleUserId, {
         action: lifecycleAction,
-        role: lifecycleRole || undefined,
         department_id: lifecycleDepartmentId || undefined,
         position_title: lifecycleTitle.trim() || undefined,
         note: lifecycleNote.trim() || undefined,
@@ -425,14 +403,11 @@ export default function AdminUserManagementPage() {
       exportMutation.mutate({ userIds: selectedIds, format: "csv" });
       return;
     }
-    if (batchAction === "delete" && !window.confirm(`Permanently delete ${selectedIds.length} selected users?`)) {
-      return;
-    }
     bulkMutation.mutate({
       user_ids: selectedIds,
       action: batchAction,
       department_id: batchAction === "assign_department" ? batchDepartmentId || undefined : undefined,
-      role: batchAction === "change_role" ? batchRole || undefined : undefined,
+      access_profile_id: batchAction === "assign_access_profile" ? batchAccessProfileId || undefined : undefined,
       note: `Applied from paginated user directory`,
     });
   };
@@ -446,7 +421,7 @@ export default function AdminUserManagementPage() {
               <UsersRound size={20} aria-hidden="true" />
               <h1>User management</h1>
             </div>
-            <p>Accounts, access, departments, permissions and employment lifecycle.</p>
+            <p>Accounts, access profiles, approved positions, module boundaries, personal authorizations and employment lifecycle.</p>
           </div>
           <div className="aum2-header-actions">
             <IconButton label="Refresh directory" onClick={() => void refreshDirectory()} disabled={directoryQuery.isFetching}>
@@ -468,11 +443,18 @@ export default function AdminUserManagementPage() {
         <nav className="aum2-tabs" aria-label="User management sections">
           {([
             ["directory", "Directory", UsersRound],
+            ["roles", "Access profiles", ShieldCheck],
             ["groups", "Groups", UserRoundCog],
-            ["permissions", "Permissions", ShieldCheck],
+            ["permissions", "Certifying authorizations", KeyRound],
             ["lifecycle", "Lifecycle", UserCheck],
           ] as const).map(([key, label, Icon]) => (
-            <button key={key} type="button" className={tab === key ? "is-active" : ""} onClick={() => setTab(key)}>
+            <button key={key} type="button" className={tab === key ? "is-active" : ""} onClick={() => {
+              setTab(key);
+              const next = new URLSearchParams(searchParams);
+              if (key === "directory") next.delete("tab");
+              else next.set("tab", key);
+              setSearchParams(next, { replace: true });
+            }}>
               <Icon size={16} aria-hidden="true" /><span>{label}</span>
             </button>
           ))}
@@ -500,9 +482,9 @@ export default function AdminUserManagementPage() {
                   <button type="button" onClick={() => setSearchInput("")} aria-label="Clear search" title="Clear search"><X size={14} /></button>
                 ) : null}
               </label>
-              <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as AccountRole | "all")} aria-label="Filter by role">
-                <option value="all">All roles</option>
-                {roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.label}</option>)}
+              <select value={accessProfileFilter} onChange={(event) => setAccessProfileFilter(event.target.value)} aria-label="Filter by access profile">
+                <option value="all">All access profiles</option>
+                {accessProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name}</option>)}
               </select>
               <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} aria-label="Filter by department">
                 <option value="all">All departments</option>
@@ -536,9 +518,8 @@ export default function AdminUserManagementPage() {
                   <option value="disable">Disable</option>
                   <option value="assign_department">Assign department</option>
                   <option value="clear_department">Clear department</option>
-                  <option value="change_role">Change role</option>
+                  <option value="assign_access_profile">Assign supporting access profile</option>
                   <option value="export_csv">Export CSV</option>
-                  <option value="delete">Delete</option>
                 </select>
                 {batchAction === "assign_department" ? (
                   <select value={batchDepartmentId} onChange={(event) => setBatchDepartmentId(event.target.value)} aria-label="Target department">
@@ -546,13 +527,23 @@ export default function AdminUserManagementPage() {
                     {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
                   </select>
                 ) : null}
-                {batchAction === "change_role" ? (
-                  <select value={batchRole} onChange={(event) => setBatchRole(event.target.value as AccountRole | "")} aria-label="Target role">
-                    <option value="">Choose role</option>
-                    {roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}
+                {batchAction === "assign_access_profile" ? (
+                  <select value={batchAccessProfileId} onChange={(event) => setBatchAccessProfileId(event.target.value)} aria-label="Target supporting access profile">
+                    <option value="">Choose supporting access profile</option>
+                    {accessProfiles.filter((profile) => !profile.is_regulated).map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name}</option>)}
                   </select>
                 ) : null}
-                <button type="button" className="aum2-compact-action" onClick={executeBatch} disabled={!batchAction || bulkMutation.isPending}>Apply</button>
+                <button
+                  type="button"
+                  className="aum2-compact-action"
+                  onClick={executeBatch}
+                  disabled={
+                    !batchAction
+                    || bulkMutation.isPending
+                    || (batchAction === "assign_department" && !batchDepartmentId)
+                    || (batchAction === "assign_access_profile" && !batchAccessProfileId)
+                  }
+                >Apply</button>
                 <IconButton label="Clear selection" onClick={() => setSelectedIds([])}><X size={16} /></IconButton>
               </div>
             ) : null}
@@ -566,7 +557,7 @@ export default function AdminUserManagementPage() {
                       else setSelectedIds((current) => Array.from(new Set([...current, ...items.map((item) => item.id)])));
                     }} aria-label="Select page" /></th>
                     <th>User</th>
-                    <th>Role</th>
+                    <th>Position &amp; access</th>
                     <th>Department</th>
                     <th>Access</th>
                     <th>Activity</th>
@@ -591,7 +582,10 @@ export default function AdminUserManagementPage() {
                           <button type="button" className="aum2-user-link" onClick={() => navigate(`${basePath}/${user.id}`)}>{user.full_name}</button>
                           <span className="aum2-secondary">{user.staff_code} · {user.email}</span>
                         </td>
-                        <td><strong className="aum2-cell-primary">{user.position_title || formatRole(user.role)}</strong>{user.position_title ? <span className="aum2-secondary">{formatRole(user.role)}</span> : null}</td>
+                        <td>
+                          <strong className="aum2-cell-primary">{user.position_title || user.access_profile_name || formatRole(user.role)}</strong>
+                          <span className="aum2-secondary">{user.access_profile_name || formatRole(user.role)}{user.is_amo_admin ? " · Tenant admin" : ""}{user.is_superuser ? " · Platform superuser" : ""}</span>
+                        </td>
                         <td>
                           <select className="aum2-inline-select" value={user.department_id || ""} onChange={(event) => departmentMutation.mutate({ userId: user.id, departmentId: event.target.value || null })} aria-label={`Department for ${user.full_name}`}>
                             <option value="">Unassigned</option>
@@ -620,9 +614,6 @@ export default function AdminUserManagementPage() {
                                 <button type="button" onClick={() => resetPasswordMutation.mutate(user.id)}><KeyRound size={15} />Require password reset</button>
                                 <button type="button" onClick={() => revokeMutation.mutate(user.id)}><ShieldOff size={15} />Revoke sessions</button>
                                 <button type="button" onClick={() => exportMutation.mutate({ userIds: [user.id], format: "csv" })}><Download size={15} />Export record</button>
-                                <button type="button" className="is-danger" onClick={() => {
-                                  if (window.confirm(`Permanently delete ${user.full_name}?`)) bulkMutation.mutate({ user_ids: [user.id], action: "delete", note: "Deleted from directory" });
-                                }}><Trash2 size={15} />Delete user</button>
                               </div>
                             </details>
                           </div>
@@ -645,6 +636,12 @@ export default function AdminUserManagementPage() {
               </div>
             </footer>
           </section>
+        ) : null}
+
+        {tab === "roles" ? (
+          <React.Suspense fallback={<section className="aum2-panel">Loading roles and structure…</section>}>
+            <AccessRolesPanel amoId={effectiveAmoId} />
+          </React.Suspense>
         ) : null}
 
         {tab === "groups" ? (
@@ -671,41 +668,22 @@ export default function AdminUserManagementPage() {
         ) : null}
 
         {tab === "permissions" ? (
-          <section className="aum2-grid-two">
-            <article className="aum2-panel">
-              <div className="aum2-section-heading"><div><h2>Permission type</h2><p>Create reusable authorisation definitions.</p></div><ShieldCheck size={18} /></div>
-              <div className="aum2-form-grid">
-                <label><span>Code</span><input value={permissionForm.code} onChange={(event) => setPermissionForm((current) => ({ ...current, code: event.target.value }))} /></label>
-                <label><span>Name</span><input value={permissionForm.name} onChange={(event) => setPermissionForm((current) => ({ ...current, name: event.target.value }))} /></label>
-                <label><span>Scope</span><select value={permissionForm.maintenance_scope || "LINE"} onChange={(event) => setPermissionForm((current) => ({ ...current, maintenance_scope: event.target.value }))}><option>LINE</option><option>BASE</option><option>COMPONENT</option><option>STRUCTURES</option><option>AVIONICS</option><option>POWERPLANT</option><option>OTHER</option></select></label>
-                <label><span>Regulation</span><input value={permissionForm.regulation_reference || ""} onChange={(event) => setPermissionForm((current) => ({ ...current, regulation_reference: event.target.value }))} /></label>
-                <label className="is-wide"><span>Description</span><textarea rows={3} value={permissionForm.description || ""} onChange={(event) => setPermissionForm((current) => ({ ...current, description: event.target.value }))} /></label>
-                <div className="aum2-check-row is-wide">
-                  <label><input type="checkbox" checked={Boolean(permissionForm.can_issue_crs)} onChange={(event) => setPermissionForm((current) => ({ ...current, can_issue_crs: event.target.checked }))} />CRS</label>
-                  <label><input type="checkbox" checked={Boolean(permissionForm.requires_dual_sign)} onChange={(event) => setPermissionForm((current) => ({ ...current, requires_dual_sign: event.target.checked }))} />Dual sign</label>
-                  <label><input type="checkbox" checked={Boolean(permissionForm.requires_valid_licence)} onChange={(event) => setPermissionForm((current) => ({ ...current, requires_valid_licence: event.target.checked }))} />Valid licence</label>
-                </div>
-                <button type="button" className="aum2-primary-action" disabled={!permissionForm.code.trim() || !permissionForm.name.trim() || createPermissionMutation.isPending} onClick={() => createPermissionMutation.mutate()}><Plus size={16} />Create</button>
-              </div>
-            </article>
-            <article className="aum2-panel">
-              <div className="aum2-section-heading"><div><h2>Permission library</h2><p>{permissionTypes.length} definitions</p></div></div>
-              <div className="aum2-compact-list">
-                {permissionTypes.map((permission) => <div key={permission.id}><div><strong>{permission.name}</strong><span>{permission.code} · {permission.maintenance_scope || "General"}</span></div><IconButton label={`Delete ${permission.name}`} danger onClick={() => { if (window.confirm(`Delete ${permission.name}?`)) deletePermissionMutation.mutate(permission.id); }}><Trash2 size={15} /></IconButton></div>)}
-                {!permissionTypes.length ? <div className="aum2-empty">No permission types configured.</div> : null}
-              </div>
-            </article>
+          <section className="aum2-panel">
+            <div className="aum2-section-heading"><div><h2>Certifying authorizations are not portal roles</h2><p>User Management shows accounts, organization positions and portal access. Personal maintenance privileges are issued only through the governed readiness and approval workflow.</p></div><KeyRound size={18} /></div>
+            <div className="aum2-form-grid">
+              <p className="is-wide">Use Training &amp; Competence to prepare the case, verify licence, training, experience and assessment evidence, record the required recommendation or committee decision, and issue, restrict, suspend or withdraw the retained authorization record.</p>
+              <button type="button" className="aum2-primary-action" onClick={() => navigate(`/maintenance/${amoCode ?? ctx.amoCode ?? "UNKNOWN"}/training/competence/authorizations`)}>Open governed authorizations</button>
+            </div>
           </section>
         ) : null}
 
         {tab === "lifecycle" ? (
           <section className="aum2-panel">
-            <div className="aum2-section-heading"><div><h2>Employment lifecycle</h2><p>Promotion, transfer, leave, resignation and reinstatement with an audit note.</p></div><UserRoundCog size={18} /></div>
+            <div className="aum2-section-heading"><div><h2>Employment lifecycle</h2><p>Employment events update status, department and descriptive title. Governed position and access changes are made in Workforce and Roles &amp; structure.</p></div><UserRoundCog size={18} /></div>
             <div className="aum2-form-grid is-lifecycle">
               <label className="is-wide"><span>Find user</span><input value={lifecycleSearch} onChange={(event) => setLifecycleSearch(event.target.value)} placeholder="Search name, email or staff code" /></label>
               <label className="is-wide"><span>User</span><select value={lifecycleUserId} onChange={(event) => setLifecycleUserId(event.target.value)}><option value="">Choose user</option>{(lifecycleUsersQuery.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.full_name} · {user.staff_code}</option>)}</select></label>
-              <label><span>Action</span><select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option></select></label>
-              <label><span>Role</span><select value={lifecycleRole} onChange={(event) => { const role = event.target.value as AccountRole | ""; const definition = roleCatalogue.roles.find((item) => item.key === role); setLifecycleRole(role); if (definition?.regulated) setLifecycleTitle(definition.label); }}><option value="">No role change</option>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select></label>
+              <label><span>Action</span><select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="transfer">Transfer descriptive department</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option></select><small>Promotion and demotion are effective-dated Workforce position changes.</small></label>
               <label><span>Department</span><select value={lifecycleDepartmentId} onChange={(event) => setLifecycleDepartmentId(event.target.value)}><option value="">No department change</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
               <label><span>Position title</span><input value={lifecycleTitle} onChange={(event) => setLifecycleTitle(event.target.value)} /></label>
               <label><span>{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? "New workforce start" : "Effective from"}</span><input type="datetime-local" required={lifecycleAction === "reinstate" || lifecycleAction === "reemploy"} value={lifecycleFrom} onChange={(event) => setLifecycleFrom(event.target.value)} />{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? <small>This starts a new contract period and becomes the locked workforce date.</small> : null}</label>

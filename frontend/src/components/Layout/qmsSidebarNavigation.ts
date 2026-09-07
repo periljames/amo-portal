@@ -56,6 +56,7 @@ const STATIC_AUDIT_SEGMENTS = new Set([
   "templates",
   "new",
   "plan",
+  "scopes",
   "bin",
 ]);
 
@@ -66,7 +67,7 @@ export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
     label: "Audit Assurance",
     moduleId: "audits",
     view: "dashboard",
-    keywords: "assurance overview programme register planner checklists evidence",
+    keywords: "assurance overview programme register planner schedules scopes checklists evidence",
     matchRelativePrefixes: ["audits"],
   },
 ] as const;
@@ -381,7 +382,7 @@ function createPanel(
   sections.append(createSection(
     "audits",
     "Audit Assurance",
-    "Programme → Planner V2 → execute → follow-up",
+    "Programme → schedules & scopes → execute → follow-up",
     auditLinks,
     pathname,
     onNavigate,

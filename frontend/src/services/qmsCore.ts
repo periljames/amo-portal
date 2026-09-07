@@ -8,16 +8,17 @@
 import { ApiClientError, apiRequest } from "./apiClient";
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
-import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
+import {
+  beginBackgroundLoading,
+  beginLoading,
+  endBackgroundLoading,
+  endLoading,
+} from "./loading";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
 export type QMSAuditScheduleFrequency =
-  | "ONE_TIME"
-  | "MONTHLY"
-  | "QUARTERLY"
-  | "BI_ANNUAL"
-  | "ANNUAL";
+  "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "BI_ANNUAL" | "ANNUAL";
 export type QMSChangeRequestStatus =
   | "SUBMITTED"
   | "UNDER_REVIEW"
@@ -93,11 +94,15 @@ export interface QMSAuditOut {
   observer_auditor_name?: string | null;
   assistant_auditor_user_id?: string | null;
   assistant_auditor_name?: string | null;
+  supporting_auditor_user_ids?: string[];
+  location?: string | null;
   notify_auditors?: boolean;
   notify_auditees?: boolean;
   reminder_interval_days?: number;
   planned_start: string | null; // YYYY-MM-DD
   planned_end: string | null; // YYYY-MM-DD
+  planned_start_time?: string | null; // HH:MM tenant local time
+  planned_end_time?: string | null; // HH:MM tenant local time
   actual_start?: string | null;
   actual_end?: string | null;
   report_file_ref?: string | null;
@@ -110,6 +115,8 @@ export interface QMSAuditOut {
   deleted_at?: string | null;
   deleted_by_user_id?: string | null;
   delete_reason?: string | null;
+  purge_at?: string | null;
+  days_remaining?: number | null;
 }
 
 export interface QMSExternalAuditeeContact {
@@ -126,7 +133,8 @@ export interface QMSAuditScopeOut {
   code: string;
   name: string;
   description?: string | null;
-  party_level: "FIRST_PARTY" | "SECOND_PARTY" | "THIRD_PARTY" | "REGULATORY" | string;
+  party_level:
+    "FIRST_PARTY" | "SECOND_PARTY" | "THIRD_PARTY" | "REGULATORY" | string;
   default_kind: string;
   is_active: boolean;
   is_system_default: boolean;
@@ -169,6 +177,8 @@ export interface QMSAuditScheduleOut {
   deleted_at?: string | null;
   deleted_by_user_id?: string | null;
   delete_reason?: string | null;
+  purge_at?: string | null;
+  days_remaining?: number | null;
 }
 
 export interface QMSAuditParticipantOut {
@@ -274,7 +284,6 @@ export interface QMSAuditWorkflowOut {
 }
 
 export type QmsServiceOptions = { silent?: boolean };
-
 
 export interface QMSAuditNoticeDispatchOut {
   audit_id: string;
@@ -458,10 +467,16 @@ function readStoredNotificationSummary(): QMSNotificationSummaryOut | null {
   }
 }
 
-function writeStoredNotificationSummary(summary: QMSNotificationSummaryOut, etag?: string | null): void {
+function writeStoredNotificationSummary(
+  summary: QMSNotificationSummaryOut,
+  etag?: string | null,
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(NOTIFICATION_SUMMARY_CACHE_KEY, JSON.stringify(summary));
+    window.localStorage.setItem(
+      NOTIFICATION_SUMMARY_CACHE_KEY,
+      JSON.stringify(summary),
+    );
     if (etag) {
       window.localStorage.setItem(NOTIFICATION_SUMMARY_ETAG_KEY, etag);
     }
@@ -474,7 +489,6 @@ function readStoredNotificationSummaryEtag(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(NOTIFICATION_SUMMARY_ETAG_KEY);
 }
-
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
@@ -515,7 +529,9 @@ function downloadEvidencePack(path: string): Promise<Blob> {
     });
 
     xhr.timeout = 45000;
-    xhr.addEventListener("timeout", () => { reject(new Error("Timed out while downloading evidence pack.")); });
+    xhr.addEventListener("timeout", () => {
+      reject(new Error("Timed out while downloading evidence pack."));
+    });
     xhr.send();
   });
 }
@@ -524,33 +540,32 @@ async function downloadBinary(path: string): Promise<Blob> {
   const token = getToken();
   beginBackgroundLoading();
   try {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort("timeout"), 30000);
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-    signal: controller.signal,
-  });
-  window.clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 30000);
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeout);
 
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
+    if (res.status === 401) {
+      handleAuthFailure("expired");
+      throw new Error("Session expired. Please sign in again.");
+    }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-  }
-  return res.blob();
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+    }
+    return res.blob();
   } finally {
     endBackgroundLoading();
   }
 }
-
 
 async function publicFetchJson<T>(path: string): Promise<T> {
   beginBackgroundLoading();
@@ -565,11 +580,15 @@ async function publicFetchJson<T>(path: string): Promise<T> {
     });
     window.clearTimeout(timeout);
     if (res.status === 401 || res.status === 403) {
-      throw new Error("This invite is not available. Check that the link is correct and still active.");
+      throw new Error(
+        "This invite is not available. Check that the link is correct and still active.",
+      );
     }
     if (res.status === 503) {
       const text = await res.text().catch(() => "");
-      throw new Error(text || "Service unavailable. Please retry or contact support.");
+      throw new Error(
+        text || "Service unavailable. Please retry or contact support.",
+      );
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -584,7 +603,7 @@ async function publicFetchJson<T>(path: string): Promise<T> {
 async function publicSendJson<T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body: unknown
+  body: unknown,
 ): Promise<T> {
   beginLoading();
   try {
@@ -602,11 +621,15 @@ async function publicSendJson<T>(
     });
     window.clearTimeout(timeout);
     if (res.status === 401 || res.status === 403) {
-      throw new Error("This invite is not available. Check that the link is correct and still active.");
+      throw new Error(
+        "This invite is not available. Check that the link is correct and still active.",
+      );
     }
     if (res.status === 503) {
       const text = await res.text().catch(() => "");
-      throw new Error(text || "Service unavailable. Please retry or contact support.");
+      throw new Error(
+        text || "Service unavailable. Please retry or contact support.",
+      );
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -621,116 +644,118 @@ async function publicSendJson<T>(
   }
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson<T>(
+  path: string,
+  options?: QmsServiceOptions,
+): Promise<T> {
   const token = getToken();
-  beginBackgroundLoading();
+  if (!options?.silent) beginBackgroundLoading();
   try {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-    signal: controller.signal,
-  });
-  window.clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
+    const res = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeout);
 
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
+    if (res.status === 401) {
+      handleAuthFailure("expired");
+      throw new Error("Session expired. Please sign in again.");
+    }
 
-  if (res.status === 503) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || "Service unavailable. Please retry or contact support.");
-  }
+    if (res.status === 503) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        text || "Service unavailable. Please retry or contact support.",
+      );
+    }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-  }
-  return (await res.json()) as T;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+    }
+    return (await res.json()) as T;
   } finally {
-    endBackgroundLoading();
+    if (!options?.silent) endBackgroundLoading();
   }
 }
 
 async function sendJson<T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
-  body: unknown
+  body: unknown,
+  options?: { silentError?: boolean },
 ): Promise<T> {
   const token = getToken();
   beginLoading();
   try {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body ?? {}),
-    credentials: "include",
-    signal: controller.signal,
-  });
-  window.clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(options?.silentError ? { "X-AMO-Silent-Error": "1" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+      credentials: "include",
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeout);
 
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (res.status === 503) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || "Service unavailable. Please retry or contact support.");
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let parsed: unknown = text;
-    if (text) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-    } else {
-      parsed = null;
+    if (res.status === 401) {
+      handleAuthFailure("expired");
+      throw new Error("Session expired. Please sign in again.");
     }
-    const detail =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as { detail?: unknown; message?: unknown }).detail
-          ?? (parsed as { message?: unknown }).message
-        : null;
-    const detailRecord =
-      detail && typeof detail === "object" && !Array.isArray(detail)
-        ? (detail as { message?: unknown })
-        : null;
-    const message =
-      typeof detail === "string" && detail.trim()
-        ? detail
-        : typeof detailRecord?.message === "string" && detailRecord.message.trim()
-          ? detailRecord.message
-        : detail != null
-          ? JSON.stringify(detail)
-          : text || res.statusText || `QMS API ${res.status}`;
-    throw new ApiClientError(res.status, message, parsed);
-  }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let parsed: unknown = text;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = text;
+        }
+      } else {
+        parsed = null;
+      }
+      const detail =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? ((parsed as { detail?: unknown; message?: unknown }).detail ??
+            (parsed as { message?: unknown }).message)
+          : null;
+      const detailRecord =
+        detail && typeof detail === "object" && !Array.isArray(detail)
+          ? (detail as { message?: unknown })
+          : null;
+      const message =
+        typeof detail === "string" && detail.trim()
+          ? detail
+          : typeof detailRecord?.message === "string" &&
+              detailRecord.message.trim()
+            ? detailRecord.message
+            : detail != null
+              ? JSON.stringify(detail)
+              : text || res.statusText || `QMS API ${res.status}`;
+      throw new ApiClientError(res.status, message, parsed);
+    }
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
   } finally {
     endLoading();
   }
 }
-
 
 export interface QMSDashboardOut {
   domain: string | null;
@@ -754,10 +779,10 @@ export interface QMSDashboardOut {
 export async function qmsGetDashboard(params?: {
   domain?: string;
 }): Promise<QMSDashboardOut> {
-  return fetchJson<QMSDashboardOut>(`/quality/qms/dashboard${toQuery(params ?? {})}`);
+  return fetchJson<QMSDashboardOut>(
+    `/quality/qms/dashboard${toQuery(params ?? {})}`,
+  );
 }
-
-
 
 export type QMSAvailabilityStatus = "ON_DUTY" | "AWAY" | "ON_LEAVE";
 
@@ -845,11 +870,17 @@ export interface QMSCockpitSnapshotOut {
 export async function qmsGetCockpitSnapshot(params?: {
   domain?: string;
 }): Promise<QMSCockpitSnapshotOut> {
-  return fetchJson<QMSCockpitSnapshotOut>(`/quality/qms/cockpit-snapshot${toQuery(params ?? {})}`);
+  return fetchJson<QMSCockpitSnapshotOut>(
+    `/quality/qms/cockpit-snapshot${toQuery(params ?? {})}`,
+  );
 }
 
-export async function qmsListManpowerAvailability(params?: { department?: string }): Promise<QMSManpowerAvailabilityItem[]> {
-  return fetchJson<QMSManpowerAvailabilityItem[]>(`/quality/qms/manpower/availability${toQuery(params ?? {})}`);
+export async function qmsListManpowerAvailability(params?: {
+  department?: string;
+}): Promise<QMSManpowerAvailabilityItem[]> {
+  return fetchJson<QMSManpowerAvailabilityItem[]>(
+    `/quality/qms/manpower/availability${toQuery(params ?? {})}`,
+  );
 }
 
 export async function qmsSetManpowerAvailability(payload: {
@@ -859,7 +890,11 @@ export async function qmsSetManpowerAvailability(payload: {
   effective_to?: string | null;
   note?: string | null;
 }): Promise<QMSManpowerAvailabilityItem> {
-  return sendJson<QMSManpowerAvailabilityItem>("/quality/qms/manpower/availability", "POST", payload);
+  return sendJson<QMSManpowerAvailabilityItem>(
+    "/quality/qms/manpower/availability",
+    "POST",
+    payload,
+  );
 }
 export async function qmsListDocuments(params?: {
   status_?: QMSDocumentStatus;
@@ -868,7 +903,7 @@ export async function qmsListDocuments(params?: {
   q?: string;
 }): Promise<QMSDocumentOut[]> {
   return fetchJson<QMSDocumentOut[]>(
-    `/quality/qms/documents${toQuery(params ?? {})}`
+    `/quality/qms/documents${toQuery(params ?? {})}`,
   );
 }
 
@@ -877,7 +912,7 @@ export async function qmsListDistributions(params?: {
   outstanding_only?: boolean;
 }): Promise<QMSDistributionOut[]> {
   return fetchJson<QMSDistributionOut[]>(
-    `/quality/qms/distributions${toQuery(params ?? {})}`
+    `/quality/qms/distributions${toQuery(params ?? {})}`,
   );
 }
 
@@ -897,42 +932,98 @@ export async function qmsListChangeRequests(params?: {
   status_?: QMSChangeRequestStatus;
 }): Promise<QMSChangeRequestOut[]> {
   return fetchJson<QMSChangeRequestOut[]>(
-    `/quality/qms${"/change-requests"}${toQuery(params ?? {})}`
+    `/quality/qms${"/change-requests"}${toQuery(params ?? {})}`,
   );
 }
 
-export async function qmsListAuditScopes(params?: { active?: boolean }): Promise<QMSAuditScopeOut[]> {
-  return fetchJson<QMSAuditScopeOut[]>(`/quality/audits/scopes${toQuery(params ?? {})}`);
+export async function qmsListAuditScopes(params?: {
+  active?: boolean;
+}): Promise<QMSAuditScopeOut[]> {
+  return fetchJson<QMSAuditScopeOut[]>(
+    `/quality/audits/scopes${toQuery(params ?? {})}`,
+  );
 }
 
-export async function qmsCreateAuditScope(payload: Partial<QMSAuditScopeOut> & { code: string; name: string }): Promise<QMSAuditScopeOut> {
+export async function qmsCreateAuditScope(
+  payload: Partial<QMSAuditScopeOut> & { code: string; name: string },
+): Promise<QMSAuditScopeOut> {
   return sendJson<QMSAuditScopeOut>("/quality/audits/scopes", "POST", payload);
 }
 
-export async function qmsUpdateAuditScope(scopeId: string, payload: Partial<QMSAuditScopeOut>): Promise<QMSAuditScopeOut> {
-  return sendJson<QMSAuditScopeOut>(`/quality/audits/scopes/${encodeURIComponent(scopeId)}`, "PATCH", payload);
+export async function qmsUpdateAuditScope(
+  scopeId: string,
+  payload: Partial<QMSAuditScopeOut>,
+): Promise<QMSAuditScopeOut> {
+  return sendJson<QMSAuditScopeOut>(
+    `/quality/audits/scopes/${encodeURIComponent(scopeId)}`,
+    "PATCH",
+    payload,
+  );
 }
 
-export async function qmsListAudits(params?: {
-  domain?: string;
-  status_?: QMSAuditStatus;
-  kind?: string;
-  deleted_only?: boolean;
-  include_deleted?: boolean;
-  limit?: number;
-}, _options?: QmsServiceOptions): Promise<QMSAuditOut[]> {
-  return fetchJson<QMSAuditOut[]>(`/quality/audits${toQuery(params ?? {})}`);
+export async function qmsListAudits(
+  params?: {
+    domain?: string;
+    status_?: QMSAuditStatus;
+    kind?: string;
+    deleted_only?: boolean;
+    include_deleted?: boolean;
+    limit?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<QMSAuditOut[]> {
+  return fetchJson<QMSAuditOut[]>(
+    `/quality/audits${toQuery(params ?? {})}`,
+    options,
+  );
 }
 
-export async function qmsListAuditSchedules(params?: {
-  domain?: string;
-  active?: boolean;
-  deleted_only?: boolean;
-  include_deleted?: boolean;
-  limit?: number;
-}, _options?: QmsServiceOptions): Promise<QMSAuditScheduleOut[]> {
+export type QMSAuditCreatePayload = {
+  domain: "AMO" | "AOC" | "CORPORATE";
+  kind: "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
+  audit_scope_id?: string | null;
+  audit_scope_code?: string | null;
+  title: string;
+  scope?: string | null;
+  criteria?: string | null;
+  auditee?: string | null;
+  auditee_email?: string | null;
+  auditee_user_id?: string | null;
+  external_auditees?: QMSExternalAuditeeContact[];
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  assistant_auditor_user_id?: string | null;
+  supporting_auditor_user_ids?: string[];
+  location?: string | null;
+  notify_auditors?: boolean;
+  notify_auditees?: boolean;
+  reminder_interval_days?: number;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  planned_start_time?: string | null;
+  planned_end_time?: string | null;
+};
+
+/** Create a governed audit occurrence through the tenant-scoped Quality API. */
+export async function qmsCreateAudit(
+  payload: QMSAuditCreatePayload,
+): Promise<QMSAuditOut> {
+  return sendJson<QMSAuditOut>("/quality/audits", "POST", payload);
+}
+
+export async function qmsListAuditSchedules(
+  params?: {
+    domain?: string;
+    active?: boolean;
+    deleted_only?: boolean;
+    include_deleted?: boolean;
+    limit?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<QMSAuditScheduleOut[]> {
   return fetchJson<QMSAuditScheduleOut[]>(
-    `/quality/audits/schedules${toQuery(params ?? {})}`
+    `/quality/audits/schedules${toQuery(params ?? {})}`,
+    options,
   );
 }
 
@@ -962,7 +1053,7 @@ export async function qmsCreateAuditSchedule(payload: {
   return sendJson<QMSAuditScheduleOut>(
     "/quality/audits/schedules",
     "POST",
-    payload
+    payload,
   );
 }
 
@@ -986,9 +1077,13 @@ export async function qmsUpdateAuditSchedule(
     next_due_date?: string | null;
     weekend_policy?: "INCLUDE_WEEKEND" | "SKIP_WEEKEND" | null;
     is_active?: boolean | null;
-  }
+  },
 ): Promise<QMSAuditScheduleOut> {
-  return sendJson<QMSAuditScheduleOut>(`/quality/audits/schedules/${encodeURIComponent(scheduleId)}`, "PATCH", payload);
+  return sendJson<QMSAuditScheduleOut>(
+    `/quality/audits/schedules/${encodeURIComponent(scheduleId)}`,
+    "PATCH",
+    payload,
+  );
 }
 
 export interface QMSPersonOption {
@@ -1000,6 +1095,7 @@ export interface QMSPersonOption {
   position_title: string | null;
   staff_code?: string | null;
   avatar_url?: string | null;
+  auditor_roles?: Array<"LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR">;
 }
 
 export interface QMSAuditeeBrandOut {
@@ -1028,10 +1124,13 @@ export async function qmsListAuditPersonnelOptions(
     limit: Math.min(params?.limit ?? 50, 100),
   });
   // Legacy quality route remains authoritative; session carries tenant AMO context.
-  return apiRequest<QMSPersonOption[]>(`/quality/audits/personnel/options${suffix}`, {
-    cacheTtlMs: params?.bypassCache ? 0 : 30_000,
-    signal,
-  });
+  return apiRequest<QMSPersonOption[]>(
+    `/quality/audits/personnel/options${suffix}`,
+    {
+      cacheTtlMs: params?.bypassCache ? 0 : 30_000,
+      signal,
+    },
+  );
 }
 
 function extractDomainFromEmail(value?: string | null): string | null {
@@ -1055,7 +1154,10 @@ function safeHostname(value?: string | null): string | null {
 
 function humanizeDomain(domain: string | null): string | null {
   if (!domain) return null;
-  const parts = domain.replace(/^www\./, "").split(".").filter(Boolean);
+  const parts = domain
+    .replace(/^www\./, "")
+    .split(".")
+    .filter(Boolean);
   if (!parts.length) return null;
   const label = parts.length > 2 ? parts[parts.length - 2] : parts[0];
   return label
@@ -1080,7 +1182,10 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   });
 }
 
-function logoCandidatesForDomain(domain: string | null, extraLogo?: string | null): string[] {
+function logoCandidatesForDomain(
+  domain: string | null,
+  extraLogo?: string | null,
+): string[] {
   if (!domain) return uniqueStrings([extraLogo]);
   const encoded = encodeURIComponent(domain);
   return uniqueStrings([
@@ -1092,17 +1197,25 @@ function logoCandidatesForDomain(domain: string | null, extraLogo?: string | nul
   ]);
 }
 
-async function commonsImageUrl(fileName: string | null | undefined): Promise<string | null> {
+async function commonsImageUrl(
+  fileName: string | null | undefined,
+): Promise<string | null> {
   const name = (fileName || "").trim();
   if (!name) return null;
   try {
     const title = name.startsWith("File:") ? name : `File:${name}`;
     const url = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=imageinfo&iiprop=url&format=json&origin=*`;
-    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+    });
     if (!response.ok) return null;
-    const payload = await response.json() as any;
-    const pages = payload?.query?.pages || {};
-    for (const page of Object.values(pages) as any[]) {
+    const payload = (await response.json()) as {
+      query?: {
+        pages?: Record<string, { imageinfo?: Array<{ url?: string }> }>;
+      };
+    };
+    const pages = payload.query?.pages || {};
+    for (const page of Object.values(pages)) {
       const imageUrl = page?.imageinfo?.[0]?.url;
       if (typeof imageUrl === "string" && imageUrl) return imageUrl;
     }
@@ -1112,46 +1225,88 @@ async function commonsImageUrl(fileName: string | null | undefined): Promise<str
   return null;
 }
 
-async function resolveCompanyFromClearbit(name: string): Promise<{ companyName: string | null; domain: string | null; logoUrl: string | null }> {
+async function resolveCompanyFromClearbit(name: string): Promise<{
+  companyName: string | null;
+  domain: string | null;
+  logoUrl: string | null;
+}> {
   const query = name.trim();
-  if (!query || query.length < 2) return { companyName: null, domain: null, logoUrl: null };
+  if (!query || query.length < 2)
+    return { companyName: null, domain: null, logoUrl: null };
   try {
     const url = `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(query)}`;
-    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+    });
     if (!response.ok) return { companyName: null, domain: null, logoUrl: null };
-    const payload = await response.json() as Array<{ name?: string; domain?: string; logo?: string }>;
-    const first = Array.isArray(payload) ? payload.find((item) => safeHostname(item.domain)) : null;
+    const payload = (await response.json()) as Array<{
+      name?: string;
+      domain?: string;
+      logo?: string;
+    }>;
+    const first = Array.isArray(payload)
+      ? payload.find((item) => safeHostname(item.domain))
+      : null;
     if (!first) return { companyName: null, domain: null, logoUrl: null };
-    return { companyName: first.name || query, domain: safeHostname(first.domain), logoUrl: first.logo || null };
+    return {
+      companyName: first.name || query,
+      domain: safeHostname(first.domain),
+      logoUrl: first.logo || null,
+    };
   } catch {
     return { companyName: null, domain: null, logoUrl: null };
   }
 }
 
-async function resolveCompanyDomainFromWikidata(name: string): Promise<{ companyName: string | null; domain: string | null; logoUrl: string | null }> {
+async function resolveCompanyDomainFromWikidata(name: string): Promise<{
+  companyName: string | null;
+  domain: string | null;
+  logoUrl: string | null;
+}> {
   const query = name.trim();
-  if (!query || query.length < 2) return { companyName: null, domain: null, logoUrl: null };
+  if (!query || query.length < 2)
+    return { companyName: null, domain: null, logoUrl: null };
   try {
     const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=4&origin=*`;
-    const searchResponse = await fetch(searchUrl, { headers: { Accept: "application/json" } });
-    if (!searchResponse.ok) return { companyName: null, domain: null, logoUrl: null };
-    const searchPayload = await searchResponse.json() as { search?: Array<{ id?: string; label?: string }> };
+    const searchResponse = await fetch(searchUrl, {
+      headers: { Accept: "application/json" },
+    });
+    if (!searchResponse.ok)
+      return { companyName: null, domain: null, logoUrl: null };
+    const searchPayload = (await searchResponse.json()) as {
+      search?: Array<{ id?: string; label?: string }>;
+    };
     for (const result of searchPayload.search || []) {
       if (!result.id) continue;
       const entityUrl = `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(result.id)}.json`;
-      const entityResponse = await fetch(entityUrl, { headers: { Accept: "application/json" } });
+      const entityResponse = await fetch(entityUrl, {
+        headers: { Accept: "application/json" },
+      });
       if (!entityResponse.ok) continue;
-      const entityPayload = await entityResponse.json() as any;
-      const claims = entityPayload?.entities?.[result.id]?.claims || {};
+      const entityPayload = (await entityResponse.json()) as {
+        entities?: Record<
+          string,
+          {
+            claims?: Record<
+              string,
+              Array<{ mainsnak?: { datavalue?: { value?: unknown } } }>
+            >;
+          }
+        >;
+      };
+      const claims = entityPayload.entities?.[result.id]?.claims || {};
       let domain: string | null = null;
       for (const claim of claims.P856 || []) {
-        domain = safeHostname(claim?.mainsnak?.datavalue?.value);
+        const value = claim.mainsnak?.datavalue?.value;
+        domain = safeHostname(typeof value === "string" ? value : null);
         if (domain) break;
       }
       let logoUrl: string | null = null;
-      const logoClaim = (claims.P154 || claims.P18 || [])[0]?.mainsnak?.datavalue?.value;
+      const logoClaim = (claims.P154 || claims.P18 || [])[0]?.mainsnak
+        ?.datavalue?.value;
       if (logoClaim) logoUrl = await commonsImageUrl(String(logoClaim));
-      if (domain || logoUrl) return { companyName: result.label || query, domain, logoUrl };
+      if (domain || logoUrl)
+        return { companyName: result.label || query, domain, logoUrl };
     }
   } catch {
     return { companyName: null, domain: null, logoUrl: null };
@@ -1166,7 +1321,10 @@ export async function qmsResolveAuditeeBrand(params: {
   const rawName = (params.name || "").trim();
   const rawEmail = (params.email || "").trim();
   const query = (rawName || rawEmail).trim();
-  const directDomain = extractDomainFromEmail(rawEmail) || extractDomainFromEmail(rawName) || safeHostname(rawName);
+  const directDomain =
+    extractDomainFromEmail(rawEmail) ||
+    extractDomainFromEmail(rawName) ||
+    safeHostname(rawName);
   const cleanName = cleanCompanyName(rawName);
 
   if (directDomain) {
@@ -1179,17 +1337,23 @@ export async function qmsResolveAuditeeBrand(params: {
       website_url: `https://${directDomain}`,
       logo_url: logoUrls[0] || null,
       logo_urls: logoUrls,
-      source: extractDomainFromEmail(rawEmail) || extractDomainFromEmail(rawName) ? "email-domain" : "domain",
+      source:
+        extractDomainFromEmail(rawEmail) || extractDomainFromEmail(rawName)
+          ? "email-domain"
+          : "domain",
       resolved: true,
     };
   }
 
-  const clearbit = cleanName ? await resolveCompanyFromClearbit(cleanName) : { companyName: null, domain: null, logoUrl: null };
+  const clearbit = cleanName
+    ? await resolveCompanyFromClearbit(cleanName)
+    : { companyName: null, domain: null, logoUrl: null };
   if (clearbit.domain || clearbit.logoUrl) {
     const logoUrls = logoCandidatesForDomain(clearbit.domain, clearbit.logoUrl);
     return {
       query,
-      company_name: clearbit.companyName || cleanName || humanizeDomain(clearbit.domain),
+      company_name:
+        clearbit.companyName || cleanName || humanizeDomain(clearbit.domain),
       domain: clearbit.domain,
       website_url: clearbit.domain ? `https://${clearbit.domain}` : null,
       logo_url: logoUrls[0] || null,
@@ -1199,12 +1363,15 @@ export async function qmsResolveAuditeeBrand(params: {
     };
   }
 
-  const resolved = cleanName ? await resolveCompanyDomainFromWikidata(cleanName) : { companyName: null, domain: null, logoUrl: null };
+  const resolved = cleanName
+    ? await resolveCompanyDomainFromWikidata(cleanName)
+    : { companyName: null, domain: null, logoUrl: null };
   if (resolved.domain || resolved.logoUrl) {
     const logoUrls = logoCandidatesForDomain(resolved.domain, resolved.logoUrl);
     return {
       query,
-      company_name: resolved.companyName || cleanName || humanizeDomain(resolved.domain),
+      company_name:
+        resolved.companyName || cleanName || humanizeDomain(resolved.domain),
       domain: resolved.domain,
       website_url: resolved.domain ? `https://${resolved.domain}` : null,
       logo_url: logoUrls[0] || null,
@@ -1243,6 +1410,8 @@ export type QMSAuditUpdatePayload = {
   assistant_auditor_user_id?: string | null;
   planned_start?: string | null;
   planned_end?: string | null;
+  planned_start_time?: string | null;
+  planned_end_time?: string | null;
   actual_start?: string | null;
   actual_end?: string | null;
   report_file_ref?: string | null;
@@ -1254,22 +1423,66 @@ export type QMSAuditUpdatePayload = {
 
 export async function qmsUpdateAudit(
   auditId: string,
-  payload: QMSAuditUpdatePayload
+  payload: QMSAuditUpdatePayload,
 ): Promise<QMSAuditOut> {
-  return sendJson<QMSAuditOut>(`/quality/audits/${encodeURIComponent(auditId)}`, "PATCH", payload);
+  return sendJson<QMSAuditOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}`,
+    "PATCH",
+    payload,
+  );
 }
 
+export type AuditDeletionImpact = {
+  audit_id: string;
+  audit_ref: string;
+  title: string;
+  status: string;
+  groups: Array<{ key: string; label: string; count: number }>;
+  database_record_count: number;
+  managed_file_count: number;
+  controlled_dms_sources_preserved: boolean;
+};
 
-export async function qmsDeleteAudit(auditId: string): Promise<void> {
-  await sendJson<void>(`/quality/audits/${encodeURIComponent(auditId)}`, "DELETE", undefined);
+export type AuditDeletionResult = {
+  deleted: true;
+  recoverable: true;
+  purge_at: string;
+};
+
+export async function qmsGetAuditDeletionImpact(
+  auditId: string,
+): Promise<AuditDeletionImpact> {
+  return fetchJson<AuditDeletionImpact>(
+    `/quality/audits/${encodeURIComponent(auditId)}/deletion-impact`,
+  );
+}
+
+export async function qmsDeleteAudit(
+  auditId: string,
+  reason?: string,
+): Promise<AuditDeletionResult> {
+  return sendJson<AuditDeletionResult>(
+    `/quality/audits/${encodeURIComponent(auditId)}${toQuery({ reason: reason?.trim() || undefined })}`,
+    "DELETE",
+    undefined,
+    { silentError: true },
+  );
 }
 
 export async function qmsRestoreAudit(auditId: string): Promise<QMSAuditOut> {
-  return sendJson<QMSAuditOut>(`/quality/audits/${encodeURIComponent(auditId)}/restore`, "POST", {});
+  return sendJson<QMSAuditOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}/restore`,
+    "POST",
+    {},
+  );
 }
 
 export async function qmsPurgeAudit(auditId: string): Promise<void> {
-  await sendJson<void>(`/quality/audits/${encodeURIComponent(auditId)}/purge`, "DELETE", undefined);
+  await sendJson<void>(
+    `/quality/audits/${encodeURIComponent(auditId)}/purge`,
+    "DELETE",
+    undefined,
+  );
 }
 
 export async function qmsStartAudit(auditId: string): Promise<QMSAuditOut> {
@@ -1280,25 +1493,42 @@ export async function qmsCloseAudit(auditId: string): Promise<QMSAuditOut> {
   return qmsUpdateAudit(auditId, { status: "CLOSED" });
 }
 
-export async function qmsDeleteAuditSchedule(scheduleId: string): Promise<void> {
-  await sendJson<void>(`/quality/audits/schedules/${scheduleId}`, "DELETE", undefined);
+export async function qmsDeleteAuditSchedule(
+  scheduleId: string,
+  reason?: string,
+): Promise<void> {
+  await sendJson<void>(
+    `/quality/audits/schedules/${encodeURIComponent(scheduleId)}${toQuery({ reason: reason?.trim() || undefined })}`,
+    "DELETE",
+    undefined,
+  );
 }
 
-export async function qmsRestoreAuditSchedule(scheduleId: string): Promise<QMSAuditScheduleOut> {
-  return sendJson<QMSAuditScheduleOut>(`/quality/audits/schedules/${encodeURIComponent(scheduleId)}/restore`, "POST", {});
+export async function qmsRestoreAuditSchedule(
+  scheduleId: string,
+): Promise<QMSAuditScheduleOut> {
+  return sendJson<QMSAuditScheduleOut>(
+    `/quality/audits/schedules/${encodeURIComponent(scheduleId)}/restore`,
+    "POST",
+    {},
+  );
 }
 
 export async function qmsPurgeAuditSchedule(scheduleId: string): Promise<void> {
-  await sendJson<void>(`/quality/audits/schedules/${encodeURIComponent(scheduleId)}/purge`, "DELETE", undefined);
+  await sendJson<void>(
+    `/quality/audits/schedules/${encodeURIComponent(scheduleId)}/purge`,
+    "DELETE",
+    undefined,
+  );
 }
 
 export async function qmsRunAuditSchedule(
-  scheduleId: string
+  scheduleId: string,
 ): Promise<QMSAuditOut> {
   return sendJson<QMSAuditOut>(
     `/quality/audits/schedules/${encodeURIComponent(scheduleId)}/run`,
     "POST",
-    {}
+    {},
   );
 }
 
@@ -1309,48 +1539,71 @@ export async function qmsRunAuditReminders(upcomingDays: number): Promise<{
   return sendJson<{ day_of_sent: number; upcoming_sent: number }>(
     `/quality/audits/reminders/run?upcoming_days=${upcomingDays}`,
     "POST",
-    {}
+    {},
   );
 }
 
-export async function qmsResolveAudit(auditKey: string, _options?: QmsServiceOptions): Promise<QMSAuditOut | null> {
+export async function qmsResolveAudit(
+  auditKey: string,
+  options?: QmsServiceOptions,
+): Promise<QMSAuditOut | null> {
   const key = auditKey.trim();
   if (!key) return null;
-  const audits = await fetchJson<QMSAuditOut[]>(`/quality/audits`);
+  const audits = await fetchJson<QMSAuditOut[]>(`/quality/audits`, options);
   const normalized = key.toLowerCase();
-  return audits.find((audit) =>
-    String(audit.id).toLowerCase() === normalized ||
-    String(audit.audit_ref || "").toLowerCase() === normalized ||
-    String(audit.audit_ref || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === normalized
-  ) ?? null;
+  return (
+    audits.find(
+      (audit) =>
+        String(audit.id).toLowerCase() === normalized ||
+        String(audit.audit_ref || "").toLowerCase() === normalized ||
+        String(audit.audit_ref || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") === normalized,
+    ) ?? null
+  );
 }
 
-export async function qmsGetAuditWorkflow(auditId: string, _options?: QmsServiceOptions): Promise<QMSAuditWorkflowOut> {
-  return fetchJson<QMSAuditWorkflowOut>(`/quality/audits/${encodeURIComponent(auditId)}/workflow-check`);
+export async function qmsGetAuditWorkflow(
+  auditId: string,
+  options?: QmsServiceOptions,
+): Promise<QMSAuditWorkflowOut> {
+  return fetchJson<QMSAuditWorkflowOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}/workflow-check`,
+    options,
+  );
 }
 
-export async function qmsGetAuditWorkspace(auditId: string): Promise<QMSAuditWorkspaceOut> {
-  return fetchJson<QMSAuditWorkspaceOut>(`/quality/audits/${encodeURIComponent(auditId)}/workspace`);
+export async function qmsGetAuditWorkspace(
+  auditId: string,
+): Promise<QMSAuditWorkspaceOut> {
+  return fetchJson<QMSAuditWorkspaceOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}/workspace`,
+  );
 }
 
-export async function qmsGetAuditWorkflowCheck(auditId: string): Promise<QMSAuditWorkflowCheckOut> {
-  return fetchJson<QMSAuditWorkflowCheckOut>(`/quality/audits/${encodeURIComponent(auditId)}/workflow-check`);
+export async function qmsGetAuditWorkflowCheck(
+  auditId: string,
+): Promise<QMSAuditWorkflowCheckOut> {
+  return fetchJson<QMSAuditWorkflowCheckOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}/workflow-check`,
+  );
 }
 
 export async function qmsIssueAuditNotice(
   auditId: string,
-  payload?: { stage?: "manual" | "upcoming" | "day_of" }
+  payload?: { stage?: "manual" | "upcoming" | "day_of" },
 ): Promise<QMSAuditNoticeDispatchOut> {
   return sendJson<QMSAuditNoticeDispatchOut>(
     `/quality/audits/${encodeURIComponent(auditId)}/issue-notice`,
     "POST",
-    payload ?? {}
+    payload ?? {},
   );
 }
 
 export async function qmsUploadAuditChecklist(
   auditId: string,
-  file: File
+  file: File,
 ): Promise<QMSAuditOut> {
   const formData = new FormData();
   formData.append("file", file);
@@ -1376,13 +1629,15 @@ export async function qmsUploadAuditChecklist(
   return (await res.json()) as QMSAuditOut;
 }
 
-export async function qmsDownloadAuditChecklist(auditId: string): Promise<Blob> {
+export async function qmsDownloadAuditChecklist(
+  auditId: string,
+): Promise<Blob> {
   return downloadBinary(`/quality/audits/${auditId}/checklist`);
 }
 
 export async function qmsUploadAuditReport(
   auditId: string,
-  file: File
+  file: File,
 ): Promise<QMSAuditOut> {
   const formData = new FormData();
   formData.append("file", file);
@@ -1426,7 +1681,7 @@ export interface QMSAuditReportShareOut {
 
 export async function qmsShareAuditReport(
   auditId: string,
-  payload: QMSAuditReportSharePayload
+  payload: QMSAuditReportSharePayload,
 ): Promise<QMSAuditReportShareOut> {
   return sendJson<QMSAuditReportShareOut>(
     `/quality/audits/${encodeURIComponent(auditId)}/report/share`,
@@ -1434,22 +1689,32 @@ export async function qmsShareAuditReport(
     {
       recipient_groups: payload.recipient_groups,
       message: payload.message ?? null,
-    }
+    },
   );
 }
 
-export async function qmsListFindings(auditId: string): Promise<QMSFindingOut[]> {
+export async function qmsListFindings(
+  auditId: string,
+): Promise<QMSFindingOut[]> {
   return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
 }
 
 export async function qmsCreateFinding(
   auditId: string,
-  payload: QMSFindingCreatePayload
+  payload: QMSFindingCreatePayload,
 ): Promise<QMSFindingOut> {
-  return sendJson<QMSFindingOut>(`/quality/audits/${auditId}/findings`, "POST", payload);
+  return sendJson<QMSFindingOut>(
+    `/quality/audits/${auditId}/findings`,
+    "POST",
+    payload,
+  );
 }
 
-function findingRoute(findingId: string, auditId?: string | null, suffix = ""): string {
+function findingRoute(
+  findingId: string,
+  auditId?: string | null,
+  suffix = "",
+): string {
   const encodedFindingId = encodeURIComponent(findingId);
   if (auditId) {
     return `/quality/audits/${encodeURIComponent(auditId)}/findings/${encodedFindingId}${suffix}`;
@@ -1460,22 +1725,41 @@ function findingRoute(findingId: string, auditId?: string | null, suffix = ""): 
 export async function qmsUpdateFinding(
   findingId: string,
   payload: QMSFindingUpdatePayload,
-  auditId?: string | null
+  auditId?: string | null,
 ): Promise<QMSFindingOut> {
-  return sendJson<QMSFindingOut>(findingRoute(findingId, auditId), "PATCH", payload);
+  return sendJson<QMSFindingOut>(
+    findingRoute(findingId, auditId),
+    "PATCH",
+    payload,
+  );
 }
 
-export async function qmsDeleteFinding(findingId: string, auditId?: string | null): Promise<void> {
+export async function qmsDeleteFinding(
+  findingId: string,
+  auditId?: string | null,
+): Promise<void> {
   await sendJson<void>(findingRoute(findingId, auditId), "DELETE", undefined);
 }
 
-export async function qmsFlagFindingForReview(findingId: string, reason: string, auditId?: string | null): Promise<QMSFindingOut> {
-  return sendJson<QMSFindingOut>(findingRoute(findingId, auditId, "/review-flag"), "POST", { reason });
+export async function qmsFlagFindingForReview(
+  findingId: string,
+  reason: string,
+  auditId?: string | null,
+): Promise<QMSFindingOut> {
+  return sendJson<QMSFindingOut>(
+    findingRoute(findingId, auditId, "/review-flag"),
+    "POST",
+    { reason },
+  );
 }
 
-export async function qmsListAuditFindingAttachments(auditId: string): Promise<QMSFindingAttachmentOut[]> {
+export async function qmsListAuditFindingAttachments(
+  auditId: string,
+): Promise<QMSFindingAttachmentOut[]> {
   try {
-    return await fetchJson<QMSFindingAttachmentOut[]>(`/quality/audits/${auditId}/finding-attachments`);
+    return await fetchJson<QMSFindingAttachmentOut[]>(
+      `/quality/audits/${auditId}/finding-attachments`,
+    );
   } catch (error) {
     if (error instanceof Error && error.message.includes("QMS API 404")) {
       return [];
@@ -1484,22 +1768,32 @@ export async function qmsListAuditFindingAttachments(auditId: string): Promise<Q
   }
 }
 
-export async function qmsListFindingAttachments(findingId: string): Promise<QMSFindingAttachmentOut[]> {
-  return fetchJson<QMSFindingAttachmentOut[]>(`/quality/findings/${encodeURIComponent(findingId)}/attachments`);
+export async function qmsListFindingAttachments(
+  findingId: string,
+): Promise<QMSFindingAttachmentOut[]> {
+  return fetchJson<QMSFindingAttachmentOut[]>(
+    `/quality/findings/${encodeURIComponent(findingId)}/attachments`,
+  );
 }
 
-export async function qmsUploadFindingAttachment(findingId: string, file: File): Promise<QMSFindingAttachmentOut> {
+export async function qmsUploadFindingAttachment(
+  findingId: string,
+  file: File,
+): Promise<QMSFindingAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
   const authToken = getToken();
-  const res = await fetch(`${getApiBaseUrl()}/quality/findings/${encodeURIComponent(findingId)}/attachments`, {
-    method: "POST",
-    headers: {
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  const res = await fetch(
+    `${getApiBaseUrl()}/quality/findings/${encodeURIComponent(findingId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: formData,
+      credentials: "include",
     },
-    body: formData,
-    credentials: "include",
-  });
+  );
   if (res.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
@@ -1511,96 +1805,144 @@ export async function qmsUploadFindingAttachment(findingId: string, file: File):
   return (await res.json()) as QMSFindingAttachmentOut;
 }
 
-export async function qmsDeleteFindingAttachment(findingId: string, attachmentId: string): Promise<void> {
-  await sendJson<void>(`/quality/findings/${encodeURIComponent(findingId)}/attachments/${encodeURIComponent(attachmentId)}`, "DELETE", undefined);
+export async function qmsDeleteFindingAttachment(
+  findingId: string,
+  attachmentId: string,
+): Promise<void> {
+  await sendJson<void>(
+    `/quality/findings/${encodeURIComponent(findingId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    "DELETE",
+    undefined,
+  );
 }
 
-export async function qmsListAuditChecklistItems(auditId: string): Promise<QualityChecklistItemOut[]> {
-  return fetchJson<QualityChecklistItemOut[]>(`/quality/audits/${auditId}/checklist-items`);
+export async function qmsListAuditChecklistItems(
+  auditId: string,
+): Promise<QualityChecklistItemOut[]> {
+  return fetchJson<QualityChecklistItemOut[]>(
+    `/quality/audits/${auditId}/checklist-items`,
+  );
 }
 
 export async function qmsCreateAuditChecklistItem(
   auditId: string,
-  payload: QualityChecklistItemPayload
+  payload: QualityChecklistItemPayload,
 ): Promise<QualityChecklistItemOut> {
-  return sendJson<QualityChecklistItemOut>(`/quality/audits/${auditId}/checklist-items`, "POST", payload);
+  return sendJson<QualityChecklistItemOut>(
+    `/quality/audits/${auditId}/checklist-items`,
+    "POST",
+    payload,
+  );
 }
 
 export async function qmsUpdateAuditChecklistItem(
   auditId: string,
   itemId: string,
-  payload: QualityChecklistItemPayload
+  payload: QualityChecklistItemPayload,
 ): Promise<QualityChecklistItemOut> {
-  return sendJson<QualityChecklistItemOut>(`/quality/audits/${auditId}/checklist-items/${itemId}`, "PATCH", payload);
+  return sendJson<QualityChecklistItemOut>(
+    `/quality/audits/${auditId}/checklist-items/${itemId}`,
+    "PATCH",
+    payload,
+  );
 }
 
-export async function qmsListFindingsBulk(params?: {
-  domain?: string;
-  audit_ids?: string[];
-  limit?: number;
-}, _options?: QmsServiceOptions): Promise<QMSFindingOut[]> {
+export async function qmsListFindingsBulk(
+  params?: {
+    domain?: string;
+    audit_ids?: string[];
+    limit?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<QMSFindingOut[]> {
   const qs = new URLSearchParams();
   if (params?.domain) qs.set("domain", params.domain);
-  (params?.audit_ids ?? []).forEach((auditId) => qs.append("audit_ids", auditId));
+  (params?.audit_ids ?? []).forEach((auditId) =>
+    qs.append("audit_ids", auditId),
+  );
   if (params?.limit) qs.set("limit", String(params.limit));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return fetchJson<QMSFindingOut[]>(`/quality/audits/findings${suffix}`);
+  return fetchJson<QMSFindingOut[]>(
+    `/quality/audits/findings${suffix}`,
+    options,
+  );
 }
 
-export async function qmsGetAuditRegister(params?: {
-  domain?: string;
-  audit_id?: string;
-  limit?: number;
-}, _options?: QmsServiceOptions): Promise<QMSAuditRegisterResponse> {
-  return fetchJson<QMSAuditRegisterResponse>(`/quality/audits/register${toQuery(params ?? {})}`);
+export async function qmsGetAuditRegister(
+  params?: {
+    domain?: string;
+    audit_id?: string;
+    limit?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<QMSAuditRegisterResponse> {
+  return fetchJson<QMSAuditRegisterResponse>(
+    `/quality/audits/register${toQuery(params ?? {})}`,
+    options,
+  );
 }
 
 export async function qmsVerifyFinding(
   findingId: string,
-  payload: { objective_evidence?: string | null }
+  payload: { objective_evidence?: string | null },
 ): Promise<QMSFindingOut> {
   return sendJson<QMSFindingOut>(
     `/quality/findings/${findingId}/verify`,
     "POST",
-    payload
+    payload,
   );
 }
 
-export async function qmsCloseFinding(findingId: string): Promise<QMSFindingOut> {
-  return sendJson<QMSFindingOut>(`/quality/findings/${findingId}/close`, "POST", {});
+export async function qmsCloseFinding(
+  findingId: string,
+): Promise<QMSFindingOut> {
+  return sendJson<QMSFindingOut>(
+    `/quality/findings/${findingId}/close`,
+    "POST",
+    {},
+  );
 }
 
 export async function qmsAcknowledgeFinding(
   findingId: string,
-  payload: { acknowledged_by_name?: string; acknowledged_by_email?: string }
+  payload: { acknowledged_by_name?: string; acknowledged_by_email?: string },
 ): Promise<QMSFindingOut> {
   return sendJson<QMSFindingOut>(
     `/quality/findings/${findingId}/ack`,
     "POST",
-    payload
+    payload,
   );
 }
 
-export async function qmsListCars(params?: {
-  program?: CARProgram;
-  status_?: CARStatus;
-  assigned_to_user_id?: string;
-  audit_id?: string;
-  limit?: number;
-}, _options?: QmsServiceOptions): Promise<CAROut[]> {
-  return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`);
+export async function qmsListCars(
+  params?: {
+    program?: CARProgram;
+    status_?: CARStatus;
+    assigned_to_user_id?: string;
+    audit_id?: string;
+    limit?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<CAROut[]> {
+  return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`, options);
 }
 
-export async function qmsListCarRegister(params?: {
-  program?: CARProgram;
-  status_?: CARStatus;
-  assigned_to_user_id?: string;
-  audit_id?: string;
-  search?: string;
-  limit?: number;
-  offset?: number;
-}, _options?: QmsServiceOptions): Promise<CARRegisterResponse> {
-  return fetchJson<CARRegisterResponse>(`/quality/cars/register${toQuery(params ?? {})}`);
+export async function qmsListCarRegister(
+  params?: {
+    program?: CARProgram;
+    status_?: CARStatus;
+    assigned_to_user_id?: string;
+    audit_id?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  },
+  options?: QmsServiceOptions,
+): Promise<CARRegisterResponse> {
+  return fetchJson<CARRegisterResponse>(
+    `/quality/cars/register${toQuery(params ?? {})}`,
+    options,
+  );
 }
 
 export type CARAssignee = {
@@ -1619,7 +1961,7 @@ export async function qmsListCarAssignees(params?: {
   search?: string;
 }): Promise<CARAssignee[]> {
   return fetchJson<CARAssignee[]>(
-    `/quality/cars/assignees${toQuery(params ?? {})}`
+    `/quality/cars/assignees${toQuery(params ?? {})}`,
   );
 }
 
@@ -1648,7 +1990,7 @@ export async function qmsUpdateCar(
     target_closure_date?: string | null;
     assigned_to_user_id?: string | null;
     reminder_interval_days?: number | null;
-  }
+  },
 ): Promise<CAROut> {
   return sendJson<CAROut>(`/quality/cars/${carId}`, "PATCH", payload);
 }
@@ -1661,9 +2003,13 @@ export async function qmsReviewCarResponse(
     capa_status?: "ACCEPTED" | "REJECTED" | "NEEDS_EVIDENCE";
     capa_review_note?: string | null;
     message?: string | null;
-  }
+  },
 ): Promise<CAROut> {
-  return sendJson<CAROut>(`/quality/cars/${encodeURIComponent(carId)}/review`, "POST", payload);
+  return sendJson<CAROut>(
+    `/quality/cars/${encodeURIComponent(carId)}/review`,
+    "POST",
+    payload,
+  );
 }
 
 export async function qmsDeleteCar(carId: string): Promise<void> {
@@ -1685,12 +2031,23 @@ export interface QualityCARExtensionRequestOut {
   updated_at: string;
 }
 
-export async function qmsListCarExtensionRequests(carId: string): Promise<QualityCARExtensionRequestOut[]> {
-  return fetchJson<QualityCARExtensionRequestOut[]>(`/quality/cars/${encodeURIComponent(carId)}/extension-requests`);
+export async function qmsListCarExtensionRequests(
+  carId: string,
+): Promise<QualityCARExtensionRequestOut[]> {
+  return fetchJson<QualityCARExtensionRequestOut[]>(
+    `/quality/cars/${encodeURIComponent(carId)}/extension-requests`,
+  );
 }
 
-export async function qmsForwardCarExtensionRequest(carId: string, extensionId: string): Promise<QualityCARExtensionRequestOut> {
-  return sendJson<QualityCARExtensionRequestOut>(`/quality/cars/${encodeURIComponent(carId)}/extension-requests/${encodeURIComponent(extensionId)}/forward-to-qm`, "POST", {});
+export async function qmsForwardCarExtensionRequest(
+  carId: string,
+  extensionId: string,
+): Promise<QualityCARExtensionRequestOut> {
+  return sendJson<QualityCARExtensionRequestOut>(
+    `/quality/cars/${encodeURIComponent(carId)}/extension-requests/${encodeURIComponent(extensionId)}/forward-to-qm`,
+    "POST",
+    {},
+  );
 }
 
 export interface CARInviteOut {
@@ -1771,11 +2128,20 @@ export async function qmsGetCarInvite(carId: string): Promise<CARInviteOut> {
   return fetchJson(`/quality/cars/${carId}/invite`);
 }
 
-export async function qmsRescheduleCarReminder(carId: string, intervalDays: number): Promise<CAROut> {
-  return sendJson<CAROut>(`/quality/cars/${carId}/reminders?reminder_interval_days=${intervalDays}`, "POST", {});
+export async function qmsRescheduleCarReminder(
+  carId: string,
+  intervalDays: number,
+): Promise<CAROut> {
+  return sendJson<CAROut>(
+    `/quality/cars/${carId}/reminders?reminder_interval_days=${intervalDays}`,
+    "POST",
+    {},
+  );
 }
 
-export async function qmsGetCarInviteByToken(token: string): Promise<CARInviteOut> {
+export async function qmsGetCarInviteByToken(
+  token: string,
+): Promise<CARInviteOut> {
   return publicFetchJson(`/quality/cars/invite/${encodeURIComponent(token)}`);
 }
 
@@ -1793,17 +2159,32 @@ export async function qmsSubmitCarInvite(
     target_closure_date?: string | null;
     root_cause_text?: string | null;
     capa_text?: string | null;
-  }
+  },
 ): Promise<CAROut> {
-  return publicSendJson<CAROut>(`/quality/cars/invite/${encodeURIComponent(token)}`, "PATCH", payload);
+  return publicSendJson<CAROut>(
+    `/quality/cars/invite/${encodeURIComponent(token)}`,
+    "PATCH",
+    payload,
+  );
 }
 
-export async function qmsRecallCarInviteSubmission(token: string): Promise<CARInviteOut> {
-  return publicSendJson<CARInviteOut>(`/quality/cars/invite/${encodeURIComponent(token)}/recall`, "POST", {});
+export async function qmsRecallCarInviteSubmission(
+  token: string,
+): Promise<CARInviteOut> {
+  return publicSendJson<CARInviteOut>(
+    `/quality/cars/invite/${encodeURIComponent(token)}/recall`,
+    "POST",
+    {},
+  );
 }
 
-export async function qmsListCarResponses(carId: string, markOpen = true): Promise<CARResponseOut[]> {
-  return fetchJson<CARResponseOut[]>(`/quality/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`);
+export async function qmsListCarResponses(
+  carId: string,
+  markOpen = true,
+): Promise<CARResponseOut[]> {
+  return fetchJson<CARResponseOut[]>(
+    `/quality/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`,
+  );
 }
 
 export interface CARAttachmentOut {
@@ -1818,7 +2199,13 @@ export interface CARAttachmentOut {
   download_url: string;
 }
 
-export type CARActionType = "COMMENT" | "STATUS_CHANGE" | "REMINDER" | "ESCALATION" | "ASSIGNMENT" | string;
+export type CARActionType =
+  | "COMMENT"
+  | "STATUS_CHANGE"
+  | "REMINDER"
+  | "ESCALATION"
+  | "ASSIGNMENT"
+  | string;
 
 export interface CARActionOut {
   id: string;
@@ -1837,53 +2224,83 @@ export interface CARActionCreate {
   message: string;
 }
 
-export async function qmsListCarActions(carId: string): Promise<CARActionOut[]> {
-  return fetchJson<CARActionOut[]>(`/quality/cars/${encodeURIComponent(carId)}/actions`);
+export async function qmsListCarActions(
+  carId: string,
+): Promise<CARActionOut[]> {
+  return fetchJson<CARActionOut[]>(
+    `/quality/cars/${encodeURIComponent(carId)}/actions`,
+  );
 }
 
-export async function qmsAddCarAction(carId: string, payload: CARActionCreate): Promise<CARActionOut> {
-  return sendJson<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, "POST", {
-    action_type: payload.action_type ?? "COMMENT",
-    message: payload.message,
-  });
+export async function qmsAddCarAction(
+  carId: string,
+  payload: CARActionCreate,
+): Promise<CARActionOut> {
+  return sendJson<CARActionOut>(
+    `/quality/cars/${encodeURIComponent(carId)}/actions`,
+    "POST",
+    {
+      action_type: payload.action_type ?? "COMMENT",
+      message: payload.message,
+    },
+  );
 }
 
-export async function qmsRequestCarAccess(carId: string, message?: string): Promise<CARActionOut> {
-  const cleanMessage = (message || "I can support resolution of this CAR. Please review and assign write access if appropriate.").trim();
+export async function qmsRequestCarAccess(
+  carId: string,
+  message?: string,
+): Promise<CARActionOut> {
+  const cleanMessage = (
+    message ||
+    "I can support resolution of this CAR. Please review and assign write access if appropriate."
+  ).trim();
   return qmsAddCarAction(carId, {
     action_type: "ASSIGNMENT",
     message: cleanMessage || "CAR access requested.",
   });
 }
 
-export async function qmsListCarInviteActions(token: string): Promise<CARActionOut[]> {
-  return publicFetchJson<CARActionOut[]>(`/quality/cars/invite/${encodeURIComponent(token)}/actions`);
+export async function qmsListCarInviteActions(
+  token: string,
+): Promise<CARActionOut[]> {
+  return publicFetchJson<CARActionOut[]>(
+    `/quality/cars/invite/${encodeURIComponent(token)}/actions`,
+  );
 }
 
 export function qmsGetCarInviteFormUrl(token: string): string {
   return `${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/form`;
 }
 
-export async function qmsListCarInviteAttachments(token: string): Promise<CARAttachmentOut[]> {
-  return publicFetchJson<CARAttachmentOut[]>(`/quality/cars/invite/${encodeURIComponent(token)}/attachments`);
+export async function qmsListCarInviteAttachments(
+  token: string,
+): Promise<CARAttachmentOut[]> {
+  return publicFetchJson<CARAttachmentOut[]>(
+    `/quality/cars/invite/${encodeURIComponent(token)}/attachments`,
+  );
 }
 
 export async function qmsUploadCarInviteAttachment(
   token: string,
   file: File,
-  description?: string
+  description?: string,
 ): Promise<CARAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
   if (description?.trim()) formData.append("description", description.trim());
-  const res = await fetch(`${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/attachments`, {
-    method: "POST",
-    body: formData,
-    credentials: "omit",
-  });
+  const res = await fetch(
+    `${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/attachments`,
+    {
+      method: "POST",
+      body: formData,
+      credentials: "omit",
+    },
+  );
 
   if (res.status === 401 || res.status === 403) {
-    throw new Error("This invite is not available. Check that the link is correct and still active.");
+    throw new Error(
+      "This invite is not available. Check that the link is correct and still active.",
+    );
   }
 
   if (!res.ok) {
@@ -1895,32 +2312,41 @@ export async function qmsUploadCarInviteAttachment(
 export async function qmsUpdateCarInviteAttachment(
   token: string,
   attachmentId: string,
-  payload: { description?: string | null }
+  payload: { description?: string | null },
 ): Promise<CARAttachmentOut> {
   return publicSendJson<CARAttachmentOut>(
     `/quality/cars/invite/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
     "PATCH",
-    payload
+    payload,
   );
 }
 
-export async function qmsDeleteCarInviteAttachment(token: string, attachmentId: string): Promise<void> {
+export async function qmsDeleteCarInviteAttachment(
+  token: string,
+  attachmentId: string,
+): Promise<void> {
   await publicSendJson<void>(
     `/quality/cars/invite/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
     "DELETE",
-    undefined
+    undefined,
   );
 }
 
-
-
-
-export async function qmsListCarAttachments(carId: string): Promise<CARAttachmentOut[]> {
-  return fetchJson<CARAttachmentOut[]>(`/quality/cars/${encodeURIComponent(carId)}/attachments`);
+export async function qmsListCarAttachments(
+  carId: string,
+): Promise<CARAttachmentOut[]> {
+  return fetchJson<CARAttachmentOut[]>(
+    `/quality/cars/${encodeURIComponent(carId)}/attachments`,
+  );
 }
 
-export async function qmsDownloadCarAttachmentBlob(carId: string, attachmentId: string): Promise<Blob> {
-  return downloadBinary(`/quality/cars/${encodeURIComponent(carId)}/attachments/${encodeURIComponent(attachmentId)}/download`);
+export async function qmsDownloadCarAttachmentBlob(
+  carId: string,
+  attachmentId: string,
+): Promise<Blob> {
+  return downloadBinary(
+    `/quality/cars/${encodeURIComponent(carId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+  );
 }
 
 export async function qmsListCarAttachmentsBulk(params?: {
@@ -1929,21 +2355,29 @@ export async function qmsListCarAttachmentsBulk(params?: {
   const qs = new URLSearchParams();
   (params?.car_ids ?? []).forEach((carId) => qs.append("car_ids", carId));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return fetchJson<CARAttachmentOut[]>(`/quality/cars/attachments/bulk${suffix}`);
+  return fetchJson<CARAttachmentOut[]>(
+    `/quality/cars/attachments/bulk${suffix}`,
+  );
 }
 
-export async function qmsUploadCarAttachment(carId: string, file: File): Promise<CARAttachmentOut> {
+export async function qmsUploadCarAttachment(
+  carId: string,
+  file: File,
+): Promise<CARAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
   const authToken = getToken();
-  const res = await fetch(`${getApiBaseUrl()}/quality/cars/${encodeURIComponent(carId)}/attachments`, {
-    method: "POST",
-    headers: {
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  const res = await fetch(
+    `${getApiBaseUrl()}/quality/cars/${encodeURIComponent(carId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: formData,
+      credentials: "include",
     },
-    body: formData,
-    credentials: "include",
-  });
+  );
   if (res.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
@@ -1955,8 +2389,15 @@ export async function qmsUploadCarAttachment(carId: string, file: File): Promise
   return (await res.json()) as CARAttachmentOut;
 }
 
-export async function qmsDeleteCarAttachment(carId: string, attachmentId: string): Promise<void> {
-  await sendJson<void>(`/quality/cars/${encodeURIComponent(carId)}/attachments/${encodeURIComponent(attachmentId)}`, "DELETE", undefined);
+export async function qmsDeleteCarAttachment(
+  carId: string,
+  attachmentId: string,
+): Promise<void> {
+  await sendJson<void>(
+    `/quality/cars/${encodeURIComponent(carId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    "DELETE",
+    undefined,
+  );
 }
 
 export type QMSNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";
@@ -1984,7 +2425,10 @@ export async function qmsListNotifications(params?: {
   include_read?: boolean;
   limit?: number;
 }): Promise<QMSNotificationOut[]> {
-  const suffix = toQuery({ include_read: params?.include_read ?? false, limit: params?.limit ?? 20 });
+  const suffix = toQuery({
+    include_read: params?.include_read ?? false,
+    limit: params?.limit ?? 20,
+  });
   return fetchJson<QMSNotificationOut[]>(`/quality/notifications/me${suffix}`);
 }
 
@@ -2006,7 +2450,12 @@ export async function qmsGetNotificationSummary(): Promise<QMSNotificationSummar
   });
 
   if (res.status === 304) {
-    return readStoredNotificationSummary() ?? { unread_count: 0, latest_created_at: null };
+    return (
+      readStoredNotificationSummary() ?? {
+        unread_count: 0,
+        latest_created_at: null,
+      }
+    );
   }
 
   if (res.status === 401) {
@@ -2016,13 +2465,23 @@ export async function qmsGetNotificationSummary(): Promise<QMSNotificationSummar
 
   if (res.status === 503) {
     const text = await res.text().catch(() => "");
-    throw new Error(text || "Service unavailable. Please retry or contact support.");
+    throw new Error(
+      text || "Service unavailable. Please retry or contact support.",
+    );
   }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    if (res.status === 403 && /subscription is locked|go to billing/i.test(text)) {
-      return readStoredNotificationSummary() ?? { unread_count: 0, latest_created_at: null };
+    if (
+      res.status === 403 &&
+      /subscription is locked|go to billing/i.test(text)
+    ) {
+      return (
+        readStoredNotificationSummary() ?? {
+          unread_count: 0,
+          latest_created_at: null,
+        }
+      );
     }
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
   }
@@ -2032,12 +2491,24 @@ export async function qmsGetNotificationSummary(): Promise<QMSNotificationSummar
   return summary;
 }
 
-export async function qmsMarkAllNotificationsRead(): Promise<{ updated: number }> {
-  return sendJson<{ updated: number }>("/quality/notifications/me/read-all", "POST", {});
+export async function qmsMarkAllNotificationsRead(): Promise<{
+  updated: number;
+}> {
+  return sendJson<{ updated: number }>(
+    "/quality/notifications/me/read-all",
+    "POST",
+    {},
+  );
 }
 
-export async function qmsMarkNotificationRead(notificationId: string): Promise<QMSNotificationOut> {
-  return sendJson<QMSNotificationOut>(`/quality/notifications/${notificationId}/read`, "POST", {});
+export async function qmsMarkNotificationRead(
+  notificationId: string,
+): Promise<QMSNotificationOut> {
+  return sendJson<QMSNotificationOut>(
+    `/quality/notifications/${notificationId}/read`,
+    "POST",
+    {},
+  );
 }
 
 export interface AuditorStatsOut {
@@ -2050,14 +2521,22 @@ export interface AuditorStatsOut {
   assistant_audits: number;
 }
 
-export async function qmsGetAuditorStats(userId: string): Promise<AuditorStatsOut> {
+export async function qmsGetAuditorStats(
+  userId: string,
+): Promise<AuditorStatsOut> {
   return fetchJson<AuditorStatsOut>(`/quality/auditors/${userId}/stats`);
 }
 
-export async function downloadAuditEvidencePack(auditId: string): Promise<Blob> {
-  return downloadEvidencePack(`/quality/audits/${encodeURIComponent(auditId)}/evidence-pack`);
+export async function downloadAuditEvidencePack(
+  auditId: string,
+): Promise<Blob> {
+  return downloadEvidencePack(
+    `/quality/audits/${encodeURIComponent(auditId)}/evidence-pack`,
+  );
 }
 
 export async function downloadCarEvidencePack(carId: string): Promise<Blob> {
-  return downloadEvidencePack(`/quality/cars/${encodeURIComponent(carId)}/evidence-pack`);
+  return downloadEvidencePack(
+    `/quality/cars/${encodeURIComponent(carId)}/evidence-pack`,
+  );
 }

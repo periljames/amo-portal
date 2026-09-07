@@ -2033,11 +2033,6 @@ def download_evidence_file(
 
 
 _WORKFLOW_ACTIONS: dict[tuple[str, str], dict[str, Any]] = {
-    ("audits", "issue-notice"): {
-        "permission": "qms.audit.update",
-        "table": "qms_audit_notices",
-        "action": "audit_notice_issued",
-    },
     ("audits", "complete-fieldwork"): {
         "permission": "qms.audit.execute",
         "table": "qms_audit_evidence",

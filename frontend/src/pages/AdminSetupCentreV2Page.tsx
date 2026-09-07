@@ -30,6 +30,7 @@ import BaseStationEditorDialog, {
 } from "./adminSetup/BaseStationEditorDialog";
 import DepartmentManager from "./adminSetup/DepartmentManager";
 import { getCachedUser, getContext } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
   listAdminAmos,
   listAdminAssets,
@@ -134,7 +135,7 @@ const AdminSetupCentreV2Page: React.FC = () => {
   const ctx = getContext();
   const isSuperuser = Boolean(currentUser?.is_superuser);
   const isAmoAdmin = Boolean(currentUser?.is_amo_admin);
-  const canAccessAdmin = isSuperuser || isAmoAdmin;
+  const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {
     const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);

@@ -12,8 +12,6 @@ from .workspace_service import role_value
 # Inspector remains able to perform controller work without being able to approve,
 # publish, archive, or rewrite terminal governance records.
 DECISION_APPROVER_ROLES = {
-    "SUPERUSER",
-    "AMO_ADMIN",
     "ACCOUNTABLE_EXECUTIVE",
     "QUALITY_MANAGER",
 }
@@ -21,9 +19,7 @@ DECISION_APPROVER_ROLES = {
 
 def is_decision_approver(user: account_models.User) -> bool:
     return bool(
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or role_value(user) in DECISION_APPROVER_ROLES
+        role_value(user) in DECISION_APPROVER_ROLES
     )
 
 

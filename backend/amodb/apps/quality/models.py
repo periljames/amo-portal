@@ -31,9 +31,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -479,12 +481,17 @@ class QMSAudit(Base):
     lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     observer_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     assistant_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    supporting_auditor_user_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+    location = Column(String(255), nullable=True)
     notify_auditors = Column(Boolean, nullable=False, default=True)
     notify_auditees = Column(Boolean, nullable=False, default=True)
     reminder_interval_days = Column(Integer, nullable=False, default=7)
 
     planned_start = Column(Date, nullable=True)
     planned_end = Column(Date, nullable=True)
+    # Defaults are applied only when corresponding dates exist.
+    planned_start_time = Column(Time, nullable=True)
+    planned_end_time = Column(Time, nullable=True)
     actual_start = Column(Date, nullable=True)
     actual_end = Column(Date, nullable=True)
 

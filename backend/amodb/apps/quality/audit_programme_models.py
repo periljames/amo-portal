@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +14,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    Time,
     UniqueConstraint,
     Uuid,
 )
@@ -49,6 +50,10 @@ class QualityAuditProgramme(Base):
             name="ck_quality_audit_programme_status",
         ),
         CheckConstraint("programme_year >= 2000 AND programme_year <= 2200", name="ck_quality_audit_programme_year"),
+        CheckConstraint(
+            "programme_kind IN ('INTERNAL','EXTERNAL','THIRD_PARTY')",
+            name="ck_quality_audit_programme_kind",
+        ),
         CheckConstraint("revision_no >= 1", name="ck_quality_audit_programme_revision"),
         CheckConstraint("period_end >= period_start", name="ck_quality_audit_programme_period"),
         Index("ix_quality_audit_programmes_year", "amo_id", "programme_year", "status"),
@@ -61,6 +66,7 @@ class QualityAuditProgramme(Base):
     programme_ref = Column(String(72), nullable=False)
     programme_series = Column(String(64), nullable=False)
     programme_year = Column(Integer, nullable=False)
+    programme_kind = Column(String(16), nullable=False, default="INTERNAL", server_default="INTERNAL")
     revision_no = Column(Integer, nullable=False, default=1, server_default="1")
     title = Column(String(255), nullable=False)
     continuous_monitoring_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
@@ -73,6 +79,10 @@ class QualityAuditProgramme(Base):
     owner_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     supersedes_programme_id = Column(String(36), ForeignKey("quality_audit_programmes.id", ondelete="SET NULL"), nullable=True)
 
+    submitted_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    quality_reviewed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    quality_reviewed_at = Column(DateTime(timezone=True), nullable=True)
     approved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)
@@ -111,13 +121,18 @@ class QualityAuditUniverseItem(Base):
         ),
         CheckConstraint(
             "entity_type IN ('DEPARTMENT','FACILITY','STATION','SUPPLIER','CONTRACTOR','PROCESS',"
-            "'CAPABILITY','APPROVAL_RATING','AIRCRAFT_TYPE','PERSONNEL_GROUP','OTHER')",
+            "'CAPABILITY','APPROVAL_RATING','AIRCRAFT','AIRCRAFT_TYPE','PERSONNEL_GROUP','OTHER')",
             name="ck_quality_audit_universe_entity_type",
+        ),
+        CheckConstraint(
+            "programme_kind IN ('INTERNAL','EXTERNAL','BOTH')",
+            name="ck_quality_audit_universe_programme_kind",
         ),
         CheckConstraint("risk_classification IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_quality_audit_universe_risk"),
         CheckConstraint("regulatory_criticality IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_quality_audit_universe_regulatory"),
         CheckConstraint("surveillance_interval_days IS NULL OR surveillance_interval_days > 0", name="ck_quality_audit_universe_interval"),
         Index("ix_quality_audit_universe_type", "amo_id", "entity_type", "active"),
+        Index("ix_quality_audit_universe_programme_kind", "amo_id", "programme_kind", "active"),
         Index("ix_quality_audit_universe_risk", "amo_id", "risk_classification", "regulatory_criticality"),
         Index("ix_quality_audit_universe_source", "amo_id", "source_owner_module", "source_type", "source_id"),
     )
@@ -125,6 +140,7 @@ class QualityAuditUniverseItem(Base):
     id = Column(String(36), primary_key=True, default=generate_user_id)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
     entity_type = Column(String(32), nullable=False)
+    programme_kind = Column(String(16), nullable=False, default="BOTH", server_default="BOTH")
     display_label = Column(String(255), nullable=False)
     source_owner_module = Column(String(80), nullable=False)
     source_type = Column(String(64), nullable=False)
@@ -165,8 +181,22 @@ class QualityAuditProgrammeItem(Base):
             name="ck_quality_audit_programme_item_state",
         ),
         CheckConstraint(
-            "recurrence IN ('ONE_TIME','MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','CUSTOM','RISK_TRIGGERED')",
+            "recurrence IN ('ONE_TIME','MONTHLY','QUARTERLY','SEMI_ANNUAL','ANNUAL','FIXED_DATES','CUSTOM','RISK_TRIGGERED')",
             name="ck_quality_audit_programme_item_recurrence",
+        ),
+        CheckConstraint(
+            "non_working_day_policy IN ('NEXT_WORKING_DAY')",
+            name="ck_quality_audit_programme_item_non_working_day",
+        ),
+        CheckConstraint(
+            "default_duration_days >= 1 AND default_duration_days <= 90",
+            name="ck_quality_audit_programme_item_duration",
+        ),
+        CheckConstraint(
+            "default_start_time >= '09:00:00' AND default_start_time <= '17:00:00' "
+            "AND default_end_time >= '09:00:00' AND default_end_time <= '17:00:00' "
+            "AND default_end_time > default_start_time",
+            name="ck_quality_audit_programme_item_business_hours",
         ),
         CheckConstraint("target_end IS NULL OR target_start IS NULL OR target_end >= target_start", name="ck_quality_audit_programme_item_dates"),
         Index("ix_quality_audit_programme_items_period", "amo_id", "programme_id", "target_start", "state"),
@@ -188,6 +218,19 @@ class QualityAuditProgrammeItem(Base):
     mandatory_surveillance = Column(Boolean, nullable=False, default=False, server_default="false")
     recurrence = Column(String(20), nullable=False, default="ONE_TIME", server_default="ONE_TIME")
     custom_interval_days = Column(Integer, nullable=True)
+    fixed_dates = Column(JSON, nullable=False, default=list)
+    non_working_day_policy = Column(String(24), nullable=False, default="NEXT_WORKING_DAY", server_default="NEXT_WORKING_DAY")
+    default_start_time = Column(Time, nullable=False, default=time(hour=9), server_default="09:00:00")
+    default_end_time = Column(Time, nullable=False, default=time(hour=17), server_default="17:00:00")
+    default_duration_days = Column(Integer, nullable=False, default=1, server_default="1")
+    default_location = Column(String(255), nullable=True)
+    lead_auditor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    observer_auditor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    supporting_auditor_user_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+    auditee_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    notify_auditors = Column(Boolean, nullable=False, default=True, server_default="true")
+    notify_auditees = Column(Boolean, nullable=False, default=True, server_default="true")
+    auto_schedule = Column(Boolean, nullable=False, default=False, server_default="false")
     target_start = Column(Date, nullable=True)
     target_end = Column(Date, nullable=True)
     state = Column(String(24), nullable=False, default="PLANNED", server_default="PLANNED")
@@ -211,7 +254,7 @@ class QualityAuditProgrammeEvent(Base):
     __tablename__ = "quality_audit_programme_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('CREATED','UPDATED','SUBMITTED_FOR_REVIEW','RETURNED_TO_DRAFT','APPROVED','ACTIVATED',"
+            "event_type IN ('CREATED','UPDATED','SUBMITTED_FOR_REVIEW','QUALITY_REVIEW_COMPLETED','RETURNED_TO_DRAFT','APPROVED','ACTIVATED',"
             "'AMENDMENT_CREATED','SUPERSEDED','CLOSED','ITEM_ADDED','ITEM_UPDATED','ITEM_SCHEDULED')",
             name="ck_quality_audit_programme_event_type",
         ),

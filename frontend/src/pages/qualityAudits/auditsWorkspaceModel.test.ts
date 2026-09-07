@@ -35,7 +35,7 @@ function audit(overrides: Partial<QMSAuditOut> = {}): QMSAuditOut {
 describe("auditsWorkspaceModel", () => {
   it("parses URL view, page, and page size with safe defaults", () => {
     expect(parseWorkspaceView("active")).toBe("active");
-    expect(parseWorkspaceView("nope")).toBe("mine");
+    expect(parseWorkspaceView("nope")).toBe("all");
     expect(parseWorkspacePageSize("50")).toBe(50);
     expect(parseWorkspacePageSize("999")).toBe(25);
     expect(parseWorkspacePage("3")).toBe(3);

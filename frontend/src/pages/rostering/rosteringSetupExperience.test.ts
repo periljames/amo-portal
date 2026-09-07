@@ -116,7 +116,8 @@ describe("rostering setup experience", () => {
   });
 
   it("adds portal-wide dark surface separation without changing status colours", () => {
-    expect(depthSource).toContain("--surface-elevated: rgba(19, 34, 55, 0.97)");
+    expect(depthSource).toContain("--surface-elevated: rgba(43, 45, 49, 0.94)");
+    expect(depthSource).toContain("graphite translucency");
     expect(depthSource).toContain(".wr-panel");
     expect(depthSource).toContain(".qms-panel");
     expect(depthSource).toContain(".admin-panel");

@@ -26,7 +26,7 @@ from .analytics_builder import build_dashboard
 from . import workbook_parity as wp
 
 ANALYSIS_ROLES = {
-    "SUPERUSER", "AMO_ADMIN", "QUALITY_MANAGER", "SAFETY_MANAGER",
+    "QUALITY_MANAGER", "SAFETY_MANAGER",
     "PLANNING_ENGINEER", "PRODUCTION_ENGINEER", "QUALITY_INSPECTOR", "AUDITOR",
 }
 MANAGEMENT_LAYOUT_CODE = "MANAGEMENT-PERIOD"
@@ -60,7 +60,7 @@ def _amo_id(user: account_models.User) -> str:
 
 def _require_analysis(user: account_models.User) -> None:
     role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
-    if bool(getattr(user, "is_superuser", False)) or bool(getattr(user, "is_amo_admin", False)) or role in ANALYSIS_ROLES:
+    if role in ANALYSIS_ROLES:
         return
     raise HTTPException(status_code=403, detail="Reliability management reporting requires analysis permission.")
 

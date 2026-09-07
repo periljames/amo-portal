@@ -6,6 +6,9 @@ const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8
 const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.url), "utf-8");
 const homePage = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
+const structurePage = readFileSync(new URL("./DocumentControlStructurePage.tsx", import.meta.url), "utf-8");
+const recordDetailPage = readFileSync(new URL("./DocumentControlGeneratedRecordPage.tsx", import.meta.url), "utf-8");
+const documentationService = readFileSync(new URL("../../services/documentation.ts", import.meta.url), "utf-8");
 const libraryService = readFileSync(new URL("../../services/documentLibrary.ts", import.meta.url), "utf-8");
 const recordEntry = readFileSync(new URL("./DocumentControlRecordEntryPage.tsx", import.meta.url), "utf-8");
 const recordPage = readFileSync(new URL("./DocumentControlRecordPage.tsx", import.meta.url), "utf-8");
@@ -26,11 +29,10 @@ const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", imp
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
 describe("DMS frontend operating-model contract", () => {
-  it("keeps permanent Document Control navigation bounded to seven daily workspaces", () => {
-    for (const label of ["Home", "Library", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
+  it("exposes the eight distinct daily Document Control workspaces", () => {
+    for (const label of ["Home", "Library", "Structure", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
       expect(shell).toContain(`label: "${label}"`);
     }
-    expect(shell).not.toContain("Document structure");
     expect(shell).not.toContain("Generated records");
     expect(shell).not.toContain("Authority submissions");
     expect(shell).not.toContain("Temporary revisions");
@@ -45,19 +47,46 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain('label: "Assistant"');
   });
 
-  it("exposes only the seven canonical Document Control workspaces", () => {
+  it("exposes the canonical Document Control workspaces and linked retained-record detail", () => {
     for (const route of [
       "/maintenance/:amoCode/document-control",
       "/maintenance/:amoCode/document-control/library",
+      "/maintenance/:amoCode/document-control/structure",
+      "/maintenance/:amoCode/document-control/structure/records/:recordId",
       "/maintenance/:amoCode/document-control/changes",
       "/maintenance/:amoCode/document-control/distribution",
       "/maintenance/:amoCode/document-control/compliance",
       "/maintenance/:amoCode/document-control/reports",
       "/maintenance/:amoCode/document-control/administration",
     ]) expect(router).toContain(`path="${route}"`);
-    for (const removed of ["/drafts", "/change-proposals", "/authority", "/tr", "/reviews", "/registers", "/settings", "/archive", "/structure", "/records"]) {
+    for (const removed of ["/drafts", "/change-proposals", "/authority", "/tr", "/reviews", "/registers", "/settings", "/archive"]) {
       expect(router).not.toContain(`document-control${removed}"`);
     }
+    expect(router).toContain("DocumentControlFallback");
+    expect(router).not.toContain('<Navigate to="." replace />');
+  });
+
+  it("provides an explicit, permission-filtered document-lineage workspace", () => {
+    expect(structurePage).toContain("getDocumentationTree");
+    expect(structurePage).toContain("getDocumentationNodeConnections");
+    expect(structurePage).toContain("Selection reveals its lineage and records here. It never opens the reader automatically.");
+    expect(structurePage).toContain("Manual / policy");
+    expect(structurePage).toContain("Procedure / instruction");
+    expect(structurePage).toContain("Form / checklist");
+    expect(structurePage).toContain("Completed record");
+    expect(structurePage).toContain("workflow_nodes");
+    expect(structurePage).toContain("governed_relationships");
+    expect(structurePage).toContain("detected_references");
+    expect(structurePage).toContain("records.scope");
+    expect(documentationService).toContain("/knowledge/nodes/${encodeURIComponent(nodeId)}/connections");
+  });
+
+  it("links lineage records to a verifiable, review-capable detail route", () => {
+    expect(recordDetailPage).toContain("getDocumentationRecord");
+    expect(recordDetailPage).toContain("reviewDocumentationRecord");
+    expect(recordDetailPage).toContain("record.integrity.status");
+    expect(recordDetailPage).toContain("Open / download PDF");
+    expect(documentationService).toContain("/knowledge/records/${encodeURIComponent(recordId)}");
   });
 
   it("gives Library the MD preset views and bounded rich controlled-information discovery", () => {
@@ -67,8 +96,17 @@ describe("DMS frontend operating-model contract", () => {
     expect(libraryPage).toContain("discoverLibrary");
     expect(libraryPage).toContain("Permission-filtered discovery · server-bounded");
     expect(libraryPage).toContain("alias, owner, revision, filename, hierarchy or indexed text");
+    expect(libraryPage).toContain('type LibraryPresentation = "shelf" | "register"');
+    expect(libraryPage).toContain('aria-label="Controlled document shelf"');
+    expect(libraryPage).toContain('data-document-type={item.library.node_type}');
+    expect(libraryPage).toContain("Read current");
+    expect(libraryPage).toContain('lazy(() => import("./DocumentLibraryRegisterGrid"))');
+    expect(libraryPage).not.toContain('from "ag-grid-react"');
     expect(libraryService).toContain("library-discovery");
     expect(libraryService).toContain("per_page");
+    expect(libraryService).toContain("cachedLibraryApi");
+    expect(libraryService).toContain("writeApiCache(path, response, LIBRARY_OFFLINE_TTL_MS)");
+    expect(libraryPage).toContain("Offline snapshot");
   });
 
   it("routes canonical Changes to a bounded paginated portfolio", () => {

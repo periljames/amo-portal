@@ -36,9 +36,7 @@ def list_tasks(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(
-            account_models.AccountRole.AMO_ADMIN,
             account_models.AccountRole.QUALITY_MANAGER,
-            account_models.AccountRole.SUPERUSER,
         )
     ),
 ):
@@ -67,11 +65,7 @@ def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    is_admin = current_user.role in (
-        account_models.AccountRole.AMO_ADMIN,
-        account_models.AccountRole.QUALITY_MANAGER,
-        account_models.AccountRole.SUPERUSER,
-    )
+    is_quality_manager = current_user.role == account_models.AccountRole.QUALITY_MANAGER
     is_owner = task.owner_user_id == current_user.id
     is_supervisor = task.supervisor_user_id == current_user.id
 
@@ -84,12 +78,12 @@ def update_task(
     if "priority" in data:
         detail_changes["priority"] = data["priority"]
     if detail_changes:
-        if not (is_admin or is_supervisor):
+        if not (is_quality_manager or is_supervisor):
             raise HTTPException(status_code=403, detail="Not authorized to edit task details")
         services.update_task_details(db, task=task, actor_user_id=current_user.id, changes=detail_changes)
 
     if payload.escalate:
-        if not (is_admin or is_supervisor):
+        if not (is_quality_manager or is_supervisor):
             raise HTTPException(status_code=403, detail="Not authorized to escalate tasks")
         services.escalate_task(
             db,
@@ -105,7 +99,7 @@ def update_task(
     if payload.status is not None:
         if is_owner and payload.status not in (models.TaskStatus.IN_PROGRESS, models.TaskStatus.DONE):
             raise HTTPException(status_code=403, detail="Owners may only mark tasks in progress or done")
-        if not is_owner and not (is_admin or is_supervisor):
+        if not is_owner and not (is_quality_manager or is_supervisor):
             raise HTTPException(status_code=403, detail="Not authorized to update tasks")
         services.update_task_status(db, task=task, status=payload.status, actor_user_id=current_user.id)
 

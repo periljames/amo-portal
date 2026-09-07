@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { useToast } from "../components/feedback/ToastProvider";
 import { Button } from "../components/UI/Admin";
 import BaseStationEditorDialog, {
   type BaseDraft,
@@ -30,6 +31,7 @@ import BaseStationEditorDialog, {
 } from "./adminSetup/BaseStationEditorDialog";
 import DepartmentManager from "./adminSetup/DepartmentManager";
 import { getCachedUser, getContext } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
   listAdminAmos,
   listAdminUsers,
@@ -126,28 +128,6 @@ function activeStepFromSearch(search: string): StepKey | null {
   return STEP_KEYS.includes(requested as StepKey) ? requested as StepKey : null;
 }
 
-const SetupToast: React.FC<{
-  tone: ToastTone;
-  title: string;
-  message: string;
-  onClose: () => void;
-}> = ({ tone, title, message, onClose }) => (
-  <div
-    className={`setup-resend__toast setup-resend__toast--${tone}`}
-    role={tone === "danger" ? "alert" : "status"}
-    aria-live={tone === "danger" ? "assertive" : "polite"}
-    aria-atomic="true"
-  >
-    <div>
-      <strong>{title}</strong>
-      <span>{message}</span>
-    </div>
-    <button type="button" aria-label="Dismiss notification" onClick={onClose}>
-      <X size={15} />
-    </button>
-  </div>
-);
-
 const AdminSetupCentreResendPage: React.FC = () => {
   const { amoCode = "system" } = useParams<UrlParams>();
   const navigate = useNavigate();
@@ -156,7 +136,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
   const ctx = getContext();
   const isSuperuser = Boolean(currentUser?.is_superuser);
   const isAmoAdmin = Boolean(currentUser?.is_amo_admin);
-  const canAccessAdmin = isSuperuser || isAmoAdmin;
+  const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {
     const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
@@ -186,7 +166,19 @@ const AdminSetupCentreResendPage: React.FC = () => {
   const [uploading, setUploading] = useState<AssetKind | null>(null);
   const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
   const [previewAsset, setPreviewAsset] = useState<{ kind: AssetKind; url: string; name: string } | null>(null);
-  const [toast, setToast] = useState<{ tone: ToastTone; title: string; message: string } | null>(null);
+  const { pushToast, dismissToast } = useToast();
+  const toastIdRef = useRef<string | null>(null);
+  const setToast = useCallback((toast: { tone: ToastTone; title: string; message: string } | null) => {
+    if (toastIdRef.current) dismissToast(toastIdRef.current);
+    toastIdRef.current = null;
+    if (!toast) return;
+    toastIdRef.current = pushToast({
+      title: toast.title,
+      message: toast.message,
+      variant: toast.tone === "danger" ? "error" : toast.tone,
+      dedupeKey: `admin-setup:${toast.tone}:${toast.title}:${toast.message}`,
+    });
+  }, [dismissToast, pushToast]);
 
   const requestRef = useRef(0);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
@@ -236,7 +228,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
         message: errorText(cause, "Could not load AMO support contexts."),
       }));
     return () => { cancelled = true; };
-  }, [activeAmoId, currentUser?.amo_id, isSuperuser]);
+  }, [activeAmoId, currentUser?.amo_id, isSuperuser, setToast]);
 
   const syncContext = useCallback(async (amoId: string) => {
     if (!isSuperuser) return;
@@ -313,7 +305,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
         setRefreshing(false);
       }
     }
-  }, [canAccessAdmin, currentUser, effectiveAmoId, isSuperuser, selectedAmo, syncContext]);
+  }, [canAccessAdmin, currentUser, effectiveAmoId, isSuperuser, selectedAmo, setToast, syncContext]);
 
   useEffect(() => {
     if (!effectiveAmoId || (isSuperuser && !selectedAmo)) return;
@@ -837,15 +829,6 @@ const AdminSetupCentreResendPage: React.FC = () => {
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="admin-assets">
       <main className="setup-resend">
-        {toast ? (
-          <SetupToast
-            tone={toast.tone}
-            title={toast.title}
-            message={toast.message}
-            onClose={() => setToast(null)}
-          />
-        ) : null}
-
         <header className="setup-resend__header">
           <div className="setup-resend__header-icon"><ShieldCheck size={25} /></div>
           <div>

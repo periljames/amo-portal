@@ -119,6 +119,10 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
           { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
         ];
   }
+  const serverAllowedActions = new Set(workflow.allowed_actions || []);
+  actions = actions.filter((item) => serverAllowedActions.has(item.action));
+  const needsDecisionInput = actions.some((item) => DECISION_ACTIONS.has(item.action) || item.action === "REQUEST_CORRECTIONS");
+  const readinessEditable = actions.some((item) => ["SCHEDULE_EFFECTIVITY", "PUBLISH"].includes(item.action));
 
   const transition = (item: ActionOption) => {
     const comment = comments.trim();
@@ -145,8 +149,8 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
 
   return <div className="dc-form" data-testid="document-control-approver-workflow-actions">
     <div className="dc-callout"><ShieldCheck size={17} /><div><strong>{workflow.state.replaceAll("_", " ")}</strong><div>Version {workflow.version} · Distribution readiness: {workflow.distribution_readiness_status}</div></div></div>
-    <label className="wide"><span>Decision comments or waiver reason</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Explain the decision, correction, waiver or release basis." /></label>
-    <DocumentEvidencePicker
+    {needsDecisionInput ? <label className="wide"><span>Decision record</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Record the approval basis or required correction." /></label> : null}
+    {needsDecisionInput ? <DocumentEvidencePicker
       tenant={tenant}
       manualId={detail.document.id}
       revisionId={workflow.revision_id}
@@ -154,15 +158,13 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
       purpose={`WORKFLOW_${workflow.state}`}
       value={evidence}
       onChange={setEvidence}
-      label="Supporting decision evidence"
-      help="Upload or select retained supporting files. The DMS adds the reviewed revision checksum to controlled decisions on the server."
-    />
-    <label><span>Training readiness</span><select value={training} onChange={(event) => setTraining(event.target.value)}><option>NOT_REQUIRED</option><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label>
-    <label><span>QMS readiness</span><select value={qms} onChange={(event) => setQms(event.target.value)}><option>NOT_REQUIRED</option><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label>
-    <label><span>Scheduled effectivity</span><input type="datetime-local" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label>
-    <label><span>Distribution readiness</span><input value={workflow.distribution_readiness_status} readOnly /><small>Established by issuing a real campaign; it cannot be marked ready here.</small></label>
+      label="Supporting evidence (optional when the source checksum is retained)"
+    /> : null}
+    {readinessEditable && workflow.training_impact_required ? <label><span>Training readiness</span><select value={training} onChange={(event) => setTraining(event.target.value)}><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label> : null}
+    {readinessEditable && workflow.qms_readiness_status !== "NOT_REQUIRED" ? <label><span>QMS readiness</span><select value={qms} onChange={(event) => setQms(event.target.value)}><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label> : null}
+    {actions.some((item) => item.action === "SCHEDULE_EFFECTIVITY") ? <label><span>Effective date and time</span><input type="datetime-local" required value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label> : null}
     <ErrorMessage message={mutation.error} />
-    <div className="dc-form__actions">{actions.map((item) => <button type="button" key={item.action} className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`} disabled={mutation.busy} onClick={() => transition(item)}>{item.label}</button>)}</div>
+    {actions.length ? <div className="dc-form__actions">{actions.map((item) => <button type="button" key={item.action} className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`} disabled={mutation.busy || (item.action === "SCHEDULE_EFFECTIVITY" && !effectiveAt)} onClick={() => transition(item)}>{item.label}</button>)}</div> : <DocumentControlEmpty title="Awaiting the assigned workflow role" message="No transition is authorized for this account at the current stage." />}
   </div>;
 }
 

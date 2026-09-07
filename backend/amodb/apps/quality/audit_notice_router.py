@@ -9,22 +9,32 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from amodb import storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.notifications import models as notification_models
 from amodb.apps.notifications import service as notification_service
+from amodb.apps.manuals import models as manual_models
 from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_notice_document import render_audit_notice_pdf
-from .audit_notice_models import QualityAuditNotice, QualityAuditNoticeArtifact, QualityAuditNoticeEvent, QualityAuditNoticePolicy
+from .audit_notice_models import (
+    QualityAuditNotice,
+    QualityAuditNoticeArtifact,
+    QualityAuditNoticeEvent,
+    QualityAuditNoticePolicy,
+    QualityAuditNoticeTemplateSetting,
+)
+from .audit_schedule_rules import DEFAULT_END_TIME, DEFAULT_START_TIME, validate_planned_window
 from .audit_occurrence_completion_models import QualityAuditMeeting
 from .tenant_security import TenantContext, assert_quality_permission, assert_quality_permission_any, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
@@ -59,6 +69,7 @@ class NoticePolicyPatch(BaseModel):
 
 class NoticeDraftCreate(BaseModel):
     policy_id: str | None = Field(default=None, max_length=36)
+    template_document_id: str | None = Field(default=None, max_length=36)
     notice_date: date = Field(default_factory=date.today)
     exception_type: ExceptionType | None = None
     exception_reason: str | None = Field(default=None, max_length=4000)
@@ -95,6 +106,10 @@ class NoticeTransition(BaseModel):
 
 class NoticeSubmit(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
+
+
+class NoticeTemplateUpdate(BaseModel):
+    document_id: str = Field(min_length=1, max_length=36)
 
 
 _NOTICE_PERMISSION = "qms.audit.notice.manage"
@@ -177,6 +192,11 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "id": str(row.id),
         "audit_id": str(row.audit_id),
         "policy_id": row.policy_id,
+        "template_document_id": row.template_document_id,
+        "template_revision_id": row.template_revision_id,
+        "form_number": row.form_number,
+        "form_issue_date": row.form_issue_date,
+        "form_revision": row.form_revision,
         "revision_no": row.revision_no,
         "status": row.status,
         "required_notice_days": row.required_notice_days,
@@ -228,6 +248,8 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
         "criteria": audit.criteria,
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
+        "planned_start_time": audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None,
+        "planned_end_time": audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None,
         "auditee": audit.auditee,
         "auditee_user_id": audit.auditee_user_id,
         "lead_auditor_user_id": audit.lead_auditor_user_id,
@@ -416,6 +438,92 @@ def _meeting_payload(row: QualityAuditMeeting | None, *, zone: ZoneInfo) -> dict
     }
 
 
+def _manual_tenant(db: Session, *, amo_id: str) -> manual_models.Tenant | None:
+    return db.query(manual_models.Tenant).filter(manual_models.Tenant.amo_id == amo_id).first()
+
+
+def _notice_form_options(db: Session, *, amo_id: str) -> list[dict[str, Any]]:
+    tenant = _manual_tenant(db, amo_id=amo_id)
+    if tenant is None:
+        return []
+    rows = db.query(manual_models.Manual).filter(
+        manual_models.Manual.tenant_id == tenant.id,
+        manual_models.Manual.status == "ACTIVE",
+        func.upper(manual_models.Manual.manual_type).in_(("FORM", "TEMPLATE")),
+    ).order_by(manual_models.Manual.code.asc(), manual_models.Manual.title.asc()).all()
+    revision_ids = [row.current_published_rev_id for row in rows if row.current_published_rev_id]
+    revisions = {
+        row.id: row
+        for row in db.query(manual_models.ManualRevision).filter(
+            manual_models.ManualRevision.id.in_(revision_ids),
+            manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
+        ).all()
+    } if revision_ids else {}
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        revision = revisions.get(row.current_published_rev_id)
+        items.append({
+            "document_id": row.id,
+            "code": row.code,
+            "title": row.title,
+            "manual_type": row.manual_type,
+            "current_revision_id": revision.id if revision else None,
+            "current_revision": revision.rev_number if revision else None,
+            "issue_number": revision.issue_number if revision else None,
+            "effective_date": revision.effective_date.isoformat() if revision and revision.effective_date else None,
+            "ready": revision is not None,
+        })
+    return items
+
+
+def _resolve_notice_template(
+    db: Session,
+    *,
+    amo_id: str,
+    document_id: str | None = None,
+) -> tuple[manual_models.Manual | None, manual_models.ManualRevision | None]:
+    tenant = _manual_tenant(db, amo_id=amo_id)
+    if tenant is None:
+        if document_id:
+            raise HTTPException(status_code=404, detail="The tenant DMS is not configured.")
+        return None, None
+    selected_id = document_id
+    if selected_id is None:
+        setting = db.query(QualityAuditNoticeTemplateSetting).filter(
+            QualityAuditNoticeTemplateSetting.amo_id == amo_id,
+        ).first()
+        selected_id = setting.document_id if setting else None
+    query = db.query(manual_models.Manual).filter(
+        manual_models.Manual.tenant_id == tenant.id,
+        manual_models.Manual.status == "ACTIVE",
+        func.upper(manual_models.Manual.manual_type).in_(("FORM", "TEMPLATE")),
+    )
+    document = query.filter(manual_models.Manual.id == selected_id).first() if selected_id else None
+    if document_id and document is None:
+        raise HTTPException(status_code=404, detail="The selected tenant DMS form was not found.")
+    if document is None:
+        document = query.filter(func.lower(manual_models.Manual.code) == "qam/45").first()
+    revision = None
+    if document is not None and document.current_published_rev_id:
+        revision = db.query(manual_models.ManualRevision).filter(
+            manual_models.ManualRevision.id == document.current_published_rev_id,
+            manual_models.ManualRevision.manual_id == document.id,
+            manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
+        ).first()
+    return document, revision
+
+
+def _template_values(db: Session, *, amo_id: str, document_id: str | None) -> dict[str, Any]:
+    document, revision = _resolve_notice_template(db, amo_id=amo_id, document_id=document_id)
+    return {
+        "template_document_id": document.id if document else None,
+        "template_revision_id": revision.id if revision else None,
+        "form_number": document.code if document else _FORM_NUMBER,
+        "form_issue_date": revision.effective_date.strftime("%d %b %y") if revision and revision.effective_date else _FORM_ISSUE_DATE,
+        "form_revision": revision.rev_number if revision else _FORM_REVISION,
+    }
+
+
 def _meetings(db: Session, *, amo_id: str, audit_id: uuid.UUID, zone: ZoneInfo) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     rows = db.query(QualityAuditMeeting).filter(
         QualityAuditMeeting.amo_id == amo_id,
@@ -484,6 +592,60 @@ def _logo_path(db: Session, *, amo_id: str) -> Path | None:
     return path if path.suffix.lower() in {".png", ".jpg", ".jpeg"} else None
 
 
+def _audit_area_label(db: Session, *, audit: models.QMSAudit) -> str:
+    scope_row = None
+    if audit.audit_scope_id:
+        scope_row = db.query(models.QMSAuditScope).filter(
+            models.QMSAuditScope.amo_id == audit.amo_id,
+            models.QMSAuditScope.id == audit.audit_scope_id,
+        ).first()
+    if scope_row is None and audit.audit_scope_code:
+        scope_row = db.query(models.QMSAuditScope).filter(
+            models.QMSAuditScope.amo_id == audit.amo_id,
+            models.QMSAuditScope.code == audit.audit_scope_code,
+        ).first()
+    if scope_row is not None:
+        return f"{scope_row.code} - {scope_row.name}"
+    if audit.audit_scope_code:
+        return str(audit.audit_scope_code)
+    first_scope_line = next((line.strip() for line in str(audit.scope or "").splitlines() if line.strip()), "")
+    return first_scope_line[:180] or audit.title
+
+
+def _portal_base_url(request: Request) -> str:
+    configured = next(
+        (
+            os.getenv(name)
+            for name in (
+                "PORTAL_FRONTEND_BASE_URL",
+                "APP_PUBLIC_BASE_URL",
+                "PUBLIC_BASE_URL",
+                "FRONTEND_BASE_URL",
+                "PORTAL_BASE_URL",
+            )
+            if os.getenv(name)
+        ),
+        None,
+    )
+    request_origin = str(request.headers.get("origin") or "").strip()
+    if request_origin and not request_origin.startswith(("https://", "http://")):
+        request_origin = ""
+    return str(configured or request_origin or request.base_url).rstrip("/")
+
+
+def _notice_record_url(
+    request: Request,
+    *,
+    ctx: TenantContext,
+    audit: models.QMSAudit,
+    notice: QualityAuditNotice,
+) -> str:
+    return (
+        f"{_portal_base_url(request)}/maintenance/{quote(ctx.amo_code, safe='')}/quality/audits/"
+        f"{audit.id}/setup?noticeId={quote(str(notice.id), safe='')}#notice"
+    )
+
+
 def _render_notice(
     db: Session,
     *,
@@ -492,7 +654,7 @@ def _render_notice(
     notice: QualityAuditNotice,
     issuer: account_models.User,
     signed_at: datetime,
-    is_preview: bool,
+    record_url: str,
 ) -> bytes:
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == ctx.amo_id).one()
     zone = _timezone_for_amo(amo)
@@ -501,12 +663,26 @@ def _render_notice(
     audit_dates = _date_label(audit.planned_start)
     if audit.planned_end and audit.planned_end != audit.planned_start:
         audit_dates += f" to {_date_label(audit.planned_end)}"
-    opening_end = opening.get("end") if opening else None
-    closing_start = closing.get("start") if closing else None
-    if isinstance(opening_end, datetime) and isinstance(closing_start, datetime):
-        sequence_window = f"{_time_label(opening_end)} to {_time_label(closing_start)}"
-    else:
-        sequence_window = audit_dates
+    start_time, end_time = validate_planned_window(
+        planned_start=audit.planned_start,
+        planned_end=audit.planned_end,
+        planned_start_time=audit.planned_start_time,
+        planned_end_time=audit.planned_end_time,
+        status_code=409,
+    )
+    start_local = datetime.combine(
+        audit.planned_start or notice.notice_date,
+        start_time or DEFAULT_START_TIME,
+        tzinfo=zone,
+    )
+    end_local = datetime.combine(
+        audit.planned_end or audit.planned_start or notice.notice_date,
+        end_time or DEFAULT_END_TIME,
+        tzinfo=zone,
+    )
+    sequence_window = f"{_time_label(start_local)} to {_time_label(end_local)}"
+    if audit.planned_start and audit.planned_end and audit.planned_end != audit.planned_start:
+        sequence_window += " on each audit day"
     local_signed = signed_at.astimezone(zone)
     return render_audit_notice_pdf(
         amo_name=amo.name,
@@ -517,7 +693,10 @@ def _render_notice(
         audit_ref=audit.audit_ref,
         audit_title=audit.title,
         audit_date_display=audit_dates,
-        auditee=audit.auditee,
+        auditee_representative=audit.auditee,
+        audit_area=_audit_area_label(db, audit=audit),
+        audit_scope=audit.scope or "As defined in the approved audit occurrence.",
+        audit_criteria=audit.criteria or "Applicable approved requirements and procedures.",
         subject=notice.subject,
         opening_meeting=opening,
         closing_meeting=closing,
@@ -526,18 +705,24 @@ def _render_notice(
         issuer_name=_display_name(issuer, "Quality Department"),
         issuer_title=str(issuer.position_title or getattr(issuer.role, "value", issuer.role) or "Quality Officer").replace("_", " ").title(),
         signed_at_display=f"{_date_label(local_signed.date())}, {_time_label(local_signed)} {zone.key}",
-        form_number=_FORM_NUMBER,
-        form_issue_date=_FORM_ISSUE_DATE,
-        form_revision=_FORM_REVISION,
+        form_number=notice.form_number or _FORM_NUMBER,
+        form_issue_date=notice.form_issue_date or _FORM_ISSUE_DATE,
+        form_revision=notice.form_revision or _FORM_REVISION,
+        record_url=record_url,
         logo_path=_logo_path(db, amo_id=ctx.amo_id),
-        is_preview=is_preview,
     )
 
 
-def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice, *, preview: bool = False) -> str:
-    reference = _SAFE_FILENAME.sub("_", str(audit.audit_ref or audit.id)).strip(" ._") or "audit"
-    marker = "_PREVIEW" if preview else ""
-    return f"{reference}_Audit_Notice_R{notice.revision_no}{marker}.pdf"
+def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice) -> str:
+    def clean(value: object, fallback: str) -> str:
+        normalized = _SAFE_FILENAME.sub("-", str(value or "")).strip(" .-_")
+        return re.sub(r"\s+", " ", normalized) or fallback
+
+    reference = clean(audit.audit_ref or audit.id, "Audit")
+    title = clean(audit.title, "Untitled")
+    notice_day = notice.notice_date.isoformat() if notice.notice_date else date.today().isoformat()
+    stem = f"(Notice) {reference} - {title} - {notice_day} - Rev {notice.revision_no:02d}"
+    return f"{stem[:251]}.pdf"
 
 
 def _artifact_path(row: QualityAuditNoticeArtifact) -> Path:
@@ -555,8 +740,17 @@ def _store_generated_artifact(
     notice: QualityAuditNotice,
     issuer: account_models.User,
     signed_at: datetime,
+    record_url: str,
 ) -> QualityAuditNoticeArtifact:
-    payload = _render_notice(db, ctx=ctx, audit=audit, notice=notice, issuer=issuer, signed_at=signed_at, is_preview=False)
+    payload = _render_notice(
+        db,
+        ctx=ctx,
+        audit=audit,
+        notice=notice,
+        issuer=issuer,
+        signed_at=signed_at,
+        record_url=record_url,
+    )
     filename = _safe_pdf_filename(audit, notice)
     stored = storage.put_stream(
         BytesIO(payload),
@@ -622,7 +816,7 @@ def _notice_notification(
         message=f"Audit notice issued: {audit.audit_ref} - {audit.title}.",
         severity=models.QMSNotificationSeverity.ACTION_REQUIRED,
         created_by_user_id=ctx.user_id,
-        action_url=f"/maintenance/{ctx.amo_code}/quality/audits/{audit.audit_ref}/setup#notice",
+        action_url=f"/maintenance/{ctx.amo_code}/quality/audits/{audit.id}/setup#notice",
         action_label="Open audit notice",
         entity_type="AUDIT_NOTICE",
         entity_id=str(notice.id),
@@ -718,6 +912,47 @@ def patch_notice_policy(
     return _policy_dict(row)
 
 
+@router.get("/audit-notice-template")
+def get_notice_template(
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    """List tenant DMS forms without exposing historical revision selection."""
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    document, revision = _resolve_notice_template(db, amo_id=ctx.amo_id)
+    return {
+        "selected_document_id": document.id if document else None,
+        "selected_current_revision_id": revision.id if revision else None,
+        "items": _notice_form_options(db, amo_id=ctx.amo_id),
+    }
+
+
+@router.put("/audit-notice-template")
+def set_notice_template(
+    payload: NoticeTemplateUpdate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", _NOTICE_PERMISSION)
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    document, revision = _resolve_notice_template(db, amo_id=ctx.amo_id, document_id=payload.document_id)
+    row = db.query(QualityAuditNoticeTemplateSetting).filter(
+        QualityAuditNoticeTemplateSetting.amo_id == ctx.amo_id,
+    ).with_for_update().first()
+    if row is None:
+        row = QualityAuditNoticeTemplateSetting(amo_id=ctx.amo_id)
+        db.add(row)
+    row.document_id = document.id if document else None
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
+    db.commit()
+    return {
+        "selected_document_id": document.id if document else None,
+        "selected_current_revision_id": revision.id if revision else None,
+        "items": _notice_form_options(db, amo_id=ctx.amo_id),
+    }
+
+
 @router.get("/audits/{audit_id}/notices")
 def list_audit_notices(
     audit_id: uuid.UUID,
@@ -766,12 +1001,12 @@ async def _stage_uploaded_pdf(file: UploadFile) -> tuple[Path, str, int, str]:
         if signature != b"%PDF-":
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid PDF document.")
         try:
-            import pypdfium2 as pdfium
+            # QMS reuses the governed Document Control parser and active-content
+            # policy instead of creating a second PDF trust boundary.
+            from amodb.apps.doc_control.pdfium_service import inspect_pdf_bytes
 
-            document = pdfium.PdfDocument(str(path))
-            page_count = len(document)
-            document.close()
-            if page_count <= 0:
+            inspection = inspect_pdf_bytes(path.read_bytes())
+            if inspection.page_count <= 0:
                 raise ValueError("PDF has no pages")
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The uploaded PDF could not be opened safely.") from exc
@@ -804,7 +1039,8 @@ async def upload_audit_notice_attachment(
     if row.status != "DRAFT":
         raise HTTPException(status_code=409, detail="A notice PDF may only be attached while the notice is in draft.")
 
-    staged, filename, size_bytes, sha256 = await _stage_uploaded_pdf(file)
+    staged, _uploaded_filename, size_bytes, sha256 = await _stage_uploaded_pdf(file)
+    filename = _safe_pdf_filename(audit, row)
     stored = None
     old_ref = row.artifact.storage_ref if row.artifact is not None else None
     try:
@@ -879,31 +1115,136 @@ def preview_audit_notice_pdf(
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
-    if row.artifact is not None:
-        path = _artifact_path(row.artifact)
-        return FileResponse(
-            path,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'inline; filename="{row.artifact.filename}"',
-                "Cache-Control": "private, no-store",
-                "X-Content-SHA256": row.artifact.sha256,
+    if row.artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_FINAL_PREVIEW_REQUIRED",
+                "message": "Generate the final signed notice before opening its controlled preview.",
             },
         )
-    issuer = db.query(account_models.User).filter(
-        account_models.User.id == row.created_by_user_id,
-        account_models.User.amo_id == ctx.amo_id,
-    ).first() or _actor(db, ctx=ctx)
-    payload = _render_notice(db, ctx=ctx, audit=audit, notice=row, issuer=issuer, signed_at=_utcnow(), is_preview=True)
-    filename = _safe_pdf_filename(audit, row, preview=True)
-    return StreamingResponse(
-        BytesIO(payload),
+    path = _artifact_path(row.artifact)
+    return FileResponse(
+        path,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{_safe_pdf_filename(audit, row)}"',
             "Cache-Control": "private, no-store",
+            "X-Content-SHA256": row.artifact.sha256,
         },
     )
+
+
+def _prepare_notice_document(
+    db: Session,
+    *,
+    request: Request,
+    ctx: TenantContext,
+    audit: models.QMSAudit,
+    notice: QualityAuditNotice,
+    issuer: account_models.User,
+    reason: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if notice.artifact is not None:
+        resolved, recipients = _resolved_recipients(
+            db,
+            amo_id=ctx.amo_id,
+            snapshot=notice.recipient_snapshot or _recipient_snapshot(audit),
+        )
+        return resolved, recipients
+    if notice.status not in {"DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"}:
+        raise HTTPException(status_code=409, detail="This notice revision cannot be prepared for final preview.")
+
+    policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=notice.policy_id) if notice.policy_id else None
+    _validate_notice_period(audit, notice, policy)
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == ctx.amo_id).one()
+    zone = _timezone_for_amo(amo)
+    opening, closing = _meetings(db, amo_id=ctx.amo_id, audit_id=audit.id, zone=zone)
+    if opening is None or closing is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_MEETINGS_REQUIRED",
+                "message": "Save both the pre-audit briefing and closing meeting before generating the final notice.",
+            },
+        )
+
+    resolved, recipients = _resolved_recipients(db, amo_id=ctx.amo_id, snapshot=_recipient_snapshot(audit))
+    if not any(
+        str(item.get("role") or "").upper() in {"AUDITEE", "EXTERNAL_AUDITEE"}
+        for item in recipients
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_AUDITEE_EMAIL_REQUIRED",
+                "message": "Add an auditee representative email and enable their notifications before generating the final notice.",
+            },
+        )
+
+    notice.audit_snapshot = _audit_snapshot(audit)
+    notice.recipient_snapshot = resolved
+    issued_at = _utcnow()
+    if notice.status == "DRAFT":
+        before = _snapshot(notice)
+        notice.status = "UNDER_REVIEW"
+        _add_event(db, ctx=ctx, notice=notice, event_type="SUBMITTED", reason=reason, before=before)
+    if notice.status == "UNDER_REVIEW":
+        before = _snapshot(notice)
+        notice.status = "APPROVED"
+        notice.approved_by_user_id = ctx.user_id
+        notice.approved_at = issued_at
+        _add_event(db, ctx=ctx, notice=notice, event_type="APPROVED", reason=reason, before=before)
+
+    before = _snapshot(notice)
+    _store_generated_artifact(
+        db,
+        ctx=ctx,
+        audit=audit,
+        notice=notice,
+        issuer=issuer,
+        signed_at=issued_at,
+        record_url=_notice_record_url(request, ctx=ctx, audit=audit, notice=notice),
+    )
+    notice.status = "GENERATED"
+    notice.generated_by_user_id = ctx.user_id
+    notice.generated_at = issued_at
+    _add_event(db, ctx=ctx, notice=notice, event_type="GENERATED", reason=reason, before=before)
+    return resolved, recipients
+
+
+@router.post("/audits/{audit_id}/notices/{notice_id}/prepare-document")
+def prepare_audit_notice_document(
+    audit_id: uuid.UUID,
+    notice_id: str,
+    request: Request,
+    payload: NoticeSubmit,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", _NOTICE_PERMISSION)
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    row = _notice_query(db).filter(
+        QualityAuditNotice.amo_id == ctx.amo_id,
+        QualityAuditNotice.audit_id == audit_id,
+        QualityAuditNotice.id == notice_id,
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Audit notice not found.")
+    if row.artifact is not None:
+        return _notice_dict(row)
+    _prepare_notice_document(
+        db,
+        request=request,
+        ctx=ctx,
+        audit=audit,
+        notice=row,
+        issuer=_actor(db, ctx=ctx),
+        reason=payload.reason.strip(),
+    )
+    db.commit()
+    return _notice_dict(_notice_query(db).filter(QualityAuditNotice.id == row.id).one())
 
 
 @router.get("/audits/{audit_id}/notices/{notice_id}/document")
@@ -914,7 +1255,7 @@ def download_audit_notice_document(
     db: Session = Depends(get_read_db),
 ):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     row = _notice_query(db).filter(
         QualityAuditNotice.amo_id == ctx.amo_id,
         QualityAuditNotice.audit_id == audit_id,
@@ -926,7 +1267,7 @@ def download_audit_notice_document(
     return FileResponse(
         path,
         media_type="application/pdf",
-        filename=row.artifact.filename,
+        filename=_safe_pdf_filename(audit, row),
         headers={"Cache-Control": "private, no-store", "X-Content-SHA256": row.artifact.sha256},
     )
 
@@ -935,6 +1276,7 @@ def download_audit_notice_document(
 def submit_and_deliver_audit_notice(
     audit_id: uuid.UUID,
     notice_id: str,
+    request: Request,
     payload: NoticeSubmit,
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
@@ -955,6 +1297,15 @@ def submit_and_deliver_audit_notice(
     if row.status not in {"DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"}:
         raise HTTPException(status_code=409, detail="This notice revision cannot be submitted.")
 
+    if row.artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_FINAL_PREVIEW_REQUIRED",
+                "message": "Generate and review the final signed notice before email delivery.",
+            },
+        )
+
     policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=row.policy_id) if row.policy_id else None
     _validate_notice_period(audit, row, policy)
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == ctx.amo_id).one()
@@ -972,7 +1323,7 @@ def submit_and_deliver_audit_notice(
     resolved_snapshot, recipients = _resolved_recipients(
         db,
         amo_id=ctx.amo_id,
-        snapshot=_recipient_snapshot(audit),
+        snapshot=row.recipient_snapshot or _recipient_snapshot(audit),
     )
     auditee_recipients = [
         item for item in recipients
@@ -1001,9 +1352,7 @@ def submit_and_deliver_audit_notice(
         _add_event(db, ctx=ctx, notice=row, event_type="APPROVED", reason=reason, before=before)
     if row.status == "APPROVED":
         before = _snapshot(row)
-        if row.artifact is None:
-            _store_generated_artifact(db, ctx=ctx, audit=audit, notice=row, issuer=issuer, signed_at=issued_at)
-        else:
+        if row.artifact.source_type == "UPLOADED":
             row.artifact.signed_by_user_id = ctx.user_id
             row.artifact.signed_by_name = _display_name(issuer)
             row.artifact.signed_by_title = str(issuer.position_title or getattr(issuer.role, "value", issuer.role) or "Quality Officer").replace("_", " ").title()
@@ -1013,8 +1362,7 @@ def submit_and_deliver_audit_notice(
         row.generated_at = issued_at
         _add_event(db, ctx=ctx, notice=row, event_type="GENERATED", reason=reason, before=before)
 
-    if row.artifact is None:
-        _store_generated_artifact(db, ctx=ctx, audit=audit, notice=row, issuer=issuer, signed_at=issued_at)
+    row.artifact.filename = _safe_pdf_filename(audit, row)
     document_path = _artifact_path(row.artifact)
     document_bytes = document_path.read_bytes()
     email_attachment = [{
@@ -1035,11 +1383,14 @@ def submit_and_deliver_audit_notice(
                 "recipient_role": recipient.get("role") or "AUDIT_RECIPIENT",
                 "audit_ref": audit.audit_ref,
                 "audit_title": audit.title,
+                "audit_area": _audit_area_label(db, audit=audit),
+                "auditee_representative": audit.auditee,
                 "planned_start": audit.planned_start.isoformat() if audit.planned_start else "",
                 "planned_end": audit.planned_end.isoformat() if audit.planned_end else "",
                 "notice_revision": row.revision_no,
                 "notice_document": row.artifact.filename,
-                "action_url": f"/maintenance/{ctx.amo_code}/quality/audits/{audit.audit_ref}/setup#notice",
+                "document_sha256": row.artifact.sha256,
+                "action_url": _notice_record_url(request, ctx=ctx, audit=audit, notice=row),
             },
             correlation_id=_notice_email_correlation(str(row.id), recipient_email),
             email_class="CRITICAL",
@@ -1090,6 +1441,25 @@ def submit_and_deliver_audit_notice(
     }
 
 
+@router.post("/audits/{audit_id}/issue-notice")
+def legacy_issue_notice_requires_controlled_document(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> None:
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", _NOTICE_PERMISSION)
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "CONTROLLED_AUDIT_NOTICE_REQUIRED",
+            "message": "Create, generate, review and send the controlled PDF from the audit Setup notice section.",
+            "audit_id": str(audit.id),
+        },
+    )
+
+
 def _create_notice(
     *,
     db: Session,
@@ -1100,6 +1470,7 @@ def _create_notice(
 ) -> QualityAuditNotice:
     policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=payload.policy_id)
     settings = _policy_values(policy)
+    template = _template_values(db, amo_id=ctx.amo_id, document_id=payload.template_document_id)
     latest = db.query(QualityAuditNotice).filter(
         QualityAuditNotice.amo_id == ctx.amo_id,
         QualityAuditNotice.audit_id == audit.id,
@@ -1110,6 +1481,7 @@ def _create_notice(
         amo_id=ctx.amo_id,
         audit_id=audit.id,
         policy_id=str(policy.id) if policy else None,
+        **template,
         revision_no=(latest.revision_no + 1) if latest else 1,
         status="DRAFT",
         required_notice_days=int(settings["minimum_notice_days"]),
@@ -1215,6 +1587,14 @@ def transition_audit_notice(
         if row.status != "APPROVED":
             raise HTTPException(status_code=409, detail="Only an APPROVED notice may be generated.")
         _validate_notice_period(audit, row, policy)
+        if row.artifact is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AUDIT_NOTICE_FINAL_PREVIEW_REQUIRED",
+                    "message": "Use the final-preview action to generate, sign and inspect the controlled PDF.",
+                },
+            )
         row.status = "GENERATED"
         row.generated_by_user_id = ctx.user_id
         row.generated_at = _utcnow()

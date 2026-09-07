@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -20,6 +20,7 @@ import {
   platformDiagnostics,
   type NetworkHistory,
   type NetworkProbeResult,
+  type SpeedTestProgress,
   type SpeedTestResult,
 } from "../../services/platformDiagnostics";
 import { EmptyState, MetricCard, PlatformShell, StatusBadge } from "./components/PlatformShared";
@@ -33,6 +34,11 @@ type Normalised = {
   jitter_ms: number | null;
   download_mbps: number | null;
   upload_mbps: number | null;
+  loaded_download_latency_ms?: number | null;
+  loaded_upload_latency_ms?: number | null;
+  packet_loss_percent?: number | null;
+  confidence?: string | null;
+  edge_location?: string | null;
   error?: string | null;
 };
 
@@ -52,7 +58,7 @@ function niceMax(value: number): number {
   return Math.ceil(value / 1000) * 1000;
 }
 
-const Gauge: React.FC<{ value: number | null }> = ({ value }) => {
+const Gauge: React.FC<{ value: number | null; label?: string }> = ({ value, label = "Mbps download" }) => {
   const v = value ?? 0;
   const max = niceMax(Math.max(v, 50));
   const pct = Math.max(0, Math.min(v / max, 1));
@@ -68,14 +74,30 @@ const Gauge: React.FC<{ value: number | null }> = ({ value }) => {
         strokeLinecap="round"
         strokeDasharray={`${(pct * length).toFixed(1)} ${length.toFixed(1)}`}
       />
+      <g className="platform-net-gauge__needle" style={{ transform: `rotate(${(pct * 180).toFixed(1)}deg)`, transformOrigin: "100px 100px" }}>
+        <line x1="100" y1="100" x2="43" y2="100" />
+      </g>
+      <circle className="platform-net-gauge__hub" cx="100" cy="100" r="5" />
       <text x="100" y="86" textAnchor="middle" className="platform-net-gauge__num">{value == null ? "—" : v.toFixed(1)}</text>
-      <text x="100" y="102" textAnchor="middle" className="platform-net-gauge__unit">Mbps download</text>
+      <text x="100" y="102" textAnchor="middle" className="platform-net-gauge__unit">{label}</text>
     </svg>
   );
 };
 
 function normaliseSpeed(result: SpeedTestResult, target: string): Normalised {
-  return { ok: true, target, latency_ms: result.latency_ms, jitter_ms: result.jitter_ms, download_mbps: result.download_mbps, upload_mbps: result.upload_mbps };
+  return {
+    ok: true,
+    target,
+    latency_ms: result.latency_ms,
+    jitter_ms: result.jitter_ms,
+    download_mbps: result.download_mbps,
+    upload_mbps: result.upload_mbps,
+    loaded_download_latency_ms: result.loaded_download_latency_ms,
+    loaded_upload_latency_ms: result.loaded_upload_latency_ms,
+    packet_loss_percent: result.packet_loss_percent,
+    confidence: result.confidence,
+    edge_location: result.edge_location,
+  };
 }
 function normaliseProbe(result: NetworkProbeResult): Normalised {
   return {
@@ -85,6 +107,9 @@ function normaliseProbe(result: NetworkProbeResult): Normalised {
     jitter_ms: result.jitter_ms,
     download_mbps: result.download_bps == null ? null : result.download_bps / 1_000_000,
     upload_mbps: result.upload_bps == null ? null : result.upload_bps / 1_000_000,
+    confidence: typeof result.details?.confidence === "string" ? result.details.confidence : null,
+    edge_location: typeof result.details?.edge_location === "string" ? result.details.edge_location : null,
+    packet_loss_percent: typeof result.details?.packet_loss_percent === "number" ? result.details.packet_loss_percent : null,
     error: result.error,
   };
 }
@@ -94,7 +119,10 @@ export default function PlatformNetworkPage() {
   const [results, setResults] = useState<Partial<Record<ScenarioKey, Normalised>>>({});
   const [running, setRunning] = useState<ScenarioKey | null>(null);
   const [stage, setStage] = useState<string>("");
+  const [progress, setProgress] = useState<SpeedTestProgress | null>(null);
+  const [durationSeconds, setDurationSeconds] = useState(8);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [window, setWindow] = useState<"24h" | "7d" | "30d">("24h");
   const [sla, setSla] = useState<number>(100);
@@ -116,16 +144,19 @@ export default function PlatformNetworkPage() {
     setTarget(key);
     setError(null);
     setStage("");
+    setProgress(null);
+    const controller = key.startsWith("client_") ? new AbortController() : null;
+    abortRef.current = controller;
     try {
       let normalised: Normalised;
       if (key === "client_internet") {
-        const r = await platformDiagnostics.clientInternetTest({ onProgress: setStage });
-        normalised = normaliseSpeed(r, "speed.cloudflare.com");
-        await platformDiagnostics.logClient("client_internet", r, "speed.cloudflare.com").catch(() => undefined);
+        const r = await platformDiagnostics.clientInternetTest({ durationSeconds, signal: controller?.signal, onProgress: setProgress });
+        normalised = normaliseSpeed(r, r.target);
+        await platformDiagnostics.logClient("client_internet", r).catch(() => undefined);
       } else if (key === "client_portal") {
-        const r = await platformDiagnostics.speedTest({ onProgress: setStage });
-        normalised = normaliseSpeed(r, "portal");
-        await platformDiagnostics.logClient("client_portal", r, "portal").catch(() => undefined);
+        const r = await platformDiagnostics.speedTest({ durationSeconds, signal: controller?.signal, onProgress: setProgress });
+        normalised = normaliseSpeed(r, r.target);
+        await platformDiagnostics.logClient("client_portal", r).catch(() => undefined);
       } else if (key === "server_internet") {
         setStage("Testing from server");
         normalised = normaliseProbe(await platformDiagnostics.internetTest());
@@ -136,12 +167,15 @@ export default function PlatformNetworkPage() {
       setResults((current) => ({ ...current, [key]: normalised }));
       void loadHistory();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Test failed");
+      setError(err instanceof DOMException && err.name === "AbortError" ? "Test cancelled." : err instanceof Error ? err.message : "Test failed");
     } finally {
+      abortRef.current = null;
       setRunning(null);
       setStage("");
     }
-  }, [loadHistory]);
+  }, [durationSeconds, loadHistory]);
+
+  const cancelTest = () => abortRef.current?.abort();
 
   // Latest known value per leg: live result if run this session, else the most
   // recent stored measurement from history.
@@ -162,6 +196,10 @@ export default function PlatformNetworkPage() {
 
   const active = results[target];
   const activeMeta = SCENARIOS.find((s) => s.key === target)!;
+  const liveValue = running === target && progress?.current_mbps != null
+    ? progress.current_mbps
+    : active?.download_mbps ?? null;
+  const liveLabel = running === target && progress?.phase === "upload" ? "Mbps upload" : "Mbps download";
   const scenarioHistory = history?.scenarios?.[chartScenario];
 
   const chartData = useMemo(
@@ -226,25 +264,30 @@ export default function PlatformNetworkPage() {
                 </button>
               ))}
             </div>
+            <label className="platform-net-profile"><span>Accuracy</span><select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))} disabled={running !== null}><option value={8}>Standard · 8s minimum</option><option value={12}>Thorough · 12s minimum</option></select></label>
           </div>
 
           <div className="platform-net-hero__body">
-            <Gauge value={active?.download_mbps ?? null} />
+            <Gauge value={liveValue} label={liveLabel} />
             <div className="platform-net-hero__metrics">
-              <div><span>Download</span><strong>{fmtMbps(active?.download_mbps)}<em>Mbps</em></strong></div>
-              <div><span>Upload</span><strong>{fmtMbps(active?.upload_mbps)}<em>Mbps</em></strong></div>
+              <div><span>Download</span><strong>{fmtMbps(running === target && progress?.phase === "download" ? progress.current_mbps : active?.download_mbps)}<em>Mbps</em></strong></div>
+              <div><span>Upload</span><strong>{fmtMbps(running === target && progress?.phase === "upload" ? progress.current_mbps : active?.upload_mbps)}<em>Mbps</em></strong></div>
               <div><span>Ping</span><strong>{fmtMs(active?.latency_ms)}<em>ms</em></strong></div>
               <div><span>Jitter</span><strong>{fmtMs(active?.jitter_ms)}<em>ms</em></strong></div>
             </div>
           </div>
 
           <div className="platform-net-hero__foot">
-            <span className="platform-muted">{running === target ? (stage || "Running…") : active?.target ? `Target: ${active.target}` : "Choose a target and run"}</span>
-            <button className="platform-btn primary" onClick={() => runScenario(target)} disabled={running !== null}>
-              {running === target ? "Testing…" : "Run test"}
-            </button>
+            <span className="platform-muted">{running === target ? (progress?.label || stage || "Running…") : active?.target ? `Target: ${active.target}${active.edge_location ? ` · edge ${active.edge_location}` : ""}` : "Choose a target and run"}</span>
+            <div className="platform-actions">
+              {running === target && abortRef.current ? <button className="platform-btn" onClick={cancelTest}>Cancel</button> : null}
+              <button className="platform-btn primary" onClick={() => runScenario(target)} disabled={running !== null}>{running === target ? "Testing…" : "Run test"}</button>
+            </div>
           </div>
+          {running === target && progress ? <div className="platform-net-live-progress"><span style={{ width: `${Math.max(2, progress.percent)}%` }} /><small>{Math.round(progress.percent)}% · {(progress.elapsed_ms / 1000).toFixed(1)}s · {progress.samples} samples{progress.stable ? " · stable" : ""}</small></div> : null}
+          {active ? <div className="platform-net-quality"><span><strong>{active.confidence?.toUpperCase() || "MEASURED"}</strong> confidence</span><span>Loaded latency ↓ <strong>{fmtMs(active.loaded_download_latency_ms)} ms</strong></span><span>Loaded latency ↑ <strong>{fmtMs(active.loaded_upload_latency_ms)} ms</strong></span><span>Packet loss <strong>{active.packet_loss_percent == null ? "—" : `${active.packet_loss_percent.toFixed(1)}%`}</strong></span></div> : null}
           {active?.error ? <div className="platform-inline-note bad">{active.error}</div> : null}
+          <p className="platform-net-method">Browser tests use warmed, duration-bound HTTP goodput and wait for stable samples. Internet tests use Cloudflare Anycast routing to a nearby edge; results measure this browser path, not certified physical line rate.</p>
         </div>
 
         <div className="platform-card">
@@ -257,7 +300,7 @@ export default function PlatformNetworkPage() {
                 <button
                   key={scenario.key}
                   className={`platform-net-leg${target === scenario.key ? " active" : ""}`}
-                  onClick={() => runScenario(scenario.key)}
+                  onClick={() => setTarget(scenario.key)}
                   disabled={running !== null}
                 >
                   <span className="platform-net-leg__id">

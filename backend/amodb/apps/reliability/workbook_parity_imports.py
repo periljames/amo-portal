@@ -34,7 +34,7 @@ ALLOWED_MIME_TYPES = {
     "application/vnd.ms-excel.sheet.macroenabled.12",
     "application/octet-stream",
 }
-IMPORT_ROLES = {"SUPERUSER", "AMO_ADMIN", "QUALITY_MANAGER", "SAFETY_MANAGER", "PLANNING_ENGINEER"}
+IMPORT_ROLES = {"QUALITY_MANAGER", "SAFETY_MANAGER", "PLANNING_ENGINEER"}
 
 
 class ReliabilityWorkbookImportBatch(Base):
@@ -116,7 +116,7 @@ def _amo_id(user: account_models.User) -> str:
 
 def _require_import_permission(user: account_models.User) -> None:
     role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
-    if bool(getattr(user, "is_superuser", False)) or bool(getattr(user, "is_amo_admin", False)) or role in IMPORT_ROLES:
+    if role in IMPORT_ROLES:
         return
     raise HTTPException(status_code=403, detail="Workbook import requires Reliability data-governance permission.")
 

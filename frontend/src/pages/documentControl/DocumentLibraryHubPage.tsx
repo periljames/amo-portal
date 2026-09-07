@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import {
   Archive,
   BookMarked,
@@ -8,20 +9,22 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock3,
-  Copy,
   FileCheck2,
   FileText,
   FilterX,
   Heart,
   History,
-  Link2,
+  LayoutGrid,
+  List,
   Search,
   ShieldCheck,
   UserRound,
+  UploadCloud,
   Workflow,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import ControlledDocumentUploadDialog from "../../components/documentControl/ControlledDocumentUploadDialog";
 import {
   discoverLibrary,
   listIntegratedLibrary,
@@ -50,11 +53,13 @@ const CATEGORIES = [
   ["", "All", BookOpen],
   ["POLICY", "Policies", ShieldCheck],
   ["MANUAL", "Manuals", BookOpen],
+  ["REGULATION", "Regulations", BookMarked],
   ["PROCEDURE", "Procedures", Workflow],
   ["WORK_INSTRUCTION", "Work instructions", ClipboardCheck],
   ["FORM", "Forms", FileText],
   ["CHECKLIST", "Checklists", FileCheck2],
   ["REGISTER", "Registers", Archive],
+  ["RECORD", "Records", Archive],
   ["EXTERNAL_DOCUMENT", "External data", Boxes],
 ] as const;
 
@@ -72,6 +77,14 @@ const PRESETS: Array<{ id: LibraryDiscoveryView | ""; label: string; icon: typeo
 ];
 
 const SEARCH_DEBOUNCE_MS = 320;
+const PRESENTATION_STORAGE_KEY = "amo.dms.library.presentation.v1";
+const DocumentLibraryRegisterGrid = lazy(() => import("./DocumentLibraryRegisterGrid"));
+
+type LibraryPresentation = "shelf" | "register";
+
+function categoryVisual(type?: string | null) {
+  return CATEGORIES.find(([value]) => value === String(type || "").toUpperCase()) || CATEGORIES[0];
+}
 
 function statusKind(status?: string | null): "success" | "warning" | "danger" | "info" | "neutral" {
   const value = String(status || "").toUpperCase();
@@ -82,25 +95,30 @@ function statusKind(status?: string | null): "success" | "warning" | "danger" | 
 }
 
 function revisionText(item: IntegratedLibraryItem): string {
-  const revision = item.latest_revision;
+  const revision = item.current_revision || item.latest_revision;
   if (!revision) return "No revision";
   return `${revision.issue_number ? `Issue ${revision.issue_number} · ` : ""}Rev ${revision.revision_number}`;
+}
+
+function controlStatus(item: IntegratedLibraryItem): string {
+  return item.read_target.control_status || (item.read_target.kind === "UNCONTROLLED" ? "CONTROLLED_DRAFT" : item.read_target.kind);
+}
+
+function metadataText(item: IntegratedLibraryItem, key: string): string {
+  const value = item.profile.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function physicalText(item: IntegratedLibraryItem): string {
+  const physical = item.library.physical;
+  if (!physical.total) return "No controlled copies";
+  return `${physical.on_shelf} on shelf · ${physical.checked_out} checked out${physical.overdue ? ` · ${physical.overdue} overdue` : ""}`;
 }
 
 function discoveryRevisionText(item: LibraryDiscoveryItem): string {
   const revision = item.current_revision || item.latest_revision;
   if (!revision) return "No revision";
   return `${revision.issue_number ? `Issue ${revision.issue_number} · ` : ""}Rev ${revision.revision_number}`;
-}
-
-function physicalText(item: IntegratedLibraryItem): string {
-  const physical = item.library.physical;
-  if (!physical.total) return "No physical copy";
-  const parts: string[] = [];
-  if (physical.on_shelf) parts.push(`${physical.on_shelf} on shelf`);
-  if (physical.checked_out) parts.push(`${physical.checked_out} with staff`);
-  if (physical.recalled) parts.push(`${physical.recalled} recalled`);
-  return parts.join(" · ") || `${physical.total} registered`;
 }
 
 function truthy(value: string | null): boolean {
@@ -141,6 +159,12 @@ export default function DocumentLibraryHubPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [presentation, setPresentation] = useState<LibraryPresentation>(() => (
+    typeof window !== "undefined" && window.localStorage.getItem(PRESENTATION_STORAGE_KEY) === "register"
+      ? "register"
+      : "shelf"
+  ));
   const hasLoadedRef = useRef(false);
 
   const filters = useMemo<IntegratedLibraryFilters>(() => ({
@@ -198,6 +222,11 @@ export default function DocumentLibraryHubPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(PRESENTATION_STORAGE_KEY, presentation);
+    }
+  }, [presentation]);
+  useEffect(() => {
     if (searchText === urlQuery) return;
     const timer = window.setTimeout(() => {
       const next = new URLSearchParams(params);
@@ -249,33 +278,124 @@ export default function DocumentLibraryHubPage() {
   };
 
   const pagination = discoveryMode ? discoveryData?.pagination : data?.pagination;
+  const offlineSnapshot = discoveryMode ? discoveryData?.offline_snapshot : data?.offline_snapshot;
   const totalPages = pagination ? Math.max(1, Math.ceil(pagination.total / pagination.per_page)) : 1;
   const canControl = Boolean((discoveryMode ? discoveryData?.capabilities.control : data?.capabilities.control));
   const hasRows = discoveryMode ? Boolean(discoveryData?.items.length) : Boolean(data?.items.length);
 
-  const openReader = (item: IntegratedLibraryItem) => {
+  const openReader = useCallback((item: IntegratedLibraryItem) => {
     const revisionId = item.read_target?.revision_id;
     if (!revisionId) return;
     navigate(`${readerBasePath}/${item.id}/rev/${revisionId}/read`);
-  };
+  }, [navigate, readerBasePath]);
 
-  const openDiscoveryReader = (item: LibraryDiscoveryItem) => {
+  const openDiscoveryReader = useCallback((item: LibraryDiscoveryItem) => {
     if (!item.read_target_revision_id) return;
     navigate(`${readerBasePath}/${item.id}/rev/${item.read_target_revision_id}/read`);
-  };
+  }, [navigate, readerBasePath]);
 
-  const selectForChange = (item: IntegratedLibraryItem) => {
+  const selectForChange = useCallback((item: IntegratedLibraryItem) => {
     navigate(`${basePath}/library/${item.id}?tab=changes`);
-  };
+  }, [basePath, navigate]);
 
-  const selectForJob = (item: IntegratedLibraryItem) => {
+  const selectForJob = useCallback((item: IntegratedLibraryItem) => {
     if (!selectedJob) return;
     if (selectingChangeDocument) {
       selectForChange(item);
       return;
     }
     navigate(documentJobTarget(basePath, item.id, selectedJob));
-  };
+  }, [basePath, navigate, selectForChange, selectedJob, selectingChangeDocument]);
+
+  const integratedColumns = useMemo<ColDef<IntegratedLibraryItem>[]>(() => [
+    {
+      headerName: "Document",
+      minWidth: 250,
+      flex: 1.5,
+      valueGetter: ({ data: item }) => item ? `${item.code} ${item.title}` : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-primary"><strong>{item.code}</strong><span>{item.title}</span></div> : null,
+      tooltipValueGetter: ({ data: item }) => item ? `${item.code} · ${item.title}${metadataText(item, "description") ? ` · ${metadataText(item, "description")}` : ""}` : "",
+    },
+    {
+      headerName: "Type / hierarchy",
+      minWidth: 210,
+      flex: 1.2,
+      valueGetter: ({ data: item }) => item ? `${item.library.node_type} ${item.library.structure_path || ""}` : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.library.node_type.replaceAll("_", " ")}</strong><small>{item.library.structure_path || "Standard document group"}</small></div> : null,
+    },
+    {
+      headerName: "Current revision",
+      minWidth: 165,
+      valueGetter: ({ data: item }) => item ? revisionText(item) : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{revisionText(item)}</strong><small>{item.current_revision?.effective_date ? `Effective ${formatDate(item.current_revision.effective_date)}` : item.latest_revision ? item.latest_revision.status.replaceAll("_", " ") : "No effective revision"}</small></div> : null,
+    },
+    {
+      headerName: "Source / format",
+      minWidth: 180,
+      flex: 0.8,
+      valueGetter: ({ data: item }) => {
+        const revision = item?.current_revision || item?.latest_revision;
+        return item ? `${metadataText(item, "source_issuer")} ${revision?.source_type || ""} ${revision?.source_filename || ""}` : "";
+      },
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => {
+        if (!item) return null;
+        const revision = item.current_revision || item.latest_revision;
+        return <div className="dlibrary__ag-stack"><strong>{metadataText(item, "source_issuer") || "Internal source"}</strong><small>{revision?.source_type || "—"}{revision?.source_filename ? ` · ${revision.source_filename}` : ""}</small></div>;
+      },
+    },
+    {
+      headerName: "Owner",
+      minWidth: 175,
+      flex: 1,
+      valueGetter: ({ data: item }) => item ? item.library.owner?.assignee?.name || item.profile.owner_department || item.owner_role : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.library.owner?.assignee?.name || item.profile.owner_department || item.owner_role}</strong><small>{item.library.responsible_department?.assignee?.name || item.profile.owner_department || "Responsibility unresolved"}</small></div> : null,
+    },
+    {
+      headerName: "Review due",
+      minWidth: 135,
+      valueGetter: ({ data: item }) => item?.profile.next_review_due || "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{formatDate(item.profile.next_review_due)}</strong><small>{item.profile.review_interval_months} month cycle</small></div> : null,
+    },
+    {
+      headerName: "Control state",
+      minWidth: 145,
+      valueGetter: ({ data: item }) => item ? `${controlStatus(item)} ${item.profile.document_class}` : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><DocumentControlStatus status={controlStatus(item)} kind={item.read_target.uncontrolled ? "warning" : "success"} /><small>{item.profile.document_class}</small></div> : null,
+    },
+    {
+      headerName: "Connected controls",
+      minWidth: 205,
+      valueGetter: ({ data: item }) => item ? `${item.library.semantic_relationships || 0} ${item.library.integrations?.count || 0} ${item.library.generated_records || 0} ${item.library.physical.total || 0}` : "",
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</strong><small>{physicalText(item)}</small></div> : null,
+    },
+    {
+      headerName: "Actions",
+      width: selectedJob && canControl ? 155 : canControl ? 205 : 90,
+      minWidth: selectedJob && canControl ? 155 : canControl ? 205 : 90,
+      pinned: "right",
+      sortable: false,
+      filter: false,
+      cellRenderer: ({ data: item }: ICellRendererParams<IntegratedLibraryItem>) => {
+        if (!item) return null;
+        const eligibility = selectedJob ? jobEligibility(item, selectedJob) : { allowed: true };
+        if (selectedJob && canControl) return <button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button>;
+        return <div className="dlibrary__ag-actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}>Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}</div>;
+      },
+    },
+  ], [basePath, canControl, navigate, openReader, selectForJob, selectedJob, selectingChangeDocument]);
+
+  const discoveryColumns = useMemo<ColDef<LibraryDiscoveryItem>[]>(() => [
+    { headerName: "Document", minWidth: 250, flex: 1.5, valueGetter: ({ data: item }) => item ? `${item.code} ${item.title}` : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-primary"><strong>{item.code}</strong><span>{item.title}</span></div> : null },
+    { headerName: "Type / hierarchy", minWidth: 210, flex: 1.2, valueGetter: ({ data: item }) => item ? `${item.node.type} ${item.node.path || ""}` : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.node.type.replaceAll("_", " ")}</strong><small>{item.node.path || "Standard document group"}</small></div> : null },
+    { headerName: "Current revision", minWidth: 170, valueGetter: ({ data: item }) => item ? discoveryRevisionText(item) : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{discoveryRevisionText(item)}</strong><small>{item.current_revision?.effective_date ? `Effective ${formatDate(item.current_revision.effective_date)}` : item.latest_revision?.source_filename || "No effective revision"}</small></div> : null },
+    { headerName: "Format", minWidth: 155, valueGetter: ({ data: item }) => item?.current_revision?.source_filename || item?.latest_revision?.source_filename || "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.current_revision?.source_filename?.split(".").pop()?.toUpperCase() || item.latest_revision?.source_filename?.split(".").pop()?.toUpperCase() || "—"}</strong><small>{item.current_revision?.source_filename || item.latest_revision?.source_filename || "No file"}</small></div> : null },
+    { headerName: "Owner", minWidth: 170, flex: 1, valueGetter: ({ data: item }) => item ? item.owner.name || item.owner.department || "Unassigned" : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.owner.name || "Unassigned"}</strong><small>{item.owner.department || "No department"}</small></div> : null },
+    { headerName: "Review due", minWidth: 145, valueGetter: ({ data: item }) => item?.next_review_due || "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{formatDate(item.next_review_due)}</strong><small>{item.last_opened_at ? `Opened ${formatDate(item.last_opened_at)}` : "Not recently opened"}</small></div> : null },
+    { headerName: "State", minWidth: 135, valueGetter: ({ data: item }) => item ? `${item.lifecycle_status} ${item.document_class}` : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><DocumentControlStatus status={item.lifecycle_status} kind={statusKind(item.lifecycle_status)} /><small>{item.document_class}</small></div> : null },
+    { headerName: "Actions", width: canControl ? 205 : 90, minWidth: canControl ? 205 : 90, pinned: "right", sortable: false, filter: false, cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}</div> : null },
+  ], [basePath, canControl, navigate, openDiscoveryReader]);
+
+  const defaultColumn = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true, suppressHeaderMenuButton: false }), []);
 
   return <DocumentControlShell
     title="Company document library"
@@ -283,6 +403,7 @@ export default function DocumentLibraryHubPage() {
     subtitle={selectedJob ? selectedJob.selectionPrompt : "Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."}
     canControl={canControl}
     actions={<>
+      {canControl && !selectedJob ? <button type="button" className="dc-button dc-button--primary" onClick={() => setUploadOpen(true)}><UploadCloud size={14} /> Register document</button> : null}
       {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/reports?view=retention`)}><Archive size={14} /> Retained records</button> : null}
     </>}
   >
@@ -311,43 +432,94 @@ export default function DocumentLibraryHubPage() {
           <select aria-label="Sort company library" value={`${filters.sort || "code"}:${filters.direction || "asc"}`} onChange={(event) => updateSort(event.target.value)}><option value="code:asc">Code A–Z</option><option value="code:desc">Code Z–A</option><option value="title:asc">Title A–Z</option><option value="title:desc">Title Z–A</option><option value="type:asc">Document type</option><option value="status:asc">Lifecycle status</option></select>
         </> : <span className="dlibrary__discovery-note">Permission-filtered discovery · server-bounded</span>}
         {refreshing ? <span role="status" aria-live="polite">Updating…</span> : null}
+        {offlineSnapshot ? <span className="dlibrary__offline-state" role="status">Offline snapshot · {formatDate(new Date(offlineSnapshot.stored_at).toISOString())}</span> : null}
+      </div>
+
+      <div className="dlibrary__presentation" aria-label="Library presentation">
+        <span>{presentation === "shelf" ? "Visual shelf" : "Controlled register"}</span>
+        <div role="group" aria-label="Choose library view">
+          <button type="button" className={presentation === "shelf" ? "active" : ""} aria-pressed={presentation === "shelf"} onClick={() => setPresentation("shelf")}><LayoutGrid size={15} /> Shelf</button>
+          <button type="button" className={presentation === "register" ? "active" : ""} aria-pressed={presentation === "register"} onClick={() => setPresentation("register")}><List size={15} /> Register</button>
+        </div>
       </div>
 
       {loading ? <DocumentControlLoading label={selectedJob ? "Loading eligible controlled documents…" : "Opening the company library…"} /> : null}
       {error && !data && !discoveryData ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !hasRows ? <DocumentControlEmpty icon={BookOpen} title="No document matches this view" message="Change the view, filters or search text. Access-controlled documents are shown only to permitted users." /> : null}
 
-      {!loading && !discoveryMode && data?.items.length ? <div className="dlibrary__table-wrap"><table className="dc-table dlibrary__table">
-        <thead><tr><th>Document</th><th>Current issue</th><th>Owner</th><th>Availability</th><th>Connected evidence</th><th>Source / currency</th><th>Action</th></tr></thead>
-        <tbody>{data.items.map((item) => {
-          const physical = item.library.physical;
-          const integration = item.library.integrations;
-          const external = item.library.external;
+      {!loading && presentation === "shelf" && !discoveryMode && data?.items.length ? <div className="dlibrary__shelf" aria-label="Controlled document shelf">
+        {data.items.map((item) => {
+          const [, typeLabel, TypeIcon] = categoryVisual(item.library.node_type);
+          const revision = item.current_revision || item.latest_revision;
           const eligibility = selectedJob ? jobEligibility(item, selectedJob) : { allowed: true };
-          return <tr key={item.id}>
-            <td><strong>{item.code}</strong><span>{item.title}</span><small>{item.library.node_type.replaceAll("_", " ")}{item.library.structure_path ? ` · ${item.library.structure_path}` : ""}</small></td>
-            <td><strong>{revisionText(item)}</strong><small>{item.latest_revision?.effective_date || "No effective date"}</small><DocumentControlStatus status={item.read_target.kind} kind={item.read_target.uncontrolled ? "warning" : "success"} /></td>
-            <td>{item.library.owner?.assignee?.name ? <><strong>{item.library.owner.assignee.name}</strong><small>{item.library.responsible_department?.assignee?.name || item.profile.owner_department}</small></> : <><strong>{item.profile.owner_department || item.owner_role}</strong><small>Named owner not resolved</small></>}</td>
-            <td><div className="dlibrary__availability"><span><BookOpen size={14} /> Digital {item.read_target.revision_id ? "available" : "unavailable"}</span><span className={physical.overdue ? "is-danger" : ""}><Copy size={14} /> {physicalText(item)}</span>{physical.overdue ? <small>{physical.overdue} overdue return{physical.overdue === 1 ? "" : "s"}</small> : null}</div></td>
-            <td>{canControl ? <div className="dlibrary__connections"><span><Link2 size={14} /> {item.library.semantic_relationships || 0} document links</span><span><Workflow size={14} /> {integration?.count || 0} module links</span><span><Archive size={14} /> {item.library.generated_records || 0} generated records</span>{integration?.modules?.length ? <small>{integration.modules.join(" · ")}</small> : null}</div> : <small>Open the document to follow permitted links.</small>}</td>
-            <td>{external ? <><strong>{external.provider}</strong><DocumentControlStatus status={external.currency_status} kind={statusKind(external.currency_status)} /><small>{external.revision_label || "Revision not received"}{external.authority ? ` · ${external.authority}` : ""}</small></> : <><DocumentControlStatus status={item.profile.document_class} kind={statusKind(item.profile.document_class)} /><small>Company-controlled source</small></>}</td>
-            <td><div className="dlibrary__actions">{selectedJob && canControl ? <><button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button>{!eligibility.allowed ? <small>{eligibility.reason}</small> : null}</> : <><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}><BookOpen size={14} /> Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</>}</div></td>
-          </tr>;
-        })}</tbody>
-      </table></div> : null}
+          return <article key={`${item.id}:${revision?.id || "none"}`} className="dlibrary-card" data-document-type={item.library.node_type}>
+            <header>
+              <div className="dlibrary-card__cover" aria-hidden="true"><TypeIcon size={22} /><span>{typeLabel}</span></div>
+              <div className="dlibrary-card__identity"><small>{item.code}</small><h2>{item.title}</h2><p>{metadataText(item, "description") || item.library.structure_path || "Controlled company information"}</p></div>
+              <DocumentControlStatus status={controlStatus(item)} kind={item.read_target.uncontrolled ? "warning" : "success"} />
+            </header>
+            <dl>
+              <div><dt>Revision</dt><dd>{revisionText(item)}</dd></div>
+              <div><dt>Effective</dt><dd>{formatDate(revision?.effective_date)}</dd></div>
+              <div><dt>Owner</dt><dd>{item.library.owner?.assignee?.name || item.profile.owner_department || item.owner_role}</dd></div>
+              <div><dt>Review</dt><dd>{formatDate(item.profile.next_review_due)}</dd></div>
+            </dl>
+            <div className="dlibrary-card__context">
+              <span>{item.library.structure_path || "Standard hierarchy"}</span>
+              <span>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</span>
+            </div>
+            <footer>
+              {selectedJob && canControl ? <button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button> : <>
+                <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}>Read current</button>
+                {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}
+              </>}
+            </footer>
+          </article>;
+        })}
+      </div> : null}
 
-      {!loading && discoveryMode && discoveryData?.items.length ? <div className="dlibrary__table-wrap"><table className="dc-table dlibrary__table dlibrary__discovery-table">
-        <thead><tr><th>Document</th><th>Current / latest</th><th>Owner</th><th>Hierarchy / source</th><th>Recent / review</th><th>State</th><th>Action</th></tr></thead>
-        <tbody>{discoveryData.items.map((item) => <tr key={item.id}>
-          <td><strong>{item.code}</strong><span>{item.title}</span><small>{item.manual_type.replaceAll("_", " ")}</small></td>
-          <td><strong>{discoveryRevisionText(item)}</strong><small>{item.current_revision?.source_filename || item.latest_revision?.source_filename || "No source filename"}</small></td>
-          <td><strong>{item.owner.name || item.owner.department || "Unassigned"}</strong><small>{item.owner.department || "No responsible department"}</small></td>
-          <td><strong>{item.node.type.replaceAll("_", " ")}</strong><small>{item.node.path || "No hierarchy path"}</small></td>
-          <td><strong>{item.last_opened_at ? `Opened ${formatDate(item.last_opened_at)}` : "Not recently opened"}</strong><small>{item.next_review_due ? `Review ${formatDate(item.next_review_due)}` : "No review due date"}{item.favorite ? " · Favorite" : ""}</small></td>
-          <td><DocumentControlStatus status={item.lifecycle_status} kind={statusKind(item.lifecycle_status)} /><small>{item.document_class}</small></td>
-          <td><div className="dlibrary__actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}><BookOpen size={14} /> Read</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Open workspace</button> : null}</div></td>
-        </tr>)}</tbody>
-      </table></div> : null}
+      {!loading && presentation === "shelf" && discoveryMode && discoveryData?.items.length ? <div className="dlibrary__shelf" aria-label="Document discovery shelf">
+        {discoveryData.items.map((item) => {
+          const [, typeLabel, TypeIcon] = categoryVisual(item.node.type);
+          const revision = item.current_revision || item.latest_revision;
+          return <article key={`${item.id}:${revision?.id || "none"}`} className="dlibrary-card" data-document-type={item.node.type}>
+            <header>
+              <div className="dlibrary-card__cover" aria-hidden="true"><TypeIcon size={22} /><span>{typeLabel}</span></div>
+              <div className="dlibrary-card__identity"><small>{item.code}</small><h2>{item.title}</h2><p>{item.node.path || "Controlled company information"}</p></div>
+              <DocumentControlStatus status={item.lifecycle_status} kind={statusKind(item.lifecycle_status)} />
+            </header>
+            <dl>
+              <div><dt>Revision</dt><dd>{discoveryRevisionText(item)}</dd></div>
+              <div><dt>Effective</dt><dd>{formatDate(revision?.effective_date)}</dd></div>
+              <div><dt>Owner</dt><dd>{item.owner.name || item.owner.department || "Unassigned"}</dd></div>
+              <div><dt>Review</dt><dd>{formatDate(item.next_review_due)}</dd></div>
+            </dl>
+            <div className="dlibrary-card__context"><span>{item.document_class} · {typeLabel}</span><span>{revision?.page_count ? `${revision.page_count} pages` : revision?.source_filename || "No source file"}</span></div>
+            <footer>
+              <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>Read current</button>
+              {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}
+            </footer>
+          </article>;
+        })}
+      </div> : null}
+
+      {!loading && presentation === "register" && !discoveryMode && data?.items.length ? <Suspense fallback={<DocumentControlLoading label="Opening controlled register…" />}>
+        <DocumentLibraryRegisterGrid
+          mode="integrated"
+          rowData={data.items}
+          columnDefs={integratedColumns}
+          defaultColDef={defaultColumn}
+        />
+      </Suspense> : null}
+
+      {!loading && presentation === "register" && discoveryMode && discoveryData?.items.length ? <Suspense fallback={<DocumentControlLoading label="Opening discovery register…" />}>
+        <DocumentLibraryRegisterGrid
+          mode="discovery"
+          rowData={discoveryData.items}
+          columnDefs={discoveryColumns}
+          defaultColDef={defaultColumn}
+        />
+      </Suspense> : null}
 
       {pagination ? <footer className="dlibrary__pagination">
         <span>{pagination.total ? `${(pagination.page - 1) * pagination.per_page + 1}–${Math.min(pagination.page * pagination.per_page, pagination.total)} of ${pagination.total}` : "0 documents"}</span>
@@ -356,6 +528,12 @@ export default function DocumentLibraryHubPage() {
         <span>Page {pagination.page} of {totalPages}</span>
         <button type="button" disabled={pagination.page >= totalPages || refreshing} onClick={() => update("page", String(pagination.page + 1))}>Next <ChevronRight size={15} /></button>
       </footer> : null}
+      <ControlledDocumentUploadDialog
+        tenant={tenant}
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onUploaded={async () => { await load(); }}
+      />
     </section>
   </DocumentControlShell>;
 }

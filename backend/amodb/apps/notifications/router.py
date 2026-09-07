@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
-from amodb.security import require_roles
-from amodb.apps.accounts.models import AccountRole, User
+from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile_or_roles
+from amodb.apps.accounts.models import User
 from amodb.database import get_db
 
 from . import models, schemas
@@ -28,13 +28,7 @@ def list_email_logs(
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_roles(
-            AccountRole.AMO_ADMIN,
-            AccountRole.QUALITY_MANAGER,
-            AccountRole.SUPERUSER,
-        )
-    ),
+    current_user: User = Depends(require_active_admin_profile_or_roles("QUALITY_MANAGER")),
 ):
     qs = db.query(models.EmailLog).filter(models.EmailLog.amo_id == current_user.amo_id)
     if status:

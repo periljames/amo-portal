@@ -184,6 +184,8 @@ class UserCreate(UserBase):
     staff_code: str
     password: str
     is_auditor: Optional[bool] = None
+    is_amo_admin: bool = False
+    access_profile_id: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -205,6 +207,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_amo_admin: Optional[bool] = None
     is_auditor: Optional[bool] = None
+    access_profile_id: Optional[str] = None
 
 
 class UserSelfUpdate(BaseModel):
@@ -240,6 +243,10 @@ class UserRead(UserBase):
     last_login_ip: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    access_profile_id: Optional[str] = None
+    access_profile_name: Optional[str] = None
+    capability_codes: list[str] = Field(default_factory=list)
+    module_access: dict[str, Literal["view", "manage"]] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True
@@ -262,6 +269,90 @@ class AccountRoleCatalogueRead(BaseModel):
     source: str
     canonical_storage: bool = True
     roles: list[AccountRoleCatalogueItem] = Field(default_factory=list)
+
+
+class AccessModuleRead(BaseModel):
+    code: str
+    label: str
+    category: str
+    description: str
+
+
+class TenantAccessProfileRead(BaseModel):
+    id: str
+    amo_id: str
+    code: str
+    display_name: str
+    base_role_key: AccountRole
+    category: str
+    reports_to_role_code: Optional[str] = None
+    description: Optional[str] = None
+    is_system: bool
+    is_regulated: bool
+    is_editable: bool
+    is_active: bool
+    version: int
+    module_permissions: dict[str, Literal["view", "manage"]] = Field(default_factory=dict)
+    assigned_user_count: int = 0
+
+
+class TenantAccessProfileOptionRead(BaseModel):
+    id: str
+    code: str
+    display_name: str
+    base_role_key: AccountRole
+    category: str
+    is_regulated: bool
+
+
+class TenantAccessProfileCreate(BaseModel):
+    code: str = Field(min_length=2, max_length=64)
+    display_name: str = Field(min_length=2, max_length=160)
+    base_role_key: AccountRole
+    category: str = Field(default="CUSTOM", min_length=2, max_length=64)
+    reports_to_role_code: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    module_permissions: dict[str, Literal["view", "manage"]] = Field(default_factory=dict)
+
+
+class TenantAccessProfileUpdate(BaseModel):
+    expected_version: int = Field(ge=1)
+    display_name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    base_role_key: Optional[AccountRole] = None
+    category: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    reports_to_role_code: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    module_permissions: Optional[dict[str, Literal["view", "manage"]]] = None
+    is_active: Optional[bool] = None
+
+
+class TenantAccessFrameworkRead(BaseModel):
+    source: str = "KCAR 2025 / Legal Notice No. 20 and tenant organization framework"
+    modules: list[AccessModuleRead] = Field(default_factory=list)
+    profiles: list[TenantAccessProfileRead] = Field(default_factory=list)
+    initialized: bool = True
+
+
+class TenantAccessFrameworkInitializeResult(BaseModel):
+    created: int = 0
+    repaired: int = 0
+    assigned: int = 0
+    total: int = 0
+
+
+class UserAccessProfileAssignment(BaseModel):
+    access_profile_id: str
+
+
+class UserAccessContextRead(BaseModel):
+    user_id: str
+    access_profile_id: Optional[str] = None
+    access_profile_name: str
+    base_role_key: AccountRole
+    is_amo_admin: bool
+    is_superuser: bool
+    capability_codes: list[str] = Field(default_factory=list)
+    module_access: dict[str, Literal["view", "manage"]] = Field(default_factory=dict)
 
 
 
@@ -336,7 +427,10 @@ class FirstSuperuserCreate(BaseModel):
     The endpoint will:
     - create (or reuse) a ROOT AMO
     - force role = SUPERUSER
-    - set is_superuser = True, is_amo_admin = True
+    - set is_superuser = True, is_amo_admin = False
+
+    Platform support authority is deliberately separate from the tenant
+    administrator overlay.
     """
     email: EmailStr
     first_name: str
@@ -972,6 +1066,8 @@ class AdminUserDirectoryItem(BaseModel):
     is_active: bool
     is_superuser: bool
     is_amo_admin: bool
+    access_profile_id: Optional[str] = None
+    access_profile_name: Optional[str] = None
     display_title: str
     availability_status: Optional[str] = None
     last_login_at: Optional[datetime] = None
@@ -1123,17 +1219,18 @@ class BulkUserActionRequest(BaseModel):
     action: Literal[
         "enable",
         "disable",
-        "delete",
         "assign_department",
         "clear_department",
-        "change_role",
+        "assign_access_profile",
         "add_group",
         "remove_group",
         "schedule_leave",
         "return_from_leave",
+        "delete",
     ]
     department_id: Optional[str] = None
     role: Optional[AccountRole] = None
+    access_profile_id: Optional[str] = None
     group_id: Optional[str] = None
     note: Optional[str] = None
     effective_from: Optional[datetime] = None

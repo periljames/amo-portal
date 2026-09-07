@@ -19,7 +19,6 @@ router = APIRouter(
 )
 
 FINANCE_WRITE_ROLES = [
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.FINANCE_MANAGER,
     account_models.AccountRole.ACCOUNTS_OFFICER,
 ]

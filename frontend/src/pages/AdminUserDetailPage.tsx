@@ -3,29 +3,24 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { useAdminAccountRoles } from "../hooks/useAdminAccountRoles";
 import { getContext } from "../services/auth";
+import { getTenantAccessFramework } from "../services/accessProfiles";
 import {
   applyAdminUserEmploymentAction,
   bulkAdminUserAction,
-  deleteAdminUserAuthorisation,
   downloadAdminUserExport,
   enableAdminUser,
   disableAdminUser,
   forceAdminUserPasswordReset,
   getAdminUserWorkspace,
-  grantAdminUserAuthorisation,
-  listAdminAuthorisationTypes,
   listAdminDepartments,
   listAdminGroups,
   notifyAdminUser,
-  permanentDeleteAdminUser,
   revokeAdminUserAccess,
   scheduleAdminUserReview,
   updateAdminUser,
 } from "../services/adminUsers";
 import type {
-  AccountRole,
   AdminDepartmentRead,
   AdminUserGroupRead,
   AdminUserUpdatePayload,
@@ -102,7 +97,7 @@ const AdminUserDetailPage: React.FC = () => {
   const resolvedUserId = userId ?? "";
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("profile");
-  const [profileRole, setProfileRole] = useState<AccountRole | "">("");
+  const [profileAccessId, setProfileAccessId] = useState("");
   const [profileDepartmentId, setProfileDepartmentId] = useState("");
   const [profileTitle, setProfileTitle] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
@@ -111,13 +106,8 @@ const AdminUserDetailPage: React.FC = () => {
   const [notifyMessage, setNotifyMessage] = useState("");
   const [reviewTitle, setReviewTitle] = useState("Authorization review");
   const [reviewDueAt, setReviewDueAt] = useState("");
-  const [permissionTypeId, setPermissionTypeId] = useState("");
-  const [permissionScopeText, setPermissionScopeText] = useState("");
-  const [permissionEffectiveFrom, setPermissionEffectiveFrom] = useState("");
-  const [permissionExpiresAt, setPermissionExpiresAt] = useState("");
   const [groupToAddId, setGroupToAddId] = useState("");
   const [lifecycleAction, setLifecycleAction] = useState<UserEmploymentActionPayload["action"]>("transfer");
-  const [lifecycleRole, setLifecycleRole] = useState<AccountRole | "">("");
   const [lifecycleDepartmentId, setLifecycleDepartmentId] = useState("");
   const [lifecycleTitle, setLifecycleTitle] = useState("");
   const [lifecycleStatus, setLifecycleStatus] = useState("");
@@ -125,7 +115,6 @@ const AdminUserDetailPage: React.FC = () => {
   const [lifecycleEffectiveFrom, setLifecycleEffectiveFrom] = useState("");
   const [lifecycleEffectiveTo, setLifecycleEffectiveTo] = useState("");
   const [feedback, setFeedback] = useState("");
-  const roleCatalogue = useAdminAccountRoles(profileRole || lifecycleRole);
 
   const workspaceQuery = useQuery({
     queryKey: ["admin-user-workspace", resolvedUserId],
@@ -146,17 +135,17 @@ const AdminUserDetailPage: React.FC = () => {
     enabled: !!resolvedUserId,
   });
 
-  const permissionTypesQuery = useQuery({
-    queryKey: ["admin-user-authorisation-types", resolvedAmoCode],
-    queryFn: () => listAdminAuthorisationTypes(),
-    enabled: !!resolvedUserId,
-  });
-
   const workspace = workspaceQuery.data;
   const user = workspace?.user;
+  const accessFrameworkQuery = useQuery({
+    queryKey: ["accounts", "access-framework", user?.amo_id],
+    queryFn: () => getTenantAccessFramework(user?.amo_id),
+    enabled: Boolean(user?.amo_id) && !user?.is_superuser,
+    staleTime: 30_000,
+  });
+  const accessProfiles = (accessFrameworkQuery.data?.profiles || []).filter((profile) => profile.is_active);
   const departments = departmentsQuery.data ?? [];
   const groups = groupsQuery.data ?? [];
-  const permissionTypes = permissionTypesQuery.data ?? [];
 
   const refreshWorkspace = async () => {
     await Promise.all([
@@ -168,15 +157,13 @@ const AdminUserDetailPage: React.FC = () => {
 
   React.useEffect(() => {
     if (!user) return;
-    setProfileRole(user.role);
+    setProfileAccessId(user.access_profile_id || "");
     setProfileDepartmentId(user.department_id || "");
     setProfileTitle(user.position_title || "");
     setProfilePhone(user.phone || "");
     setProfileSecondaryPhone(user.secondary_phone || "");
-    setLifecycleRole(user.role);
     setLifecycleDepartmentId(user.department_id || "");
     setLifecycleTitle(user.position_title || "");
-    setPermissionEffectiveFrom(new Date().toISOString().slice(0, 10));
   }, [user?.id]);
 
   const updateUserMutation = useMutation({
@@ -217,32 +204,6 @@ const AdminUserDetailPage: React.FC = () => {
     },
   });
 
-  const permissionGrantMutation = useMutation({
-    mutationFn: () =>
-      grantAdminUserAuthorisation({
-        user_id: resolvedUserId,
-        authorisation_type_id: permissionTypeId,
-        scope_text: permissionScopeText || undefined,
-        effective_from: permissionEffectiveFrom,
-        expires_at: permissionExpiresAt || undefined,
-      }),
-    onSuccess: async () => {
-      setFeedback("Permission granted.");
-      setPermissionTypeId("");
-      setPermissionScopeText("");
-      setPermissionExpiresAt("");
-      await refreshWorkspace();
-    },
-  });
-
-  const deletePermissionMutation = useMutation({
-    mutationFn: (permissionId: string) => deleteAdminUserAuthorisation(permissionId),
-    onSuccess: async () => {
-      setFeedback("Permission removed.");
-      await refreshWorkspace();
-    },
-  });
-
   const groupMembershipMutation = useMutation({
     mutationFn: ({ action, groupId }: { action: "add_group" | "remove_group"; groupId: string }) =>
       bulkAdminUserAction({ user_ids: [resolvedUserId], action, group_id: groupId }),
@@ -265,15 +226,6 @@ const AdminUserDetailPage: React.FC = () => {
     onSuccess: (result) => {
       downloadBlob(result);
       setFeedback(`Export ready: ${result.filename}`);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => permanentDeleteAdminUser(resolvedUserId),
-    onSuccess: async () => {
-      setFeedback("User permanently deleted.");
-      await queryClient.invalidateQueries({ queryKey: ["admin-user-directory"] });
-      navigate(`/maintenance/${resolvedAmoCode}/admin/users`);
     },
   });
 
@@ -347,7 +299,7 @@ const AdminUserDetailPage: React.FC = () => {
         <div className="aum-tabs" role="tablist" aria-label="User profile sections">
           {([
             ["profile", "Profile"],
-            ["permissions", "Permissions"],
+            ["permissions", "Certifying authorizations"],
             ["groups", "Groups"],
             ["tasks", "Tasks"],
             ["lifecycle", "Lifecycle"],
@@ -366,7 +318,9 @@ const AdminUserDetailPage: React.FC = () => {
               <h2>Profile details</h2>
               <div className="aum-definition-list">
                 <div><span>Staff code</span><strong>{user.staff_code}</strong></div>
-                <div><span>Role</span><strong>{formatRole(user.role)}</strong></div>
+                <div><span>Access profile</span><strong>{user.access_profile_name || formatRole(user.role)}</strong></div>
+                <div><span>Stable persona</span><strong>{formatRole(user.role)}</strong></div>
+                <div><span>Tenant administrator</span><strong>{user.is_amo_admin ? "Yes" : "No"}</strong></div>
                 <div><span>Phone</span><strong>{user.phone || "—"}</strong></div>
                 <div><span>Secondary phone</span><strong>{user.secondary_phone || "—"}</strong></div>
                 <div><span>Department</span><strong>{workspace.department_name || "—"}</strong></div>
@@ -378,12 +332,13 @@ const AdminUserDetailPage: React.FC = () => {
             <article className="aum-panel">
               <h2>Edit account</h2>
               <div className="aum-stack">
-                <label className="aum-field"><span>Role</span><select className="aum-select" value={profileRole} onChange={(event) => { const role = event.target.value as AccountRole; const definition = roleCatalogue.roles.find((item) => item.key === role); setProfileRole(role); if (definition?.regulated) setProfileTitle(definition.label); }}>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select><small>{roleCatalogue.roles.find((role) => role.key === profileRole)?.permission_summary.join(" · ")}</small></label>
+                {user.is_superuser ? <div className="aum-note">Platform superuser access is ROOT-scoped and cannot be converted to a tenant profile.</div> : <label className="aum-field"><span>Tenant access profile</span><select className="aum-select" value={profileAccessId} onChange={(event) => setProfileAccessId(event.target.value)}><option value="">Select profile</option>{accessProfiles.map((profile) => <option key={profile.id} value={profile.id} disabled={profile.is_regulated && profile.id !== user.access_profile_id}>{profile.is_regulated ? "KCAR 2025 appointment · " : ""}{profile.display_name}</option>)}</select><small>Prescribed profiles are assigned through Workforce appointments. Supporting profiles control module access; personal authorization remains separate.</small></label>}
                 <label className="aum-field"><span>Department</span><select className="aum-select" value={profileDepartmentId} onChange={(event) => setProfileDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
-                <label className="aum-field"><span>Job role / title</span><input className="aum-input" value={profileTitle} onChange={(event) => setProfileTitle(event.target.value)} /></label>
+                <label className="aum-field"><span>Employment / display title</span><input className="aum-input" value={profileTitle} onChange={(event) => setProfileTitle(event.target.value)} /><small>Descriptive only; changing this text cannot elevate access.</small></label>
+                {!user.is_superuser ? <div className="aum-note">Tenant administrator: {user.is_amo_admin ? "permanent overlay active" : "not assigned"}. Grant or revoke this overlay only through Access governance, with Accountable Executive and Quality Manager approval.</div> : null}
                 <label className="aum-field"><span>Primary phone</span><input className="aum-input" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
                 <label className="aum-field"><span>Secondary phone</span><input className="aum-input" value={profileSecondaryPhone} onChange={(event) => setProfileSecondaryPhone(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" onClick={() => updateUserMutation.mutate({ role: (profileRole || user.role) as AccountRole, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null })}>
+                <button type="button" className="aum-button aum-button--primary" disabled={!user.is_superuser && !profileAccessId} onClick={() => updateUserMutation.mutate({ access_profile_id: user.is_superuser ? undefined : profileAccessId, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null })}>
                   Save profile changes
                 </button>
               </div>
@@ -401,18 +356,8 @@ const AdminUserDetailPage: React.FC = () => {
                 <button type="button" className="aum-button aum-button--primary" disabled={!notifySubject.trim() || !notifyMessage.trim()} onClick={() => notifyMutation.mutate()}>Send notification</button>
                 <div className="aum-row-actions wrap top-gap">
                   <button type="button" className="aum-button aum-button--ghost" onClick={() => exportMutation.mutate()}>Export full record</button>
-                  <button
-                    type="button"
-                    className="aum-button aum-button--danger"
-                    onClick={() => {
-                      if (window.confirm(`Permanently delete ${user.full_name}? This cannot be undone.`)) {
-                        deleteMutation.mutate();
-                      }
-                    }}
-                  >
-                    Hard delete
-                  </button>
                 </div>
+                <div className="aum-note">Offboarding preserves this regulated personnel record. Disable the account, revoke sessions, and complete the employment lifecycle; users are never hard-deleted.</div>
               </div>
             </article>
           </section>
@@ -421,30 +366,26 @@ const AdminUserDetailPage: React.FC = () => {
         {activeTab === "permissions" ? (
           <section className="aum-two-col">
             <article className="aum-panel">
-              <div className="aum-panel-header"><div><h2>Grant permission</h2><p>Grant a permission type to this user with scope and validity dates.</p></div></div>
+              <div className="aum-panel-header"><div><h2>Governed certifying authorization</h2><p>Portal administrators can inspect this record but cannot issue or withdraw maintenance privileges. Authorization decisions belong to the competence workflow and retain readiness, recommendation, committee and decision evidence.</p></div></div>
               <div className="aum-stack">
-                <label className="aum-field"><span>Permission type</span><select className="aum-select" value={permissionTypeId} onChange={(event) => setPermissionTypeId(event.target.value)}><option value="">Select permission type</option>{permissionTypes.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</select></label>
-                <label className="aum-field"><span>Scope text</span><input className="aum-input" value={permissionScopeText} onChange={(event) => setPermissionScopeText(event.target.value)} placeholder="Fleet / shop / work scope" /></label>
-                <label className="aum-field"><span>Effective from</span><input className="aum-input" type="date" value={permissionEffectiveFrom} onChange={(event) => setPermissionEffectiveFrom(event.target.value)} /></label>
-                <label className="aum-field"><span>Expires at</span><input className="aum-input" type="date" value={permissionExpiresAt} onChange={(event) => setPermissionExpiresAt(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" disabled={!permissionTypeId || !permissionEffectiveFrom} onClick={() => permissionGrantMutation.mutate()}>
-                  Grant permission
+                <button type="button" className="aum-button aum-button--primary" onClick={() => navigate(`/maintenance/${resolvedAmoCode}/training/competence/authorizations`)}>
+                  Open Training &amp; Competence authorizations
                 </button>
               </div>
               <div className="aum-stack top-gap">
                 <label className="aum-field"><span>Review title</span><input className="aum-input" value={reviewTitle} onChange={(event) => setReviewTitle(event.target.value)} /></label>
                 <label className="aum-field"><span>Review due date</span><input className="aum-input" type="datetime-local" value={reviewDueAt} onChange={(event) => setReviewDueAt(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--ghost" disabled={!reviewTitle.trim()} onClick={() => reviewMutation.mutate()}>Schedule permission review</button>
+                <button type="button" className="aum-button aum-button--ghost" disabled={!reviewTitle.trim()} onClick={() => reviewMutation.mutate()}>Schedule authorization review</button>
               </div>
             </article>
             <article className="aum-panel">
-              <div className="aum-panel-header"><div><h2>Current permissions</h2><p>Delete any permission that should no longer remain in force.</p></div></div>
+              <div className="aum-panel-header"><div><h2>Certifying authorization record</h2><p>Read-only visibility. Expired, restricted, suspended and withdrawn records remain available as auditable history.</p></div></div>
               <div className="aum-table-wrap">
                 <table className="aum-table">
-                  <thead><tr><th>Code</th><th>Permission</th><th>Scope</th><th>Effective</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Code</th><th>Authorization</th><th>Scope</th><th>Effective</th><th>Expires</th><th>Status</th></tr></thead>
                   <tbody>
                     {workspace.permissions.length === 0 ? (
-                      <tr><td colSpan={7} className="aum-empty-row">No permissions recorded.</td></tr>
+                      <tr><td colSpan={6} className="aum-empty-row">No certifying authorizations recorded.</td></tr>
                     ) : workspace.permissions.map((permission) => (
                       <tr key={permission.id}>
                         <td>{permission.code}</td>
@@ -453,7 +394,6 @@ const AdminUserDetailPage: React.FC = () => {
                         <td>{permission.effective_from}</td>
                         <td>{permission.expires_at || "—"}</td>
                         <td>{permission.is_currently_valid ? "Current" : "Expired / Revoked"}</td>
-                        <td><button type="button" className="aum-button aum-button--danger" onClick={() => deletePermissionMutation.mutate(permission.id)}>Delete</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -516,17 +456,17 @@ const AdminUserDetailPage: React.FC = () => {
         {activeTab === "lifecycle" ? (
           <section className="aum-two-col">
             <article className="aum-panel">
-              <div className="aum-panel-header"><div><h2>Employment lifecycle</h2><p>Promote, demote, transfer, schedule leave, reinstate, or resign the employee from this workspace.</p></div></div>
+              <div className="aum-panel-header"><div><h2>Employment lifecycle</h2><p>Manage employment status, descriptive transfer data and availability. Promotions and demotions belong to effective-dated Workforce positions.</p></div></div>
               <div className="aum-stack">
-                <label className="aum-field"><span>Action</span><select className="aum-select" value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="promote">Promote</option><option value="demote">Demote</option><option value="transfer">Transfer</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option></select></label>
-                <label className="aum-field"><span>Role</span><select className="aum-select" value={lifecycleRole} onChange={(event) => { const role = event.target.value as AccountRole; const definition = roleCatalogue.roles.find((item) => item.key === role); setLifecycleRole(role); if (definition?.regulated) setLifecycleTitle(definition.label); }}>{roleCatalogue.roles.map((role) => <option key={role.key} value={role.key}>{role.regulated ? "KCAR 2025 · " : ""}{role.label}</option>)}</select></label>
+                <label className="aum-field"><span>Action</span><select className="aum-select" value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value as UserEmploymentActionPayload["action"])}><option value="new_hire">New hire</option><option value="transfer">Transfer descriptive department</option><option value="resign">Resign</option><option value="reinstate">Reinstate</option><option value="reemploy">Re-employ</option><option value="schedule_leave">Schedule leave</option><option value="return_from_leave">Return from leave</option></select></label>
                 <label className="aum-field"><span>Department</span><select className="aum-select" value={lifecycleDepartmentId} onChange={(event) => setLifecycleDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
                 <label className="aum-field"><span>Job role / title</span><input className="aum-input" value={lifecycleTitle} onChange={(event) => setLifecycleTitle(event.target.value)} /></label>
                 <label className="aum-field"><span>Employment status text</span><input className="aum-input" value={lifecycleStatus} onChange={(event) => setLifecycleStatus(event.target.value)} /></label>
                 <label className="aum-field"><span>Note</span><textarea className="aum-textarea" rows={3} value={lifecycleNote} onChange={(event) => setLifecycleNote(event.target.value)} /></label>
                 <label className="aum-field"><span>{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? "New workforce start" : "Effective from"}</span><input className="aum-input" type="datetime-local" required={lifecycleAction === "reinstate" || lifecycleAction === "reemploy"} value={lifecycleEffectiveFrom} onChange={(event) => setLifecycleEffectiveFrom(event.target.value)} />{lifecycleAction === "reinstate" || lifecycleAction === "reemploy" ? <small>This starts a new contract period and becomes the locked workforce date.</small> : null}</label>
                 <label className="aum-field"><span>Effective to</span><input className="aum-input" type="datetime-local" value={lifecycleEffectiveTo} onChange={(event) => setLifecycleEffectiveTo(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" disabled={(lifecycleAction === "reinstate" || lifecycleAction === "reemploy") && !lifecycleEffectiveFrom} onClick={() => lifecycleMutation.mutate({ action: lifecycleAction, role: lifecycleRole || undefined, department_id: lifecycleDepartmentId || undefined, position_title: lifecycleTitle || undefined, employment_status: lifecycleStatus || undefined, note: lifecycleNote || undefined, effective_from: lifecycleEffectiveFrom || undefined, effective_to: lifecycleEffectiveTo || undefined })}>Apply lifecycle action</button>
+                <div className="aum-note">Access-profile changes belong in Profile. Governed position changes belong in Workforce; lifecycle notes and display titles do not grant authority.</div>
+                <button type="button" className="aum-button aum-button--primary" disabled={(lifecycleAction === "reinstate" || lifecycleAction === "reemploy") && !lifecycleEffectiveFrom} onClick={() => lifecycleMutation.mutate({ action: lifecycleAction, department_id: lifecycleDepartmentId || undefined, position_title: lifecycleTitle || undefined, employment_status: lifecycleStatus || undefined, note: lifecycleNote || undefined, effective_from: lifecycleEffectiveFrom || undefined, effective_to: lifecycleEffectiveTo || undefined })}>Apply lifecycle action</button>
               </div>
             </article>
             <article className="aum-panel">

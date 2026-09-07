@@ -11,6 +11,7 @@ export type DocumentationNodeType =
   | "FORM"
   | "CHECKLIST"
   | "REGISTER"
+  | "RECORD"
   | "EXTERNAL_DOCUMENT"
   | "RECORD_SERIES";
 
@@ -223,6 +224,27 @@ export type DocumentationRecord = {
   download_url: string;
 };
 
+export type DocumentationRecordDetail = DocumentationRecord & {
+  template?: { code: string; title: string; manual_type: string } | null;
+  template_revision?: {
+    issue_number?: string | null;
+    revision_number: string;
+    effective_date?: string | null;
+  } | null;
+  record_series?: { id: string; code: string; title: string; path: string } | null;
+  source_context: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  reviewed_by_user_id?: string | null;
+  reviewed_at?: string | null;
+  integrity: {
+    status: "VERIFIED" | "MISSING" | "MISMATCH";
+    expected_sha256?: string | null;
+    actual_sha256?: string | null;
+    size_bytes?: number;
+  };
+  capabilities: { review: boolean; control: boolean };
+};
+
 function tenantPath(tenant: string): string {
   return encodeURIComponent(tenant.toLowerCase());
 }
@@ -238,6 +260,28 @@ export async function getDocumentationNodeConnections(
   return apiGet<DocumentationNodeConnections>(
     `/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/nodes/${encodeURIComponent(nodeId)}/connections`,
     { headers: authHeaders() },
+  );
+}
+
+export async function getDocumentationRecord(
+  tenant: string,
+  recordId: string,
+): Promise<DocumentationRecordDetail> {
+  return apiGet<DocumentationRecordDetail>(
+    `/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/records/${encodeURIComponent(recordId)}`,
+    { headers: authHeaders() },
+  );
+}
+
+export async function reviewDocumentationRecord(
+  tenant: string,
+  recordId: string,
+  payload: { decision: "ACCEPT" | "RETURN"; comments: string; evidence_references?: string[] },
+): Promise<{ id: string; record_number: string; status: string; reviewed_by_user_id?: string | null; reviewed_at?: string | null }> {
+  return apiPost(
+    `/doc-control/workspace/t/${tenantPath(tenant)}/knowledge/records/${encodeURIComponent(recordId)}/review`,
+    JSON.stringify(payload),
+    { headers: authHeaders({ "Content-Type": "application/json" }) },
   );
 }
 

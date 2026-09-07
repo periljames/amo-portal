@@ -28,6 +28,7 @@ class QualityAuditChecklistTemplate(Base):
     description = Column(Text, nullable=True)
     category = Column(String(64), nullable=True)
     audit_kind = Column(String(32), nullable=True)
+    canonical_document_id = Column(String(36), ForeignKey("manuals.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(16), nullable=False, default="ACTIVE", server_default="ACTIVE")
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -85,3 +86,27 @@ class QualityAuditChecklistBinding(Base):
     application_reason = Column(Text, nullable=False)
     applied_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     applied_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class QualityAuditChecklistMemory(Base):
+    """Tenant-scoped reuse memory for similar audit preparation contexts."""
+
+    __tablename__ = "quality_audit_checklist_memory"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "context_key", "selection_key", name="uq_quality_audit_checklist_memory_selection"),
+        Index("ix_quality_audit_checklist_memory_context", "amo_id", "context_key", "last_used_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    context_key = Column(String(255), nullable=False)
+    selection_key = Column(String(96), nullable=False)
+    audit_scope_code = Column(String(32), nullable=True)
+    audit_kind = Column(String(32), nullable=True)
+    auditee_key = Column(String(255), nullable=True)
+    template_id = Column(String(36), ForeignKey("quality_audit_checklist_templates.id", ondelete="CASCADE"), nullable=False)
+    canonical_document_id = Column(String(36), ForeignKey("manuals.id", ondelete="SET NULL"), nullable=True)
+    last_audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="SET NULL"), nullable=True)
+    usage_count = Column(Integer, nullable=False, default=1, server_default="1")
+    first_used_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

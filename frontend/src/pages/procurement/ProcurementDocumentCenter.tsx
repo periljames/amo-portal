@@ -413,7 +413,7 @@ export default function ProcurementDocumentCenter({
   const download = async (document: ProcurementDocument) => {
     try {
       await downloadProcurementDocument(amoCode, document);
-      pushToast({ title: "Download started", message: document.original_filename || document.title, variant: "success", sound: false });
+      pushToast({ title: "Download started", message: document.original_filename || document.title, variant: "success" });
     } catch (caught) {
       pushToast({ title: "Download failed", message: caught instanceof Error ? caught.message : "The retained file could not be opened.", variant: "error", sound: true });
     }

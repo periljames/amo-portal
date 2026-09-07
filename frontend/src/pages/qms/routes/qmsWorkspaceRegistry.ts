@@ -59,7 +59,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     label: "Assurance",
     shortLabel: "Assurance",
     permission: "qms.audit.view",
-    description: "Audits, findings, corrective action, evidence, and governed assurance case review for the Quality programme.",
+    description: "Audits, findings, corrective action, evidence, and effectiveness review for the Quality programme.",
     activePrefixes: [
       "assurance",
       "audits",
@@ -94,7 +94,7 @@ export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId
   const base = `/maintenance/${encodeSegment(amoCode)}/quality`;
   if (workspace === "control-room") return base;
   if (workspace === "planner") return `${base}/calendar/week`;
-  // Land on the audits hub — Assurance cases remain available from Assurance related nav.
+  // Assurance work starts from the consolidated audits hub.
   if (workspace === "assurance") return `${base}/audits/dashboard`;
   return `${base}?workspace=${encodeSegment(workspace)}`;
 }

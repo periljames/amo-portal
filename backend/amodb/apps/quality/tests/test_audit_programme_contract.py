@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+import inspect
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -16,20 +18,32 @@ from amodb.apps.quality.audit_programme_queue_router import router as audit_prog
 from amodb.apps.quality.audit_programme_router import (
     ProgrammeCreate,
     ProgrammeItemCreate,
+    ProgrammeItemPatch,
+    ProgrammeQualityReview,
     _TRANSITIONS,
     _assert_editable,
+    _assert_exportable,
+    _load_programme,
+    _audit_type_for_entity,
+    _normalise_supporting_auditors,
     _programme_kind_title,
     _programme_readiness,
     _recurrence_for_interval,
     _validate_item_window,
+    _working_day_count,
+    patch_programme_item,
     router as audit_programme_router,
 )
+from amodb.apps.quality.audit_deferral_router import _load_item as _load_deferral_item
+from amodb.apps.quality.audit_programme_occurrence_router import _programme_item as _load_occurrence_item
 from amodb.apps.quality.audit_programme_schedule_router import (
     _RECURRENCE_TO_FREQUENCY,
     _expected_frequency,
+    _programme_and_item as _load_schedule_item,
     router as audit_programme_schedule_router,
 )
 from amodb.apps.quality.planner_assignment_guard_router import router as planner_assignment_guard_router
+from amodb.apps.quality.router import _audit_allows_user_by_audit
 from amodb.apps.quality.enums import QMSAuditScheduleFrequency
 
 
@@ -39,6 +53,15 @@ def _route_methods(router):
 
 def _catchall_index(router) -> int:
     return next(index for index, route in enumerate(router.routes) if str(route.path).endswith("/{module_path:path}"))
+
+
+def _workflow_action_index(router) -> int:
+    return next(
+        index
+        for index, route in enumerate(router.routes)
+        if str(route.path).endswith("/{module}/{record_id}/{action}")
+        and "POST" in (getattr(route, "methods", None) or set())
+    )
 
 
 def _matching(router, path: str, method: str):
@@ -74,7 +97,11 @@ def test_audit_programme_router_exposes_governed_bounded_contract() -> None:
         ("/audit-programmes/{programme_id}/optimizer", "GET"),
         ("/audit-programmes/{programme_id}/optimizer/rebuild", "POST"),
         ("/audit-programmes/{programme_id}/transitions", "POST"),
+        ("/audit-programmes/{programme_id}/quality-review", "POST"),
+        ("/audit-programmes/{programme_id}/schedule.pdf", "GET"),
+        ("/audit-programmes/{programme_id}/schedule.ics", "GET"),
         ("/audit-programmes/{programme_id}/amendments", "POST"),
+        ("/audit-programmes/universe/ensure-defaults", "POST"),
         ("/audit-programmes/universe/items", "GET"),
         ("/audit-programmes/universe/items", "POST"),
         ("/audit-programmes/universe/items/{universe_item_id}", "PATCH"),
@@ -141,6 +168,14 @@ def test_audit_programme_routes_are_promoted_before_generic_quality_catchall() -
         assert router.routes.index(optimizer[0]) < _catchall_index(router)
 
 
+def test_universe_defaults_write_precedes_generic_workflow_action() -> None:
+    path = "/api/maintenance/{amo_code}/quality/audit-programmes/universe/ensure-defaults"
+    matches = _matching(canonical_router.router, path, "POST")
+    assert len(matches) == 1
+    assert matches[0].endpoint.__name__ == "ensure_universe_defaults"
+    assert canonical_router.router.routes.index(matches[0]) < _workflow_action_index(canonical_router.router)
+
+
 def test_audit_programme_schedule_lineage_migration_extends_single_chain() -> None:
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
     revision = script.get_revision("quality_260808_prog_schedule")
@@ -166,6 +201,8 @@ def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
     assert programme_table.c.amo_id.nullable is False
     assert programme_table.c.continuous_monitoring_enabled.nullable is False
     assert programme_table.c.optimizer_version.nullable is False
+    assert programme_table.c.submitted_by_user_id.nullable is True
+    assert programme_table.c.quality_reviewed_by_user_id.nullable is True
     assert "programme_methodology" not in programme_table.c
     assert "methodology_rationale" not in programme_table.c
     assert Base.metadata.tables["quality_audit_universe_items"].c.amo_id.nullable is False
@@ -176,6 +213,10 @@ def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
     assert item_table.c.scheduled_at.nullable is True
     unique_names = {constraint.name for constraint in item_table.constraints if constraint.name}
     assert "uq_quality_audit_programme_item_schedule" in unique_names
+    assert not any(
+        constraint.unique and {column.name for column in constraint.columns} == {"programme_id", "universe_item_id"}
+        for constraint in item_table.indexes
+    ), "A programme must allow more than one audit requirement for the same audit area."
     fk_targets = {element.target_fullname for fk in item_table.foreign_key_constraints for element in fk.elements}
     assert "qms_audit_schedules.id" in fk_targets
     assert "users.id" in fk_targets
@@ -190,12 +231,55 @@ def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> 
         "SUPERSEDED": set(),
         "CLOSED": set(),
     }
-    for state in ("APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"):
+    for state in ("UNDER_REVIEW", "APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"):
         with pytest.raises(HTTPException) as exc:
             _assert_editable(SimpleNamespace(status=state))
         assert exc.value.status_code == 409
     _assert_editable(SimpleNamespace(status="DRAFT"))
-    _assert_editable(SimpleNamespace(status="UNDER_REVIEW"))
+
+
+def test_quality_review_and_controlled_export_contracts_are_explicit() -> None:
+    assert ProgrammeQualityReview(decision="FORWARD", reason="Coverage verified").decision == "FORWARD"
+    with pytest.raises(ValidationError):
+        ProgrammeQualityReview(decision="APPROVE", reason="Invalid")
+    with pytest.raises(HTTPException) as draft:
+        _assert_exportable(SimpleNamespace(status="DRAFT"))
+    assert draft.value.status_code == 409
+    _assert_exportable(SimpleNamespace(status="APPROVED"))
+
+
+def test_fixed_date_validation_belongs_to_item_patch_not_quality_review() -> None:
+    review = ProgrammeQualityReview(decision="FORWARD", reason="Coverage verified")
+    assert review.decision == "FORWARD"
+    with pytest.raises(ValidationError):
+        ProgrammeItemPatch(
+            recurrence="FIXED_DATES",
+            fixed_dates=[],
+            reason="Add another month",
+        )
+
+
+def test_programme_item_writes_lock_only_the_item_table() -> None:
+    pattern = re.compile(r"with_for_update\(\s*of=QualityAuditProgrammeItem\s*\)")
+    for function in (
+        patch_programme_item,
+        _load_schedule_item,
+        _load_occurrence_item,
+        _load_deferral_item,
+    ):
+        assert pattern.search(inspect.getsource(function)), function.__name__
+    assert re.search(
+        r"with_for_update\(\s*of=QualityAuditProgramme\s*\)",
+        inspect.getsource(_load_programme),
+    )
+
+
+def test_programme_approval_chain_migration_extends_current_programme_chain() -> None:
+    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+    revision = script.get_revision("quality_260905_prog_approval")
+    assert revision is not None
+    assert revision.down_revision == "quality_260905_programme_team"
+    assert len(revision.revision) <= 32
 
 
 def test_programme_payload_has_no_methodology_choice_and_validates_period_and_recurrence() -> None:
@@ -225,6 +309,42 @@ def test_programme_payload_has_no_methodology_choice_and_validates_period_and_re
             scope="Quality",
             recurrence="CUSTOM",
         )
+
+
+def test_programme_planning_derives_type_duration_and_team_membership() -> None:
+    assert _audit_type_for_entity("FACILITY") == "FACILITY"
+    assert _audit_type_for_entity("STATION") == "FACILITY"
+    assert _audit_type_for_entity("AIRCRAFT") == "PRODUCT"
+    assert _audit_type_for_entity("CONTRACTOR") == "CONTRACTED_FUNCTION"
+    assert _working_day_count(date(2026, 9, 11), date(2026, 9, 14)) == 2
+    assert _normalise_supporting_auditors(
+        ["lead", "observer", "second", "second"],
+        lead_auditor_user_id="lead",
+        observer_auditor_user_id="observer",
+    ) == ["second"]
+
+    item = ProgrammeItemCreate(
+        universe_item_id="universe",
+        audit_type="PROCESS",
+        title="Hangar audit",
+        scope="Main hangar",
+        target_start=date(2026, 9, 8),
+        target_end=date(2026, 9, 9),
+        lead_auditor_user_id="lead",
+        observer_auditor_user_id="observer",
+        supporting_auditor_user_ids=["lead", "observer", "second"],
+    )
+    assert item.default_duration_days == 2
+    assert item.supporting_auditor_user_ids == ["second"]
+    assert _audit_allows_user_by_audit(
+        SimpleNamespace(
+            lead_auditor_user_id="lead",
+            observer_auditor_user_id=None,
+            assistant_auditor_user_id=None,
+            supporting_auditor_user_ids=["second", "third"],
+        ),
+        "third",
+    )
 
 
 def test_programme_readiness_always_keeps_compliance_baseline() -> None:

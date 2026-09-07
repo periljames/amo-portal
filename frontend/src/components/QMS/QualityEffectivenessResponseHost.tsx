@@ -18,14 +18,20 @@ type Props = { amoCode?: string };
 type ActionType = EffectivenessResponseAction["action_type"];
 const NON_EFFECTIVE = new Set(["INEFFECTIVE", "PARTIALLY_EFFECTIVE", "INCONCLUSIVE"]);
 
+function isEffectivenessResponseRoute(pathname: string, search: string): boolean {
+  const workspace = new URLSearchParams(search).get("workspace")?.toLowerCase();
+  if (workspace === "assurance") return true;
+  return /^\/maintenance\/[^/]+\/quality\/(?:findings|cars)\/[^/]+(?:\/|$)/i.test(pathname)
+    && !/\/quality\/cars\/new(?:\/|$)/i.test(pathname);
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Effectiveness response action could not be completed.";
 }
 
 const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => {
   const location = useLocation();
-  const workspace = new URLSearchParams(location.search).get("workspace")?.toLowerCase();
-  const isAssurance = workspace === "assurance" || /\/quality\/assurance(?:\/|$)/i.test(location.pathname);
+  const isAssurance = isEffectivenessResponseRoute(location.pathname, location.search);
   const pathnameAmo = location.pathname.match(/^\/maintenance\/([^/]+)\//i)?.[1];
   const resolvedAmo = amoCode || (pathnameAmo ? decodeURIComponent(pathnameAmo) : "");
   const queryClient = useQueryClient();

@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
 import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
 
 import { apiRequest } from "../../../services/apiClient";
 import {
@@ -60,6 +64,7 @@ function carIsOverdue(car: AuditCar): boolean {
 
 const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const canGovern = canGovernAudit();
   const canManageCarActions = canManageCars();
   const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
@@ -87,8 +92,10 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const cars = useMemo(() => carsQuery.data?.items || [], [carsQuery.data?.items]);
-  const effectiveSelectedCarId = selectedCarId && cars.some((row) => row.id === selectedCarId)
-    ? selectedCarId
+  const requestedCarId = searchParams.get("carId");
+  const requestedSelection = selectedCarId || requestedCarId;
+  const effectiveSelectedCarId = requestedSelection && cars.some((row) => row.id === requestedSelection)
+    ? requestedSelection
     : cars.find((row) => !carIsClosed(row))?.id || cars[0]?.id || null;
   const selectedCar = cars.find((row) => row.id === effectiveSelectedCarId) || null;
   const selectedControlQuery = useQuery({
@@ -132,6 +139,36 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const closure = closureQuery.data;
   const selectedControl = selectedControlQuery.data;
   const loadError = auditQuery.error || carsQuery.error || closureQuery.error;
+  const carColumns = useMemo<ColDef<AuditCar>[]>(() => [
+    {
+      headerName: "CAR / finding",
+      flex: 1.5,
+      minWidth: 180,
+      cellRenderer: ({ data }: ICellRendererParams<AuditCar>) => data ? <div className="qms-followup-car-grid__stack"><strong>{data.car_number}</strong><span>{data.finding_ref || data.title}</span></div> : null,
+    },
+    {
+      headerName: "Owner / due",
+      flex: 1,
+      minWidth: 145,
+      cellRenderer: ({ data }: ICellRendererParams<AuditCar>) => data ? <div className="qms-followup-car-grid__stack"><strong>{data.assigned_to_user_id ? "Assigned" : "Unassigned"}</strong><span>{data.target_closure_date || data.due_date || "No due date"}</span></div> : null,
+    },
+    { headerName: "Priority", field: "priority", flex: 0.65, minWidth: 95 },
+    {
+      headerName: "Status",
+      flex: 0.85,
+      minWidth: 115,
+      cellRenderer: ({ data }: ICellRendererParams<AuditCar>) => data ? <span className={`qms-followup-car-grid__status ${carIsOverdue(data) ? "is-overdue" : carIsClosed(data) ? "is-closed" : ""}`}>{carIsOverdue(data) ? "Overdue" : data.status.replaceAll("_", " ")}</span> : null,
+    },
+    {
+      headerName: "",
+      pinned: "right",
+      width: 48,
+      minWidth: 48,
+      maxWidth: 48,
+      sortable: false,
+      cellRenderer: ({ data }: ICellRendererParams<AuditCar>) => data ? <button className="qms-followup-car-grid__select" type="button" title="View control state" aria-label={`View ${data.car_number}`} onClick={() => setSelectedCarId(data.id)}><ExternalLink size={15} /></button> : null,
+    },
+  ], []);
 
   if (auditQuery.isLoading || carsQuery.isLoading || closureQuery.isLoading) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit follow-up…</section>;
   if (loadError || !auditQuery.data || !closure) {
@@ -178,7 +215,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <main>
           <article className="qms-occurrence-stage__card">
             <header><Clock3 size={18} /><div><h3>Corrective-action queue</h3><small>One audit-filtered register query; detailed control-loop state is fetched only for the selected CAR.</small></div></header>
-            {!cars.length ? <p>No CARs are linked to this audit.</p> : <div className="qms-occurrence-stage__queue">{cars.map((car) => <button type="button" key={car.id} className={car.id === effectiveSelectedCarId ? "is-selected" : ""} onClick={() => setSelectedCarId(car.id)}><div><strong>{car.car_number}</strong><span>{car.title}</span><small>{car.finding_ref || "No finding reference"} · {car.priority}</small></div><em data-state={carIsClosed(car) ? "closed" : carIsOverdue(car) ? "overdue" : "open"}>{carIsClosed(car) ? "Closed" : carIsOverdue(car) ? "Overdue" : car.status.replaceAll("_", " ")}</em></button>)}</div>}
+            {!cars.length ? <p>No corrective actions are linked to this audit.</p> : <div className="qms-followup-car-grid ag-theme-alpine"><AgGridReact<AuditCar> rowData={cars} columnDefs={carColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.id} rowHeight={48} headerHeight={34} domLayout="autoHeight" animateRows={false} suppressCellFocus onRowClicked={(event: RowClickedEvent<AuditCar>) => event.data && setSelectedCarId(event.data.id)} rowClassRules={{ "is-selected": ({ data }) => data?.id === effectiveSelectedCarId }} /></div>}
           </article>
 
           {selectedCar ? <article className="qms-occurrence-stage__card">

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timezone
+import json
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -16,7 +18,8 @@ from .audit_programme_models import (
     QualityAuditProgrammeEvent,
     QualityAuditProgrammeItem,
 )
-from .enums import QMSAuditScheduleFrequency
+from .audit_programme_occurrence_models import QualityAuditProgrammeOccurrenceLink
+from .enums import QMSAuditKind, QMSAuditScheduleFrequency
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 from .schedule_weekend import annotate_notes_with_weekend_policy, resolve_schedule_window
 from .planner_schedule_router import (
@@ -68,6 +71,9 @@ class ProgrammeScheduleLink(BaseModel):
     frequency: str | None = None
     lifecycle_status: str | None = None
     version: int | None = None
+    scheduled_count: int = 0
+    adjusted_count: int = 0
+    occurrences: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProgrammeScheduleLinksResponse(BaseModel):
@@ -92,8 +98,11 @@ def _programme_and_item(
         QualityAuditProgrammeItem.id == item_id,
     )
     if lock:
-        programme_query = programme_query.with_for_update()
-        item_query = item_query.with_for_update()
+        programme_query = programme_query.with_for_update(of=QualityAuditProgramme)
+        # QualityAuditProgrammeItem eagerly joins its audit-area relationship.
+        # Restrict the lock to the programme-item table so PostgreSQL does not
+        # attempt to lock the nullable side of that outer join.
+        item_query = item_query.with_for_update(of=QualityAuditProgrammeItem)
     programme = programme_query.first()
     item = item_query.first()
     if programme is None or item is None:
@@ -194,12 +203,24 @@ def list_programme_schedule_links(
         QualityAuditProgrammeItem.amo_id == ctx.amo_id,
         QualityAuditProgrammeItem.programme_id == programme_id,
     ).order_by(QualityAuditProgrammeItem.target_start.asc(), QualityAuditProgrammeItem.title.asc()).all()
-    schedule_ids = [item.schedule_id for item in items if item.schedule_id]
+    occurrence_links = db.query(QualityAuditProgrammeOccurrenceLink).filter(
+        QualityAuditProgrammeOccurrenceLink.amo_id == ctx.amo_id,
+        QualityAuditProgrammeOccurrenceLink.programme_id == programme_id,
+        QualityAuditProgrammeOccurrenceLink.occurrence_type == "FIXED_DATE",
+    ).order_by(QualityAuditProgrammeOccurrenceLink.occurrence_key.asc()).all()
+    occurrence_by_item: dict[str, list[QualityAuditProgrammeOccurrenceLink]] = {}
+    for occurrence in occurrence_links:
+        occurrence_by_item.setdefault(str(occurrence.programme_item_id), []).append(occurrence)
+    schedule_ids = list({
+        *[item.schedule_id for item in items if item.schedule_id],
+        *[link.schedule_id for link in occurrence_links],
+    })
     schedules = {
         str(schedule.id): schedule
         for schedule in db.query(models.QMSAuditSchedule).filter(
             models.QMSAuditSchedule.amo_id == ctx.amo_id,
             models.QMSAuditSchedule.id.in_(schedule_ids),
+            models.QMSAuditSchedule.deleted_at.is_(None),
         ).all()
     } if schedule_ids else {}
     metadata = {
@@ -210,8 +231,24 @@ def list_programme_schedule_links(
         ).all()
     } if schedule_ids else {}
 
-    return ProgrammeScheduleLinksResponse(items=[
-        ProgrammeScheduleLink(
+    response_items: list[ProgrammeScheduleLink] = []
+    for item in items:
+        item_occurrences = occurrence_by_item.get(str(item.id), [])
+        occurrence_payload = []
+        for link in item_occurrences:
+            snapshot = link.source_snapshot if isinstance(link.source_snapshot, dict) else {}
+            linked_schedule = schedules.get(str(link.schedule_id))
+            linked_metadata = metadata.get(str(link.schedule_id))
+            occurrence_payload.append({
+                "schedule_id": str(link.schedule_id),
+                "occurrence_key": link.occurrence_key,
+                "requested_date": snapshot.get("requested_date"),
+                "scheduled_date": linked_schedule.next_due_date.isoformat() if linked_schedule else snapshot.get("scheduled_date"),
+                "adjusted": bool(snapshot.get("adjusted")),
+                "adjustment_message": snapshot.get("adjustment_message"),
+                "lifecycle_status": linked_metadata.lifecycle_status if linked_metadata else None,
+            })
+        response_items.append(ProgrammeScheduleLink(
             programme_item_id=str(item.id),
             state=item.state,
             schedule_id=str(item.schedule_id) if item.schedule_id else None,
@@ -222,9 +259,202 @@ def list_programme_schedule_links(
             frequency=str(getattr(schedules.get(str(item.schedule_id)).frequency, "value", schedules.get(str(item.schedule_id)).frequency)) if item.schedule_id and str(item.schedule_id) in schedules else None,
             lifecycle_status=metadata.get(str(item.schedule_id)).lifecycle_status if item.schedule_id and str(item.schedule_id) in metadata else None,
             version=int(metadata.get(str(item.schedule_id)).version or 1) if item.schedule_id and str(item.schedule_id) in metadata else None,
-        )
-        for item in items
-    ])
+            scheduled_count=len(occurrence_payload) or (1 if item.schedule_id else 0),
+            adjusted_count=sum(1 for entry in occurrence_payload if entry["adjusted"]),
+            occurrences=occurrence_payload,
+        ))
+    return ProgrammeScheduleLinksResponse(items=response_items)
+
+
+def materialize_fixed_date_programme(
+    *,
+    db: Session,
+    programme: QualityAuditProgramme,
+    request: Request,
+    ctx: TenantContext,
+) -> dict[str, Any]:
+    """Create idempotent one-time Planner schedules for approved calendar anchors."""
+    from .planner_assignment_guard_router import _create_guarded_planner_audit_schedule
+
+    today = date.today()
+    generated = 0
+    existing_count = 0
+    adjusted: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    pending_activation: list[dict[str, Any]] = []
+    for item in list(programme.items or []):
+        if item.state == "CANCELLED" or item.recurrence != "FIXED_DATES" or not item.auto_schedule:
+            continue
+        existing_links = {
+            row.occurrence_key: row
+            for row in db.query(QualityAuditProgrammeOccurrenceLink).filter(
+                QualityAuditProgrammeOccurrenceLink.amo_id == ctx.amo_id,
+                QualityAuditProgrammeOccurrenceLink.programme_item_id == item.id,
+                QualityAuditProgrammeOccurrenceLink.occurrence_type == "FIXED_DATE",
+            ).all()
+        }
+        item_generated = 0
+        for month_day in list(item.fixed_dates or []):
+            requested = date.fromisoformat(f"{programme.programme_year}-{month_day}")
+            occurrence_key = f"FIXED_DATE:{requested.isoformat()}"
+            if occurrence_key in existing_links:
+                existing_count += 1
+                continue
+            if requested < today:
+                skipped.append({
+                    "programme_item_id": str(item.id),
+                    "requested_date": requested.isoformat(),
+                    "reason": "Date already passed before programme activation.",
+                })
+                continue
+            resolved_start, resolved_end, duration_days = resolve_schedule_window(
+                start=requested,
+                duration_days=int(item.default_duration_days or 1),
+                weekend_policy="SKIP_WEEKEND",
+                title=item.title,
+                require_confirmation=False,
+            )
+            adjustment_message = None
+            if resolved_start != requested:
+                adjustment_message = (
+                    f"{requested.strftime('%A %d %B %Y')} falls on a weekend; "
+                    f"the audit was scheduled for {resolved_start.strftime('%A %d %B %Y')}."
+                )
+                adjusted.append({
+                    "programme_item_id": str(item.id),
+                    "requested_date": requested.isoformat(),
+                    "scheduled_date": resolved_start.isoformat(),
+                    "message": adjustment_message,
+                })
+            criteria = "\n".join(
+                value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+                for value in list(item.criteria or [])
+            )
+            supporting_auditors = list(item.supporting_auditor_user_ids or [])
+            payload = PlannerAuditScheduleCreate(
+                title=item.title,
+                kind=QMSAuditKind(str(programme.programme_kind or "INTERNAL")),
+                frequency=QMSAuditScheduleFrequency.ONE_TIME,
+                next_due_date=requested,
+                start_time=item.default_start_time or time(hour=9),
+                end_time=item.default_end_time or time(hour=17),
+                duration_days=int(item.default_duration_days or 1),
+                location=item.default_location,
+                scope=item.scope,
+                criteria=criteria or None,
+                notes=(
+                    f"Generated from approved programme {programme.programme_ref}; "
+                    f"calendar anchor {requested.isoformat()}."
+                ),
+                auditee=item.universe_item.display_label if item.universe_item else None,
+                auditee_user_id=item.auditee_user_id,
+                lead_auditor_user_id=item.lead_auditor_user_id,
+                observer_auditor_user_id=item.observer_auditor_user_id,
+                assistant_auditor_user_id=supporting_auditors[0] if supporting_auditors else None,
+                attendee_user_ids=supporting_auditors[1:],
+                notify_auditors=bool(item.notify_auditors),
+                notify_auditees=bool(item.notify_auditees),
+                automation_active=True,
+                weekend_policy="SKIP_WEEKEND",
+                conflict_override_reason=adjustment_message or f"Activated from approved programme {programme.programme_ref}.",
+            )
+            try:
+                schedule = _create_guarded_planner_audit_schedule(
+                    payload=payload,
+                    request=request,
+                    ctx=ctx,
+                    db=db,
+                    commit=False,
+                )
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                if exc.status_code != status.HTTP_409_CONFLICT or "assignment_gate" not in detail:
+                    raise
+                pending_reason = (
+                    f"{adjustment_message + ' ' if adjustment_message else ''}"
+                    "The date is reserved; activate it after the required auditor independence declaration."
+                )
+                schedule = _create_guarded_planner_audit_schedule(
+                    payload=payload.model_copy(update={
+                        "automation_active": False,
+                        "conflict_override_reason": pending_reason,
+                    }),
+                    request=request,
+                    ctx=ctx,
+                    db=db,
+                    commit=False,
+                )
+                pending_activation.append({
+                    "programme_item_id": str(item.id),
+                    "requested_date": requested.isoformat(),
+                    "scheduled_date": resolved_start.isoformat(),
+                    "reason": "Auditor independence declaration required before activation.",
+                    "assignment_gate": detail.get("assignment_gate", []),
+                })
+            schedule_uuid = uuid.UUID(str(schedule.id))
+            now = datetime.now(timezone.utc)
+            db.add(QualityAuditProgrammeOccurrenceLink(
+                amo_id=ctx.amo_id,
+                programme_id=programme.id,
+                programme_item_id=item.id,
+                schedule_id=schedule_uuid,
+                occurrence_type="FIXED_DATE",
+                occurrence_key=occurrence_key,
+                rationale="Generated from an approved recurring calendar date in the annual audit programme.",
+                source_snapshot={
+                    "programme_ref": programme.programme_ref,
+                    "requested_date": requested.isoformat(),
+                    "scheduled_date": resolved_start.isoformat(),
+                    "end_date": resolved_end.isoformat(),
+                    "adjusted": resolved_start != requested,
+                    "adjustment_message": adjustment_message,
+                    "non_working_day_policy": item.non_working_day_policy,
+                },
+                created_by_user_id=ctx.user_id,
+                created_at=now,
+            ))
+            if item.schedule_id is None:
+                item.schedule_id = schedule_uuid
+            item.state = "SCHEDULED"
+            item.scheduled_by_user_id = ctx.user_id
+            item.scheduled_at = now
+            item.updated_by_user_id = ctx.user_id
+            item.updated_at = now
+            db.add(QualityAuditProgrammeEvent(
+                amo_id=ctx.amo_id,
+                programme_id=programme.id,
+                event_type="ITEM_SCHEDULED",
+                reason=adjustment_message or f"Scheduled {item.title} for {resolved_start.isoformat()} from the approved programme.",
+                before_snapshot={"programme_item_id": str(item.id), "occurrence_key": occurrence_key},
+                after_snapshot={
+                    "programme_item_id": str(item.id),
+                    "schedule_id": str(schedule.id),
+                    "requested_date": requested.isoformat(),
+                    "scheduled_date": resolved_start.isoformat(),
+                    "adjusted": resolved_start != requested,
+                },
+                actor_user_id=ctx.user_id,
+                created_at=now,
+            ))
+            generated += 1
+            item_generated += 1
+        if item_generated == 0 and not existing_links and all(
+            date.fromisoformat(f"{programme.programme_year}-{value}") < today for value in list(item.fixed_dates or [])
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": f"{item.title} has no remaining date that can be scheduled in {programme.programme_year}.",
+                    "required_action": "Return the programme to draft or create an amendment with a future calendar date.",
+                },
+            )
+    return {
+        "generated": generated,
+        "already_scheduled": existing_count,
+        "adjustments": adjusted,
+        "skipped_past_dates": skipped,
+        "pending_activation": pending_activation,
+    }
 
 
 def _schedule_programme_requirement(

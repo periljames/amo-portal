@@ -232,7 +232,7 @@ def test_schedule_creation_notifies_lead_auditor_and_auditee(db_session):
     assert "listed as auditee" in auditee_note.message
 
 
-def test_running_schedule_sends_notice_notification_and_email(db_session, monkeypatch):
+def test_running_schedule_does_not_send_uncontrolled_occurrence_notice(db_session, monkeypatch):
     amo, quality, _, _ = _seed_audit(db_session)
     lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
     auditee = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
@@ -276,14 +276,18 @@ def test_running_schedule_sends_notice_notification_and_email(db_session, monkey
         .order_by(notification_models.EmailLog.created_at.asc())
         .all()
     )
-    recipients = {log.recipient for log in email_logs}
-
     assert audit.lead_auditor_user_id == lead.id
-    assert lead_note is not None
-    assert "Audit notice memo" in lead_note.message
-    assert audit.audit_ref in lead_note.message
-    assert auditee_note is not None
-    assert "Audit notice memo issued to auditee" in auditee_note.message
-    assert lead.email in recipients
-    assert auditee.email in recipients
-    assert {entry["recipient"] for entry in fake_provider.sent} >= {lead.email, auditee.email}
+    assert lead_note is None
+    assert auditee_note is None
+    assert email_logs == []
+    assert fake_provider.sent == []
+
+
+def test_legacy_issue_notice_route_requires_controlled_pdf_workflow(db_session):
+    _, quality, _, audit = _seed_audit(db_session)
+
+    with pytest.raises(HTTPException) as exc:
+        quality_router.issue_audit_notice(audit_id=audit.id, db=db_session, current_user=quality)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "CONTROLLED_AUDIT_NOTICE_REQUIRED"

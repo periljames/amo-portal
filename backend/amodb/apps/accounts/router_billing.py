@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
+from .admin_profile_guard import require_active_admin_profile
 from . import audit, schemas, services, models
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -310,7 +311,7 @@ def get_billing_access_status(
 @router.get("/invoices", response_model=list[schemas.InvoiceRead])
 def get_invoices(
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         return []
@@ -322,7 +323,7 @@ def get_invoices(
 def get_invoice_detail(
     invoice_id: str,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     invoice = (
         db.query(models.BillingInvoice)
@@ -345,7 +346,7 @@ def get_invoice_document(
     invoice_id: str,
     format: Literal["html", "pdf"] = "html",
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     invoice = (
         db.query(models.BillingInvoice)
@@ -380,7 +381,7 @@ def get_invoice_document(
 def export_invoices(
     format: Literal["csv"] = "csv",
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(
@@ -414,7 +415,7 @@ def export_billing_audit(
 @router.get("/usage-meters", response_model=list[schemas.UsageMeterRead])
 def get_usage_meters(
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         return []
@@ -440,7 +441,7 @@ def list_billing_audit(
 @router.get("/payment-methods", response_model=list[schemas.PaymentMethodRead])
 def get_payment_methods(
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         return []
@@ -451,7 +452,7 @@ def get_payment_methods(
 def add_payment_method(
     payload: schemas.PaymentMethodUpsertRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot mutate tenant payment methods from a global session.")
@@ -470,7 +471,7 @@ def delete_payment_method(
     payment_method_id: str,
     payload: schemas.PaymentMethodMutationRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot mutate tenant payment methods from a global session.")
@@ -487,7 +488,7 @@ def delete_payment_method(
 def start_trial(
     payload: schemas.TrialStartRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot start a tenant trial from a global session.")
@@ -509,7 +510,7 @@ def start_trial(
 def purchase(
     payload: schemas.PurchaseRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot purchase tenant subscriptions from a global session.")
@@ -529,7 +530,7 @@ def purchase(
 def cancel(
     payload: schemas.CancelSubscriptionRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
+    current_user=Depends(require_active_admin_profile),
 ):
     if _is_platform_superuser(current_user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Platform superusers cannot cancel tenant subscriptions from a global session.")
@@ -584,4 +585,3 @@ async def webhook_handler(
         should_fail=bool(should_fail),
     )
     return {"status": event.status}
-

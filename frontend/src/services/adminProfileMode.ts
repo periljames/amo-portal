@@ -31,6 +31,53 @@ export type AdminProfileChangeDetail = {
   state: AdminProfileState;
 };
 
+export type AdminGrantStatus = "PENDING" | "ACTIVE" | "REVOKED" | "REJECTED" | "EXPIRED";
+
+export type AdminAccessGrant = {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  user_name?: string | null;
+  user_email?: string | null;
+  grant_type: "PERMANENT" | "TEMPORARY";
+  valid_from?: string | null;
+  valid_until?: string | null;
+  status: AdminGrantStatus;
+  reason: string;
+  requested_by_user_id: string;
+  requested_by_name?: string | null;
+  created_at: string;
+  approval_count: number;
+  accountable_executive_approved: boolean;
+  quality_manager_approved: boolean;
+  current_user_decided: boolean;
+};
+
+export type AdminGrantCandidate = {
+  id: string;
+  full_name?: string | null;
+  email: string;
+  position_title?: string | null;
+  access_profile_name?: string | null;
+};
+
+export type AdminGrantRequestPayload = {
+  user_id: string;
+  grant_type: "PERMANENT" | "TEMPORARY";
+  valid_from?: string | null;
+  valid_until?: string | null;
+  reason: string;
+};
+
+export type AdminGrantDecisionResult = {
+  id: string;
+  status: AdminGrantStatus;
+  approval_count?: number;
+  required_approvals?: number;
+  accountable_executive_approved?: boolean;
+  quality_manager_approved?: boolean;
+};
+
 type AdminProfileSessionResponse = AdminProfileState & {
   message?: string | null;
 };
@@ -238,6 +285,75 @@ export async function deactivateAdminProfile(amoCode: string): Promise<AdminProf
     cacheTtlMs: 0,
   });
   return cacheState(amoCode, requester, state);
+}
+
+export function hasActiveTenantAdminProfile(amoCode?: string | null): boolean {
+  return Boolean(amoCode && readCachedAdminProfileState(amoCode)?.active);
+}
+
+export async function listAdminAccessGrants(amoCode: string): Promise<{
+  items: AdminAccessGrant[];
+  required_approver_roles: ["ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"];
+}> {
+  return apiRequest(`${API_PREFIX}/${encodeURIComponent(amoCode)}/grants`, {
+    timeoutMs: 12_000,
+    cacheTtlMs: 0,
+  });
+}
+
+export async function listAdminGrantCandidates(amoCode: string): Promise<AdminGrantCandidate[]> {
+  const result = await apiRequest<{ items: AdminGrantCandidate[] }>(
+    `${API_PREFIX}/${encodeURIComponent(amoCode)}/grant-candidates`,
+    { timeoutMs: 12_000, cacheTtlMs: 0 },
+  );
+  return result.items;
+}
+
+export async function requestAdminAccessGrant(
+  amoCode: string,
+  payload: AdminGrantRequestPayload,
+): Promise<AdminGrantDecisionResult> {
+  return apiRequest(`${API_PREFIX}/${encodeURIComponent(amoCode)}/grants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    timeoutMs: 12_000,
+    cacheTtlMs: 0,
+  });
+}
+
+export async function approveAdminAccessGrant(
+  amoCode: string,
+  grantId: string,
+  comment?: string,
+): Promise<AdminGrantDecisionResult> {
+  return apiRequest(
+    `${API_PREFIX}/${encodeURIComponent(amoCode)}/grants/${encodeURIComponent(grantId)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: comment?.trim() || null }),
+      timeoutMs: 12_000,
+      cacheTtlMs: 0,
+    },
+  );
+}
+
+export async function revokeAdminAccessGrant(
+  amoCode: string,
+  grantId: string,
+  comment?: string,
+): Promise<AdminGrantDecisionResult> {
+  return apiRequest(
+    `${API_PREFIX}/${encodeURIComponent(amoCode)}/grants/${encodeURIComponent(grantId)}/revoke`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: comment?.trim() || null }),
+      timeoutMs: 12_000,
+      cacheTtlMs: 0,
+    },
+  );
 }
 
 export function clearCachedAdminProfileState(amoCode: string): void {

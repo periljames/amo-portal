@@ -13,10 +13,12 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -327,6 +329,14 @@ class User(Base):
     position_title = Column(String(255), nullable=True)
     phone = Column(String(64), nullable=True)
     secondary_phone = Column(String(64), nullable=True)
+
+    access_role_assignments = relationship(
+        "AuthUserRoleAssignment",
+        foreign_keys="AuthUserRoleAssignment.user_id",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
     # Regulatory/licence metadata to back CRS signatories etc.
     regulatory_authority = Column(
@@ -1658,3 +1668,113 @@ class PlatformSettings(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+
+
+# ---------------------------------------------------------------------------
+# TENANT ACCESS PROFILES
+# ---------------------------------------------------------------------------
+
+
+class AuthRoleDefinition(Base):
+    """Tenant-editable portal access profile.
+
+    ``base_role_key`` remains the stable server-side persona used by legacy
+    workflow guards. The tenant may change display terminology and may narrow
+    module access, but cannot create a platform superuser or rewrite the legal
+    identity of a prescribed postholder role. Global specialist-engine roles
+    retain ``amo_id = NULL``.
+    """
+
+    __tablename__ = "auth_role_definitions"
+    __table_args__ = (
+        Index(
+            "uq_auth_role_tenant_code",
+            "amo_id",
+            "tenant_code",
+            unique=True,
+            postgresql_where=text("amo_id IS NOT NULL"),
+        ),
+        Index("ix_auth_role_tenant_active", "amo_id", "is_active", "display_name"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    code = Column(String(160), nullable=False, unique=True)
+    scope_type = Column(String(24), nullable=False, default="TENANT")
+    description = Column(Text, nullable=True)
+    is_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
+    tenant_code = Column(String(64), nullable=True)
+    display_name = Column(String(160), nullable=True)
+    base_role_key = Column(String(64), nullable=True)
+    category = Column(String(64), nullable=True)
+    reports_to_role_code = Column(String(64), nullable=True)
+    is_regulated = Column(Boolean, nullable=False, default=False)
+    is_editable = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    version = Column(Integer, nullable=False, default=1)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    capabilities = relationship(
+        "AuthRoleCapabilityBinding",
+        back_populates="role",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+class AuthCapabilityDefinition(Base):
+    __tablename__ = "auth_capability_definitions"
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    code = Column(String(120), nullable=False, unique=True)
+    module = Column(String(64), nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class AuthRoleCapabilityBinding(Base):
+    __tablename__ = "auth_role_capability_bindings"
+    __table_args__ = (
+        UniqueConstraint("role_id", "capability_id", name="uq_auth_role_capability_bindings_pair"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    role_id = Column(String(36), ForeignKey("auth_role_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    capability_id = Column(String(36), ForeignKey("auth_capability_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    constraints_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    role = relationship("AuthRoleDefinition", back_populates="capabilities")
+    capability = relationship("AuthCapabilityDefinition", lazy="joined")
+
+
+class AuthUserRoleAssignment(Base):
+    __tablename__ = "auth_user_role_assignments"
+    __table_args__ = (
+        Index("ix_auth_user_role_assignments_amo_user", "amo_id", "user_id"),
+        Index("ix_auth_user_role_primary", "amo_id", "user_id", "is_primary"),
+        Index(
+            "uq_auth_user_primary_profile",
+            "amo_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_primary = true AND valid_to IS NULL"),
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id = Column(String(36), ForeignKey("auth_role_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
+    assigned_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    is_primary = Column(Boolean, nullable=False, default=False)
+
+    user = relationship("User", foreign_keys=[user_id], back_populates="access_role_assignments")
+    role = relationship("AuthRoleDefinition", lazy="joined")

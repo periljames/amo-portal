@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 const entry = readFileSync(new URL("../AdminSetupCentrePage.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("../AdminSetupCentreResendPage.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../styles/admin-setup-resend.css", import.meta.url), "utf8");
+const toastProvider = readFileSync(
+  new URL("../../components/feedback/ToastProvider.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("AMO Setup Centre supplied workflow adoption", () => {
   it("routes the setup page to the dedicated Resend-derived structure", () => {
@@ -42,9 +46,12 @@ describe("AMO Setup Centre supplied workflow adoption", () => {
   });
 
   it("uses dismissible accessible notifications and visibly muted examples", () => {
-    expect(page).toContain('role={tone === "danger" ? "alert" : "status"}');
-    expect(page).toContain('aria-live={tone === "danger" ? "assertive" : "polite"}');
-    expect(page).toContain('aria-label="Dismiss notification"');
+    expect(page).toContain("useToast()");
+    expect(page).toContain("pushToast({");
+    expect(page).toContain("dismissToast(toastIdRef.current)");
+    expect(toastProvider).toContain('role={urgent ? "alert" : "status"}');
+    expect(toastProvider).toContain('aria-live={urgent ? "assertive" : "polite"}');
+    expect(toastProvider).toContain('aria-label="Dismiss notification"');
     expect(css).toContain("--setup-placeholder: #52595b");
     expect(css).toContain("input::placeholder");
     expect(css).toContain("opacity: 1");

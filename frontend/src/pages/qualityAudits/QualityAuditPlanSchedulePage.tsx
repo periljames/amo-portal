@@ -25,9 +25,10 @@ export default function QualityAuditPlanSchedulePage(): React.ReactElement {
   const handledRef = useRef(false);
   const isPlannerHandoff = searchParams.get("source") === PLANNER_SOURCE
     && searchParams.get(HANDOFF_STATE_KEY) !== HANDOFF_OPENED;
+  const shouldOpenCreate = searchParams.get("create") === "1" || isPlannerHandoff;
 
   useEffect(() => {
-    if (!isPlannerHandoff || handledRef.current) return;
+    if (!shouldOpenCreate || handledRef.current) return;
 
     const root = rootRef.current;
     if (!root) return;
@@ -43,7 +44,7 @@ export default function QualityAuditPlanSchedulePage(): React.ReactElement {
 
       const next = new URLSearchParams(searchParams);
       next.delete("create");
-      next.set(HANDOFF_STATE_KEY, HANDOFF_OPENED);
+      if (isPlannerHandoff) next.set(HANDOFF_STATE_KEY, HANDOFF_OPENED);
       setSearchParams(next, { replace: true });
       return true;
     };
@@ -60,7 +61,7 @@ export default function QualityAuditPlanSchedulePage(): React.ReactElement {
       window.clearTimeout(timeout);
       observer.disconnect();
     };
-  }, [isPlannerHandoff, searchParams, setSearchParams]);
+  }, [isPlannerHandoff, searchParams, setSearchParams, shouldOpenCreate]);
 
   return (
     <div ref={rootRef} data-qms-planner-handoff-root style={{ display: "contents" }}>

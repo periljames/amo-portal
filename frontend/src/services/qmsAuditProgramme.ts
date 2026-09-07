@@ -1,16 +1,49 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { apiBlob, downloadBlob } from "./typedApi";
 
-export type AuditProgrammeStatus = "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "CLOSED";
+export type AuditProgrammeStatus =
+  "DRAFT" | "UNDER_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "CLOSED";
 /** Programme methodology. Backend currently emits HYBRID; other values are reserved for display/future API support. */
-export type AuditAssuranceModel = "HYBRID" | "COMPLIANCE" | "PERFORMANCE" | "RISK";
+export type AuditAssuranceModel =
+  "HYBRID" | "COMPLIANCE" | "PERFORMANCE" | "RISK";
 export type AuditRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type AuditUniverseEntityType = "DEPARTMENT" | "FACILITY" | "STATION" | "SUPPLIER" | "CONTRACTOR" | "PROCESS" | "CAPABILITY" | "APPROVAL_RATING" | "AIRCRAFT_TYPE" | "PERSONNEL_GROUP" | "OTHER";
-export type AuditProgrammeItemState = "PLANNED" | "SCHEDULED" | "COMPLETED" | "DEFERRED" | "CANCELLED" | "FOLLOW_UP_REQUIRED";
-export type AuditScheduleFrequency = "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "BI_ANNUAL" | "ANNUAL";
+export type AuditUniverseEntityType =
+  | "DEPARTMENT"
+  | "FACILITY"
+  | "STATION"
+  | "SUPPLIER"
+  | "CONTRACTOR"
+  | "PROCESS"
+  | "CAPABILITY"
+  | "APPROVAL_RATING"
+  | "AIRCRAFT"
+  | "AIRCRAFT_TYPE"
+  | "PERSONNEL_GROUP"
+  | "OTHER";
+export type AuditUniverseProgrammeKind = "INTERNAL" | "EXTERNAL" | "BOTH";
+export type AuditProgrammeItemState =
+  | "PLANNED"
+  | "SCHEDULED"
+  | "COMPLETED"
+  | "DEFERRED"
+  | "CANCELLED"
+  | "FOLLOW_UP_REQUIRED";
+export type AuditScheduleFrequency =
+  "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "BI_ANNUAL" | "ANNUAL";
+export type AuditProgrammeRecurrence =
+  | "ONE_TIME"
+  | "MONTHLY"
+  | "QUARTERLY"
+  | "SEMI_ANNUAL"
+  | "ANNUAL"
+  | "FIXED_DATES"
+  | "CUSTOM"
+  | "RISK_TRIGGERED";
 
 export type AuditUniverseItem = {
   id: string;
   entity_type: AuditUniverseEntityType;
+  programme_kind?: AuditUniverseProgrammeKind;
   display_label: string;
   source_owner_module: string;
   source_type: string;
@@ -22,6 +55,8 @@ export type AuditUniverseItem = {
   mandatory_surveillance: boolean;
   active: boolean;
   notes?: string | null;
+  origin?: "PLATFORM_STANDARD" | "TENANT";
+  aircraft?: { tail_number: string; model?: string | null; msn: string } | null;
 };
 
 export type AuditProgrammeItem = {
@@ -34,8 +69,21 @@ export type AuditProgrammeItem = {
   scope: string;
   criteria: Array<string | Record<string, unknown>>;
   mandatory_surveillance: boolean;
-  recurrence: string;
+  recurrence: AuditProgrammeRecurrence;
   custom_interval_days?: number | null;
+  fixed_dates?: string[];
+  non_working_day_policy?: "NEXT_WORKING_DAY";
+  default_start_time?: string;
+  default_end_time?: string;
+  default_duration_days?: number;
+  default_location?: string | null;
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  supporting_auditor_user_ids?: string[];
+  auditee_user_id?: string | null;
+  notify_auditors?: boolean;
+  notify_auditees?: boolean;
+  auto_schedule?: boolean;
   target_start?: string | null;
   target_end?: string | null;
   state: AuditProgrammeItemState;
@@ -61,6 +109,7 @@ export type AuditProgramme = {
   programme_ref: string;
   programme_series: string;
   programme_year: number;
+  programme_kind?: "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
   revision_no: number;
   title: string;
   assurance_model: AuditAssuranceModel;
@@ -73,6 +122,10 @@ export type AuditProgramme = {
   period_end: string;
   owner_user_id?: string | null;
   supersedes_programme_id?: string | null;
+  submitted_by_user_id?: string | null;
+  submitted_at?: string | null;
+  quality_reviewed_by_user_id?: string | null;
+  quality_reviewed_at?: string | null;
   approved_by_user_id?: string | null;
   approved_at?: string | null;
   activated_at?: string | null;
@@ -150,8 +203,20 @@ export type AuditProgrammeOptimizer = {
   governance?: { programme_immutable: boolean; message: string };
 };
 
-export type AuditProgrammeList = { items: AuditProgramme[]; total: number; limit: number; offset: number; has_more: boolean };
-export type AuditUniverseList = { items: AuditUniverseItem[]; total: number; limit: number; offset: number; has_more: boolean };
+export type AuditProgrammeList = {
+  items: AuditProgramme[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+export type AuditUniverseList = {
+  items: AuditUniverseItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
 
 export function readinessOf(
   programme?: AuditProgramme,
@@ -159,43 +224,83 @@ export function readinessOf(
 ): AuditProgrammeReadiness {
   const items = programme?.items || [];
   const server = programme?.readiness;
-  const blockers = server ? [...server.blockers] : ([] as Array<{ code: string; message: string }>);
+  const blockers = server
+    ? [...server.blockers]
+    : ([] as Array<{ code: string; message: string }>);
   if (!server) {
-    if (!items.length) blockers.push({ code: "NO_REQUIREMENTS", message: "No governed audit coverage is defined yet." });
-    if (!programme?.regulatory_basis?.length) blockers.push({ code: "NO_COMPLIANCE_BASIS", message: "Add the applicable compliance baseline before approval." });
+    if (!items.length)
+      blockers.push({
+        code: "NO_REQUIREMENTS",
+        message: "No governed audit coverage is defined yet.",
+      });
+    if (!programme?.regulatory_basis?.length)
+      blockers.push({
+        code: "NO_COMPLIANCE_BASIS",
+        message: "Add the applicable compliance baseline before approval.",
+      });
     items.forEach((item) => {
-      if (!item.target_start || !item.target_end) blockers.push({ code: "MISSING_TARGET_WINDOW", message: `${item.title}: set a target window.` });
-      if (!item.criteria?.length) blockers.push({ code: "MISSING_CRITERIA", message: `${item.title}: add audit criteria.` });
+      if (!item.target_start || !item.target_end)
+        blockers.push({
+          code: "MISSING_TARGET_WINDOW",
+          message: `${item.title}: set a target window.`,
+        });
+      if (!item.criteria?.length)
+        blockers.push({
+          code: "MISSING_CRITERIA",
+          message: `${item.title}: add audit criteria.`,
+        });
     });
   }
   const mandatoryGaps = optimizer?.summary?.mandatory_coverage_gaps || 0;
-  if (mandatoryGaps && !blockers.some((entry) => entry.code === "MANDATORY_COVERAGE_GAP")) {
+  if (
+    mandatoryGaps &&
+    !blockers.some((entry) => entry.code === "MANDATORY_COVERAGE_GAP")
+  ) {
     blockers.push({
       code: "MANDATORY_COVERAGE_GAP",
       message: `${mandatoryGaps} mandatory surveillance requirement(s) due this period are not covered.`,
     });
   }
+  const awaitingManualSchedule = items.filter(
+    (item) =>
+      item.state === "PLANNED" &&
+      !(item.recurrence === "FIXED_DATES" && item.auto_schedule),
+  );
   return {
     ready_for_approval: blockers.length === 0,
     blockers,
     requirement_count: server?.requirement_count ?? items.length,
-    mandatory_requirement_count: server?.mandatory_requirement_count ?? items.filter((item) => item.mandatory_surveillance).length,
+    mandatory_requirement_count:
+      server?.mandatory_requirement_count ??
+      items.filter((item) => item.mandatory_surveillance).length,
     mandatory_unscheduled_count:
-      server?.mandatory_unscheduled_count ?? items.filter((item) => item.mandatory_surveillance && item.state === "PLANNED").length,
+      server?.mandatory_unscheduled_count ??
+      awaitingManualSchedule.filter((item) => item.mandatory_surveillance)
+        .length,
     high_risk_requirement_count:
       server?.high_risk_requirement_count ??
-      items.filter((item) => ["HIGH", "CRITICAL"].includes(item.auditable_entity?.risk_classification || "")).length,
-    unscheduled_requirement_count: server?.unscheduled_requirement_count ?? items.filter((item) => item.state === "PLANNED").length,
-    mandatory_coverage_gap_count: server?.mandatory_coverage_gap_count ?? mandatoryGaps,
+      items.filter((item) =>
+        ["HIGH", "CRITICAL"].includes(
+          item.auditable_entity?.risk_classification || "",
+        ),
+      ).length,
+    unscheduled_requirement_count:
+      server?.unscheduled_requirement_count ?? awaitingManualSchedule.length,
+    mandatory_coverage_gap_count:
+      server?.mandatory_coverage_gap_count ?? mandatoryGaps,
   };
 }
 
-export function listedReadinessOf(programme: AuditProgramme): AuditProgrammeReadiness | null {
+export function listedReadinessOf(
+  programme: AuditProgramme,
+): AuditProgrammeReadiness | null {
   // Programme readiness is the single source of truth; list consumers must never infer it from generic audit metrics.
   return programme.readiness ? readinessOf(programme) : null;
 }
 
-export function readinessExceptionCount(readiness: AuditProgrammeReadiness): number {
+export function readinessExceptionCount(
+  readiness: AuditProgrammeReadiness,
+): number {
   return readiness.blockers.length;
 }
 
@@ -236,10 +341,40 @@ export type AuditProgrammeScheduleLink = {
   frequency?: AuditScheduleFrequency | null;
   lifecycle_status?: string | null;
   version?: number | null;
+  scheduled_count?: number;
+  adjusted_count?: number;
+  occurrences?: Array<{
+    schedule_id: string;
+    occurrence_key: string;
+    requested_date?: string | null;
+    scheduled_date?: string | null;
+    adjusted: boolean;
+    adjustment_message?: string | null;
+    lifecycle_status?: string | null;
+  }>;
 };
 
-export type PlannerScheduleOption = { id: string; code: string; name: string; party_level: string; default_kind: string };
-export type PlannerPersonOption = { id: string; full_name: string; email?: string | null; role?: string | null; department_name?: string | null };
+export type PlannerScheduleOption = {
+  id: string;
+  code: string;
+  name: string;
+  party_level: string;
+  default_kind: string;
+};
+export type PlannerPersonOption = {
+  id: string;
+  full_name: string;
+  email?: string | null;
+  role?: string | null;
+  department_name?: string | null;
+  auditor_roles: Array<"LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR">;
+};
+export type PlannerLocationOption = {
+  id: string;
+  code: string;
+  name: string;
+  location_type: string;
+};
 export type PlannerScheduleOptions = {
   timezone_name: string;
   frequencies: AuditScheduleFrequency[];
@@ -248,6 +383,7 @@ export type PlannerScheduleOptions = {
   unsupported_source_types: Record<string, string>;
   scopes: PlannerScheduleOption[];
   people: PlannerPersonOption[];
+  locations: PlannerLocationOption[];
 };
 
 export type PlannerConflict = {
@@ -324,34 +460,74 @@ function jsonOptions(method: string, body?: unknown): RequestInit {
   };
 }
 
-export function listAuditProgrammes(amoCode: string, year?: number, signal?: AbortSignal): Promise<AuditProgrammeList> {
+export function listAuditProgrammes(
+  amoCode: string,
+  year?: number,
+  signal?: AbortSignal,
+): Promise<AuditProgrammeList> {
   const params = new URLSearchParams({ limit: "50", offset: "0" });
   if (year) params.set("year", String(year));
-  return apiRequest(qmsPath(amoCode, `/audit-programmes?${params.toString()}`), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes?${params.toString()}`),
+    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+  );
 }
 
-export function getAuditProgramme(amoCode: string, programmeId: string, signal?: AbortSignal): Promise<AuditProgramme> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}`), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+export function getAuditProgramme(
+  amoCode: string,
+  programmeId: string,
+  signal?: AbortSignal,
+): Promise<AuditProgramme> {
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}`),
+    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+  );
 }
 
-export function getAuditProgrammeOptimizer(amoCode: string, programmeId: string, signal?: AbortSignal): Promise<AuditProgrammeOptimizer> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/optimizer`), { timeoutMs: 20_000, cacheTtlMs: 3_000, signal });
+export function getAuditProgrammeOptimizer(
+  amoCode: string,
+  programmeId: string,
+  signal?: AbortSignal,
+): Promise<AuditProgrammeOptimizer> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/optimizer`,
+    ),
+    { timeoutMs: 20_000, cacheTtlMs: 3_000, signal },
+  );
 }
 
-export function rebuildAuditProgrammeOptimizer(amoCode: string, programmeId: string): Promise<AuditProgrammeOptimizer> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/optimizer/rebuild`), jsonOptions("POST"));
+export function rebuildAuditProgrammeOptimizer(
+  amoCode: string,
+  programmeId: string,
+): Promise<AuditProgrammeOptimizer> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/optimizer/rebuild`,
+    ),
+    jsonOptions("POST"),
+  );
 }
 
-export function createAuditProgramme(amoCode: string, payload: {
-  programme_year: number;
-  programme_kind: "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
-  title?: string;
-  objectives: string[];
-  regulatory_basis: Array<string | Record<string, unknown>>;
-  period_start: string;
-  period_end: string;
-}): Promise<AuditProgramme> {
-  return apiRequest(qmsPath(amoCode, "/audit-programmes"), jsonOptions("POST", payload));
+export function createAuditProgramme(
+  amoCode: string,
+  payload: {
+    programme_year: number;
+    programme_kind: "INTERNAL" | "EXTERNAL" | "THIRD_PARTY";
+    title?: string;
+    objectives: string[];
+    regulatory_basis: Array<string | Record<string, unknown>>;
+    period_start: string;
+    period_end: string;
+    copy_previous_year?: boolean;
+  },
+): Promise<AuditProgramme> {
+  return apiRequest(
+    qmsPath(amoCode, "/audit-programmes"),
+    jsonOptions("POST", payload),
+  );
 }
 
 export function updateAuditProgramme(
@@ -367,51 +543,169 @@ export function updateAuditProgramme(
     reason: string;
   },
 ): Promise<AuditProgramme> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}`), jsonOptions("PATCH", payload));
-}
-
-export function transitionAuditProgramme(amoCode: string, programmeId: string, targetStatus: AuditProgrammeStatus, reason: string): Promise<AuditProgramme> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/transitions`), jsonOptions("POST", { target_status: targetStatus, reason }));
-}
-
-export function createAuditProgrammeAmendment(amoCode: string, programmeId: string, reason: string): Promise<AuditProgramme> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/amendments`), jsonOptions("POST", { reason }));
-}
-
-export function listAuditUniverse(amoCode: string, signal?: AbortSignal): Promise<AuditUniverseList> {
-  return apiRequest(qmsPath(amoCode, "/audit-programmes/universe/items?limit=200&offset=0"), { timeoutMs: 15_000, cacheTtlMs: 10_000, signal });
-}
-
-export function createAuditUniverseItem(amoCode: string, payload: {
-  entity_type: AuditUniverseEntityType; display_label: string; source_owner_module: string; source_type: string; source_id: string;
-  source_route?: string; risk_classification: AuditRiskLevel; regulatory_criticality: AuditRiskLevel;
-  surveillance_interval_days?: number; mandatory_surveillance: boolean; notes?: string;
-}): Promise<AuditUniverseItem> {
-  return apiRequest(qmsPath(amoCode, "/audit-programmes/universe/items"), jsonOptions("POST", payload));
-}
-
-export function updateAuditUniverseItem(amoCode: string, universeItemId: string, payload: {
-  display_label?: string;
-  source_route?: string | null;
-  risk_classification?: AuditRiskLevel;
-  regulatory_criticality?: AuditRiskLevel;
-  surveillance_interval_days?: number | null;
-  mandatory_surveillance?: boolean;
-  active?: boolean;
-  notes?: string | null;
-}): Promise<AuditUniverseItem> {
   return apiRequest(
-    qmsPath(amoCode, `/audit-programmes/universe/items/${encodeURIComponent(universeItemId)}`),
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}`),
     jsonOptions("PATCH", payload),
   );
 }
 
-export function addAuditProgrammeItem(amoCode: string, programmeId: string, payload: {
-  universe_item_id: string; audit_type: string; title: string; purpose?: string; scope: string;
-  criteria: string[]; mandatory_surveillance: boolean; recurrence: string; target_start?: string; target_end?: string;
-  prioritization_basis: Array<Record<string, unknown>>;
-}): Promise<AuditProgrammeItem> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items`), jsonOptions("POST", payload));
+export function transitionAuditProgramme(
+  amoCode: string,
+  programmeId: string,
+  targetStatus: AuditProgrammeStatus,
+  reason: string,
+): Promise<AuditProgramme> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/transitions`,
+    ),
+    jsonOptions("POST", { target_status: targetStatus, reason }),
+  );
+}
+
+export function reviewAuditProgramme(
+  amoCode: string,
+  programmeId: string,
+  decision: "FORWARD" | "RETURN",
+  reason: string,
+): Promise<AuditProgramme> {
+  return apiRequest(
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/quality-review`),
+    jsonOptions("POST", { decision, reason }),
+  );
+}
+
+export async function downloadAuditProgrammeSchedule(
+  amoCode: string,
+  programmeId: string,
+  programmeRef: string,
+  format: "pdf" | "ics",
+): Promise<void> {
+  const result = await apiBlob(
+    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/schedule.${format}`),
+  );
+  const safeRef = programmeRef.replace(/[^a-z0-9._-]+/gi, "-");
+  downloadBlob(result.blob, result.filename || `${safeRef}-audit-schedule.${format}`);
+}
+
+export function createAuditProgrammeAmendment(
+  amoCode: string,
+  programmeId: string,
+  reason: string,
+): Promise<AuditProgramme> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/amendments`,
+    ),
+    jsonOptions("POST", { reason }),
+  );
+}
+
+export function listAuditUniverse(
+  amoCode: string,
+  signal?: AbortSignal,
+): Promise<AuditUniverseList> {
+  return apiRequest(
+    qmsPath(amoCode, "/audit-programmes/universe/items?limit=200&offset=0"),
+    { timeoutMs: 15_000, cacheTtlMs: 10_000, signal },
+  );
+}
+
+export function ensureAuditUniverseDefaults(
+  amoCode: string,
+): Promise<{ created: number; standard_area_count: number }> {
+  return apiRequest(
+    qmsPath(amoCode, "/audit-programmes/universe/ensure-defaults"),
+    jsonOptions("POST", {}),
+  );
+}
+
+export function createAuditUniverseItem(
+  amoCode: string,
+  payload: {
+    entity_type: AuditUniverseEntityType;
+    programme_kind?: AuditUniverseProgrammeKind;
+    display_label: string;
+    source_owner_module: string;
+    source_type: string;
+    source_id: string;
+    source_route?: string;
+    risk_classification: AuditRiskLevel;
+    regulatory_criticality: AuditRiskLevel;
+    surveillance_interval_days?: number;
+    mandatory_surveillance: boolean;
+    notes?: string;
+  },
+): Promise<AuditUniverseItem> {
+  return apiRequest(
+    qmsPath(amoCode, "/audit-programmes/universe/items"),
+    jsonOptions("POST", payload),
+  );
+}
+
+export function updateAuditUniverseItem(
+  amoCode: string,
+  universeItemId: string,
+  payload: {
+    programme_kind?: AuditUniverseProgrammeKind;
+    display_label?: string;
+    source_route?: string | null;
+    risk_classification?: AuditRiskLevel;
+    regulatory_criticality?: AuditRiskLevel;
+    surveillance_interval_days?: number | null;
+    mandatory_surveillance?: boolean;
+    active?: boolean;
+    notes?: string | null;
+  },
+): Promise<AuditUniverseItem> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/universe/items/${encodeURIComponent(universeItemId)}`,
+    ),
+    jsonOptions("PATCH", payload),
+  );
+}
+
+export function addAuditProgrammeItem(
+  amoCode: string,
+  programmeId: string,
+  payload: {
+    universe_item_id: string;
+    audit_type: string;
+    title: string;
+    purpose?: string;
+    scope: string;
+    criteria: Array<string | Record<string, unknown>>;
+    mandatory_surveillance: boolean;
+    recurrence: AuditProgrammeRecurrence;
+    target_start?: string;
+    target_end?: string;
+    fixed_dates?: string[];
+    non_working_day_policy?: "NEXT_WORKING_DAY";
+    default_start_time?: string;
+    default_end_time?: string;
+    default_duration_days?: number;
+    default_location?: string;
+    lead_auditor_user_id?: string;
+    observer_auditor_user_id?: string;
+    supporting_auditor_user_ids?: string[];
+    auditee_user_id?: string;
+    notify_auditors?: boolean;
+    notify_auditees?: boolean;
+    auto_schedule?: boolean;
+    prioritization_basis: Array<Record<string, unknown>>;
+  },
+): Promise<AuditProgrammeItem> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/items`,
+    ),
+    jsonOptions("POST", payload),
+  );
 }
 
 export function updateAuditProgrammeItem(
@@ -424,8 +718,21 @@ export function updateAuditProgrammeItem(
     scope?: string;
     criteria?: Array<string | Record<string, unknown>>;
     mandatory_surveillance?: boolean;
-    recurrence?: string;
+    recurrence?: AuditProgrammeRecurrence;
     custom_interval_days?: number | null;
+    fixed_dates?: string[];
+    non_working_day_policy?: "NEXT_WORKING_DAY";
+    default_start_time?: string;
+    default_end_time?: string;
+    default_duration_days?: number;
+    default_location?: string | null;
+    lead_auditor_user_id?: string | null;
+    observer_auditor_user_id?: string | null;
+    supporting_auditor_user_ids?: string[];
+    auditee_user_id?: string | null;
+    notify_auditors?: boolean;
+    notify_auditees?: boolean;
+    auto_schedule?: boolean;
     target_start?: string | null;
     target_end?: string | null;
     prioritization_basis?: Array<Record<string, unknown>>;
@@ -436,21 +743,46 @@ export function updateAuditProgrammeItem(
   },
 ): Promise<AuditProgrammeItem> {
   return apiRequest(
-    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}`),
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}`,
+    ),
     jsonOptions("PATCH", payload),
   );
 }
 
-export function listAuditProgrammeSchedulingQueue(amoCode: string, signal?: AbortSignal): Promise<AuditProgrammeSchedulingQueue> {
-  return apiRequest(qmsPath(amoCode, "/audit-programmes/planner/queue?limit=50&offset=0"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+export function listAuditProgrammeSchedulingQueue(
+  amoCode: string,
+  signal?: AbortSignal,
+): Promise<AuditProgrammeSchedulingQueue> {
+  return apiRequest(
+    qmsPath(amoCode, "/audit-programmes/planner/queue?limit=50&offset=0"),
+    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+  );
 }
 
-export function listAuditProgrammeScheduleLinks(amoCode: string, programmeId: string, signal?: AbortSignal): Promise<{ items: AuditProgrammeScheduleLink[] }> {
-  return apiRequest(qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/schedule-links`), { timeoutMs: 15_000, cacheTtlMs: 3_000, signal });
+export function listAuditProgrammeScheduleLinks(
+  amoCode: string,
+  programmeId: string,
+  signal?: AbortSignal,
+): Promise<{ items: AuditProgrammeScheduleLink[] }> {
+  return apiRequest(
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/schedule-links`,
+    ),
+    { timeoutMs: 15_000, cacheTtlMs: 3_000, signal },
+  );
 }
 
-export function getPlannerScheduleOptions(amoCode: string, signal?: AbortSignal): Promise<PlannerScheduleOptions> {
-  return apiRequest(qmsPath(amoCode, "/integrations/calendar/schedule-options"), { timeoutMs: 15_000, cacheTtlMs: 10_000, signal });
+export function getPlannerScheduleOptions(
+  amoCode: string,
+  signal?: AbortSignal,
+): Promise<PlannerScheduleOptions> {
+  return apiRequest(
+    qmsPath(amoCode, "/integrations/calendar/schedule-options"),
+    { timeoutMs: 15_000, cacheTtlMs: 10_000, signal },
+  );
 }
 
 export function scheduleAuditProgrammeItem(
@@ -460,7 +792,10 @@ export function scheduleAuditProgrammeItem(
   payload: ProgrammeScheduleCreate,
 ): Promise<PlannerAuditSchedule> {
   return apiRequest(
-    qmsPath(amoCode, `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}/schedule`),
+    qmsPath(
+      amoCode,
+      `/audit-programmes/${encodeURIComponent(programmeId)}/items/${encodeURIComponent(itemId)}/schedule`,
+    ),
     jsonOptions("POST", payload),
   );
 }

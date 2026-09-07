@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from threading import Lock
 from typing import Callable, Dict, List
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -29,7 +29,13 @@ from .database import (
 from .database_resilience import database_circuit
 from .db_capacity import connection_budget, validate_connection_budget
 from .query_metrics import begin_counting, end_counting, query_count
-from .security import JWT_ALGORITHM, SECRET_KEY
+from .security import (
+    JWT_ALGORITHM,
+    SECRET_KEY,
+    apply_module_access_boundary,
+    require_any_module_access,
+    require_module_access,
+)
 from .apps.accounts import models as accounts_models
 
 from .apps.accounts.router_public import router as accounts_public_router
@@ -69,6 +75,7 @@ from .apps.quality.planner_schedule_router import (
     stop_quality_planner_scheduler,
 )
 from .apps.platform.router import router as platform_router
+from .apps.ai.router import router as ai_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
 from .apps.rostering.router import router as rostering_router
@@ -634,26 +641,57 @@ def server_time():
         "source": "server",
     }
 
+
+# Tenant access profiles are the outer operational boundary. A ``view`` grant
+# permits read routes only; every mutating route additionally requires the
+# corresponding ``manage`` grant. Workflow roles, object assignments and
+# personal maintenance authorizations continue to apply inside each endpoint.
+apply_module_access_boundary(rostering_router, "rostering")
+apply_module_access_boundary(fleet_router, "fleet")
+apply_module_access_boundary(aircraft_architecture_router, "fleet")
+apply_module_access_boundary(work_router, "maintenance", "planning", "production")
+apply_module_access_boundary(crs_router, "maintenance")
+apply_module_access_boundary(training_router, "training")
+apply_module_access_boundary(quality_router, "quality")
+apply_module_access_boundary(canonical_quality_router, "quality")
+apply_module_access_boundary(reliability_router, "reliability")
+apply_module_access_boundary(
+    inventory_router,
+    "stores",
+    path_prefixes=("/inventory",),
+)
+apply_module_access_boundary(
+    inventory_router,
+    "procurement",
+    path_prefixes=("/api/maintenance/{amo_code}/procurement",),
+)
+apply_module_access_boundary(finance_router, "finance")
+apply_module_access_boundary(manuals_router, "documents")
+apply_module_access_boundary(doc_control_router, "documents")
+apply_module_access_boundary(technical_records_router, "technical_records")
+apply_module_access_boundary(aerodoc_router, "documents")
+
 app.include_router(accounts_public_router)
 app.include_router(platform_router)
+app.include_router(ai_router)
 app.include_router(foundations_router)
-app.include_router(rostering_router)
+app.include_router(rostering_router, dependencies=[Depends(require_module_access("rostering"))])
 app.include_router(resilience_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(accounts_onboarding_router)
-app.include_router(fleet_router)
-app.include_router(aircraft_architecture_router)
-app.include_router(work_router)
-app.include_router(crs_router)
-app.include_router(training_router)
+app.include_router(fleet_router, dependencies=[Depends(require_module_access("fleet"))])
+app.include_router(aircraft_architecture_router, dependencies=[Depends(require_module_access("fleet"))])
+app.include_router(work_router, dependencies=[Depends(require_any_module_access("maintenance", "planning", "production"))])
+app.include_router(crs_router, dependencies=[Depends(require_module_access("maintenance"))])
+app.include_router(training_router, dependencies=[Depends(require_module_access("training"))])
 app.include_router(training_public_router)
 app.include_router(quality_public_router)
-app.include_router(quality_router)
-app.include_router(reliability_router)
-app.include_router(inventory_router)
-app.include_router(finance_router)
+app.include_router(quality_router, dependencies=[Depends(require_module_access("quality"))])
+app.include_router(reliability_router, dependencies=[Depends(require_module_access("reliability"))])
+app.include_router(inventory_router, dependencies=[Depends(require_any_module_access("stores", "procurement"))])
+app.include_router(finance_router, dependencies=[Depends(require_module_access("finance"))])
 app.include_router(billing_router)
 app.include_router(audit_router)
 app.include_router(audit_events_router)
@@ -663,9 +701,9 @@ app.include_router(bootstrap_router)
 app.include_router(integrations_router)
 app.include_router(events_router)
 app.include_router(realtime_router)
-app.include_router(manuals_router)
+app.include_router(manuals_router, dependencies=[Depends(require_module_access("documents"))])
 app.include_router(manuals_branding_router)
-app.include_router(doc_control_router)
-app.include_router(technical_records_router)
-app.include_router(canonical_quality_router)
-app.include_router(aerodoc_router)
+app.include_router(doc_control_router, dependencies=[Depends(require_module_access("documents"))])
+app.include_router(technical_records_router, dependencies=[Depends(require_module_access("technical_records"))])
+app.include_router(canonical_quality_router, dependencies=[Depends(require_module_access("quality"))])
+app.include_router(aerodoc_router, dependencies=[Depends(require_module_access("documents"))])

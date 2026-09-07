@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import { listEmailLogs, type EmailLog, type EmailLogStatus } from "../services/emailLogs";
 
 type UrlParams = {
@@ -61,7 +62,7 @@ const EmailLogsPage: React.FC = () => {
   const isSuperuser = !!currentUser?.is_superuser;
   const isAmoAdmin = !!currentUser?.is_amo_admin;
   const isQualityManager = currentUser?.role === "QUALITY_MANAGER";
-  const canAccessAdmin = isSuperuser || isAmoAdmin || isQualityManager;
+  const canAccessAdmin = isSuperuser || isAmoAdmin || isQualityManager || hasActiveTenantAdminProfile(amoCode);
 
   const [status, setStatus] = useState<EmailLogStatus | "ALL">("ALL");
   const [templateKey, setTemplateKey] = useState("");

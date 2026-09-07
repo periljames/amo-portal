@@ -107,19 +107,8 @@ def public_verify_copy(serial: str, amo_id: str = Query(...), request: Request =
 @router.get("/public/verify/rate-limit/stats")
 def public_verify_rate_limit_stats(current_user: account_models.User = Depends(get_current_active_user)):
     role_value = getattr(current_user.role, "value", current_user.role)
-    if not (
-        current_user.is_superuser
-        or role_value in {
-            account_models.AccountRole.AMO_ADMIN,
-            account_models.AccountRole.QUALITY_MANAGER,
-            account_models.AccountRole.QUALITY_INSPECTOR,
-            "AMO_ADMIN",
-            "QUALITY_MANAGER",
-            "QUALITY_INSPECTOR",
-            "DOCUMENT_CONTROL_OFFICER",
-        }
-    ):
-        raise HTTPException(status_code=403, detail="Document Control Officer or AMO Admin rights required")
+    if str(role_value) not in {"QUALITY_MANAGER", "DOCUMENT_CONTROL_OFFICER"}:
+        raise HTTPException(status_code=403, detail="Document Control Officer or Quality Manager authority is required")
     now = time.monotonic()
     active_keys = 0
     attempts_total = 0

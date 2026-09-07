@@ -11,7 +11,7 @@ from amodb.apps.accounts import models as account_models
 from . import domain_models as dm
 from . import governance_models as gm
 from .workspace_decision_policy import is_decision_approver
-from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is_control_user, role_value
+from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is_control_user, role_assignment_tokens
 
 
 # A workflow decision is not authorized merely because a button is visible. These
@@ -25,14 +25,14 @@ _ACTION_RESPONSIBILITIES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _assignment_target_filter(user: account_models.User):
+def _assignment_target_filter(db: Session, user: account_models.User):
     clauses = [gm.DocumentResponsibilityAssignment.assignee_user_id == str(user.id)]
     department_id = getattr(user, "department_id", None)
     if department_id:
         clauses.append(gm.DocumentResponsibilityAssignment.assignee_department_id == str(department_id))
-    role = role_value(user)
-    if role:
-        clauses.append(gm.DocumentResponsibilityAssignment.assignee_role == role)
+    role_tokens = role_assignment_tokens(db, user)
+    if role_tokens:
+        clauses.append(gm.DocumentResponsibilityAssignment.assignee_role.in_(role_tokens))
     return or_(*clauses)
 
 
@@ -70,7 +70,7 @@ def has_confirmed_responsibility(
                 gm.DocumentResponsibilityAssignment.effective_to.is_(None),
                 gm.DocumentResponsibilityAssignment.effective_to >= today,
             ),
-            _assignment_target_filter(user),
+            _assignment_target_filter(db, user),
         )
         .limit(1)
         .first()
@@ -99,7 +99,7 @@ def can_perform_workflow_action(
         return False
 
     if action in {"PUBLISH", "ARCHIVE", "SCHEDULE_EFFECTIVITY"}:
-        return is_decision_approver(user)
+        return is_control_user(user)
 
     if action == "REQUEST_CORRECTIONS":
         responsibility_types = _corrections_responsibility(workflow)

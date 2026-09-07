@@ -178,20 +178,23 @@ const portalPrecacheManifestPlugin = (): Plugin => {
       if (!resolvedConfig) return
       const outputRoot = path.resolve(resolvedConfig.root, resolvedConfig.build.outDir)
       const urls = new Set<string>(['/', '/index.html', '/portal.webmanifest'])
-      const visit = (directory: string) => {
-        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-          const absolute = path.join(directory, entry.name)
-          if (entry.isDirectory()) {
-            if (entry.name !== 'pdfjs') visit(absolute)
-            continue
+      const manifestPath = path.join(outputRoot, '.vite', 'manifest.json')
+      if (fs.existsSync(manifestPath)) {
+        type ManifestEntry = { file?: string; imports?: string[]; css?: string[]; assets?: string[] }
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, ManifestEntry>
+        const visited = new Set<string>()
+        const includeEntryGraph = (key: string) => {
+          if (visited.has(key)) return
+          visited.add(key)
+          const entry = manifest[key]
+          if (!entry) return
+          for (const file of [entry.file, ...(entry.css || []), ...(entry.assets || [])]) {
+            if (file) urls.add(`/${file}`)
           }
-          const relative = path.relative(outputRoot, absolute).split(path.sep).join('/')
-          if (/^(?:assets\/).+\.(?:js|css|woff2?|ttf|png|jpe?g|svg|webp|ico)$/i.test(relative)) {
-            urls.add(`/${relative}`)
-          }
+          for (const dependency of entry.imports || []) includeEntryGraph(dependency)
         }
+        includeEntryGraph('index.html')
       }
-      visit(outputRoot)
       fs.writeFileSync(
         path.join(outputRoot, 'portal-precache.json'),
         `${JSON.stringify({ version: Date.now(), urls: [...urls].sort() }, null, 2)}\n`,
@@ -287,6 +290,16 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            // Keep React in a neutral framework chunk. Without this boundary,
+            // manually grouping React adapters such as react-pdf/ag-grid-react
+            // can create a chunk cycle that makes Rollup import both heavy
+            // engines from the application entry despite route-level lazy
+            // loading.
+            if (
+              /node_modules\/(?:react|react-dom|react-router|react-router-dom|scheduler)(?:\/|$)/.test(id)
+            ) {
+              return 'framework-vendor'
+            }
             if (id.includes('node_modules/echarts') || id.includes('node_modules/echarts-for-react')) {
               return 'charts-vendor'
             }

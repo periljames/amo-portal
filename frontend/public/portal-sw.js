@@ -3,11 +3,12 @@
  * API payloads are deliberately not stored in Cache Storage. Authenticated JSON
  * is persisted by the application in a tenant/user-scoped IndexedDB database.
  * This worker only preserves the application shell and immutable static assets.
- * Controlled documents are intentionally network-only
- * until their binary cache can use the same device-bound encryption contract.
+ * Controlled document responses remain network-only in this worker. Explicit
+ * offline copies are owned by the reader's device-bound encrypted IndexedDB
+ * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v6";
+const VERSION = "v7";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];

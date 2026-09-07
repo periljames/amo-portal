@@ -7,7 +7,6 @@ import { AppRouter } from "./router";
 import TenantRouteBoundary from "./app/TenantRouteBoundary";
 import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
-import { ToastProvider } from "./components/feedback/ToastProvider";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
@@ -108,11 +107,11 @@ const App: React.FC = () => {
   if (isPublicCarAccess) return <PortalErrorBoundary><CanonicalPublicCarAccessPage /></PortalErrorBoundary>;
 
   return (
-    <ToastProvider>
+    <>
       <GlobalLoadingBar />
       <PortalSessionLifecycle />
       <PortalErrorBoundary><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></PortalErrorBoundary>
-    </ToastProvider>
+    </>
   );
 };
 

@@ -13,7 +13,7 @@ from amodb.apps.accounts import services as account_services
 
 from . import models as platform_models
 from . import saas_models as models
-from . import saas_providers, saas_queue, saas_secrets
+from . import saas_provider_setup, saas_providers, saas_queue, saas_secrets
 
 
 MODULE_CODE_MAX = 64
@@ -75,6 +75,7 @@ def provider_payload(row: models.SaaSProviderCredential) -> dict[str, Any]:
         "secret_fingerprint": row.secret_fingerprint,
         "secret_fields": list(definition.secret_fields) if definition else [],
         "config_fields": list(definition.config_fields) if definition else [],
+        "setup": saas_provider_setup.provider_setup_schema(row.provider, definition) if definition else None,
         "last_checked_at": row.last_checked_at,
         "last_latency_ms": row.last_latency_ms,
         "last_health_detail": row.last_health_detail,
@@ -135,6 +136,12 @@ def list_provider_credentials(db: Session, *, tenant_id: str | None = None) -> l
     configured = [provider_payload(row) for row in by_provider.values()]
     configured_codes = {row["provider"] for row in configured}
     for definition in saas_providers.provider_catalog():
+        provider_definition = saas_providers.PROVIDERS.get(str(definition.get("provider") or ""))
+        definition = {
+            **definition,
+            "setup": saas_provider_setup.provider_setup_schema(definition["provider"], provider_definition)
+            if provider_definition else None,
+        }
         if definition["provider"] not in configured_codes:
             configured.append(
                 {
@@ -194,7 +201,20 @@ def upsert_provider_credential(
     unexpected_config = set(config) - set(definition.config_fields)
     if unexpected_config:
         raise ValueError(f"Unsupported config field(s): {', '.join(sorted(unexpected_config))}")
-    row.config_json = config
+    # A guided setup normally sends only the fields visible in the current
+    # step. Merge by default so rotating a key or changing one model cannot
+    # silently erase advanced endpoint/project settings. Full replacement is
+    # still available to explicit administrative clients.
+    existing_config = dict(row.config_json or {})
+    row.config_json = dict(config) if payload.get("replace_config") else {**existing_config, **config}
+    clear_fields = payload.get("clear_config_fields") or []
+    if not isinstance(clear_fields, list):
+        raise ValueError("clear_config_fields must be a list")
+    unsupported_clear = set(clear_fields) - set(definition.config_fields)
+    if unsupported_clear:
+        raise ValueError(f"Unsupported config field(s): {', '.join(sorted(unsupported_clear))}")
+    for field in clear_fields:
+        row.config_json.pop(field, None)
 
     if "secret" in payload:
         secret = payload.get("secret") or {}
@@ -226,7 +246,7 @@ def upsert_provider_credential(
             details_json={
                 "provider": normalized,
                 "scope": provider_scope(tenant_id),
-                "config": saas_secrets.redact_mapping(config),
+                "config": saas_secrets.redact_mapping(row.config_json or {}),
                 "has_secret": bool(row.encrypted_secret),
             },
         )

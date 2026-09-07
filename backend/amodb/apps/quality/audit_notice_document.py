@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from xml.sax.saxutils import escape
 
+from reportlab.graphics.barcode import qr
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -77,6 +79,17 @@ def _staff_story(staff: Iterable[str], style: ParagraphStyle) -> list[Paragraph]
     return [Paragraph(f"{index})&nbsp;&nbsp;{escape(name)}", style) for index, name in enumerate(names, start=1)]
 
 
+def _qr_flowable(target: str, size: float = 23 * mm) -> Drawing:
+    widget = qr.QrCodeWidget(target)
+    x1, y1, x2, y2 = widget.getBounds()
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    scale = min(size / width, size / height)
+    drawing = Drawing(size, size, transform=[scale, 0, 0, scale, -x1 * scale, -y1 * scale])
+    drawing.add(widget)
+    return drawing
+
+
 def render_audit_notice_pdf(
     *,
     amo_name: str,
@@ -87,7 +100,10 @@ def render_audit_notice_pdf(
     audit_ref: str,
     audit_title: str,
     audit_date_display: str,
-    auditee: str | None,
+    auditee_representative: str | None,
+    audit_area: str,
+    audit_scope: str,
+    audit_criteria: str,
     subject: str,
     opening_meeting: dict[str, Any] | None,
     closing_meeting: dict[str, Any] | None,
@@ -99,8 +115,8 @@ def render_audit_notice_pdf(
     form_number: str,
     form_issue_date: str,
     form_revision: str,
+    record_url: str,
     logo_path: Path | None = None,
-    is_preview: bool = False,
 ) -> bytes:
     """Render the controlled audit notice using the supplied immutable values."""
 
@@ -144,9 +160,10 @@ def render_audit_notice_pdf(
         alignment=TA_CENTER,
     )
     meta_style = ParagraphStyle("NoticeMeta", parent=compact, fontSize=7.8, leading=9.5, alignment=TA_LEFT)
-    section = ParagraphStyle("NoticeSection", parent=normal, leftIndent=15 * mm, spaceBefore=4, spaceAfter=3)
-    bullet = ParagraphStyle("NoticeBullet", parent=strong, leftIndent=22 * mm, bulletIndent=17 * mm, spaceAfter=3)
+    section = ParagraphStyle("NoticeSection", parent=normal, fontName="Helvetica-Bold", spaceBefore=4, spaceAfter=2)
+    bullet = ParagraphStyle("NoticeBullet", parent=normal, leftIndent=7 * mm, bulletIndent=2 * mm, spaceAfter=2)
     signature = ParagraphStyle("NoticeSignature", parent=normal, fontSize=8.6, leading=10.5)
+    qr_caption = ParagraphStyle("NoticeQrCaption", parent=meta_style, alignment=TA_CENTER, leading=8.5)
 
     metadata = (
         f"Form No: {escape(form_number)}<br/>"
@@ -172,8 +189,14 @@ def render_audit_notice_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
 
-    recipient = _text(auditee, "Responsible auditee")
-    area = recipient
+    representative = _text(auditee_representative, "Responsible auditee representative")
+    area = _text(audit_area, "Defined audit area / process")
+    representative_names = [representative]
+    representative_names.extend(_text(item) for item in staff if _text(item) and _text(item) != representative)
+    representative_story = [
+        Paragraph(f"{index})&nbsp;&nbsp;{escape(name)}", compact)
+        for index, name in enumerate(representative_names, start=1)
+    ]
     story: list[Any] = [
         header,
         Spacer(1, 5 * mm),
@@ -182,28 +205,34 @@ def render_audit_notice_pdf(
             colWidths=[124 * mm, 65 * mm],
             style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (1, 0), (1, 0), "RIGHT")]),
         ),
-        Paragraph(f"To: <b>{escape(recipient)}</b>", normal),
+        Paragraph(f"To: <b>{escape(representative)}</b>", normal),
+        Paragraph(f"Role: Auditee representative for <b>{escape(area)}</b>", compact),
         Spacer(1, 1.5 * mm),
         Paragraph(f"Subject: <b>{escape(subject)}</b>", normal),
         Spacer(1, 1.5 * mm),
         Paragraph(
-            "This memo serves as formal notification that "
-            f"<b>{escape(recipient)}</b> will undergo the scheduled "
+            f"<b>{escape(representative)}</b> is the auditee representative and coordination contact.",
+            normal,
+        ),
+        Paragraph(
+            "<b>Role note:</b> accountability for the process and records remains with process owners.",
+            normal,
+        ),
+        Paragraph(
+            f"This notice confirms that the <b>{escape(area)}</b> area/process is scheduled for the "
             f"<b>{escape(audit_title)}</b> (Ref: <b>{escape(audit_ref)}</b>) on "
             f"<b>{escape(audit_date_display)}</b>.",
             normal,
         ),
-        Paragraph("Audit Name and Audit Reference Number:", section),
-        Paragraph(f"<bullet>&bull;</bullet>{escape(audit_title)} - {escape(audit_ref)}", bullet),
-        Paragraph("Date, time and place of pre-audit briefing:", section),
-        Paragraph(f"<bullet>&bull;</bullet>{escape(_meeting_line(opening_meeting))}", bullet),
-        Paragraph("Planned sequence of audit/examination:", section),
+        Paragraph("Audit particulars", section),
     ]
 
     sequence = Table(
-        [[Paragraph("DEPARTMENT / AREA", strong), Paragraph("ALLOCATED TIME", strong)],
-         [_paragraph(area, compact), _paragraph(sequence_window, compact)]],
-        colWidths=[123 * mm, 61 * mm],
+        [
+            [Paragraph("REFERENCE", strong), Paragraph("AREA / PROCESS", strong), Paragraph("AUDIT WINDOW", strong)],
+            [_paragraph(audit_ref, compact), _paragraph(area, compact), _paragraph(f"{audit_date_display}; {sequence_window}", compact)],
+        ],
+        colWidths=[42 * mm, 79 * mm, 63 * mm],
     )
     sequence.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#344054")),
@@ -217,17 +246,41 @@ def render_audit_notice_pdf(
     ]))
     story.extend([
         KeepTogether(sequence),
-        Spacer(1, 2.5 * mm),
-        Paragraph("The following staff members are requested to be present:", normal),
-        *_staff_story(staff, compact),
-        Spacer(1, 1.5 * mm),
+        Spacer(1, 2 * mm),
+        Table(
+            [
+                [Paragraph("CONTROLLED SCOPE", strong), Paragraph("AUDIT CRITERIA", strong)],
+                [_paragraph(audit_scope, compact), _paragraph(audit_criteria, compact)],
+            ],
+            colWidths=[92 * mm, 92 * mm],
+            style=TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#98A2B3")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D0D5DD")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F8FAFC")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]),
+        ),
+        Paragraph("Pre-audit briefing", section),
+        Paragraph(f"<bullet>&bull;</bullet>{escape(_meeting_line(opening_meeting))}", bullet),
+        Paragraph("Auditee coordination", section),
+        Paragraph(
+            "The representative should coordinate the availability of applicable process owners, record custodians, "
+            "facilities, systems and controlled records. The following auditee representatives are recorded for this notice:",
+            normal,
+        ),
+        *representative_story,
+        Spacer(1, 1 * mm),
         Paragraph(
             "The audit will generally include three phases: data gathering and review, on-site audit or examination, "
             "and analysis of the evidence. A corrective action request will be issued to the responsible manager "
             "where the evidence shows that corrective action is warranted.",
             normal,
         ),
-        Paragraph("Date, time and place of post-audit briefing:", normal),
+        Paragraph("Post-audit briefing", section),
         Paragraph(f"<bullet>&bull;</bullet>{escape(_meeting_line(closing_meeting))}", bullet),
         Spacer(1, 1.5 * mm),
         Paragraph(
@@ -235,18 +288,33 @@ def render_audit_notice_pdf(
             f"For further information, contact the Quality Office at <b>{escape(_text(contact_email, 'the registered AMO contact address'))}</b>.",
             normal,
         ),
-        Spacer(1, 2 * mm),
-        Paragraph("Sincerely,", normal),
-        Paragraph(
-            "Preview - electronic signature and issuance are applied on submission"
-            if is_preview
-            else "Electronically signed and issued through AMO Portal",
-            signature,
+        Spacer(1, 1.5 * mm),
+        Table(
+            [[
+                [
+                    Paragraph("<b>Electronically signed in AMO Portal</b>", signature),
+                    Paragraph(f"<b>{escape(issuer_name)}</b>", signature),
+                    Paragraph(escape(issuer_title), signature),
+                    Paragraph(f"Signed: {escape(signed_at_display)}", signature),
+                    Paragraph(f"Notice record: {escape(notice_id)} / revision {revision_no}", meta_style),
+                    Paragraph("The stored document hash and issuance history are retained in the controlled digital record.", meta_style),
+                ],
+                [
+                    _qr_flowable(record_url),
+                    Paragraph("Scan to open the controlled digital notice.<br/>Login required.<br/>QR identifies the record only.", qr_caption),
+                ],
+            ]],
+            colWidths=[134 * mm, 50 * mm],
+            style=TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#98A2B3")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]),
         ),
-        Paragraph(f"<b>{escape(issuer_name)}</b>", signature),
-        Paragraph(escape(issuer_title), signature),
-        Paragraph(f"{'Prepared' if is_preview else 'Signed'}: {escape(signed_at_display)}", signature),
-        Paragraph(f"Notice record: {escape(notice_id)} / revision {revision_no}", meta_style),
     ])
 
     document.build(story, canvasmaker=_PageCountCanvas)

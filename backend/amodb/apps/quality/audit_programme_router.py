@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from io import BytesIO
 from typing import Any, Literal
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.notifications import service as notification_service
 from amodb.database import get_read_db, get_write_db
 
 from . import models
@@ -19,10 +23,13 @@ from .audit_programme_models import (
     QualityAuditProgrammeItem,
     QualityAuditUniverseItem,
 )
+from .audit_programme_occurrence_models import QualityAuditProgrammeOccurrenceLink
+from .audit_programme_exports import audit_programme_ics, audit_programme_pdf
 from .audit_programme_optimizer import ALGORITHM_VERSION, WEIGHTS, recommended_window, score_surveillance
 from .excellence_models import QualityIntelligenceReview
 from .planner_schedule_models import QMSPlannerScheduleMetadata
-from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
+from .schedule_weekend import add_business_days, next_weekday
+from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context
 
 router = APIRouter(prefix="/audit-programmes", tags=["Quality audit programme"])
 
@@ -30,15 +37,16 @@ ProgrammeStatus = Literal["DRAFT", "UNDER_REVIEW", "APPROVED", "ACTIVE", "SUPERS
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 EntityType = Literal[
     "DEPARTMENT", "FACILITY", "STATION", "SUPPLIER", "CONTRACTOR", "PROCESS",
-    "CAPABILITY", "APPROVAL_RATING", "AIRCRAFT_TYPE", "PERSONNEL_GROUP", "OTHER",
+    "CAPABILITY", "APPROVAL_RATING", "AIRCRAFT", "AIRCRAFT_TYPE", "PERSONNEL_GROUP", "OTHER",
 ]
 AuditType = Literal[
     "INTERNAL", "DEPARTMENTAL", "TECHNICAL", "WORK_PACK", "SUPPLIER", "CONTRACTED_FUNCTION",
     "FACILITY", "PERSONNEL", "PRODUCT", "PROCESS", "REGULATORY", "SPECIAL", "REACTIVE", "FOLLOW_UP",
 ]
-Recurrence = Literal["ONE_TIME", "MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL", "CUSTOM", "RISK_TRIGGERED"]
+Recurrence = Literal["ONE_TIME", "MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL", "FIXED_DATES", "CUSTOM", "RISK_TRIGGERED"]
 ProgrammeItemState = Literal["PLANNED", "SCHEDULED", "COMPLETED", "DEFERRED", "CANCELLED", "FOLLOW_UP_REQUIRED"]
 ProgrammeKind = Literal["INTERNAL", "EXTERNAL", "THIRD_PARTY"]
+UniverseProgrammeKind = Literal["INTERNAL", "EXTERNAL", "BOTH"]
 _ACTIVE_PROGRAMME_STATUSES = ("DRAFT", "UNDER_REVIEW", "APPROVED", "ACTIVE")
 _PROGRAMME_KIND_LABELS: dict[str, str] = {
     "INTERNAL": "Internal Audits",
@@ -46,36 +54,72 @@ _PROGRAMME_KIND_LABELS: dict[str, str] = {
     "THIRD_PARTY": "Third Party Audits",
 }
 
+# Platform templates are copied into each tenant's own audit universe. A tenant
+# can then rename, tune, or deactivate its copy without changing another tenant.
+# The internal set mirrors the controlled QAM/22 annual schedule supplied for
+# the portal; external rows cover the common Part-145 contracted-provider cycle.
+_STANDARD_AUDIT_AREAS: tuple[dict[str, Any], ...] = (
+    {"code": "INT-AIRCRAFT", "kind": "INTERNAL", "type": "AIRCRAFT_TYPE", "label": "Aircraft / product audits", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-LINE-STATIONS", "kind": "INTERNAL", "type": "STATION", "label": "Line stations", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-TECH-RECORDS", "kind": "INTERNAL", "type": "PROCESS", "label": "Technical records & library", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-STORES", "kind": "INTERNAL", "type": "PROCESS", "label": "Stores & procurement", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-TOOLS", "kind": "INTERNAL", "type": "PROCESS", "label": "Tools & equipment", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-WORKSHOPS", "kind": "INTERNAL", "type": "FACILITY", "label": "Workshops", "risk": "MEDIUM", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-HANGAR", "kind": "INTERNAL", "type": "FACILITY", "label": "Hangar", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-PERSONNEL", "kind": "INTERNAL", "type": "PERSONNEL_GROUP", "label": "Technical personnel & training", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-DOCUMENTS", "kind": "INTERNAL", "type": "PROCESS", "label": "Controlled documents & manuals", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "INT-QMS", "kind": "INTERNAL", "type": "PROCESS", "label": "Quality management system", "risk": "HIGH", "criticality": "CRITICAL", "mandatory": True},
+    {"code": "INT-SMS", "kind": "INTERNAL", "type": "PROCESS", "label": "Safety management system", "risk": "HIGH", "criticality": "CRITICAL", "mandatory": True},
+    {"code": "EXT-REGULATOR", "kind": "EXTERNAL", "type": "OTHER", "label": "Regulatory authority oversight", "risk": "HIGH", "criticality": "CRITICAL", "mandatory": True},
+    {"code": "EXT-MAINTENANCE", "kind": "EXTERNAL", "type": "CONTRACTOR", "label": "Contracted maintenance organisations", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "EXT-SUPPLIERS", "kind": "EXTERNAL", "type": "SUPPLIER", "label": "Parts & material suppliers", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "EXT-CALIBRATION", "kind": "EXTERNAL", "type": "CONTRACTOR", "label": "Calibration service providers", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+    {"code": "EXT-TRAINING", "kind": "EXTERNAL", "type": "CONTRACTOR", "label": "External training providers", "risk": "MEDIUM", "criticality": "HIGH", "mandatory": True},
+    {"code": "EXT-LINE-STATIONS", "kind": "EXTERNAL", "type": "STATION", "label": "Contracted line stations", "risk": "HIGH", "criticality": "HIGH", "mandatory": True},
+)
+
 
 def _programme_kind_title(kind: ProgrammeKind, year: int) -> str:
     return f"{_PROGRAMME_KIND_LABELS[kind]} ({year})"
 
 
 def _assert_programme_kind_available(db: Session, *, amo_id: str, year: int, kind: ProgrammeKind) -> None:
-    prefix = _PROGRAMME_KIND_LABELS[kind]
     conflict = (
-        db.query(QualityAuditProgramme.id, QualityAuditProgramme.title)
+        db.query(QualityAuditProgramme.id)
         .filter(
             QualityAuditProgramme.amo_id == amo_id,
             QualityAuditProgramme.programme_year == year,
+            QualityAuditProgramme.programme_kind == kind,
             QualityAuditProgramme.status.in_(_ACTIVE_PROGRAMME_STATUSES),
         )
-        .all()
+        .first()
     )
-    for _, title in conflict:
-        normalized = str(title or "").strip().lower()
-        if normalized.startswith(prefix.lower()):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"An active {prefix} programme already exists for {year}. Amend or close it before creating another.",
-            )
-        if kind == "INTERNAL" and not any(
-            normalized.startswith(label.lower()) for label in _PROGRAMME_KIND_LABELS.values()
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"An active audit programme already exists for {year}. Amend or close it before creating another.",
-            )
+    if conflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An active {_PROGRAMME_KIND_LABELS[kind]} programme already exists for {year}. Amend or close it before creating another.",
+        )
+
+
+def _normalise_fixed_dates(values: list[str] | None) -> list[str]:
+    normalized: set[str] = set()
+    for value in values or []:
+        raw = str(value or "").strip()
+        try:
+            parsed = date.fromisoformat(f"2000-{raw}")
+        except ValueError as exc:
+            raise ValueError(f"Invalid recurring date '{raw}'. Use MM-DD, for example 04-15.") from exc
+        normalized.add(parsed.strftime("%m-%d"))
+    return sorted(normalized)
+
+
+def _validate_default_timing(start_time: time, end_time: time, duration_days: int) -> None:
+    if not (time(9) <= start_time <= time(17)) or not (time(9) <= end_time <= time(17)):
+        raise ValueError("Audit times must be between 09:00 and 17:00 tenant local time.")
+    if end_time <= start_time:
+        raise ValueError("Audit end time must be after start time; overnight audits are not permitted.")
+    if not 1 <= duration_days <= 90:
+        raise ValueError("Audit duration must be between 1 and 90 working days.")
 
 
 class ProgrammeCreate(BaseModel):
@@ -87,11 +131,14 @@ class ProgrammeCreate(BaseModel):
     period_start: date
     period_end: date
     owner_user_id: str | None = Field(default=None, max_length=36)
+    copy_previous_year: bool = True
 
     @model_validator(mode="after")
     def valid_period(self):
         if self.period_end < self.period_start:
             raise ValueError("period_end must be on or after period_start")
+        if self.period_start.year != self.programme_year or self.period_end.year != self.programme_year:
+            raise ValueError("The programme period must stay within the selected calendar year.")
         return self
 
 
@@ -117,6 +164,7 @@ class ProgrammeAmendment(BaseModel):
 
 class UniverseCreate(BaseModel):
     entity_type: EntityType
+    programme_kind: UniverseProgrammeKind = "BOTH"
     display_label: str = Field(min_length=2, max_length=255)
     source_owner_module: str = Field(min_length=2, max_length=80)
     source_type: str = Field(min_length=2, max_length=64)
@@ -130,6 +178,7 @@ class UniverseCreate(BaseModel):
 
 
 class UniversePatch(BaseModel):
+    programme_kind: UniverseProgrammeKind | None = None
     display_label: str | None = Field(default=None, min_length=2, max_length=255)
     source_route: str | None = Field(default=None, max_length=500)
     risk_classification: RiskLevel | None = None
@@ -140,9 +189,43 @@ class UniversePatch(BaseModel):
     notes: str | None = None
 
 
+def _normalise_supporting_auditors(
+    user_ids: list[str] | None,
+    *,
+    lead_auditor_user_id: str | None = None,
+    observer_auditor_user_id: str | None = None,
+) -> list[str]:
+    normalized: list[str] = []
+    for value in user_ids or []:
+        user_id = str(value or "").strip()
+        if (
+            not user_id
+            or user_id in {lead_auditor_user_id, observer_auditor_user_id}
+            or user_id in normalized
+        ):
+            continue
+        if len(user_id) > 36:
+            raise ValueError("Auditor user identifiers cannot exceed 36 characters.")
+        normalized.append(user_id)
+    return normalized
+
+
+def _working_day_count(start: date, end: date) -> int:
+    """Return the inclusive weekday duration represented by a planned date range."""
+    if end < start:
+        raise ValueError("target_end must be on or after target_start")
+    cursor = start
+    count = 0
+    while cursor <= end:
+        if cursor.weekday() < 5:
+            count += 1
+        cursor += timedelta(days=1)
+    return max(count, 1)
+
+
 class ProgrammeItemCreate(BaseModel):
     universe_item_id: str = Field(max_length=36)
-    audit_type: AuditType
+    audit_type: AuditType | None = None
     title: str = Field(min_length=3, max_length=255)
     purpose: str | None = None
     scope: str = Field(min_length=3)
@@ -150,16 +233,47 @@ class ProgrammeItemCreate(BaseModel):
     mandatory_surveillance: bool = False
     recurrence: Recurrence = "ONE_TIME"
     custom_interval_days: int | None = Field(default=None, ge=1, le=3650)
+    fixed_dates: list[str] = Field(default_factory=list, max_length=24)
+    non_working_day_policy: Literal["NEXT_WORKING_DAY"] = "NEXT_WORKING_DAY"
+    default_start_time: time = time(hour=9)
+    default_end_time: time = time(hour=17)
+    default_duration_days: int = Field(default=1, ge=1, le=90)
+    default_location: str | None = Field(default=None, max_length=255)
+    lead_auditor_user_id: str | None = Field(default=None, max_length=36)
+    observer_auditor_user_id: str | None = Field(default=None, max_length=36)
+    supporting_auditor_user_ids: list[str] = Field(default_factory=list, max_length=50)
+    auditee_user_id: str | None = Field(default=None, max_length=36)
+    notify_auditors: bool = True
+    notify_auditees: bool = True
+    auto_schedule: bool = False
     target_start: date | None = None
     target_end: date | None = None
     prioritization_basis: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_schedule(self):
+        if (
+            self.lead_auditor_user_id
+            and self.observer_auditor_user_id == self.lead_auditor_user_id
+        ):
+            raise ValueError("The lead auditor cannot also be the observer.")
         if self.target_start and self.target_end and self.target_end < self.target_start:
             raise ValueError("target_end must be on or after target_start")
         if self.recurrence == "CUSTOM" and not self.custom_interval_days:
             raise ValueError("CUSTOM recurrence requires custom_interval_days")
+        self.fixed_dates = _normalise_fixed_dates(self.fixed_dates)
+        if self.recurrence == "FIXED_DATES" and not self.fixed_dates:
+            raise ValueError("Specific-date recurrence requires at least one calendar date.")
+        if self.auto_schedule and self.recurrence != "FIXED_DATES":
+            raise ValueError("Automatic schedule generation is available for specific-date recurrence.")
+        self.supporting_auditor_user_ids = _normalise_supporting_auditors(
+            self.supporting_auditor_user_ids,
+            lead_auditor_user_id=self.lead_auditor_user_id,
+            observer_auditor_user_id=self.observer_auditor_user_id,
+        )
+        if self.recurrence != "FIXED_DATES" and self.target_start and self.target_end:
+            self.default_duration_days = _working_day_count(self.target_start, self.target_end)
+        _validate_default_timing(self.default_start_time, self.default_end_time, self.default_duration_days)
         return self
 
 
@@ -171,6 +285,19 @@ class ProgrammeItemPatch(BaseModel):
     mandatory_surveillance: bool | None = None
     recurrence: Recurrence | None = None
     custom_interval_days: int | None = Field(default=None, ge=1, le=3650)
+    fixed_dates: list[str] | None = Field(default=None, max_length=24)
+    non_working_day_policy: Literal["NEXT_WORKING_DAY"] | None = None
+    default_start_time: time | None = None
+    default_end_time: time | None = None
+    default_duration_days: int | None = Field(default=None, ge=1, le=90)
+    default_location: str | None = Field(default=None, max_length=255)
+    lead_auditor_user_id: str | None = Field(default=None, max_length=36)
+    observer_auditor_user_id: str | None = Field(default=None, max_length=36)
+    supporting_auditor_user_ids: list[str] | None = Field(default=None, max_length=50)
+    auditee_user_id: str | None = Field(default=None, max_length=36)
+    notify_auditors: bool | None = None
+    notify_auditees: bool | None = None
+    auto_schedule: bool | None = None
     target_start: date | None = None
     target_end: date | None = None
     prioritization_basis: list[dict[str, Any]] | None = None
@@ -179,9 +306,67 @@ class ProgrammeItemPatch(BaseModel):
     cancellation_reason: str | None = None
     reason: str = Field(min_length=3)
 
+    @model_validator(mode="after")
+    def validate_fixed_date_input(self):
+        if self.fixed_dates is not None:
+            self.fixed_dates = _normalise_fixed_dates(self.fixed_dates)
+        if self.recurrence == "FIXED_DATES" and self.fixed_dates == []:
+            raise ValueError("Specific-date recurrence requires at least one calendar date.")
+        return self
+
+
+class ProgrammeQualityReview(BaseModel):
+    decision: Literal["FORWARD", "RETURN"]
+    reason: str = Field(min_length=3)
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ensure_standard_audit_areas(db: Session, *, amo_id: str, actor_user_id: str) -> int:
+    """Materialise missing platform templates as editable tenant-owned rows."""
+
+    # Serialise first-time catalogue materialisation for concurrent tenant
+    # administrators; the existing source uniqueness constraint remains the
+    # final duplicate guard.
+    db.query(account_models.AMO.id).filter(account_models.AMO.id == amo_id).with_for_update().first()
+    existing_codes = {
+        str(source_id)
+        for (source_id,) in db.query(QualityAuditUniverseItem.source_id).filter(
+            QualityAuditUniverseItem.amo_id == amo_id,
+            QualityAuditUniverseItem.source_owner_module == "QUALITY_STANDARD",
+            QualityAuditUniverseItem.source_type == "AUDIT_AREA_TEMPLATE",
+        ).all()
+    }
+    now = _utcnow()
+    created = 0
+    for template in _STANDARD_AUDIT_AREAS:
+        if template["code"] in existing_codes:
+            continue
+        db.add(QualityAuditUniverseItem(
+            amo_id=amo_id,
+            entity_type=template["type"],
+            programme_kind=template["kind"],
+            display_label=template["label"],
+            source_owner_module="QUALITY_STANDARD",
+            source_type="AUDIT_AREA_TEMPLATE",
+            source_id=template["code"],
+            risk_classification=template["risk"],
+            regulatory_criticality=template["criticality"],
+            surveillance_interval_days=365,
+            mandatory_surveillance=bool(template["mandatory"]),
+            active=True,
+            notes="Platform standard copied into this tenant. Changes apply only to this tenant.",
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+            created_at=now,
+            updated_at=now,
+        ))
+        created += 1
+    if created:
+        db.flush()
+    return created
 
 
 def _validate_programme_owner(db: Session, *, amo_id: str, user_id: str | None) -> None:
@@ -200,14 +385,123 @@ def _validate_programme_owner(db: Session, *, amo_id: str, user_id: str | None) 
         )
 
 
+def _validate_item_people(db: Session, *, amo_id: str, user_ids: list[str | None]) -> None:
+    selected = {str(user_id) for user_id in user_ids if user_id}
+    if not selected:
+        return
+    existing = {
+        str(row[0])
+        for row in db.query(account_models.User.id).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(selected),
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        ).all()
+    }
+    if existing != selected:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Every selected auditor and auditee must be an active human user in this tenant.",
+        )
+
+
+def _validate_item_auditor_privileges(
+    db: Session,
+    *,
+    amo_id: str,
+    lead_user_id: str | None,
+    observer_user_id: str | None,
+    supporting_user_ids: list[str],
+) -> None:
+    # Imported lazily because the planner composes this programme router during
+    # Quality application startup. The shared check is nevertheless the sole
+    # runtime source of auditor eligibility for both programme and calendar.
+    from .planner_schedule_router import _validate_auditor_assignments
+
+    _validate_auditor_assignments(
+        db,
+        amo_id=amo_id,
+        lead_user_id=lead_user_id,
+        observer_user_id=observer_user_id,
+        assistant_user_id=None,
+        supporting_user_ids=supporting_user_ids,
+    )
+
+
+def _validate_item_location(
+    db: Session,
+    *,
+    amo_id: str,
+    location_code: str | None,
+    required: bool = False,
+) -> None:
+    code = str(location_code or "").strip()
+    if not code:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Facility and station audits require a configured tenant location.",
+            )
+        return
+    from amodb.apps.foundations import models as foundation_models
+
+    location = db.query(foundation_models.BaseStation.id).filter(
+        foundation_models.BaseStation.amo_id == amo_id,
+        foundation_models.BaseStation.code == code,
+        foundation_models.BaseStation.is_active.is_(True),
+    ).first()
+    if location is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Select an active physical location configured for this tenant.",
+        )
+
+
+def _fixed_date(programme: QualityAuditProgramme, month_day: str) -> date:
+    try:
+        return date.fromisoformat(f"{programme.programme_year}-{month_day}")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Recurring date {month_day} is not valid in {programme.programme_year}.",
+        ) from exc
+
+
+def _apply_fixed_date_window(programme: QualityAuditProgramme, values: dict[str, Any]) -> None:
+    if values.get("recurrence") != "FIXED_DATES":
+        return
+    fixed_dates = _normalise_fixed_dates(values.get("fixed_dates"))
+    if not fixed_dates:
+        raise HTTPException(status_code=422, detail="Add at least one specific calendar date.")
+    duration_days = int(values.get("default_duration_days") or 1)
+    requested = [_fixed_date(programme, value) for value in fixed_dates]
+    resolved_starts = [next_weekday(value) for value in requested]
+    if len(set(resolved_starts)) != len(resolved_starts):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Two selected dates resolve to the same working day. Remove one of the duplicate audit dates.",
+        )
+    resolved_ends = [add_business_days(value, duration_days - 1) for value in resolved_starts]
+    if min(resolved_starts) < programme.period_start or max(resolved_ends) > programme.period_end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Specific audit dates and their working-day duration must stay inside the programme period.",
+        )
+    values["fixed_dates"] = fixed_dates
+    values["target_start"] = min(resolved_starts)
+    values["target_end"] = max(resolved_ends)
+    values["auto_schedule"] = True
+
+
 def _programme_ref(year: int, revision: int) -> tuple[str, str]:
     series = f"AP-{year}-{uuid.uuid4().hex[:8].upper()}"
     return f"{series}-R{revision:02d}", series
 
 
-def _universe_dict(item: QualityAuditUniverseItem) -> dict[str, Any]:
-    return {
+def _universe_dict(item: QualityAuditUniverseItem, aircraft: Any | None = None) -> dict[str, Any]:
+    payload = {
         "id": str(item.id), "entity_type": item.entity_type, "display_label": item.display_label,
+        "programme_kind": item.programme_kind,
         "source_owner_module": item.source_owner_module, "source_type": item.source_type,
         "source_id": item.source_id, "source_route": item.source_route,
         "risk_classification": item.risk_classification,
@@ -216,6 +510,42 @@ def _universe_dict(item: QualityAuditUniverseItem) -> dict[str, Any]:
         "mandatory_surveillance": item.mandatory_surveillance, "active": item.active,
         "notes": item.notes, "created_at": item.created_at, "updated_at": item.updated_at,
     }
+    if aircraft is not None:
+        payload["aircraft"] = {
+            "tail_number": aircraft.registration,
+            "model": aircraft.model or aircraft.aircraft_model_code,
+            "msn": aircraft.serial_number,
+        }
+    else:
+        payload["aircraft"] = None
+    payload["origin"] = "PLATFORM_STANDARD" if item.source_owner_module == "QUALITY_STANDARD" else "TENANT"
+    return payload
+
+
+def _aircraft_by_source_id(
+    db: Session,
+    *,
+    amo_id: str,
+    items: list[QualityAuditUniverseItem],
+) -> dict[str, Any]:
+    serial_numbers = {
+        str(item.source_id)
+        for item in items
+        if item.entity_type == "AIRCRAFT"
+        and item.source_owner_module == "FLEET"
+        and item.source_type == "AIRCRAFT"
+    }
+    if not serial_numbers:
+        return {}
+    # Local import avoids coupling the Quality router's module bootstrap to the
+    # Fleet router while still treating Fleet as the authoritative source.
+    from amodb.apps.fleet.models import Aircraft
+
+    rows = db.query(Aircraft).filter(
+        Aircraft.amo_id == amo_id,
+        Aircraft.serial_number.in_(serial_numbers),
+    ).all()
+    return {str(row.serial_number): row for row in rows}
 
 
 def _item_dict(item: QualityAuditProgrammeItem) -> dict[str, Any]:
@@ -226,6 +556,19 @@ def _item_dict(item: QualityAuditProgrammeItem) -> dict[str, Any]:
         "mandatory_surveillance": item.mandatory_surveillance, "recurrence": item.recurrence,
         "custom_interval_days": item.custom_interval_days, "target_start": item.target_start,
         "target_end": item.target_end, "state": item.state,
+        "fixed_dates": list(item.fixed_dates or []),
+        "non_working_day_policy": item.non_working_day_policy,
+        "default_start_time": item.default_start_time,
+        "default_end_time": item.default_end_time,
+        "default_duration_days": item.default_duration_days,
+        "default_location": item.default_location,
+        "lead_auditor_user_id": item.lead_auditor_user_id,
+        "observer_auditor_user_id": item.observer_auditor_user_id,
+        "supporting_auditor_user_ids": list(item.supporting_auditor_user_ids or []),
+        "auditee_user_id": item.auditee_user_id,
+        "notify_auditors": item.notify_auditors,
+        "notify_auditees": item.notify_auditees,
+        "auto_schedule": item.auto_schedule,
         "prioritization_basis": item.prioritization_basis,
         "deferral_reason": item.deferral_reason, "cancellation_reason": item.cancellation_reason,
         "auditable_entity": _universe_dict(item.universe_item) if item.universe_item else None,
@@ -237,6 +580,7 @@ def _programme_snapshot(programme: QualityAuditProgramme) -> dict[str, Any]:
     return {
         "id": str(programme.id), "programme_ref": programme.programme_ref,
         "programme_series": programme.programme_series, "programme_year": programme.programme_year,
+        "programme_kind": programme.programme_kind,
         "revision_no": programme.revision_no, "title": programme.title,
         "assurance_model": "HYBRID",
         "continuous_monitoring_enabled": bool(programme.continuous_monitoring_enabled),
@@ -245,6 +589,12 @@ def _programme_snapshot(programme: QualityAuditProgramme) -> dict[str, Any]:
         "status": programme.status, "period_start": programme.period_start.isoformat(),
         "period_end": programme.period_end.isoformat(), "owner_user_id": programme.owner_user_id,
         "supersedes_programme_id": programme.supersedes_programme_id,
+        "submitted_by_user_id": programme.submitted_by_user_id,
+        "submitted_at": programme.submitted_at.isoformat() if programme.submitted_at else None,
+        "quality_reviewed_by_user_id": programme.quality_reviewed_by_user_id,
+        "quality_reviewed_at": programme.quality_reviewed_at.isoformat() if programme.quality_reviewed_at else None,
+        "approved_by_user_id": programme.approved_by_user_id,
+        "approved_at": programme.approved_at.isoformat() if programme.approved_at else None,
     }
 
 
@@ -263,6 +613,13 @@ def _programme_readiness(programme: QualityAuditProgramme, *, mandatory_coverage
             "message": f"{mandatory_coverage_gaps} mandatory surveillance requirement(s) due in this programme period are not covered.",
         })
     for item in items:
+        if getattr(item, "recurrence", None) == "FIXED_DATES":
+            if not list(getattr(item, "fixed_dates", None) or []):
+                blockers.append({"code": "MISSING_FIXED_DATES", "message": f"{item.title}: add at least one recurring calendar date."})
+            if not getattr(item, "auto_schedule", False):
+                blockers.append({"code": "AUTO_SCHEDULE_DISABLED", "message": f"{item.title}: enable automatic schedule generation for its specific dates."})
+            if not getattr(item, "lead_auditor_user_id", None):
+                blockers.append({"code": "MISSING_LEAD_AUDITOR", "message": f"{item.title}: assign a lead auditor before approval."})
         if not item.target_start or not item.target_end:
             blockers.append({"code": "MISSING_TARGET_WINDOW", "message": f"{item.title}: set a target start and end window."})
         elif item.target_start < programme.period_start or item.target_end > programme.period_end:
@@ -274,14 +631,22 @@ def _programme_readiness(programme: QualityAuditProgramme, *, mandatory_coverage
         item for item in items
         if item.universe_item and item.universe_item.risk_classification in {"HIGH", "CRITICAL"}
     ]
+    awaiting_manual_schedule = [
+        item for item in items
+        if item.state == "PLANNED"
+        and not (
+            getattr(item, "recurrence", None) == "FIXED_DATES"
+            and getattr(item, "auto_schedule", False)
+        )
+    ]
     return {
         "ready_for_approval": not blockers,
         "blockers": blockers,
         "requirement_count": len(items),
         "mandatory_requirement_count": len(mandatory),
-        "mandatory_unscheduled_count": sum(1 for item in mandatory if item.state == "PLANNED"),
+        "mandatory_unscheduled_count": sum(1 for item in awaiting_manual_schedule if item.mandatory_surveillance),
         "high_risk_requirement_count": len(high_risk),
-        "unscheduled_requirement_count": sum(1 for item in items if item.state == "PLANNED"),
+        "unscheduled_requirement_count": len(awaiting_manual_schedule),
         "mandatory_coverage_gap_count": mandatory_coverage_gaps,
     }
 
@@ -291,9 +656,18 @@ def _programme_dict(programme: QualityAuditProgramme, *, detail: bool = False) -
     counts = {state: 0 for state in ["PLANNED", "SCHEDULED", "COMPLETED", "DEFERRED", "CANCELLED", "FOLLOW_UP_REQUIRED"]}
     for item in items:
         counts[item.state] = counts.get(item.state, 0) + 1
+    auto_scheduled_on_publication = sum(
+        1 for item in items
+        if item.state == "PLANNED"
+        and getattr(item, "recurrence", None) == "FIXED_DATES"
+        and getattr(item, "auto_schedule", False)
+    )
     result: dict[str, Any] = {
         **_programme_snapshot(programme),
         "owner_user_id": programme.owner_user_id,
+        "submitted_by_user_id": programme.submitted_by_user_id, "submitted_at": programme.submitted_at,
+        "quality_reviewed_by_user_id": programme.quality_reviewed_by_user_id,
+        "quality_reviewed_at": programme.quality_reviewed_at,
         "approved_by_user_id": programme.approved_by_user_id, "approved_at": programme.approved_at,
         "activated_at": programme.activated_at, "closed_at": programme.closed_at,
         "created_at": programme.created_at, "updated_at": programme.updated_at,
@@ -301,7 +675,7 @@ def _programme_dict(programme: QualityAuditProgramme, *, detail: bool = False) -
             "planned_audit_count": len(items), "completed_audit_count": counts["COMPLETED"],
             "deferred_audit_count": counts["DEFERRED"], "cancelled_audit_count": counts["CANCELLED"],
             "follow_up_audit_count": counts["FOLLOW_UP_REQUIRED"], "scheduled_audit_count": counts["SCHEDULED"],
-            "unscheduled_audit_count": counts["PLANNED"],
+            "unscheduled_audit_count": counts["PLANNED"] - auto_scheduled_on_publication,
         },
         "readiness": _programme_readiness(programme),
     }
@@ -326,7 +700,7 @@ def _load_programme(db: Session, amo_id: str, programme_id: str, *, for_update: 
                       selectinload(QualityAuditProgramme.events))
              .filter(QualityAuditProgramme.id == programme_id))
     if for_update:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityAuditProgramme)
     programme = query.first()
     if not programme:
         raise HTTPException(status_code=404, detail="Audit programme not found.")
@@ -341,10 +715,104 @@ def _event(db: Session, programme: QualityAuditProgramme, ctx: TenantContext, ev
     ))
 
 
+def _programme_action_url(ctx: TenantContext, programme: QualityAuditProgramme) -> str:
+    return (
+        f"/maintenance/{ctx.amo_code}/quality/audits/program"
+        f"?tab=approval&programme={programme.id}"
+    )
+
+
+def _active_programme_role_users(
+    db: Session,
+    *,
+    amo_id: str,
+    role_name: str,
+    exclude_user_id: str | None = None,
+) -> list[account_models.User]:
+    query = db.query(account_models.User).filter(
+        account_models.User.amo_id == amo_id,
+        account_models.User.role == account_models.AccountRole(role_name),
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    )
+    if exclude_user_id:
+        query = query.filter(account_models.User.id != exclude_user_id)
+    return query.all()
+
+
+def _notify_programme_users(
+    db: Session,
+    *,
+    programme: QualityAuditProgramme,
+    ctx: TenantContext,
+    role_names: tuple[str, ...] = (),
+    extra_user_ids: tuple[str | None, ...] = (),
+    message: str,
+    subject: str,
+    template_key: str,
+    correlation_suffix: str,
+    action_required: bool,
+) -> int:
+    role_values = [account_models.AccountRole(value) for value in role_names]
+    query = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    )
+    users = query.filter(account_models.User.role.in_(role_values)).all() if role_values else []
+    extra_ids = {str(value) for value in extra_user_ids if value}
+    if extra_ids:
+        users.extend(query.filter(account_models.User.id.in_(extra_ids)).all())
+    recipients = {str(user.id): user for user in users}
+    recipients.pop(ctx.user_id, None)
+    action_url = _programme_action_url(ctx, programme)
+    severity = models.QMSNotificationSeverity.ACTION_REQUIRED if action_required else models.QMSNotificationSeverity.INFO
+    queued = 0
+    for user_id, user in recipients.items():
+        db.add(models.QMSNotification(
+            amo_id=ctx.amo_id,
+            user_id=user_id,
+            message=message,
+            severity=severity,
+            created_by_user_id=ctx.user_id,
+            action_url=action_url,
+            action_label="Open audit programme",
+            entity_type="AUDIT_PROGRAMME",
+            entity_id=str(programme.id),
+        ))
+        queued += 1
+        if getattr(user, "email", None):
+            try:
+                notification_service.send_email(
+                    template_key=template_key,
+                    recipient=user.email,
+                    subject=subject,
+                    context={
+                        "programme_id": str(programme.id),
+                        "programme_ref": programme.programme_ref,
+                        "programme_title": programme.title,
+                        "message": message,
+                        "action_url": action_url,
+                    },
+                    correlation_id=f"audit-programme:{programme.id}:{correlation_suffix}:{user_id}",
+                    critical=False,
+                    amo_id=ctx.amo_id,
+                    db=db,
+                    recipient_user_id=user_id,
+                    audit_context={"purpose": "audit-programme-approval", "stage": correlation_suffix},
+                )
+                queued += 1
+            except Exception:
+                # Approval is never blocked by an unavailable optional delivery provider;
+                # the durable in-app notification above remains authoritative.
+                continue
+    return queued
+
+
 def _assert_editable(programme: QualityAuditProgramme) -> None:
-    if programme.status not in {"DRAFT", "UNDER_REVIEW"}:
+    if programme.status != "DRAFT":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Approved or active programme revisions are immutable. Create an amendment revision instead.")
+                            detail="Only a draft programme may be edited. A submitted revision is frozen; return it to draft or create an amendment.")
 
 
 def _validate_item_window(programme: QualityAuditProgramme, start: date | None, end: date | None) -> None:
@@ -382,6 +850,7 @@ def _hybrid_signal_map(
         QualityAuditProgrammeItem.universe_item_id.in_(list(universe_by_id)),
     ).all()
     schedule_to_universe: dict[str, str] = {}
+    programme_item_to_universe: dict[str, str] = {}
     for item in history:
         universe_id = str(item.universe_item_id)
         if universe_id not in signals:
@@ -392,6 +861,17 @@ def _hybrid_signal_map(
             signals[universe_id]["deferred_audits"] += 1
         if item.schedule_id:
             schedule_to_universe[str(item.schedule_id)] = universe_id
+        programme_item_to_universe[str(item.id)] = universe_id
+
+    if programme_item_to_universe:
+        occurrence_links = db.query(QualityAuditProgrammeOccurrenceLink).filter(
+            QualityAuditProgrammeOccurrenceLink.amo_id == amo_id,
+            QualityAuditProgrammeOccurrenceLink.programme_item_id.in_(list(programme_item_to_universe)),
+        ).all()
+        for link in occurrence_links:
+            universe_id = programme_item_to_universe.get(str(link.programme_item_id))
+            if universe_id:
+                schedule_to_universe[str(link.schedule_id)] = universe_id
 
     audit_to_universe: dict[str, set[str]] = defaultdict(set)
     if schedule_to_universe:
@@ -470,18 +950,29 @@ def _recurrence_for_interval(days: int) -> tuple[str, int | None]:
 
 def _audit_type_for_entity(entity_type: str) -> str:
     return {
+        "AIRCRAFT": "PRODUCT",
+        "AIRCRAFT_TYPE": "PRODUCT",
         "SUPPLIER": "SUPPLIER",
         "CONTRACTOR": "CONTRACTED_FUNCTION",
         "FACILITY": "FACILITY",
+        "STATION": "FACILITY",
         "PERSONNEL_GROUP": "PERSONNEL",
+        "CAPABILITY": "TECHNICAL",
+        "APPROVAL_RATING": "TECHNICAL",
+        "DEPARTMENT": "DEPARTMENTAL",
         "PROCESS": "PROCESS",
     }.get(entity_type, "INTERNAL")
 
 
 def _optimizer_payload(db: Session, programme: QualityAuditProgramme) -> dict[str, Any]:
+    universe_kind = "INTERNAL" if programme.programme_kind == "INTERNAL" else "EXTERNAL"
     universe = db.query(QualityAuditUniverseItem).filter(
         QualityAuditUniverseItem.amo_id == programme.amo_id,
         QualityAuditUniverseItem.active.is_(True),
+        or_(
+            QualityAuditUniverseItem.programme_kind == universe_kind,
+            QualityAuditUniverseItem.programme_kind == "BOTH",
+        ),
     ).order_by(QualityAuditUniverseItem.display_label.asc()).limit(500).all()
     signal_map = _hybrid_signal_map(db, programme.amo_id, universe)
     covered = {str(item.universe_item_id): item for item in list(programme.items or []) if item.state != "CANCELLED"}
@@ -643,14 +1134,14 @@ def _sync_hybrid_recommendations(
         current_interval = row.custom_interval_days if row.recurrence == "CUSTOM" else {
             "MONTHLY": 31, "QUARTERLY": 92, "SEMI_ANNUAL": 183, "ANNUAL": 365, "ONE_TIME": 3650,
         }.get(row.recurrence, 3650)
-        if int(recommendation["recommended_interval_days"]) < int(current_interval or 3650):
+        if row.recurrence != "FIXED_DATES" and int(recommendation["recommended_interval_days"]) < int(current_interval or 3650):
             row.recurrence = recurrence
             row.custom_interval_days = custom_interval
             changed = True
-        if row.target_start is None or target_start < row.target_start:
+        if row.recurrence != "FIXED_DATES" and (row.target_start is None or target_start < row.target_start):
             row.target_start = target_start
             changed = True
-        if row.target_end is None or target_end < row.target_end:
+        if row.recurrence != "FIXED_DATES" and (row.target_end is None or target_end < row.target_end):
             row.target_end = max(row.target_start or target_start, target_end)
             changed = True
         row.updated_by_user_id = ctx.user_id
@@ -672,6 +1163,97 @@ def _sync_hybrid_recommendations(
     refreshed = _optimizer_payload(db, programme)
     refreshed["sync"] = {"added": added, "updated": updated}
     return refreshed
+
+
+def _date_in_year(value: date | None, year: int) -> date | None:
+    if value is None:
+        return None
+    try:
+        return value.replace(year=year)
+    except ValueError:
+        return value.replace(year=year, day=28)
+
+
+def _carry_forward_previous_year(
+    db: Session,
+    *,
+    programme: QualityAuditProgramme,
+    ctx: TenantContext,
+) -> int:
+    previous = (
+        _query(db, ctx.amo_id)
+        .options(selectinload(QualityAuditProgramme.items))
+        .filter(
+            QualityAuditProgramme.programme_year == programme.programme_year - 1,
+            QualityAuditProgramme.programme_kind == programme.programme_kind,
+            QualityAuditProgramme.status.in_(("APPROVED", "ACTIVE", "CLOSED", "SUPERSEDED")),
+        )
+        .order_by(QualityAuditProgramme.revision_no.desc(), QualityAuditProgramme.updated_at.desc())
+        .first()
+    )
+    if previous is None:
+        return 0
+    if not list(programme.objectives or []):
+        programme.objectives = list(previous.objectives or [])
+    if not list(programme.regulatory_basis or []):
+        programme.regulatory_basis = list(previous.regulatory_basis or [])
+    now = _utcnow()
+    copied = 0
+    for source in list(previous.items or []):
+        if source.state == "CANCELLED":
+            continue
+        data: dict[str, Any] = {
+            "amo_id": ctx.amo_id,
+            "programme_id": programme.id,
+            "universe_item_id": source.universe_item_id,
+            "audit_type": source.audit_type,
+            "title": source.title,
+            "purpose": source.purpose,
+            "scope": source.scope,
+            "criteria": list(source.criteria or []),
+            "mandatory_surveillance": source.mandatory_surveillance,
+            "recurrence": source.recurrence,
+            "custom_interval_days": source.custom_interval_days,
+            "fixed_dates": list(source.fixed_dates or []),
+            "non_working_day_policy": source.non_working_day_policy,
+            "default_start_time": source.default_start_time,
+            "default_end_time": source.default_end_time,
+            "default_duration_days": source.default_duration_days,
+            "default_location": source.default_location,
+            "lead_auditor_user_id": source.lead_auditor_user_id,
+            "auditee_user_id": source.auditee_user_id,
+            "notify_auditors": source.notify_auditors,
+            "notify_auditees": source.notify_auditees,
+            "auto_schedule": source.auto_schedule,
+            "target_start": _date_in_year(source.target_start, programme.programme_year),
+            "target_end": _date_in_year(source.target_end, programme.programme_year),
+            "state": "PLANNED",
+            "prioritization_basis": [
+                *list(source.prioritization_basis or []),
+                {"driver": "ANNUAL_CARRY_FORWARD", "source_programme_id": str(previous.id)},
+            ],
+            "created_by_user_id": ctx.user_id,
+            "updated_by_user_id": ctx.user_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if source.recurrence == "FIXED_DATES":
+            _apply_fixed_date_window(programme, data)
+        elif data["target_start"] and data["target_end"]:
+            _validate_item_window(programme, data["target_start"], data["target_end"])
+        db.add(QualityAuditProgrammeItem(**data))
+        copied += 1
+    if copied:
+        _event(
+            db,
+            programme,
+            ctx,
+            "ITEM_ADDED",
+            f"Carried forward {copied} governed audit requirement(s) from {previous.programme_year} for annual review.",
+            None,
+            {"source_programme_id": str(previous.id), "copied_count": copied},
+        )
+    return copied
 
 
 @router.get("")
@@ -707,7 +1289,7 @@ def create_programme(payload: ProgrammeCreate,
     now = _utcnow()
     row = QualityAuditProgramme(
         amo_id=ctx.amo_id, programme_ref=ref, programme_series=series, programme_year=payload.programme_year,
-        revision_no=1, title=title, continuous_monitoring_enabled=True,
+        programme_kind=payload.programme_kind, revision_no=1, title=title, continuous_monitoring_enabled=True,
         optimizer_version=ALGORITHM_VERSION, objectives=payload.objectives,
         regulatory_basis=payload.regulatory_basis, status="DRAFT", period_start=payload.period_start,
         period_end=payload.period_end, owner_user_id=owner_user_id,
@@ -716,6 +1298,9 @@ def create_programme(payload: ProgrammeCreate,
     db.add(row)
     db.flush()
     _event(db, row, ctx, "CREATED", "Continuous hybrid audit programme created.", None, _programme_snapshot(row))
+    _ensure_standard_audit_areas(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    if payload.copy_previous_year:
+        _carry_forward_previous_year(db, programme=row, ctx=ctx)
     _sync_hybrid_recommendations(db, row, ctx)
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -735,7 +1320,7 @@ def rebuild_programme_optimizer(programme_id: str,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")), db: Session = Depends(get_write_db)) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     programme = _load_programme(db, ctx.amo_id, programme_id, for_update=True)
-    if programme.status in {"DRAFT", "UNDER_REVIEW"}:
+    if programme.status == "DRAFT":
         result = _sync_hybrid_recommendations(db, programme, ctx)
         db.commit()
         return result
@@ -746,6 +1331,86 @@ def rebuild_programme_optimizer(programme_id: str,
         "message": "New adaptive coverage requires an amendment revision; the optimizer does not silently rewrite an approved programme.",
     }
     return result
+
+
+def _programme_people(db: Session, programme: QualityAuditProgramme) -> dict[str, str]:
+    user_ids = {
+        str(value)
+        for value in (
+            programme.owner_user_id,
+            programme.submitted_by_user_id,
+            programme.quality_reviewed_by_user_id,
+            programme.approved_by_user_id,
+        )
+        if value
+    }
+    for item in list(programme.items or []):
+        user_ids.update(str(value) for value in (
+            item.lead_auditor_user_id,
+            item.observer_auditor_user_id,
+            item.auditee_user_id,
+            *list(item.supporting_auditor_user_ids or []),
+        ) if value)
+    if not user_ids:
+        return {}
+    rows = db.query(account_models.User).filter(
+        account_models.User.amo_id == programme.amo_id,
+        account_models.User.id.in_(user_ids),
+    ).all()
+    return {str(user.id): str(user.full_name or user.email or user.id) for user in rows}
+
+
+def _programme_timezone(db: Session, programme: QualityAuditProgramme) -> str:
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == programme.amo_id).first()
+    return str(getattr(amo, "time_zone", None) or "UTC")
+
+
+def _assert_exportable(programme: QualityAuditProgramme) -> None:
+    if programme.status not in {"APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The controlled schedule becomes downloadable after Accountable Executive approval.",
+        )
+
+
+@router.get("/{programme_id}/schedule.pdf")
+def export_programme_pdf(
+    programme_id: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.reports.export")),
+    db: Session = Depends(get_read_db),
+):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    programme = _load_programme(db, ctx.amo_id, programme_id)
+    _assert_exportable(programme)
+    content = audit_programme_pdf(programme, _programme_people(db, programme))
+    filename = f"{programme.programme_ref.replace('/', '-')}-audit-schedule.pdf"
+    return StreamingResponse(
+        BytesIO(content),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{programme_id}/schedule.ics")
+def export_programme_calendar(
+    programme_id: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.reports.export")),
+    db: Session = Depends(get_read_db),
+):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    programme = _load_programme(db, ctx.amo_id, programme_id)
+    _assert_exportable(programme)
+    content = audit_programme_ics(
+        programme,
+        _programme_people(db, programme),
+        _programme_timezone(db, programme),
+    )
+    filename = f"{programme.programme_ref.replace('/', '-')}-audit-schedule.ics"
+    return Response(
+        content=content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/{programme_id}")
@@ -769,8 +1434,20 @@ def patch_programme(programme_id: str, payload: ProgrammePatch,
         setattr(row, field, value)
     if row.period_end < row.period_start:
         raise HTTPException(status_code=422, detail="period_end must be on or after period_start")
+    if row.period_start.year != row.programme_year or row.period_end.year != row.programme_year:
+        raise HTTPException(status_code=422, detail="The programme period must stay within its calendar year.")
     for item in list(row.items or []):
-        _validate_item_window(row, item.target_start, item.target_end)
+        if item.recurrence == "FIXED_DATES":
+            candidate = {
+                "recurrence": item.recurrence,
+                "fixed_dates": list(item.fixed_dates or []),
+                "default_duration_days": item.default_duration_days,
+            }
+            _apply_fixed_date_window(row, candidate)
+            item.target_start = candidate["target_start"]
+            item.target_end = candidate["target_end"]
+        else:
+            _validate_item_window(row, item.target_start, item.target_end)
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
     _event(db, row, ctx, "UPDATED", payload.reason, before, _programme_snapshot(row))
@@ -790,23 +1467,58 @@ _EVENT_BY_TARGET = {"UNDER_REVIEW": "SUBMITTED_FOR_REVIEW", "DRAFT": "RETURNED_T
 
 
 @router.post("/{programme_id}/transitions")
-def transition_programme(programme_id: str, payload: ProgrammeTransition,
-    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")), db: Session = Depends(get_write_db)) -> dict[str, Any]:
+def transition_programme(programme_id: str, payload: ProgrammeTransition, request: Request,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")), db: Session = Depends(get_write_db)) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     row = _load_programme(db, ctx.amo_id, programme_id, for_update=True)
+    if payload.target_status == "APPROVED":
+        assert_quality_permission(db, ctx, "qms.audit.programme.approve")
+    elif payload.target_status == "DRAFT" and row.status == "UNDER_REVIEW":
+        assert_quality_permission(
+            db,
+            ctx,
+            "qms.audit.programme.approve" if row.quality_reviewed_at else "qms.audit.programme.quality_review",
+        )
+    else:
+        assert_quality_permission(db, ctx, "qms.audit.manage")
     if payload.target_status not in _TRANSITIONS.get(row.status, set()):
         raise HTTPException(status_code=409, detail=f"Audit programme cannot transition from {row.status} to {payload.target_status}.")
-    if payload.target_status == "APPROVED":
+    if payload.target_status == "UNDER_REVIEW" and not _active_programme_role_users(
+        db,
+        amo_id=ctx.amo_id,
+        role_name="QUALITY_MANAGER",
+        exclude_user_id=ctx.user_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Assign a different active Quality Manager before submitting this programme for independent review.",
+        )
+    if payload.target_status in {"UNDER_REVIEW", "APPROVED"}:
         optimizer = _optimizer_payload(db, row)
         readiness = _programme_readiness(row, mandatory_coverage_gaps=int(optimizer["summary"]["mandatory_coverage_gaps"]))
         if not readiness["ready_for_approval"]:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={"message": "Audit programme is not ready for approval.", "blockers": readiness["blockers"]},
+                detail={"message": "Audit programme is not ready for the approval workflow.", "blockers": readiness["blockers"]},
             )
+    if payload.target_status == "APPROVED" and not row.quality_reviewed_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Quality Manager review must be recorded before Accountable Executive approval.",
+        )
     before = _programme_snapshot(row)
     now = _utcnow()
     row.status = payload.target_status
+    if row.status == "UNDER_REVIEW":
+        row.submitted_by_user_id = ctx.user_id
+        row.submitted_at = now
+        row.quality_reviewed_by_user_id = None
+        row.quality_reviewed_at = None
+    if row.status == "DRAFT":
+        row.submitted_by_user_id = None
+        row.submitted_at = None
+        row.quality_reviewed_by_user_id = None
+        row.quality_reviewed_at = None
     if row.status == "APPROVED":
         row.approved_by_user_id = ctx.user_id
         row.approved_at = now
@@ -816,7 +1528,69 @@ def transition_programme(programme_id: str, payload: ProgrammeTransition,
         row.closed_at = now
     row.updated_by_user_id = ctx.user_id
     row.updated_at = now
-    _event(db, row, ctx, _EVENT_BY_TARGET[row.status], payload.reason, before, _programme_snapshot(row))
+    schedule_generation: dict[str, Any] | None = None
+    if row.status == "ACTIVE":
+        from .audit_programme_schedule_router import materialize_fixed_date_programme
+
+        schedule_generation = materialize_fixed_date_programme(
+            db=db,
+            programme=row,
+            request=request,
+            ctx=ctx,
+        )
+    after = _programme_snapshot(row)
+    if schedule_generation is not None:
+        after["schedule_generation"] = schedule_generation
+    _event(db, row, ctx, _EVENT_BY_TARGET[row.status], payload.reason, before, after)
+    if row.status == "UNDER_REVIEW":
+        _notify_programme_users(
+            db,
+            programme=row,
+            ctx=ctx,
+            role_names=("QUALITY_MANAGER",),
+            message=f"{row.programme_ref} is ready for Quality Manager review. {payload.reason.strip()}",
+            subject=f"Quality review required · {row.programme_ref}",
+            template_key="qms_audit_programme_quality_review_required",
+            correlation_suffix=f"submitted:{row.submitted_at.isoformat()}",
+            action_required=True,
+        )
+    elif row.status == "DRAFT":
+        _notify_programme_users(
+            db,
+            programme=row,
+            ctx=ctx,
+            extra_user_ids=(before.get("submitted_by_user_id"), row.owner_user_id),
+            message=f"{row.programme_ref} was returned to draft. {payload.reason.strip()}",
+            subject=f"Programme changes required · {row.programme_ref}",
+            template_key="qms_audit_programme_returned",
+            correlation_suffix=f"returned:{now.isoformat()}",
+            action_required=True,
+        )
+    elif row.status == "APPROVED":
+        _notify_programme_users(
+            db,
+            programme=row,
+            ctx=ctx,
+            role_names=("QUALITY_MANAGER", "QUALITY_OFFICER"),
+            extra_user_ids=(row.owner_user_id, row.submitted_by_user_id),
+            message=f"{row.programme_ref} received Accountable Executive approval and is ready to publish. {payload.reason.strip()}",
+            subject=f"Programme approved · {row.programme_ref}",
+            template_key="qms_audit_programme_approved",
+            correlation_suffix=f"approved:{now.isoformat()}",
+            action_required=True,
+        )
+    elif row.status == "ACTIVE":
+        _notify_programme_users(
+            db,
+            programme=row,
+            ctx=ctx,
+            extra_user_ids=(row.owner_user_id, row.submitted_by_user_id, row.quality_reviewed_by_user_id),
+            message=f"{row.programme_ref} was published. Scheduled audit participants were notified and assigned events are available in calendar subscriptions.",
+            subject=f"Programme published · {row.programme_ref}",
+            template_key="qms_audit_programme_published",
+            correlation_suffix=f"published:{now.isoformat()}",
+            action_required=False,
+        )
     if row.status == "APPROVED" and row.supersedes_programme_id:
         prior = _query(db, ctx.amo_id).filter(QualityAuditProgramme.id == row.supersedes_programme_id).with_for_update().first()
         if prior and prior.status in {"APPROVED", "ACTIVE"}:
@@ -825,6 +1599,84 @@ def transition_programme(programme_id: str, payload: ProgrammeTransition,
             prior.updated_by_user_id = ctx.user_id
             prior.updated_at = now
             _event(db, prior, ctx, "SUPERSEDED", f"Superseded by approved revision {row.programme_ref}.", old_before, _programme_snapshot(prior))
+    db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _programme_dict(_load_programme(db, ctx.amo_id, programme_id), detail=True)
+
+
+@router.post("/{programme_id}/quality-review")
+def quality_review_programme(
+    programme_id: str,
+    payload: ProgrammeQualityReview,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.programme.quality_review")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = _load_programme(db, ctx.amo_id, programme_id, for_update=True)
+    if row.status != "UNDER_REVIEW":
+        raise HTTPException(status_code=409, detail="Only a submitted programme can receive Quality Manager review.")
+    if payload.decision == "FORWARD" and row.quality_reviewed_at:
+        raise HTTPException(status_code=409, detail="Quality Manager review is already recorded for this revision.")
+    if payload.decision == "FORWARD" and str(row.submitted_by_user_id or "") == ctx.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The person who submitted the programme cannot also record the independent Quality Manager review.",
+        )
+    before = _programme_snapshot(row)
+    now = _utcnow()
+    if payload.decision == "RETURN":
+        submitted_by_user_id = row.submitted_by_user_id
+        row.status = "DRAFT"
+        row.submitted_by_user_id = None
+        row.submitted_at = None
+        row.quality_reviewed_by_user_id = None
+        row.quality_reviewed_at = None
+        event_type = "RETURNED_TO_DRAFT"
+        recipients = (submitted_by_user_id, row.owner_user_id)
+        notification_message = f"{row.programme_ref} was returned to draft by the Quality Manager. {payload.reason.strip()}"
+        subject = f"Programme changes required · {row.programme_ref}"
+        template_key = "qms_audit_programme_quality_review_returned"
+        role_names: tuple[str, ...] = ()
+    else:
+        if not _active_programme_role_users(
+            db,
+            amo_id=ctx.amo_id,
+            role_name="ACCOUNTABLE_EXECUTIVE",
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Assign an active Accountable Executive before forwarding this programme for final approval.",
+            )
+        optimizer = _optimizer_payload(db, row)
+        readiness = _programme_readiness(row, mandatory_coverage_gaps=int(optimizer["summary"]["mandatory_coverage_gaps"]))
+        if not readiness["ready_for_approval"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"message": "The programme is no longer ready for Quality review.", "blockers": readiness["blockers"]},
+            )
+        row.quality_reviewed_by_user_id = ctx.user_id
+        row.quality_reviewed_at = now
+        event_type = "QUALITY_REVIEW_COMPLETED"
+        recipients = ()
+        notification_message = f"{row.programme_ref} passed Quality Manager review and requires Accountable Executive approval. {payload.reason.strip()}"
+        subject = f"Executive approval required · {row.programme_ref}"
+        template_key = "qms_audit_programme_executive_approval_required"
+        role_names = ("ACCOUNTABLE_EXECUTIVE",)
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = now
+    _event(db, row, ctx, event_type, payload.reason, before, _programme_snapshot(row))
+    _notify_programme_users(
+        db,
+        programme=row,
+        ctx=ctx,
+        role_names=role_names,
+        extra_user_ids=recipients,
+        message=notification_message,
+        subject=subject,
+        template_key=template_key,
+        correlation_suffix=f"quality-review:{payload.decision.lower()}:{now.isoformat()}",
+        action_required=True,
+    )
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _programme_dict(_load_programme(db, ctx.amo_id, programme_id), detail=True)
@@ -842,7 +1694,8 @@ def create_amendment(programme_id: str, payload: ProgrammeAmendment,
     now = _utcnow()
     row = QualityAuditProgramme(
         amo_id=ctx.amo_id, programme_ref=f"{prior.programme_series}-R{next_revision:02d}", programme_series=prior.programme_series,
-        programme_year=prior.programme_year, revision_no=next_revision, title=(payload.title or prior.title).strip(),
+        programme_year=prior.programme_year, programme_kind=prior.programme_kind,
+        revision_no=next_revision, title=(payload.title or prior.title).strip(),
         continuous_monitoring_enabled=True, optimizer_version=ALGORITHM_VERSION,
         objectives=list(prior.objectives or []), regulatory_basis=list(prior.regulatory_basis or []), status="DRAFT",
         period_start=prior.period_start, period_end=prior.period_end, owner_user_id=prior.owner_user_id,
@@ -856,7 +1709,16 @@ def create_amendment(programme_id: str, payload: ProgrammeAmendment,
             amo_id=ctx.amo_id, programme_id=row.id, universe_item_id=item.universe_item_id, audit_type=item.audit_type,
             title=item.title, purpose=item.purpose, scope=item.scope, criteria=list(item.criteria or []),
             mandatory_surveillance=item.mandatory_surveillance, recurrence=item.recurrence,
-            custom_interval_days=item.custom_interval_days, target_start=item.target_start, target_end=item.target_end,
+            custom_interval_days=item.custom_interval_days, fixed_dates=list(item.fixed_dates or []),
+            non_working_day_policy=item.non_working_day_policy,
+            default_start_time=item.default_start_time, default_end_time=item.default_end_time,
+            default_duration_days=item.default_duration_days, default_location=item.default_location,
+            lead_auditor_user_id=item.lead_auditor_user_id,
+            observer_auditor_user_id=item.observer_auditor_user_id,
+            supporting_auditor_user_ids=list(item.supporting_auditor_user_ids or []),
+            auditee_user_id=item.auditee_user_id,
+            notify_auditors=item.notify_auditors, notify_auditees=item.notify_auditees,
+            auto_schedule=item.auto_schedule, target_start=item.target_start, target_end=item.target_end,
             state="PLANNED", prioritization_basis=list(item.prioritization_basis or []),
             created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id, created_at=now, updated_at=now,
         ))
@@ -869,19 +1731,41 @@ def create_amendment(programme_id: str, payload: ProgrammeAmendment,
 
 
 @router.get("/universe/items")
-def list_universe(entity_type: EntityType | None = None, active: bool | None = None,
+def list_universe(entity_type: EntityType | None = None, programme_kind: UniverseProgrammeKind | None = None,
+    active: bool | None = None,
     limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0),
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")), db: Session = Depends(get_read_db)) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     query = db.query(QualityAuditUniverseItem).filter(QualityAuditUniverseItem.amo_id == ctx.amo_id)
     if entity_type:
         query = query.filter(QualityAuditUniverseItem.entity_type == entity_type)
+    if programme_kind:
+        query = query.filter(or_(
+            QualityAuditUniverseItem.programme_kind == programme_kind,
+            QualityAuditUniverseItem.programme_kind == "BOTH",
+        ))
     if active is not None:
         query = query.filter(QualityAuditUniverseItem.active.is_(active))
     total = int(query.order_by(None).count())
     rows = query.order_by(QualityAuditUniverseItem.display_label.asc()).offset(offset).limit(limit).all()
-    return {"items": [_universe_dict(row) for row in rows], "total": total, "limit": limit, "offset": offset,
+    aircraft_by_id = _aircraft_by_source_id(db, amo_id=ctx.amo_id, items=rows)
+    return {"items": [_universe_dict(row, aircraft_by_id.get(str(row.source_id))) for row in rows], "total": total, "limit": limit, "offset": offset,
             "has_more": offset + len(rows) < total}
+
+
+@router.post("/universe/ensure-defaults", status_code=status.HTTP_200_OK)
+def ensure_universe_defaults(
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    created = _ensure_standard_audit_areas(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    db.commit()
+    total = db.query(QualityAuditUniverseItem.id).filter(
+        QualityAuditUniverseItem.amo_id == ctx.amo_id,
+        QualityAuditUniverseItem.source_owner_module == "QUALITY_STANDARD",
+    ).count()
+    return {"created": created, "standard_area_count": int(total)}
 
 
 @router.post("/universe/items", status_code=status.HTTP_201_CREATED)
@@ -896,15 +1780,35 @@ def create_universe_item(payload: UniverseCreate,
     ).first()
     if duplicate:
         raise HTTPException(status_code=409, detail="This authoritative source record is already in the Audit Universe.")
+    data = payload.model_dump()
+    aircraft = None
+    if payload.entity_type == "AIRCRAFT":
+        if payload.source_owner_module != "FLEET" or payload.source_type != "AIRCRAFT":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Aircraft audit areas must be selected from this tenant's Fleet register.",
+            )
+        from amodb.apps.fleet.models import Aircraft
+
+        aircraft = db.query(Aircraft).filter(
+            Aircraft.amo_id == ctx.amo_id,
+            Aircraft.serial_number == payload.source_id,
+            Aircraft.is_active.is_(True),
+        ).first()
+        if aircraft is None:
+            raise HTTPException(status_code=404, detail="The selected active aircraft was not found in this tenant's Fleet register.")
+        model_label = aircraft.model or aircraft.aircraft_model_code or "Model not recorded"
+        data["display_label"] = f"{aircraft.registration} · {model_label}"
+        data["source_route"] = data.get("source_route") or f"/maintenance/{ctx.amo_code}/production/fleet/{aircraft.serial_number}"
     now = _utcnow()
     row = QualityAuditUniverseItem(
-        amo_id=ctx.amo_id, **payload.model_dump(), created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id,
+        amo_id=ctx.amo_id, **data, created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id,
         created_at=now, updated_at=now,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _universe_dict(row)
+    return _universe_dict(row, aircraft)
 
 
 @router.patch("/universe/items/{universe_item_id}")
@@ -934,10 +1838,43 @@ def add_programme_item(programme_id: str, payload: ProgrammeItemCreate,
         QualityAuditUniverseItem.id == payload.universe_item_id, QualityAuditUniverseItem.active.is_(True)).first()
     if not universe:
         raise HTTPException(status_code=422, detail="Select an active Audit Universe item from this tenant.")
-    _validate_item_window(programme, payload.target_start, payload.target_end)
+    programme_universe_kind = "INTERNAL" if programme.programme_kind == "INTERNAL" else "EXTERNAL"
+    if universe.programme_kind not in {programme_universe_kind, "BOTH"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Select an audit area available to this {programme_universe_kind.lower()} programme.",
+        )
     now = _utcnow()
     data = payload.model_dump()
+    data["audit_type"] = _audit_type_for_entity(universe.entity_type)
     data["mandatory_surveillance"] = bool(payload.mandatory_surveillance or universe.mandatory_surveillance)
+    _validate_item_people(
+        db,
+        amo_id=ctx.amo_id,
+        user_ids=[
+            payload.lead_auditor_user_id,
+            payload.observer_auditor_user_id,
+            payload.auditee_user_id,
+            *payload.supporting_auditor_user_ids,
+        ],
+    )
+    _validate_item_auditor_privileges(
+        db,
+        amo_id=ctx.amo_id,
+        lead_user_id=payload.lead_auditor_user_id,
+        observer_user_id=payload.observer_auditor_user_id,
+        supporting_user_ids=payload.supporting_auditor_user_ids,
+    )
+    _validate_item_location(
+        db,
+        amo_id=ctx.amo_id,
+        location_code=payload.default_location,
+        required=universe.entity_type in {"FACILITY", "STATION"},
+    )
+    if payload.recurrence == "FIXED_DATES":
+        _apply_fixed_date_window(programme, data)
+    else:
+        _validate_item_window(programme, payload.target_start, payload.target_end)
     row = QualityAuditProgrammeItem(
         amo_id=ctx.amo_id, programme_id=programme.id, **data, state="PLANNED",
         created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id, created_at=now, updated_at=now,
@@ -959,12 +1896,32 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
     programme = _load_programme(db, ctx.amo_id, programme_id, for_update=True)
     _assert_editable(programme)
     row = db.query(QualityAuditProgrammeItem).filter(QualityAuditProgrammeItem.amo_id == ctx.amo_id,
-        QualityAuditProgrammeItem.programme_id == programme.id, QualityAuditProgrammeItem.id == item_id).with_for_update().first()
+        QualityAuditProgrammeItem.programme_id == programme.id, QualityAuditProgrammeItem.id == item_id).with_for_update(
+            of=QualityAuditProgrammeItem
+        ).first()
     if not row:
         raise HTTPException(status_code=404, detail="Audit programme item not found.")
     before = {"title": row.title, "state": row.state, "target_start": str(row.target_start) if row.target_start else None,
               "target_end": str(row.target_end) if row.target_end else None}
     updates = payload.model_dump(exclude_unset=True, exclude={"reason"})
+    updates.pop("audit_type", None)
+    if row.universe_item is not None:
+        updates["audit_type"] = _audit_type_for_entity(row.universe_item.entity_type)
+    supporting_auditors = _normalise_supporting_auditors(
+        updates.get("supporting_auditor_user_ids", list(row.supporting_auditor_user_ids or [])),
+        lead_auditor_user_id=updates.get("lead_auditor_user_id", row.lead_auditor_user_id),
+        observer_auditor_user_id=updates.get(
+            "observer_auditor_user_id", row.observer_auditor_user_id
+        ),
+    )
+    updates["supporting_auditor_user_ids"] = supporting_auditors
+    required_schedule_fields = {
+        "non_working_day_policy", "default_start_time", "default_end_time", "default_duration_days"
+    }
+    if any(field in updates and updates[field] is None for field in required_schedule_fields):
+        raise HTTPException(status_code=422, detail="Audit timing and non-working-day settings cannot be cleared.")
+    if "fixed_dates" in updates:
+        updates["fixed_dates"] = _normalise_fixed_dates(updates["fixed_dates"])
     candidate_state = updates.get("state", row.state)
     if "state" in updates and candidate_state not in {"PLANNED", "CANCELLED"}:
         raise HTTPException(
@@ -980,8 +1937,79 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
         raise HTTPException(status_code=422, detail="Cancelling an audit requirement requires a reason.")
     if "state" in updates and candidate_state == "PLANNED":
         updates["cancellation_reason"] = None
+    candidate_lead_auditor = updates.get(
+        "lead_auditor_user_id", row.lead_auditor_user_id
+    )
+    candidate_observer = updates.get(
+        "observer_auditor_user_id", row.observer_auditor_user_id
+    )
+    if candidate_lead_auditor and candidate_observer == candidate_lead_auditor:
+        raise HTTPException(
+            status_code=422,
+            detail="The lead auditor cannot also be the observer.",
+        )
     if "mandatory_surveillance" in updates and row.universe_item and row.universe_item.mandatory_surveillance:
         updates["mandatory_surveillance"] = True
+    candidate = {
+        "recurrence": updates.get("recurrence", row.recurrence),
+        "fixed_dates": updates.get("fixed_dates", list(row.fixed_dates or [])),
+        "default_start_time": updates.get("default_start_time", row.default_start_time),
+        "default_end_time": updates.get("default_end_time", row.default_end_time),
+        "default_duration_days": updates.get("default_duration_days", row.default_duration_days),
+        "auto_schedule": updates.get("auto_schedule", row.auto_schedule),
+    }
+    if candidate["recurrence"] == "FIXED_DATES":
+        try:
+            _validate_default_timing(
+                candidate["default_start_time"], candidate["default_end_time"], candidate["default_duration_days"]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _apply_fixed_date_window(programme, candidate)
+        updates["fixed_dates"] = candidate["fixed_dates"]
+        updates["target_start"] = candidate["target_start"]
+        updates["target_end"] = candidate["target_end"]
+        updates["auto_schedule"] = True
+    elif updates.get("recurrence") and row.recurrence == "FIXED_DATES":
+        updates["fixed_dates"] = []
+        updates["auto_schedule"] = False
+    candidate_recurrence = updates.get("recurrence", row.recurrence)
+    candidate_start = updates.get("target_start", row.target_start)
+    candidate_end = updates.get("target_end", row.target_end)
+    if candidate_recurrence != "FIXED_DATES" and candidate_start and candidate_end:
+        updates["default_duration_days"] = _working_day_count(candidate_start, candidate_end)
+    try:
+        _validate_default_timing(
+            updates.get("default_start_time", row.default_start_time),
+            updates.get("default_end_time", row.default_end_time),
+            updates.get("default_duration_days", row.default_duration_days),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if "default_location" in updates:
+        _validate_item_location(
+            db,
+            amo_id=ctx.amo_id,
+            location_code=updates["default_location"],
+            required=bool(row.universe_item and row.universe_item.entity_type in {"FACILITY", "STATION"}),
+        )
+    _validate_item_people(
+        db,
+        amo_id=ctx.amo_id,
+        user_ids=[
+            updates.get("lead_auditor_user_id", row.lead_auditor_user_id),
+            updates.get("observer_auditor_user_id", row.observer_auditor_user_id),
+            updates.get("auditee_user_id", row.auditee_user_id),
+            *supporting_auditors,
+        ],
+    )
+    _validate_item_auditor_privileges(
+        db,
+        amo_id=ctx.amo_id,
+        lead_user_id=updates.get("lead_auditor_user_id", row.lead_auditor_user_id),
+        observer_user_id=updates.get("observer_auditor_user_id", row.observer_auditor_user_id),
+        supporting_user_ids=supporting_auditors,
+    )
     for field, value in updates.items():
         setattr(row, field, value)
     if row.target_start and row.target_end and row.target_end < row.target_start:

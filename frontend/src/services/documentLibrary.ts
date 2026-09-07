@@ -1,6 +1,13 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { ControlledCopy, DocumentLibraryItem } from "./documentControl";
+import { readApiCache, writeApiCache } from "./offlinePersistence";
+
+const LIBRARY_OFFLINE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type LibraryOfflineSnapshot = {
+  stored_at: number;
+};
 
 export type LibraryPhysicalSummary = {
   total: number;
@@ -39,6 +46,7 @@ export type IntegratedLibraryResponse = {
   facets: { node_types: Record<string, number>; visible_documents: number };
   capabilities: { read: boolean; control: boolean };
   pagination: { page: number; per_page: number; total: number; returned: number };
+  offline_snapshot?: LibraryOfflineSnapshot;
 };
 
 export type IntegratedLibraryFilters = {
@@ -111,6 +119,7 @@ export type LibraryDiscoveryResponse = {
   items: LibraryDiscoveryItem[];
   capabilities: { read: boolean; control: boolean };
   pagination: { page: number; per_page: number; total: number; returned: number };
+  offline_snapshot?: LibraryOfflineSnapshot;
 };
 
 export type PhysicalCopyRegisterItem = ControlledCopy & {
@@ -208,8 +217,29 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function cachedLibraryApi<T extends object>(path: string): Promise<T & { offline_snapshot?: LibraryOfflineSnapshot }> {
+  const readCached = async () => {
+    const cached = await readApiCache<T>(path).catch(() => null);
+    return cached ? { ...cached.value, offline_snapshot: { stored_at: cached.storedAt } } : null;
+  };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const cached = await readCached();
+    if (cached) return cached;
+    throw new Error("This library view has not been saved on this device. Reconnect and open it once before using it offline.");
+  }
+  try {
+    const response = await api<T>(path);
+    void writeApiCache(path, response, LIBRARY_OFFLINE_TTL_MS);
+    return response;
+  } catch (error) {
+    const cached = await readCached();
+    if (cached) return cached;
+    throw error;
+  }
+}
+
 export function listIntegratedLibrary(tenant: string, filters: IntegratedLibraryFilters = {}): Promise<IntegratedLibraryResponse> {
-  return api(`${workspacePath(tenant, "/documents")}${queryString({
+  return cachedLibraryApi(`${workspacePath(tenant, "/documents")}${queryString({
     q: filters.q,
     node_type: filters.nodeType,
     document_class: filters.documentClass,
@@ -229,7 +259,7 @@ export function listIntegratedLibrary(tenant: string, filters: IntegratedLibrary
 }
 
 export function discoverLibrary(tenant: string, filters: { view?: LibraryDiscoveryView; q?: string; page?: number; perPage?: number } = {}): Promise<LibraryDiscoveryResponse> {
-  return api(`${workspacePath(tenant, "/library-discovery")}${queryString({
+  return cachedLibraryApi(`${workspacePath(tenant, "/library-discovery")}${queryString({
     view: filters.view || "all",
     q: filters.q,
     page: filters.page || 1,

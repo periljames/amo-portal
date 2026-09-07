@@ -79,11 +79,8 @@ def _assert_accountable_executive(db: Session, ctx: TenantContext) -> account_mo
 
 def _assert_pack_generation_actor(db: Session, ctx: TenantContext) -> account_models.User:
     user = _tenant_user(db, ctx)
-    if not (
-        getattr(user, "is_amo_admin", False)
-        or _role_value(user) in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER", "AMO_ADMIN"}
-    ):
-        raise HTTPException(status_code=403, detail="Only the Accountable Executive, Quality Manager, or AMO administrator may generate an Authority submission pack.")
+    if _role_value(user) not in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}:
+        raise HTTPException(status_code=403, detail="Only the Accountable Executive or Quality Manager may generate an Authority submission pack.")
     return user
 
 

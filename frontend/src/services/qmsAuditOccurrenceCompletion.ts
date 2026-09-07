@@ -20,6 +20,7 @@ export type CanonicalDocumentControlDocument = {
   manual_type: string;
   status: string;
   current_published_revision_id: string | null;
+  current_revision: CanonicalDocumentControlRevision | null;
 };
 
 export type CanonicalDocumentControlRevision = {
@@ -196,7 +197,7 @@ export function updateGovernedAuditDocumentRequest(
 }
 
 export function listAuditMeetings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  return apiRequest<{ timezone_name?: string; items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
 }
 
 export function createAuditMeeting(

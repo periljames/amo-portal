@@ -119,6 +119,12 @@ def _run_training_notifications_once() -> Any:
     return training_notification_automation.run_once()
 
 
+def _run_quality_recycle_bin_once() -> Any:
+    from amodb.jobs import quality_recycle_bin_automation
+
+    return quality_recycle_bin_automation.run_once()
+
+
 @dataclass(frozen=True)
 class WorkerFamily:
     name: str
@@ -169,6 +175,12 @@ def _families() -> tuple[WorkerFamily, ...]:
             "training-notifications",
             _bounded_float("TRAINING_NOTIFICATION_AUTOMATION_INTERVAL_SECONDS", 3600.0, 300.0, 86_400.0),
             _run_training_notifications_once,
+            drain_backlog=False,
+        ),
+        WorkerFamily(
+            "quality-recycle-bin",
+            _bounded_float("QUALITY_RECYCLE_BIN_INTERVAL_SECONDS", 300.0, 60.0, 86_400.0),
+            _run_quality_recycle_bin_once,
             drain_backlog=False,
         ),
     )

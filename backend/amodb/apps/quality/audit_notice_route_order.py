@@ -11,6 +11,9 @@ def _is_notice_route(route_item) -> bool:
     return (
         "/quality/audit-notice-policies" in path
         or "/qms/audit-notice-policies" in path
+        or "/quality/audit-notice-template" in path
+        or "/qms/audit-notice-template" in path
+        or (path.endswith("/audits/{audit_id}/issue-notice"))
         or ("/quality/audits/" in path and "/notices" in path)
         or ("/qms/audits/" in path and "/notices" in path)
     )

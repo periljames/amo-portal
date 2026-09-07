@@ -38,6 +38,10 @@ def list_programme_scheduling_queue(
             QualityAuditProgramme.amo_id == ctx.amo_id,
             QualityAuditProgramme.status.in_(["APPROVED", "ACTIVE"]),
             QualityAuditProgrammeItem.state.in_(["PLANNED", "DEFERRED"]),
+            ~(
+                (QualityAuditProgrammeItem.recurrence == "FIXED_DATES")
+                & QualityAuditProgrammeItem.auto_schedule.is_(True)
+            ),
         )
     )
     total = int(query.order_by(None).count())

@@ -89,6 +89,8 @@ export interface TrainingRequirementRead {
   course_name?: string | null;
   scope: TrainingRequirementScope;
   department_code?: string | null;
+  access_profile_id?: string | null;
+  access_profile_name?: string | null;
   job_role?: string | null;
   user_id?: string | null;
   is_mandatory?: boolean;
@@ -115,6 +117,7 @@ export interface TrainingRequirementCreate {
   course_pk: string;
   scope: TrainingRequirementScope;
   department_code?: string | null;
+  access_profile_id?: string | null;
   job_role?: string | null;
   user_id?: string | null;
   is_mandatory?: boolean;

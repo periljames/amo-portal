@@ -46,6 +46,8 @@ export interface AdminUserCreatePayload {
   last_name: string;
   full_name?: string;
   role: AccountRole;
+  access_profile_id?: string;
+  is_amo_admin?: boolean;
   position_title?: string;
   phone?: string;
   secondary_phone?: string;
@@ -86,6 +88,10 @@ export interface AdminUserRead {
   is_active?: boolean;
   is_superuser?: boolean;
   is_amo_admin?: boolean;
+  access_profile_id?: string | null;
+  access_profile_name?: string | null;
+  capability_codes?: string[];
+  module_access?: Record<string, "view" | "manage">;
   must_change_password?: boolean;
   token_revoked_at?: string | null;
   last_login_at?: string | null;
@@ -119,6 +125,7 @@ export interface AdminUserUpdatePayload {
   licence_expires_on?: string | null;
   is_active?: boolean;
   is_amo_admin?: boolean;
+  access_profile_id?: string | null;
 }
 
 /**
@@ -844,6 +851,8 @@ export interface AdminUserDirectoryItem {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  access_profile_id: string | null;
+  access_profile_name: string | null;
   display_title: string;
   availability_status?: string | null;
   last_login_at: string | null;
@@ -1063,16 +1072,16 @@ export interface BulkUserActionPayload {
   action:
     | "enable"
     | "disable"
-    | "delete"
     | "assign_department"
     | "clear_department"
-    | "change_role"
+    | "assign_access_profile"
     | "add_group"
     | "remove_group"
     | "schedule_leave"
     | "return_from_leave";
   department_id?: string | null;
   role?: AccountRole | null;
+  access_profile_id?: string | null;
   group_id?: string | null;
   note?: string | null;
   effective_from?: string | null;
@@ -1335,13 +1344,6 @@ export async function applyAdminUserEmploymentAction(
   );
   invalidateAdminUserCache(userId);
   return result;
-}
-
-export async function permanentDeleteAdminUser(userId: string): Promise<void> {
-  await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
-    headers: authHeaders(),
-  });
-  invalidateAdminUserCache(userId);
 }
 
 export async function downloadAdminUserExport(userId: string): Promise<{ filename: string; blob: Blob }> {

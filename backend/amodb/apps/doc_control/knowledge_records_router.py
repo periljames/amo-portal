@@ -17,7 +17,8 @@ from amodb.security import get_current_active_user
 from . import knowledge_models as km
 from .knowledge_service import serialize_record
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
-from .workspace_service import require_control_user, resolve_tenant
+from . import domain_models
+from .workspace_service import can_read_manual, is_control_user, resolve_tenant
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Generated Records"])
@@ -117,6 +118,30 @@ def _record_payload(
     return payload
 
 
+def _readable_template_ids(
+    db: Session,
+    *,
+    tenant: manual_models.Tenant,
+    user: account_models.User,
+) -> set[str]:
+    manuals = db.query(manual_models.Manual).filter(
+        manual_models.Manual.tenant_id == tenant.id,
+    ).all()
+    if is_control_user(user):
+        return {str(row.id) for row in manuals}
+    profiles = {
+        str(row.manual_id): row
+        for row in db.query(domain_models.DocumentControlProfile).filter(
+            domain_models.DocumentControlProfile.tenant_id == tenant.amo_id,
+        ).all()
+    }
+    return {
+        str(row.id)
+        for row in manuals
+        if can_read_manual(user, profiles.get(str(row.id)))
+    }
+
+
 @router.get("/t/{tenant_slug}/knowledge/records")
 def list_generated_records(
     tenant_slug: str,
@@ -129,9 +154,15 @@ def list_generated_records(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
-    query = db.query(km.DocumentationRecord).filter(km.DocumentationRecord.tenant_id == tenant.amo_id)
+    control = is_control_user(current_user)
+    readable_template_ids = _readable_template_ids(db, tenant=tenant, user=current_user)
+    query = db.query(km.DocumentationRecord).filter(
+        km.DocumentationRecord.tenant_id == tenant.amo_id,
+        km.DocumentationRecord.template_manual_id.in_(readable_template_ids or {"-"}),
+    )
+    if not control:
+        query = query.filter(km.DocumentationRecord.submitted_by_user_id == current_user.id)
     if series_id:
         query = query.filter(km.DocumentationRecord.record_series_node_id == series_id)
     if template_manual_id:
@@ -189,7 +220,8 @@ def list_generated_records(
         },
         "capabilities": {
             "review": is_decision_approver(current_user),
-            "control": True,
+            "control": control,
+            "records_scope": "ALL" if control else "OWN",
         },
     }
 
@@ -201,19 +233,35 @@ def generated_record_detail(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
+    control = is_control_user(current_user)
+    readable_template_ids = _readable_template_ids(db, tenant=tenant, user=current_user)
     row = (
         db.query(km.DocumentationRecord)
-        .filter(km.DocumentationRecord.id == record_id, km.DocumentationRecord.tenant_id == tenant.amo_id)
+        .filter(
+            km.DocumentationRecord.id == record_id,
+            km.DocumentationRecord.tenant_id == tenant.amo_id,
+            km.DocumentationRecord.template_manual_id.in_(readable_template_ids or {"-"}),
+        )
         .first()
     )
+    if row and not control and str(row.submitted_by_user_id) != str(current_user.id):
+        row = None
     if not row:
         raise HTTPException(status_code=404, detail="Generated record not found")
-    template = db.query(manual_models.Manual).filter(manual_models.Manual.id == row.template_manual_id).first()
-    revision = db.query(manual_models.ManualRevision).filter(manual_models.ManualRevision.id == row.template_revision_id).first()
+    template = db.query(manual_models.Manual).filter(
+        manual_models.Manual.id == row.template_manual_id,
+        manual_models.Manual.tenant_id == tenant.id,
+    ).first()
+    revision = db.query(manual_models.ManualRevision).filter(
+        manual_models.ManualRevision.id == row.template_revision_id,
+        manual_models.ManualRevision.manual_id == row.template_manual_id,
+    ).first()
     record_series = (
-        db.query(km.DocumentationNode).filter(km.DocumentationNode.id == row.record_series_node_id).first()
+        db.query(km.DocumentationNode).filter(
+            km.DocumentationNode.id == row.record_series_node_id,
+            km.DocumentationNode.tenant_id == tenant.amo_id,
+        ).first()
         if row.record_series_node_id
         else None
     )
@@ -228,7 +276,7 @@ def generated_record_detail(
         ),
         "capabilities": {
             "review": is_decision_approver(current_user),
-            "control": True,
+            "control": control,
         },
     }
 

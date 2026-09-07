@@ -33,10 +33,12 @@ function user(role: AccountRole, overrides: Partial<PortalUser> = {}): PortalUse
 }
 
 describe("QMS role permission boundaries", () => {
-  it("gives the Quality Officer execution and CAR follow-up without governance or closure", () => {
+  it("lets the Quality Officer prepare and submit without either approval decision", () => {
     const officer = user("QUALITY_OFFICER");
     expect(userHasQmsRolePermission(officer, "qms.audit.execute")).toBe(true);
-    expect(userHasQmsRolePermission(officer, "qms.audit.manage")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.audit.manage")).toBe(true);
+    expect(userHasQmsRolePermission(officer, "qms.audit.programme.quality_review")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.audit.programme.approve")).toBe(false);
     expect(userHasQmsRolePermission(officer, "qms.audit.notice.manage")).toBe(true);
     expect(userHasQmsRolePermission(officer, "qms.car.manage")).toBe(true);
     expect(userHasQmsRolePermission(officer, "qms.car.close")).toBe(false);
@@ -50,16 +52,22 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(accountable, "qms.reports.attest_authority")).toBe(true);
     expect(userHasQmsRolePermission(accountable, "qms.reports.export")).toBe(true);
     expect(userHasQmsRolePermission(accountable, "qms.audit.manage")).toBe(false);
+    expect(userHasQmsRolePermission(accountable, "qms.audit.programme.quality_review")).toBe(false);
+    expect(userHasQmsRolePermission(accountable, "qms.audit.programme.approve")).toBe(true);
   });
 
   it("keeps manager, auditor, and administrator boundaries explicit", () => {
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.manage")).toBe(true);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.programme.quality_review")).toBe(true);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.programme.approve")).toBe(false);
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.notice.manage")).toBe(true);
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.reports.attest_authority")).toBe(false);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.audit.execute")).toBe(true);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.audit.manage")).toBe(false);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.car.manage")).toBe(false);
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.reports.attest_authority")).toBe(false);
+    expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.programme.quality_review")).toBe(false);
+    expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.programme.approve")).toBe(false);
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.notice.manage")).toBe(true);
     expect(userHasQmsRolePermission(user("VIEW_ONLY"), "qms.reports.attest_authority")).toBe(false);
   });

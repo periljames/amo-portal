@@ -12,17 +12,14 @@ from ..aircraft_induction import models as induction_models
 from . import models, schemas, services
 
 ENTRY_ROLES = (
-    AccountRole.SUPERUSER,
-    AccountRole.AMO_ADMIN,
     AccountRole.PLANNING_ENGINEER,
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,
 )
 POST_ROLES = (
-    AccountRole.SUPERUSER,
-    AccountRole.AMO_ADMIN,
     AccountRole.PLANNING_ENGINEER,
+    AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
 )
 CONFIG_ROLES = POST_ROLES + (AccountRole.QUALITY_MANAGER,)
 
@@ -65,11 +62,7 @@ def _require_authority(
     action: str,
 ) -> None:
     _require_human(user)
-    if (
-        user.is_superuser
-        or user.is_amo_admin
-        or user.role in allowed_roles
-    ):
+    if user.role in allowed_roles:
         return
     raise HTTPException(
         status_code=403,

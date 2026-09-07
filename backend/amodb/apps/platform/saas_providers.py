@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import smtplib
 import ssl
 import time
@@ -34,7 +35,14 @@ _PROVIDER_DEFINITIONS = (
     ProviderDefinition("etims_vscu", "KRA eTIMS VSCU", "TAX", ("client_secret", "certificate_password"), ("endpoint", "client_id", "device_serial", "certified", "integrator_name"), "KRA eTIMS virtual sales control unit system-to-system bridge."),
     ProviderDefinition("smtp", "SMTP server", "EMAIL", ("password",), ("host", "port", "username", "from_email", "from_name", "use_tls", "use_ssl", "allow_self_signed"), "Transactional email through a tenant or platform SMTP server."),
     ProviderDefinition("sendgrid", "SendGrid", "EMAIL", ("api_key",), ("api_base_url", "from_email", "from_name"), "Transactional email through the SendGrid API."),
-    ProviderDefinition("openai", "OpenAI", "AI", ("api_key",), ("api_base_url", "model", "project", "organization"), "Server-side support assistant and controlled AI workflows."),
+    ProviderDefinition(
+        "openai",
+        "OpenAI",
+        "AI",
+        ("api_key",),
+        ("api_base_url", "model", "default_model", "lightweight_model", "embedding_model", "project", "organization"),
+        "Server-side governed AI workflows with tenant plans, model controls and usage tracking.",
+    ),
     ProviderDefinition("azure_openai", "Azure OpenAI", "AI", ("api_key",), ("endpoint", "deployment", "api_version"), "Server-side Azure OpenAI deployment."),
     ProviderDefinition("zendesk", "Zendesk", "SUPPORT", ("api_token",), ("subdomain", "email"), "External support desk synchronization."),
     ProviderDefinition("jira", "Jira Service Management", "SUPPORT", ("api_token",), ("base_url", "email", "project_key"), "External service desk synchronization."),
@@ -217,7 +225,7 @@ def openai_support_response(
     if not api_key:
         raise ValueError("OpenAI api_key is not configured")
     api_base = _safe_url(str(config.get("api_base_url") or "https://api.openai.com"))
-    model = str(config.get("model") or "gpt-5-mini").strip()
+    model = str(config.get("default_model") or config.get("model") or os.getenv("OPENAI_DEFAULT_MODEL") or "gpt-5-mini").strip()
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if config.get("project"):
         headers["OpenAI-Project"] = str(config["project"])

@@ -18,7 +18,6 @@ from amodb.security import require_roles
 
 
 ENTRY_GUARD = require_roles(
-    AccountRole.AMO_ADMIN,
     AccountRole.QUALITY_MANAGER,
     AccountRole.SAFETY_MANAGER,
     AccountRole.PLANNING_ENGINEER,
@@ -26,15 +25,12 @@ ENTRY_GUARD = require_roles(
     AccountRole.QUALITY_INSPECTOR,
 )
 APPROVAL_GUARD = require_roles(
-    AccountRole.AMO_ADMIN,
     AccountRole.QUALITY_MANAGER,
 )
 CONFIGURATION_GUARD = require_roles(
-    AccountRole.AMO_ADMIN,
     AccountRole.QUALITY_MANAGER,
 )
 ANALYSIS_GUARD = require_roles(
-    AccountRole.AMO_ADMIN,
     AccountRole.QUALITY_MANAGER,
     AccountRole.SAFETY_MANAGER,
     AccountRole.PLANNING_ENGINEER,

@@ -105,7 +105,9 @@ function ControllerWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "a
     );
   }
 
-  const actions = CONTROLLER_WORKFLOW_ACTIONS[workflow.state] || [];
+  const serverAllowedActions = new Set(workflow.allowed_actions || []);
+  const actions = (CONTROLLER_WORKFLOW_ACTIONS[workflow.state] || []).filter((item) => serverAllowedActions.has(item.action));
+  const canRequestCorrections = actions.some((item) => item.action === "REQUEST_CORRECTIONS");
   const transition = (item: ControllerAction) => {
     if (item.action === "REQUEST_CORRECTIONS" && !comments.trim()) {
       mutation.setError("Record the correction reason before returning the revision.");
@@ -126,7 +128,7 @@ function ControllerWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "a
         <FileClock size={17} />
         <div><strong>{workflow.state.replaceAll("_", " ")}</strong><div>Version {workflow.version}. Decision-only actions are withheld from this controller account.</div></div>
       </div>
-      <label className="wide"><span>Submission or correction reason</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Explain the submission or correction request." /></label>
+      {canRequestCorrections ? <label className="wide"><span>Correction reason</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="State what must be corrected before resubmission." /></label> : null}
       <ErrorMessage message={mutation.error} />
       {actions.length ? (
         <div className="dc-form__actions">
@@ -222,7 +224,7 @@ function ControllerTemporaryRevisionActions({ detail, tenant, onChanged }: Omit<
   const sourceError = !publishedRevisionId
     ? "A published revision is required before creating a temporary revision."
     : !sourceRevisionId
-      ? "Upload an uncontrolled source revision containing the temporary amendment before creating the TR record."
+      ? "Upload a controlled draft revision containing the temporary amendment before creating the TR record."
       : "";
 
   return (

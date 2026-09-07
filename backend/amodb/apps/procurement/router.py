@@ -21,7 +21,6 @@ router = APIRouter(
 
 
 REQUEST_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PROCUREMENT_OFFICER,
     account_models.AccountRole.STORES_MANAGER,
     account_models.AccountRole.STOREKEEPER,
@@ -32,28 +31,22 @@ REQUEST_ROLES = (
     account_models.AccountRole.CERTIFYING_TECHNICIAN,
 )
 PROCUREMENT_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PROCUREMENT_OFFICER,
     account_models.AccountRole.STORES_MANAGER,
 )
 TECHNICAL_APPROVAL_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PLANNING_ENGINEER,
     account_models.AccountRole.PRODUCTION_ENGINEER,
     account_models.AccountRole.CERTIFYING_ENGINEER,
 )
 FINANCE_APPROVAL_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.FINANCE_MANAGER,
     account_models.AccountRole.ACCOUNTS_OFFICER,
 )
 QUALITY_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.QUALITY_MANAGER,
-    account_models.AccountRole.QUALITY_INSPECTOR,
 )
 RECEIVING_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.STORES_MANAGER,
     account_models.AccountRole.STOREKEEPER,
     account_models.AccountRole.STORES,
@@ -225,11 +218,11 @@ def requisition_transition(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(require_roles(*REQUEST_ROLES, *FINANCE_APPROVAL_ROLES)),
 ):
-    if payload.action == "TECHNICAL_APPROVE" and current_user.role not in TECHNICAL_APPROVAL_ROLES and not current_user.is_superuser:
+    if payload.action == "TECHNICAL_APPROVE" and current_user.role not in TECHNICAL_APPROVAL_ROLES:
         raise HTTPException(status_code=403, detail="Technical approval role is required.")
-    if payload.action == "BUDGET_APPROVE" and current_user.role not in FINANCE_APPROVAL_ROLES and not current_user.is_superuser:
+    if payload.action == "BUDGET_APPROVE" and current_user.role not in FINANCE_APPROVAL_ROLES:
         raise HTTPException(status_code=403, detail="Finance approval role is required.")
-    if payload.action == "APPROVE" and current_user.role not in PROCUREMENT_ROLES and not current_user.is_superuser:
+    if payload.action == "APPROVE" and current_user.role not in PROCUREMENT_ROLES:
         raise HTTPException(status_code=403, detail="Procurement approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     requisition = service.transition_requisition(
@@ -374,7 +367,7 @@ def purchase_order_approve(
         "QUALITY": QUALITY_ROLES,
         "FINAL": QUALITY_ROLES,
     }
-    if current_user.role not in stage_roles[payload.stage] and not current_user.is_superuser:
+    if current_user.role not in stage_roles[payload.stage]:
         raise HTTPException(status_code=403, detail=f"{payload.stage.title()} approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     if payload.stage in {"QUALITY", "FINAL"}:
@@ -385,7 +378,7 @@ def purchase_order_approve(
         po_id=po_id,
         payload=payload,
         actor_user_id=current_user.id,
-        actor_is_quality=current_user.role in QUALITY_ROLES or current_user.is_superuser,
+        actor_is_quality=current_user.role in QUALITY_ROLES,
     )
     return _commit_refresh(db, po)
 

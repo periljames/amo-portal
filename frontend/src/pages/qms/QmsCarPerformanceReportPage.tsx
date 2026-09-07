@@ -1,13 +1,18 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
 
 import { hasQmsRolePermission } from "../../app/routeGuards";
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getContext } from "../../services/auth";
-import { type CAROut } from "../../services/qms";
-import { qmsGetCarRegisterPage } from "../../services/qmsRegisters";
+import { type CAROut, type QMSAuditRegisterRowOut } from "../../services/qms";
+import { qmsGetAuditRegisterPage, qmsGetCarRegisterPage } from "../../services/qmsRegisters";
 import { saveDownloadedFile } from "../../utils/downloads";
+import QualityAuditsSectionLayout from "../qualityAudits/QualityAuditsSectionLayout";
+import "../qualityAudits/quality-audits-list-workspace.css";
 
 const PAGE_SIZE = 100;
 const REPORT_ROW_CAP = 10_000;
@@ -20,6 +25,8 @@ type LoadedReport = {
   total: number;
   truncated: boolean;
 };
+
+type LoadedFindings = { rows: QMSAuditRegisterRowOut[]; total: number; truncated: boolean };
 
 type DepartmentMetric = {
   department: string;
@@ -140,6 +147,20 @@ async function loadAllCars(signal: AbortSignal): Promise<LoadedReport> {
   };
 }
 
+async function loadAllFindings(signal: AbortSignal): Promise<LoadedFindings> {
+  const rows: QMSAuditRegisterRowOut[] = [];
+  let offset = 0;
+  let total = 0;
+  while (rows.length < REPORT_ROW_CAP) {
+    const page = await qmsGetAuditRegisterPage({ domain: "AMO", limit: PAGE_SIZE, offset, signal });
+    total = page.total;
+    rows.push(...page.rows);
+    if (!page.has_more || page.rows.length === 0 || rows.length >= total) break;
+    offset += page.limit || page.rows.length;
+  }
+  return { rows: rows.slice(0, REPORT_ROW_CAP), total, truncated: total > REPORT_ROW_CAP };
+}
+
 const QmsCarPerformanceReportPage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();
   const context = getContext();
@@ -161,8 +182,15 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     enabled: canViewReports,
     staleTime: 30_000,
   });
+  const findingsQuery = useQuery({
+    queryKey: ["qms-finding-trends-live", amoCode],
+    queryFn: ({ signal }) => loadAllFindings(signal),
+    enabled: canViewReports,
+    staleTime: 30_000,
+  });
 
   const allCars = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
+  const allFindings = useMemo(() => findingsQuery.data?.rows ?? [], [findingsQuery.data?.rows]);
   const generatedAt = useMemo(() => new Date(reportQuery.dataUpdatedAt || 0), [reportQuery.dataUpdatedAt]);
   const today = generatedAt.toISOString().slice(0, 10);
 
@@ -212,8 +240,10 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     const onTime = measurable.filter(isOnTimeClosure).length;
     const late = measurable.length - onTime;
     const onTimePercent = measurable.length ? (onTime / measurable.length) * 100 : null;
-    return { total, open, overdue, review, closed, measurable: measurable.length, onTime, late, onTimePercent };
-  }, [filteredCars, today]);
+    const observations = allFindings.filter((row) => String(row.finding.finding_type).toUpperCase() === "OBSERVATION" || String(row.finding.level).toUpperCase().includes("LEVEL_4")).length;
+    const withoutCar = allFindings.filter((row) => row.linked_cars.length === 0 && String(row.finding.finding_type).toUpperCase() !== "OBSERVATION").length;
+    return { total, open, overdue, review, closed, measurable: measurable.length, onTime, late, onTimePercent, totalFindings: allFindings.length, observations, withoutCar };
+  }, [allFindings, filteredCars, today]);
 
   const departmentMetrics = useMemo<DepartmentMetric[]>(() => {
     const grouped = new Map<string, DepartmentMetric>();
@@ -240,6 +270,26 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     });
     return [...grouped.values()].sort((left, right) => right.overdue - left.overdue || right.open - left.open || left.department.localeCompare(right.department));
   }, [filteredCars, today]);
+
+  const departmentColumns = useMemo<ColDef<DepartmentMetric>[]>(() => [
+    { headerName: "Department", field: "department", flex: 1.5, minWidth: 160 },
+    { headerName: "Findings / CARs", field: "total", flex: .8, minWidth: 105 },
+    { headerName: "Open", field: "open", flex: .55, minWidth: 75 },
+    { headerName: "Overdue", field: "overdue", flex: .65, minWidth: 85 },
+    { headerName: "Review", field: "review", flex: .6, minWidth: 80 },
+    { headerName: "Closed", field: "closed", flex: .6, minWidth: 80 },
+    { headerName: "On-time", flex: .75, minWidth: 95, valueGetter: ({ data }) => data?.measurableClosed ? `${((data.onTimeClosed / data.measurableClosed) * 100).toFixed(1)}%` : "N/A" },
+  ], []);
+  const carColumns = useMemo<ColDef<CAROut>[]>(() => [
+    { headerName: "Finding / CAR", flex: 1.5, minWidth: 190, cellRenderer: ({ data }: ICellRendererParams<CAROut>) => data ? <div className="qa-register-grid__stack"><strong>{data.finding_ref || data.car_number}</strong><span>{data.title}</span></div> : null },
+    { headerName: "Department / owner", flex: 1.15, minWidth: 160, cellRenderer: ({ data }: ICellRendererParams<CAROut>) => data ? <div className="qa-register-grid__stack"><strong>{departmentLabel(data)}</strong><span>{ownerLabel(data)}</span></div> : null },
+    { headerName: "Priority", flex: .6, minWidth: 85, valueGetter: ({ data }) => humanize(data?.priority) },
+    { headerName: "Status", flex: .75, minWidth: 105, valueGetter: ({ data }) => humanize(data?.status) },
+    { headerName: "Agreed due", flex: .8, minWidth: 105, valueGetter: ({ data }) => formatDate(data ? agreedDue(data) : null) },
+    { headerName: "Timeliness", flex: .75, minWidth: 100, valueGetter: ({ data }) => !data ? "" : isMeasurableClosure(data) ? (isOnTimeClosure(data) ? "On time" : "Late") : isOverdue(data, today) ? "Overdue" : "—" },
+    { headerName: "RCA / CAP", flex: .85, minWidth: 115, valueGetter: ({ data }) => data ? `${humanize(data.root_cause_status)} · ${humanize(data.capa_status)}` : "" },
+    { headerName: "", pinned: "right", width: 54, minWidth: 54, maxWidth: 54, sortable: false, cellRenderer: ({ data }: ICellRendererParams<CAROut>) => data ? <button type="button" className="qms-checklist-library__icon" title="Open corrective action" aria-label={`Open ${data.car_number}`} onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${encodeURIComponent(data.id)}`)}>Open</button> : null },
+  ], [amoCode, navigate, today]);
 
   const activeFilterLabel = useMemo(() => {
     const filters = [
@@ -315,43 +365,33 @@ const QmsCarPerformanceReportPage: React.FC = () => {
 
   if (!canViewReports) {
     return (
-      <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-        <main className="page"><div className="card"><h1>CAR performance</h1><p>Reports & Analytics permission is required to view this workspace.</p></div></main>
-      </DepartmentLayout>
+      <QualityAuditsSectionLayout title="Finding trends" subtitle="Finding conversion, corrective-action exposure and closure effectiveness.">
+        <div className="card"><p>Reports & Analytics permission is required to view this workspace.</p></div>
+      </QualityAuditsSectionLayout>
     );
   }
 
-  if (reportQuery.isLoading) {
-    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="page"><div className="card">Loading live CAR performance…</div></main></DepartmentLayout>;
+  if (reportQuery.isLoading || findingsQuery.isLoading) {
+    return <QualityAuditsSectionLayout title="Finding trends" subtitle="Finding conversion, corrective-action exposure and closure effectiveness."><div className="card">Loading live finding trends…</div></QualityAuditsSectionLayout>;
   }
 
-  if (reportQuery.isError || !reportQuery.data) {
+  if (reportQuery.isError || findingsQuery.isError || !reportQuery.data || !findingsQuery.data) {
     return (
-      <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-        <main className="page"><div className="card"><h1>CAR performance</h1><p className="text-danger">{reportQuery.error instanceof Error ? reportQuery.error.message : "Unable to load CAR performance."}</p><button className="btn" type="button" onClick={() => void reportQuery.refetch()}>Retry</button></div></main>
-      </DepartmentLayout>
+      <QualityAuditsSectionLayout title="Finding trends" subtitle="Finding conversion, corrective-action exposure and closure effectiveness.">
+        <div className="card"><p className="text-danger">{reportQuery.error instanceof Error ? reportQuery.error.message : findingsQuery.error instanceof Error ? findingsQuery.error.message : "Unable to load finding trends."}</p><button className="btn" type="button" onClick={() => { void reportQuery.refetch(); void findingsQuery.refetch(); }}>Retry</button></div>
+      </QualityAuditsSectionLayout>
     );
   }
 
   return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+    <QualityAuditsSectionLayout
+      title="Finding trends"
+      subtitle="Finding conversion, corrective-action exposure, ownership and closure effectiveness."
+      toolbar={<div className="toolbar"><button className="btn" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register`)}>Findings register</button><button className="btn" type="button" onClick={() => { void reportQuery.refetch(); void findingsQuery.refetch(); }}>Refresh</button><button className="btn" type="button" onClick={exportCsv}>Export CSV</button><button className="btn btn--primary" type="button" onClick={printReport}>Print report</button></div>}
+    >
       <main className="page qms-car-performance-report">
-        <div className="page-header">
-          <div>
-            <p className="eyebrow">Reports & Analytics · Management review input</p>
-            <h1>CAR performance</h1>
-            <p>Live corrective-action performance, closure timeliness, overdue exposure and department accountability.</p>
-          </div>
-          <div className="toolbar">
-            <button className="btn" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/register`)}>CAR register</button>
-            <button className="btn" type="button" onClick={() => void reportQuery.refetch()}>Refresh</button>
-            <button className="btn" type="button" onClick={exportCsv}>Export CSV</button>
-            <button className="btn btn--primary" type="button" onClick={printReport}>Print report</button>
-          </div>
-        </div>
-
         {outputError ? <div className="alert alert--danger" role="alert">{outputError}</div> : null}
-        {reportQuery.data.truncated ? <div className="alert alert--warning">This tenant has more than {REPORT_ROW_CAP.toLocaleString()} CARs. The interactive report is capped at {REPORT_ROW_CAP.toLocaleString()} rows; use a server-side archival export for a complete historical extract.</div> : null}
+        {reportQuery.data.truncated || findingsQuery.data.truncated ? <div className="alert alert--warning">This tenant has more than {REPORT_ROW_CAP.toLocaleString()} matching records. The interactive analysis is capped; use a server-side archival export for the full history.</div> : null}
 
         <section className="card">
           <div className="card__header"><div><h2>Reporting position</h2><p>Generated {generatedAt.toLocaleString()} · {activeFilterLabel}</p></div></div>
@@ -368,6 +408,9 @@ const QmsCarPerformanceReportPage: React.FC = () => {
         <section className="card">
           <div className="card__header"><div><h2>QPI and workload</h2><p>QMSM 2.5 QPI 3 target: at least {QMS_CLOSURE_TARGET}% of findings closed within the agreed timeframe.</p></div></div>
           <div className="stats-grid">
+            <div><span className="muted">All findings</span><strong>{metrics.totalFindings}</strong></div>
+            <div><span className="muted">Observations</span><strong>{metrics.observations}</strong></div>
+            <div><span className="muted">Nonconformities without CAR</span><strong>{metrics.withoutCar}</strong></div>
             <div><span className="muted">Matching CARs</span><strong>{metrics.total}</strong></div>
             <div><span className="muted">Open / active</span><strong>{metrics.open}</strong></div>
             <div><span className="muted">Overdue</span><strong>{metrics.overdue}</strong></div>
@@ -380,18 +423,15 @@ const QmsCarPerformanceReportPage: React.FC = () => {
 
         <section className="card">
           <div className="card__header"><div><h2>Department performance</h2><p>Accountability view for management review and follow-up. Departments with overdue/open exposure are listed first.</p></div></div>
-          <div className="table-wrap"><table className="table"><thead><tr><th>Department</th><th>Total</th><th>Open</th><th>Overdue</th><th>Review</th><th>Closed</th><th>On-time closure</th></tr></thead><tbody>{departmentMetrics.length ? departmentMetrics.map((item) => <tr key={item.department}><td><strong>{item.department}</strong></td><td>{item.total}</td><td>{item.open}</td><td>{item.overdue}</td><td>{item.review}</td><td>{item.closed}</td><td>{item.measurableClosed ? `${((item.onTimeClosed / item.measurableClosed) * 100).toFixed(1)}%` : "N/A"}</td></tr>) : <tr><td colSpan={7} className="muted">No CARs match the active filters.</td></tr>}</tbody></table></div>
+          <div className="qa-register-grid-page__grid ag-theme-alpine" style={{ minHeight: 120, height: Math.max(120, Math.min(340, 36 + departmentMetrics.length * 38)) }}><AgGridReact<DepartmentMetric> rowData={departmentMetrics} columnDefs={departmentColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.department} rowHeight={38} headerHeight={34} animateRows={false} suppressCellFocus overlayNoRowsTemplate='<span class="muted">No corrective actions match the active filters.</span>' /></div>
         </section>
 
         <section className="card">
-          <div className="card__header"><div><h2>CAR performance detail</h2><p>Current agreed due date is the approved target closure date when present; otherwise the original CAR due date is used.</p></div><span className="badge badge--neutral">{filteredCars.length} row{filteredCars.length === 1 ? "" : "s"}</span></div>
-          <div className="table-wrap"><table className="table"><thead><tr><th>CAR / finding</th><th>Department / owner</th><th>Priority</th><th>Status</th><th>Issued</th><th>Agreed due</th><th>Closed</th><th>Timeliness</th><th>RCA / CAP</th><th /></tr></thead><tbody>{filteredCars.length ? filteredCars.map((car) => {
-            const timeliness = isMeasurableClosure(car) ? (isOnTimeClosure(car) ? "On time" : "Late") : isOverdue(car, today) ? "Overdue" : "—";
-            return <tr key={car.id}><td><strong>{car.car_number}</strong><div>{car.title}</div><div className="muted">{car.finding_ref || car.audit_ref || "No linked finding reference"}</div></td><td><strong>{departmentLabel(car)}</strong><div className="muted">{ownerLabel(car)}</div></td><td>{humanize(car.priority)}</td><td>{humanize(car.status)}</td><td>{formatDate(issuedDate(car))}</td><td>{formatDate(agreedDue(car))}</td><td>{formatDate(closedDate(car))}</td><td><span className={`badge ${timeliness === "On time" ? "badge--success" : timeliness === "Late" || timeliness === "Overdue" ? "badge--danger" : "badge--neutral"}`}>{timeliness}</span></td><td><div>RCA: {humanize(car.root_cause_status)}</div><div>CAP: {humanize(car.capa_status)}</div></td><td><button className="btn btn--small" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars?control=${encodeURIComponent(car.id)}`)}>Control</button></td></tr>;
-          }) : <tr><td colSpan={10} className="muted">No CARs match the active filters.</td></tr>}</tbody></table></div>
+          <div className="card__header"><div><h2>Finding corrective-action detail</h2><p>Nonconformities advance into corrective action; observations remain findings unless explicitly escalated.</p></div><span className="badge badge--neutral">{filteredCars.length} row{filteredCars.length === 1 ? "" : "s"}</span></div>
+          <div className="qa-register-grid-page__grid ag-theme-alpine" style={{ height: "clamp(20rem, 42vh, 34rem)" }}><AgGridReact<CAROut> rowData={filteredCars} columnDefs={carColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.id} rowHeight={48} headerHeight={34} animateRows={false} suppressCellFocus pagination paginationPageSize={25} paginationPageSizeSelector={[25, 50, 100]} overlayNoRowsTemplate='<span class="muted">No corrective actions match the active filters.</span>' /></div>
         </section>
       </main>
-    </DepartmentLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 

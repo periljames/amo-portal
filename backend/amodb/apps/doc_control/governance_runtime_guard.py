@@ -26,6 +26,7 @@ _LIMITS = {
     "assignment_users": 250,
     "assignment_departments": 100,
     "assignment_org_units": 250,
+    "assignment_access_profiles": 250,
 }
 
 
@@ -187,7 +188,7 @@ def bounded_document_governance_payload(
     if target and not target.source_sha256:
         issues.append({"code": "MISSING_SOURCE_CHECKSUM", "severity": "HIGH", "count": 1})
 
-    assignment_options = {"users": [], "departments": [], "org_units": []}
+    assignment_options = {"users": [], "departments": [], "org_units": [], "access_profiles": []}
     if service.is_control_user(current_user):
         from amodb.apps.workforce.governance_models import WorkforceOrgUnit
 
@@ -216,10 +217,19 @@ def bounded_document_governance_payload(
             _LIMITS["assignment_org_units"],
         )
         bounds["assignment_org_units"] = _bound(_LIMITS["assignment_org_units"], option_org_units, more)
+        option_access_profiles, more = _bounded(
+            db.query(account_models.AuthRoleDefinition).filter(
+                account_models.AuthRoleDefinition.amo_id == tenant.amo_id,
+                account_models.AuthRoleDefinition.is_active.is_(True),
+            ).order_by(account_models.AuthRoleDefinition.display_name.asc()),
+            _LIMITS["assignment_access_profiles"],
+        )
+        bounds["assignment_access_profiles"] = _bound(_LIMITS["assignment_access_profiles"], option_access_profiles, more)
         assignment_options = {
             "users": [{"id": row.id, "name": row.full_name, "email": row.email} for row in option_users],
             "departments": [{"id": row.id, "code": row.code, "name": row.name} for row in option_departments],
             "org_units": [{"id": row.id, "code": row.code, "name": row.name, "unit_type": row.unit_type} for row in option_org_units],
+            "access_profiles": [{"id": row.id, "code": row.tenant_code, "name": row.display_name, "category": row.category} for row in option_access_profiles],
         }
 
     return {

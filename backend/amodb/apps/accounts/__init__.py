@@ -11,7 +11,7 @@ from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
 from . import models, schemas, services  # noqa: F401
-from . import admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
+from . import access_router, admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
 from .admin_profile_access import active_admin_profile_session
 from .admin_profile_concurrency import (
     lock_admin_grant_for_approval,
@@ -59,6 +59,7 @@ department_home_router._admin_profile_active = active_admin_profile_session
 # then protect every existing and future tenant administration route.
 _admin_routes = _router_admin.router
 _admin_routes.include_router(admin_profile_router.router)
+_admin_routes.include_router(access_router.admin_router)
 for _route in _admin_routes.routes:
     if (
         isinstance(_route, APIRoute)
@@ -96,11 +97,13 @@ for _route in _router_public.router.routes:
 # same per-user accessibility and appearance contract.
 _router_public.router.include_router(department_home_router.router)
 _router_public.router.include_router(portal_preferences_router.router)
+_router_public.router.include_router(access_router.context_router)
 
 __all__ = [
     "models",
     "schemas",
     "services",
+    "access_router",
     "admin_profile_router",
     "department_home_router",
     "portal_preferences_router",

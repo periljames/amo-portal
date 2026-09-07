@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Bell, MessageCircle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useToast } from "../feedback/ToastProvider";
 import { getCachedUser, getToken } from "../../services/auth";
 import { messagingApi } from "../../services/messaging";
 import type {
@@ -50,6 +51,7 @@ function badgeLabel(value: number): string {
 
 export function MessagingHub() {
   const queryClient = useQueryClient();
+  const { pushToast } = useToast();
   const user = getCachedUser();
   const authenticated = Boolean(getToken() && user?.id);
   const [open, setOpen] = useState(false);
@@ -63,6 +65,7 @@ export function MessagingHub() {
   const [showSettings, setShowSettings] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const lastNotificationId = useRef<string | null>(null);
+  const notificationsInitialized = useRef(false);
 
   const unreadQuery = useQuery({
     queryKey: ["messaging", "unread"],
@@ -81,7 +84,7 @@ export function MessagingHub() {
   const notificationsQuery = useQuery({
     queryKey: ["messaging", "notifications"],
     queryFn: () => messagingApi.notifications(false),
-    enabled: authenticated && (open || (unreadQuery.data?.notifications || 0) > 0),
+    enabled: authenticated,
     refetchInterval: open ? 8_000 : 20_000,
     staleTime: 3_000,
   });
@@ -94,7 +97,7 @@ export function MessagingHub() {
   const preferencesQuery = useQuery({
     queryKey: ["messaging", "preferences"],
     queryFn: messagingApi.preferences,
-    enabled: authenticated && open,
+    enabled: authenticated,
     staleTime: 60_000,
   });
 
@@ -152,16 +155,45 @@ export function MessagingHub() {
   }, [effectiveThreadId, messagesQuery.data?.length]);
 
   useEffect(() => {
+    if (!notificationsQuery.isSuccess) return;
     const latest = notificationsQuery.data?.items?.[0];
     const preferences = preferencesQuery.data;
+    if (!notificationsInitialized.current) {
+      notificationsInitialized.current = true;
+      lastNotificationId.current = latest?.id || null;
+      return;
+    }
     if (!latest || latest.id === lastNotificationId.current) return;
-    const previous = lastNotificationId.current;
     lastNotificationId.current = latest.id;
-    if (!previous || latest.read_at || !preferences?.desktop_enabled || document.visibilityState === "visible") return;
+    if (latest.read_at) return;
+    const isChat = latest.kind === "CHAT_MESSAGE";
+    if (preferences?.in_app_enabled !== false) {
+      const priority = String(
+        latest.metadata?.priority || latest.metadata?.severity || "",
+      ).toUpperCase();
+      pushToast({
+        title: latest.title,
+        message: latest.body,
+        variant: ["CRITICAL", "HIGH", "URGENT"].includes(priority)
+          ? "warning"
+          : "info",
+        sound: preferences?.sound_enabled !== false,
+        actionLabel: isChat ? "Open message" : "Open notifications",
+        action: () => {
+          setTab(isChat ? "chats" : "notifications");
+          setOpen(true);
+        },
+        dedupeKey: `portal-notification:${latest.id}`,
+      });
+    }
+    if (
+      !preferences?.desktop_enabled ||
+      document.visibilityState === "visible"
+    ) return;
     if ("Notification" in window && Notification.permission === "granted") {
       new Notification(latest.title, { body: latest.body, tag: latest.id });
     }
-  }, [notificationsQuery.data, preferencesQuery.data]);
+  }, [notificationsQuery.data, notificationsQuery.isSuccess, preferencesQuery.data, pushToast]);
 
   const refreshMessaging = () => queryClient.invalidateQueries({ queryKey: ["messaging"] });
   const selectThread = (threadId: string) => {

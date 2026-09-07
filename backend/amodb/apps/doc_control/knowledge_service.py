@@ -30,36 +30,42 @@ NODE_TYPES = {
     "ROOT",
     "MANAGEMENT_SYSTEM",
     "MANUAL",
+    "REGULATION",
     "POLICY",
     "PROCEDURE",
     "WORK_INSTRUCTION",
     "FORM",
     "CHECKLIST",
     "REGISTER",
+    "RECORD",
     "EXTERNAL_DOCUMENT",
     "RECORD_SERIES",
 }
 CONTENT_NODE_TYPES = {
     "MANUAL",
+    "REGULATION",
     "POLICY",
     "PROCEDURE",
     "WORK_INSTRUCTION",
     "FORM",
     "CHECKLIST",
     "REGISTER",
+    "RECORD",
     "EXTERNAL_DOCUMENT",
 }
 EXECUTABLE_NODE_TYPES = {"FORM", "CHECKLIST", "REGISTER"}
 ALLOWED_CHILDREN: dict[str, set[str]] = {
-    "ROOT": {"MANAGEMENT_SYSTEM", "MANUAL", "POLICY", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "EXTERNAL_DOCUMENT", "RECORD_SERIES"},
-    "MANAGEMENT_SYSTEM": {"MANAGEMENT_SYSTEM", "MANUAL", "POLICY", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "EXTERNAL_DOCUMENT", "RECORD_SERIES"},
+    "ROOT": {"MANAGEMENT_SYSTEM", "MANUAL", "REGULATION", "POLICY", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "RECORD", "EXTERNAL_DOCUMENT", "RECORD_SERIES"},
+    "MANAGEMENT_SYSTEM": {"MANAGEMENT_SYSTEM", "MANUAL", "REGULATION", "POLICY", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "RECORD", "EXTERNAL_DOCUMENT", "RECORD_SERIES"},
     "MANUAL": {"POLICY", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "RECORD_SERIES"},
+    "REGULATION": {"POLICY", "PROCEDURE"},
     "POLICY": {"PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "RECORD_SERIES"},
     "PROCEDURE": {"WORK_INSTRUCTION", "FORM", "CHECKLIST", "REGISTER", "RECORD_SERIES"},
     "WORK_INSTRUCTION": {"FORM", "CHECKLIST", "REGISTER", "RECORD_SERIES"},
-    "FORM": {"RECORD_SERIES"},
-    "CHECKLIST": {"RECORD_SERIES"},
-    "REGISTER": {"RECORD_SERIES"},
+    "FORM": {"RECORD", "RECORD_SERIES"},
+    "CHECKLIST": {"RECORD", "RECORD_SERIES"},
+    "REGISTER": {"RECORD", "RECORD_SERIES"},
+    "RECORD": set(),
     "EXTERNAL_DOCUMENT": set(),
     "RECORD_SERIES": set(),
 }
@@ -95,6 +101,9 @@ def _node_path(parent: km.DocumentationNode | None, node_id: str, code: str) -> 
 
 
 def _manual_node_type(manual: manual_models.Manual, profile: domain_models.DocumentControlProfile | None) -> str:
+    override = str((profile.metadata_json or {}).get("document_type_override") or "").strip().upper() if profile else ""
+    if override in CONTENT_NODE_TYPES:
+        return override
     source = " ".join(filter(None, [manual.manual_type, manual.code, manual.title])).upper()
     if profile and profile.document_class == "EXTERNAL":
         return "EXTERNAL_DOCUMENT"
@@ -104,6 +113,10 @@ def _manual_node_type(manual: manual_models.Manual, profile: domain_models.Docum
         return "FORM"
     if "REGISTER" in source or re.search(r"\bREG\b", source):
         return "REGISTER"
+    if "REGULATION" in source or re.search(r"\bKCAR", source):
+        return "REGULATION"
+    if source.strip() == "RECORD" or " RETAINED RECORD" in source:
+        return "RECORD"
     if "WORK INSTRUCTION" in source or re.search(r"\bWI\b", source):
         return "WORK_INSTRUCTION"
     if "PROCEDURE" in source or re.search(r"\bPROC\b", source):
@@ -116,8 +129,10 @@ def _manual_node_type(manual: manual_models.Manual, profile: domain_models.Docum
 def _default_group_code(node_type: str, manual: manual_models.Manual, profile: domain_models.DocumentControlProfile | None) -> str:
     if node_type in EXECUTABLE_NODE_TYPES:
         return "SYS-FORMS"
-    if node_type == "EXTERNAL_DOCUMENT":
+    if node_type in {"REGULATION", "EXTERNAL_DOCUMENT"}:
         return "SYS-EXTERNAL"
+    if node_type == "RECORD":
+        return "SYS-RECORDS"
     source = " ".join(filter(None, [manual.manual_type, manual.title, profile.owner_department if profile else None])).upper()
     if any(token in source for token in ("QUALITY", "SAFETY", "QMS", "SMS", "COMPLIANCE")):
         return "SYS-MANAGEMENT"

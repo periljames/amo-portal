@@ -79,13 +79,13 @@ export function listReconciliation() {
 }
 
 export function canEditProduction(): boolean {
-  const role = getCachedUser()?.role;
+  const user = getCachedUser();
+  if (!user || user.module_access?.fleet !== "manage") return false;
   return [
-    "SUPERUSER",
-    "AMO_ADMIN",
+    "BASE_MAINTENANCE_MANAGER",
+    "LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER",
     "PRODUCTION_ENGINEER",
     "PLANNING_ENGINEER",
-    "CERTIFYING_ENGINEER",
-    "CERTIFYING_TECHNICIAN",
-  ].includes(role || "");
+  ].includes(user.role || "");
 }

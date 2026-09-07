@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Ban,
   CalendarClock,
+  CalendarCheck2,
   CalendarDays,
   CalendarRange,
   Check,
@@ -12,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
-  CircleHelp,
   Clock3,
   ExternalLink,
   Filter,
@@ -22,7 +22,6 @@ import {
   Layers,
   List,
   MapPin,
-  MoreHorizontal,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,6 +39,8 @@ import {
   X,
 } from "lucide-react";
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
+import QmsCalendarSyncDialog from "../../../components/QMS/QmsCalendarSyncDialog";
+import { useToast } from "../../../components/feedback/ToastProvider";
 import InlineError from "../../../components/shared/InlineError";
 import Button from "../../../components/UI/Button";
 import { apiRequest, qmsPath } from "../../../services/apiClient";
@@ -813,16 +814,36 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [quickCreate, setQuickCreate] = useState<QuickCreateDraft | null>(null);
-  const [toast, setToast] = useState<ToastState>(null);
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleTarget | null>(null);
   const [pendingSuspend, setPendingSuspend] = useState<PlannerEvent | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [suspendBusy, setSuspendBusy] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
+  const [calendarSyncOpen, setCalendarSyncOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const createOptions = useMemo(() => quickCreateOptions(capabilities), [capabilities]);
   const loadRequestRef = useRef(0);
   const queryClient = useQueryClient();
+  const { pushToast } = useToast();
+  const setToast = useCallback((toast: ToastState) => {
+    if (!toast) return;
+    pushToast({
+      title:
+        toast.tone === "success"
+          ? "Planner updated"
+          : toast.tone === "danger"
+            ? "Planner action failed"
+            : "Planner information",
+      message: toast.message,
+      variant:
+        toast.tone === "danger"
+          ? "error"
+          : toast.tone === "success"
+            ? "success"
+            : "info",
+      dedupeKey: `qms-planner:${toast.tone}:${toast.message}`,
+    });
+  }, [pushToast]);
 
   const schedulingQueueQuery = useQuery({
     queryKey: ["qms-audit-programme-scheduling-queue", amoCode],
@@ -837,7 +858,6 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   }, []);
 
   useEffect(() => saveUiPreferences(storageKey, preferences), [preferences, storageKey]);
-  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timer); }, [toast]);
   useEffect(() => {
     const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
     return () => window.clearInterval(timer);
@@ -903,7 +923,7 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
     }
-  }, [amoCode, anchor, preferences.daySpan, view]);
+  }, [amoCode, anchor, preferences.daySpan, setToast, view]);
 
   useEffect(() => { void loadPlanner(); }, [loadPlanner]);
 
@@ -1183,17 +1203,10 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
               <button type="button" className={view === "agenda" ? "is-active" : ""} onClick={() => switchView("agenda")}><List size={15} /><span>Agenda</span></button>
             </div>
             <button type="button" className="qms-planner-icon-button" onClick={() => setPreferences((current) => ({ ...current, rightPanelOpen: !current.rightPanelOpen }))} aria-label={preferences.rightPanelOpen ? "Hide planner context panel" : "Show planner context panel"}>{preferences.rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button>
-            {embedded ? (
-              <button
-                type="button"
-                className="qms-planner-icon-button"
-                aria-label="Open Audit Assurance tools"
-                title="Audit Assurance tools"
-                onClick={() => window.dispatchEvent(new Event("qa:open-assurance-tools"))}
-              >
-                <MoreHorizontal size={18} />
-              </button>
-            ) : null}
+            <button type="button" className="qms-planner-queue-chip" onClick={() => setCalendarSyncOpen(true)} title="Subscribe this calendar in Google, Outlook, Apple Calendar, or another calendar app">
+              <CalendarCheck2 size={15} />
+              <span>Sync calendar</span>
+            </button>
             {schedulingQueue.length ? (
               <button
                 type="button"
@@ -1571,7 +1584,8 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
           </div>
         ) : null}
 
-        {toast ? <div className={`qms-planner-toast qms-planner-toast--${toast.tone}`} role="status">{toast.tone === "success" ? <CheckCircle2 size={16} /> : toast.tone === "danger" ? <AlertTriangle size={16} /> : <CircleHelp size={16} />}<span>{toast.message}</span></div> : null}
+        <QmsCalendarSyncDialog open={calendarSyncOpen} onClose={() => setCalendarSyncOpen(false)} />
+
       </main>
   );
 

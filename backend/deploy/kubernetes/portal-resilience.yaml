@@ -11,7 +11,7 @@ data:
   DB_CONNECT_TIMEOUT_SECONDS: "5"
   DB_STATEMENT_TIMEOUT_MS: "30000"
   DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: "60000"
-  DATABASE_EXPECTED_ALEMBIC_HEADS: quality_260902_qms13_gate
+  DATABASE_EXPECTED_ALEMBIC_HEADS: quality_260904_purge_guards
   DB_CIRCUIT_FAILURE_THRESHOLD: "3"
   DB_CIRCUIT_BASE_RETRY_SECONDS: "2"
   DB_CIRCUIT_MAX_RETRY_SECONDS: "60"
@@ -168,7 +168,7 @@ spec:
           command: ["python", "-m", "amodb.jobs.portal_worker_main"]
           args:
             - --families
-            - platform-commands,saas,training-workbooks,training-reports,document-indexing
+            - platform-commands,saas,training-workbooks,training-reports,document-indexing,quality-recycle-bin
             - --concurrency
             - "1"
           envFrom:

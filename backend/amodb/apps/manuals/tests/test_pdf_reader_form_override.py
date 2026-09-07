@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+from types import SimpleNamespace
+
 import pymupdf
 
 from amodb.apps.doc_control.pdfium_service import PdfFlattenResult, PdfInspection
 from amodb.apps.manuals.pdf_reader_form_override_router import (
     _extract_completed_pages,
     _parse_requested_pages,
+    _reader_source_metadata,
     _safe_form_capabilities,
 )
 
@@ -71,3 +75,34 @@ def test_completed_page_output_contains_only_selected_pages() -> None:
         assert "PAGE 3" not in output[0].get_text()
     finally:
         output.close()
+
+
+def test_reader_source_metadata_identifies_the_exact_sanitized_bytes(tmp_path, monkeypatch) -> None:
+    reader_path = tmp_path / "safe-reader.pdf"
+    reader_bytes = b"%PDF-1.7\nscript-disabled-reader\n%%EOF"
+    reader_path.write_bytes(reader_bytes)
+    revision = SimpleNamespace(source_storage_path=str(reader_path))
+    inspection = PdfInspection(
+        engine="PDFium",
+        engine_version="test",
+        source_sha256="a" * 64,
+        page_count=1,
+        form_type=0,
+        has_acroform=False,
+        has_javascript=True,
+        is_dynamic_xfa=False,
+        encrypted=False,
+        can_flatten=True,
+        unsupported_reason=None,
+        template_fingerprint={},
+    )
+    monkeypatch.setattr(
+        "amodb.apps.manuals.pdf_reader_form_override_router._safe_reader_cache_path",
+        lambda _revision, _sha256: reader_path,
+    )
+
+    checksum, size = _reader_source_metadata(revision, inspection)
+
+    assert checksum == hashlib.sha256(reader_bytes).hexdigest()
+    assert size == len(reader_bytes)
+    assert reader_path.with_suffix(".metadata.json").is_file()

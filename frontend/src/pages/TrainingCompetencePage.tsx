@@ -8,6 +8,7 @@ import TrainingWorkbookImportDialog from "../components/training/TrainingWorkboo
 import { useToast } from "../components/feedback/ToastProvider";
 import { saveDownloadedFile } from "../utils/downloads";
 import { getCachedUser } from "../services/auth";
+import { getActiveTenantAccessProfiles, type TenantAccessProfileOption } from "../services/accessProfiles";
 import { trainingLifecyclePhase } from "../utils/trainingPresentation";
 import { invalidateAdminUserCache, listAdminUserSummaries, type AdminUserSummaryRead } from "../services/adminUsers";
 import {
@@ -464,6 +465,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
   const [users, setUsers] = useState<AdminUserSummaryRead[]>([]);
   const [courses, setCourses] = useState<TrainingCourseRead[]>([]);
   const [requirements, setRequirements] = useState<TrainingRequirementRead[]>([]);
+  const [accessProfiles, setAccessProfiles] = useState<TenantAccessProfileOption[]>([]);
   const [events, setEvents] = useState<TrainingEventRead[]>([]);
   const [records, setRecords] = useState<TrainingRecordRead[]>([]);
   const [certificates, setCertificates] = useState<TrainingRecordRead[]>([]);
@@ -494,6 +496,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     course_pk: "",
     scope: "ALL",
     department_code: null,
+    access_profile_id: null,
     job_role: null,
     user_id: null,
     is_mandatory: true,
@@ -587,7 +590,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
   const hydratedSnapshotRef = useRef(false);
   const { pushToast } = useToast();
   const currentUser = getCachedUser();
-  const canManageCourses = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER");
+  const canManageCourses = Boolean(currentUser?.capability_codes?.includes("training.course.manage"));
 
   useEffect(() => {
     try {
@@ -668,6 +671,15 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       .then(setParticipants)
       .catch(() => setParticipants([]));
   }, [selectedEventId]);
+
+  useEffect(() => {
+    if (!requirementFormOpen) return;
+    let active = true;
+    getActiveTenantAccessProfiles()
+      .then((profiles) => { if (active) setAccessProfiles(profiles); })
+      .catch(() => { if (active) setAccessProfiles([]); });
+    return () => { active = false; };
+  }, [requirementFormOpen]);
 
   const load = React.useCallback(async () => {
     const requestId = ++loadSeq.current;
@@ -901,7 +913,6 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
   }, [courseById, requirements]);
 
   const knownDepartments = useMemo(() => Array.from(new Set(users.map((user) => String((user as AdminUserSummaryWithDepartment).department_code || "").trim()).filter(Boolean))).sort(), [users]);
-  const knownRoles = useMemo(() => Array.from(new Set(users.map((user) => String(user.position_title || user.role || "").trim()).filter(Boolean))).sort(), [users]);
 
   const courseRows = useMemo(() => {
     const requiredCourseIds = new Set(requirements.filter((item) => item.is_active).map((item) => item.course_pk));
@@ -1224,6 +1235,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       course_pk: personCourseFilter !== "ALL" ? (courses.find((course) => course.course_id === personCourseFilter)?.id || "") : "",
       scope: "ALL",
       department_code: null,
+      access_profile_id: null,
       job_role: null,
       user_id: null,
       is_mandatory: true,
@@ -1249,6 +1261,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       course_pk: requirement.course_pk,
       scope: requirement.scope,
       department_code: requirement.department_code || null,
+      access_profile_id: requirement.access_profile_id || null,
       job_role: requirement.job_role || null,
       user_id: requirement.user_id || null,
       is_mandatory: requirement.is_mandatory,
@@ -1277,8 +1290,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       pushToast({ title: "Department required", message: "Choose or enter a department code.", variant: "error" });
       return;
     }
-    if (requirementForm.scope === "JOB_ROLE" && !String(requirementForm.job_role || "").trim()) {
-      pushToast({ title: "Job role required", message: "Choose or enter the role this rule applies to.", variant: "error" });
+    if (requirementForm.scope === "JOB_ROLE" && !String(requirementForm.access_profile_id || "").trim()) {
+      pushToast({ title: "Access profile required", message: "Choose the governed tenant access profile this rule applies to.", variant: "error" });
       return;
     }
     if (requirementForm.scope === "USER" && !String(requirementForm.user_id || "").trim()) {
@@ -1301,7 +1314,8 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
         course_pk: requirementForm.course_pk,
         scope: requirementForm.scope as TrainingRequirementScope,
         department_code: requirementForm.scope === "DEPARTMENT" ? String(requirementForm.department_code || "").trim().toUpperCase() || null : null,
-        job_role: requirementForm.scope === "JOB_ROLE" ? String(requirementForm.job_role || "").trim() || null : null,
+        access_profile_id: requirementForm.scope === "JOB_ROLE" ? String(requirementForm.access_profile_id || "").trim() || null : null,
+        job_role: null,
         user_id: requirementForm.scope === "USER" ? String(requirementForm.user_id || "").trim() || null : null,
         is_mandatory: requirementForm.is_mandatory,
         is_active: requirementForm.is_active,
@@ -1778,7 +1792,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                         <td>{row.course?.course_id || row.course_pk} · {row.course?.course_name || "Unknown course"}</td>
                         <td>{row.scope}</td>
                         <td>{row.department_code || "—"}</td>
-                        <td>{row.scope === "USER" ? (users.find((user) => user.id === row.user_id)?.full_name || row.job_role || "—") : (row.job_role || "—")}</td>
+                        <td>{row.scope === "USER" ? (users.find((user) => user.id === row.user_id)?.full_name || "—") : (row.access_profile_name || row.job_role || "—")}</td>
                         <td>{row.is_mandatory ? "Yes" : "No"}</td>
                         <td>{row.is_active ? "Active" : "Inactive"}</td>
                         <td>{row.effective_from || row.effective_to ? `${compactDate(row.effective_from)} → ${compactDate(row.effective_to)}` : "Always on"}</td>
@@ -2278,7 +2292,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
           </label>
           <label className="tc-field">
             <span className="tc-field__label">Scope</span>
-            <select className="tc-select" value={requirementForm.scope} onChange={(e) => setRequirementForm((prev) => ({ ...prev, scope: e.target.value as TrainingRequirementScope, department_code: null, job_role: null, user_id: null }))}>
+            <select className="tc-select" value={requirementForm.scope} onChange={(e) => setRequirementForm((prev) => ({ ...prev, scope: e.target.value as TrainingRequirementScope, department_code: null, access_profile_id: null, job_role: null, user_id: null }))}>
               <option value="ALL">All personnel</option>
               <option value="DEPARTMENT">Department</option>
               <option value="JOB_ROLE">Job role</option>
@@ -2294,9 +2308,12 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
           ) : null}
           {requirementForm.scope === "JOB_ROLE" ? (
             <label className="tc-field">
-              <span className="tc-field__label">Job role</span>
-              <input className="tc-input" list="training-known-roles" value={requirementForm.job_role || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, job_role: e.target.value }))} placeholder="CERTIFYING TECHNICIAN" />
-              <datalist id="training-known-roles">{knownRoles.map((role) => <option key={role} value={role} />)}</datalist>
+              <span className="tc-field__label">Tenant access profile</span>
+              <select className="tc-select" value={requirementForm.access_profile_id || ""} onChange={(e) => setRequirementForm((prev) => ({ ...prev, access_profile_id: e.target.value || null }))}>
+                <option value="">Select active profile</option>
+                {accessProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name} · {profile.category.replaceAll("_", " ")}</option>)}
+              </select>
+              <small>Stored by stable profile identity so tenant terminology changes do not alter applicability.</small>
             </label>
           ) : null}
           {requirementForm.scope === "USER" ? (

@@ -223,8 +223,6 @@ def _get_qa_user_id(db: Session, amo_id: str) -> Optional[str]:
             account_models.User.role.in_(
                 [
                     account_models.AccountRole.QUALITY_MANAGER,
-                    account_models.AccountRole.AMO_ADMIN,
-                    account_models.AccountRole.SUPERUSER,
                 ]
             ),
         )

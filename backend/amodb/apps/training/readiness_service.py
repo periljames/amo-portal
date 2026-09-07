@@ -18,9 +18,10 @@ from ..quality import models as quality_models
 from ..realtime import models as realtime_models
 from . import compliance
 from . import models as legacy_models
+from . import role_targeting
 from . import operating_models as models
 from . import operating_schemas as schemas
-from .permissions import tenant_id_for
+from .permissions import TrainingCapability, has_training_capability, tenant_id_for
 
 
 UTC = timezone.utc
@@ -82,7 +83,8 @@ def source_health(db: Session, *, actor: account_models.User) -> schemas.SourceH
 
 def _requirement_indexes(requirements: list[legacy_models.TrainingRequirement]) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "ALL": set(), "USER": defaultdict(set), "DEPARTMENT": defaultdict(set), "JOB_ROLE": defaultdict(set), "source": defaultdict(list),
+        "ALL": set(), "USER": defaultdict(set), "DEPARTMENT": defaultdict(set),
+        "ACCESS_PROFILE": defaultdict(set), "JOB_ROLE": defaultdict(set), "source": defaultdict(list),
     }
     for requirement in requirements:
         scope = str(getattr(requirement.scope, "value", requirement.scope)).upper()
@@ -93,8 +95,12 @@ def _requirement_indexes(requirements: list[legacy_models.TrainingRequirement]) 
             result["USER"][str(requirement.user_id)].add(course_id)
         elif scope == "DEPARTMENT" and requirement.department_code:
             result["DEPARTMENT"][requirement.department_code.strip().upper()].add(course_id)
+        elif scope == "JOB_ROLE" and requirement.access_profile_id:
+            result["ACCESS_PROFILE"][str(requirement.access_profile_id)].add(course_id)
         elif scope == "JOB_ROLE" and requirement.job_role:
-            result["JOB_ROLE"][requirement.job_role.strip().lower()].add(course_id)
+            legacy_term = role_targeting.normalize_role_term(requirement.job_role)
+            if legacy_term:
+                result["JOB_ROLE"][legacy_term].add(course_id)
         result["source"][course_id].append({
             "requirement_id": str(requirement.id), "scope": scope,
             "manual_reference": requirement.manual_reference, "source_type": requirement.source_type, "source_id": requirement.source_id,
@@ -140,6 +146,27 @@ def people_compliance_page(
         or_(legacy_models.TrainingRequirement.effective_to.is_(None), legacy_models.TrainingRequirement.effective_to >= today),
     ).all()
     requirement_index = _requirement_indexes(requirements)
+    access_profiles = role_targeting.primary_profiles_for_users(
+        db,
+        amo_id=amo_id,
+        user_ids=all_user_ids,
+    )
+
+    def role_courses(user_id: str, position_title: str | None) -> set[str]:
+        profile = access_profiles.get(user_id)
+        result = set(
+            requirement_index["ACCESS_PROFILE"].get(str(profile.id), set())
+            if profile is not None
+            else set()
+        )
+        terms = role_targeting.profile_terms(profile)
+        position_term = role_targeting.normalize_role_term(position_title)
+        if position_term:
+            terms.add(position_term)
+        for term in terms:
+            result.update(requirement_index["JOB_ROLE"].get(term, set()))
+        return result
+
     course_ids = {str(row.course_id) for row in requirements}
     courses = db.query(legacy_models.TrainingCourse).filter(
         legacy_models.TrainingCourse.amo_id == amo_id,
@@ -159,11 +186,10 @@ def people_compliance_page(
     rows: list[schemas.PersonComplianceRow] = []
     def obligation_counts(user_id: str, position_title: str | None, department_id: str | None) -> tuple[int, int, int]:
         department_code = department_by_id.get(str(department_id or ""), "")
-        position = str(position_title or "").lower()
         required = set(requirement_index["ALL"])
         required.update(requirement_index["USER"].get(user_id, set()))
         required.update(requirement_index["DEPARTMENT"].get(department_code, set()))
-        required.update(requirement_index["JOB_ROLE"].get(position, set()))
+        required.update(role_courses(user_id, position_title))
         overdue = due_soon = never = 0
         for course_id in required:
             course = course_by_id.get(course_id)
@@ -191,11 +217,10 @@ def people_compliance_page(
     for user in users:
         user_id = str(user.id)
         department_code = department_by_id.get(str(user.department_id or ""), "")
-        position = str(user.position_title or "").lower()
         required = set(requirement_index["ALL"])
         required.update(requirement_index["USER"].get(user_id, set()))
         required.update(requirement_index["DEPARTMENT"].get(department_code, set()))
-        required.update(requirement_index["JOB_ROLE"].get(position, set()))
+        required.update(role_courses(user_id, user.position_title))
         overdue = due_soon = never = 0
         due_dates: list[date] = []
         provenance: list[dict[str, Any]] = []
@@ -443,7 +468,7 @@ def create_workflow(db: Session, *, actor: account_models.User, payload: schemas
 def complete_workflow_step(db: Session, *, actor: account_models.User, workflow: models.TrainingWorkflowInstance, step: models.TrainingWorkflowStep, payload: schemas.WorkflowStepComplete) -> models.TrainingWorkflowStep:
     if workflow.status in {"APPROVED", "COMPLETED", "CANCELLED"}:
         raise HTTPException(status_code=409, detail="This workflow is immutable in its current state.")
-    if step.assigned_user_id and str(step.assigned_user_id) != str(actor.id) and not getattr(actor, "is_amo_admin", False):
+    if step.assigned_user_id and str(step.assigned_user_id) != str(actor.id):
         raise HTTPException(status_code=403, detail="This workflow step is assigned to another user.")
     step.response_json = payload.response_json
     step.signature_json = {"meaning": payload.signature or "Completed by authenticated user", "user_id": str(actor.id), "signed_at": _now().isoformat()}
@@ -460,16 +485,48 @@ def transition_workflow(db: Session, *, actor: account_models.User, row: models.
     }
     if payload.target not in allowed.get(row.status, set()):
         raise HTTPException(status_code=409, detail=f"Workflow cannot move from {row.status} to {payload.target}.")
+    actor_id = str(actor.id)
+    owner_ids = {
+        str(value)
+        for value in (row.owner_user_id, row.created_by_user_id)
+        if value
+    }
+    if payload.target in {"SUBMITTED", "CANCELLED", "COMPLETED"} and actor_id not in owner_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the assigned workflow owner or originator may perform this transition.",
+        )
+    if payload.target == "SUBMITTED":
+        if not row.reviewer_user_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Assign an independent reviewer before submitting this controlled workflow.",
+            )
+        if str(row.reviewer_user_id) in owner_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="The reviewer must be independent of the workflow owner and originator.",
+            )
+    if payload.target in {"RETURNED", "APPROVED"}:
+        if not row.reviewer_user_id or str(row.reviewer_user_id) != actor_id:
+            raise HTTPException(status_code=403, detail="Only the assigned independent reviewer may decide this workflow.")
+        if not has_training_capability(
+            db,
+            user=actor,
+            capability=TrainingCapability.ASSESSMENT_REVIEW,
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="The assigned reviewer also requires the training.assessment.review capability.",
+            )
     steps = _workflow_steps(db, str(row.amo_id), str(row.id))
     if payload.target in {"SUBMITTED", "APPROVED", "COMPLETED"}:
         incomplete = [step.step_key for step in steps if step.status != "COMPLETED"]
         if incomplete:
             row.validation_result = {"status": "BLOCKED", "incomplete_steps": incomplete}
             raise HTTPException(status_code=409, detail={"message": "Required controlled-form steps are incomplete.", "incomplete_steps": incomplete})
-    if payload.target == "APPROVED" and str(row.created_by_user_id) == str(actor.id):
+    if payload.target == "APPROVED" and str(row.created_by_user_id) == actor_id:
         raise HTTPException(status_code=409, detail="Segregation of duties requires a different user to approve this workflow.")
-    if payload.target in {"RETURNED", "APPROVED"} and row.reviewer_user_id and str(row.reviewer_user_id) != str(actor.id):
-        raise HTTPException(status_code=403, detail="Only the assigned reviewer may decide this workflow.")
     row.status = payload.target; row.revision_no = int(row.revision_no or 0) + 1
     row.validation_result = {"status": "VALID", "validated_at": _now().isoformat()}
     if payload.target == "SUBMITTED": row.submitted_at = _now()

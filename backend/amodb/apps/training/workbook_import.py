@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ...database import SessionLocal
 from ...user_id import generate_user_id
 from ..accounts import models as account_models
+from ..accounts import access_control as account_access_control
 from ..accounts.services import get_password_hash
 from ..audit import services as audit_services
 from . import models as training_models
@@ -393,20 +394,12 @@ def _default_frequency_months(params: dict[str, Any]) -> Optional[int]:
 
 
 def _role_from_position(position: Optional[str]) -> account_models.AccountRole:
-    text = upper(position)
-    mapping = {
-        "QUALITY MANAGER": account_models.AccountRole.QUALITY_MANAGER,
-        "QUALITY INSPECTOR": account_models.AccountRole.QUALITY_INSPECTOR,
-        "AUDITOR": account_models.AccountRole.AUDITOR,
-        "CERTIFYING ENGINEER": account_models.AccountRole.CERTIFYING_ENGINEER,
-        "CERTIFYING TECHNICIAN": account_models.AccountRole.CERTIFYING_TECHNICIAN,
-        "PLANNING ENGINEER": account_models.AccountRole.PLANNING_ENGINEER,
-        "PRODUCTION ENGINEER": account_models.AccountRole.PRODUCTION_ENGINEER,
-        "STORES MANAGER": account_models.AccountRole.STORES_MANAGER,
-        "STOREKEEPER": account_models.AccountRole.STOREKEEPER,
-        "PROCUREMENT OFFICER": account_models.AccountRole.PROCUREMENT_OFFICER,
-    }
-    return mapping.get(text, account_models.AccountRole.TECHNICIAN)
+    # Imported position text is HR evidence, not an access decision. Imported
+    # accounts remain non-login general users until an administrator assigns a
+    # governed tenant profile (and, where applicable, personal authorization).
+    # Keeping the parameter documents why this must not be inferred here.
+    del position
+    return account_models.AccountRole.USER
 
 
 def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]]) -> None:
@@ -1177,6 +1170,7 @@ def _upsert_person(
             db.flush()
         except IntegrityError as exc:
             raise PersonnelIdentityChanged(row.id, "A portal account was created after preview. Review this People row again.") from exc
+        account_access_control.assign_default_profile_for_role(db, user=user)
         profile.user_id = user.id
     else:
         user = existing_profile_user or existing_staff_user or existing_email_user
@@ -1212,6 +1206,7 @@ def _upsert_person(
                 db.flush()
             except IntegrityError as exc:
                 raise PersonnelIdentityChanged(row.id, "A portal account was created after preview. Review this People row again.") from exc
+            account_access_control.assign_default_profile_for_role(db, user=user)
         elif user is None and decision == "LINK_EXISTING_ACCOUNT":
             raise ValueError("The account selected for linking no longer exists. Re-run the workbook preview.")
         elif user is not None:

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
-from sqlalchemy import and_, text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from amodb.database_resilience import database_circuit, is_database_disconnect
 from . import models
 from .enums import QMSAuditKind, QMSAuditScheduleFrequency, QMSAuditStatus, QMSDomain
 from .planner_schedule_models import QMSPlannerScheduleMetadata
+from .people_models import QualityPrivilege, QualityPrivilegeRule
 from .schedule_weekend import annotate_notes_with_weekend_policy, resolve_schedule_window
 from .router import (
     _advance_schedule_date,
@@ -106,6 +107,7 @@ class PlannerPersonOption(BaseModel):
     email: str | None = None
     role: str | None = None
     department_name: str | None = None
+    auditor_roles: list[str] = Field(default_factory=list)
 
 
 class PlannerScopeOption(BaseModel):
@@ -116,6 +118,13 @@ class PlannerScopeOption(BaseModel):
     default_kind: str
 
 
+class PlannerLocationOption(BaseModel):
+    id: str
+    code: str
+    name: str
+    location_type: str
+
+
 class PlannerScheduleOptionsResponse(BaseModel):
     timezone_name: str
     frequencies: list[str]
@@ -124,6 +133,7 @@ class PlannerScheduleOptionsResponse(BaseModel):
     unsupported_source_types: dict[str, str]
     scopes: list[PlannerScopeOption]
     people: list[PlannerPersonOption]
+    locations: list[PlannerLocationOption]
 
 
 class PlannerConflict(BaseModel):
@@ -432,6 +442,72 @@ def _validate_people(db: Session, *, amo_id: str, user_ids: list[str]) -> dict[s
             },
         )
     return by_id
+
+
+def _auditor_roles_by_user(db: Session, *, amo_id: str) -> dict[str, set[str]]:
+    today = date.today()
+    rows = db.query(QualityPrivilege, QualityPrivilegeRule).join(
+        QualityPrivilegeRule,
+        QualityPrivilegeRule.id == QualityPrivilege.rule_id,
+    ).filter(
+        QualityPrivilege.amo_id == amo_id,
+        QualityPrivilege.status == "ACTIVE",
+        QualityPrivilegeRule.is_active.is_(True),
+        QualityPrivilegeRule.privilege_type.in_(["AUDITOR", "LEAD_AUDITOR"]),
+        or_(QualityPrivilege.effective_from.is_(None), QualityPrivilege.effective_from <= today),
+        or_(QualityPrivilege.expires_on.is_(None), QualityPrivilege.expires_on >= today),
+    ).all()
+    result: dict[str, set[str]] = {}
+    for privilege, rule in rows:
+        roles = result.setdefault(str(privilege.user_id), set())
+        if rule.privilege_type == "LEAD_AUDITOR":
+            roles.update({"LEAD_AUDITOR", "OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"})
+            continue
+        configured = {
+            str(value).strip().upper()
+            for value in (rule.scope_schema or {}).get("allowed_assignment_roles", [])
+            if str(value).strip()
+        }
+        roles.update(configured or {"OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"})
+    return result
+
+
+def _validate_auditor_assignments(
+    db: Session,
+    *,
+    amo_id: str,
+    lead_user_id: str | None,
+    observer_user_id: str | None,
+    assistant_user_id: str | None,
+    supporting_user_ids: list[str] | None = None,
+) -> None:
+    assignments = (
+        ("LEAD_AUDITOR", lead_user_id),
+        ("OBSERVER_AUDITOR", observer_user_id),
+        ("ASSISTANT_AUDITOR", assistant_user_id),
+    )
+    selected = [(assignment_role, str(user_id)) for assignment_role, user_id in assignments if user_id]
+    if not selected:
+        return
+    eligible = _auditor_roles_by_user(db, amo_id=amo_id)
+    invalid = [
+        {"user_id": user_id, "assignment_role": assignment_role}
+        for assignment_role, user_id in selected
+        if assignment_role not in eligible.get(user_id, set())
+    ]
+    invalid.extend(
+        {"user_id": str(user_id), "assignment_role": "SUPPORTING_AUDITOR"}
+        for user_id in _dedupe(supporting_user_ids or [])
+        if not eligible.get(str(user_id), set())
+    )
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Each auditor assignment requires a current governed Quality privilege for that assignment role.",
+                "invalid_assignments": invalid,
+            },
+        )
 
 
 def _metadata_for_schedule(db: Session, *, amo_id: str, schedule_id: uuid.UUID, lock: bool = False) -> QMSPlannerScheduleMetadata | None:
@@ -893,7 +969,6 @@ def _accountable_actor_id(db: Session, schedule: models.QMSAuditSchedule) -> str
         account_models.User.is_active.is_(True),
         account_models.User.role.in_([
             account_models.AccountRole.QUALITY_MANAGER,
-            account_models.AccountRole.AMO_ADMIN,
         ]),
     ).order_by(account_models.User.role.asc(), account_models.User.id.asc()).first()
     return str(manager.id) if manager else None
@@ -987,6 +1062,12 @@ def _materialize_occurrence(
         lead_auditor_user_id=schedule.lead_auditor_user_id,
         observer_auditor_user_id=schedule.observer_auditor_user_id,
         assistant_auditor_user_id=schedule.assistant_auditor_user_id,
+        supporting_auditor_user_ids=_dedupe([
+            schedule.observer_auditor_user_id,
+            schedule.assistant_auditor_user_id,
+            *_json_list(template.attendee_user_ids_json),
+        ]),
+        location=template.location,
         notify_auditors=schedule.notify_auditors,
         notify_auditees=schedule.notify_auditees,
         reminder_interval_days=schedule.reminder_interval_days,
@@ -1336,6 +1417,13 @@ def planner_schedule_options(
         account_models.User.is_active.is_(True),
         account_models.User.is_system_account.is_(False),
     ).order_by(account_models.User.full_name.asc(), account_models.User.email.asc()).limit(1000).all()
+    from amodb.apps.foundations import models as foundation_models
+
+    locations = db.query(foundation_models.BaseStation).filter(
+        foundation_models.BaseStation.amo_id == ctx.amo_id,
+        foundation_models.BaseStation.is_active.is_(True),
+    ).order_by(foundation_models.BaseStation.name.asc()).limit(500).all()
+    auditor_roles = _auditor_roles_by_user(db, amo_id=ctx.amo_id)
     return PlannerScheduleOptionsResponse(
         timezone_name=_PLANNER_TIMEZONE_NAME,
         frequencies=[item.value for item in QMSAuditScheduleFrequency],
@@ -1351,7 +1439,14 @@ def planner_schedule_options(
         people=[PlannerPersonOption(
             id=str(user.id), full_name=_user_display_name(user), email=user.email,
             role=_enum_value(user.role), department_name=department_name,
+            auditor_roles=sorted(auditor_roles.get(str(user.id), set())),
         ) for user, department_name in people],
+        locations=[PlannerLocationOption(
+            id=str(location.id),
+            code=location.code,
+            name=location.name,
+            location_type=_enum_value(location.base_type),
+        ) for location in locations],
     )
 
 
@@ -1373,6 +1468,13 @@ def _create_planner_audit_schedule(
         *payload.attendee_user_ids,
     ])
     selected_users = _validate_people(db, amo_id=ctx.amo_id, user_ids=selected_ids)
+    _validate_auditor_assignments(
+        db,
+        amo_id=ctx.amo_id,
+        lead_user_id=payload.lead_auditor_user_id,
+        observer_user_id=payload.observer_auditor_user_id,
+        assistant_user_id=payload.assistant_auditor_user_id,
+    )
     resolved_scope = _resolve_audit_scope(
         db,
         amo_id=ctx.amo_id,
@@ -1532,6 +1634,13 @@ def check_planner_conflicts(
         payload.assistant_auditor_user_id, payload.auditee_user_id, *payload.attendee_user_ids,
     ])
     _validate_people(db, amo_id=ctx.amo_id, user_ids=user_ids)
+    _validate_auditor_assignments(
+        db,
+        amo_id=ctx.amo_id,
+        lead_user_id=payload.lead_auditor_user_id,
+        observer_user_id=payload.observer_auditor_user_id,
+        assistant_user_id=payload.assistant_auditor_user_id,
+    )
     conflicts = _collect_conflicts(
         db,
         amo_id=ctx.amo_id,

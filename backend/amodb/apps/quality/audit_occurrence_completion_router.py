@@ -21,6 +21,7 @@ from .audit_occurrence_completion_models import (
     QualityAuditDocumentRequestMetadata,
     QualityAuditMeeting,
 )
+from .audit_schedule_rules import normalise_tenant_datetime, tenant_timezone
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -56,8 +57,8 @@ def _audit(db: Session, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
     return row
 
 
-def _normalise_datetime(value: datetime) -> datetime:
-    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+def _normalise_datetime(value: datetime, *, zone) -> datetime:
+    return normalise_tenant_datetime(value, zone=zone)
 
 
 class GovernedDocumentRequestCreate(BaseModel):
@@ -171,13 +172,11 @@ def _validate_canonical_controlled_source(
     user_id: str | None = None,
     require_revision: bool = False,
 ) -> tuple[manual_models.Manual | None, manual_models.ManualRevision | None]:
-    """Validate a canonical Document Control document and exact controlled revision."""
+    """Validate a canonical document and resolve its current effective revision."""
     document_id = (document_id or "").strip() or None
     revision_id = (revision_id or "").strip() or None
     if revision_id and not document_id:
         raise HTTPException(status_code=422, detail="A canonical revision must be linked to its Document Control document.")
-    if require_revision and document_id and not revision_id:
-        raise HTTPException(status_code=422, detail="Canonical Document Control evidence must identify an exact controlled revision.")
     if not document_id:
         return None, None
 
@@ -204,6 +203,13 @@ def _validate_canonical_controlled_source(
             raise HTTPException(status_code=403, detail="The selected Document Control record is restricted.")
 
     revision = None
+    if require_revision:
+        current_revision_id = document.current_published_rev_id
+        if not current_revision_id:
+            raise HTTPException(status_code=409, detail="The selected Document Control record has no current effective revision.")
+        if revision_id and str(revision_id) != str(current_revision_id):
+            raise HTTPException(status_code=409, detail="The requested revision is no longer current. Refresh the DMS document selection.")
+        revision_id = current_revision_id
     if revision_id:
         revision = db.query(manual_models.ManualRevision).filter(
             manual_models.ManualRevision.id == revision_id,
@@ -275,7 +281,7 @@ def _validate_request_controlled_selection(
     if source_mode == "CONTROLLED_DMS" and (document is None or revision is None):
         raise HTTPException(
             status_code=422,
-            detail="A canonical Document Control document and exact controlled revision are required for this request.",
+            detail="The selected canonical Document Control document must have a current effective revision.",
         )
     return (
         None,
@@ -407,6 +413,21 @@ def list_canonical_document_control_documents(
     for document in documents:
         if not can_read_manual(user, profiles.get(document.id)):
             continue
+        current_revision = None
+        if document.current_published_rev_id:
+            revision = db.query(manual_models.ManualRevision).filter(
+                manual_models.ManualRevision.id == document.current_published_rev_id,
+                manual_models.ManualRevision.manual_id == document.id,
+                manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
+            ).first()
+            if revision:
+                current_revision = {
+                    "id": revision.id,
+                    "issue_number": revision.issue_number,
+                    "revision_number": revision.rev_number,
+                    "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
+                    "source_sha256": revision.source_sha256,
+                }
         items.append({
             "id": document.id,
             "code": document.code,
@@ -414,6 +435,7 @@ def list_canonical_document_control_documents(
             "manual_type": document.manual_type,
             "status": document.status,
             "current_published_revision_id": document.current_published_rev_id,
+            "current_revision": current_revision,
         })
     return {"items": items}
 
@@ -622,7 +644,8 @@ def list_audit_meetings(
         QualityAuditMeeting.amo_id == ctx.amo_id,
         QualityAuditMeeting.audit_id == audit_id,
     ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
-    return {"items": [_meeting_dict(row) for row in _current_meeting_rows(rows)]}
+    zone = tenant_timezone(db, amo_id=ctx.amo_id)
+    return {"timezone_name": zone.key, "items": [_meeting_dict(row) for row in _current_meeting_rows(rows)]}
 
 
 @router.post("/audits/{audit_id}/meetings", status_code=status.HTTP_201_CREATED)
@@ -634,8 +657,9 @@ def create_audit_meeting(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, ctx.amo_id, audit_id)
-    start = _normalise_datetime(payload.scheduled_start)
-    end = _normalise_datetime(payload.scheduled_end) if payload.scheduled_end else None
+    zone = tenant_timezone(db, amo_id=ctx.amo_id)
+    start = _normalise_datetime(payload.scheduled_start, zone=zone)
+    end = _normalise_datetime(payload.scheduled_end, zone=zone) if payload.scheduled_end else None
     if end and end < start:
         raise HTTPException(status_code=422, detail="Meeting end cannot be before its start.")
     # Opening and closing are singleton governance events. A client retry must
@@ -665,6 +689,7 @@ def create_audit_meeting(
     row.notes = (payload.notes or "").strip() or None
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
+    db.flush()
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
@@ -688,9 +713,10 @@ def update_audit_meeting(
     if row is None:
         raise HTTPException(status_code=404, detail="Audit meeting not found.")
     update = payload.model_dump(exclude_unset=True)
+    zone = tenant_timezone(db, amo_id=ctx.amo_id)
     for field, value in update.items():
         if field in {"scheduled_start", "scheduled_end"} and value is not None:
-            value = _normalise_datetime(value)
+            value = _normalise_datetime(value, zone=zone)
         elif isinstance(value, str):
             value = value.strip() or None
         setattr(row, field, value)
@@ -698,6 +724,7 @@ def update_audit_meeting(
         raise HTTPException(status_code=422, detail="Meeting end cannot be before its start.")
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
+    db.flush()
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)

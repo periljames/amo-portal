@@ -476,12 +476,46 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         (data.full_name or "").strip()
         or f"{first_name} {last_name}".strip()
     )
-    inferred_role = role_registry.infer_regulated_role(data.position_title)
-    resolved_role = (
-        inferred_role
-        if data.role == models.AccountRole.USER and inferred_role is not None
-        else data.role
-    )
+    # Job titles are descriptive workforce data and never grant authority.
+    # Access changes require an explicit account persona or governed tenant
+    # access profile.
+    resolved_role = data.role
+    if resolved_role == models.AccountRole.AMO_ADMIN or data.is_amo_admin:
+        raise ValueError(
+            "Tenant-administrator access must use the governed administrator-grant workflow"
+        )
+    if data.is_auditor:
+        raise ValueError(
+            "Personal audit authority must be assigned through the governed QMS People workflow"
+        )
+    selected_access_profile = None
+    if data.access_profile_id:
+        selected_access_profile = db.query(models.AuthRoleDefinition).filter(
+            models.AuthRoleDefinition.id == data.access_profile_id,
+            models.AuthRoleDefinition.amo_id == data.amo_id,
+            models.AuthRoleDefinition.is_active.is_(True),
+        ).first()
+        if selected_access_profile is None:
+            raise ValueError("Access profile not found in the selected AMO")
+        if selected_access_profile.base_role_key in {None, "SUPERUSER", "AMO_ADMIN"}:
+            raise ValueError("Platform and tenant administration are assigned separately")
+        if selected_access_profile.is_regulated:
+            raise ValueError(
+                "Create the person with a supporting access profile, then appoint them to the prescribed management position in Workforce"
+            )
+        resolved_role = role_registry.resolve_account_role(selected_access_profile.base_role_key)
+    elif resolved_role != models.AccountRole.SUPERUSER:
+        raise ValueError(
+            "Select an active tenant access profile. Raw account-role creation is retired"
+        )
+    if resolved_role == models.AccountRole.SUPERUSER:
+        if data.access_profile_id:
+            raise ValueError("Platform superusers cannot receive tenant access profiles")
+        if not (
+            str(amo.amo_code or "").strip().upper() == "ROOT"
+            or str(amo.login_slug or "").strip().lower() in {"root", "system"}
+        ):
+            raise ValueError("Platform superuser identities must belong to the ROOT tenant")
     role_definition = role_registry.role_definition(resolved_role)
     position_title = (data.position_title or "").strip() or (
         role_definition.label if role_definition.regulated else None
@@ -525,21 +559,25 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         # SUPERUSER with false flags, committing, and repairing it afterward
         # leaves a real (if brief) inconsistent account state.
         is_superuser=resolved_role == models.AccountRole.SUPERUSER,
-        is_amo_admin=resolved_role
-        in {models.AccountRole.SUPERUSER, models.AccountRole.AMO_ADMIN},
-        is_auditor=bool(
-            data.is_auditor
-            if data.is_auditor is not None
-            else resolved_role in {
-                models.AccountRole.AUDITOR,
-                models.AccountRole.QUALITY_OFFICER,
-            }
-        ),
+        is_amo_admin=False,
+        # Audit authority is a governed, scoped QMS People privilege; a portal
+        # access profile never grants it.
+        is_auditor=False,
         must_change_password=True,
         # is_system_account defaults to False in the model â€“ human by default.
     )
     db.add(user)
     db.flush()
+    from . import access_control
+    if selected_access_profile is not None:
+        access_control.assign_primary_access_profile(
+            db,
+            user=user,
+            profile_id=str(selected_access_profile.id),
+            actor_user_id=None,
+        )
+    else:
+        access_control.assign_default_profile_for_role(db, user=user)
     sync_regulated_postholder_assignment(db, user)
     db.commit()
     db.refresh(user)
@@ -547,7 +585,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
 
 
 def governed_workforce_role_for_user(db: Session, user: models.User) -> models.AccountRole | None:
-    """Return the effective regulated Workforce position role, when present.
+    """Return the base persona for the user's governed primary position.
 
     The accounts package deliberately reads only the canonical role key. It
     does not duplicate or mutate Workforce placement records.
@@ -562,16 +600,19 @@ def governed_workforce_role_for_user(db: Session, user: models.User) -> models.A
         value = db.execute(
             text(
                 """
-                SELECT wp.role_key
+                SELECT COALESCE(ard.base_role_key, wp.role_key)
                 FROM workforce_person_placements wpp
                 JOIN workforce_positions wp ON wp.id = wpp.position_id
+                LEFT JOIN auth_role_definitions ard
+                  ON ard.id = wp.access_profile_id
+                 AND ard.amo_id = wpp.amo_id
+                 AND ard.is_active = true
                 WHERE wpp.amo_id = :amo_id
                   AND wpp.user_id = :user_id
                   AND wpp.placement_type = 'PRIMARY'
                   AND wpp.effective_from <= CURRENT_DATE
                   AND (wpp.effective_to IS NULL OR wpp.effective_to >= CURRENT_DATE)
-                  AND wp.role_source = 'KCAR_2025'
-                  AND wp.role_key IS NOT NULL
+                  AND (ard.base_role_key IS NOT NULL OR wp.role_key IS NOT NULL)
                 ORDER BY wpp.effective_from DESC, wpp.id DESC
                 LIMIT 1
                 """
@@ -581,9 +622,42 @@ def governed_workforce_role_for_user(db: Session, user: models.User) -> models.A
     except (OperationalError, ProgrammingError):
         return None
     key = role_registry.canonical_role_key(value)
-    if key not in role_registry.REGULATED_MANAGEMENT_ROLE_KEYS:
+    if key not in role_registry.ROLE_DEFINITIONS or key in role_registry.ACCOUNT_ADMIN_ROLE_KEYS:
         return None
     return models.AccountRole(key)
+
+
+def governed_workforce_title_for_user(db: Session, user: models.User) -> str | None:
+    """Return the effective primary Workforce position title, when governed."""
+    inspector = inspect(db.connection())
+    if not (
+        inspector.has_table("workforce_person_placements")
+        and inspector.has_table("workforce_positions")
+    ):
+        return None
+    try:
+        value = db.execute(
+            text(
+                """
+                SELECT wp.canonical_title
+                FROM workforce_person_placements wpp
+                JOIN workforce_positions wp ON wp.id = wpp.position_id
+                WHERE wpp.amo_id = :amo_id
+                  AND wpp.user_id = :user_id
+                  AND wpp.placement_type = 'PRIMARY'
+                  AND wpp.effective_from <= CURRENT_DATE
+                  AND (wpp.effective_to IS NULL OR wpp.effective_to >= CURRENT_DATE)
+                  AND wp.amo_id = wpp.amo_id
+                  AND wp.is_active = true
+                ORDER BY wpp.effective_from DESC, wpp.id DESC
+                LIMIT 1
+                """
+            ),
+            {"amo_id": str(user.amo_id), "user_id": str(user.id)},
+        ).scalar()
+    except (OperationalError, ProgrammingError):
+        return None
+    return str(value).strip() if value else None
 
 
 def require_role_matches_workforce(
@@ -681,6 +755,8 @@ def update_user(
     db: Session,
     user: models.User,
     data: schemas.UserUpdate,
+    *,
+    actor_user_id: str | None = None,
 ) -> models.User:
     # Names
     name_changed = False
@@ -695,24 +771,35 @@ def update_user(
     elif name_changed:
         user.full_name = f"{user.first_name} {user.last_name}".strip()
 
-    # Role / org placement. An explicitly selected role wins. When only the
-    # title changes, exact KCAR/legacy aliases promote the account to the
-    # matching canonical 2025 role rather than creating a parallel role.
+    # Role and position title are separate. Free text must never elevate an
+    # account. An explicit tenant access profile is the preferred authority
+    # assignment and maps to the stable compatibility persona.
     explicit_role = "role" in data.model_fields_set and data.role is not None
     explicit_title = "position_title" in data.model_fields_set
     resolved_role = data.role if explicit_role else user.role
     requested_title = data.position_title if explicit_title else user.position_title
-    # A title edit must never silently demote a platform or tenant
-    # administrator. Privileged role changes require the explicit role field
-    # so the route can enforce continuity and self-lockout controls.
-    if (
-        not explicit_role
-        and explicit_title
-        and user.role not in {models.AccountRole.SUPERUSER, models.AccountRole.AMO_ADMIN}
-    ):
-        inferred_role = role_registry.infer_regulated_role(requested_title)
-        if inferred_role is not None:
-            resolved_role = inferred_role
+    selected_access_profile = None
+    access_profile_explicit = "access_profile_id" in data.model_fields_set
+    if access_profile_explicit and not data.access_profile_id and not user.is_superuser:
+        raise ValueError(
+            "A tenant user must retain an active access profile; assign a replacement profile instead"
+        )
+    if access_profile_explicit and data.access_profile_id:
+        selected_access_profile = db.query(models.AuthRoleDefinition).filter(
+            models.AuthRoleDefinition.id == data.access_profile_id,
+            models.AuthRoleDefinition.amo_id == user.amo_id,
+            models.AuthRoleDefinition.is_active.is_(True),
+        ).first()
+        if selected_access_profile is None:
+            raise ValueError("Access profile not found in this tenant")
+        if selected_access_profile.base_role_key in {None, "SUPERUSER", "AMO_ADMIN"}:
+            raise ValueError("Platform and tenant administration are assigned separately")
+        resolved_role = role_registry.resolve_account_role(selected_access_profile.base_role_key)
+        explicit_role = True
+    elif explicit_role and not user.is_superuser and resolved_role != user.role:
+        raise ValueError(
+            "Assign an active tenant access profile to change the portal persona; raw account-role changes are retired"
+        )
     if user.is_superuser and resolved_role != models.AccountRole.SUPERUSER:
         raise ValueError("A platform superuser cannot be converted into a tenant role")
     if not user.is_superuser and resolved_role == models.AccountRole.SUPERUSER:
@@ -722,12 +809,15 @@ def update_user(
         user=user,
         requested_role=resolved_role,
     )
-    workforce_governed = governed_workforce_role_for_user(db, user) is not None
+    governed_title = governed_workforce_title_for_user(db, user)
+    workforce_governed = governed_title is not None
     definition = role_registry.role_definition(resolved_role)
     if explicit_role or resolved_role != user.role:
         user.role = resolved_role
     if workforce_governed:
-        user.position_title = definition.label
+        if explicit_title and (requested_title or "").strip() not in {"", governed_title}:
+            raise ValueError("This title is governed by the active Workforce position; change the position in Workforce")
+        user.position_title = governed_title
     elif explicit_title:
         user.position_title = (requested_title or "").strip() or (
             definition.label if definition.regulated else None
@@ -771,19 +861,43 @@ def update_user(
             user.deactivated_at = datetime.now(timezone.utc)
         user.is_active = data.is_active
 
-    expected_amo_admin = bool(getattr(user, "is_superuser", False)) or user.role == models.AccountRole.AMO_ADMIN
-    if data.is_amo_admin is not None and bool(data.is_amo_admin) != expected_amo_admin:
-        raise ValueError("AMO administrator access is derived from the canonical AMO_ADMIN role")
-    if explicit_role or data.is_amo_admin is not None:
-        user.is_amo_admin = expected_amo_admin
+    if user.is_superuser:
+        # Platform support authority and tenant administration are distinct
+        # security boundaries even when the superuser is operating in a tenant
+        # context.
+        user.is_amo_admin = False
+    elif (
+        data.is_amo_admin is not None
+        and bool(data.is_amo_admin) != bool(user.is_amo_admin)
+    ):
+        raise ValueError(
+            "Tenant-administrator access must use the governed administrator-grant workflow"
+        )
+    elif user.role == models.AccountRole.AMO_ADMIN:
+        # Compatibility for tenants not yet migrated to the overlay model.
+        user.is_amo_admin = True
 
-    if data.is_auditor is not None:
-        user.is_auditor = data.is_auditor
+    if (
+        data.is_auditor is not None
+        and bool(data.is_auditor) != bool(user.is_auditor)
+    ):
+        raise ValueError(
+            "Personal audit authority must be assigned through the governed QMS People workflow"
+        )
+
+    if selected_access_profile is not None:
+        from . import access_control
+        access_control.assign_primary_access_profile(
+            db,
+            user=user,
+            profile_id=str(selected_access_profile.id),
+            actor_user_id=actor_user_id,
+        )
     elif explicit_role:
-        user.is_auditor = user.role in {
-            models.AccountRole.AUDITOR,
-            models.AccountRole.QUALITY_OFFICER,
-        }
+        from . import access_control
+        access_control.assign_default_profile_for_role(
+            db, user=user, actor_user_id=actor_user_id
+        )
 
     clear_management_supervisor_links(db, user)
     sync_regulated_postholder_assignment(db, user)

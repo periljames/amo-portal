@@ -24,6 +24,7 @@ import type {
   HrPeopleSelection,
   HrPersonnelMutationPayload,
   HrPosition,
+  HrPositionAccessProfile,
   HrPositionWrite,
   HrSupervisorOptionsPage,
   HrWorkPatternBatchOptions,
@@ -221,6 +222,9 @@ export function saveWorkforceHrGrade(payload: HrGradeWrite, id?: string): Promis
 }
 export function listWorkforceHrPositions(includeInactive = false): Promise<HrPosition[]> {
   return apiJson(`/workforce/hr/positions${queryString({ include_inactive: includeInactive })}`);
+}
+export function listWorkforceHrPositionAccessProfiles(): Promise<HrPositionAccessProfile[]> {
+  return apiJson("/workforce/hr/positions/access-profiles", { offline: { cacheTtlMs: 60_000 } });
 }
 export function getWorkforceHrHierarchyBlueprint(): Promise<HrHierarchyBlueprint> {
   return apiJson("/workforce/hr/positions/hierarchy-blueprint", { offline: { cacheTtlMs: 60_000 } });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from collections import defaultdict
+from configparser import InterpolationError
 from logging.config import fileConfig
 
 from alembic import context
@@ -55,6 +56,7 @@ from amodb.apps.finance import models as finance_models  # noqa: F401, E402
 import amodb.apps.realtime.models as realtime_models  # noqa: F401, E402
 from amodb.apps.doc_control import domain_models as document_control_domain_models  # noqa: F401, E402
 from amodb.apps.doc_control import knowledge_models as document_control_knowledge_models  # noqa: F401, E402
+from amodb.apps.ai import models as ai_models  # noqa: F401, E402
 
 
 
@@ -165,9 +167,15 @@ def _resolve_offline_url() -> str:
     Offline mode needs a URL to render SQL.
     Prefer sqlalchemy.url unless it is the placeholder, then fall back to env vars.
     """
-    url = (config.get_main_option("sqlalchemy.url") or "").strip()
+    try:
+        url = (config.get_main_option("sqlalchemy.url") or "").strip()
+    except InterpolationError:
+        # The released alembic.ini uses %(DATABASE_WRITE_URL)s as a readable
+        # placeholder. ConfigParser does not interpolate operating-system
+        # variables, so offline SQL generation must fall back to the process env.
+        url = ""
 
-    if _is_placeholder_url(url):
+    if _is_placeholder_url(url) or url.startswith("%(DATABASE_"):
         url = (os.getenv("DATABASE_WRITE_URL") or os.getenv("DATABASE_URL") or "").strip()
 
     if not url:

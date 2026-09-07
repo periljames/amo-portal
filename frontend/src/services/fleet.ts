@@ -82,6 +82,7 @@ export interface AircraftRead {
   template?: string | null;
   make?: string | null;
   model?: string | null;
+  aircraft_model_code?: string | null;
   home_base?: string | null;
   owner?: string | null;
   status?: string | null;

@@ -121,7 +121,6 @@ def transition_report(
         bool((profile.approval_workflow or {}).get("separation_of_duties", True))
         and target in {FormalReportStatus.APPROVED.value, FormalReportStatus.PUBLISHED.value}
         and report.created_by_user_id == user.id
-        and not bool(getattr(user, "is_superuser", False))
     ):
         raise HTTPException(
             status_code=409,

@@ -130,6 +130,56 @@
   color: #991b1b;
 }
 
+.qms-audit-prepare-stage__notice.is-info {
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 28%, var(--qms-line));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 7%, var(--qms-panel));
+  color: color-mix(in srgb, var(--accent-primary, #2563eb) 78%, var(--qms-text));
+}
+
+.qms-audit-prepare-stage__release {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, #dc2626 30%, var(--qms-line));
+  border-radius: var(--qms-radius);
+  background: color-mix(in srgb, #dc2626 5%, var(--qms-panel));
+}
+
+.qms-audit-prepare-stage__release.is-ready {
+  border-color: color-mix(in srgb, #15803d 35%, var(--qms-line));
+  background: color-mix(in srgb, #15803d 6%, var(--qms-panel));
+}
+
+.qms-audit-prepare-stage__release > div,
+.qms-audit-prepare-stage__release > div > span {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.qms-audit-prepare-stage__release > div > span {
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.qms-audit-prepare-stage__release small { color: var(--qms-muted); }
+.qms-audit-prepare-stage__release button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--accent-primary, #2563eb);
+  border-radius: var(--qms-radius);
+  background: var(--accent-primary, #2563eb);
+  color: #fff;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.qms-audit-prepare-stage__release button:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .qms-audit-prepare-stage__stack {
   display: grid;
   gap: 0;
@@ -257,6 +307,28 @@
   display: grid;
   gap: 0.3rem;
   min-width: 0;
+}
+
+.qms-audit-prepare__current-revision {
+  display: grid;
+  align-content: center;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+}
+
+.qms-audit-prepare__current-revision strong {
+  font-size: 0.72rem;
+}
+
+.qms-audit-prepare__current-revision span,
+.qms-audit-prepare__current-revision small {
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
 }
 
 .qms-audit-prepare__checklist-form label > span,
@@ -491,6 +563,8 @@
 }
 
 @media (max-width: 600px) {
+  .qms-audit-prepare-stage__release { align-items: stretch; flex-direction: column; }
+  .qms-audit-prepare-stage__release button { width: 100%; white-space: normal; }
   .qms-audit-prepare__request-form,
   .qms-audit-prepare__checklist-form,
   .qms-audit-prepare__dms-source,

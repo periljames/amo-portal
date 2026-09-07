@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import role_registry
 from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -83,7 +84,7 @@ def _validate_assignee_tenant(
     *,
     tenant: manual_models.Tenant,
     payload: ResponsibilityCreate,
-) -> None:
+) -> account_models.AuthRoleDefinition | None:
     if payload.assignee_user_id:
         exists = db.query(account_models.User.id).filter(
             account_models.User.id == payload.assignee_user_id,
@@ -111,6 +112,17 @@ def _validate_assignee_tenant(
         ).first()
         if not exists:
             raise HTTPException(status_code=422, detail="The selected organization unit is not active in this tenant")
+    if payload.assignee_role:
+        profile_code = role_registry.normalize_role_token(payload.assignee_role)
+        profile = db.query(account_models.AuthRoleDefinition).filter(
+            account_models.AuthRoleDefinition.amo_id == tenant.amo_id,
+            account_models.AuthRoleDefinition.tenant_code == profile_code,
+            account_models.AuthRoleDefinition.is_active.is_(True),
+        ).first()
+        if profile is None:
+            raise HTTPException(status_code=422, detail="The selected access profile is not active in this tenant")
+        return profile
+    return None
 
 
 def _location(
@@ -258,7 +270,7 @@ def create_responsibility(
         assignee_org_unit_id=payload.assignee_org_unit_id,
         assignee_role=payload.assignee_role,
     )
-    _validate_assignee_tenant(db, tenant=tenant, payload=payload)
+    assignee_profile = _validate_assignee_tenant(db, tenant=tenant, payload=payload)
     revision_id = None
     if payload.revision_id:
         revision_id = get_revision(db, manual, payload.revision_id).id
@@ -282,7 +294,7 @@ def create_responsibility(
         assignee_user_id=payload.assignee_user_id,
         assignee_department_id=payload.assignee_department_id,
         assignee_org_unit_id=payload.assignee_org_unit_id,
-        assignee_role=payload.assignee_role.strip().upper() if payload.assignee_role else None,
+        assignee_role=assignee_profile.tenant_code if assignee_profile else None,
         is_primary=payload.is_primary,
         delegated_from_id=payload.delegated_from_id,
         effective_from=payload.effective_from,
@@ -290,7 +302,14 @@ def create_responsibility(
         assignment_source=payload.assignment_source,
         confidence_percent=payload.confidence_percent,
         confirmation_status=payload.confirmation_status,
-        provenance_json=dict(payload.provenance),
+        provenance_json={
+            **dict(payload.provenance),
+            **({
+                "access_profile_id": assignee_profile.id,
+                "access_profile_code": assignee_profile.tenant_code,
+                "access_profile_name": assignee_profile.display_name,
+            } if assignee_profile else {}),
+        },
         created_by_user_id=current_user.id,
         confirmed_by_user_id=current_user.id if payload.confirmation_status == "CONFIRMED" else None,
         confirmed_at=utcnow() if payload.confirmation_status == "CONFIRMED" else None,

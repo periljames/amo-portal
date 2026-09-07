@@ -5,6 +5,7 @@ export type PdfReaderPerformanceProfile = {
   hotPageLimit: number;
   prefetchMarginPx: number;
   maxDevicePixelRatio: number;
+  maxCanvasPixels: number;
 };
 
 type NetworkInformationLike = {
@@ -42,10 +43,10 @@ function browserHints(): {
 
 /**
  * Use browser network and memory hints to choose a bounded rendering policy.
- * Normal office clients receive 20 MiB PDF ranges. A demonstrably stable,
- * high-throughput connection on a capable device receives 50 MiB bursts.
- * Constrained clients retain a progressive path without governing everyone
- * else by the slowest possible network profile.
+ * Keep first-page latency bounded: normal office clients receive 4 MiB PDF
+ * ranges and even high-throughput clients stop at 8 MiB. Rendering policy is
+ * additionally bounded by a per-canvas pixel budget, so a high-DPI display
+ * cannot silently multiply memory use while zooming or scrolling.
  *
  * The page observer is also the authority for the toolbar page number and the
  * active Contents row. Its root margin must therefore remain zero. Nearby-page
@@ -71,47 +72,59 @@ export function getPdfReaderPerformanceProfile(): PdfReaderPerformanceProfile {
     return {
       mode: "constrained",
       rangeChunkSize: 512 * KIB,
-      renderRadius: 2,
-      hotPageLimit: 5,
+      renderRadius: 1,
+      hotPageLimit: 3,
       prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.1,
+      maxCanvasPixels: 4_000_000,
     };
   }
 
   if (modestNetwork || deviceMemory < 4) {
     return {
       mode: "balanced",
-      rangeChunkSize: 4 * MIB,
-      renderRadius: 4,
-      hotPageLimit: 10,
+      rangeChunkSize: 2 * MIB,
+      renderRadius: 1,
+      hotPageLimit: 4,
       prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.25,
+      maxCanvasPixels: 6_000_000,
     };
   }
 
   if (superStableNetwork) {
     return {
       mode: "burst",
-      rangeChunkSize: 50 * MIB,
-      renderRadius: 8,
-      hotPageLimit: 24,
+      rangeChunkSize: 8 * MIB,
+      renderRadius: 2,
+      hotPageLimit: 7,
       prefetchMarginPx: 0,
       maxDevicePixelRatio: 1.6,
+      maxCanvasPixels: 12_000_000,
     };
   }
 
   return {
     mode: "balanced",
-    rangeChunkSize: 20 * MIB,
-    renderRadius: 6,
-    hotPageLimit: 18,
+    rangeChunkSize: 4 * MIB,
+    renderRadius: 2,
+    hotPageLimit: 5,
     prefetchMarginPx: 0,
     maxDevicePixelRatio: 1.45,
+    maxCanvasPixels: 8_000_000,
   };
 }
 
-export function pdfDevicePixelRatio(maximum?: number): number {
+export function pdfDevicePixelRatio(
+  maximum?: number,
+  widthCssPixels?: number,
+  heightCssPixels?: number,
+  maximumCanvasPixels?: number,
+): number {
   if (typeof window === "undefined") return 1;
   const ceiling = maximum || getPdfReaderPerformanceProfile().maxDevicePixelRatio;
-  return Math.min(window.devicePixelRatio || 1, ceiling);
+  const desired = Math.min(window.devicePixelRatio || 1, ceiling);
+  const area = Math.max(0, Number(widthCssPixels || 0) * Number(heightCssPixels || 0));
+  if (!area || !maximumCanvasPixels) return desired;
+  return Math.max(0.75, Math.min(desired, Math.sqrt(maximumCanvasPixels / area)));
 }

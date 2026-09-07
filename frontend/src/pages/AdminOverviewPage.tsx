@@ -6,6 +6,7 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Badge, Button, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
 import { usePortalRuntimeMode } from "../hooks/usePortalRuntimeMode";
 import { getCachedUser, getContext } from "../services/auth";
+import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
   fetchOverviewSummary,
   type OverviewIssue,
@@ -55,7 +56,7 @@ const AdminOverviewPage: React.FC = () => {
 
   const isSuperuser = !!currentUser?.is_superuser;
   const isAmoAdmin = !!currentUser?.is_amo_admin;
-  const canAccessAdmin = isSuperuser || isAmoAdmin;
+  const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [summary, setSummary] = useState<OverviewSummary | null>(null);
   const [loading, setLoading] = useState(true);

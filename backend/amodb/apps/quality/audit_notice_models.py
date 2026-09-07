@@ -38,6 +38,23 @@ class QualityAuditNoticePolicy(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+class QualityAuditNoticeTemplateSetting(Base):
+    """Tenant-owned pointer to a DMS form; the current published revision is always resolved at use time."""
+
+    __tablename__ = "quality_audit_notice_template_settings"
+    __table_args__ = (
+        UniqueConstraint("amo_id", name="uq_quality_audit_notice_template_amo"),
+        Index("ix_quality_audit_notice_template_document", "amo_id", "document_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(String(36), ForeignKey("manuals.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
 class QualityAuditNotice(Base):
     __tablename__ = "quality_audit_notices"
     __table_args__ = (
@@ -60,6 +77,11 @@ class QualityAuditNotice(Base):
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
     audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
     policy_id = Column(String(36), ForeignKey("quality_audit_notice_policies.id", ondelete="SET NULL"), nullable=True)
+    template_document_id = Column(String(36), ForeignKey("manuals.id", ondelete="SET NULL"), nullable=True)
+    template_revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="SET NULL"), nullable=True)
+    form_number = Column(String(64), nullable=False, default="QAM/45", server_default="QAM/45")
+    form_issue_date = Column(String(64), nullable=True)
+    form_revision = Column(String(32), nullable=True)
     revision_no = Column(Integer, nullable=False)
     status = Column(String(24), nullable=False, default="DRAFT", server_default="DRAFT")
     required_notice_days = Column(Integer, nullable=False, default=14, server_default="14")

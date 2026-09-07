@@ -129,7 +129,16 @@ export type AccountRole =
   | "STOREKEEPER"
   | "PROCUREMENT_OFFICER"
   | "QUALITY_INSPECTOR"
-  | "QUALITY_OFFICER";
+  | "QUALITY_OFFICER"
+  | "DOCUMENT_CONTROL_OFFICER"
+  | "QUALITY_SUPPORT_OFFICER"
+  | "SAFETY_OFFICER"
+  | "MAINTENANCE_SUPERVISOR"
+  | "TECHNICAL_RECORDS_SUPERVISOR"
+  | "TECHNICAL_RECORDS_OFFICER"
+  | "MAINTENANCE_SUPPORT"
+  | "HUMAN_RESOURCES_MANAGER"
+  | "HUMAN_RESOURCES_OFFICER";
 
 export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
 
@@ -163,6 +172,10 @@ export interface PortalUser {
   is_superuser: boolean;
   is_amo_admin: boolean;
   must_change_password: boolean;
+  access_profile_id?: string | null;
+  access_profile_name?: string | null;
+  capability_codes?: string[];
+  module_access?: Record<string, "view" | "manage">;
 
   last_login_at: string | null;
   last_login_ip: string | null;

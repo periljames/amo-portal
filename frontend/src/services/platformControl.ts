@@ -59,6 +59,22 @@ export type SaaSJob = {
   created_at?: string;
   finished_at?: string | null;
 };
+export type SaaSProviderFieldOption = { value: string; label: string };
+export type SaaSProviderSetupField = {
+  name: string;
+  label: string;
+  source: "config" | "secret";
+  control: "text" | "password" | "url" | "number" | "select" | "toggle";
+  required: boolean;
+  advanced: boolean;
+  default?: string | number | boolean | null;
+  options: SaaSProviderFieldOption[];
+};
+export type SaaSProviderSetup = {
+  mode: "guided";
+  summary: string;
+  fields: SaaSProviderSetupField[];
+};
 export type SaaSProvider = {
   id?: string | null;
   provider: string;
@@ -76,6 +92,7 @@ export type SaaSProvider = {
   last_latency_ms?: number | null;
   last_health_detail?: string | null;
   description?: string;
+  setup?: SaaSProviderSetup | null;
 };
 export type SaaSModulePrice = {
   id: string;

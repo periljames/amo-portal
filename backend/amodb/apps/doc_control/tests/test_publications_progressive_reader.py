@@ -97,6 +97,31 @@ def test_approved_intake_preserves_existing_pdf_file(tmp_path: Path) -> None:
     assert resolved.read_bytes() == original
 
 
+def test_approved_intake_distinguishes_internal_control_from_regulatory_authority() -> None:
+    internal = approved.ApprovedPublicationIntake.model_validate({
+        "approval_kind": "INTERNAL",
+        "authority_name": "Quality Manager",
+        "approval_reference": "QM-APP-2026-004",
+        "approval_date": "2026-01-01",
+        "comments": "Approved controlled checklist intake.",
+    })
+    legacy = approved.ApprovedPublicationIntake.model_validate({
+        "authority_name": "Kenya Civil Aviation Authority",
+        "approval_reference": "KCAA-APP-2026-004",
+        "approval_date": "2026-01-01",
+        "comments": "Approved authority publication intake.",
+    })
+
+    assert internal.approval_kind == "INTERNAL"
+    assert legacy.approval_kind == "AUTHORITY"
+
+    source = Path(approved.__file__).read_text(encoding="utf-8")
+    assert "if is_authority_approval:" in source
+    assert "profile.regulated_flag = True" in source
+    assert "profile.requires_authority_approval = True" in source
+    assert "profile.requires_authority_approval = is_authority_approval" not in source
+
+
 def test_progressive_reader_routes_precede_legacy_routes() -> None:
     from amodb.main import app
 
@@ -124,8 +149,10 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "getPdfReaderPerformanceProfile" in service
     assert "rangeChunkSize: performance.rangeChunkSize" in service
     assert "512 * KIB" in performance
-    assert "20 * MIB" in performance
-    assert "50 * MIB" in performance
+    assert "2 * MIB" in performance
+    assert "4 * MIB" in performance
+    assert "8 * MIB" in performance
+    assert "maxCanvasPixels" in performance
     assert "disableRange: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page

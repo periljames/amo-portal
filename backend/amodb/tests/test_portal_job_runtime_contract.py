@@ -23,11 +23,13 @@ def test_api_lifecycle_starts_and_stops_embedded_durable_workers() -> None:
         '"training-reports"',
         '"document-indexing"',
         '"training-plans"',
+        '"quality-recycle-bin"',
     ):
         assert family in runtime
     # Worker imports are lazy so one optional family cannot abort API startup.
     assert "def _run_training_plans_once()" in runtime
     assert "from amodb.jobs import training_plan_automation" in runtime
+    assert "from amodb.jobs import quality_recycle_bin_automation" in runtime
 
 
 def test_monthly_training_plan_worker_is_present_and_tenant_safe() -> None:

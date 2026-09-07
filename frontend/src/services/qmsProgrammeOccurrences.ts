@@ -14,7 +14,12 @@ export type ProgrammeOccurrenceItem = {
 export type ProgrammeDetail = ProgrammeSummary & { items: ProgrammeOccurrenceItem[] };
 export type ProgrammeOccurrenceLink = { id: string; schedule_id: string; occurrence_type: "CUSTOM" | "RISK_TRIGGERED"; occurrence_key: string; source_signal_id?: string | null; rationale: string; lifecycle_status?: string | null; created_at: string };
 export type OpenSignal = { id: string; rule_code?: string; metric: string; severity: string; explanation: string; triggered: boolean; state?: string };
-export type PlannerPerson = { id: string; full_name: string; role?: string | null };
+export type PlannerPerson = {
+  id: string;
+  full_name: string;
+  role?: string | null;
+  auditor_roles?: Array<"LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR">;
+};
 
 function json(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -37,7 +42,7 @@ export function listOccurrenceSignals(amoCode: string, signal?: AbortSignal) {
 }
 
 export function getOccurrencePlannerOptions(amoCode: string, signal?: AbortSignal) {
-  return apiRequest<{ timezone_name: string; people: PlannerPerson[] }>(qmsPath(amoCode, "/planner/options"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+  return apiRequest<{ timezone_name: string; people: PlannerPerson[] }>(qmsPath(amoCode, "/integrations/calendar/schedule-options"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
 }
 
 export function createProgrammeOccurrence(

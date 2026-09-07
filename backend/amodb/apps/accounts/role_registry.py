@@ -41,6 +41,15 @@ class AccountRole(str, enum.Enum):
     QUALITY_INSPECTOR = "QUALITY_INSPECTOR"
     QUALITY_OFFICER = "QUALITY_OFFICER"
     AUDITOR = "AUDITOR"
+    DOCUMENT_CONTROL_OFFICER = "DOCUMENT_CONTROL_OFFICER"
+    QUALITY_SUPPORT_OFFICER = "QUALITY_SUPPORT_OFFICER"
+    SAFETY_OFFICER = "SAFETY_OFFICER"
+    MAINTENANCE_SUPERVISOR = "MAINTENANCE_SUPERVISOR"
+    TECHNICAL_RECORDS_SUPERVISOR = "TECHNICAL_RECORDS_SUPERVISOR"
+    TECHNICAL_RECORDS_OFFICER = "TECHNICAL_RECORDS_OFFICER"
+    MAINTENANCE_SUPPORT = "MAINTENANCE_SUPPORT"
+    HUMAN_RESOURCES_MANAGER = "HUMAN_RESOURCES_MANAGER"
+    HUMAN_RESOURCES_OFFICER = "HUMAN_RESOURCES_OFFICER"
 
     @classmethod
     def _missing_(cls, value: object):
@@ -116,7 +125,6 @@ _DEFINITIONS = (
         ),
         regulated=True,
         workforce_role_key="BASE_MAINTENANCE_MANAGER",
-        can_have_supervisor=False,
         permission_summary=("Base maintenance control", "Department roster approval", "Leave review"),
     ),
     AccountRoleDefinition(
@@ -131,7 +139,6 @@ _DEFINITIONS = (
         ),
         regulated=True,
         workforce_role_key="LINE_MAINTENANCE_MANAGER",
-        can_have_supervisor=False,
         permission_summary=("Line maintenance control", "Department roster approval", "Leave review"),
     ),
     AccountRoleDefinition(
@@ -145,7 +152,6 @@ _DEFINITIONS = (
         ),
         regulated=True,
         workforce_role_key="WORKSHOP_MANAGER",
-        can_have_supervisor=False,
         permission_summary=("Workshop control", "Department roster approval", "Leave review"),
     ),
     AccountRoleDefinition(
@@ -159,7 +165,6 @@ _DEFINITIONS = (
         ),
         regulated=True,
         workforce_role_key="QUALITY_MANAGER",
-        can_have_supervisor=False,
         permission_summary=("Quality management", "Compliance monitoring", "Controlled-document quality review"),
     ),
     AccountRoleDefinition(
@@ -170,7 +175,6 @@ _DEFINITIONS = (
         aliases=("safety manager", "head of safety", "safety head", "sm", "hos"),
         regulated=True,
         workforce_role_key="SAFETY_MANAGER",
-        can_have_supervisor=False,
         permission_summary=("Safety management", "Safety reporting", "Safety assurance"),
     ),
     AccountRoleDefinition("PLANNING_ENGINEER", "Planning Engineer", "OPERATIONAL", "Maintenance planning access."),
@@ -190,16 +194,50 @@ _DEFINITIONS = (
     ),
     AccountRoleDefinition("AUDITOR", "Auditor", "OPERATIONAL", "Audit execution access without management approval authority."),
     AccountRoleDefinition(
-        "STORES_MANAGER", "Stores Manager", "SUPPORT", "Stores management access.",
-        can_have_supervisor=False,
+        "DOCUMENT_CONTROL_OFFICER", "Document Control Officer", "OPERATIONAL",
+        "Controls the document register, distribution and retained records; no Quality Manager approval authority.",
+        aliases=("document controller", "librarian", "document control officer (librarian)"),
     ),
+    AccountRoleDefinition(
+        "QUALITY_SUPPORT_OFFICER", "Quality Support Officer", "OPERATIONAL",
+        "Administrative quality support without audit, finding-approval or closure authority.",
+    ),
+    AccountRoleDefinition(
+        "SAFETY_OFFICER", "Safety Officer", "OPERATIONAL",
+        "Supports the Safety Manager and safety reporting without inheriting the nominated manager appointment.",
+    ),
+    AccountRoleDefinition(
+        "MAINTENANCE_SUPERVISOR", "Maintenance Supervisor", "OPERATIONAL",
+        "Supervises an assigned maintenance team or area within its department and base scope.",
+    ),
+    AccountRoleDefinition(
+        "TECHNICAL_RECORDS_SUPERVISOR", "Technical Records & Planning Supervisor", "OPERATIONAL",
+        "Supervises technical-records custody and planning coordination without certifying privileges.",
+    ),
+    AccountRoleDefinition(
+        "TECHNICAL_RECORDS_OFFICER", "Technical Records Officer", "OPERATIONAL",
+        "Maintains technical records and controlled maintenance-record packs.",
+        aliases=("tro", "technical records clerk"),
+    ),
+    AccountRoleDefinition(
+        "MAINTENANCE_SUPPORT", "Maintenance Support", "OPERATIONAL",
+        "Limited operational access for support personnel; certification remains a separate authorization.",
+    ),
+    AccountRoleDefinition(
+        "HUMAN_RESOURCES_MANAGER", "Human Resources Manager", "SUPPORT",
+        "Tenant-defined people, employment and workforce-governance access.",
+        aliases=("hr manager", "human resource manager", "head of human resources"),
+    ),
+    AccountRoleDefinition(
+        "HUMAN_RESOURCES_OFFICER", "Human Resources Officer", "SUPPORT",
+        "Tenant-defined workforce administration without tenant-account administration authority.",
+        aliases=("hr officer", "human resource officer", "people officer"),
+    ),
+    AccountRoleDefinition("STORES_MANAGER", "Stores Manager", "SUPPORT", "Stores management access."),
     AccountRoleDefinition("STORES", "Stores", "SUPPORT", "Stores operational access."),
     AccountRoleDefinition("STOREKEEPER", "Storekeeper", "SUPPORT", "Storekeeping access."),
     AccountRoleDefinition("PROCUREMENT_OFFICER", "Procurement Officer", "SUPPORT", "Procurement operational access."),
-    AccountRoleDefinition(
-        "FINANCE_MANAGER", "Finance Manager", "SUPPORT", "Tenant-defined finance management access.",
-        can_have_supervisor=False,
-    ),
+    AccountRoleDefinition("FINANCE_MANAGER", "Finance Manager", "SUPPORT", "Tenant-defined finance management access."),
     AccountRoleDefinition("ACCOUNTS_OFFICER", "Accounts Officer", "SUPPORT", "Tenant-defined accounts access."),
     AccountRoleDefinition("VIEW_ONLY", "View only", "GENERAL", "Read-only access."),
 )

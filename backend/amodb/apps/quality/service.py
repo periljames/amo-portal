@@ -181,7 +181,10 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, *, amo_id: st
     ).count()
 
     # Audits
-    a_q = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == amo_id)
+    a_q = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == amo_id,
+        models.QMSAudit.deleted_at.is_(None),
+    )
     if domain:
         a_q = a_q.filter(models.QMSAudit.domain == domain)
     audits_total = a_q.count()
@@ -200,7 +203,11 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, *, amo_id: st
             models.QMSAudit.id == models.QMSAuditFinding.audit_id,
             models.QMSAudit.amo_id == models.QMSAuditFinding.amo_id,
         ),
-    ).filter(models.QMSAudit.amo_id == amo_id, models.QMSAuditFinding.amo_id == amo_id)
+    ).filter(
+        models.QMSAudit.amo_id == amo_id,
+        models.QMSAudit.deleted_at.is_(None),
+        models.QMSAuditFinding.amo_id == amo_id,
+    )
     if domain:
         f_q = f_q.filter(models.QMSAudit.domain == domain)
 
@@ -288,6 +295,7 @@ def _build_audit_closure_trend(db: Session, *, amo_id: str, window_days: int = 9
             db.query(models.QMSAudit.id, models.QMSAudit.actual_end)
             .filter(
                 models.QMSAudit.amo_id == amo_id,
+                models.QMSAudit.deleted_at.is_(None),
                 models.QMSAudit.status == QMSAuditStatus.CLOSED,
                 models.QMSAudit.actual_end.is_not(None),
             )
@@ -346,6 +354,7 @@ def _build_most_common_finding_trend_12m(db: Session, *, amo_id: str) -> list[di
             )
             .filter(
                 models.QMSAudit.amo_id == amo_id,
+                models.QMSAudit.deleted_at.is_(None),
                 models.QMSAuditFinding.amo_id == amo_id,
                 models.QMSAuditFinding.created_at >= window_start,
             )
@@ -375,6 +384,7 @@ def _build_most_common_finding_trend_12m(db: Session, *, amo_id: str) -> list[di
             )
             .filter(
                 models.QMSAudit.amo_id == amo_id,
+                models.QMSAudit.deleted_at.is_(None),
                 models.QMSAuditFinding.amo_id == amo_id,
                 models.QMSAuditFinding.created_at >= window_start,
                 models.QMSAuditFinding.finding_type == top_finding[0],
@@ -485,7 +495,10 @@ def _build_manpower_snapshot(db: Session, amo_id: str, department_code: Optional
 
 
 def _select_next_due_audit(db: Session, amo_id: str, domain: Optional[QMSDomain]) -> Optional[dict]:
-    query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == amo_id)
+    query = db.query(models.QMSAudit).filter(
+        models.QMSAudit.amo_id == amo_id,
+        models.QMSAudit.deleted_at.is_(None),
+    )
     if domain:
         query = query.filter(models.QMSAudit.domain == domain)
     query = query.filter(models.QMSAudit.status.in_([QMSAuditStatus.PLANNED, QMSAuditStatus.IN_PROGRESS, QMSAuditStatus.CAP_OPEN]))

@@ -196,6 +196,35 @@ body[data-color-scheme="light"] .pdfv4-reader {
   background: var(--pdfv4-toolbar-hover);
 }
 
+.pdfv4-reader .pdfv3-offline-menu summary[data-state="AVAILABLE"] {
+  border-color: color-mix(in srgb, #22c55e 56%, transparent);
+  background: color-mix(in srgb, #22c55e 18%, transparent);
+  color: #bbf7d0;
+}
+
+body[data-color-scheme="light"] .pdfv4-reader .pdfv3-offline-menu summary[data-state="AVAILABLE"] {
+  color: #166534;
+}
+
+.pdfv4-reader .pdfv3-offline-menu > div {
+  gap: 0.26rem;
+  min-width: min(280px, 86vw);
+  padding: 0.58rem;
+}
+
+.pdfv4-reader .pdfv3-offline-menu strong,
+.pdfv4-reader .pdfv3-offline-menu small {
+  display: block;
+  padding-inline: 0.34rem;
+}
+
+.pdfv4-reader .pdfv3-offline-menu small {
+  margin-bottom: 0.24rem;
+  color: var(--pdfv4-toolbar-muted);
+  font-size: 0.67rem;
+  line-height: 1.35;
+}
+
 .pdfv4-reader .pdfv3-viewport {
   background: var(--pdfv4-stage);
   transition: background-color 160ms ease;

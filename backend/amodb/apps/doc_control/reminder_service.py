@@ -117,21 +117,18 @@ def _profile_owner(db: Session, *, amo_id: str, manual_id: str) -> str | None:
 
 
 def _quality_escalation_user(db: Session, *, amo_id: str) -> str | None:
-    for role in (account_models.AccountRole.QUALITY_MANAGER, account_models.AccountRole.AMO_ADMIN):
-        row = (
-            db.query(account_models.User.id)
-            .filter(
-                account_models.User.amo_id == amo_id,
-                account_models.User.is_active.is_(True),
-                account_models.User.is_system_account.is_(False),
-                account_models.User.role == role,
-            )
-            .order_by(account_models.User.created_at.asc(), account_models.User.id.asc())
-            .first()
+    row = (
+        db.query(account_models.User.id)
+        .filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+            account_models.User.role == account_models.AccountRole.QUALITY_MANAGER,
         )
-        if row:
-            return str(row[0])
-    return None
+        .order_by(account_models.User.created_at.asc(), account_models.User.id.asc())
+        .first()
+    )
+    return str(row[0]) if row else None
 
 
 def _portal_allowed(db: Session, *, amo_id: str, user_id: str) -> bool:

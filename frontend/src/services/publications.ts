@@ -2,6 +2,7 @@ import { authHeaders, getCachedUser } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
+import { readApiCache, writeApiCache } from "./offlinePersistence";
 import { getPdfReaderPerformanceProfile } from "./pdfPerformance";
 
 export type PublicationUploadPreview = {
@@ -32,7 +33,36 @@ export type PublicationUploadPayload = {
   manual_type?: string;
   owner_role?: string;
   change_log?: string;
+  control_metadata?: ControlledDocumentIntakeMetadata;
   file: File;
+};
+
+export type ControlledDocumentType =
+  | "MANUAL"
+  | "REGULATION"
+  | "POLICY"
+  | "PROCEDURE"
+  | "WORK_INSTRUCTION"
+  | "FORM"
+  | "CHECKLIST"
+  | "REGISTER"
+  | "RECORD"
+  | "EXTERNAL_DOCUMENT";
+
+export type ControlledDocumentIntakeMetadata = {
+  document_type: ControlledDocumentType;
+  document_class?: "INTERNAL" | "EXTERNAL" | "RECORD";
+  description?: string | null;
+  owner_department?: string | null;
+  source_issuer?: string | null;
+  parent_document_id?: string | null;
+  next_review_due?: string | null;
+  review_interval_months?: number;
+  retention_years?: number | null;
+  confidentiality?: "PUBLIC" | "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
+  acknowledgement_required?: boolean;
+  regulated_flag?: boolean;
+  tags?: string[];
 };
 
 export type PublicationUploadResult = {
@@ -42,6 +72,14 @@ export type PublicationUploadResult = {
   source_type: "DOCX" | "PDF";
   paragraphs?: number;
   page_count?: number;
+  control_metadata?: {
+    document_type: ControlledDocumentType;
+    document_class: string;
+    hierarchy_node_id: string;
+    hierarchy_parent_id?: string | null;
+    hierarchy_path: string;
+    metadata_confirmed: boolean;
+  } | null;
 };
 
 export type PublicationReaderMetadata = {
@@ -135,6 +173,7 @@ export type PublicationSearchResult = {
 };
 
 export type ApprovedPublicationIntakePayload = {
+  approval_kind?: "INTERNAL" | "AUTHORITY";
   authority_name: string;
   approval_reference: string;
   approval_date: string;
@@ -146,6 +185,7 @@ export type ApprovedPublicationIntakePayload = {
 
 const READER_CACHE_PREFIX = "amo-publication-bootstrap:v2";
 const READER_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const publicationBootstrapMemory = new Map<string, PublicationReaderBootstrap>();
 
 function extensionOf(file: File): "docx" | "pdf" {
   const name = file.name.toLowerCase();
@@ -160,28 +200,27 @@ function readerCacheKey(tenantSlug: string, manualId: string, revisionId: string
 }
 
 export function readCachedPublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string): PublicationReaderBootstrap | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(readerCacheKey(tenantSlug, manualId, revisionId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { cached_at: number; payload: PublicationReaderBootstrap };
-    if (!parsed?.payload || Date.now() - Number(parsed.cached_at || 0) > READER_CACHE_MAX_AGE_MS) {
-      window.localStorage.removeItem(readerCacheKey(tenantSlug, manualId, revisionId));
-      return null;
-    }
-    return parsed.payload;
-  } catch {
-    return null;
-  }
+  return publicationBootstrapMemory.get(readerCacheKey(tenantSlug, manualId, revisionId)) || null;
+}
+
+export async function readPersistedPublicationBootstrap(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+): Promise<PublicationReaderBootstrap | null> {
+  const key = readerCacheKey(tenantSlug, manualId, revisionId);
+  const memory = publicationBootstrapMemory.get(key);
+  if (memory) return memory;
+  const cached = await readApiCache<PublicationReaderBootstrap>(key).catch(() => null);
+  if (!cached?.value) return null;
+  publicationBootstrapMemory.set(key, cached.value);
+  return cached.value;
 }
 
 export function cachePublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string, payload: PublicationReaderBootstrap): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(readerCacheKey(tenantSlug, manualId, revisionId), JSON.stringify({ cached_at: Date.now(), payload }));
-  } catch {
-    // Storage may be unavailable or full. HTTP caching still remains active.
-  }
+  const key = readerCacheKey(tenantSlug, manualId, revisionId);
+  publicationBootstrapMemory.set(key, payload);
+  void writeApiCache(key, payload, READER_CACHE_MAX_AGE_MS);
 }
 
 export async function previewPublicationUpload(tenantSlug: string, file: File): Promise<PublicationUploadPreview> {
@@ -202,6 +241,7 @@ export async function uploadPublicationRevision(tenantSlug: string, payload: Pub
   if (payload.manual_type) body.append("manual_type", payload.manual_type);
   if (payload.owner_role) body.append("owner_role", payload.owner_role);
   if (payload.change_log) body.append("change_log", payload.change_log);
+  if (payload.control_metadata) body.append("control_metadata_json", JSON.stringify(payload.control_metadata));
   body.append("file", payload.file);
   return apiPostForm<PublicationUploadResult>(`/manuals/t/${encodeURIComponent(tenantSlug)}/upload-${extension}`, body, { headers: authHeaders() });
 }
@@ -235,7 +275,9 @@ export async function getPublicationReaderBootstrap(tenantSlug: string, manualId
 
 export function prefetchPublicationReader(tenantSlug: string, manualId: string, revisionId: string): void {
   if (readCachedPublicationBootstrap(tenantSlug, manualId, revisionId)) return;
-  void getPublicationReaderBootstrap(tenantSlug, manualId, revisionId).catch(() => undefined);
+  void readPersistedPublicationBootstrap(tenantSlug, manualId, revisionId)
+    .then((cached) => cached || getPublicationReaderBootstrap(tenantSlug, manualId, revisionId))
+    .catch(() => undefined);
 }
 
 export async function getPublicationReaderContent(tenantSlug: string, manualId: string, revisionId: string, sectionIds: string[]): Promise<PublicationReaderContent> {

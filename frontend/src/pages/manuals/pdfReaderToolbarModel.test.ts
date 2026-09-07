@@ -40,4 +40,11 @@ describe("pdfReaderToolbarModel", () => {
     // this 600 x 840 page must therefore fall back to the 500px page-fit size.
     expect(pdfPageWidth({ ...base, mode: "AUTO" })).toBe(500);
   });
+
+  it("fits portrait and landscape pages against the measured viewport independently", () => {
+    const viewport = { zoom: 100, availableWidth: 960, availableHeight: 680, actualWidth: 612 };
+    expect(pdfPageWidth({ ...viewport, mode: "PAGE", pageRatio: 1.414 })).toBe(481);
+    expect(pdfPageWidth({ ...viewport, mode: "PAGE", pageRatio: 0.707 })).toBe(960);
+    expect(pdfPageWidth({ ...viewport, mode: "WIDTH", pageRatio: 0.707 })).toBe(960);
+  });
 });

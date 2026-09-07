@@ -77,6 +77,60 @@ def _template_variables(context: dict[str, Any]) -> dict[str, str | int]:
 
 
 def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) -> tuple[str, str]:
+    if template_key == "qms_audit_notice_memo":
+        recipient = str(context.get("recipient_name") or "Audit recipient").strip()
+        role = str(context.get("recipient_role") or "AUDIT_RECIPIENT").replace("_", " ").strip().title()
+        audit_ref = str(context.get("audit_ref") or "Controlled audit").strip()
+        audit_title = str(context.get("audit_title") or "Audit").strip()
+        audit_area = str(context.get("audit_area") or "Defined department / process").strip()
+        planned_start = str(context.get("planned_start") or "To be confirmed").strip()
+        planned_end = str(context.get("planned_end") or planned_start).strip()
+        document_name = str(context.get("notice_document") or "Controlled audit notice.pdf").strip()
+        action_url = str(context.get("action_url") or "").strip()
+        responsibility = (
+            "You are listed as the auditee representative and coordination contact for this department/process audit. "
+            "Accountability for the process and records remains with the relevant process owners and responsible managers."
+            if role.upper() in {"AUDITEE", "EXTERNAL AUDITEE"}
+            else "You are receiving this controlled notice as a member of the audit team."
+        )
+        details = (
+            ("Audit reference", audit_ref),
+            ("Audit", audit_title),
+            ("Department / process", audit_area),
+            ("Planned window", f"{planned_start} to {planned_end}"),
+            ("Attached controlled document", document_name),
+        )
+        rows = "".join(
+            f"<tr><th style='text-align:left;padding:6px 12px 6px 0'>{html.escape(label)}</th>"
+            f"<td style='padding:6px 0'>{html.escape(value)}</td></tr>"
+            for label, value in details
+        )
+        action = (
+            f"<p><a href='{html.escape(action_url, quote=True)}' "
+            "style='display:inline-block;padding:10px 16px;background:#1f4b99;color:#fff;text-decoration:none;border-radius:4px'>"
+            "Open controlled audit record</a></p>"
+            if action_url.startswith(("https://", "http://"))
+            else ""
+        )
+        html_body = (
+            "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#172033'>"
+            f"<h2>{html.escape(subject)}</h2><p>Dear {html.escape(recipient)},</p>"
+            f"<p>{html.escape(responsibility)}</p><table>{rows}</table>{action}"
+            "<p>The attached PDF is the issued, electronically signed audit notice. Its QR code opens the controlled "
+            "digital record after sign-in.</p>"
+            "<p style='font-size:12px;color:#667085'>This controlled notification was sent by AMO Portal.</p>"
+            "</body></html>"
+        )
+        text_body = "\n".join([
+            subject,
+            f"Dear {recipient},",
+            responsibility,
+            *(f"{label}: {value}" for label, value in details),
+            "The attached PDF is the issued, electronically signed audit notice.",
+            action_url,
+        ]).strip()
+        return html_body, text_body
+
     rows: list[str] = []
     text_rows: list[str] = []
     for key, value in (context or {}).items():

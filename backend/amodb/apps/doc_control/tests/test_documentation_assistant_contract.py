@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from amodb.apps.ai.contracts import CompletionResult
 from amodb.apps.doc_control import knowledge_assistant_router as assistant
 
 
@@ -23,15 +24,26 @@ def _repository_root() -> Path:
 
 
 def test_provider_is_off_by_default_and_never_calls_external_network(monkeypatch) -> None:
-    monkeypatch.delenv("DOCUMENT_AI_PROVIDER", raising=False)
-    monkeypatch.delenv("DOCUMENT_AI_ALLOW_EXTERNAL", raising=False)
+    monkeypatch.setattr(assistant, "apply_tenant_db_context", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        assistant.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network called")),
+        assistant,
+        "get_effective_settings",
+        lambda *_args, **_kwargs: SimpleNamespace(enabled=False, allow_external_document_context=False),
     )
 
-    answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
+    class NetworkMustNotRun:
+        def complete(self, *_args, **_kwargs):
+            raise AssertionError("provider called")
+
+    monkeypatch.setattr(assistant, "AIService", NetworkMustNotRun)
+
+    answer, citations, warning = assistant._openai_synthesis(
+        object(),
+        tenant_id="tenant-1",
+        user_id="user-1",
+        query="Where is QAM 51?",
+        sources=[_source()],
+    )
 
     assert answer is None
     assert citations == []
@@ -40,49 +52,50 @@ def test_provider_is_off_by_default_and_never_calls_external_network(monkeypatch
 
 def test_external_provider_request_is_server_side_non_storing_and_citation_limited(monkeypatch) -> None:
     captured: dict = {}
+    monkeypatch.setattr(assistant, "apply_tenant_db_context", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        assistant,
+        "get_effective_settings",
+        lambda *_args, **_kwargs: SimpleNamespace(enabled=True, allow_external_document_context=True),
+    )
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self) -> bytes:
-            content = json.dumps(
-                {
+    class FakeAIService:
+        def complete(self, db, **kwargs):
+            captured["db"] = db
+            captured.update(kwargs)
+            return CompletionResult(
+                provider="openai",
+                model="configured-model",
+                text=json.dumps({
                     "answer": "Open QAM 51 and verify the controlled form.",
                     "source_ids": ["section:rev:sec", "invented"],
-                }
+                }),
+                response_id="response-1",
+                input_tokens=20,
+                output_tokens=12,
+                latency_ms=4.0,
             )
-            return json.dumps(
-                {"output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}]}
-            ).encode()
 
-    def fake_open(request, timeout):
-        captured["url"] = request.full_url
-        captured["timeout"] = timeout
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = json.loads(request.data.decode())
-        return FakeResponse()
-
-    monkeypatch.setenv("DOCUMENT_AI_PROVIDER", "openai")
-    monkeypatch.setenv("DOCUMENT_AI_ALLOW_EXTERNAL", "true")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
-    monkeypatch.setenv("DOCUMENT_AI_MODEL", "configured-model")
-    monkeypatch.setattr(assistant.urllib.request, "urlopen", fake_open)
-
-    answer, citations, warning = assistant._openai_synthesis("Where is QAM 51?", [_source()])
+    monkeypatch.setattr(assistant, "AIService", FakeAIService)
+    db = object()
+    answer, citations, warning = assistant._openai_synthesis(
+        db,
+        tenant_id="tenant-1",
+        user_id="user-1",
+        query="Where is QAM 51?",
+        sources=[_source()],
+    )
 
     assert answer == "Open QAM 51 and verify the controlled form."
     assert citations == ["section:rev:sec"]
     assert warning is None
-    assert captured["url"] == "https://api.openai.com/v1/responses"
-    assert captured["timeout"] == 12
-    assert captured["body"]["store"] is False
-    assert captured["body"]["model"] == "configured-model"
-    assert captured["body"]["text"]["format"]["type"] == "json_schema"
-    assert "test-only-key" not in json.dumps(captured["body"])
+    assert captured["db"] is db
+    assert captured["feature"] == "DOCUMENT_INTELLIGENCE"
+    assert captured["response_format"]["type"] == "json_schema"
+    assert captured["context"].tenant_id == "tenant-1"
+    assert captured["context"].user_id == "user-1"
+    assert "invented" not in citations
+    assert "api_key" not in json.dumps(captured, default=str)
 
 
 def test_navigation_url_carries_precise_page_and_anchor() -> None:
@@ -111,8 +124,10 @@ def test_route_contract_filters_access_before_retrieval_and_audits_only_query_ha
     assert '"query_sha256": _query_hash(request_payload.query)' in source
     assert '"query_text"' not in source
     assert '"controlled_source_is_authoritative": True' in source
-    assert '"store": False' in source
-    assert "https://api.openai.com/v1/responses" in source
+    assert "AIService().complete(" in source
+    provider = (_repository_root() / "backend/amodb/apps/ai/providers/openai.py").read_text(encoding="utf-8")
+    assert '"store": False' in provider
+    assert 'self._post("/v1/responses", body)' in provider
 
 
 def test_assistant_route_precedes_compatibility_workspace_routes() -> None:
@@ -171,7 +186,7 @@ def test_direct_and_assisted_reader_navigation_share_one_precise_contract() -> N
     ).read_text(encoding="utf-8")
     core = (
         _repository_root()
-        / "frontend/src/pages/manuals/PdfReaderCoreV2.tsx"
+        / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
     ).read_text(encoding="utf-8")
 
     assert 'searchParams.get("page")' in bridge
@@ -179,6 +194,6 @@ def test_direct_and_assisted_reader_navigation_share_one_precise_contract() -> N
     assert 'window.addEventListener("amo:publication-navigate"' in bridge
     assert '.pdf-engine-page[data-page-number=' in bridge
     assert "data-page-number={page}" in core
-    assert "jump(navigationRequest.page)" in core
+    assert 'jump(navigationRequest.page, "auto")' in core
     assert "PdfReaderCore" in viewer
     assert "<PdfDocument" not in viewer

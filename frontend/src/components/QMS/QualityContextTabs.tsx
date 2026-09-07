@@ -71,8 +71,8 @@ const ASSURANCE_MODULES = new Set([
   "evidence-vault",
 ]);
 
-/** Surfaces where the Audits rail owns local nav (calendar stays planner-owned). */
-const AUDIT_ASSURANCE_SEGMENTS = new Set(["audits"]);
+/** Surfaces where the Audit Assurance rail owns local nav (calendar stays planner-owned). */
+const AUDIT_ASSURANCE_SEGMENTS = new Set(["audits", "findings"]);
 
 const WORKSPACE_ICONS: Record<QmsWorkspaceId, LucideIcon> = {
   "control-room": Gauge,
@@ -203,12 +203,6 @@ function assurancePrimaryTabs(basePath: string, aaRailOwnsLocalNav: boolean): Co
       excludePrefixes: [`${basePath}/audits/register`, `${basePath}/audits/findings-actions`],
     },
     {
-      id: "assurance-home",
-      label: "Assurance cases",
-      path: `${basePath}?workspace=assurance`,
-      queryWorkspace: "assurance",
-    },
-    {
       id: "assurance-findings",
       label: "Findings & Actions",
       path: `${basePath}/audits/register?tab=findings`,
@@ -233,14 +227,6 @@ function assurancePrimaryTabs(basePath: string, aaRailOwnsLocalNav: boolean): Co
 function assuranceToolTabs(basePath: string, aaRailOwnsLocalNav: boolean): ContextTab[] {
   const demotedOnAa: ContextTab[] = aaRailOwnsLocalNav
     ? [
-        {
-          id: "assurance-home",
-          label: "Assurance cases",
-          path: `${basePath}?workspace=assurance`,
-          queryWorkspace: "assurance",
-          // Exact hub only — do not light Assurance cases while browsing Audits surfaces.
-          exact: true,
-        },
         {
           id: "assurance-cars",
           label: "Corrective action",
@@ -478,17 +464,21 @@ const QualityContextTabs: React.FC = () => {
         <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active">
           <RefreshCw size={13} aria-hidden="true" /> Live
         </span>
-        {showAssuranceRelated && !isCarRecord && contextualTabs.length === 0 ? renderAssuranceToolsMenu() : null}
-        <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}>
-          <PrimaryIcon size={15} aria-hidden="true" />
-          <span>{primaryAction.label}</span>
-        </button>
+        {showAssuranceRelated && !isCarRecord && contextualTabs.length === 0 && !aaRailOwnsLocalNav
+          ? renderAssuranceToolsMenu()
+          : null}
+        {!aaRailOwnsLocalNav || isAuditRecord ? (
+          <button type="button" className="quality-context-bar__primary" onClick={() => navigate(primaryAction.path)}>
+            <PrimaryIcon size={15} aria-hidden="true" />
+            <span>{primaryAction.label}</span>
+          </button>
+        ) : null}
       </div>
 
       {contextualTabs.length > 0 ? (
         <nav className="quality-context-bar__subtabs" aria-label={`${title} related pages`}>
           {renderTabs(contextualTabs)}
-          {showAssuranceRelated && !isCarRecord ? renderAssuranceToolsMenu() : null}
+          {showAssuranceRelated && !isCarRecord && !aaRailOwnsLocalNav ? renderAssuranceToolsMenu() : null}
         </nav>
       ) : null}
     </section>,

@@ -5,6 +5,7 @@ import {
   ClipboardList,
   FileCog,
   FileSearch,
+  FolderTree,
   Gauge,
   Send,
   Settings,
@@ -26,6 +27,7 @@ import "./dmsLibraryDiscovery.css";
 type PrimaryWorkspaceId =
   | "home"
   | "library"
+  | "structure"
   | "changes"
   | "distribution"
   | "compliance"
@@ -41,12 +43,13 @@ type PrimaryWorkspaceRoute = {
 };
 
 /**
- * Daily-use DMS information architecture. Detailed backend entities remain
- * addressable through deep links but are no longer permanent navigation peers.
+ * Daily-use DMS information architecture. Structure is a distinct discovery
+ * workspace; lifecycle entities remain grouped under their operational owners.
  */
 const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
   { id: "home", label: "Home", path: "", icon: Gauge },
   { id: "library", label: "Library", path: "/library", icon: BookOpen },
+  { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
   { id: "changes", label: "Changes", path: "/changes", icon: ClipboardList, controlOnly: true },
   { id: "distribution", label: "Distribution", path: "/distribution", icon: Send, controlOnly: true },
   { id: "compliance", label: "Compliance", path: "/compliance", icon: ShieldCheck, controlOnly: true },
@@ -55,6 +58,7 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
 ];
 
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
+  if (pathname.includes("/structure")) return "structure";
   if (pathname.includes("/changes")) return "changes";
   if (pathname.includes("/distribution")) return "distribution";
   if (pathname.includes("/compliance")) return "compliance";

@@ -15,7 +15,7 @@ from amodb.apps.realtime import models as realtime_models
 from amodb.database import get_db
 from amodb.security import require_admin
 
-from . import models, schemas
+from . import access_control, models, schemas
 from .router_admin import (
     _current_availability_status,
     _display_title_for_user,
@@ -306,6 +306,7 @@ def get_user_directory_page(
     limit: Optional[int] = Query(default=None, ge=1, le=250),
     search: Optional[str] = None,
     role: Optional[models.AccountRole] = None,
+    access_profile_id: Optional[str] = None,
     account_status: DirectoryAccountStatus = "all",
     department_id: Optional[str] = None,
     sort_by: DirectorySortField = "name",
@@ -336,6 +337,24 @@ def get_user_directory_page(
         )
     if role is not None:
         query = query.filter(models.User.role == role)
+    if access_profile_id:
+        now = datetime.now(timezone.utc)
+        query = query.join(
+            models.AuthUserRoleAssignment,
+            models.AuthUserRoleAssignment.user_id == models.User.id,
+        ).filter(
+            models.AuthUserRoleAssignment.amo_id == target_amo_id,
+            models.AuthUserRoleAssignment.role_id == access_profile_id,
+            models.AuthUserRoleAssignment.is_primary.is_(True),
+            or_(
+                models.AuthUserRoleAssignment.valid_from.is_(None),
+                models.AuthUserRoleAssignment.valid_from <= now,
+            ),
+            or_(
+                models.AuthUserRoleAssignment.valid_to.is_(None),
+                models.AuthUserRoleAssignment.valid_to >= now,
+            ),
+        )
     if account_status == "active":
         query = query.filter(models.User.is_active.is_(True))
     elif account_status == "inactive":
@@ -370,6 +389,11 @@ def get_user_directory_page(
         .limit(effective_size)
         .all()
     )
+    profile_map = access_control.primary_access_profiles_for_users(
+        db,
+        amo_id=str(target_amo_id),
+        user_ids=[str(user.id) for user in users],
+    )
 
     department_ids = sorted(
         {str(user.department_id) for user in users if user.department_id}
@@ -397,6 +421,7 @@ def get_user_directory_page(
 
     items: list[schemas.AdminUserDirectoryItem] = []
     for user in users:
+        profile = profile_map.get(str(user.id))
         presence = presence_map[str(user.id)]
         availability_status = _current_availability_status(
             availability_map.get(str(user.id))
@@ -421,6 +446,8 @@ def get_user_directory_page(
                 is_active=user.is_active,
                 is_superuser=user.is_superuser,
                 is_amo_admin=user.is_amo_admin,
+                access_profile_id=str(profile.id) if profile else None,
+                access_profile_name=profile.display_name if profile else None,
                 display_title=_display_title_for_user(user),
                 availability_status=availability_status,
                 last_login_at=user.last_login_at,

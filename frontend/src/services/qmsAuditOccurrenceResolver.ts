@@ -9,6 +9,8 @@ export type AuditOccurrenceSetupUpdate = {
   auditee_email?: string | null;
   planned_start?: string | null;
   planned_end?: string | null;
+  planned_start_time?: string | null;
+  planned_end_time?: string | null;
   notify_auditors?: boolean | null;
   notify_auditees?: boolean | null;
   reminder_interval_days?: number | null;

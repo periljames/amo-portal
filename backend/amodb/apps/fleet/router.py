@@ -44,8 +44,6 @@ from . import models, ocr as ocr_service, schemas, services
 
 # Roles allowed to manage aircraft, components, usage
 MANAGEMENT_ROLES = [
-    "SUPERUSER",
-    "AMO_ADMIN",
     "BASE_MAINTENANCE_MANAGER",
     "LINE_MAINTENANCE_MANAGER",
     "WORKSHOP_MANAGER",
@@ -65,15 +63,11 @@ DEFECT_INTAKE_ROLES = MANAGEMENT_ROLES + [
 # Include Quality for document management
 DOCUMENT_WRITE_ROLES = MANAGEMENT_ROLES + ["QUALITY_MANAGER"]
 QUALITY_OVERRIDE_ROLES = [
-    "SUPERUSER",
-    "AMO_ADMIN",
     "QUALITY_MANAGER",
 ]
 
 # Roles allowed to manage maintenance programme template items
 PROGRAM_WRITE_ROLES = [
-    "SUPERUSER",
-    "AMO_ADMIN",
     "BASE_MAINTENANCE_MANAGER",
     "PLANNING_ENGINEER",
 ]
@@ -1294,7 +1288,6 @@ def create_defect_report(
             work_models.WorkOrderStatusEnum.RELEASED
             if current_user.role
             in {
-                account_models.AccountRole.AMO_ADMIN,
                 account_models.AccountRole.PLANNING_ENGINEER,
                 account_models.AccountRole.PRODUCTION_ENGINEER,
             }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +14,7 @@ from amodb.database import get_read_db, get_write_db
 from . import models
 from .audit_closure_models import QualityAuditClosureState
 from .audit_preparation_models import QualityAuditPreparationRevision
+from .audit_schedule_rules import time_text, validate_planned_window
 from .audit_workflow_contract import build_authoritative_audit_workflow
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -49,6 +50,8 @@ class AuditSetupUpdate(BaseModel):
     auditee_email: str | None = Field(default=None, max_length=255)
     planned_start: date | None = None
     planned_end: date | None = None
+    planned_start_time: time | None = None
+    planned_end_time: time | None = None
     notify_auditors: bool | None = None
     notify_auditees: bool | None = None
     reminder_interval_days: int | None = Field(default=None, ge=1, le=60)
@@ -82,6 +85,8 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "reminder_interval_days": audit.reminder_interval_days,
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
+        "planned_start_time": time_text(audit.planned_start_time),
+        "planned_end_time": time_text(audit.planned_end_time),
         "actual_start": audit.actual_start.isoformat() if audit.actual_start else None,
         "actual_end": audit.actual_end.isoformat() if audit.actual_end else None,
         "report_file_ref": audit.report_file_ref,
@@ -179,12 +184,22 @@ def update_audit_setup(
 
     next_start = update.get("planned_start", audit.planned_start)
     next_end = update.get("planned_end", audit.planned_end)
-    if next_start is not None and next_end is not None and next_end < next_start:
-        raise HTTPException(status_code=422, detail="Planned end cannot be before planned start.")
+    next_start_time = update.get("planned_start_time", audit.planned_start_time)
+    next_end_time = update.get("planned_end_time", audit.planned_end_time)
+    effective_start_time, effective_end_time = validate_planned_window(
+        planned_start=next_start,
+        planned_end=next_end,
+        planned_start_time=next_start_time,
+        planned_end_time=next_end_time,
+    )
     if "planned_start" in update:
         audit.planned_start = update["planned_start"]
     if "planned_end" in update:
         audit.planned_end = update["planned_end"]
+    if "planned_start_time" in update or ("planned_start" in update and next_start is not None):
+        audit.planned_start_time = effective_start_time
+    if "planned_end_time" in update or ("planned_end" in update and next_end is not None):
+        audit.planned_end_time = effective_end_time
 
     for field_name in ("notify_auditors", "notify_auditees", "reminder_interval_days"):
         if field_name in update and update[field_name] is not None:

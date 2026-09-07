@@ -19,11 +19,9 @@ router = APIRouter(
 )
 
 INVENTORY_WRITE_ROLES = [
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.STORES,
     account_models.AccountRole.STORES_MANAGER,
     account_models.AccountRole.STOREKEEPER,
-    account_models.AccountRole.QUALITY_INSPECTOR,
 ]
 
 

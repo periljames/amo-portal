@@ -150,7 +150,7 @@ const QMS_MODULES: ModuleMeta[] = [
     taskHint: "Start here. It compresses the old Quality and QMS surfaces into one controlled operating cockpit.",
     lifecycle: [
       { label: "Open", path: "inbox/assigned-to-me", description: "Assigned work and unread decisions." },
-      { label: "Plan", path: "audits/schedule", description: "Audit, review, and due date planning." },
+      { label: "Plan", path: "audits/plan", description: "Audit, review, and due date planning." },
       { label: "Execute", path: "audits/dashboard", description: "Fieldwork, evidence, and findings." },
       { label: "Correct", path: "cars/awaiting-auditee", description: "CAR response and implementation." },
       { label: "Verify", path: "cars/awaiting-quality-review", description: "Quality review and effectiveness checks." },
@@ -210,7 +210,7 @@ const QMS_MODULES: ModuleMeta[] = [
     ],
     taskHint: "Use this to stop deadlines from living in separate pages.",
     lifecycle: [
-      { label: "Schedule", path: "audits/schedule", description: "Audit programme and due dates." },
+      { label: "Schedule", path: "audits/plan", description: "Audit programme and due dates." },
       { label: "Warn", path: "calendar/cars", description: "Corrective actions due soon." },
       { label: "Renew", path: "calendar/training", description: "Training and competence expiries." },
       { label: "Review", path: "management-review/meetings", description: "Management review cycle." },
@@ -231,16 +231,17 @@ const QMS_MODULES: ModuleMeta[] = [
     primary: { label: "Dashboard", path: "audits/dashboard" },
     actions: [
       { label: "Programme", path: "audits/program" },
-      { label: "Schedule", path: "audits/schedule" },
+      { label: "Planner", path: "audits/plan" },
+      { label: "Scopes", path: "audits/scopes" },
       { label: "Checklists", path: "audits/checklists" },
-      { label: "New", path: "audits/new", tone: "success" },
+      { label: "New", path: "audits/plan?create=1", tone: "success" },
     ],
     taskHint: "Run the full audit lifecycle in the Quality assurance workspace.",
     createEnabled: true,
     lifecycle: [
       { label: "Programme", path: "audits/program", description: "Annual and risk-based audit programme." },
-      { label: "Schedule", path: "audits/schedule", description: "Audit dates, scope, and team." },
-      { label: "Prepare", path: "audits/templates", description: "Templates, notices, and checklists." },
+      { label: "Schedule", path: "audits/plan", description: "Audit dates, scope, and team." },
+      { label: "Prepare", path: "audits/checklists", description: "Controlled checklists for preparation and fieldwork." },
       { label: "Fieldwork", path: "audits/dashboard", description: "Execution, evidence, and observations." },
       { label: "Findings", path: "findings/register", description: "Classify and link findings." },
       { label: "Closeout", path: "cars/register", description: "CAR follow-up and closure." },
@@ -734,7 +735,7 @@ function ModuleBadge({ mode }: { mode: ModuleMode }): React.ReactElement {
 
 function SignalCards({ amoCode, dashboard }: { amoCode: string; dashboard: QmsDashboardResponse | null }): React.ReactElement {
   const signals = [
-    { label: "Active audit plans", value: counterValue(dashboard, "open_audits"), icon: ClipboardCheck, to: "audits/schedule" },
+    { label: "Active audit plans", value: counterValue(dashboard, "open_audits"), icon: ClipboardCheck, to: "audits/plan" },
     { label: "Overdue CARs", value: counterValue(dashboard, "overdue_cars"), icon: AlertTriangle, to: "cars/overdue", tone: "danger" },
     { label: "CARs due soon", value: counterValue(dashboard, "cars_due_soon"), icon: CalendarDays, to: "cars/due-soon", tone: "warning" },
     { label: "Open findings", value: counterValue(dashboard, "open_findings"), icon: ClipboardList, to: "findings/register" },
@@ -1644,7 +1645,7 @@ function CockpitWorkspace({ amoCode, dashboard, loading }: { amoCode: string; da
       <SectionCard title="Priority queue" subtitle="Tenant dashboard indicators. Audit indicators use the audit schedule source to keep the cockpit responsive." variant="subtle">
         <div className="qms-ops-priority-list">
           <Link to={routeToUrl(amoCode, "cars/overdue")}><AlertTriangle size={16} /> Overdue CARs <strong>{counterValue(dashboard, "overdue_cars")}</strong></Link>
-          <Link to={routeToUrl(amoCode, "audits/schedule")}><CalendarDays size={16} /> Audit plan due soon <strong>{counterValue(dashboard, "audits_due_soon")}</strong></Link>
+          <Link to={routeToUrl(amoCode, "audits/plan")}><CalendarDays size={16} /> Audit plan due soon <strong>{counterValue(dashboard, "audits_due_soon")}</strong></Link>
           <Link to={routeToUrl(amoCode, "documents/library")}><FileText size={16} /> Draft documents <strong>{counterValue(dashboard, "draft_documents")}</strong></Link>
           <Link to={routeToUrl(amoCode, "training-competence/overdue")}><Users size={16} /> Expired training <strong>{counterValue(dashboard, "training_expired_records")}</strong></Link>
         </div>

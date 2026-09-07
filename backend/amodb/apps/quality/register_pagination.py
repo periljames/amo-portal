@@ -26,6 +26,7 @@ FindingWorkflowStage = Literal[
     "effectiveness",
     "closed",
 ]
+CarTiming = Literal["overdue", "due_soon"]
 
 
 class QMSAuditRegisterPageOut(BaseModel):
@@ -68,6 +69,8 @@ def get_audit_register_paged(
     finding_id: Optional[UUID] = None,
     only_with_cars: bool = False,
     workflow_stage: Optional[FindingWorkflowStage] = None,
+    car_timing: Optional[CarTiming] = None,
+    due_soon_days: int = Query(default=30, ge=0, le=90),
     search: Optional[str] = Query(default=None, max_length=160),
     ref: Optional[str] = Query(default=None, max_length=120),
     finding: Optional[str] = Query(default=None, max_length=200),
@@ -138,6 +141,26 @@ def get_audit_register_paged(
             query = query.filter(or_(Finding.closed_at.is_not(None), matching_stage_car_exists))
         else:
             query = query.filter(Finding.closed_at.is_(None), matching_stage_car_exists)
+    if car_timing:
+        today = date.today()
+        active_statuses = [
+            models.CARStatus.DRAFT,
+            models.CARStatus.OPEN,
+            models.CARStatus.IN_PROGRESS,
+            models.CARStatus.PENDING_VERIFICATION,
+            models.CARStatus.ESCALATED,
+        ]
+        timing_filters = [
+            Car.amo_id == amo_id,
+            Car.finding_id == Finding.id,
+            Car.status.in_(active_statuses),
+            Car.due_date.is_not(None),
+        ]
+        if car_timing == "overdue":
+            timing_filters.append(Car.due_date < today)
+        else:
+            timing_filters.extend((Car.due_date >= today, Car.due_date <= today + timedelta(days=due_soon_days)))
+        query = query.filter(db.query(Car.id).filter(*timing_filters).exists())
 
     search_value = _normalise_search(search)
     if search_value:

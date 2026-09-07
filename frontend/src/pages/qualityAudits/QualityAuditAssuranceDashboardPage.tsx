@@ -39,6 +39,7 @@ import {
   readinessExceptionCount,
 } from "../../services/qmsAuditProgramme";
 import { auditNavigationHref } from "./auditNavigation";
+import { uniqueById } from "./auditDashboardModel";
 import "./quality-audit-dashboard.css";
 
 type KpiTone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -176,7 +177,6 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
-  const department = params.department ?? "quality";
   const queryClient = useQueryClient();
   const today = todayDateOnly();
   const inSevenDays = addDays(today, 7);
@@ -227,8 +227,8 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
   });
 
   const dashboard = dashboardQuery.data as QMSDashboardOut | undefined;
-  const audits = auditsQuery.data ?? [];
-  const schedules = schedulesQuery.data ?? [];
+  const audits = uniqueById(auditsQuery.data ?? []);
+  const schedules = uniqueById(schedulesQuery.data ?? []);
   const registerRows = useMemo(() => uniqueRegisterRows(registerQuery.data?.rows ?? []), [registerQuery.data?.rows]);
   const cars = carsQuery.data ?? [];
   const programmes = programmesQuery.data?.items ?? [];
@@ -466,9 +466,10 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       href: scheduleHref(amoCode, schedule),
       urgency: "warning" as ActionUrgency,
     })),
-  ].slice(0, 6);
+  ];
+  const distinctActionQueue = uniqueById(actionQueue).slice(0, 6);
 
-  const nextAttention = actionQueue[0];
+  const nextAttention = distinctActionQueue[0];
 
   const refreshDashboard = () => {
     void queryClient.invalidateQueries({ queryKey: ["qms-audit-dashboard"] });
@@ -555,8 +556,8 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               </div>
             </div>
             <div className="qa-action-queue" aria-label="Attention queue">
-              {actionQueue.length ? (
-                actionQueue.map((item) => (
+              {distinctActionQueue.length ? (
+                distinctActionQueue.map((item) => (
                   <Link key={item.id} to={item.href} className={`qa-action-queue__item qa-action-queue__item--${item.urgency}`} title={item.label}>
                     <span className={`qa-action-item__marker qa-action-item__marker--${item.urgency}`} />
                     <span>

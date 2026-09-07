@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from amodb.database import Base
 from amodb.apps.accounts import models as account_models
@@ -16,6 +21,7 @@ from amodb.apps.quality.audit_notice_models import (
 from amodb.apps.quality.audit_notice_router import (
     NoticeSubmit,
     _notice_email_correlation,
+    prepare_audit_notice_document,
     submit_and_deliver_audit_notice,
 )
 from amodb.apps.quality.audit_occurrence_completion_models import QualityAuditMeeting
@@ -131,16 +137,51 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
         )
 
     monkeypatch.setattr("amodb.apps.quality.audit_notice_router.notification_service.send_email", fake_send_email)
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/maintenance/AMO-NOTICE/quality/audits/audit/notices/notice",
+        "headers": [(b"origin", b"https://portal.example.test")],
+        "scheme": "https",
+        "server": ("api.example.test", 443),
+        "query_string": b"",
+    })
+    context = TenantContext(
+        amo_code=amo.amo_code,
+        amo_id=amo.id,
+        user_id=officer.id,
+        is_superuser=False,
+    )
+    with pytest.raises(HTTPException) as preview_required:
+        submit_and_deliver_audit_notice(
+            audit_id=audit.id,
+            notice_id=notice.id,
+            request=request,
+            payload=NoticeSubmit(reason="Attempted delivery before reviewing the final document."),
+            ctx=context,
+            db=db_session,
+        )
+    assert preview_required.value.status_code == 409
+    assert preview_required.value.detail["code"] == "AUDIT_NOTICE_FINAL_PREVIEW_REQUIRED"
+    assert sends == []
+
+    prepared = prepare_audit_notice_document(
+        audit_id=audit.id,
+        notice_id=notice.id,
+        request=request,
+        payload=NoticeSubmit(reason="Final signed notice prepared for controlled preview."),
+        ctx=context,
+        db=db_session,
+    )
+    assert prepared["status"] == "GENERATED"
+    assert prepared["artifact"]["source_type"] == "GENERATED"
+
     result = submit_and_deliver_audit_notice(
         audit_id=audit.id,
         notice_id=notice.id,
+        request=request,
         payload=NoticeSubmit(reason="Notice preview verified by the issuing officer."),
-        ctx=TenantContext(
-            amo_code=amo.amo_code,
-            amo_id=amo.id,
-            user_id=officer.id,
-            is_superuser=False,
-        ),
+        ctx=context,
         db=db_session,
     )
 
@@ -151,6 +192,9 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert len(sends) == 1
     assert sends[0]["recipient"] == "auditee@example.test"
     assert sends[0]["attachments"][0]["content"].startswith(b"%PDF-")
+    assert hashlib.sha256(sends[0]["attachments"][0]["content"]).hexdigest() == result["notice"]["artifact"]["sha256"]
+    assert sends[0]["context"]["action_url"].startswith("https://portal.example.test/maintenance/AMO-NOTICE/")
+    assert f"noticeId={notice.id}" in sends[0]["context"]["action_url"]
     assert len(sends[0]["correlation_id"]) <= 64
     assert sends[0]["correlation_id"] == _notice_email_correlation(notice.id, "auditee@example.test")
     events = [row.event_type for row in db_session.query(QualityAuditNoticeEvent).order_by(QualityAuditNoticeEvent.created_at).all()]

@@ -2,6 +2,7 @@ import type { PortalUser } from "../services/auth";
 import {
   getAllowedDepartments,
   getAssignedDepartment,
+  getOperationalAccessUser,
   isAdminUser,
   type DepartmentId,
 } from "../utils/departmentAccess";
@@ -290,6 +291,27 @@ function departmentBranch(
     ],
   };
   if (department === "safety") return simpleDepartmentBranch(base, "safety", "Safety Management", "safety");
+  if (department === "procurement") return {
+    id: "department-procurement",
+    label: "Procurement & Supply Chain",
+    icon: "stores",
+    path: `${base}/procurement`,
+    children: [{
+      id: "procurement-workspace",
+      label: "Workspace",
+      path: `${base}/procurement`,
+      children: [
+        { id: "procurement-command", label: "Command", path: `${base}/procurement/command` },
+        { id: "procurement-requests", label: "Requests", path: `${base}/procurement/requests` },
+        { id: "procurement-sourcing", label: "Sourcing", path: `${base}/procurement/sourcing` },
+        { id: "procurement-orders", label: "Orders", path: `${base}/procurement/orders` },
+        { id: "procurement-receiving", label: "Receiving", path: `${base}/procurement/receiving` },
+        { id: "procurement-suppliers", label: "Suppliers", path: `${base}/procurement/suppliers` },
+        { id: "procurement-control", label: "Quality Control", path: `${base}/procurement/control` },
+        { id: "procurement-documents", label: "Documents", path: `${base}/procurement/documents` },
+      ],
+    }],
+  };
   if (department === "stores") return simpleDepartmentBranch(base, "stores", "Procurement & Stores", "stores");
   if (department === "workshops") return simpleDepartmentBranch(base, "workshops", "Workshops", "workshops");
   return null;
@@ -351,29 +373,51 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
 export function buildPortalNavigation(context: PortalNavigationContext): PortalNavGroup[] {
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
   if (!user) return [];
+  const operationalUser = getOperationalAccessUser(user);
+  // Administration is an overlay for administration screens only; it must
+  // never manufacture operational department or module access.
+  const effectiveUser = operationalUser;
   const assigned = getAssignedDepartment(user, contextDepartment);
-  const allowed = getAllowedDepartments(user, assigned).filter(
+  const allowed = getAllowedDepartments(effectiveUser, assigned).filter(
     (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
   );
-  const scope: Array<Exclude<DepartmentId, "admin">> = adminModeActive && isAdminUser(user)
-    ? allowed
-    : assigned && assigned !== "admin" && allowed.includes(assigned) ? [assigned] : allowed.slice(0, 1);
+  const scope: Array<Exclude<DepartmentId, "admin">> = allowed;
   const base = tenantBase(amoCode);
+  const homeDepartment = (
+    assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : allowed[0]
+  );
+  const moduleVisible = (module: string): boolean => (
+    effectiveUser?.module_access === undefined
+    || Boolean(effectiveUser.module_access[module])
+  );
+  const canGovernAdministratorAccess = Boolean(
+    adminModeActive
+    || user.is_amo_admin
+    || user.role === "AMO_ADMIN"
+    || user.role === "ACCOUNTABLE_EXECUTIVE"
+    || user.role === "QUALITY_MANAGER",
+  );
   const groups: PortalNavGroup[] = [{
     id: "workspace",
     label: "Workspace",
     items: [
-      { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, assigned), exact: true },
-      { id: "my-training", label: "My Training", icon: "training", path: `${base}/training` },
-      { id: "my-roster", label: "My Roster", icon: "calendar", path: `${base}/rostering/my-roster` },
+      { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, homeDepartment || null), exact: true },
+      ...(moduleVisible("training") ? [{ id: "my-training", label: "My Training", icon: "training" as const, path: `${base}/training` }] : []),
+      ...(moduleVisible("rostering") ? [{ id: "my-roster", label: "My Roster", icon: "calendar" as const, path: `${base}/rostering/my-roster` }] : []),
+      ...(canGovernAdministratorAccess ? [{
+        id: "administrator-governance",
+        label: "Administrator Governance",
+        icon: "users" as const,
+        path: `${base}/access-governance`,
+      }] : []),
     ],
   }];
   const departments = scope
-    .map((department) => departmentBranch(amoCode, department, user, contextDepartment))
+    .map((department) => departmentBranch(amoCode, department, effectiveUser, contextDepartment))
     .filter((navItem): navItem is PortalNavItem => Boolean(navItem));
-  departments.push(...supportingBranches(amoCode, user, contextDepartment));
+  departments.push(...supportingBranches(amoCode, effectiveUser, contextDepartment));
   if (departments.length) groups.push({ id: "departments", label: adminModeActive ? "Department Workspaces" : "Department", items: departments });
-  if (adminModeActive && isAdminUser(user)) groups.push(...adminGroups(amoCode));
+  if (adminModeActive) groups.push(...adminGroups(amoCode));
   return groups;
 }
 

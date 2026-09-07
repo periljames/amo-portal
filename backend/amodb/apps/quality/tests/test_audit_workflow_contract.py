@@ -1,3 +1,4 @@
+from datetime import time
 from types import SimpleNamespace
 
 from amodb.apps.quality import router
@@ -62,6 +63,8 @@ def test_setup_gate_requires_scope_and_applicable_criteria():
     complete = {
         "planned_start": "2026-09-11",
         "planned_end": "2026-09-12",
+        "planned_start_time": time(9, 0),
+        "planned_end_time": time(17, 0),
         "scope": "Line maintenance and release records",
         "criteria": "KCARs Part 145 and company CAME/MOE",
         "lead_auditor_user_id": "lead-1",

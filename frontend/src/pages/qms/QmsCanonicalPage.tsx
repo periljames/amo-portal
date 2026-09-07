@@ -44,11 +44,25 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }
 
   if (/\/quality\/findings(?:\/register)?\/?$/i.test(location.pathname)) {
-    return <Navigate to={`/maintenance/${amoCode}/quality/audits/register?tab=findings`} replace />;
+    return <Navigate to={`/maintenance/${amoCode}/quality/audits/register`} replace />;
   }
 
   if (searchParams.get("control") && pathname.includes("/quality/cars")) {
     return <QmsCarControlLoopPage />;
+  }
+
+  const carListView = location.pathname.match(/\/quality\/cars(?:\/(register|overdue|due-soon|awaiting-auditee|awaiting-quality-review|awaiting-effectiveness-review|closed))?\/?$/i)?.[1]?.toLowerCase() || "";
+  if (carListView || (/\/quality\/cars\/?$/i.test(location.pathname) && !searchParams.get("carId"))) {
+    const filters: Record<string, string> = {
+      overdue: "timing=overdue",
+      "due-soon": "timing=due_soon",
+      "awaiting-auditee": "stage=with_auditee",
+      "awaiting-quality-review": "stage=needs_review",
+      "awaiting-effectiveness-review": "stage=effectiveness",
+      closed: "stage=closed",
+    };
+    const suffix = filters[carListView] ? `?${filters[carListView]}` : "";
+    return <Navigate to={`/maintenance/${amoCode}/quality/audits/register${suffix}`} replace />;
   }
 
   if (pathname.includes("/quality/cars")) {

@@ -10,6 +10,7 @@ import {
   DEPARTMENT_LABELS,
   getAllowedDepartments,
   getAssignedDepartment,
+  getOperationalAccessUser,
   isAdminUser,
   isDepartmentId,
 } from "../utils/departmentAccess";
@@ -19,6 +20,7 @@ import {
 } from "../services/fleet";
 import { DASHBOARD_WIDGETS, canSeeDashboardWidget, getWidgetStorageKey } from "../utils/dashboardWidgets";
 import { isUiShellV2Enabled } from "../utils/featureFlags";
+import { readCachedAdminProfileState } from "../services/adminProfileMode";
 
 const niceLabel = (dept: string) =>
   DEPARTMENT_LABELS[dept as DepartmentId] || dept;
@@ -183,7 +185,8 @@ const DashboardPage: React.FC = () => {
   const amoSlug = (params.amoCode ?? ctx.amoSlug ?? ctx.amoCode ?? "UNKNOWN").trim();
 
   const currentUser = getCachedUser();
-  const isAdmin = isAdminUser(currentUser);
+  const operationalUser = getOperationalAccessUser(currentUser);
+  const isAdmin = isAdminUser(operationalUser);
   const uiShellV2 = isUiShellV2Enabled();
   const isSuperuser =
     !!currentUser &&
@@ -244,13 +247,13 @@ const DashboardPage: React.FC = () => {
 
   // For normal users, this MUST be their assigned department (server-driven context).
   const assignedDept = useMemo(
-    () => getAssignedDepartment(currentUser, ctx.department),
-    [currentUser, ctx.department]
+    () => getAssignedDepartment(operationalUser, ctx.department),
+    [operationalUser, ctx.department]
   );
 
   const allowedDepartments = useMemo(
-    () => getAllowedDepartments(currentUser, assignedDept),
-    [currentUser, assignedDept]
+    () => getAllowedDepartments(operationalUser, assignedDept),
+    [operationalUser, assignedDept]
   );
 
   const requestedDeptRaw = (params.department || "").trim();
@@ -343,11 +346,7 @@ const DashboardPage: React.FC = () => {
   }, [blockingDocAlerts]);
 
   const canManageUsers =
-    !!currentUser &&
-    (currentUser.is_superuser ||
-      currentUser.is_amo_admin ||
-      currentUser.role === "SUPERUSER" ||
-      currentUser.role === "AMO_ADMIN");
+    !!currentUser && Boolean(readCachedAdminProfileState(amoSlug)?.active);
 
   const handleNewCrs = () => {
     navigate(`/maintenance/${amoSlug}/${department}/crs/new`);

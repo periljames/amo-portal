@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Header, Request, status, HTTPException
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
-from amodb.security import require_roles
-from amodb.apps.accounts.models import AccountRole, User
+from amodb.apps.accounts.admin_profile_guard import require_active_admin_profile
+from amodb.apps.accounts.models import User
 
 from . import schemas, services
 
@@ -21,7 +21,7 @@ router = APIRouter(
 @router.get("/configs", response_model=List[schemas.IntegrationConfigRead])
 def list_configs(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+    current_user: User = Depends(require_active_admin_profile),
 ):
     return services.list_integration_configs(db, amo_id=current_user.amo_id)
 
@@ -34,7 +34,7 @@ def list_configs(
 def create_config(
     payload: schemas.IntegrationConfigCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+    current_user: User = Depends(require_active_admin_profile),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     config = services.create_integration_config(
@@ -57,7 +57,7 @@ def update_config(
     config_id: str,
     payload: schemas.IntegrationConfigUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+    current_user: User = Depends(require_active_admin_profile),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     try:
@@ -81,7 +81,7 @@ def list_outbox(
     integration_id: Optional[str] = None,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+    current_user: User = Depends(require_active_admin_profile),
 ):
     return services.list_outbound_events(
         db,

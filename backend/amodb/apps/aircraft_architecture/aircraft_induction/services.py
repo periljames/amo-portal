@@ -22,9 +22,11 @@ from . import models, schemas
 
 
 ALLOWED_ROLES = {
-    account_models.AccountRole.AMO_ADMIN,
+    account_models.AccountRole.BASE_MAINTENANCE_MANAGER,
+    account_models.AccountRole.LINE_MAINTENANCE_MANAGER,
+    account_models.AccountRole.WORKSHOP_MANAGER,
     account_models.AccountRole.PLANNING_ENGINEER,
-    account_models.AccountRole.QUALITY_MANAGER,
+    account_models.AccountRole.TECHNICAL_RECORDS_SUPERVISOR,
 }
 CONTROLLED_COMPONENT_ROLES = {"ENGINE", "PROPELLER", "APU", "OTHER"}
 
@@ -70,11 +72,7 @@ def require_human_induction_authority(user: account_models.User) -> str:
     amo_id = getattr(user, "amo_id", None)
     if not amo_id:
         raise HTTPException(status_code=403, detail="Tenant context is required")
-    if not (
-        user.is_superuser
-        or user.is_amo_admin
-        or user.role in ALLOWED_ROLES
-    ):
+    if user.role not in ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="Aircraft induction authority is required")
     return str(amo_id)
 

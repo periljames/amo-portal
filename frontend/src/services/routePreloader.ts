@@ -1,6 +1,7 @@
 // src/services/routePreloader.ts
 import { getContext, type PortalUser } from "./auth";
 import { getRoleDrivenDepartments } from "../utils/roleAccess";
+import { getOperationalAccessUser } from "../utils/departmentAccess";
 
 type PreloadJob = {
   id: string;
@@ -68,11 +69,10 @@ export function preloadWorkspaceForUser(user: PortalUser | null, amoCodeOrSlug?:
 
   COMMON_AFTER_LOGIN.forEach(enqueue);
 
-  const departments = user.is_amo_admin || user.is_superuser
-    ? ["admin", "quality", "planning", "production", "maintenance", "document-control"]
-    : getRoleDrivenDepartments(user, ctx.department);
+  const operationalUser = getOperationalAccessUser(user);
+  const departments = getRoleDrivenDepartments(operationalUser, ctx.department);
 
-  departments.slice(0, user.is_amo_admin ? 6 : 3).forEach((department) => {
+  departments.slice(0, 3).forEach((department) => {
     MODULE_PRELOADERS[department]?.forEach(enqueue);
   });
 }

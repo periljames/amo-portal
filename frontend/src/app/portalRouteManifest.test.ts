@@ -74,7 +74,9 @@ describe("portal route manifest", () => {
     expect(items.some((item) => item.id === "department-quality")).toBe(true);
     expect(items.some((item) => item.id === "admin-users")).toBe(false);
     expect(userHasQmsRolePermission(officer, "qms.car.manage")).toBe(true);
-    expect(userHasQmsRolePermission(officer, "qms.audit.manage")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.audit.manage")).toBe(true);
+    expect(userHasQmsRolePermission(officer, "qms.audit.programme.quality_review")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.audit.programme.approve")).toBe(false);
   });
 
   it("keeps Accountable Executive Quality access read-only except Authority attestation", () => {

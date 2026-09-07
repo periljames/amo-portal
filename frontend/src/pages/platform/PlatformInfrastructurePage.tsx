@@ -178,7 +178,7 @@ export default function PlatformInfrastructurePage() {
     setSpeedError(null);
     setSpeedResult(null);
     try {
-      const result = await platformDiagnostics.speedTest({ onProgress: setSpeedStage });
+      const result = await platformDiagnostics.speedTest({ onProgress: (progress) => setSpeedStage(`${progress.label} · ${Math.round(progress.percent)}%`) });
       setSpeedResult(result);
     } catch (err) {
       setSpeedError(err instanceof Error ? err.message : "Speed test failed");

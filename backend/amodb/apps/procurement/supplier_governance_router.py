@@ -22,16 +22,12 @@ router = APIRouter(
 )
 
 QUALITY_GOVERNANCE_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.QUALITY_MANAGER,
 )
 QUALITY_REVIEW_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.QUALITY_MANAGER,
-    account_models.AccountRole.QUALITY_INSPECTOR,
 )
 EVALUATION_AUTHOR_ROLES = (
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.QUALITY_MANAGER,
     account_models.AccountRole.QUALITY_INSPECTOR,
     account_models.AccountRole.PROCUREMENT_OFFICER,

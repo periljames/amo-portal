@@ -15,6 +15,7 @@ import {
 import {
   getAllowedDepartments,
   getAssignedDepartment,
+  getOperationalAccessUser,
   isDepartmentId,
   type DepartmentId,
 } from "../utils/departmentAccess";
@@ -29,6 +30,7 @@ const DEPARTMENT_SEGMENTS = new Set<DepartmentId>([
   "safety",
   "stores",
   "workshops",
+  "procurement",
   "admin",
 ]);
 
@@ -134,15 +136,13 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   const assigned = getAssignedDepartment(currentUser, getContext().department);
-  const normalAllowed: Array<Exclude<DepartmentId, "admin">> =
-    assigned && assigned !== "admin" ? [assigned] : [];
-  const elevatedUser = adminState?.active
-    ? { ...currentUser, is_amo_admin: true }
-    : currentUser;
-  const elevatedAllowed = getAllowedDepartments(elevatedUser, assigned).filter(
+  const operationalUser = getOperationalAccessUser(currentUser);
+  const normalAllowed = getAllowedDepartments(operationalUser, assigned).filter(
     (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
   );
-  const allowed = adminState?.active ? elevatedAllowed : normalAllowed;
+  // Admin Profile unlocks administration routes only. It never expands the
+  // user's operational departments or module grants.
+  const allowed = normalAllowed;
   const homeDepartment =
     (assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : null)
     || allowed[0];

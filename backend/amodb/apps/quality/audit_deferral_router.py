@@ -119,7 +119,9 @@ def _load_item(db: Session, *, amo_id: str, item_id: str, lock: bool = False) ->
         QualityAuditProgrammeItem.id == item_id,
     )
     if lock:
-        item_query = item_query.with_for_update()
+        # The item model eagerly joins its optional audit-area relationship.
+        # PostgreSQL rejects an unrestricted FOR UPDATE on that outer join.
+        item_query = item_query.with_for_update(of=QualityAuditProgrammeItem)
     item = item_query.first()
     if item is None:
         raise HTTPException(status_code=404, detail="Audit programme requirement not found.")

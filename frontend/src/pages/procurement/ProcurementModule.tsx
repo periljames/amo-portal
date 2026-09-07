@@ -15,9 +15,9 @@ import { ModalShell } from "./procurementUiShared";
 import { EMPTY, NAV, dateLabel, humanize, type FormState, type Modal, type Section, type WorkspaceData } from "./procurementUiModel";
 import "../../styles/procurement.css";
 
-const QUALITY_ROLES = new Set(["QUALITY_MANAGER", "QUALITY_INSPECTOR", "AMO_ADMIN", "SUPERUSER"]);
-const FINANCE_ROLES = new Set(["FINANCE_MANAGER", "ACCOUNTS_OFFICER", "AMO_ADMIN", "SUPERUSER"]);
-const DOCUMENT_CONTROL_ROLES = new Set(["PROCUREMENT_OFFICER", "QUALITY_MANAGER", "QUALITY_INSPECTOR", "AMO_ADMIN", "SUPERUSER"]);
+const QUALITY_ROLES = new Set(["QUALITY_MANAGER", "QUALITY_INSPECTOR"]);
+const FINANCE_ROLES = new Set(["FINANCE_MANAGER", "ACCOUNTS_OFFICER"]);
+const DOCUMENT_CONTROL_ROLES = new Set(["PROCUREMENT_OFFICER", "QUALITY_MANAGER", "QUALITY_INSPECTOR"]);
 
 export default function ProcurementModule() {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
@@ -26,9 +26,10 @@ export default function ProcurementModule() {
   const { pushToast } = useToast();
   const user = getCachedUser();
   const role = user?.role || "";
-  const canQuality = QUALITY_ROLES.has(role) || Boolean(user?.is_superuser);
-  const canFinance = FINANCE_ROLES.has(role) || Boolean(user?.is_superuser);
-  const canDocumentControl = DOCUMENT_CONTROL_ROLES.has(role) || Boolean(user?.is_superuser);
+  const canManageProcurement = user?.module_access?.procurement === "manage";
+  const canQuality = canManageProcurement && QUALITY_ROLES.has(role);
+  const canFinance = canManageProcurement && FINANCE_ROLES.has(role);
+  const canDocumentControl = canManageProcurement && DOCUMENT_CONTROL_ROLES.has(role);
 
   const rawSection = location.pathname.split("/").filter(Boolean)[3] as Section | undefined;
   const section: Section = NAV.some((item) => item.id === rawSection) ? rawSection! : "command";
@@ -86,11 +87,26 @@ export default function ProcurementModule() {
   useEffect(() => { void load(); }, [load]);
 
   const setValue = (name: string, value: string | boolean) => setForm((current) => ({ ...current, [name]: value }));
-  const openModal = (next: Exclude<Modal, null>, initial: FormState = {}) => { setForm(initial); setModal(next); };
+  const openModal = (next: Exclude<Modal, null>, initial: FormState = {}) => {
+    if (!canManageProcurement) {
+      pushToast({
+        title: "View-only Procurement access",
+        message: "Your tenant access profile permits reading Procurement records but not changing them.",
+        variant: "warning",
+      });
+      return;
+    }
+    setForm(initial);
+    setModal(next);
+  };
   const closeModal = () => { if (!saving) { setModal(null); setForm({}); } };
   const linkDocument = (type: ProcurementDocumentEntityType, id: number) => { setDocumentTarget({ type, id: String(id) }); go("documents"); };
 
   const act = async (label: string, operation: () => Promise<unknown>, success = `${label} completed`) => {
+    if (!canManageProcurement) {
+      pushToast({ title: "Action unavailable", message: "A Procurement manage grant is required.", variant: "warning" });
+      return;
+    }
     setSaving(true);
     try {
       await operation();
@@ -161,10 +177,10 @@ export default function ProcurementModule() {
         <header className="proc-module-header">
           <div><span className="proc-eyebrow">Aviation supply chain control</span><h1>Procurement & Supply Chain</h1><p>Controlled demand, sourcing, purchasing, quarantine, Quality release, supplier approval, and retained evidence.</p></div>
           <div className="proc-header-actions">
-            <span className="proc-live"><span />Tenant controls active</span>
+            <span className="proc-live"><span />{canManageProcurement ? "Tenant controls active" : "View-only profile"}</span>
             <span className="proc-sync">{data.dashboard?.as_of ? `Updated ${dateLabel(data.dashboard.as_of)}` : "Awaiting data"}</span>
             <button type="button" className="proc-button proc-button--secondary" onClick={() => void load(true)} disabled={refreshing}>{refreshing ? <LoaderCircle className="is-spinning" size={16} /> : <RefreshCw size={16} />}Refresh</button>
-            <button type="button" className="proc-button proc-button--primary" onClick={() => openModal("requisition", { priority: "ROUTINE", quantity: "1", department: "MAINTENANCE" })}><Plus size={16} />New request</button>
+            {canManageProcurement ? <button type="button" className="proc-button proc-button--primary" onClick={() => openModal("requisition", { priority: "ROUTINE", quantity: "1", department: "MAINTENANCE" })}><Plus size={16} />New request</button> : null}
           </div>
         </header>
 

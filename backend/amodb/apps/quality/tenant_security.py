@@ -40,7 +40,6 @@ class TenantContext:
 
 
 _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "AMO_ADMIN": {"qms.*"},
     "QUALITY_MANAGER": {"qms.*"},
     "QUALITY_INSPECTOR": {
         "qms.dashboard.view",
@@ -74,6 +73,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.calendar.view",
         "qms.audit.view",
         "qms.audit.execute",
+        "qms.audit.manage",
         "qms.audit.notice.manage",
         "qms.finding.view",
         "qms.finding.create",
@@ -91,6 +91,26 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.reports.view",
         "qms.reports.export",
         "qms.external.view",
+    },
+    "QUALITY_SUPPORT_OFFICER": {
+        "qms.dashboard.view",
+        "qms.inbox.view",
+        "qms.calendar.view",
+        "qms.audit.view",
+        "qms.finding.view",
+        "qms.car.view",
+        "qms.document.view",
+        "qms.evidence.view",
+        "qms.training.view",
+        "qms.reports.view",
+    },
+    "DOCUMENT_CONTROL_OFFICER": {
+        "qms.dashboard.view",
+        "qms.inbox.view",
+        "qms.document.view",
+        "qms.evidence.view",
+        "qms.evidence.download",
+        "qms.training.view",
     },
     "VIEW_ONLY": {
         "qms.dashboard.view",
@@ -121,6 +141,7 @@ _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"].update(
         "qms.external.view",
         "qms.reports.export",
         "qms.reports.attest_authority",
+        "qms.audit.programme.approve",
     }
 )
 
@@ -175,8 +196,10 @@ def _has_role_permission(user: account_models.User, permission: str) -> bool:
     if _is_platform_superuser(user):
         return False
     role_name = _normalise(getattr(user, "role", ""))
-    if permission == "qms.reports.attest_authority":
+    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
         return role_name == "ACCOUNTABLE_EXECUTIVE"
+    if permission == "qms.audit.programme.quality_review":
+        return role_name == "QUALITY_MANAGER"
     grants = _QUALITY_ROLE_PERMISSIONS.get(role_name, set())
     return any(_permission_matches(grant, permission) for grant in grants)
 
@@ -202,14 +225,36 @@ def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permis
         ).first()
         if not capability_defined:
             return None
+        primary_assignment = db.execute(
+            text("""
+                SELECT 1
+                FROM auth_user_role_assignments ura
+                JOIN auth_role_definitions rd ON rd.id = ura.role_id
+                WHERE ura.amo_id = :amo_id
+                  AND ura.user_id = :user_id
+                  AND ura.is_primary = TRUE
+                  AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
+                  AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
+                  AND rd.is_active = TRUE
+                LIMIT 1
+            """),
+            {"amo_id": amo_id, "user_id": user_id},
+        ).first()
+        if not primary_assignment:
+            # Compatibility during staged rollout: personas remain the source
+            # until the tenant access framework assigns a primary profile.
+            return None
         allowed = db.execute(
             text("""
                 SELECT 1
                 FROM auth_user_role_assignments ura
+                JOIN auth_role_definitions rd ON rd.id = ura.role_id
                 JOIN auth_role_capability_bindings rcb ON rcb.role_id = ura.role_id
                 JOIN auth_capability_definitions cd ON cd.id = rcb.capability_id
                 WHERE ura.amo_id = :amo_id
                   AND ura.user_id = :user_id
+                  AND ura.is_primary = TRUE
+                  AND rd.is_active = TRUE
                   AND cd.code = :permission
                   AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
                   AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
@@ -354,7 +399,7 @@ def require_quality_permission(permission: str) -> Callable[[TenantContext, acco
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_read_db),
     ) -> TenantContext:
-        if permission == "qms.reports.attest_authority":
+        if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
             if not ctx.is_superuser and _has_role_permission(current_user, permission):
                 return ctx
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
@@ -377,7 +422,7 @@ def require_quality_permission(permission: str) -> Callable[[TenantContext, acco
 def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> bool:
     """Return whether the resolved tenant user/support session has a Quality permission."""
     if ctx.is_superuser:
-        if permission == "qms.reports.attest_authority":
+        if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
             return False
         return _support_level_allows(ctx.support_access_level, permission)
     user = db.query(account_models.User).filter(
@@ -387,7 +432,7 @@ def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> 
     ).first()
     if not user or _is_platform_superuser(user):
         return False
-    if permission == "qms.reports.attest_authority":
+    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
         return _has_role_permission(user, permission)
     capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
     if capability_result is not None:

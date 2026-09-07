@@ -112,6 +112,7 @@ export type GovernanceDetail = {
     users: Array<{ id: string; name: string; email: string }>;
     departments: Array<{ id: string; code: string; name: string }>;
     org_units: Array<{ id: string; code: string; name: string; unit_type: string }>;
+    access_profiles: Array<{ id: string; code: string; name: string; category: string }>;
   };
   annotations: Array<Record<string, unknown>>;
   issues: Array<{ code: string; severity: string; count: number; items?: string[] }>;

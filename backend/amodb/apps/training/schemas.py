@@ -185,9 +185,13 @@ class TrainingRequirementBase(BaseModel):
         None,
         description="Required when scope=DEPARTMENT. Must match your personnel/HR department code.",
     )
+    access_profile_id: Optional[str] = Field(
+        None,
+        description="Required when scope=JOB_ROLE. Stable tenant access-profile identifier.",
+    )
     job_role: Optional[str] = Field(
         None,
-        description="Required when scope=JOB_ROLE. Use your standardized role titles.",
+        description="Auditable display-name snapshot for the selected access profile.",
     )
     user_id: Optional[str] = Field(
         None,
@@ -222,6 +226,7 @@ class TrainingRequirementUpdate(BaseModel):
     course_pk: Optional[str] = None
     scope: Optional[TrainingRequirementScope] = None
     department_code: Optional[str] = None
+    access_profile_id: Optional[str] = None
     job_role: Optional[str] = None
     user_id: Optional[str] = None
     is_mandatory: Optional[bool] = None
@@ -244,6 +249,7 @@ class TrainingRequirementRead(TrainingRequirementBase):
     amo_id: str
     course_code: Optional[str] = None
     course_name: Optional[str] = None
+    access_profile_name: Optional[str] = None
     created_by_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime

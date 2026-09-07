@@ -36,23 +36,27 @@ router = APIRouter(prefix="/workspace", tags=["Document Control Document Lifecyc
 
 DocumentType = Literal[
     "MANUAL",
+    "REGULATION",
     "POLICY",
     "PROCEDURE",
     "WORK_INSTRUCTION",
     "FORM",
     "CHECKLIST",
     "REGISTER",
+    "RECORD",
     "EXTERNAL_DOCUMENT",
 ]
 
 DOCUMENT_TYPES = {
     "MANUAL",
+    "REGULATION",
     "POLICY",
     "PROCEDURE",
     "WORK_INSTRUCTION",
     "FORM",
     "CHECKLIST",
     "REGISTER",
+    "RECORD",
     "EXTERNAL_DOCUMENT",
 }
 
@@ -62,12 +66,14 @@ DOCUMENT_TYPES = {
 # profile metadata for reporting and future classification work.
 TYPE_STORAGE_VALUE = {
     "MANUAL": "MANUAL",
+    "REGULATION": "REGULATION",
     "POLICY": "POLICY",
     "PROCEDURE": "PROCEDURE",
     "WORK_INSTRUCTION": "WORK INSTRUCTION",
     "FORM": "FORM",
     "CHECKLIST": "CHECKLIST",
     "REGISTER": "REGISTER",
+    "RECORD": "RECORD",
     "EXTERNAL_DOCUMENT": "EXTERNAL DOCUMENT",
 }
 STRUCTURAL_STORAGE_VALUES = set(TYPE_STORAGE_VALUE.values())
@@ -129,6 +135,8 @@ def _current_document_type(
 
     source = " ".join(filter(None, [manual.manual_type, manual.code, manual.title])).upper()
     if profile and profile.document_class == "EXTERNAL":
+        if "REGULATION" in source or "KCAR" in source:
+            return "REGULATION", "DETECTED"
         return "EXTERNAL_DOCUMENT", "DETECTED"
     if "CHECKLIST" in source or "CHK" in source:
         return "CHECKLIST", "DETECTED"
@@ -136,6 +144,10 @@ def _current_document_type(
         return "FORM", "DETECTED"
     if "REGISTER" in source:
         return "REGISTER", "DETECTED"
+    if "REGULATION" in source or "KCAR" in source:
+        return "REGULATION", "DETECTED"
+    if source.strip() == "RECORD" or " RETAINED RECORD" in source:
+        return "RECORD", "DETECTED"
     if "WORK INSTRUCTION" in source or " QWI " in f" {source} " or " WI " in f" {source} ":
         return "WORK_INSTRUCTION", "DETECTED"
     if "PROCEDURE" in source or " PROC " in f" {source} " or " SOP " in f" {source} ":
@@ -256,10 +268,15 @@ def update_document_type(
     metadata["document_type_override"] = document_type
 
     managed_external = bool(metadata.get("document_type_managed_external_class"))
-    if document_type == "EXTERNAL_DOCUMENT":
+    if document_type in {"EXTERNAL_DOCUMENT", "REGULATION"}:
         profile.document_class = "EXTERNAL"
         metadata["document_type_managed_external_class"] = True
-    elif managed_external and profile.document_class == "EXTERNAL":
+    elif document_type == "RECORD":
+        profile.document_class = "RECORD"
+        metadata["document_type_managed_external_class"] = False
+    elif (managed_external and profile.document_class == "EXTERNAL") or (
+        previous_type == "RECORD" and profile.document_class == "RECORD"
+    ):
         profile.document_class = "INTERNAL"
         metadata["document_type_managed_external_class"] = False
 

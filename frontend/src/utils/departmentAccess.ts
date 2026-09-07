@@ -51,6 +51,22 @@ export function isAdminUser(user: PortalUser | null): boolean {
   );
 }
 
+/**
+ * Return the operational identity with tenant-administration elevation
+ * removed. Admin access is an explicit overlay and must not silently turn a
+ * General User profile into every operational department while it is inactive.
+ */
+export function getOperationalAccessUser(user: PortalUser | null): PortalUser | null {
+  if (!user || !isAdminUser(user) || user.is_superuser || user.role === "SUPERUSER") {
+    return user;
+  }
+  return {
+    ...user,
+    is_amo_admin: false,
+    role: user.role === "AMO_ADMIN" ? "USER" : user.role,
+  };
+}
+
 function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
   if (!user) return null;
   switch (user.role) {
@@ -66,14 +82,23 @@ function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
     case "CERTIFYING_ENGINEER":
     case "CERTIFYING_TECHNICIAN":
     case "TECHNICIAN":
+    case "MAINTENANCE_SUPERVISOR":
+    case "MAINTENANCE_SUPPORT":
       return "maintenance";
     case "QUALITY_MANAGER":
     case "QUALITY_INSPECTOR":
     case "QUALITY_OFFICER":
     case "AUDITOR":
+    case "QUALITY_SUPPORT_OFFICER":
       return "quality";
     case "SAFETY_MANAGER":
+    case "SAFETY_OFFICER":
       return "safety";
+    case "DOCUMENT_CONTROL_OFFICER":
+      return "document-control";
+    case "TECHNICAL_RECORDS_SUPERVISOR":
+    case "TECHNICAL_RECORDS_OFFICER":
+      return "production";
     case "PROCUREMENT_OFFICER":
       return "procurement";
     case "STORES":
@@ -113,7 +138,9 @@ export function getAllowedDepartments(
   }
 
   const departments = new Set<DepartmentId>();
-  if (assignedDepartment) departments.add(assignedDepartment);
+  // Governed module access is authoritative once supplied by the backend;
+  // descriptive department metadata cannot recreate a removed module.
+  if (user?.module_access === undefined && assignedDepartment) departments.add(assignedDepartment);
   for (const dept of getRoleDrivenDepartments(user, assignedDepartment)) {
     departments.add(dept);
   }
@@ -134,7 +161,7 @@ export function getAllowedDepartments(
     "CERTIFYING_TECHNICIAN",
     "TECHNICIAN",
   ]);
-  if (user?.role && procurementCollaborators.has(user.role)) {
+  if (user?.module_access === undefined && user?.role && procurementCollaborators.has(user.role)) {
     departments.add("procurement");
   }
 
@@ -154,5 +181,9 @@ export function isQualityReadOnly(
   user: PortalUser | null,
   assignedDepartment: DepartmentId | null
 ): boolean {
-  return !isAdminUser(user) && assignedDepartment === "quality";
+  if (isAdminUser(user)) return false;
+  if (user?.module_access !== undefined) return user.module_access.quality !== "manage";
+  return assignedDepartment === "quality" && ![
+    "QUALITY_MANAGER", "QUALITY_OFFICER", "QUALITY_INSPECTOR", "AUDITOR",
+  ].includes(user?.role || "");
 }

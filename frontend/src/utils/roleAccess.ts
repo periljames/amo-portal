@@ -7,6 +7,7 @@ export type RoleCapability =
   | "planner"
   | "supervisor"
   | "certifying"
+  | "inspector"
   | "technician"
   | "records"
   | "quality"
@@ -125,21 +126,6 @@ function getDepartmentFromUser(user: PortalUser | null, contextDepartment?: stri
   );
 }
 
-function titleContext(user: PortalUser | null): string {
-  return `${user?.position_title || ""} ${user?.department?.name || ""}`.toLowerCase();
-}
-
-function hasRecordsTitle(user: PortalUser | null): boolean {
-  return /(technical\s*records?|records?\s*clerk|records?\s*officer|records?\s*controller)/.test(titleContext(user));
-}
-
-function hasHrTitle(user: PortalUser | null, department: string | null): boolean {
-  return /(^|\b)(human\s+resources?|hr|payroll)(\b|$)/.test(titleContext(user))
-    || department === "hr"
-    || department === "human-resources"
-    || department === "human_resources";
-}
-
 export function getUserCapabilities(
   user: PortalUser | null,
   contextDepartment?: string | null,
@@ -149,24 +135,26 @@ export function getUserCapabilities(
   const role = user.role as AccountRole;
   const assignedDepartment = getDepartmentFromUser(user, contextDepartment);
 
-  if (user.is_superuser || user.is_amo_admin || role === "SUPERUSER" || role === "AMO_ADMIN") caps.add("admin");
+  // Account administration is a separate control plane. It must never become
+  // an operational planning, maintenance, inspection or release capability.
   if (role === "ACCOUNTABLE_EXECUTIVE") {
     caps.add("management");
     caps.add("publisher");
   }
   if (role === "BASE_MAINTENANCE_MANAGER") caps.add("publisher");
   if (role === "PLANNING_ENGINEER") caps.add("planner");
-  if (["PRODUCTION_ENGINEER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"].includes(role)) caps.add("supervisor");
+  if (["PRODUCTION_ENGINEER", "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER", "MAINTENANCE_SUPERVISOR", "TECHNICAL_RECORDS_SUPERVISOR"].includes(role)) caps.add("supervisor");
   if (role === "CERTIFYING_ENGINEER" || role === "CERTIFYING_TECHNICIAN") caps.add("certifying");
-  if (role === "TECHNICIAN") caps.add("technician");
+  if (role === "TECHNICIAN" || role === "MAINTENANCE_SUPPORT") caps.add("technician");
   if (role === "QUALITY_MANAGER" || role === "QUALITY_INSPECTOR" || role === "QUALITY_OFFICER" || role === "AUDITOR") caps.add("quality");
-  if (role === "SAFETY_MANAGER") caps.add("safety");
+  if (role === "QUALITY_INSPECTOR") caps.add("inspector");
+  if (role === "SAFETY_MANAGER" || role === "SAFETY_OFFICER") caps.add("safety");
   if (role === "PROCUREMENT_OFFICER") caps.add("procurement");
   if (["STORES", "STORES_MANAGER", "STOREKEEPER"].includes(role)) caps.add("stores");
   if (role === "VIEW_ONLY") caps.add("viewer");
-  if (hasHrTitle(user, assignedDepartment) || role === "FINANCE_MANAGER" || role === "ACCOUNTS_OFFICER") caps.add("hr");
+  if (role === "HUMAN_RESOURCES_MANAGER" || role === "HUMAN_RESOURCES_OFFICER") caps.add("hr");
 
-  if (hasRecordsTitle(user) || assignedDepartment === "technical-records") caps.add("records");
+  if (["TECHNICAL_RECORDS_SUPERVISOR", "TECHNICAL_RECORDS_OFFICER", "DOCUMENT_CONTROL_OFFICER"].includes(role)) caps.add("records");
   if (role === "VIEW_ONLY" && assignedDepartment === "production") caps.add("records");
   if (role === "PRODUCTION_ENGINEER") caps.add("records");
 
@@ -184,6 +172,20 @@ export function getRoleDrivenDepartments(
       "planning", "production", "maintenance", "document-control", "quality",
       "reliability", "safety", "procurement", "stores", "workshops", "admin",
     ];
+  }
+  if (user.module_access !== undefined) {
+    const modules = user.module_access;
+    const departments = new Set<DepartmentId>();
+    if (modules.planning) departments.add("planning");
+    if (modules.production || modules.technical_records) departments.add("production");
+    if (modules.maintenance) departments.add("maintenance");
+    if (modules.documents) departments.add("document-control");
+    if (modules.quality) departments.add("quality");
+    if (modules.reliability) departments.add("reliability");
+    if (modules.safety) departments.add("safety");
+    if (modules.procurement) departments.add("procurement");
+    if (modules.stores) departments.add("stores");
+    return Array.from(departments);
   }
   if (caps.has("management")) {
     return [
@@ -234,7 +236,7 @@ const FEATURE_RULES: Record<ModuleFeature, AccessRule> = {
   "production.work-order-execution": { view: ["admin", "supervisor", "certifying", "technician"], edit: ["admin", "supervisor", "certifying", "technician"] },
   "production.findings": { view: ["admin", "supervisor", "certifying", "technician"], edit: ["admin", "supervisor", "certifying", "technician"] },
   "production.materials": { view: ["admin", "supervisor", "certifying", "technician", "stores"], edit: ["admin", "supervisor", "certifying", "technician", "stores"] },
-  "production.review-inspection": { view: ["admin", "supervisor", "certifying"], edit: ["admin", "supervisor", "certifying"] },
+  "production.review-inspection": { view: ["admin", "supervisor", "certifying", "inspector"], edit: ["certifying", "inspector"] },
   "production.release-prep": { view: ["admin", "supervisor", "certifying", "records"], edit: ["admin", "supervisor", "certifying"] },
   "production.compliance-items": { view: ["admin", "supervisor", "certifying", "records"], edit: ["admin", "supervisor"] },
   "production.records.dashboard": { view: ["admin", "supervisor", "certifying", "records", "planner"] },
@@ -253,7 +255,7 @@ const FEATURE_RULES: Record<ModuleFeature, AccessRule> = {
   "maintenance.work-packages": { view: ["admin", "supervisor", "certifying", "technician"] },
   "maintenance.defects": { view: ["admin", "supervisor", "certifying", "technician"] },
   "maintenance.non-routines": { view: ["admin", "supervisor", "certifying", "technician"] },
-  "maintenance.inspections": { view: ["admin", "supervisor", "certifying"] },
+  "maintenance.inspections": { view: ["admin", "supervisor", "certifying", "inspector"] },
   "maintenance.parts-tools": { view: ["admin", "supervisor", "certifying", "technician", "stores"] },
   "maintenance.closeout": { view: ["admin", "supervisor", "certifying"], edit: ["admin", "supervisor", "certifying"] },
   "maintenance.reports": { view: ["admin", "supervisor", "certifying", "technician", "quality"] },
@@ -277,7 +279,7 @@ const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
   "production.manage-board": ["admin", "supervisor"],
   "production.execute-work": ["admin", "supervisor", "certifying", "technician"],
   "production.request-parts": ["admin", "supervisor", "certifying", "technician", "stores"],
-  "production.perform-review": ["admin", "supervisor", "certifying"],
+  "production.perform-review": ["certifying", "inspector"],
   "production.prepare-release": ["admin", "supervisor", "certifying"],
   "production.write-records": ["admin", "supervisor", "certifying", "records"],
   "production.reconcile-records": ["admin", "supervisor"],
@@ -285,7 +287,7 @@ const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
   "maintenance.update-task": ["admin", "supervisor", "certifying", "technician"],
   "maintenance.raise-non-routine": ["admin", "supervisor", "certifying", "technician"],
   "maintenance.request-parts": ["admin", "supervisor", "certifying", "technician", "stores"],
-  "maintenance.perform-inspection": ["admin", "supervisor", "certifying"],
+  "maintenance.perform-inspection": ["certifying", "inspector"],
   "maintenance.closeout": ["admin", "supervisor", "certifying"],
   "maintenance.manage-settings": ["admin", "supervisor"],
   "rostering.create-draft": ["admin", "planner", "supervisor"],
@@ -302,6 +304,32 @@ function hasMatchingCapability(caps: RoleCapability[], expected: RoleCapability[
   return expected.some((cap) => caps.includes(cap));
 }
 
+function featureModule(feature: ModuleFeature): string {
+  return feature.split(".", 1)[0];
+}
+
+function actionModule(action: ModuleAction): string {
+  return action.split(".", 1)[0];
+}
+
+function moduleAllows(user: PortalUser | null, module: string, level: "view" | "manage"): boolean | null {
+  if (!user || user.module_access === undefined) return null;
+  const configured = user.module_access[module];
+  return configured === "manage" || (level === "view" && configured === "view");
+}
+
+function featureModuleAllows(
+  user: PortalUser | null,
+  feature: ModuleFeature,
+  level: "view" | "manage",
+): boolean | null {
+  if (feature.startsWith("production.records.")) {
+    const recordsAccess = moduleAllows(user, "technical_records", level);
+    if (recordsAccess !== null) return recordsAccess;
+  }
+  return moduleAllows(user, featureModule(feature), level);
+}
+
 export function canViewFeature(
   user: PortalUser | null,
   feature: ModuleFeature,
@@ -309,6 +337,8 @@ export function canViewFeature(
 ): boolean {
   const rule = FEATURE_RULES[feature];
   const capabilities = getUserCapabilities(user, contextDepartment);
+  const governed = featureModuleAllows(user, feature, "view");
+  if (governed === false) return false;
   return Boolean(rule && (capabilities.includes("management") || hasMatchingCapability(capabilities, rule.view)));
 }
 
@@ -319,6 +349,8 @@ export function canEditFeature(
 ): boolean {
   const rule = FEATURE_RULES[feature];
   if (!rule) return false;
+  const governed = featureModuleAllows(user, feature, "manage");
+  if (governed === false) return false;
   return hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.edit || rule.view);
 }
 
@@ -327,6 +359,8 @@ export function canPerformAction(
   action: ModuleAction,
   contextDepartment?: string | null,
 ): boolean {
+  const governed = moduleAllows(user, actionModule(action), "manage");
+  if (governed === false) return false;
   return hasMatchingCapability(getUserCapabilities(user, contextDepartment), ACTION_RULES[action] || []);
 }
 
@@ -373,6 +407,7 @@ export function formatCapabilitiesForUi(user: PortalUser | null, contextDepartme
       case "planner": return "Planner";
       case "supervisor": return "Supervisor";
       case "certifying": return "Certifying Staff";
+      case "inspector": return "Quality Inspector";
       case "technician": return "Technician";
       case "records": return "Technical Records";
       case "quality": return "Quality";

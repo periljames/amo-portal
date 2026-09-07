@@ -183,6 +183,30 @@ def test_send_email_passes_attachment_without_persisting_content(db_session, mon
     assert payload not in str(log.context_json).encode()
 
 
+def test_audit_notice_fallback_explains_representative_role_and_controlled_attachment():
+    html_body, text_body = notification_providers._fallback_content(
+        "qms_audit_notice_memo",
+        "Audit Notice - QAR/MO/26/003",
+        {
+            "recipient_name": "Prudence Wamaitha",
+            "recipient_role": "AUDITEE",
+            "audit_ref": "QAR/MO/26/003",
+            "audit_title": "Work Pack Audit",
+            "audit_area": "Maintenance Operations",
+            "planned_start": "2026-09-09",
+            "planned_end": "2026-09-09",
+            "notice_document": "(Notice) QAR-MO-26-003 - Work Pack Audit.pdf",
+            "action_url": "https://portal.example.test/maintenance/amo/quality/audits/audit-id/setup#notice",
+        },
+    )
+
+    assert "auditee representative and coordination contact" in text_body
+    assert "Accountability for the process and records remains" in text_body
+    assert "electronically signed audit notice" in text_body
+    assert "Open controlled audit record" in html_body
+    assert "qms_audit_notice_memo" not in html_body
+
+
 def test_send_email_reuses_successful_correlation_id(db_session, monkeypatch):
     amo = _create_amo(db_session)
     _create_user(db_session, amo.id)

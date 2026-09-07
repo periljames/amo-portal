@@ -27,6 +27,7 @@ from .workspace_service import (
     get_revision,
     get_workflow,
     is_control_user,
+    is_approver,
     latest_revision,
     next_workflow_state,
     profile_defaults,
@@ -428,7 +429,7 @@ def dashboard(
         "capabilities": {
             "read": True,
             "control": is_control_user(current_user),
-            "approve": role_value(current_user) in {"SUPERUSER", "AMO_ADMIN", "QUALITY_MANAGER", "QUALITY_INSPECTOR"},
+            "approve": is_approver(current_user),
         },
         "metrics": {
             "document_records": manual_count,
@@ -1596,7 +1597,9 @@ def create_integration_link(
         workflow = db.query(dm.DocumentWorkflowInstance).filter(dm.DocumentWorkflowInstance.tenant_id == tenant.amo_id, dm.DocumentWorkflowInstance.id == payload.workflow_id, dm.DocumentWorkflowInstance.manual_id == manual.id).first()
         if not workflow:
             raise HTTPException(status_code=400, detail="Workflow does not match the document")
-    if payload.source_module == "QMS" and not (is_control_user(current_user) or getattr(current_user, "is_auditor", False)):
+    if payload.source_module == "QMS" and not (
+        is_control_user(current_user) or role_value(current_user) == "AUDITOR"
+    ):
         raise HTTPException(status_code=403, detail="QMS or Document Control privileges required")
     row = dm.DocumentIntegrationLink(tenant_id=tenant.amo_id, manual_id=manual.id, revision_id=payload.revision_id, change_request_id=payload.change_request_id, workflow_id=payload.workflow_id, source_module=payload.source_module, entity_type=payload.entity_type, entity_id=payload.entity_id, relation_type=payload.relation_type, blocking=payload.blocking, status_snapshot=payload.status_snapshot, metadata_json=dict(payload.metadata), created_by_user_id=current_user.id)
     db.add(row)

@@ -86,6 +86,11 @@ function activeTabFromParams(params: URLSearchParams): DocumentWorkspaceView {
   return TABS.some(([tab]) => tab === requested) ? requested as DocumentWorkspaceView : "overview";
 }
 
+function controlStatus(detail: DocumentDetailResponse): string {
+  const target = detail.document.read_target;
+  return target.control_status || (target.kind === "UNCONTROLLED" ? "CONTROLLED_DRAFT" : target.kind);
+}
+
 export default function DocumentControlRecordPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -149,7 +154,7 @@ export default function DocumentControlRecordPage() {
     <DocumentControlShell
       title={document?.title || "Document workspace"}
       eyebrow={document?.code || "DOCUMENT CONTROL"}
-      subtitle={document ? `${currentRevisionLabel(detail!)} · ${document.read_target.kind} · ${document.profile.owner_department}` : "Controlled document lifecycle workspace"}
+      subtitle={document ? `${currentRevisionLabel(detail!)} · ${controlStatus(detail!)} · ${document.profile.owner_department}` : "Controlled document lifecycle workspace"}
       canControl={canControl}
       actions={document && detail ? <>
         <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library`)}>Back to library</button>
@@ -160,7 +165,7 @@ export default function DocumentControlRecordPage() {
       {loading ? <DocumentControlLoading label="Loading unified document workspace…" /> : null}
       {error ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !error && detail && document ? <div className="dms-document" data-testid="document-workspace">
-        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>Uncontrolled revision.</strong> This content may be reviewed but is not approved for operational use or controlled distribution.</div></div> : null}
+        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>Controlled draft — not yet issued.</strong> {workflow ? "The approval workflow is active." : "The document is registered; start its review workflow below."} Draft views, downloads and printouts are not approved for operational use until publication.</div></div> : null}
 
         <section className="dms-document__identity">
           <div className="dms-document__identity-main">
@@ -170,7 +175,7 @@ export default function DocumentControlRecordPage() {
           <div className="dms-document__identity-meta">
             <div><small>Current issue</small><strong>{currentRevisionLabel(detail)}</strong></div>
             <div><small>Effective</small><strong>{document.latest_revision?.effective_date || "Not effective"}</strong></div>
-            <div><small>Status</small><DocumentControlStatus status={document.read_target.kind} kind={document.read_target.kind === "PUBLISHED" ? "success" : "warning"} /></div>
+            <div><small>Status</small><DocumentControlStatus status={controlStatus(detail)} kind={document.read_target.kind === "PUBLISHED" ? "success" : "warning"} /></div>
             <div><small>Workflow</small><DocumentControlStatus status={workflow?.state || "No active workflow"} kind={statusKind(workflow?.state)} /></div>
           </div>
         </section>

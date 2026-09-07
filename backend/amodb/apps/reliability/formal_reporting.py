@@ -168,7 +168,7 @@ def _amo_id(user: account_models.User) -> str:
 
 
 def _is_privileged(user: account_models.User, allowed: set[str]) -> bool:
-    return bool(getattr(user, "is_superuser", False)) or bool(getattr(user, "is_amo_admin", False)) or _role(user) in allowed
+    return _role(user) in allowed
 
 
 def _require_role(user: account_models.User, allowed: set[str], message: str) -> None:
@@ -842,11 +842,15 @@ def completeness_result(db: Session, report: ReliabilityFormalReport, *, persist
 
 
 def _roles_for_transition(profile: ReliabilityRegulatoryProfile, to_status: str) -> set[str]:
-    workflow = profile.approval_workflow or {}
+    # Stored profile metadata is evidence of the regulatory baseline, not an
+    # authorization override. Runtime approval authority follows the current
+    # organization governance model so historic SUPERUSER/AMO_ADMIN role lists
+    # cannot preserve operational decision rights.
+    _ = profile
     if to_status == FormalReportStatus.TECHNICAL_REVIEW.value:
-        return set(workflow.get("technical_review_roles") or TECHNICAL_REVIEW_ROLES)
+        return set(TECHNICAL_REVIEW_ROLES)
     if to_status == FormalReportStatus.QUALITY_REVIEW.value:
-        return set(workflow.get("quality_review_roles") or QUALITY_REVIEW_ROLES)
+        return set(QUALITY_REVIEW_ROLES)
     if to_status in {
         FormalReportStatus.APPROVAL_PENDING.value,
         FormalReportStatus.APPROVED.value,
@@ -854,7 +858,7 @@ def _roles_for_transition(profile: ReliabilityRegulatoryProfile, to_status: str)
         FormalReportStatus.SUPERSEDED.value,
         FormalReportStatus.WITHDRAWN.value,
     }:
-        return set(workflow.get("approval_roles") or APPROVAL_ROLES)
+        return set(APPROVAL_ROLES)
     return ANALYSIS_ROLES
 
 
@@ -876,7 +880,6 @@ def _transition_report(
         bool((profile.approval_workflow or {}).get("separation_of_duties", True))
         and target in {FormalReportStatus.APPROVED.value, FormalReportStatus.PUBLISHED.value}
         and report.created_by_user_id == user.id
-        and not bool(getattr(user, "is_superuser", False))
     ):
         raise HTTPException(status_code=409, detail="Separation of duties prevents the preparer approving/publishing the same report revision.")
 

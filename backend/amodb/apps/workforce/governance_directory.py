@@ -237,6 +237,11 @@ def _position_read(row):
         description=row.description,
         role_source=role_source,
         role_key=getattr(row, "role_key", None),
+        access_profile_id=str(row.access_profile_id) if getattr(row, "access_profile_id", None) else None,
+        access_profile_name=getattr(getattr(row, "access_profile", None), "display_name", None),
+        access_base_role_key=getattr(getattr(row, "access_profile", None), "base_role_key", None),
+        reports_to_position_id=str(row.reports_to_position_id) if getattr(row, "reports_to_position_id", None) else None,
+        reports_to_position_title=getattr(getattr(row, "reports_to_position", None), "canonical_title", None),
         management_level=management_level,
         can_have_supervisor=hierarchy_roles.can_have_supervisor(row),
         is_locked=role_source == "KCAR_2025",
@@ -245,7 +250,7 @@ def _position_read(row):
     )
 
 
-def _validate_position_references(db: Session, *, amo_id: str, payload):
+def _validate_position_references(db: Session, *, amo_id: str, payload, row_id: str | None = None):
     if payload.job_family_id and db.query(governance_models.WorkforceJobFamily.id).filter(
         governance_models.WorkforceJobFamily.amo_id == amo_id,
         governance_models.WorkforceJobFamily.id == payload.job_family_id,
@@ -256,6 +261,36 @@ def _validate_position_references(db: Session, *, amo_id: str, payload):
         governance_models.WorkforceGrade.id == payload.grade_id,
     ).first() is None:
         raise ValueError("Grade not found")
+    if payload.access_profile_id:
+        profile = db.query(account_models.AuthRoleDefinition).filter(
+            account_models.AuthRoleDefinition.id == payload.access_profile_id,
+            account_models.AuthRoleDefinition.amo_id == amo_id,
+            account_models.AuthRoleDefinition.is_active.is_(True),
+        ).first()
+        if profile is None:
+            raise ValueError("Access profile not found in this tenant")
+        if profile.base_role_key in {None, "SUPERUSER", "AMO_ADMIN"}:
+            raise ValueError("Administration cannot be inherited from a workforce position")
+    if payload.reports_to_position_id:
+        if row_id and str(payload.reports_to_position_id) == str(row_id):
+            raise ValueError("A position cannot report to itself")
+        parent = db.query(governance_models.WorkforcePosition).filter(
+            governance_models.WorkforcePosition.id == payload.reports_to_position_id,
+            governance_models.WorkforcePosition.amo_id == amo_id,
+            governance_models.WorkforcePosition.is_active.is_(True),
+        ).first()
+        if parent is None:
+            raise ValueError("Reports-to position not found in this tenant")
+        current = parent
+        seen: set[str] = set()
+        while current is not None:
+            current_id = str(current.id)
+            if row_id and current_id == str(row_id):
+                raise ValueError("This reporting line would create a position cycle")
+            if current_id in seen:
+                raise ValueError("The existing position hierarchy contains a cycle")
+            seen.add(current_id)
+            current = current.reports_to_position
 
 
 def _validate_unique_position_fields(
@@ -287,6 +322,8 @@ def list_positions(db: Session, *, amo_id: str, include_inactive: bool = False):
     query = db.query(governance_models.WorkforcePosition).options(
         joinedload(governance_models.WorkforcePosition.job_family),
         joinedload(governance_models.WorkforcePosition.grade),
+        joinedload(governance_models.WorkforcePosition.access_profile),
+        joinedload(governance_models.WorkforcePosition.reports_to_position),
     ).filter(governance_models.WorkforcePosition.amo_id == amo_id)
     if not include_inactive:
         query = query.filter(governance_models.WorkforcePosition.is_active.is_(True))
@@ -296,7 +333,7 @@ def list_positions(db: Session, *, amo_id: str, include_inactive: bool = False):
 
 
 def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = None):
-    _validate_position_references(db, amo_id=amo_id, payload=payload)
+    _validate_position_references(db, amo_id=amo_id, payload=payload, row_id=row_id)
     row = None
     if row_id:
         row = db.query(governance_models.WorkforcePosition).filter(
@@ -306,14 +343,46 @@ def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = N
         if row is None:
             raise ValueError("Governed Workforce record not found")
     regulatory = row is not None and str(row.role_source or "TENANT") == "KCAR_2025"
+    selected_profile = None
+    if payload.access_profile_id:
+        selected_profile = db.query(account_models.AuthRoleDefinition).filter(
+            account_models.AuthRoleDefinition.id == payload.access_profile_id,
+            account_models.AuthRoleDefinition.amo_id == amo_id,
+            account_models.AuthRoleDefinition.is_active.is_(True),
+        ).first()
+        if selected_profile and selected_profile.is_regulated and not (
+            regulatory and row.role_key == selected_profile.tenant_code
+        ):
+            raise ValueError(
+                "A prescribed management access profile may only be linked to its matching protected Workforce position"
+            )
+        reference_template = (
+            access_control.TEMPLATES_BY_CODE.get(str(row.role_key))
+            if row is not None and row.role_key
+            else None
+        )
+        if reference_template and selected_profile.base_role_key != reference_template["base"]:
+            raise ValueError(
+                "This reference position requires an access profile with the same stable persona; clone its existing profile to change module access"
+            )
+    if selected_profile is None and not regulatory:
+        raise ValueError("Select the tenant access profile governed by this position")
     code = payload.code.strip().upper()
     title = payload.canonical_title.strip()
-    role_key = row.role_key if regulatory else payload.tenant_function
+    # Reference positions keep their stable organization identity when their
+    # tenant-editable title, grade, reporting line or profile is changed. The
+    # previous implementation erased keys such as HANGAR_SUPERVISOR on edit,
+    # allowing reconciliation to create a duplicate position later.
+    role_key = row.role_key if row is not None and row.role_key else payload.tenant_function
     if regulatory:
         if code != row.code or title != row.canonical_title:
             raise ValueError("KCAR position identity is protected; only its family, grade and description may be edited")
         if payload.management_level != row.management_level or payload.tenant_function:
             raise ValueError("KCAR management classification is protected")
+        if payload.access_profile_id and payload.access_profile_id != row.access_profile_id:
+            raise ValueError("KCAR access persona is protected")
+        if payload.reports_to_position_id != row.reports_to_position_id:
+            raise ValueError("KCAR management reporting lines are protected")
         if not payload.is_active or not payload.is_supervisory:
             raise ValueError("Required KCAR management positions must remain active and supervisory")
     _validate_unique_position_fields(
@@ -339,7 +408,15 @@ def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = N
             payload.is_supervisory or payload.management_level in {"SUPERVISOR", "MANAGER", "EXECUTIVE"}
         )
         row.is_active = payload.is_active
+        row.access_profile_id = payload.access_profile_id
+        row.reports_to_position_id = payload.reports_to_position_id
     db.flush()
+    hierarchy_roles.sync_current_position_accounts(
+        db,
+        amo_id=amo_id,
+        position=row,
+        on_date=_today(db, amo_id=amo_id),
+    )
     if not hierarchy_roles.can_have_supervisor(row):
         hierarchy_roles.clear_current_management_supervisors(
             db,
@@ -348,6 +425,7 @@ def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = N
             on_date=_today(db, amo_id=amo_id),
         )
         db.flush()
+    db.refresh(row)
     return _position_read(row)
 
 

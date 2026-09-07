@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts import role_registry
+from amodb.apps.accounts import access_control
 from amodb.apps.manuals import models as manual_models
 from amodb.apps.manuals.core_router import _tenant_by_slug
 from amodb.security import get_current_actor_id
@@ -15,20 +15,16 @@ from amodb.security import get_current_actor_id
 from . import domain_models
 
 
-# Use only roles that exist in the authoritative AccountRole enum. AUDITOR is
-# intentionally read-only and cannot mutate document governance. A future dedicated
-# Document Control Officer role must be introduced through the shared RBAC/capability
-# model and migration rather than accepted here as an unprovisioned string.
+# Use only roles that exist in the authoritative AccountRole enum. AUDITOR remains
+# execution-only; Quality Officer may perform controlled intake and preparation but
+# does not receive the narrower approval authority below.
 CONTROL_ROLES = {
-    "SUPERUSER",
-    "AMO_ADMIN",
     "QUALITY_MANAGER",
-    "QUALITY_INSPECTOR",
+    "QUALITY_OFFICER",
+    "DOCUMENT_CONTROL_OFFICER",
 }
 
 APPROVER_ROLES = {
-    "SUPERUSER",
-    "AMO_ADMIN",
     "ACCOUNTABLE_EXECUTIVE",
     "QUALITY_MANAGER",
 }
@@ -85,30 +81,41 @@ def role_value(user: account_models.User) -> str:
     return str(getattr(role, "value", role or "")).upper()
 
 
+def role_assignment_tokens(db: Session, user: account_models.User) -> list[str]:
+    """Return stable and legacy tokens that may target a governed responsibility.
+
+    New role-based document assignments persist the tenant access-profile code.
+    Legacy rows may still contain an AccountRole value or an old display label,
+    so those values remain readable during the transition. Renaming a profile
+    never changes its tenant code and therefore cannot detach new assignments.
+    """
+    tokens: set[str] = set()
+    legacy_role = role_value(user)
+    if legacy_role:
+        tokens.update({legacy_role, legacy_role.replace("_", " "), legacy_role.replace("_", " ").title()})
+    profile = access_control.primary_access_profile(db, user=user)
+    if profile:
+        if profile.tenant_code:
+            tokens.add(str(profile.tenant_code).upper())
+        if profile.display_name:
+            tokens.add(str(profile.display_name).strip())
+    return sorted(value for value in tokens if value)
+
+
 def is_control_user(user: account_models.User) -> bool:
-    return bool(
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or role_value(user) in CONTROL_ROLES
-    )
+    return role_value(user) in CONTROL_ROLES
 
 
 def is_approver(user: account_models.User) -> bool:
     return bool(
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or role_value(user) in APPROVER_ROLES
+        role_value(user) in APPROVER_ROLES
     )
 
 
 def is_accountable_approver(user: account_models.User) -> bool:
     role = role_value(user)
-    inferred = role_registry.infer_regulated_role(getattr(user, "position_title", None))
     return bool(
-        getattr(user, "is_superuser", False)
-        or getattr(user, "is_amo_admin", False)
-        or role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE.value
-        or inferred == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE
+        role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE.value
     )
 
 
@@ -338,14 +345,22 @@ def serialize_manual(
         "status": manual.status,
         "current_published_revision_id": manual.current_published_rev_id,
         "profile": serialize_profile(profile, manual),
+        "current_revision": serialize_revision(target_revision) if target_kind == "PUBLISHED" else None,
         "latest_revision": serialize_revision(latest),
         "read_target": {
             "revision_id": target_revision.id if target_revision else None,
             "kind": target_kind,
+            "control_status": (
+                "PUBLISHED"
+                if target_kind == "PUBLISHED"
+                else "CONTROLLED_DRAFT"
+                if target_kind == "UNCONTROLLED"
+                else "NO_READABLE_REVISION"
+            ),
             "label": (
                 "Read current issue"
                 if target_kind == "PUBLISHED"
-                else "Read uncontrolled draft"
+                else "Review controlled draft"
                 if target_kind == "UNCONTROLLED"
                 else "No readable revision"
             ),

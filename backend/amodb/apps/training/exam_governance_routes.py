@@ -19,7 +19,13 @@ from . import governance_models as models
 from . import governance_rules
 from . import governance_service
 from . import models as legacy_models
-from .permissions import TrainingCapability as Cap, require_not_self_approval, require_training_capability, tenant_id_for
+from .permissions import (
+    TrainingCapability as Cap,
+    has_training_capability,
+    require_not_self_approval,
+    require_training_capability,
+    tenant_id_for,
+)
 
 
 def _utcnow() -> datetime:
@@ -291,8 +297,18 @@ def install_training_exam_governance_routes(router_module) -> None:
     ):
         amo_id = tenant_id_for(current_user)
         attempt = governance_service._tenant_row(db, models.TrainingExamAttempt, amo_id=amo_id, row_id=attempt_id, label="Exam attempt")
-        if str(attempt.user_id) != str(current_user.id) and not getattr(current_user, "is_amo_admin", False):
-            raise HTTPException(status_code=403, detail="You cannot record a security event against another learner's attempt.")
+        if (
+            str(attempt.user_id) != str(current_user.id)
+            and not has_training_capability(
+                db,
+                user=current_user,
+                capability=Cap.ASSESSMENT_PERFORM,
+            )
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Recording a security event for another learner requires the training.assessment.perform capability.",
+            )
         row = models.TrainingExamSecurityEvent(amo_id=amo_id, attempt_id=attempt.id, recorded_by_user_id=str(current_user.id), **payload.model_dump())
         db.add(row); db.commit(); db.refresh(row)
         return governance_service._dict(row)

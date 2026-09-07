@@ -30,10 +30,11 @@ from .schemas import (
 )
 
 PROGRAM_WRITE_ROLES = [
-    "SUPERUSER",
-    "AMO_ADMIN",
     "BASE_MAINTENANCE_MANAGER",
+    "LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER",
     "PLANNING_ENGINEER",
+    "PRODUCTION_ENGINEER",
 ]
 
 router = APIRouter(

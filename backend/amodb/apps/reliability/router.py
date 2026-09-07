@@ -54,8 +54,6 @@ def _normalize_ehm_pagination(limit: int, offset: int) -> tuple[int, int]:
 
 def _can_export_fracas(current_user: account_models.User, case: reliability_models.FRACASCase) -> bool:
     if current_user.role in {
-        account_models.AccountRole.SUPERUSER,
-        account_models.AccountRole.AMO_ADMIN,
         account_models.AccountRole.QUALITY_MANAGER,
     }:
         return True
@@ -77,7 +75,6 @@ def _ensure_ehm_upload_path(path: Path) -> Path:
     return resolved
 
 PART_MOVEMENT_ROLES = [
-    account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PLANNING_ENGINEER,
     account_models.AccountRole.PRODUCTION_ENGINEER,
     account_models.AccountRole.CERTIFYING_ENGINEER,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
@@ -32,6 +33,7 @@ router = APIRouter(
 
 
 class ApprovedPublicationIntake(BaseModel):
+    approval_kind: Literal["INTERNAL", "AUTHORITY"] = "AUTHORITY"
     authority_name: str = Field(default="Kenya Civil Aviation Authority", min_length=2, max_length=255)
     approval_reference: str = Field(min_length=2, max_length=255)
     approval_date: date
@@ -115,7 +117,6 @@ def approve_existing_publication_intake(
     revision.published_at = approval_timestamp
     revision.effective_date = effective_date
     revision.immutable_locked = True
-    revision.requires_authority_approval_bool = True
     revision.authority_approval_ref = payload.approval_reference.strip()
     manual.current_published_rev_id = revision.id
     manual.status = "ACTIVE"
@@ -131,6 +132,7 @@ def approve_existing_publication_intake(
     metadata = dict(profile.metadata_json or {})
     metadata["approved_intake"] = {
         "authority_name": payload.authority_name.strip(),
+        "approval_kind": payload.approval_kind,
         "approval_reference": payload.approval_reference.strip(),
         "approval_date": payload.approval_date.isoformat(),
         "effective_date": effective_date.isoformat(),
@@ -145,8 +147,11 @@ def approve_existing_publication_intake(
         distribution_policy.setdefault("acknowledgement_due_days", 10)
         metadata["distribution_policy"] = distribution_policy
     profile.metadata_json = metadata
-    profile.regulated_flag = True
-    profile.requires_authority_approval = True
+    is_authority_approval = payload.approval_kind == "AUTHORITY"
+    revision.requires_authority_approval_bool = is_authority_approval
+    if is_authority_approval:
+        profile.regulated_flag = True
+        profile.requires_authority_approval = True
     profile.acknowledgement_required = payload.acknowledgement_required
     profile.version = max(1, int(profile.version or 0) + 1)
 
@@ -169,7 +174,7 @@ def approve_existing_publication_intake(
         db.flush()
     from_state = workflow.state
     workflow.state = "PUBLISHED"
-    workflow.requires_authority = True
+    workflow.requires_authority = is_authority_approval
     workflow.training_readiness_status = "NOT_REQUIRED"
     workflow.qms_readiness_status = "READY"
     workflow.distribution_readiness_status = "PENDING" if payload.notify_eligible_users else "NOT_REQUIRED"
@@ -181,7 +186,7 @@ def approve_existing_publication_intake(
         dm.DocumentWorkflowDecision(
             tenant_id=tenant.amo_id,
             workflow_id=workflow.id,
-            step_code="APPROVED_SOURCE_INTAKE",
+            step_code="APPROVED_SOURCE_INTAKE" if is_authority_approval else "INTERNAL_APPROVED_SOURCE_INTAKE",
             decision="APPROVED_AND_PUBLISHED",
             actor_user_id=current_user.id,
             from_state=from_state,
@@ -207,7 +212,7 @@ def approve_existing_publication_intake(
         )
         .first()
     )
-    if not authority_record:
+    if is_authority_approval and not authority_record:
         db.add(
             dm.DocumentAuthoritySubmission(
                 tenant_id=tenant.amo_id,
@@ -237,7 +242,8 @@ def approve_existing_publication_intake(
             event_name="revision.approved_intake",
             payload_json={
                 "manual_id": manual.id,
-                "authority": payload.authority_name.strip(),
+                "approving_function": payload.authority_name.strip(),
+                "approval_kind": payload.approval_kind,
                 "approval_reference": payload.approval_reference.strip(),
             },
         )
@@ -252,7 +258,8 @@ def approve_existing_publication_intake(
         {
             "manual_id": manual.id,
             "from_state": from_state,
-            "authority_name": payload.authority_name.strip(),
+            "approving_function": payload.authority_name.strip(),
+            "approval_kind": payload.approval_kind,
             "approval_reference": payload.approval_reference.strip(),
             "approval_date": payload.approval_date.isoformat(),
             "effective_date": effective_date.isoformat(),

@@ -6,7 +6,6 @@ export function canExecuteAssignedAudit(audit?: Pick<QMSAuditOut, "lead_auditor_
   if (!hasQmsRolePermission("qms.audit.execute") && !hasQmsRolePermission("qms.audit.manage")) return false;
   const user = getCachedUser();
   if (!user) return false;
-  if (user.is_amo_admin || user.role === "AMO_ADMIN") return true;
   if (!audit) return true;
   return [audit.lead_auditor_user_id, audit.observer_auditor_user_id, audit.assistant_auditor_user_id].includes(user.id);
 }
@@ -18,7 +17,6 @@ export function canGovernAudit(): boolean {
 export function canCompleteAuditFieldwork(audit?: Pick<QMSAuditOut, "lead_auditor_user_id"> | null): boolean {
   const user = getCachedUser();
   if (!user || (!hasQmsRolePermission("qms.audit.execute") && !hasQmsRolePermission("qms.audit.manage"))) return false;
-  if (user.is_amo_admin || user.role === "AMO_ADMIN") return true;
   return Boolean(audit?.lead_auditor_user_id && audit.lead_auditor_user_id === user.id);
 }
 

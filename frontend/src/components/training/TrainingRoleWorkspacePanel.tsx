@@ -33,10 +33,7 @@ type WorkspacePayload = {
   action_queue: WorkspaceAction[];
 };
 
-const coordinatorRoles = new Set(["SUPERUSER", "AMO_ADMIN", "QUALITY_MANAGER"]);
 const managerRoles = new Set([
-  "SUPERUSER",
-  "AMO_ADMIN",
   "ACCOUNTABLE_EXECUTIVE",
   "BASE_MAINTENANCE_MANAGER",
   "LINE_MAINTENANCE_MANAGER",
@@ -71,10 +68,10 @@ const TrainingRoleWorkspacePanel = () => {
   const user = getCachedUser();
   const mode = useMemo<"COORDINATOR" | "MANAGER" | null>(() => {
     const role = String(user?.role || "").toUpperCase();
-    if (coordinatorRoles.has(role)) return "COORDINATOR";
+    if (user?.capability_codes?.includes("training.course.manage")) return "COORDINATOR";
     if (managerRoles.has(role)) return "MANAGER";
     return null;
-  }, [user?.role]);
+  }, [user?.capability_codes, user?.role]);
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
