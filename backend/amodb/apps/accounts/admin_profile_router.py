@@ -281,6 +281,16 @@ def _active_session(
 
 def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]:
     _ensure_schema(db)
+    implicit = _is_implicit_admin(user)
+    if implicit:
+        return {
+            "eligible": True,
+            "active": True,
+            "session_id": None,
+            "expires_at": None,
+            "grant_type": "PERMANENT",
+            "reason": "Standing AMO administrator assigned by the platform superuser",
+        }
     now = _utcnow()
     auth_session_id = _auth_session_id(user)
     db.execute(
@@ -305,24 +315,23 @@ def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]
         """),
         {"now": now, "amo_id": str(amo.id)},
     )
-    implicit = _is_implicit_admin(user)
-    grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
+    grant = _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
     session = _active_session(
         db,
         amo_id=str(amo.id),
         user_id=str(user.id),
         auth_session_id=auth_session_id,
-        implicit_admin=implicit,
+        implicit_admin=False,
         now=now,
     )
-    eligible = implicit or grant is not None
+    eligible = grant is not None
     return {
         "eligible": eligible,
         "active": bool(session),
         "session_id": session.get("id") if session else None,
         "expires_at": session.get("expires_at") if session else None,
-        "grant_type": "PERMANENT" if implicit else (grant.get("grant_type") if grant else None),
-        "reason": "Existing AMO administrator" if implicit else (grant.get("reason") if grant else None),
+        "grant_type": grant.get("grant_type") if grant else None,
+        "reason": grant.get("reason") if grant else None,
     }
 
 
@@ -367,11 +376,15 @@ def activate_admin_profile(
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
+    if _is_implicit_admin(current_user):
+        # Standing authority is assigned by the platform superuser and is
+        # already active. Do not create a misleading temporary session row.
+        db.commit()
+        return _state(db, amo=amo, user=current_user)
     now = _utcnow()
     auth_session_id = _auth_session_id(current_user)
-    implicit = _is_implicit_admin(current_user)
-    grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(current_user.id), now=now)
-    if not implicit and not grant:
+    grant = _eligible_grant(db, amo_id=str(amo.id), user_id=str(current_user.id), now=now)
+    if not grant:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No approved administrator grant is active for this user.")
 
     db.execute(
@@ -439,6 +452,11 @@ def deactivate_admin_profile(
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
+    if _is_implicit_admin(current_user):
+        # A user cannot deactivate a standing platform grant from inside the
+        # tenant. The platform superuser must revoke the overlay explicitly.
+        db.commit()
+        return _state(db, amo=amo, user=current_user)
     now = _utcnow()
     auth_session_id = _auth_session_id(current_user)
     db.execute(

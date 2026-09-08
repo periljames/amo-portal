@@ -24,12 +24,16 @@ def _is_current_implicit_admin(user: models.User) -> bool:
 
 
 def active_admin_profile_session(db: Session, user: models.User, amo: models.AMO) -> bool:
-    """Return whether this exact authenticated tenant session is elevated.
+    """Return whether the user has standing or session-scoped admin authority.
 
-    Existing AMO administrators use grantless rows only while they remain
-    standing administrators. Approved grantees use rows linked to a currently
-    active grant. Concurrent logins for the same account never share elevation.
+    Standing AMO administrators are appointed and revoked by the platform
+    superuser, so their authority does not depend on a temporary activation
+    row. Approved delegates use rows linked to a currently active grant;
+    concurrent logins for the same delegated account never share elevation.
     """
+    if _is_current_implicit_admin(user):
+        return True
+
     auth_session_id = str(
         getattr(user, "auth_session_id", None)
         or getattr(user, "_auth_session_id", None)
@@ -71,7 +75,7 @@ def active_admin_profile_session(db: Session, user: models.User, amo: models.AMO
                 "amo_id": str(amo.id),
                 "user_id": str(user.id),
                 "auth_session_id": auth_session_id,
-                "implicit_admin": _is_current_implicit_admin(user),
+                "implicit_admin": False,
                 "now": datetime.now(timezone.utc),
             },
         ).first() is not None

@@ -30,6 +30,7 @@ from amodb.apps.reliability import models as reliability_models  # noqa: E402
 from amodb.apps.audit import models as audit_models  # noqa: E402
 from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.notifications import models as notification_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
@@ -47,6 +48,10 @@ def db_session():
             account_models.AMOAsset.__table__,
             account_models.Department.__table__,
             account_models.User.__table__,
+            account_models.AuthCapabilityDefinition.__table__,
+            account_models.AuthRoleDefinition.__table__,
+            account_models.AuthRoleCapabilityBinding.__table__,
+            account_models.AuthUserRoleAssignment.__table__,
             account_models.IdempotencyKey.__table__,
             account_models.UserActiveContext.__table__,
             account_models.AuthorisationType.__table__,
@@ -91,6 +96,10 @@ def db_session():
             quality_models.CARResponse.__table__,
             quality_models.CARAttachment.__table__,
             quality_models.QMSNotification.__table__,
+            quality_people_models.QualityPrivilegeRule.__table__,
+            quality_people_models.QualityPrivilege.__table__,
+            quality_people_models.QualityPrivilegeDecision.__table__,
+            quality_people_models.QualityIndependenceDeclaration.__table__,
             notification_models.EmailLog.__table__,
             integration_models.IntegrationConfig.__table__,
             integration_models.IntegrationOutboundEvent.__table__,

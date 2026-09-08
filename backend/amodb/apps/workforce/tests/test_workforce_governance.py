@@ -71,13 +71,18 @@ def test_kcar_2025_management_catalogue_and_reporting_rule() -> None:
         "QUALITY_MANAGER",
         "SAFETY_MANAGER",
     ]
-    assert all(
+    assert [
         hierarchy_roles.can_have_supervisor(
-            SimpleNamespace(management_level=role["management_level"])
-        ) is False
+            SimpleNamespace(
+                role_key=role["key"],
+                management_level=role["management_level"],
+            )
+        )
         for role in hierarchy_roles.KCAR_ROLES
-    )
-    assert hierarchy_roles.can_have_supervisor(SimpleNamespace(management_level="SUPERVISOR")) is True
+    ] == [False, True, True, True, True, True]
+    assert hierarchy_roles.can_have_supervisor(
+        SimpleNamespace(role_key="LINE_MAINTENANCE_SUPERVISOR", management_level="SUPERVISOR")
+    ) is True
     assert hierarchy_roles.TENANT_FUNCTION_KEYS == {
         "HUMAN_RESOURCES",
         "INFORMATION_TECHNOLOGY",

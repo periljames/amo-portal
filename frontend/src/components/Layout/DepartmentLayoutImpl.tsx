@@ -304,6 +304,10 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = getCachedUser();
+  const standingAdmin = Boolean(
+    currentUser && !currentUser.is_superuser
+    && (currentUser.is_amo_admin || currentUser.role === "AMO_ADMIN"),
+  );
   const identity = `${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
   const pinnedKey = `amo_sidebar_pinned:${identity}`;
   const widthKey = `amo_sidebar_width:${identity}`;
@@ -339,9 +343,9 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       user: currentUser,
       contextDepartment: activeDepartment,
       activeDepartment,
-      adminModeActive: Boolean(adminProfile?.active),
+      adminModeActive: standingAdmin || Boolean(adminProfile?.active),
     }),
-    [activeDepartment, adminProfile?.active, amoCode, currentUser],
+    [activeDepartment, adminProfile?.active, amoCode, currentUser, standingAdmin],
   );
   const leaves = useMemo(() => leafItems(navigation), [navigation]);
   const homePath = navigation[0]?.items.find((item) => item.id === "home")?.path || `/maintenance/${encodeURIComponent(amoCode)}`;
@@ -621,7 +625,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                     <strong>{labelForDepartment(activeDepartment)}</strong>
                     <span>{brand.name || amoCode.toUpperCase()}</span>
                   </div>
-                  {adminProfile?.active ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Admin profile</span> : null}
+                  {standingAdmin ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> AMO administrator</span> : adminProfile?.active ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Delegated admin</span> : null}
                 </div>
 
                 <div className="tenant-shell__topbar-actions">
@@ -640,7 +644,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                     {profileOpen ? (
                       <div className="tenant-shell__profile-menu" role="menu">
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
-                        {adminProfile?.eligible ? (
+                        {adminProfile?.eligible && !standingAdmin ? (
                           <button type="button" role="menuitem" onClick={() => void toggleAdminProfile()} disabled={adminProfileBusy}>
                             {adminProfile.active ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
                             {adminProfileBusy ? "Updating admin profile…" : adminProfile.active ? "Admin profile Off" : "Admin profile On"}

@@ -48,6 +48,20 @@ ALL_CAPABILITIES = [
     "reliability.audit.read",
 ]
 
+AMO_ADMIN_CONTROL_CAPABILITIES = {
+    "reliability.read",
+    "reliability.source.manage",
+    "reliability.ingest",
+    "reliability.data_quality.resolve",
+    "reliability.programme.manage",
+    "reliability.metric.manage",
+    "reliability.meeting.manage",
+    "reliability.change.manage",
+    "reliability.handoff.manage",
+    "reliability.authority.prepare",
+    "reliability.audit.read",
+}
+
 FRACAS_TRANSITIONS: Dict[str, set[str]] = {
     "DETECTED": {"TRIAGE"},
     "TRIAGE": {"ACCEPTED", "REJECTED", "MERGED"},
@@ -208,6 +222,12 @@ def capabilities_for_user(db: Session, user: account_models.User) -> List[str]:
         # identity is never a tenant approval or operational-management role.
         return ["reliability.read", "reliability.audit.read"]
     tenant_id(user)
+    if bool(
+        getattr(user, "is_amo_admin", False)
+        or str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
+        == "AMO_ADMIN"
+    ):
+        return sorted(AMO_ADMIN_CONTROL_CAPABILITIES)
     return sorted(
         code
         for code in access_control.capability_codes_for_user(db, user=user)

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getContext } from "../services/auth";
+import { getCachedUser, getContext } from "../services/auth";
 import { getTenantAccessFramework } from "../services/accessProfiles";
 import {
   applyAdminUserEmploymentAction,
@@ -93,6 +93,8 @@ const AdminUserDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const ctx = getContext();
+  const currentUser = useMemo(() => getCachedUser(), []);
+  const isPlatformSuperuser = Boolean(currentUser?.is_superuser);
   const resolvedAmoCode = amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const resolvedUserId = userId ?? "";
 
@@ -102,6 +104,7 @@ const AdminUserDetailPage: React.FC = () => {
   const [profileTitle, setProfileTitle] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
   const [profileSecondaryPhone, setProfileSecondaryPhone] = useState("");
+  const [profileStandingAdmin, setProfileStandingAdmin] = useState(false);
   const [notifySubject, setNotifySubject] = useState("QMS user notification");
   const [notifyMessage, setNotifyMessage] = useState("");
   const [reviewTitle, setReviewTitle] = useState("Authorization review");
@@ -162,9 +165,10 @@ const AdminUserDetailPage: React.FC = () => {
     setProfileTitle(user.position_title || "");
     setProfilePhone(user.phone || "");
     setProfileSecondaryPhone(user.secondary_phone || "");
+    setProfileStandingAdmin(Boolean(user.is_amo_admin));
     setLifecycleDepartmentId(user.department_id || "");
     setLifecycleTitle(user.position_title || "");
-  }, [user?.id]);
+  }, [user]);
 
   const updateUserMutation = useMutation({
     mutationFn: (payload: AdminUserUpdatePayload) => updateAdminUser(resolvedUserId, payload),
@@ -335,10 +339,11 @@ const AdminUserDetailPage: React.FC = () => {
                 {user.is_superuser ? <div className="aum-note">Platform superuser access is ROOT-scoped and cannot be converted to a tenant profile.</div> : <label className="aum-field"><span>Tenant access profile</span><select className="aum-select" value={profileAccessId} onChange={(event) => setProfileAccessId(event.target.value)}><option value="">Select profile</option>{accessProfiles.map((profile) => <option key={profile.id} value={profile.id} disabled={profile.is_regulated && profile.id !== user.access_profile_id}>{profile.is_regulated ? "KCAR 2025 appointment · " : ""}{profile.display_name}</option>)}</select><small>Prescribed profiles are assigned through Workforce appointments. Supporting profiles control module access; personal authorization remains separate.</small></label>}
                 <label className="aum-field"><span>Department</span><select className="aum-select" value={profileDepartmentId} onChange={(event) => setProfileDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map((department: AdminDepartmentRead) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
                 <label className="aum-field"><span>Employment / display title</span><input className="aum-input" value={profileTitle} onChange={(event) => setProfileTitle(event.target.value)} /><small>Descriptive only; changing this text cannot elevate access.</small></label>
-                {!user.is_superuser ? <div className="aum-note">Tenant administrator: {user.is_amo_admin ? "permanent overlay active" : "not assigned"}. Grant or revoke this overlay only through Access governance, with Accountable Executive and Quality Manager approval.</div> : null}
+                {!user.is_superuser && isPlatformSuperuser ? <label className="aum-field"><span>Standing AMO Administrator</span><select className="aum-select" value={profileStandingAdmin ? "yes" : "no"} onChange={(event) => setProfileStandingAdmin(event.target.value === "yes")}><option value="no">Not assigned</option><option value="yes">Assigned</option></select><small>Only the platform superuser can grant or revoke this standing tenant-wide privilege. Regulated decisions remain with the prescribed postholder.</small></label> : null}
+                {!user.is_superuser && !isPlatformSuperuser ? <div className="aum-note">Standing AMO Administrator: {user.is_amo_admin ? "assigned by platform superuser" : "not assigned"}. Delegated administration is managed separately in Administrator governance.</div> : null}
                 <label className="aum-field"><span>Primary phone</span><input className="aum-input" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
                 <label className="aum-field"><span>Secondary phone</span><input className="aum-input" value={profileSecondaryPhone} onChange={(event) => setProfileSecondaryPhone(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" disabled={!user.is_superuser && !profileAccessId} onClick={() => updateUserMutation.mutate({ access_profile_id: user.is_superuser ? undefined : profileAccessId, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null })}>
+                <button type="button" className="aum-button aum-button--primary" disabled={!user.is_superuser && !profileAccessId} onClick={() => updateUserMutation.mutate({ access_profile_id: user.is_superuser ? undefined : profileAccessId, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null, is_amo_admin: isPlatformSuperuser && !user.is_superuser ? profileStandingAdmin : undefined })}>
                   Save profile changes
                 </button>
               </div>

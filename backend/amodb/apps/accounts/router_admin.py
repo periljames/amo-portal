@@ -2045,10 +2045,10 @@ def create_user_admin(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Select an active tenant access profile. Raw account-role creation is retired.",
         )
-    if payload.is_amo_admin:
+    if payload.is_amo_admin and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant-administrator access must use the governed administrator-grant workflow.",
+            detail="Only the platform superuser can assign standing tenant-administrator access.",
         )
     if payload.is_auditor:
         raise HTTPException(
@@ -2057,7 +2057,11 @@ def create_user_admin(
         )
 
     try:
-        user = services.create_user(db, payload)
+        user = services.create_user(
+            db,
+            payload,
+            allow_standing_admin=bool(current_user.is_superuser),
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2175,10 +2179,14 @@ def update_user_admin(
             status_code=status.HTTP_409_CONFLICT,
             detail="Assign an access profile to change a tenant user's portal persona; raw account-role changes are retired.",
         )
-    if "is_amo_admin" in update_data and bool(update_data["is_amo_admin"]) != bool(user.is_amo_admin):
+    if (
+        "is_amo_admin" in update_data
+        and bool(update_data["is_amo_admin"]) != bool(user.is_amo_admin)
+        and not current_user.is_superuser
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant-administrator access must use the governed administrator-grant workflow.",
+            detail="Only the platform superuser can assign or revoke standing tenant-administrator access.",
         )
     if "is_auditor" in update_data and bool(update_data["is_auditor"]) != bool(user.is_auditor):
         raise HTTPException(
@@ -2209,7 +2217,11 @@ def update_user_admin(
     # NOTE: services.update_user() should also enforce what fields are allowed.
     try:
         user = services.update_user(
-            db, user, payload, actor_user_id=str(current_user.id)
+            db,
+            user,
+            payload,
+            actor_user_id=str(current_user.id),
+            allow_standing_admin_change=bool(current_user.is_superuser),
         )
     except ValueError as exc:
         raise HTTPException(

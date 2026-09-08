@@ -58,12 +58,13 @@ def _workflow(state: str, *, requires_authority: bool = False) -> DocumentWorkfl
 
 def test_document_control_roles_are_explicit_and_fail_closed() -> None:
     assert service.is_control_user(_user("QUALITY_MANAGER")) is True
-    assert service.is_control_user(_user("QUALITY_INSPECTOR")) is True
+    assert service.is_control_user(_user("QUALITY_INSPECTOR")) is False
     assert service.is_control_user(_user("AUDITOR")) is False
-    assert service.is_control_user(_user("DOCUMENT_CONTROL_OFFICER")) is False
+    assert service.is_control_user(_user("DOCUMENT_CONTROL_OFFICER")) is True
     assert service.is_control_user(_user("TECHNICIAN")) is False
     assert service.is_control_user(_user("VIEW_ONLY")) is False
-    assert service.is_control_user(_user("TECHNICIAN", superuser=True)) is True
+    assert service.is_control_user(_user("TECHNICIAN", superuser=True)) is False
+    assert service.is_control_user(_user("AMO_ADMIN", amo_admin=True)) is True
 
 
 def test_document_approval_roles_are_narrower_than_general_control_roles() -> None:
@@ -71,7 +72,7 @@ def test_document_approval_roles_are_narrower_than_general_control_roles() -> No
     assert service.is_approver(_user("ACCOUNTABLE_EXECUTIVE")) is True
     assert service.is_approver(_user("QUALITY_INSPECTOR")) is False
     assert service.is_approver(_user("AUDITOR")) is False
-    assert service.is_approver(_user("TECHNICIAN", amo_admin=True)) is True
+    assert service.is_approver(_user("TECHNICIAN", amo_admin=True)) is False
 
 
 def test_normal_user_can_use_library_and_reader_originated_change_request() -> None:

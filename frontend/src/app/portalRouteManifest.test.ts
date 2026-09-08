@@ -109,7 +109,7 @@ describe("portal route manifest", () => {
     expect(items.every((item) => item.path.startsWith("/maintenance/safarilink"))).toBe(true);
   });
 
-  it("does not expose administration until the backend-confirmed mode is active", () => {
+  it("keeps standing AMO administration active without delegated-profile activation", () => {
     const admin = user({
       role: "AMO_ADMIN",
       is_amo_admin: true,
@@ -128,7 +128,7 @@ describe("portal route manifest", () => {
       adminModeActive: true,
     }));
 
-    expect(normalMode.some((item) => item.adminOnly)).toBe(false);
+    expect(normalMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
     expect(elevatedMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
     expect(elevatedMode.some((item) => item.id === "department-planning")).toBe(true);
     expect(elevatedMode.some((item) => item.id === "department-quality")).toBe(true);
@@ -196,12 +196,16 @@ describe("portal route manifest", () => {
   });
 
   it("provides real home, operations and configuration routes for simple departments", () => {
-    const admin = user({ role: "AMO_ADMIN", is_amo_admin: true });
+    const accountable = user({
+      role: "ACCOUNTABLE_EXECUTIVE",
+      is_amo_admin: false,
+      position_title: "Accountable Executive",
+    });
     const items = flattenPortalNavigation(buildPortalNavigation({
       amoCode: "tenant-a",
-      user: admin,
+      user: accountable,
       contextDepartment: "safety",
-      adminModeActive: true,
+      adminModeActive: false,
     }));
     const paths = new Set(items.map((item) => item.path));
 
@@ -213,7 +217,11 @@ describe("portal route manifest", () => {
   });
 
   it("exposes all eleven Training OS sections to a Training department user without QMS elevation", () => {
-    const trainingUser = user({ role: "TECHNICIAN", position_title: "Training Officer" });
+    const trainingUser = user({
+      role: "HUMAN_RESOURCES_OFFICER",
+      position_title: "Training Officer",
+      module_access: { training: "manage" },
+    });
     const items = flattenPortalNavigation(buildPortalNavigation({
       amoCode: "tenant-a",
       user: trainingUser,

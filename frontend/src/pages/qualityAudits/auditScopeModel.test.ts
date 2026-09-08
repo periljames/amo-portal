@@ -37,4 +37,3 @@ describe("audit scope governance", () => {
     expect(auditScopeValidationError({ ...valid, sortOrder: "10000" })).toContain("0 to 9999");
   });
 });
-

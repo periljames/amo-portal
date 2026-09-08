@@ -8,9 +8,9 @@ from .workspace_service import role_value
 
 
 # Document controllers may prepare and administer records, but controlled approval
-# decisions are deliberately restricted to accountable management roles. A Quality
-# Inspector remains able to perform controller work without being able to approve,
-# publish, archive, or rewrite terminal governance records.
+# decisions are deliberately restricted to accountable management roles. Quality
+# inspectors and auditors remain evidence/review participants; they do not inherit
+# librarian/controller or publication authority from their operational titles.
 DECISION_APPROVER_ROLES = {
     "ACCOUNTABLE_EXECUTIVE",
     "QUALITY_MANAGER",

@@ -465,6 +465,19 @@ def require_module_access(
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db),
     ) -> account_models.User:
+        # Standing AMO administrators are a tenant privilege assigned by the
+        # platform superuser. Their module administration is broad by default;
+        # module-specific regulated decision gates still apply downstream.
+        if (
+            not getattr(current_user, "is_superuser", False)
+            and (
+                getattr(current_user, "is_amo_admin", False)
+                or str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", ""))).upper()
+                == "AMO_ADMIN"
+            )
+            and not getattr(current_user, "_admin_profile_elevated", False)
+        ):
+            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user
@@ -513,6 +526,20 @@ def require_any_module_access(
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db),
     ) -> account_models.User:
+        # Match require_module_access: standing tenant administrators can view
+        # and configure every licensed tenant module until the platform
+        # superuser removes their standing overlay. Operational decision gates
+        # inside each module remain authoritative.
+        if (
+            not getattr(current_user, "is_superuser", False)
+            and (
+                getattr(current_user, "is_amo_admin", False)
+                or str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", ""))).upper()
+                == "AMO_ADMIN"
+            )
+            and not getattr(current_user, "_admin_profile_elevated", False)
+        ):
+            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user

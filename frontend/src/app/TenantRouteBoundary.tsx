@@ -128,6 +128,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (currentUser.is_superuser || currentUser.role === "SUPERUSER") {
     return <Navigate to="/platform/control" replace state={{ blockedTenantPath: location.pathname }} />;
   }
+  const standingAdmin = Boolean(currentUser.is_amo_admin || currentUser.role === "AMO_ADMIN");
 
   const canonicalTenant = canonicalTenantSlug();
   if (!canonicalTenant) return <Navigate to="/login" replace />;
@@ -147,7 +148,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
     (assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : null)
     || allowed[0];
 
-  if (isAdminRoute && !adminStateResolved) {
+  if (isAdminRoute && !standingAdmin && !adminStateResolved) {
     return (
       <div className="page-loading" role="status" aria-live="polite">
         <div className="page-loading__card">Confirming Admin profile…</div>
@@ -163,7 +164,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (routeParts.length === 2) return <Navigate to={home} replace />;
 
   if (isAdminRoute) {
-    if (!adminState?.eligible || !adminState.active) {
+    if (!standingAdmin && (!adminState?.eligible || !adminState.active)) {
       return <Navigate to={home} replace state={{ blockedAdminPath: location.pathname }} />;
     }
     return <>{children}</>;

@@ -55,7 +55,7 @@ const AdminOverviewPage: React.FC = () => {
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
-  const isAmoAdmin = !!currentUser?.is_amo_admin;
+  const isAmoAdmin = Boolean(currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN");
   const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [summary, setSummary] = useState<OverviewSummary | null>(null);

@@ -131,18 +131,16 @@ def test_audit_evidence_pack_contains_summary_and_findings(db_session):
     )
     db_session.commit()
 
-    audit_payload = quality_schemas.QMSAuditCreate(
+    audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-1",
         title="Audit 1",
+        lead_auditor_user_id=user.id,
     )
-    audit = quality_router.create_audit(
-        payload=audit_payload,
-        request=_make_request(),
-        db=db_session,
-        current_user=user,
-    )
+    db_session.add(audit)
+    db_session.commit()
 
     finding_payload = quality_schemas.QMSFindingCreate(
         description="Test finding",

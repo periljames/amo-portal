@@ -135,8 +135,10 @@ export function getUserCapabilities(
   const role = user.role as AccountRole;
   const assignedDepartment = getDepartmentFromUser(user, contextDepartment);
 
-  // Account administration is a separate control plane. It must never become
-  // an operational planning, maintenance, inspection or release capability.
+  // Standing AMO administration is assigned/revoked by the platform
+  // superuser. It provides broad tenant operation/configuration control while
+  // regulated signatures remain protected by their dedicated role checks.
+  if (!user.is_superuser && (user.is_amo_admin || role === "AMO_ADMIN")) caps.add("admin");
   if (role === "ACCOUNTABLE_EXECUTIVE") {
     caps.add("management");
     caps.add("publisher");
@@ -314,6 +316,7 @@ function actionModule(action: ModuleAction): string {
 
 function moduleAllows(user: PortalUser | null, module: string, level: "view" | "manage"): boolean | null {
   if (!user || user.module_access === undefined) return null;
+  if (!user.is_superuser && (user.is_amo_admin || user.role === "AMO_ADMIN")) return true;
   const configured = user.module_access[module];
   return configured === "manage" || (level === "view" && configured === "view");
 }

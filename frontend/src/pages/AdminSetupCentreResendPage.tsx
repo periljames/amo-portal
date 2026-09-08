@@ -135,7 +135,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
   const isSuperuser = Boolean(currentUser?.is_superuser);
-  const isAmoAdmin = Boolean(currentUser?.is_amo_admin);
+  const isAmoAdmin = Boolean(currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN");
   const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {

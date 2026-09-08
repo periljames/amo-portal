@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import access_control
 from amodb.apps.accounts import router_admin
 from amodb.apps.accounts import schemas as account_schemas
 from amodb.apps.audit import models as audit_models
@@ -38,7 +40,7 @@ def _create_user(
         role=role,
         hashed_password="hashed",
         is_active=True,
-        is_amo_admin=is_admin or is_superuser,
+        is_amo_admin=is_admin,
         is_superuser=is_superuser,
         must_change_password=False,
     )
@@ -110,24 +112,19 @@ def test_bulk_role_change_cannot_promote_tenant_user_to_platform_superuser(db_se
     admin = _create_user(db_session, amo_id=amo.id, email="admin3@example.com", is_admin=True)
     subject = _create_user(db_session, amo_id=amo.id, email="tenant-user@example.com")
 
-    with pytest.raises(HTTPException) as caught:
-        router_admin.bulk_user_action(
-            account_schemas.BulkUserActionRequest(
-                user_ids=[subject.id],
-                action="change_role",
-                role=account_models.AccountRole.SUPERUSER,
-            ),
-            db=db_session,
-            current_user=admin,
+    with pytest.raises(ValidationError, match="Input should be"):
+        account_schemas.BulkUserActionRequest(
+            user_ids=[subject.id],
+            action="change_role",
+            role=account_models.AccountRole.SUPERUSER,
         )
 
-    assert caught.value.status_code == 403
     db_session.refresh(subject)
     assert subject.role == account_models.AccountRole.TECHNICIAN
     assert subject.is_superuser is False
 
 
-def test_bulk_superuser_role_reconciliation_preserves_platform_identity_flags(db_session):
+def test_bulk_account_action_preserves_separate_platform_identity_flags(db_session):
     root = _create_amo(db_session, code="ROOT")
     platform_user = _create_user(
         db_session,
@@ -139,8 +136,7 @@ def test_bulk_superuser_role_reconciliation_preserves_platform_identity_flags(db
     result = router_admin.bulk_user_action(
         account_schemas.BulkUserActionRequest(
             user_ids=[platform_user.id],
-            action="change_role",
-            role=account_models.AccountRole.SUPERUSER,
+            action="enable",
         ),
         db=db_session,
         current_user=platform_user,
@@ -149,7 +145,7 @@ def test_bulk_superuser_role_reconciliation_preserves_platform_identity_flags(db
     db_session.refresh(platform_user)
     assert result.processed == 1
     assert platform_user.is_superuser is True
-    assert platform_user.is_amo_admin is True
+    assert platform_user.is_amo_admin is False
 
 
 def test_admin_cannot_disable_current_signed_in_account(db_session):
@@ -220,7 +216,96 @@ def test_additional_superuser_creation_is_root_scoped_and_sets_identity_flag(db_
     assert created.amo_id == root.id
     assert created.role == account_models.AccountRole.SUPERUSER
     assert created.is_superuser is True
+    assert created.is_amo_admin is False
+
+
+def test_platform_superuser_can_assign_standing_admin_when_creating_tenant_user(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root = _create_amo(db_session, code="ROOT-ADMIN-CREATE")
+    tenant = _create_amo(db_session, code="AMO-ADMIN-CREATE")
+    platform_user = _create_user(
+        db_session,
+        amo_id=root.id,
+        email="platform-admin-create@example.com",
+        is_superuser=True,
+    )
+    access_control.ensure_tenant_access_profiles(db_session, amo_id=tenant.id)
+    profile = db_session.query(account_models.AuthRoleDefinition).filter(
+        account_models.AuthRoleDefinition.amo_id == tenant.id,
+        account_models.AuthRoleDefinition.tenant_code == "GENERAL_USER",
+    ).one()
+
+    def assign_profile(db, *, user, profile_id, actor_user_id):
+        selected = db.query(account_models.AuthRoleDefinition).filter_by(id=profile_id).one()
+        user.role = account_models.AccountRole(selected.base_role_key)
+        db.add(account_models.AuthUserRoleAssignment(
+            id="standing-admin-primary-profile",
+            amo_id=user.amo_id,
+            user_id=user.id,
+            role_id=selected.id,
+            assigned_by_user_id=actor_user_id,
+            is_primary=True,
+        ))
+        db.flush()
+        return selected
+
+    monkeypatch.setattr(access_control, "assign_primary_access_profile", assign_profile)
+
+    created = router_admin.create_user_admin(
+        account_schemas.UserCreate(
+            amo_id=tenant.id,
+            staff_code="TENANTADMIN1",
+            email="tenant-admin@example.com",
+            first_name="Tenant",
+            last_name="Administrator",
+            full_name="Tenant Administrator",
+            role=account_models.AccountRole.USER,
+            access_profile_id=profile.id,
+            is_amo_admin=True,
+            password="StrongTenant2!",
+        ),
+        db=db_session,
+        current_user=platform_user,
+    )
+
+    assert created.amo_id == tenant.id
+    assert created.role == account_models.AccountRole.USER
     assert created.is_amo_admin is True
+    assert created.is_superuser is False
+
+
+def test_platform_superuser_can_revoke_standing_admin_with_continuity_preserved(db_session):
+    root = _create_amo(db_session, code="ROOT-ADMIN-REVOKE")
+    tenant = _create_amo(db_session, code="AMO-ADMIN-REVOKE")
+    platform_user = _create_user(
+        db_session,
+        amo_id=root.id,
+        email="platform-admin-revoke@example.com",
+        is_superuser=True,
+    )
+    subject = _create_user(
+        db_session,
+        amo_id=tenant.id,
+        email="admin-to-revoke@example.com",
+        is_admin=True,
+    )
+    _create_user(
+        db_session,
+        amo_id=tenant.id,
+        email="remaining-admin@example.com",
+        is_admin=True,
+    )
+
+    updated = router_admin.update_user_admin(
+        subject.id,
+        account_schemas.UserUpdate(is_amo_admin=False),
+        db=db_session,
+        current_user=platform_user,
+    )
+
+    assert updated.is_amo_admin is False
 
 
 def test_position_title_edit_cannot_silently_demote_an_administrator(db_session):
@@ -241,4 +326,4 @@ def test_position_title_edit_cannot_silently_demote_an_administrator(db_session)
 
     assert updated.role == account_models.AccountRole.SUPERUSER
     assert updated.is_superuser is True
-    assert updated.is_amo_admin is True
+    assert updated.is_amo_admin is False

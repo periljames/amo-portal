@@ -223,7 +223,7 @@ export default function AccessRolesPanel({ amoId }: { amoId?: string | null }) {
     </header>
 
     <div className="access-roles-panel__principles">
-      <div><ShieldCheck size={18} /><span><strong>Tenant administrator</strong> is an account overlay, not a job title.</span></div>
+      <div><ShieldCheck size={18} /><span><strong>Standing administrator</strong> is assigned or revoked by the platform superuser; delegated administration uses the governed session workflow.</span></div>
       <div><Network size={18} /><span><strong>Reporting line</strong> does not grant approval authority.</span></div>
       <div><SlidersHorizontal size={18} /><span><strong>Module access</strong> can narrow a role; workflow and personal authorization checks still apply.</span></div>
     </div>

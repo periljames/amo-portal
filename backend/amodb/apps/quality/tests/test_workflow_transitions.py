@@ -37,9 +37,9 @@ def _create_user(db_session, *, amo_id: str) -> account_models.User:
         last_name="User",
         full_name="QA User",
         hashed_password="hash",
-        role=account_models.AccountRole.AMO_ADMIN,
+        role=account_models.AccountRole.QUALITY_OFFICER,
         is_active=True,
-        is_amo_admin=True,
+        is_amo_admin=False,
     )
     db_session.add(user)
     db_session.commit()
@@ -63,6 +63,7 @@ def test_close_audit_requires_closed_findings(db_session):
         audit_ref="AUD-200",
         title="Audit 200",
         status=quality_models.QMSAuditStatus.IN_PROGRESS,
+        lead_auditor_user_id=user.id,
     )
     db_session.add(audit)
     db_session.commit()
@@ -108,6 +109,7 @@ def test_close_finding_requires_evidence_and_verification(db_session):
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-201",
         title="Audit 201",
+        lead_auditor_user_id=user.id,
     )
     db_session.add(audit)
     db_session.commit()
@@ -152,6 +154,7 @@ def test_close_finding_with_requirements_logs_transition(db_session):
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-202",
         title="Audit 202",
+        lead_auditor_user_id=user.id,
     )
     db_session.add(audit)
     db_session.commit()
@@ -201,6 +204,7 @@ def test_close_cap_requires_actions_evidence_and_verification(db_session):
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-203",
         title="Audit 203",
+        lead_auditor_user_id=user.id,
     )
     db_session.add(audit)
     db_session.commit()

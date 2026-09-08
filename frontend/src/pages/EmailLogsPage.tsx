@@ -60,7 +60,7 @@ const EmailLogsPage: React.FC = () => {
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
-  const isAmoAdmin = !!currentUser?.is_amo_admin;
+  const isAmoAdmin = Boolean(currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN");
   const isQualityManager = currentUser?.role === "QUALITY_MANAGER";
   const canAccessAdmin = isSuperuser || isAmoAdmin || isQualityManager || hasActiveTenantAdminProfile(amoCode);
 

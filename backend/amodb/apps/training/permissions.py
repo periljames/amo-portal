@@ -115,6 +115,25 @@ _QUALITY_REVIEW = _READ | {
     TrainingCapability.REPORT_EXPORT.value,
 }
 
+_AMO_ADMIN_CONTROL = set(ALL_TRAINING_CAPABILITIES) - {
+    TrainingCapability.PLAN_REVIEW.value,
+    TrainingCapability.PLAN_APPROVE.value,
+    TrainingCapability.BUDGET_REVIEW.value,
+    TrainingCapability.BUDGET_APPROVE.value,
+    TrainingCapability.SESSION_CLOSE.value,
+    TrainingCapability.ASSESSMENT_REVIEW.value,
+    TrainingCapability.ASSESSMENT_APPROVE.value,
+    TrainingCapability.AUTHORIZATION_RECOMMEND.value,
+    TrainingCapability.AUTHORIZATION_COMMITTEE_DECIDE.value,
+    TrainingCapability.AUTHORIZATION_ISSUE.value,
+    TrainingCapability.AUTHORIZATION_RENEW.value,
+    TrainingCapability.AUTHORIZATION_RESTRICT.value,
+    TrainingCapability.AUTHORIZATION_WITHDRAW.value,
+    TrainingCapability.CERTIFICATE_ISSUE.value,
+    TrainingCapability.CERTIFICATE_REVOKE.value,
+    TrainingCapability.CERTIFICATE_REISSUE.value,
+}
+
 
 def _role_value(user: account_models.User) -> str:
     raw = getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))
@@ -242,6 +261,12 @@ def training_capabilities_for(db: Session, *, user: account_models.User) -> set[
         if not _platform_support_session_active(db, user=user, amo_id=amo_id):
             return set()
         return set(_READ)
+
+    if (
+        not getattr(user, "_admin_profile_elevated", False)
+        and (getattr(user, "is_amo_admin", False) or _role_value(user) == "AMO_ADMIN")
+    ):
+        return set(_AMO_ADMIN_CONTROL)
 
     if db.get_bind().dialect.name == "postgresql":
         db.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})

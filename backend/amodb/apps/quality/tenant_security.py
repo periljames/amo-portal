@@ -133,6 +133,25 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
 }
 
+# Standing AMO administrators need tenant-wide operational visibility and
+# configuration control. Explicit regulatory/independent decisions below stay
+# role-bound to the Accountable Executive or Quality Manager.
+_QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"] = set(_QUALITY_ROLE_PERMISSIONS["QUALITY_OFFICER"])
+_QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"].update(
+    {
+        "qms.calendar.manage",
+        "qms.change.manage",
+        "qms.equipment.manage",
+        "qms.management_review.manage",
+        "qms.reports.manage",
+        "qms.risk.manage",
+        "qms.settings.manage",
+        "qms.settings.view",
+        "qms.supplier.manage",
+        "qms.training.manage",
+    }
+)
+
 # The Accountable Executive has governed oversight visibility, not Quality
 # mutation rights. Quality independence remains with the Quality Manager.
 _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"] = set(_QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"])
@@ -181,6 +200,17 @@ def _permission_matches(grant: str, permission: str) -> bool:
 
 def _is_platform_superuser(user: account_models.User) -> bool:
     return bool(getattr(user, "is_superuser", False) or getattr(user, "is_platform_context", False))
+
+
+def _is_standing_amo_admin(user: account_models.User) -> bool:
+    return bool(
+        not _is_platform_superuser(user)
+        and not getattr(user, "_admin_profile_elevated", False)
+        and (
+            getattr(user, "is_amo_admin", False)
+            or _normalise(getattr(user, "role", "")).upper() == "AMO_ADMIN"
+        )
+    )
 
 
 def _support_level_allows(level: str | None, permission: str) -> bool:
@@ -407,6 +437,8 @@ def require_quality_permission(permission: str) -> Callable[[TenantContext, acco
             if _support_level_allows(ctx.support_access_level, permission):
                 return ctx
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Support session does not allow '{permission}'.")
+        if _is_standing_amo_admin(current_user) and _has_role_permission(current_user, permission):
+            return ctx
         capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
         if capability_result is True:
             return ctx
@@ -434,6 +466,8 @@ def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> 
         return False
     if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
         return _has_role_permission(user, permission)
+    if _is_standing_amo_admin(user) and _has_role_permission(user, permission):
+        return True
     capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
     if capability_result is not None:
         return bool(capability_result)

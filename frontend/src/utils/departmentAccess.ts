@@ -51,20 +51,14 @@ export function isAdminUser(user: PortalUser | null): boolean {
   );
 }
 
-/**
- * Return the operational identity with tenant-administration elevation
- * removed. Admin access is an explicit overlay and must not silently turn a
- * General User profile into every operational department while it is inactive.
+/** Return the user's operational identity.
+ *
+ * Standing AMO administrators are appointed by the platform superuser and
+ * retain tenant-wide workspace access. Delegated admin elevation is held in
+ * the separate Admin Profile state and does not rewrite the cached user role.
  */
 export function getOperationalAccessUser(user: PortalUser | null): PortalUser | null {
-  if (!user || !isAdminUser(user) || user.is_superuser || user.role === "SUPERUSER") {
-    return user;
-  }
-  return {
-    ...user,
-    is_amo_admin: false,
-    role: user.role === "AMO_ADMIN" ? "USER" : user.role,
-  };
+  return user;
 }
 
 function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {

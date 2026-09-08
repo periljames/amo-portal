@@ -22,8 +22,12 @@ def source(name: str) -> str:
 
 class TrainingOperatingSystemScenarioTests(unittest.TestCase):
     def test_01_admin_can_open_full_training_os(self):
-        self.assertIn("is_amo_admin", source("permissions.py"))
-        self.assertIn("ALL_TRAINING_CAPABILITIES", source("permissions.py"))
+        text = source("permissions.py")
+        self.assertIn("_AMO_ADMIN_CONTROL", text)
+        self.assertIn("is_amo_admin", text)
+        admin_block = text.split("_AMO_ADMIN_CONTROL =", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("TrainingCapability.PLAN_APPROVE.value", admin_block)
+        self.assertIn("TrainingCapability.CERTIFICATE_ISSUE.value", admin_block)
 
     def test_02_training_department_is_not_qms_elevated(self):
         text = source("permissions.py")
@@ -249,11 +253,11 @@ class TrainingOperatingSystemScenarioTests(unittest.TestCase):
         self.assertIn("_tenant_training_counts", control_room_body)
         self.assertNotIn("evaluate_user_training_policy(db, user", control_room_body)
 
-    def test_45_instructors_can_operate_but_not_certify_attendance(self):
+    def test_45_titles_do_not_create_instructor_authority(self):
         permissions = source("permissions.py")
-        instructor_block = permissions.split('if any(token in position for token in ("assessor", "instructor", "trainer")):', 1)[1].split("return set(_SELF)", 1)[0]
-        self.assertIn("ATTENDANCE_MANAGE", instructor_block)
-        self.assertNotIn("SESSION_CLOSE", instructor_block)
+        self.assertIn("free-text titles are intentionally excluded", permissions)
+        self.assertNotIn('token in position for token in ("assessor", "instructor", "trainer")', permissions)
+        self.assertIn("access_control.capability_codes_for_user", permissions)
 
     def test_46_qms_and_dms_share_the_training_evidence_adapter(self):
         people = (AMODB_ROOT / "apps/quality/people_router.py").read_text(encoding="utf-8")

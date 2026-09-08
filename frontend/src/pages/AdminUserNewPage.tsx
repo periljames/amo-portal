@@ -69,6 +69,7 @@ const AdminUserNewPage: React.FC = () => {
     confirmPassword: "",
   });
   const [accessProfileId, setAccessProfileId] = useState("");
+  const [standingAmoAdmin, setStandingAmoAdmin] = useState(false);
   const [staffCodeOptions, setStaffCodeOptions] = useState<string[]>([]);
   const [staffCodeLoading, setStaffCodeLoading] = useState(false);
   const [staffCodeError, setStaffCodeError] = useState<string | null>(null);
@@ -397,6 +398,7 @@ const AdminUserNewPage: React.FC = () => {
         full_name: `${first} ${last}`.trim(),
         role: creatingPlatformSuperuser ? "SUPERUSER" : selectedAccessProfile!.base_role_key,
         access_profile_id: creatingPlatformSuperuser ? undefined : accessProfileId,
+        is_amo_admin: isSuperuser && !creatingPlatformSuperuser ? standingAmoAdmin : false,
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
@@ -688,7 +690,22 @@ const AdminUserNewPage: React.FC = () => {
             {!accessFrameworkQuery.isPending && !activeProfiles.length ? <InlineAlert tone="warning" title="Access framework required"><span>Open Access profiles and apply the AMO/MRO framework before creating tenant users.</span></InlineAlert> : null}
           </div> : null}
 
-          {!creatingPlatformSuperuser ? <InlineAlert tone="info" title="Governed tenant administration" className="form-row--span-2"><span>Create the user first, then use Access governance for Accountable Executive and Quality Manager approval. Platform support cannot bypass that tenant decision.</span></InlineAlert> : null}
+          {isSuperuser && !creatingPlatformSuperuser ? (
+            <label className="form-row form-row--span-2 admin-checkbox-row">
+              <input
+                type="checkbox"
+                checked={standingAmoAdmin}
+                onChange={(event) => setStandingAmoAdmin(event.target.checked)}
+                disabled={submitting}
+              />
+              <span>
+                <strong>Standing AMO Administrator</strong>
+                <small>Grants tenant-wide administration and module visibility immediately. It remains active until a platform superuser revokes it; regulated approvals and personal authorizations remain role-governed.</small>
+              </span>
+            </label>
+          ) : !creatingPlatformSuperuser ? (
+            <InlineAlert tone="info" title="Delegated tenant administration" className="form-row--span-2"><span>Temporary or task-specific administration is assigned through Administrator governance and requires the prescribed independent approvals.</span></InlineAlert>
+          ) : null}
 
           <div className="form-row">
             <label htmlFor="positionTitle">Employment / display title</label>

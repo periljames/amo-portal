@@ -57,15 +57,11 @@ export type AccessProfileUpdate = Partial<Omit<AccessProfileCreate, "code">> & {
 
 export function getTenantAccessFramework(amoId?: string | null): Promise<TenantAccessFramework> {
   const query = amoId ? `?amo_id=${encodeURIComponent(amoId)}` : "";
-  return apiGet<TenantAccessFramework>(`/accounts/admin/access-framework${query}`, {
-    cacheTtlMs: 30_000,
-  });
+  return apiGet<TenantAccessFramework>(`/accounts/admin/access-framework${query}`);
 }
 
 export function getActiveTenantAccessProfiles(): Promise<TenantAccessProfileOption[]> {
-  return apiGet<TenantAccessProfileOption[]>("/auth/access-profiles", {
-    cacheTtlMs: 60_000,
-  });
+  return apiGet<TenantAccessProfileOption[]>("/auth/access-profiles");
 }
 
 export function initializeTenantAccessFramework(amoId?: string | null): Promise<{

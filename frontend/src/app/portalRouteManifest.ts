@@ -3,7 +3,6 @@ import {
   getAllowedDepartments,
   getAssignedDepartment,
   getOperationalAccessUser,
-  isAdminUser,
   type DepartmentId,
 } from "../utils/departmentAccess";
 import { canViewFeature, type ModuleFeature } from "../utils/roleAccess";
@@ -373,6 +372,10 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
 export function buildPortalNavigation(context: PortalNavigationContext): PortalNavGroup[] {
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
   if (!user) return [];
+  const standingAdmin = Boolean(
+    !user.is_superuser && (user.is_amo_admin || user.role === "AMO_ADMIN"),
+  );
+  const administrationActive = adminModeActive || standingAdmin;
   const operationalUser = getOperationalAccessUser(user);
   // Administration is an overlay for administration screens only; it must
   // never manufacture operational department or module access.
@@ -391,7 +394,7 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
     || Boolean(effectiveUser.module_access[module])
   );
   const canGovernAdministratorAccess = Boolean(
-    adminModeActive
+    administrationActive
     || user.is_amo_admin
     || user.role === "AMO_ADMIN"
     || user.role === "ACCOUNTABLE_EXECUTIVE"
@@ -416,8 +419,8 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
     .map((department) => departmentBranch(amoCode, department, effectiveUser, contextDepartment))
     .filter((navItem): navItem is PortalNavItem => Boolean(navItem));
   departments.push(...supportingBranches(amoCode, effectiveUser, contextDepartment));
-  if (departments.length) groups.push({ id: "departments", label: adminModeActive ? "Department Workspaces" : "Department", items: departments });
-  if (adminModeActive) groups.push(...adminGroups(amoCode));
+  if (departments.length) groups.push({ id: "departments", label: administrationActive ? "Department Workspaces" : "Department", items: departments });
+  if (administrationActive) groups.push(...adminGroups(amoCode));
   return groups;
 }
 

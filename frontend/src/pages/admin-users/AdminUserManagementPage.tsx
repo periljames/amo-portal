@@ -15,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   ShieldOff,
+  Trash2,
   UserCheck,
   UserPlus,
   UserRoundCog,
@@ -212,10 +213,6 @@ export default function AdminUserManagementPage() {
       : "directory";
     setTab(nextTab);
   }, [requestedTab]);
-
-  useEffect(() => {
-    setPermissionForm((current) => ({ ...current, amo_id: effectiveAmoId || "" }));
-  }, [effectiveAmoId]);
 
   useEffect(() => {
     if (canAccessAdmin) return;

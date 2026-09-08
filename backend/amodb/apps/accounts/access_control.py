@@ -767,6 +767,16 @@ def capability_codes_for_user(db: Session, *, user: models.User) -> list[str]:
             base_role_key=template["base"],
             module_permissions=template["modules"],
         ))
+    role_key = role_registry.canonical_role_key(user.role) or "USER"
+    if bool(getattr(user, "is_amo_admin", False) or role_key == "AMO_ADMIN"):
+        # A standing administrator is a platform-assigned tenant overlay. Keep
+        # the user's operational workflow capabilities intact, but expose all
+        # tenant module view/manage boundaries until that overlay is revoked.
+        # Commercial/module entitlements and in-module decision gates still
+        # apply independently.
+        for module_code in MODULE_CODES:
+            codes.add(_capability_code(module_code, "view"))
+            codes.add(_capability_code(module_code, "manage"))
     return sorted(codes)
 
 

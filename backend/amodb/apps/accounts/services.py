@@ -444,7 +444,12 @@ def get_global_superuser_by_email(
 # ---------------------------------------------------------------------------
 
 
-def create_user(db: Session, data: schemas.UserCreate) -> models.User:
+def create_user(
+    db: Session,
+    data: schemas.UserCreate,
+    *,
+    allow_standing_admin: bool = False,
+) -> models.User:
     email = _normalise_email(data.email)
     staff_code = _normalise_staff_code(data.staff_code)
 
@@ -480,9 +485,13 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
     # Access changes require an explicit account persona or governed tenant
     # access profile.
     resolved_role = data.role
-    if resolved_role == models.AccountRole.AMO_ADMIN or data.is_amo_admin:
+    if resolved_role == models.AccountRole.AMO_ADMIN:
         raise ValueError(
-            "Tenant-administrator access must use the governed administrator-grant workflow"
+            "AMO_ADMIN is an access overlay, not an organization role"
+        )
+    if data.is_amo_admin and not allow_standing_admin:
+        raise ValueError(
+            "Only the platform superuser can assign standing tenant-administrator access"
         )
     if data.is_auditor:
         raise ValueError(
@@ -559,7 +568,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         # SUPERUSER with false flags, committing, and repairing it afterward
         # leaves a real (if brief) inconsistent account state.
         is_superuser=resolved_role == models.AccountRole.SUPERUSER,
-        is_amo_admin=False,
+        is_amo_admin=bool(data.is_amo_admin and allow_standing_admin),
         # Audit authority is a governed, scoped QMS People privilege; a portal
         # access profile never grants it.
         is_auditor=False,
@@ -757,6 +766,7 @@ def update_user(
     data: schemas.UserUpdate,
     *,
     actor_user_id: str | None = None,
+    allow_standing_admin_change: bool = False,
 ) -> models.User:
     # Names
     name_changed = False
@@ -870,9 +880,11 @@ def update_user(
         data.is_amo_admin is not None
         and bool(data.is_amo_admin) != bool(user.is_amo_admin)
     ):
-        raise ValueError(
-            "Tenant-administrator access must use the governed administrator-grant workflow"
-        )
+        if not allow_standing_admin_change:
+            raise ValueError(
+                "Only the platform superuser can assign or revoke standing tenant-administrator access"
+            )
+        user.is_amo_admin = bool(data.is_amo_admin)
     elif user.role == models.AccountRole.AMO_ADMIN:
         # Compatibility for tenants not yet migrated to the overlay model.
         user.is_amo_admin = True

@@ -70,6 +70,20 @@ const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
   "qms.audit.programme.approve",
 ]);
 
+const QMS_STANDING_ADMIN_PERMISSIONS = new Set([
+  ...QMS_OFFICER_PERMISSIONS,
+  "qms.calendar.manage",
+  "qms.change.manage",
+  "qms.equipment.manage",
+  "qms.management_review.manage",
+  "qms.reports.manage",
+  "qms.risk.manage",
+  "qms.settings.manage",
+  "qms.settings.view",
+  "qms.supplier.manage",
+  "qms.training.manage",
+]);
+
 export function isPlatformSuperuser(): boolean {
   const user = getCachedUser();
   return !!user?.is_superuser;
@@ -90,19 +104,22 @@ export function userHasQmsRolePermission(
   // AMO tenant QMS user.
   if (user.is_superuser || !user.amo_id) return false;
 
-  // Tenant module grants are a narrowing boundary. They never create a QMS
-  // decision right, but removing Quality from a profile must also remove the
-  // corresponding route and action surface.
-  const qualityLevel = user.module_access?.quality;
-  if (user.module_access !== undefined && !qualityLevel) return false;
-  if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
-
   if (permission === "qms.reports.attest_authority" || permission === "qms.audit.programme.approve") {
     return user.role === "ACCOUNTABLE_EXECUTIVE";
   }
   if (permission === "qms.audit.programme.quality_review") {
     return user.role === "QUALITY_MANAGER";
   }
+  if (user.role === "AMO_ADMIN" || user.is_amo_admin) {
+    return QMS_STANDING_ADMIN_PERMISSIONS.has(permission);
+  }
+
+  // Tenant module grants are a narrowing boundary. They never create a QMS
+  // decision right, but removing Quality from a profile must also remove the
+  // corresponding route and action surface.
+  const qualityLevel = user.module_access?.quality;
+  if (user.module_access !== undefined && !qualityLevel) return false;
+  if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
 
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);

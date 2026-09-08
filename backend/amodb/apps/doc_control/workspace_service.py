@@ -103,7 +103,15 @@ def role_assignment_tokens(db: Session, user: account_models.User) -> list[str]:
 
 
 def is_control_user(user: account_models.User) -> bool:
-    return role_value(user) in CONTROL_ROLES
+    standing_admin = bool(
+        not getattr(user, "is_superuser", False)
+        and not getattr(user, "_admin_profile_elevated", False)
+        and (
+            getattr(user, "is_amo_admin", False)
+            or role_value(user) == "AMO_ADMIN"
+        )
+    )
+    return standing_admin or role_value(user) in CONTROL_ROLES
 
 
 def is_approver(user: account_models.User) -> bool:

@@ -266,7 +266,7 @@ def test_manual_change_request_model_has_required_tenant_key() -> None:
 def test_certified_backend_merge_is_the_single_alembic_head() -> None:
     config = Config(str(QUALITY_DIR.parents[1] / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["backend_260906_certified"]
+    assert scripts.get_heads() == ["accounts_260907_access_profiles"]
 
 
 def test_certified_backend_merge_repairs_orphan_times_and_removes_defaults(monkeypatch) -> None:

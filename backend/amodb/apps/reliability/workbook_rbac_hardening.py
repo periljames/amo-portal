@@ -29,6 +29,7 @@ APPROVAL_GUARD = require_roles(
 )
 CONFIGURATION_GUARD = require_roles(
     AccountRole.QUALITY_MANAGER,
+    AccountRole.AMO_ADMIN,
 )
 ANALYSIS_GUARD = require_roles(
     AccountRole.QUALITY_MANAGER,

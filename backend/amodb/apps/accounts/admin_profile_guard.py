@@ -101,6 +101,12 @@ def require_active_admin_profile(
         return current_user
     if getattr(current_user, "is_superuser", False):
         return current_user
+    # A standing AMO Administrator is appointed/revoked by the platform
+    # superuser and does not need to elevate into the temporary delegated-admin
+    # profile on every session. The governed profile remains mandatory for
+    # ordinary operational users who receive time-bound administrator access.
+    if _is_current_implicit_admin(current_user):
+        return current_user
 
     amo_id = getattr(current_user, "effective_amo_id", None) or getattr(current_user, "amo_id", None)
     if not amo_id:

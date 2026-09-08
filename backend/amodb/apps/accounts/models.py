@@ -334,7 +334,10 @@ class User(Base):
         "AuthUserRoleAssignment",
         foreign_keys="AuthUserRoleAssignment.user_id",
         back_populates="user",
-        lazy="selectin",
+        # Access profiles are resolved explicitly by access_control. Eagerly
+        # loading them on every User lookup adds an authorization-table query
+        # to unrelated Finance, Inventory, Realtime and operational requests.
+        lazy="select",
         cascade="all, delete-orphan",
     )
 

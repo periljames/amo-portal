@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from amodb.apps.accounts import models as account_models
 from amodb.apps.notifications import models as notification_models, providers as notification_providers
 from amodb.apps.quality import models as quality_models
+from amodb.apps.quality import people_models as quality_people_models
 from amodb.apps.quality import schemas as quality_schemas
 
 quality_router = importlib.import_module("amodb.apps.quality.router")
@@ -71,6 +72,30 @@ def _seed_audit(db_session):
     db_session.add(audit)
     db_session.commit()
     return amo, quality, tech, audit
+
+
+def _grant_lead_auditor(db_session, *, amo_id: str, user_id: str) -> None:
+    rule = quality_people_models.QualityPrivilegeRule(
+        amo_id=amo_id,
+        privilege_code="LEAD_AUDITOR",
+        title="Lead auditor",
+        privilege_type="LEAD_AUDITOR",
+        is_active=True,
+    )
+    db_session.add(rule)
+    db_session.flush()
+    db_session.add(
+        quality_people_models.QualityPrivilege(
+            amo_id=amo_id,
+            rule_id=rule.id,
+            user_id=user_id,
+            privilege_code=rule.privilege_code,
+            scope_key="GLOBAL",
+            status="ACTIVE",
+            effective_from=date.today(),
+        )
+    )
+    db_session.commit()
 
 
 def test_rbac_blocks_non_quality_audit_schedule_creation(db_session):
@@ -195,6 +220,7 @@ class _FakeProvider(notification_providers.EmailProvider):
 def test_schedule_creation_notifies_lead_auditor_and_auditee(db_session):
     amo, quality, _, _ = _seed_audit(db_session)
     lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    _grant_lead_auditor(db_session, amo_id=amo.id, user_id=lead.id)
     auditee = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
     payload = quality_schemas.QMSAuditScheduleCreate(
         domain=quality_models.QMSDomain.AMO,
@@ -235,6 +261,7 @@ def test_schedule_creation_notifies_lead_auditor_and_auditee(db_session):
 def test_running_schedule_does_not_send_uncontrolled_occurrence_notice(db_session, monkeypatch):
     amo, quality, _, _ = _seed_audit(db_session)
     lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    _grant_lead_auditor(db_session, amo_id=amo.id, user_id=lead.id)
     auditee = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
     fake_provider = _FakeProvider()
     monkeypatch.setattr(notification_providers, "get_email_provider", lambda: (fake_provider, True))

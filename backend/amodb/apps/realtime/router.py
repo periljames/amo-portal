@@ -41,7 +41,7 @@ def get_current_active_realtime_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     current_user = get_current_user(token=credentials.credentials, db=db)
-    return get_current_active_user(current_user=current_user)
+    return get_current_active_user(current_user=current_user, db=db)
 
 
 def _flush_outbox() -> None:

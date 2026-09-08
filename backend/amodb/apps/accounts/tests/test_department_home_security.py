@@ -185,13 +185,12 @@ def test_downgraded_admin_grantless_session_does_not_open_department_homes() -> 
     assert db.execute.call_args.args[1]["implicit_admin"] is False
 
 
-def test_other_browser_session_cannot_inherit_department_elevation() -> None:
+def test_standing_admin_department_visibility_is_not_bound_to_browser_elevation() -> None:
     db = MagicMock()
-    db.execute.return_value.first.return_value = None
 
     assert active_admin_profile_session(
         db,
         user(role="AMO_ADMIN", is_amo_admin=True, auth_session_id="browser-b"),
         SimpleNamespace(id="amo-a"),
-    ) is False
-    assert db.execute.call_args.args[1]["auth_session_id"] == "browser-b"
+    ) is True
+    db.execute.assert_not_called()

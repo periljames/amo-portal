@@ -344,6 +344,7 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   const isTenantAdmin = Boolean(
     currentUser?.is_superuser
     || currentUser?.is_amo_admin
+    || currentUser?.role === "AMO_ADMIN"
     || (amoCode && readCachedAdminProfileState(amoCode)?.active),
   );
 
@@ -373,7 +374,7 @@ function resolveDefaultDepartment(amoCode: string): string {
   if (currentUser?.is_superuser) {
     return "platform/control";
   }
-  if (currentUser?.is_amo_admin) {
+  if (currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN") {
     return "admin/overview";
   }
   const target = getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department);

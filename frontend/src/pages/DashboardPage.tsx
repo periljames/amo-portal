@@ -346,7 +346,11 @@ const DashboardPage: React.FC = () => {
   }, [blockingDocAlerts]);
 
   const canManageUsers =
-    !!currentUser && Boolean(readCachedAdminProfileState(amoSlug)?.active);
+    !!currentUser && Boolean(
+      currentUser.is_amo_admin
+      || currentUser.role === "AMO_ADMIN"
+      || readCachedAdminProfileState(amoSlug)?.active
+    );
 
   const handleNewCrs = () => {
     navigate(`/maintenance/${amoSlug}/${department}/crs/new`);

@@ -15,14 +15,17 @@ def user(role: AccountRole, *, superuser: bool = False):
     return SimpleNamespace(role=role, is_superuser=superuser)
 
 
-def test_controlled_approval_is_quality_or_admin_only():
+def test_controlled_approval_remains_with_quality_management():
     quality = user(AccountRole.QUALITY_MANAGER)
     admin = user(AccountRole.AMO_ADMIN)
     planner = user(AccountRole.PLANNING_ENGINEER)
     viewer = user(AccountRole.VIEW_ONLY)
 
     assert rbac.APPROVAL_GUARD(quality) is quality
-    assert rbac.APPROVAL_GUARD(admin) is admin
+    with pytest.raises(HTTPException) as admin_denied:
+        rbac.APPROVAL_GUARD(admin)
+    assert admin_denied.value.status_code == 403
+    assert rbac.CONFIGURATION_GUARD(admin) is admin
     with pytest.raises(HTTPException) as planner_denied:
         rbac.APPROVAL_GUARD(planner)
     assert planner_denied.value.status_code == 403
@@ -47,12 +50,17 @@ def test_entry_and_analysis_roles_do_not_gain_configuration_rights():
     assert auditor_config_denied.value.status_code == 403
 
 
-def test_superuser_override_remains_supported():
+def test_superuser_does_not_bypass_tenant_operational_roles():
     superuser = user(AccountRole.VIEW_ONLY, superuser=True)
-    assert rbac.ENTRY_GUARD(superuser) is superuser
-    assert rbac.APPROVAL_GUARD(superuser) is superuser
-    assert rbac.CONFIGURATION_GUARD(superuser) is superuser
-    assert rbac.ANALYSIS_GUARD(superuser) is superuser
+    for guard in {
+        rbac.ENTRY_GUARD,
+        rbac.APPROVAL_GUARD,
+        rbac.CONFIGURATION_GUARD,
+        rbac.ANALYSIS_GUARD,
+    }:
+        with pytest.raises(HTTPException) as denied:
+            guard(superuser)
+        assert denied.value.status_code == 403
 
 
 def test_every_controlled_policy_route_has_the_expected_dependency():

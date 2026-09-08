@@ -40,6 +40,11 @@ export default function AdminAccessGovernancePage() {
   const amoCode = routeAmoCode || context.amoCode || context.amoSlug || "UNKNOWN";
   const activeDepartment = getAssignedDepartment(currentUser, context.department) || "quality";
   const canApprove = ["ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"].includes(currentUser?.role || "");
+  const isStandingAdmin = Boolean(
+    currentUser
+    && !currentUser.is_superuser
+    && (currentUser.is_amo_admin || currentUser.role === "AMO_ADMIN"),
+  );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("PENDING");
   const [feedback, setFeedback] = useState("");
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
@@ -170,8 +175,8 @@ export default function AdminAccessGovernancePage() {
             <section className="aag-control-strip" aria-label="Administrator grant control">
               <div><strong>Required approvals</strong><span>Accountable Executive + Quality Manager</span></div>
               <div><strong>Current persona</strong><span>{currentUser.access_profile_name || currentUser.role.replaceAll("_", " ")}</span></div>
-              <div><strong>Admin Profile</strong><span>{profileQuery.data?.active ? "Active for this session" : profileQuery.data?.eligible ? "Eligible, not active" : "Not assigned"}</span></div>
-              {!canRequest && profileQuery.data?.eligible ? (
+              <div><strong>Administrative authority</strong><span>{isStandingAdmin ? "Standing · platform assigned" : profileQuery.data?.active ? "Delegated · active for this session" : profileQuery.data?.eligible ? "Delegated · eligible, not active" : "Not assigned"}</span></div>
+              {!isStandingAdmin && !canRequest && profileQuery.data?.eligible ? (
                 <button type="button" className="aag-button" onClick={() => activateMutation.mutate()} disabled={activateMutation.isPending}>
                   <UserRoundCog size={16} /> {activateMutation.isPending ? "Activating…" : "Activate Admin Profile"}
                 </button>

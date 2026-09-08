@@ -248,8 +248,14 @@ def _scope_default_code_for_kind(kind: models.QMSAuditKind) -> str:
 
 
 def _require_scope_admin(current_user: account_models.User) -> None:
-    if not _is_quality_manager(current_user):
-        raise HTTPException(status_code=403, detail="Only the Quality Manager can govern audit scopes")
+    role = _role_value(current_user)
+    standing_admin = bool(
+        not getattr(current_user, "is_superuser", False)
+        and not getattr(current_user, "_admin_profile_elevated", False)
+        and (getattr(current_user, "is_amo_admin", False) or role == "AMO_ADMIN")
+    )
+    if not (_is_quality_manager(current_user) or standing_admin):
+        raise HTTPException(status_code=403, detail="Only the Quality Manager or standing AMO Administrator can govern audit scopes")
 
 
 def _validate_one_calendar_year(*, start: Optional[date], end: Optional[date], duration_days: Optional[int] = None) -> None:

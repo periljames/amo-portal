@@ -26,13 +26,22 @@ def test_document_control_role_matrix_keeps_reader_and_technical_roles_non_globa
         assert capabilities["publish"] is False
 
 
-def test_quality_controller_can_administer_without_inheriting_accountable_approval() -> None:
+def test_quality_inspector_does_not_inherit_document_controller_authority() -> None:
     inspector = document_control_capabilities(_user(AccountRole.QUALITY_INSPECTOR))
-    assert inspector["control"] is True
-    assert inspector["edit_properties"] is True
-    assert inspector["manage_distribution"] is True
+    assert inspector["control"] is False
+    assert inspector["edit_properties"] is False
+    assert inspector["manage_distribution"] is False
     assert inspector["approve"] is False
     assert inspector["publish"] is False
+
+
+def test_document_control_officer_can_administer_without_approval() -> None:
+    controller = document_control_capabilities(_user(AccountRole.DOCUMENT_CONTROL_OFFICER))
+    assert controller["control"] is True
+    assert controller["edit_properties"] is True
+    assert controller["manage_distribution"] is True
+    assert controller["approve"] is False
+    assert controller["publish"] is False
 
 
 def test_quality_manager_has_control_and_accountable_decision_capability() -> None:
@@ -42,16 +51,16 @@ def test_quality_manager_has_control_and_accountable_decision_capability() -> No
     assert manager["publish"] is True
 
 
-def test_tenant_admin_has_administration_and_decision_capability_under_current_policy() -> None:
+def test_tenant_admin_overlay_does_not_create_document_control_authority() -> None:
     admin = document_control_capabilities(_user(AccountRole.AMO_ADMIN, is_amo_admin=True))
     assert admin["control"] is True
-    assert admin["approve"] is True
+    assert admin["approve"] is False
     assert admin["register"] is True
-    assert admin["publish"] is True
+    assert admin["publish"] is False
 
 
-def test_superuser_capability_is_explicit_not_role_cache_magic() -> None:
+def test_superuser_remains_outside_tenant_document_decisions() -> None:
     superuser = document_control_capabilities(_user(AccountRole.VIEW_ONLY, is_superuser=True))
-    assert superuser["control"] is True
-    assert superuser["approve"] is True
-    assert superuser["publish"] is True
+    assert superuser["control"] is False
+    assert superuser["approve"] is False
+    assert superuser["publish"] is False

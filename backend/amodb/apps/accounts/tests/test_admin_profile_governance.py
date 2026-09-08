@@ -21,6 +21,7 @@ from amodb.apps.accounts.admin_profile_guard import (
 )
 from amodb.apps.accounts.admin_profile_logout import revoke_admin_profile_on_logout
 from amodb.apps.accounts.admin_profile_router import (
+    REQUIRED_APPROVAL_COLUMNS,
     REQUIRED_SCHEMA_TABLES,
     REQUIRED_SESSION_COLUMNS,
     _active_session,
@@ -29,6 +30,7 @@ from amodb.apps.accounts.admin_profile_router import (
     _ensure_schema,
     _is_implicit_admin,
     _is_management_approver,
+    _state,
 )
 from amodb.apps.accounts.auth_session_context import bind_auth_session_to_token_refresh
 from amodb.apps.accounts.models import AccountRole
@@ -41,6 +43,8 @@ from amodb.security import (
     bind_current_auth_session_id,
     create_access_token,
     require_admin,
+    require_any_module_access,
+    require_module_access,
     require_roles,
     reset_current_auth_session_id,
 )
@@ -89,8 +93,9 @@ def test_existing_admin_and_governance_approver_rules() -> None:
     assert _is_current_implicit_admin(actor(role="AMO_ADMIN", is_amo_admin=True)) is True
     assert _is_current_implicit_admin(actor(role="TECHNICIAN", is_amo_admin=False)) is False
     assert _is_management_approver(actor(role="QUALITY_MANAGER")) is True
-    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="Accountable Manager")) is True
-    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="HR Manager")) is True
+    assert _is_management_approver(actor(role="ACCOUNTABLE_EXECUTIVE")) is True
+    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="Accountable Manager")) is False
+    assert _is_management_approver(actor(role="VIEW_ONLY", position_title="HR Manager")) is False
     assert _is_management_approver(actor(role="TECHNICIAN", position_title="Technician")) is False
 
 
@@ -114,7 +119,14 @@ def test_admin_profile_schema_check_accepts_migrated_tables_without_runtime_ddl(
     db = MagicMock()
     inspector = SimpleNamespace(
         get_table_names=lambda: sorted(REQUIRED_SCHEMA_TABLES),
-        get_columns=lambda _table: [{"name": name} for name in REQUIRED_SESSION_COLUMNS],
+        get_columns=lambda table: [
+            {"name": name}
+            for name in (
+                REQUIRED_APPROVAL_COLUMNS
+                if table == "admin_access_grant_approvals"
+                else REQUIRED_SESSION_COLUMNS
+            )
+        ],
     )
     monkeypatch.setattr(profile_router, "inspect", lambda _bind: inspector)
 
@@ -219,23 +231,19 @@ def test_profile_governance_routes_are_the_only_tenant_admin_guard_exemption() -
     db.execute.assert_not_called()
 
 
-def test_normal_tenant_admin_api_requires_active_backend_session() -> None:
+def test_standing_tenant_admin_api_does_not_require_delegated_session() -> None:
     db = MagicMock()
-    db.execute.return_value.first.return_value = None
-    with pytest.raises(HTTPException) as exc:
-        require_active_admin_profile(
-            request("/accounts/admin/users"),
-            actor(role="AMO_ADMIN", is_amo_admin=True),
-            db,
-        )
-    assert exc.value.status_code == 403
-    assert "activate admin profile" in str(exc.value.detail).lower()
+    current = actor(role="AMO_ADMIN", is_amo_admin=True)
+
+    assert require_active_admin_profile(request("/accounts/admin/users"), current, db) is current
+    assert getattr(current, "_admin_profile_elevated", False) is False
+    db.execute.assert_not_called()
 
 
-def test_active_backend_session_unlocks_tenant_admin_api() -> None:
+def test_active_backend_session_unlocks_delegated_tenant_admin_api() -> None:
     db = MagicMock()
     db.execute.return_value.first.return_value = ("session-1",)
-    current = actor(role=AccountRole.AMO_ADMIN, is_amo_admin=True)
+    current = actor(role=AccountRole.TECHNICIAN, is_amo_admin=False)
     elevated = require_active_admin_profile(
         request("/accounts/admin/users"),
         current,
@@ -243,13 +251,14 @@ def test_active_backend_session_unlocks_tenant_admin_api() -> None:
     )
     assert elevated is current
     assert elevated.is_amo_admin is True
-    assert elevated.role == AccountRole.AMO_ADMIN
+    assert elevated.role == AccountRole.TECHNICIAN
+    assert getattr(elevated, "_admin_profile_elevated", False) is True
     sql = str(db.execute.call_args.args[0]).upper()
     params = db.execute.call_args.args[1]
     assert "S.AUTH_SESSION_ID = :AUTH_SESSION_ID" in sql
     assert ":IMPLICIT_ADMIN = TRUE" in sql
     assert params["auth_session_id"] == "auth-session-a"
-    assert params["implicit_admin"] is True
+    assert params["implicit_admin"] is False
 
 
 def test_downgraded_admin_cannot_use_grantless_session() -> None:
@@ -278,8 +287,8 @@ def test_concurrent_login_must_match_activating_auth_session() -> None:
     db = MagicMock()
     db.execute.return_value.first.return_value = None
     current = actor(
-        role=AccountRole.AMO_ADMIN,
-        is_amo_admin=True,
+        role=AccountRole.TECHNICIAN,
+        is_amo_admin=False,
         auth_session_id="browser-b",
     )
 
@@ -296,7 +305,7 @@ def test_concurrent_login_must_match_activating_auth_session() -> None:
 
 def test_missing_auth_session_identity_fails_closed() -> None:
     db = MagicMock()
-    current = actor(role=AccountRole.AMO_ADMIN, is_amo_admin=True, auth_session_id=None)
+    current = actor(role=AccountRole.TECHNICIAN, is_amo_admin=False, auth_session_id=None)
 
     with pytest.raises(HTTPException) as exc:
         require_active_admin_profile(
@@ -306,6 +315,39 @@ def test_missing_auth_session_identity_fails_closed() -> None:
         )
 
     assert exc.value.status_code == 401
+    db.execute.assert_not_called()
+
+
+def test_standing_admin_profile_state_is_permanent_without_session_row(monkeypatch) -> None:
+    db = MagicMock()
+    monkeypatch.setattr(profile_router, "_ensure_schema", lambda _db: None)
+
+    result = _state(
+        db,
+        amo=SimpleNamespace(id="amo-a"),
+        user=actor(role=AccountRole.TECHNICIAN, is_amo_admin=True),
+    )
+
+    assert result == {
+        "eligible": True,
+        "active": True,
+        "session_id": None,
+        "expires_at": None,
+        "grant_type": "PERMANENT",
+        "reason": "Standing AMO administrator assigned by the platform superuser",
+    }
+    db.execute.assert_not_called()
+
+
+def test_standing_admin_cross_module_boundaries_do_not_require_profile_capabilities() -> None:
+    current = actor(role=AccountRole.TECHNICIAN, is_amo_admin=True)
+    db = MagicMock()
+
+    assert require_module_access("quality", "manage")(current_user=current, db=db) is current
+    assert require_any_module_access("stores", "procurement", level="manage")(
+        current_user=current,
+        db=db,
+    ) is current
     db.execute.assert_not_called()
 
 
@@ -326,7 +368,7 @@ def test_approved_grantee_satisfies_legacy_admin_dependencies() -> None:
 
     assert elevated is current
     assert elevated.is_amo_admin is True
-    assert elevated.role == AccountRole.AMO_ADMIN
+    assert elevated.role == AccountRole.TECHNICIAN
     assert getattr(elevated, "_admin_profile_elevated", False) is True
     assert require_admin(elevated) is elevated
     assert require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)(elevated) is elevated

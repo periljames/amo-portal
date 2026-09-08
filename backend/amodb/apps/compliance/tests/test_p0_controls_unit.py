@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from amodb.apps.compliance.ledger import write_ledger_event
+from amodb.apps.accounts import access_control
 from amodb.apps.doc_control import state_machine as doc_state
 from amodb.apps.quality import transitions as car_transitions
 from amodb.apps.training import gates
@@ -43,7 +44,8 @@ class _DB:
         return None
 
 
-def test_require_capability_denies_without_capability():
+def test_require_capability_denies_without_capability(monkeypatch):
+    monkeypatch.setattr(access_control, "user_has_capability", lambda *_args, **_kwargs: False)
     dep = require_capability("doc_control.revision.publish")
     user = SimpleNamespace(id="U1", amo_id="A1", is_superuser=False, is_amo_admin=False, role="TECHNICIAN")
     db = _DB(allowed=False)
@@ -52,7 +54,8 @@ def test_require_capability_denies_without_capability():
     assert exc.value.status_code == 403
 
 
-def test_require_capability_strict_default_denies_admin_without_grant():
+def test_require_capability_strict_default_denies_admin_without_grant(monkeypatch):
+    monkeypatch.setattr(access_control, "user_has_capability", lambda *_args, **_kwargs: False)
     dep = require_capability("doc_control.revision.publish")
     user = SimpleNamespace(id="U1", amo_id="A1", is_superuser=False, is_amo_admin=True, role="AMO_ADMIN")
     db = _DB(allowed=False)
@@ -61,7 +64,11 @@ def test_require_capability_strict_default_denies_admin_without_grant():
     assert exc.value.status_code == 403
 
 
-def test_require_capability_db_error_fails_closed_service_unavailable():
+def test_require_capability_db_error_fails_closed_service_unavailable(monkeypatch):
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("db failure")
+
+    monkeypatch.setattr(access_control, "user_has_capability", unavailable)
     dep = require_capability("doc_control.revision.publish")
     user = SimpleNamespace(id="U1", amo_id="A1", is_superuser=False, is_amo_admin=False, role="TECHNICIAN")
     db = _DB(fail_execute=True)

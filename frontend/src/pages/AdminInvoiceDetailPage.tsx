@@ -43,7 +43,7 @@ const AdminInvoiceDetailPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
-  const isTenantAdmin = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || hasActiveTenantAdminProfile(amoCode));
+  const isTenantAdmin = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN" || hasActiveTenantAdminProfile(amoCode));
 
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);

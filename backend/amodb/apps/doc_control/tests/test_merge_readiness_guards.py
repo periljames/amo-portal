@@ -33,9 +33,9 @@ def _request(method: str, path: str) -> Request:
     )
 
 
-def test_quality_inspector_is_controller_without_decision_authority() -> None:
+def test_quality_inspector_has_neither_librarian_nor_decision_authority() -> None:
     user = SimpleNamespace(is_superuser=False, is_amo_admin=False, role="QUALITY_INSPECTOR")
-    assert workspace_service.is_control_user(user) is True
+    assert workspace_service.is_control_user(user) is False
     assert is_decision_approver(user) is False
 
 

@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from amodb.apps.compliance.ledger import write_ledger_event
+from amodb.apps.accounts import access_control
 from amodb.apps.doc_control.state_machine import (
     assert_doc_access_allowed,
     transition_revision_package,
@@ -52,7 +53,14 @@ class _DB:
         return None
 
 
-def test_tenant_isolation_cross_tenant_access_denied() -> None:
+def test_tenant_isolation_cross_tenant_access_denied(monkeypatch) -> None:
+    monkeypatch.setattr(
+        access_control,
+        "user_has_capability",
+        lambda _db, *, user, capability_code: (
+            str(user.amo_id), str(user.id), capability_code
+        ) in {("A1", "U1", "doc_control.revision.publish")},
+    )
     dep = require_capability("doc_control.revision.publish")
     user = SimpleNamespace(id="U1", amo_id="A2", is_superuser=False, is_amo_admin=False, role="TECHNICIAN")
     db = _DB(capability_grants={("A1", "U1", "doc_control.revision.publish")})
@@ -61,12 +69,14 @@ def test_tenant_isolation_cross_tenant_access_denied() -> None:
     assert exc.value.status_code == 403
 
 
-def test_capability_authz_required_for_doc_mutations() -> None:
+def test_capability_authz_required_for_doc_mutations(monkeypatch) -> None:
+    monkeypatch.setattr(access_control, "user_has_capability", lambda *_args, **_kwargs: False)
     dep = require_capability("doc_control.document.create")
     user = SimpleNamespace(id="U9", amo_id="A1", is_superuser=False, is_amo_admin=False, role="TECHNICIAN")
     db = _DB(capability_grants=set())
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as exc:
         dep(current_user=user, db=db)
+    assert exc.value.status_code == 403
 
 
 def test_invalid_transition_rejected_for_revision_workflow() -> None:

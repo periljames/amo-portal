@@ -52,8 +52,8 @@ export function auditScopeValidationError(form: AuditScopeFormState): string | n
   return null;
 }
 
-/** Mirrors backend `_require_scope_admin`: only the prescribed Quality Manager governs scope families. */
+/** Mirrors backend `_require_scope_admin`: Quality Manager or standing AMO Administrator. */
 export function canManageAuditScopes(user: PortalUser | null | undefined): boolean {
   if (!user || user.is_superuser || !user.amo_id) return false;
-  return user.role === "QUALITY_MANAGER";
+  return user.role === "QUALITY_MANAGER" || user.role === "AMO_ADMIN" || Boolean(user.is_amo_admin);
 }

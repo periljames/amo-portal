@@ -116,6 +116,7 @@ def test_close_finding_logs_audit_event(db_session):
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-1",
         title="Audit 1",
+        lead_auditor_user_id=user.id,
     )
     db_session.add(audit)
     db_session.commit()
