@@ -3,7 +3,10 @@
   padding: var(--s-4);
   border-radius: var(--r-md);
   border: 1px dashed var(--border);
-  background: rgba(15, 23, 42, 0.55);
+  /* Theme-aware recessed surface — must not hardcode a dark fill or it renders
+     as a dark box on light surfaces. */
+  background: var(--surface-soft);
+  color: var(--text-primary);
 }
 
 .empty-state__title {
