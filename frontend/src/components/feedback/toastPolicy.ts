@@ -1,1 +1,1 @@
-export const TOAST_AUTO_CLOSE_MS = 30_000;
+export const TOAST_AUTO_CLOSE_MS = 7_000;
