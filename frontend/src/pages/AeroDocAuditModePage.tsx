@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import { fetchEntitlements } from "../services/billing";
 import { authHeaders } from "../services/auth";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
 
 const MODULE_KEY = "aerodoc_hybrid_dms";
 
 export default function AeroDocAuditModePage() {
+  const { amoCode = "" } = useParams<{ amoCode: string }>();
   const [enabled, setEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -28,13 +31,19 @@ export default function AeroDocAuditModePage() {
     URL.revokeObjectURL(url);
   };
 
-  if (enabled === false) return <section className="panel"><h2>Module not enabled</h2></section>;
-
-  return (
-    <section className="panel">
+  const content = enabled === false ? (
+    <section className="panel qms-surface-root"><h2>Module not enabled</h2><p>AeroDoc Hybrid-DMS is not enabled for this tenant.</p></section>
+  ) : (
+    <section className="panel qms-surface-root">
       <h2>Inspector Audit Mode</h2>
       <p>Verify copies and export the compliance binder.</p>
       <button type="button" onClick={downloadBinder}>Download compliance binder</button>
     </section>
+  );
+
+  return (
+    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      {content}
+    </DepartmentLayout>
   );
 }
