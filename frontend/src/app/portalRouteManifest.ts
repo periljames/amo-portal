@@ -1,3 +1,5 @@
+import { isTenantAdmin } from "../utils/tenantAccess";
+import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
 import type { PortalUser } from "../services/auth";
 import {
   getAllowedDepartments,
@@ -213,10 +215,6 @@ function simpleDepartmentBranch(
   };
 }
 
-function departmentHomePath(amoCode: string, department: DepartmentId | null): string {
-  const base = tenantBase(amoCode);
-  return !department || department === "admin" ? base : `${base}/${department}`;
-}
 
 function departmentBranch(
   amoCode: string,
@@ -372,13 +370,10 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
 export function buildPortalNavigation(context: PortalNavigationContext): PortalNavGroup[] {
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
   if (!user) return [];
-  const standingAdmin = Boolean(
-    !user.is_superuser && (user.is_amo_admin || user.role === "AMO_ADMIN"),
-  );
+  const standingAdmin = isTenantAdmin(user);
   const administrationActive = adminModeActive || standingAdmin;
   const operationalUser = getOperationalAccessUser(user);
-  // Administration is an overlay for administration screens only; it must
-  // never manufacture operational department or module access.
+  // Tenant administration includes every tenant workspace.
   const effectiveUser = operationalUser;
   const assigned = getAssignedDepartment(user, contextDepartment);
   const allowed = getAllowedDepartments(effectiveUser, assigned).filter(
@@ -386,25 +381,16 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   );
   const scope: Array<Exclude<DepartmentId, "admin">> = allowed;
   const base = tenantBase(amoCode);
-  const homeDepartment = (
-    assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : allowed[0]
-  );
   const moduleVisible = (module: string): boolean => (
-    effectiveUser?.module_access === undefined
+    isTenantAdmin(effectiveUser) || effectiveUser?.module_access === undefined
     || Boolean(effectiveUser.module_access[module])
   );
-  const canGovernAdministratorAccess = Boolean(
-    administrationActive
-    || user.is_amo_admin
-    || user.role === "AMO_ADMIN"
-    || user.role === "ACCOUNTABLE_EXECUTIVE"
-    || user.role === "QUALITY_MANAGER",
-  );
+  const canGovernAdministratorAccess = Boolean(user.amo_id && !user.is_superuser);
   const groups: PortalNavGroup[] = [{
     id: "workspace",
     label: "Workspace",
     items: [
-      { id: "home", label: "Home", icon: "home", path: departmentHomePath(amoCode, homeDepartment || null), exact: true },
+      { id: "home", label: "Home", icon: "home", path: getFirstAccessibleModuleRoute(amoCode, user, assigned), exact: true },
       ...(moduleVisible("training") ? [{ id: "my-training", label: "My Training", icon: "training" as const, path: `${base}/training` }] : []),
       ...(moduleVisible("rostering") ? [{ id: "my-roster", label: "My Roster", icon: "calendar" as const, path: `${base}/rostering/my-roster` }] : []),
       ...(canGovernAdministratorAccess ? [{

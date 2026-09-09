@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 import re
 import uuid
 from datetime import datetime, timezone
@@ -72,14 +74,14 @@ def _tenant_user(db: Session, ctx: TenantContext) -> account_models.User:
 
 def _assert_accountable_executive(db: Session, ctx: TenantContext) -> account_models.User:
     user = _tenant_user(db, ctx)
-    if _role_value(user) != "ACCOUNTABLE_EXECUTIVE":
+    if not is_tenant_admin(user) and _role_value(user) != "ACCOUNTABLE_EXECUTIVE":
         raise HTTPException(status_code=403, detail="Only the Accountable Executive may attest an Authority submission.")
     return user
 
 
 def _assert_pack_generation_actor(db: Session, ctx: TenantContext) -> account_models.User:
     user = _tenant_user(db, ctx)
-    if _role_value(user) not in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}:
+    if not is_tenant_admin(user) and _role_value(user) not in {"ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"}:
         raise HTTPException(status_code=403, detail="Only the Accountable Executive or Quality Manager may generate an Authority submission pack.")
     return user
 

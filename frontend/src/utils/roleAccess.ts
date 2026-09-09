@@ -1,3 +1,4 @@
+import { isTenantAdmin } from "./tenantAccess";
 import { normalizeDepartmentCode, type AccountRole, type PortalUser } from "../services/auth";
 
 export type RoleCapability =
@@ -119,18 +120,17 @@ type AccessRule = {
 };
 
 function getDepartmentFromUser(user: PortalUser | null, contextDepartment?: string | null): string | null {
-  const fromContext = normalizeDepartmentCode(contextDepartment || "");
-  if (fromContext) return fromContext;
-  return normalizeDepartmentCode(
-    user?.department?.code || user?.department_code || "",
-  );
+  const assigned = normalizeDepartmentCode(user?.department?.code || user?.department_code || "");
+  // A current writer-side assignment always wins over remembered navigation.
+  if (assigned || user?.department_code !== undefined) return assigned;
+  return normalizeDepartmentCode(contextDepartment || "");
 }
 
 export function getUserCapabilities(
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): RoleCapability[] {
-  if (!user) return [];
+  if (!user?.amo_id || user.is_superuser || user.role === "SUPERUSER" || user.is_active === false) return [];
   const caps = new Set<RoleCapability>();
   const role = user.role as AccountRole;
   const assignedDepartment = getDepartmentFromUser(user, contextDepartment);
@@ -138,7 +138,7 @@ export function getUserCapabilities(
   // Standing AMO administration is assigned/revoked by the platform
   // superuser. It provides broad tenant operation/configuration control while
   // regulated signatures remain protected by their dedicated role checks.
-  if (!user.is_superuser && (user.is_amo_admin || role === "AMO_ADMIN")) caps.add("admin");
+  if (isTenantAdmin(user)) caps.add("admin");
   if (role === "ACCOUNTABLE_EXECUTIVE") {
     caps.add("management");
     caps.add("publisher");
@@ -167,7 +167,7 @@ export function getRoleDrivenDepartments(
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): DepartmentId[] {
-  if (!user) return [];
+  if (!user?.amo_id || user.is_superuser || user.role === "SUPERUSER" || user.is_active === false) return [];
   const caps = new Set(getUserCapabilities(user, contextDepartment));
   if (caps.has("admin")) {
     return [
@@ -316,7 +316,7 @@ function actionModule(action: ModuleAction): string {
 
 function moduleAllows(user: PortalUser | null, module: string, level: "view" | "manage"): boolean | null {
   if (!user || user.module_access === undefined) return null;
-  if (!user.is_superuser && (user.is_amo_admin || user.role === "AMO_ADMIN")) return true;
+  if (isTenantAdmin(user)) return true;
   const configured = user.module_access[module];
   return configured === "manage" || (level === "view" && configured === "view");
 }
@@ -342,6 +342,7 @@ export function canViewFeature(
   const capabilities = getUserCapabilities(user, contextDepartment);
   const governed = featureModuleAllows(user, feature, "view");
   if (governed === false) return false;
+  if (feature === "rostering.my-roster" && user?.amo_id && !user.is_superuser) return true;
   return Boolean(rule && (capabilities.includes("management") || hasMatchingCapability(capabilities, rule.view)));
 }
 
@@ -354,7 +355,7 @@ export function canEditFeature(
   if (!rule) return false;
   const governed = featureModuleAllows(user, feature, "manage");
   if (governed === false) return false;
-  return hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.edit || rule.view);
+  return isTenantAdmin(user) || hasMatchingCapability(getUserCapabilities(user, contextDepartment), rule.edit || rule.view);
 }
 
 export function canPerformAction(
@@ -364,7 +365,7 @@ export function canPerformAction(
 ): boolean {
   const governed = moduleAllows(user, actionModule(action), "manage");
   if (governed === false) return false;
-  return hasMatchingCapability(getUserCapabilities(user, contextDepartment), ACTION_RULES[action] || []);
+  return isTenantAdmin(user) || hasMatchingCapability(getUserCapabilities(user, contextDepartment), ACTION_RULES[action] || []);
 }
 
 export function getFirstAccessibleModuleRoute(
@@ -372,25 +373,19 @@ export function getFirstAccessibleModuleRoute(
   user: PortalUser | null,
   contextDepartment?: string | null,
 ): string {
-  if (!user) return `/maintenance/${amoCode}/login`;
-  if (user.role === "PROCUREMENT_OFFICER") return `/maintenance/${amoCode}/procurement`;
-  const ordered: Array<[ModuleFeature, string]> = [
-    ["planning.dashboard", `/maintenance/${amoCode}/planning/dashboard`],
-    ["production.control-board", `/maintenance/${amoCode}/production/control-board`],
-    ["production.records.dashboard", `/maintenance/${amoCode}/production/records`],
-    ["maintenance.dashboard", `/maintenance/${amoCode}/maintenance/dashboard`],
-    ["rostering.settings", `/maintenance/${amoCode}/rostering/settings?section=workforce`],
-  ];
-  for (const [feature, route] of ordered) {
-    if (canViewFeature(user, feature, contextDepartment)) return route;
+  const tenant = user?.amo_slug || user?.amo_code || amoCode;
+  const base = `/maintenance/${encodeURIComponent(tenant)}`;
+  if (!user) return `${base}/login`;
+  if (user.is_superuser || user.role === "SUPERUSER") return "/platform/control";
+  const assigned = getDepartmentFromUser(user, contextDepartment);
+  const allowed = getRoleDrivenDepartments(user, assigned);
+  if (assigned && assigned !== "admin" && (allowed.includes(assigned as DepartmentId) || ["planning", "production", "maintenance", "safety", "stores", "workshops"].includes(assigned))) {
+    return `${base}/${assigned}`;
   }
-  const depts = getRoleDrivenDepartments(user, contextDepartment);
-  if (depts.includes("quality")) return `/maintenance/${amoCode}/qms`;
-  if (depts.includes("procurement")) return `/maintenance/${amoCode}/procurement`;
-  if (depts.includes("stores")) return `/maintenance/${amoCode}/stores`;
-  if (depts.includes("safety")) return `/maintenance/${amoCode}/safety`;
-  if (depts.includes("document-control")) return `/maintenance/${amoCode}/document-control`;
-  return `/maintenance/${amoCode}/planning`;
+  if (isTenantAdmin(user)) return `${base}/admin/overview`;
+  // A removed or unavailable department never sends a user to someone else's home.
+  // These routes are available to every authenticated tenant employee.
+  return `${base}/profile`;
 }
 
 export function getFeatureDenialMessage(feature: ModuleFeature): string {

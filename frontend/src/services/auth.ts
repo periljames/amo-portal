@@ -98,7 +98,13 @@ const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
 export function normalizeDepartmentCode(value?: string | null): string | null {
   const v = (value || "").trim();
   if (!v) return null;
-  return v.toLowerCase();
+  const normalized = v.toLowerCase().replace(/[ _]+/g, "-");
+  const aliases: Record<string, string> = {
+    "doc-control": "document-control", "quality-assurance": "quality",
+    "technical-records": "production", "procurement-stores": "stores",
+    "base-maintenance": "maintenance", "line-maintenance": "maintenance",
+  };
+  return aliases[normalized] || normalized;
 }
 
 /**
@@ -148,6 +154,8 @@ export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
  */
 export interface PortalUser {
   id: string;
+  amo_code?: string | null;
+  amo_slug?: string | null;
   amo_id: string | null;
   department_id: string | null;
   department?: { code?: string | null; name?: string | null } | null;

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 import os
 from typing import Any
 
@@ -29,7 +31,7 @@ def require_saas_admin(
         )
     if getattr(current_user, "is_superuser", False):
         return current_user
-    if getattr(current_user, "is_amo_admin", False) or current_user.role == account_models.AccountRole.AMO_ADMIN:
+    if is_tenant_admin(current_user):
         if not current_user.amo_id:
             raise HTTPException(status_code=403, detail="AMO administrator is not assigned to a tenant.")
         return current_user

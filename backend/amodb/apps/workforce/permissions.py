@@ -1,6 +1,8 @@
 # backend/amodb/apps/workforce/permissions.py
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
+
 from datetime import date
 from enum import Enum
 from typing import Iterable, Optional
@@ -224,6 +226,8 @@ def default_permissions_for(user: account_models.User) -> set[str]:
 
     if not user or getattr(user, "is_system_account", False):
         return set()
+    if is_tenant_admin(user):
+        return set(ALL_PERMISSIONS)
     return set(ROLE_PERMISSIONS.get(_role_value(user), EMPLOYEE))
 
 
@@ -317,6 +321,10 @@ def has_permission(
     if not user or getattr(user, "is_system_account", False):
         return False
     code = permission.value if isinstance(permission, PermissionCode) else str(permission)
+    if not tenant_member(user):
+        return False
+    if is_tenant_admin(user):
+        return code in ALL_PERMISSIONS
     amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
     explicit = _active_grants(
         db,
@@ -375,6 +383,10 @@ def permissions_for_user(db: Session, *, user: account_models.User) -> list[str]
     a concrete scope instead of treating this list as a tenant-wide grant.
     """
 
+    if not tenant_member(user):
+        return []
+    if is_tenant_admin(user):
+        return sorted(ALL_PERMISSIONS)
     defaults = default_permissions_for(user)
     permissions = {
         code for code in defaults

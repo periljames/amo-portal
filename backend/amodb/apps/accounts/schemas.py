@@ -225,6 +225,9 @@ class UserSelfUpdate(BaseModel):
 
 class UserRead(UserBase):
     id: str
+    department_code: Optional[str] = None
+    amo_code: Optional[str] = None
+    amo_slug: Optional[str] = None
     amo_id: Optional[str] = None
     department_id: Optional[str] = None
     staff_code: Optional[str] = None

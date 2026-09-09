@@ -293,7 +293,8 @@ export function hasActiveTenantAdminProfile(amoCode?: string | null): boolean {
 
 export async function listAdminAccessGrants(amoCode: string): Promise<{
   items: AdminAccessGrant[];
-  required_approver_roles: ["ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"];
+  required_approver_roles: ["ACCOUNTABLE_EXECUTIVE"];
+  standing_administrators: Array<{ id: string; full_name: string; email: string }>;
 }> {
   return apiRequest(`${API_PREFIX}/${encodeURIComponent(amoCode)}/grants`, {
     timeoutMs: 12_000,
@@ -372,4 +373,13 @@ export function clearAllCachedAdminProfileStates(): void {
       window.sessionStorage.removeItem(key);
     }
   }
+}
+
+export async function removeTenantAdministrator(amoCode: string, userId: string, deactivateAccount = false): Promise<void> {
+  await apiRequest(`${API_PREFIX}/${encodeURIComponent(amoCode)}/administrators/${encodeURIComponent(userId)}/revoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deactivate_account: deactivateAccount }),
+    cacheTtlMs: 0,
+  });
 }

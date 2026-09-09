@@ -13,6 +13,8 @@ cannot manufacture SUPERUSER authority or a certifying privilege.
 """
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
+
 from datetime import date, datetime, timezone
 from typing import Iterable
 
@@ -738,6 +740,8 @@ def capability_codes_for_user(db: Session, *, user: models.User) -> list[str]:
             _capability_code(module_code, "view")
             for module_code in MODULE_CODES
         )
+    if not tenant_member(user):
+        return []
     assignments = _active_assignment_query(
         db, amo_id=str(user.amo_id), user_id=str(user.id)
     ).filter(models.AuthUserRoleAssignment.is_primary.is_(True))
@@ -768,7 +772,7 @@ def capability_codes_for_user(db: Session, *, user: models.User) -> list[str]:
             module_permissions=template["modules"],
         ))
     role_key = role_registry.canonical_role_key(user.role) or "USER"
-    if bool(getattr(user, "is_amo_admin", False) or role_key == "AMO_ADMIN"):
+    if is_tenant_admin(user):
         # A standing administrator is a platform-assigned tenant overlay. Keep
         # the user's operational workflow capabilities intact, but expose all
         # tenant module view/manage boundaries until that overlay is revoked.
@@ -801,6 +805,11 @@ def attach_user_access(db: Session, user: models.User) -> models.User:
         profile = primary_access_profile(db, user=user)
         capabilities = capability_codes_for_user(db, user=user)
         display_name = profile.display_name if profile else role_registry.role_definition(user.role).label
+    department = getattr(user, "department", None)
+    setattr(user, "department_code", department.code if department and str(department.amo_id) == str(user.amo_id) and department.is_active else None)
+    amo = getattr(user, "amo", None)
+    setattr(user, "amo_code", amo.amo_code if amo and str(amo.id) == str(user.amo_id) else None)
+    setattr(user, "amo_slug", amo.login_slug if amo and str(amo.id) == str(user.amo_id) else None)
     setattr(user, "access_profile_id", str(profile.id) if profile else None)
     setattr(user, "access_profile_name", display_name)
     setattr(user, "capability_codes", capabilities)
@@ -809,6 +818,8 @@ def attach_user_access(db: Session, user: models.User) -> models.User:
 
 
 def user_has_capability(db: Session, *, user: models.User, capability_code: str) -> bool:
+    if is_tenant_admin(user) and capability_code.startswith(("portal.", "qms.", "training.", "workforce.", "roster.", "leave.", "attendance.", "timesheet.", "overtime.", "payroll.")):
+        return True
     capabilities = capability_codes_for_user(db, user=user)
     if capability_code in capabilities:
         return True

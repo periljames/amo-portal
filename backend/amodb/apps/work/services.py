@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -220,7 +222,7 @@ def _ensure_valid_work_order_transition(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="CRS is required to close this work order or provide NO_CRS_REQUIRED.",
                 )
-            if actor.role != AccountRole.QUALITY_MANAGER:
+            if not is_tenant_admin(actor) and actor.role != AccountRole.QUALITY_MANAGER:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only the Quality Manager can authorize closure without CRS.",

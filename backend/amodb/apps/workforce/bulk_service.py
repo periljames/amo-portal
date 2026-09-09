@@ -1,6 +1,8 @@
 """Durable, idempotent and retryable Workforce bulk-operation service."""
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 import csv
 import hashlib
 import io
@@ -292,7 +294,7 @@ def resume_operation(db: Session, *, amo_id: str, actor, operation_id: str):
         heartbeat = row.heartbeat_at or row.started_at or row.created_at
         if heartbeat and (_utcnow() - heartbeat).total_seconds() < 300:
             raise ValueError("This operation is still active and does not need to be resumed")
-    if str(row.actor_user_id) != str(actor.id) and not getattr(actor, "is_amo_admin", False) and not getattr(actor, "is_superuser", False):
+    if str(row.actor_user_id) != str(actor.id) and not is_tenant_admin(actor) and not getattr(actor, "is_superuser", False):
         raise ValueError("Only the initiating administrator or a tenant administrator may resume this operation")
     db.query(bulk_models.WorkforceBulkOperationItem).filter(
         bulk_models.WorkforceBulkOperationItem.operation_id == row.id,

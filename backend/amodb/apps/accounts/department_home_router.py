@@ -12,7 +12,7 @@ from amodb.apps.tasks.models import Task, TaskStatus
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 from . import models
-from .admin_profile_access import active_admin_profile_session
+from .tenant_authority import active_admin_profile_session, tenant_member
 
 
 router = APIRouter(prefix="/home", tags=["department_home"])
@@ -154,7 +154,7 @@ def _assert_tenant(user: models.User, amo: models.AMO) -> None:
             detail="Platform superusers must use a governed support session.",
         )
     effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None)
-    if not effective_amo_id or str(effective_amo_id) != str(amo.id):
+    if not tenant_member(user, amo.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a member of this AMO tenant.")
 
 
@@ -164,7 +164,17 @@ def _admin_profile_active(db: Session, user: models.User, amo: models.AMO) -> bo
 
 def _allowed_departments(db: Session, user: models.User, amo: models.AMO) -> set[str]:
     """Resolve department authorization only from writer-side state."""
+    if not tenant_member(user, amo.id):
+        return set()
     allowed = set(ROLE_DEPARTMENTS.get(_role(user), set()))
+    module_access = getattr(user, "module_access", None)
+    if module_access is not None:
+        department_modules = {"document-control": "documents", "workshops": "maintenance"}
+        allowed = {
+            department for department in SUPPORTED_DEPARTMENTS
+            if module_access.get(department_modules.get(department, department))
+            or (department == "production" and module_access.get("technical_records"))
+        }
     if getattr(user, "department_id", None):
         department = (
             db.query(models.Department)

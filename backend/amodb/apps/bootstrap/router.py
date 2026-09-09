@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import date, datetime, timezone
 from typing import List, Optional
 
@@ -66,7 +68,7 @@ def _require_fleet_bootstrap_actor(
         account_models.AccountRole.PLANNING_ENGINEER,
         account_models.AccountRole.PRODUCTION_ENGINEER,
     }
-    if current_user.role not in allowed:
+    if not is_tenant_admin(current_user) and current_user.role not in allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fleet master-data authority is required for this bootstrap operation.",

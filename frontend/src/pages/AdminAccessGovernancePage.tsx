@@ -13,6 +13,7 @@ import {
   listAdminGrantCandidates,
   requestAdminAccessGrant,
   revokeAdminAccessGrant,
+  removeTenantAdministrator,
   type AdminAccessGrant,
   type AdminGrantRequestPayload,
 } from "../services/adminProfileMode";
@@ -39,7 +40,7 @@ export default function AdminAccessGovernancePage() {
   const currentUser = useMemo(() => getCachedUser(), []);
   const amoCode = routeAmoCode || context.amoCode || context.amoSlug || "UNKNOWN";
   const activeDepartment = getAssignedDepartment(currentUser, context.department) || "quality";
-  const canApprove = ["ACCOUNTABLE_EXECUTIVE", "QUALITY_MANAGER"].includes(currentUser?.role || "");
+  const canApprove = currentUser?.role === "ACCOUNTABLE_EXECUTIVE";
   const isStandingAdmin = Boolean(
     currentUser
     && !currentUser.is_superuser
@@ -61,14 +62,10 @@ export default function AdminAccessGovernancePage() {
     enabled: Boolean(currentUser && amoCode !== "UNKNOWN"),
     staleTime: 5_000,
   });
-  const canUseGovernance = Boolean(
-    canApprove
-    || currentUser?.is_amo_admin
-    || currentUser?.role === "AMO_ADMIN"
-    || profileQuery.data?.eligible,
-  );
-  const canRequest = Boolean(profileQuery.data?.active);
-  const canListGrants = canApprove || canRequest;
+  const canUseGovernance = Boolean(currentUser?.amo_id && !currentUser.is_superuser);
+  const canAssign = Boolean(profileQuery.data?.active || canApprove);
+  const canRequest = canUseGovernance;
+  const canListGrants = canUseGovernance;
 
   const grantsQuery = useQuery({
     queryKey: ["admin-access-grants", amoCode],
@@ -107,9 +104,9 @@ export default function AdminAccessGovernancePage() {
         : null,
       reason: request.reason.trim(),
     }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setRequest({ user_id: "", grant_type: "TEMPORARY", valid_until: "", reason: "" });
-      setFeedback("Administrator grant submitted for independent AE and Quality Manager approval.");
+      setFeedback(result.status === "ACTIVE" ? "Administrator access assigned for the selected duration." : "Request submitted to the Accountable Executive.");
       await refresh();
     },
     onError: (error: Error) => setFeedback(error.message),
@@ -122,8 +119,8 @@ export default function AdminAccessGovernancePage() {
     ),
     onSuccess: async (result) => {
       setFeedback(result.status === "ACTIVE"
-        ? "The independent approvals are complete and the administrator grant is active."
-        : "Your decision is recorded; the other prescribed approval is still required.");
+        ? "The administrator grant is approved and active."
+        : "Your decision is recorded.");
       await refresh();
     },
     onError: (error: Error) => setFeedback(error.message),
@@ -138,6 +135,12 @@ export default function AdminAccessGovernancePage() {
       setFeedback(result.status === "REVOKED" ? "Administrator grant revoked." : "Grant updated.");
       await refresh();
     },
+    onError: (error: Error) => setFeedback(error.message),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: ({ id, deactivate }: { id: string; deactivate: boolean }) => removeTenantAdministrator(amoCode, id, deactivate),
+    onSuccess: async () => { setFeedback("Administrator access removed."); await refresh(); },
     onError: (error: Error) => setFeedback(error.message),
   });
 
@@ -168,15 +171,15 @@ export default function AdminAccessGovernancePage() {
           <section className="aag-empty" role="alert">
             <ShieldX size={28} />
             <h2>Governance access is not assigned</h2>
-            <p>Only the Accountable Executive, Quality Manager and an eligible Tenant Administrator may use this workspace.</p>
+            <p>Sign in under your AMO tenant to use administrator governance.</p>
           </section>
         ) : (
           <>
             <section className="aag-control-strip" aria-label="Administrator grant control">
-              <div><strong>Required approvals</strong><span>Accountable Executive + Quality Manager</span></div>
+              <div><strong>Request approver</strong><span>Accountable Executive</span></div>
               <div><strong>Current persona</strong><span>{currentUser.access_profile_name || currentUser.role.replaceAll("_", " ")}</span></div>
               <div><strong>Administrative authority</strong><span>{isStandingAdmin ? "Standing · platform assigned" : profileQuery.data?.active ? "Delegated · active for this session" : profileQuery.data?.eligible ? "Delegated · eligible, not active" : "Not assigned"}</span></div>
-              {!isStandingAdmin && !canRequest && profileQuery.data?.eligible ? (
+              {!isStandingAdmin && !profileQuery.data?.active && profileQuery.data?.eligible ? (
                 <button type="button" className="aag-button" onClick={() => activateMutation.mutate()} disabled={activateMutation.isPending}>
                   <UserRoundCog size={16} /> {activateMutation.isPending ? "Activating…" : "Activate Admin Profile"}
                 </button>
@@ -186,7 +189,7 @@ export default function AdminAccessGovernancePage() {
             {canRequest ? (
               <section className="aag-panel">
                 <div className="aag-section-heading">
-                  <div><h2>Request administrator access</h2><p>Choose an existing tenant user. The request remains inactive until both prescribed approvals are recorded.</p></div>
+                  <div><h2>Request administrator access</h2><p>{canAssign ? "Assign permanent or temporary administrator access to a tenant user." : "Request permanent or temporary administrator access from your Accountable Executive."}</p></div>
                 </div>
                 <div className="aag-request-grid">
                   <label><span>User</span><select value={request.user_id} onChange={(event) => setRequest((current) => ({ ...current, user_id: event.target.value }))}>
@@ -201,11 +204,22 @@ export default function AdminAccessGovernancePage() {
                   {request.grant_type === "TEMPORARY" ? <label><span>Expires</span><input type="datetime-local" value={request.valid_until || ""} onChange={(event) => setRequest((current) => ({ ...current, valid_until: event.target.value }))} /></label> : null}
                   <label className="aag-request-reason"><span>Operational reason</span><textarea value={request.reason} minLength={8} maxLength={1000} onChange={(event) => setRequest((current) => ({ ...current, reason: event.target.value }))} placeholder="State the task, access scope and reason this administrator overlay is required." /></label>
                   <button type="button" className="aag-button" onClick={() => requestMutation.mutate()} disabled={!request.user_id || request.reason.trim().length < 8 || (request.grant_type === "TEMPORARY" && !request.valid_until) || requestMutation.isPending}>
-                    {requestMutation.isPending ? "Submitting…" : "Submit governed request"}
+                    {requestMutation.isPending ? "Submitting…" : canAssign ? "Assign administrator access" : "Submit request"}
                   </button>
                 </div>
               </section>
             ) : null}
+
+            {grantsQuery.data?.standing_administrators?.length ? <section className="aag-panel">
+              <div className="aag-section-heading"><div><h2>Standing administrators</h2><p>Platform appointments are permanent. Only the superuser or Accountable Executive may remove them.</p></div></div>
+              <div className="aag-grants">{grantsQuery.data.standing_administrators.map((admin) => <article className="aag-grant" key={admin.id}>
+                <div><h3>{admin.full_name}</h3><p>{admin.email}</p></div>
+                {canApprove ? <div className="aag-actions">
+                  <button className="aag-button aag-button--danger" disabled={removeMutation.isPending} onClick={() => removeMutation.mutate({ id: admin.id, deactivate: false })}>Remove administrator access</button>
+                  <button className="aag-button aag-button--danger" disabled={removeMutation.isPending || admin.id === currentUser.id} onClick={() => removeMutation.mutate({ id: admin.id, deactivate: true })}>Deactivate account</button>
+                </div> : null}
+              </article>)}</div>
+            </section> : null}
 
             <section className="aag-panel">
               <div className="aag-section-heading">
@@ -237,9 +251,8 @@ export default function AdminAccessGovernancePage() {
                         </dl>
                       </div>
                       <div className="aag-decision">
-                        <div className="aag-approval-pair" aria-label="Required independent approvals">
+                        <div className="aag-approval-pair" aria-label="Request approval">
                           <span className={grant.accountable_executive_approved ? "is-complete" : ""}>{grant.accountable_executive_approved ? <CheckCircle2 size={15} /> : <Clock3 size={15} />} Accountable Executive</span>
-                          <span className={grant.quality_manager_approved ? "is-complete" : ""}>{grant.quality_manager_approved ? <CheckCircle2 size={15} /> : <Clock3 size={15} />} Quality Manager</span>
                         </div>
                         {(canApprove || canCancelOwn) && ["PENDING", "ACTIVE"].includes(grant.status) ? <textarea value={decisionNotes[grant.id] || ""} onChange={(event) => setDecisionNotes((current) => ({ ...current, [grant.id]: event.target.value }))} placeholder="Decision note (optional)" maxLength={1000} /> : null}
                         <div className="aag-actions">

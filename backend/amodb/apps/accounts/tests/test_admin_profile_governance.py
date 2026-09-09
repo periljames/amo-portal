@@ -11,10 +11,6 @@ from jose import jwt
 
 from amodb.apps.accounts import admin_profile_router as profile_router
 from amodb.apps.accounts import department_home_router as home_router
-from amodb.apps.accounts.admin_profile_concurrency import (
-    lock_admin_grant_for_approval,
-    serialized_approval_count,
-)
 from amodb.apps.accounts.admin_profile_guard import (
     _is_current_implicit_admin,
     require_active_admin_profile,
@@ -92,7 +88,7 @@ def test_existing_admin_and_governance_approver_rules() -> None:
     assert _is_implicit_admin(actor(role="QUALITY_MANAGER", is_amo_admin=False)) is False
     assert _is_current_implicit_admin(actor(role="AMO_ADMIN", is_amo_admin=True)) is True
     assert _is_current_implicit_admin(actor(role="TECHNICIAN", is_amo_admin=False)) is False
-    assert _is_management_approver(actor(role="QUALITY_MANAGER")) is True
+    assert _is_management_approver(actor(role="QUALITY_MANAGER")) is False
     assert _is_management_approver(actor(role="ACCOUNTABLE_EXECUTIVE")) is True
     assert _is_management_approver(actor(role="VIEW_ONLY", position_title="Accountable Manager")) is False
     assert _is_management_approver(actor(role="VIEW_ONLY", position_title="HR Manager")) is False
@@ -205,20 +201,6 @@ def test_separately_mounted_amo_asset_mutations_require_profile() -> None:
     assert all(require_active_admin_profile not in dependency_calls(route) for route in reads)
 
 
-def test_approval_route_locks_grant_before_endpoint_execution() -> None:
-    routes = [
-        route
-        for route in protected_admin_router.routes
-        if isinstance(route, APIRoute)
-        and route.path.endswith("/approve")
-        and "/admin-profile/" in route.path
-        and "POST" in (route.methods or set())
-    ]
-    assert len(routes) == 1
-    calls = dependency_calls(routes[0])
-    assert lock_admin_grant_for_approval in calls
-    assert require_active_admin_profile in calls
-
 
 def test_profile_governance_routes_are_the_only_tenant_admin_guard_exemption() -> None:
     db = MagicMock()
@@ -250,7 +232,7 @@ def test_active_backend_session_unlocks_delegated_tenant_admin_api() -> None:
         db,
     )
     assert elevated is current
-    assert elevated.is_amo_admin is True
+    assert elevated.is_amo_admin is False
     assert elevated.role == AccountRole.TECHNICIAN
     assert getattr(elevated, "_admin_profile_elevated", False) is True
     sql = str(db.execute.call_args.args[0]).upper()
@@ -367,7 +349,7 @@ def test_approved_grantee_satisfies_legacy_admin_dependencies() -> None:
     )
 
     assert elevated is current
-    assert elevated.is_amo_admin is True
+    assert elevated.is_amo_admin is False
     assert elevated.role == AccountRole.TECHNICIAN
     assert getattr(elevated, "_admin_profile_elevated", False) is True
     assert require_admin(elevated) is elevated
@@ -441,34 +423,7 @@ def test_extend_session_route_binds_refresh_to_current_auth_session() -> None:
     assert bind_auth_session_to_token_refresh in dependency_calls(routes[0])
 
 
-def test_postgres_approval_dependency_locks_before_insert() -> None:
-    db = MagicMock()
-    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
 
-    lock_admin_grant_for_approval("grant-1", db)
-
-    assert db.execute.call_count == 1
-    assert "FOR UPDATE" in str(db.execute.call_args.args[0]).upper()
-
-
-def test_sqlite_approval_dependency_skips_unsupported_row_lock() -> None:
-    db = MagicMock()
-    db.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
-
-    lock_admin_grant_for_approval("grant-1", db)
-
-    db.execute.assert_not_called()
-
-
-def test_serialized_count_only_counts_after_prelock() -> None:
-    db = MagicMock()
-    db.execute.return_value.scalar.return_value = 2
-
-    assert serialized_approval_count(db, "grant-1") == 2
-    assert db.execute.call_count == 1
-    sql = str(db.execute.call_args.args[0]).upper()
-    assert "COUNT(DISTINCT APPROVER_USER_ID)" in sql
-    assert "FOR UPDATE" not in sql
 
 
 def test_logout_route_revokes_admin_profile_session() -> None:

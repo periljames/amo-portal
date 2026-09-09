@@ -768,6 +768,10 @@ def update_user(
     actor_user_id: str | None = None,
     allow_standing_admin_change: bool = False,
 ) -> models.User:
+    if data.is_active is False or (data.is_amo_admin is False and user.is_amo_admin):
+        from .tenant_authority import assert_administrator_removal_allowed
+        actor = db.query(models.User).filter(models.User.id == actor_user_id).first() if actor_user_id else None
+        assert_administrator_removal_allowed(db, actor=actor, user=user)
     # Names
     name_changed = False
     if data.first_name is not None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -72,7 +74,7 @@ def require_human_induction_authority(user: account_models.User) -> str:
     amo_id = getattr(user, "amo_id", None)
     if not amo_id:
         raise HTTPException(status_code=403, detail="Tenant context is required")
-    if user.role not in ALLOWED_ROLES:
+    if not is_tenant_admin(user) and user.role not in ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="Aircraft induction authority is required")
     return str(amo_id)
 

@@ -1,3 +1,5 @@
+import type { PortalUser } from "../services/auth";
+import { userBelongsToTenant } from "../utils/tenantAccess";
 function normalizePathname(target: string): string | null {
   const rawPathname = target.split(/[?#]/, 1)[0] || "/";
 
@@ -29,6 +31,8 @@ function isPlatformRoute(pathname: string): boolean {
 export function resolvePostLoginReturnTarget(
   candidate: unknown,
   platformUser: boolean,
+  user?: PortalUser | null,
+  amoCode?: string,
 ): string | null {
   if (typeof candidate !== "string") return null;
 
@@ -36,7 +40,12 @@ export function resolvePostLoginReturnTarget(
   if (!target.startsWith("/") || target.startsWith("//")) return null;
 
   const pathname = normalizePathname(target);
-  if (!pathname) return null;
+  if (!pathname || pathname.split("/").some((part) => part === "." || part === "..")) return null;
+  if (platformUser && !isPlatformRoute(pathname)) return null;
+  const tenantMatch = pathname.match(/^\/maintenance\/([^/]+)(?:\/|$)/);
+  if (tenantMatch && !platformUser && (user || amoCode)) {
+    if (user ? !userBelongsToTenant(user, tenantMatch[1]) : tenantMatch[1] !== amoCode?.toLowerCase()) return null;
+  }
   if (isLoginRoute(pathname)) return null;
   if (isPlatformRoute(pathname) && !platformUser) return null;
 

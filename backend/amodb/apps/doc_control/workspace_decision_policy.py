@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from fastapi import HTTPException
 
 from amodb.apps.accounts import models as account_models
@@ -19,7 +21,7 @@ DECISION_APPROVER_ROLES = {
 
 def is_decision_approver(user: account_models.User) -> bool:
     return bool(
-        role_value(user) in DECISION_APPROVER_ROLES
+        is_tenant_admin(user) or role_value(user) in DECISION_APPROVER_ROLES
     )
 
 

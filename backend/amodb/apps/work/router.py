@@ -17,6 +17,8 @@ Role model (from security / AccountRole):
 
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import date
 from typing import List, Optional
 
@@ -78,7 +80,7 @@ def _require_current_inspection_authorisation(db: Session, user: User) -> None:
     Portal administration, position wording and module access are deliberately
     insufficient for a maintenance inspection sign-off.
     """
-    if user.role not in INSPECTION_ROLES:
+    if not is_tenant_admin(user) and user.role not in INSPECTION_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inspection sign-off requires an authorized certifying or Quality Inspector account.",

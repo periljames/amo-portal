@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
+
 from datetime import datetime
 from typing import Any
 
@@ -103,27 +105,19 @@ def role_assignment_tokens(db: Session, user: account_models.User) -> list[str]:
 
 
 def is_control_user(user: account_models.User) -> bool:
-    standing_admin = bool(
-        not getattr(user, "is_superuser", False)
-        and not getattr(user, "_admin_profile_elevated", False)
-        and (
-            getattr(user, "is_amo_admin", False)
-            or role_value(user) == "AMO_ADMIN"
-        )
-    )
-    return standing_admin or role_value(user) in CONTROL_ROLES
+    return is_tenant_admin(user) or role_value(user) in CONTROL_ROLES
 
 
 def is_approver(user: account_models.User) -> bool:
     return bool(
-        role_value(user) in APPROVER_ROLES
+        is_tenant_admin(user) or role_value(user) in APPROVER_ROLES
     )
 
 
 def is_accountable_approver(user: account_models.User) -> bool:
     role = role_value(user)
     return bool(
-        role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE.value
+        is_tenant_admin(user) or role == account_models.AccountRole.ACCOUNTABLE_EXECUTIVE.value
     )
 
 

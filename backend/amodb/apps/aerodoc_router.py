@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import datetime
 import os
 import threading
@@ -107,7 +109,7 @@ def public_verify_copy(serial: str, amo_id: str = Query(...), request: Request =
 @router.get("/public/verify/rate-limit/stats")
 def public_verify_rate_limit_stats(current_user: account_models.User = Depends(get_current_active_user)):
     role_value = getattr(current_user.role, "value", current_user.role)
-    if str(role_value) not in {"QUALITY_MANAGER", "DOCUMENT_CONTROL_OFFICER"}:
+    if not is_tenant_admin(current_user) and str(role_value) not in {"QUALITY_MANAGER", "DOCUMENT_CONTROL_OFFICER"}:
         raise HTTPException(status_code=403, detail="Document Control Officer or Quality Manager authority is required")
     now = time.monotonic()
     active_keys = 0

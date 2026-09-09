@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin, assert_administrator_removal_allowed, can_revoke_administrator
+
 import os
 import json
 import csv
@@ -405,6 +407,8 @@ def _protect_tenant_admin_continuity(
             (user.is_amo_admin if resulting_admin is None else resulting_admin)
             or next_role == models.AccountRole.AMO_ADMIN
         )
+        if deleting or not next_active or (resulting_admin is False and user.is_amo_admin):
+            assert_administrator_removal_allowed(db, actor=actor, user=user)
         removes_access = _canonical_tenant_admin(user) and not (next_active and next_admin)
         if not removes_access:
             continue
@@ -431,7 +435,7 @@ def _protect_tenant_admin_continuity(
             .scalar()
             or 0
         )
-        if int(remaining) < 1:
+        if int(remaining) < 1 and not can_revoke_administrator(actor, amo_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Assign another active AMO administrator before removing the tenant's last administrator.",
@@ -500,7 +504,7 @@ def _require_tenant_support_approver(current_user: models.User) -> models.User:
     if getattr(current_user, "is_superuser", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant-side approval must be performed by an AMO user.")
     role_value = str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", "")) or "")
-    if not (getattr(current_user, "is_amo_admin", False) or role_value in {"AMO_ADMIN", "QUALITY_MANAGER"}):
+    if not (is_tenant_admin(current_user) or role_value in {"AMO_ADMIN", "QUALITY_MANAGER"}):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AMO admin or Quality Manager approval is required.")
     return current_user
 
@@ -3761,7 +3765,7 @@ def _require_quality_manager(user: models.User) -> models.User:
             detail="System/service accounts cannot manage authorisations.",
         )
 
-    if user.role == models.AccountRole.QUALITY_MANAGER:
+    if is_tenant_admin(user) or user.role == models.AccountRole.QUALITY_MANAGER:
         return user
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

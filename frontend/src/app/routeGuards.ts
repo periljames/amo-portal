@@ -1,3 +1,4 @@
+import { isTenantAdmin } from "../utils/tenantAccess";
 // src/app/routeGuards.ts
 import { getCachedUser, getContext, type PortalUser } from "../services/auth";
 
@@ -70,20 +71,6 @@ const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
   "qms.audit.programme.approve",
 ]);
 
-const QMS_STANDING_ADMIN_PERMISSIONS = new Set([
-  ...QMS_OFFICER_PERMISSIONS,
-  "qms.calendar.manage",
-  "qms.change.manage",
-  "qms.equipment.manage",
-  "qms.management_review.manage",
-  "qms.reports.manage",
-  "qms.risk.manage",
-  "qms.settings.manage",
-  "qms.settings.view",
-  "qms.supplier.manage",
-  "qms.training.manage",
-]);
-
 export function isPlatformSuperuser(): boolean {
   const user = getCachedUser();
   return !!user?.is_superuser;
@@ -104,14 +91,13 @@ export function userHasQmsRolePermission(
   // AMO tenant QMS user.
   if (user.is_superuser || !user.amo_id) return false;
 
+  if (isTenantAdmin(user)) return permission.startsWith("qms.");
+
   if (permission === "qms.reports.attest_authority" || permission === "qms.audit.programme.approve") {
     return user.role === "ACCOUNTABLE_EXECUTIVE";
   }
   if (permission === "qms.audit.programme.quality_review") {
     return user.role === "QUALITY_MANAGER";
-  }
-  if (user.role === "AMO_ADMIN" || user.is_amo_admin) {
-    return QMS_STANDING_ADMIN_PERMISSIONS.has(permission);
   }
 
   // Tenant module grants are a narrowing boundary. They never create a QMS
@@ -145,6 +131,7 @@ export function userHasTrainingRolePermission(
   if (!user) return false;
   if (user.is_superuser) return false;
   if (!user.amo_id) return false;
+  if (isTenantAdmin(user)) return permission.startsWith("training.");
   const trainingLevel = user.module_access?.training;
   if (user.module_access !== undefined && !trainingLevel) return false;
   if (trainingLevel === "view" && !TRAINING_READ.has(permission)) return false;

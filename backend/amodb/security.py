@@ -15,6 +15,8 @@ This module is intentionally focused and aligned with the new accounts app:
 
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
+
 import hashlib
 import os
 from contextvars import ContextVar, Token
@@ -385,6 +387,14 @@ def get_current_active_user(
 
     setattr(current_user, "active_amo_id", active_amo_id)
     setattr(current_user, "effective_amo_id", effective_amo_id)
+    from amodb.apps.accounts.tenant_authority import is_standing_admin, tenant_member
+    from amodb.apps.accounts.tenant_authority import active_admin_profile_session
+    from types import SimpleNamespace
+    setattr(current_user, "_admin_profile_elevated", False)
+    if tenant_member(current_user) and not is_standing_admin(current_user):
+        setattr(current_user, "_admin_profile_elevated", active_admin_profile_session(
+            db, current_user, SimpleNamespace(id=current_user.amo_id)
+        ))
     from amodb.apps.accounts import access_control
     access_control.attach_user_access(db, current_user)
     return current_user
@@ -401,9 +411,7 @@ def require_admin(
     workflow permissions through the relevant module guards and never inherit
     tenant-administrator access merely because they are managers.
     """
-    if getattr(current_user, "is_superuser", False) or getattr(
-        current_user, "is_amo_admin", False
-    ):
+    if getattr(current_user, "is_superuser", False) or is_tenant_admin(current_user):
         return current_user
 
     raise HTTPException(
@@ -468,15 +476,7 @@ def require_module_access(
         # Standing AMO administrators are a tenant privilege assigned by the
         # platform superuser. Their module administration is broad by default;
         # module-specific regulated decision gates still apply downstream.
-        if (
-            not getattr(current_user, "is_superuser", False)
-            and (
-                getattr(current_user, "is_amo_admin", False)
-                or str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", ""))).upper()
-                == "AMO_ADMIN"
-            )
-            and not getattr(current_user, "_admin_profile_elevated", False)
-        ):
+        if is_tenant_admin(current_user):
             return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
@@ -530,15 +530,7 @@ def require_any_module_access(
         # and configure every licensed tenant module until the platform
         # superuser removes their standing overlay. Operational decision gates
         # inside each module remain authoritative.
-        if (
-            not getattr(current_user, "is_superuser", False)
-            and (
-                getattr(current_user, "is_amo_admin", False)
-                or str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", ""))).upper()
-                == "AMO_ADMIN"
-            )
-            and not getattr(current_user, "_admin_profile_elevated", False)
-        ):
+        if is_tenant_admin(current_user):
             return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
@@ -654,8 +646,8 @@ def require_roles(
     Behaviour:
     - Platform SUPERUSER passes only when explicitly listed in `allowed_roles`.
     - The user's writer-side operational role must otherwise be in the set.
-    - Tenant administration is an independent overlay and passes only when
-      AMO_ADMIN is explicitly part of the endpoint's configuration authority.
+    - Tenant administrators inherit all tenant roles, never platform-only authority.
+    - Administrator appointment/revocation uses its separate governance policy.
     """
     normalised_roles: Set[AccountRole] = set()
     for r in allowed_roles:
@@ -670,10 +662,13 @@ def require_roles(
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
     ) -> account_models.User:
-        if (
-            getattr(current_user, "is_amo_admin", False)
-            and AccountRole.AMO_ADMIN in normalised_roles
-        ):
+        if getattr(current_user, "is_superuser", False):
+            if AccountRole.SUPERUSER in normalised_roles:
+                return current_user
+            raise HTTPException(status_code=403, detail="Platform identity has no tenant operational role.")
+        if not tenant_member(current_user):
+            raise HTTPException(status_code=403, detail="A tenant identity is required for this operation.")
+        if is_tenant_admin(current_user) and normalised_roles - {AccountRole.SUPERUSER}:
             return current_user
 
         if current_user.role not in normalised_roles:

@@ -7,11 +7,12 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import set_committed_value
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 from . import models, role_registry
+from .tenant_authority import is_standing_admin, is_tenant_admin, tenant_member
+from .tenant_authority import active_admin_profile_session
 
 
 PROFILE_ROUTE_MARKER = "/accounts/admin/admin-profile/"
@@ -47,12 +48,7 @@ def require_active_admin_profile_or_roles(*allowed_roles: str) -> Callable[..., 
 
 
 def _is_current_implicit_admin(user: models.User) -> bool:
-    if getattr(user, "is_superuser", False):
-        return False
-    return bool(
-        getattr(user, "is_amo_admin", False)
-        or _normalise_role(user) == "AMO_ADMIN"
-    )
+    return is_standing_admin(user)
 
 
 def _auth_session_id(user: models.User) -> str:
@@ -70,19 +66,7 @@ def _auth_session_id(user: models.User) -> str:
 
 
 def _mark_request_as_admin_profile(user: models.User) -> None:
-    """Expose temporary elevation without changing the user's job persona.
-
-    Existing administration handlers still depend on `require_admin` or
-    `require_roles(..., AMO_ADMIN)`, both of which accept the administrator
-    overlay. FastAPI resolves this router dependency first and reuses the same
-    current-user object for later dependencies. The regulated/operational role
-    must remain visible throughout the request for segregation-of-duty checks.
-    """
-    try:
-        set_committed_value(user, "is_amo_admin", True)
-    except Exception:
-        # Lightweight test doubles are not SQLAlchemy-mapped instances.
-        setattr(user, "is_amo_admin", True)
+    # Request-only authority must never be persisted or serialized as a standing appointment.
     setattr(user, "_admin_profile_elevated", True)
 
 
@@ -101,72 +85,13 @@ def require_active_admin_profile(
         return current_user
     if getattr(current_user, "is_superuser", False):
         return current_user
-    # A standing AMO Administrator is appointed/revoked by the platform
-    # superuser and does not need to elevate into the temporary delegated-admin
-    # profile on every session. The governed profile remains mandatory for
-    # ordinary operational users who receive time-bound administrator access.
-    if _is_current_implicit_admin(current_user):
+    if not tenant_member(current_user):
+        raise HTTPException(status_code=403, detail="A tenant identity is required for administration.")
+    if is_tenant_admin(current_user):
         return current_user
-
-    amo_id = getattr(current_user, "effective_amo_id", None) or getattr(current_user, "amo_id", None)
-    if not amo_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="A tenant identity is required for administration.",
-        )
-
-    now = datetime.now(timezone.utc)
-    auth_session_id = _auth_session_id(current_user)
-    implicit_admin = _is_current_implicit_admin(current_user)
-    try:
-        session = db.execute(
-            text(
-                """
-                SELECT s.id
-                FROM admin_profile_sessions s
-                LEFT JOIN admin_access_grants g ON g.id = s.grant_id
-                WHERE s.amo_id = :amo_id
-                  AND s.user_id = :user_id
-                  AND s.auth_session_id = :auth_session_id
-                  AND s.revoked_at IS NULL
-                  AND s.expires_at > :now
-                  AND (
-                    (
-                      :implicit_admin = TRUE
-                      AND s.grant_id IS NULL
-                    )
-                    OR (
-                      s.grant_id IS NOT NULL
-                      AND g.amo_id = s.amo_id
-                      AND g.user_id = s.user_id
-                      AND g.status = 'ACTIVE'
-                      AND (g.valid_from IS NULL OR g.valid_from <= :now)
-                      AND (g.valid_until IS NULL OR g.valid_until > :now)
-                    )
-                  )
-                ORDER BY s.activated_at DESC
-                LIMIT 1
-                """
-            ),
-            {
-                "amo_id": str(amo_id),
-                "user_id": str(current_user.id),
-                "auth_session_id": auth_session_id,
-                "implicit_admin": implicit_admin,
-                "now": now,
-            },
-        ).first()
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Administrator profile service is not ready. Open the profile menu and activate Admin profile.",
-        ) from exc
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Activate Admin profile before using tenant administration APIs.",
-        )
-
+    _auth_session_id(current_user)
+    from types import SimpleNamespace
+    if not active_admin_profile_session(db, current_user, SimpleNamespace(id=current_user.amo_id)):
+        raise HTTPException(status_code=403, detail="Activate Admin profile before using tenant administration APIs.")
     _mark_request_as_admin_profile(current_user)
     return current_user

@@ -443,6 +443,9 @@ def import_personnel_rows(
                 existing_user.position_title = parsed.position_title
                 existing_user.phone = parsed.phone_number
                 existing_user.secondary_phone = parsed.secondary_phone
+                if parsed.status != STATUS_ACTIVE:
+                    from .tenant_authority import assert_administrator_removal_allowed
+                    assert_administrator_removal_allowed(db, actor=None, user=existing_user)
                 existing_user.is_active = parsed.status == STATUS_ACTIVE
                 existing_user.email = chosen_email
                 if existing_user.staff_code != parsed.person_id:

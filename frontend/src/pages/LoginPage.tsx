@@ -1,3 +1,4 @@
+import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
 // src/pages/LoginPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -68,11 +69,6 @@ function isPlatformUser(u: PortalUser | null): boolean {
   return !!u?.is_superuser || u?.role === "SUPERUSER";
 }
 
-function isAdminUser(u: PortalUser | null): boolean {
-  if (!u) return false;
-  return !!u.is_amo_admin || u.role === "AMO_ADMIN";
-}
-
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -119,12 +115,11 @@ const LoginPage: React.FC = () => {
 
     const run = async () => {
       const ctx = getContext();
-      const slug = effectiveAmoSlug || ctx.amoSlug || amoCode || PLATFORM_SUPPORT_SLUG;
+      const slug = getCachedUser()?.amo_slug || ctx.amoSlug || effectiveAmoSlug || amoCode || PLATFORM_SUPPORT_SLUG;
       if (!slug || !active) return;
 
       const u = getCachedUser();
       const platformUser = isPlatformUser(u);
-      const admin = isAdminUser(u);
       const requiresOnboarding = !!u?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
@@ -132,7 +127,7 @@ const LoginPage: React.FC = () => {
         return;
       }
 
-      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser);
+      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser, u, slug);
       if (returnTarget) {
         navigate(returnTarget, { replace: true });
         return;
@@ -142,12 +137,7 @@ const LoginPage: React.FC = () => {
         return;
       }
 
-      const landingDept = admin ? "admin" : (ctx.department || null);
-      if (!admin && !landingDept) {
-        setErrorMsg("Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT.");
-        return;
-      }
-      navigate(admin ? `/maintenance/${slug}/admin/overview` : `/maintenance/${slug}/${landingDept}`, { replace: true });
+      navigate(getFirstAccessibleModuleRoute(slug, u, ctx.department), { replace: true });
     };
 
     void run();
@@ -221,7 +211,7 @@ const LoginPage: React.FC = () => {
       const ctx = getContext();
       const signedInUser = auth.user || getCachedUser();
       const platformUser = isPlatformUser(signedInUser);
-      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser);
+      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser, signedInUser, slugToUse);
       if (returnTarget) {
         navigate(returnTarget, { replace: true });
         return;
@@ -230,16 +220,7 @@ const LoginPage: React.FC = () => {
         navigate("/platform/control", { replace: true });
         return;
       }
-      const admin = isAdminUser(signedInUser);
-      if (!admin) {
-        if (!ctx.department) {
-          setErrorMsg("Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT.");
-          return;
-        }
-        navigate(`/maintenance/${slugToUse}/${ctx.department}`, { replace: true });
-        return;
-      }
-      navigate(`/maintenance/${slugToUse}/admin/overview`, { replace: true });
+      navigate(getFirstAccessibleModuleRoute(slugToUse, signedInUser, ctx.department), { replace: true });
     } catch (err: unknown) {
       console.error("Login error:", err);
       const msg = err instanceof Error ? err.message.toLowerCase() : "";

@@ -1,6 +1,8 @@
 """Active document-control API routes."""
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import date, datetime, timedelta
 import uuid
 from typing import Any
@@ -119,7 +121,7 @@ def get_document(doc_id: str, db: Session = Depends(get_db), current_user: accou
         account_models.AccountRole.QUALITY_OFFICER,
         account_models.AccountRole.DOCUMENT_CONTROL_OFFICER,
     }
-    if doc.restricted_flag and current_user.role not in restricted_read_roles:
+    if doc.restricted_flag and not is_tenant_admin(current_user) and current_user.role not in restricted_read_roles:
         raise HTTPException(403, "Restricted document")
     return doc
 

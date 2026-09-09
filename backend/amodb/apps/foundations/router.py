@@ -1,6 +1,8 @@
 # backend/amodb/apps/foundations/router.py
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import datetime
 from typing import List, Optional
 
@@ -36,7 +38,7 @@ def _effective_amo_id(user: account_models.User) -> str:
 def _can_manage_foundations(user: account_models.User) -> bool:
     if getattr(user, "is_system_account", False):
         return False
-    if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
+    if getattr(user, "is_superuser", False) or is_tenant_admin(user):
         return True
     return user.role in {
         account_models.AccountRole.QUALITY_MANAGER,

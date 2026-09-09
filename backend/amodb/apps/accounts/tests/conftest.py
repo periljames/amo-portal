@@ -16,6 +16,7 @@ from amodb.apps.accounts import models  # noqa: E402
 from amodb.apps.audit import models as audit_models  # noqa: E402
 from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.notifications import models as notification_models  # noqa: E402
+from amodb.apps.rostering import models as rostering_models  # noqa: E402,F401
 
 
 @pytest.fixture()

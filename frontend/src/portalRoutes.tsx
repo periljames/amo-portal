@@ -1,3 +1,4 @@
+import { isTenantAdmin } from "./utils/tenantAccess";
 // src/router.tsx
 // App routing
 // - Public routes: /login and /maintenance/:amoCode/login
@@ -341,12 +342,7 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname);
   const currentUser = getCachedUser();
-  const isTenantAdmin = Boolean(
-    currentUser?.is_superuser
-    || currentUser?.is_amo_admin
-    || currentUser?.role === "AMO_ADMIN"
-    || (amoCode && readCachedAdminProfileState(amoCode)?.active),
-  );
+  const tenantAdmin = isTenantAdmin(currentUser);
 
   if (!currentUser) {
     const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
@@ -359,9 +355,9 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
     );
   }
 
-  if (!isTenantAdmin) {
+  if (!tenantAdmin) {
     const fallback = amoCode
-      ? `/maintenance/${amoCode}/admin/overview`
+      ? getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department)
       : "/login";
     return <Navigate to={fallback} replace />;
   }
@@ -369,22 +365,10 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   return children;
 };
 
-function resolveDefaultDepartment(amoCode: string): string {
-  const currentUser = getCachedUser();
-  if (currentUser?.is_superuser) {
-    return "platform/control";
-  }
-  if (currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN") {
-    return "admin/overview";
-  }
-  const target = getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department);
-  return target.replace(`/maintenance/${amoCode}/`, "");
-}
-
 const DepartmentHomeRedirect: React.FC = () => {
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
-  return <Navigate to={`/maintenance/${amoCode}/${resolveDefaultDepartment(amoCode)}`} replace />;
+  return <Navigate to={getFirstAccessibleModuleRoute(amoCode, getCachedUser(), getContext().department)} replace />;
 };
 
 const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.ReactElement }> = ({ feature, children }) => {
@@ -393,7 +377,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
   const workforceSettings = feature === "rostering.settings"
     && new URLSearchParams(location.search).get("section") === "workforce";
-  if (workforceSettings) return children;
+  if (workforceSettings && isTenantAdmin(currentUser)) return children;
   if (!canViewFeature(getOperationalAccessUser(currentUser), feature, getContext().department)) {
     return <Navigate to={getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department)} replace />;
   }

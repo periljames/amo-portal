@@ -1,6 +1,8 @@
 """Active Manuals API routes and shared route helpers."""
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import datetime, timedelta, date
 import hashlib
 from uuid import uuid4
@@ -973,7 +975,7 @@ async def preview_docx_upload(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _ = _tenant_by_slug(db, tenant_slug)
-    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+    if not is_tenant_admin(current_user) and (str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY):
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
@@ -1003,7 +1005,7 @@ async def preview_pdf_upload(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _ = _tenant_by_slug(db, tenant_slug)
-    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+    if not is_tenant_admin(current_user) and (str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY):
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_pdf_upload(file, content)
@@ -1044,7 +1046,7 @@ async def upload_docx_revision(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
-    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+    if not is_tenant_admin(current_user) and (str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY):
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
@@ -1251,7 +1253,7 @@ async def upload_pdf_revision(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
-    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+    if not is_tenant_admin(current_user) and (str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY):
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_pdf_upload(file, content)

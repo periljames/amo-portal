@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
 
-from amodb.apps.accounts.admin_profile_access import active_admin_profile_session
+from amodb.apps.accounts.tenant_authority import active_admin_profile_session
 from amodb.apps.accounts.department_home_router import (
     QUICK_ACTIONS,
     _allowed_departments,

@@ -12,11 +12,7 @@ from fastapi.routing import APIRoute
 
 from . import models, schemas, services  # noqa: F401
 from . import access_router, admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
-from .admin_profile_access import active_admin_profile_session
-from .admin_profile_concurrency import (
-    lock_admin_grant_for_approval,
-    serialized_approval_count,
-)
+from .tenant_authority import active_admin_profile_session
 from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
 from .auth_session_context import bind_auth_session_to_token_refresh
@@ -51,8 +47,6 @@ def _attach_router_dependency(router, dependency) -> None:
 
 # These endpoints resolve module-level helpers at request time. Keep the router
 # modules importable while replacing only the governed policy functions.
-admin_profile_router._approval_count = serialized_approval_count
-department_home_router._admin_profile_active = active_admin_profile_session
 
 # Preserve the original /accounts/admin router object and prefix. Register the
 # profile endpoints, serialize approval requests before their foreign-key insert,
@@ -60,14 +54,6 @@ department_home_router._admin_profile_active = active_admin_profile_session
 _admin_routes = _router_admin.router
 _admin_routes.include_router(admin_profile_router.router)
 _admin_routes.include_router(access_router.admin_router)
-for _route in _admin_routes.routes:
-    if (
-        isinstance(_route, APIRoute)
-        and "/admin-profile/" in _route.path
-        and _route.path.endswith("/approve")
-        and "POST" in (_route.methods or set())
-    ):
-        _attach_route_dependency(_route, lock_admin_grant_for_approval)
 _attach_router_dependency(_admin_routes, require_active_admin_profile)
 
 # AMO logo and CRS-template mutations are mounted by main.py through a separate
@@ -110,8 +96,6 @@ __all__ = [
     "router_amo_assets",
     "active_admin_profile_session",
     "bind_auth_session_to_token_refresh",
-    "lock_admin_grant_for_approval",
-    "serialized_approval_count",
     "require_active_admin_profile",
     "revoke_admin_profile_on_logout",
 ]

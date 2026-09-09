@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -218,11 +220,11 @@ def requisition_transition(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(require_roles(*REQUEST_ROLES, *FINANCE_APPROVAL_ROLES)),
 ):
-    if payload.action == "TECHNICAL_APPROVE" and current_user.role not in TECHNICAL_APPROVAL_ROLES:
+    if payload.action == "TECHNICAL_APPROVE" and not is_tenant_admin(current_user) and current_user.role not in TECHNICAL_APPROVAL_ROLES:
         raise HTTPException(status_code=403, detail="Technical approval role is required.")
-    if payload.action == "BUDGET_APPROVE" and current_user.role not in FINANCE_APPROVAL_ROLES:
+    if payload.action == "BUDGET_APPROVE" and not is_tenant_admin(current_user) and current_user.role not in FINANCE_APPROVAL_ROLES:
         raise HTTPException(status_code=403, detail="Finance approval role is required.")
-    if payload.action == "APPROVE" and current_user.role not in PROCUREMENT_ROLES:
+    if payload.action == "APPROVE" and not is_tenant_admin(current_user) and current_user.role not in PROCUREMENT_ROLES:
         raise HTTPException(status_code=403, detail="Procurement approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     requisition = service.transition_requisition(
@@ -367,7 +369,7 @@ def purchase_order_approve(
         "QUALITY": QUALITY_ROLES,
         "FINAL": QUALITY_ROLES,
     }
-    if current_user.role not in stage_roles[payload.stage]:
+    if not is_tenant_admin(current_user) and current_user.role not in stage_roles[payload.stage]:
         raise HTTPException(status_code=403, detail=f"{payload.stage.title()} approval role is required.")
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     if payload.stage in {"QUALITY", "FINAL"}:

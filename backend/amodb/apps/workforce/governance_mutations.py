@@ -437,6 +437,10 @@ def _execute_offboarding(db: Session, *, plan, actor_user_id: str | None = None)
         return False
     now = _utcnow()
     if plan.revoke_access:
+        from ..accounts.tenant_authority import assert_administrator_removal_allowed
+        remover_id = actor_user_id or getattr(plan, "requested_by_user_id", None) or getattr(plan, "created_by_user_id", None)
+        actor = db.query(account_models.User).filter(account_models.User.id == remover_id).first() if remover_id else None
+        assert_administrator_removal_allowed(db, actor=actor, user=user)
         user.is_active = False
         user.deactivated_at = now
         user.deactivated_reason = plan.reason

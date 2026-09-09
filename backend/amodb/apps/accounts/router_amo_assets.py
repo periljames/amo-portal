@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 import hashlib
 import os
 import re
@@ -29,7 +31,7 @@ _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._ -]+")
 def _require_amo_admin(current_user: models.User) -> models.User:
     if getattr(current_user, "is_system_account", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System/service accounts cannot manage AMO assets.")
-    if getattr(current_user, "is_superuser", False) or getattr(current_user, "is_amo_admin", False) or current_user.role == models.AccountRole.AMO_ADMIN:
+    if getattr(current_user, "is_superuser", False) or is_tenant_admin(current_user):
         return current_user
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AMO admin privileges required.")
 

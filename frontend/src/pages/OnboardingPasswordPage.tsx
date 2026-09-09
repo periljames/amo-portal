@@ -1,3 +1,4 @@
+import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
 import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AuthLayout from "../components/Layout/AuthLayout";
@@ -7,7 +8,6 @@ import {
   changePassword,
   getCachedUser,
   getContext,
-  endSession,
 } from "../services/auth";
 
 const PASSWORD_MIN_LENGTH = 12;
@@ -63,19 +63,8 @@ const OnboardingPasswordPage: React.FC = () => {
 
       const ctx = getContext();
       const user = getCachedUser();
-      const isAdmin = !!user?.is_superuser || !!user?.is_amo_admin;
-      const landing = isAdmin
-        ? (ctx.department || "admin")
-        : (ctx.department || null);
-
-      if (!landing) {
-        endSession("manual");
-        navigate("/login", { replace: true });
-        return;
-      }
-
-      const slug = amoCode || "system";
-      navigate(`/maintenance/${slug}/${landing}`, { replace: true });
+      const slug = user?.amo_slug || ctx.amoSlug || amoCode || "system";
+      navigate(getFirstAccessibleModuleRoute(slug, user, ctx.department), { replace: true });
     } catch (err) {
       console.error("Password change failed", err);
       const message = err instanceof Error ? err.message : "Could not change password.";

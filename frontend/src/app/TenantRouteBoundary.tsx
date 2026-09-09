@@ -1,3 +1,6 @@
+import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
+import { isTenantAdmin, userBelongsToTenant } from "../utils/tenantAccess";
+import { userHasQmsRolePermission } from "./routeGuards";
 import React, { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
@@ -46,19 +49,8 @@ function segments(pathname: string): string[] {
 
 function canonicalTenantSlug(): string | null {
   const context = getContext();
-  return context.amoSlug || context.amoCode || null;
-}
-
-function tenantMatches(routeTenant: string): boolean {
-  const context = getContext();
-  const candidates = [context.amoSlug, context.amoCode]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value.trim().toLowerCase());
-  return candidates.includes(routeTenant.trim().toLowerCase());
-}
-
-function departmentHome(tenant: string, department: Exclude<DepartmentId, "admin">): string {
-  return `/maintenance/${encodeURIComponent(tenant)}/${department}`;
+  const user = getCachedUser();
+  return user?.amo_slug || user?.amo_code || context.amoSlug || context.amoCode || null;
 }
 
 function isPublicTenantRoute(parts: string[]): boolean {
@@ -91,7 +83,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   const [adminStateResolved, setAdminStateResolved] = useState(Boolean(cachedAdminState));
 
   useEffect(() => {
-    if (!isTenantRoute || isPublicRoute || !currentUser) {
+    if (!isTenantRoute || isPublicRoute || !currentUser || !userBelongsToTenant(currentUser, routeTenant)) {
       setAdminState(null);
       setAdminStateResolved(true);
       return;
@@ -128,11 +120,11 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (currentUser.is_superuser || currentUser.role === "SUPERUSER") {
     return <Navigate to="/platform/control" replace state={{ blockedTenantPath: location.pathname }} />;
   }
-  const standingAdmin = Boolean(currentUser.is_amo_admin || currentUser.role === "AMO_ADMIN");
+  const standingAdmin = isTenantAdmin(currentUser);
 
   const canonicalTenant = canonicalTenantSlug();
   if (!canonicalTenant) return <Navigate to="/login" replace />;
-  if (!tenantMatches(routeTenant)) {
+  if (!userBelongsToTenant(currentUser, routeTenant)) {
     return <Navigate to={`/maintenance/${encodeURIComponent(canonicalTenant)}`} replace state={{ blockedTenantPath: location.pathname }} />;
   }
 
@@ -141,13 +133,8 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   const normalAllowed = getAllowedDepartments(operationalUser, assigned).filter(
     (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
   );
-  // Admin Profile unlocks administration routes only. It never expands the
-  // user's operational departments or module grants.
   const allowed = normalAllowed;
-  const homeDepartment =
-    (assigned && assigned !== "admin" && allowed.includes(assigned) ? assigned : null)
-    || allowed[0];
-
+  const home = getFirstAccessibleModuleRoute(canonicalTenant, currentUser, assigned);
   if (isAdminRoute && !standingAdmin && !adminStateResolved) {
     return (
       <div className="page-loading" role="status" aria-live="polite">
@@ -155,11 +142,6 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
       </div>
     );
   }
-
-  if (!homeDepartment) {
-    return <Navigate to={`/maintenance/${encodeURIComponent(canonicalTenant)}/login`} replace state={{ accessConfigurationError: true }} />;
-  }
-  const home = departmentHome(canonicalTenant, homeDepartment);
 
   if (routeParts.length === 2) return <Navigate to={home} replace />;
 
@@ -170,6 +152,10 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
     return <>{children}</>;
   }
 
+  if ((routeParts[2] === "quality" || routeParts[2] === "qms") && !userHasQmsRolePermission(currentUser, "qms.dashboard.view")) {
+    const fallback = `/maintenance/${encodeURIComponent(canonicalTenant)}/profile`;
+    return <Navigate to={home.endsWith("/quality") ? fallback : home} replace />;
+  }
   const requestedDepartment = routeDepartment(routeParts);
   if (requestedDepartment && requestedDepartment !== "admin" && !allowed.includes(requestedDepartment)) {
     return <Navigate to={home} replace state={{ blockedDepartmentPath: location.pathname }} />;

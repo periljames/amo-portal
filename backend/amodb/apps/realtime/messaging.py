@@ -9,7 +9,7 @@ from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.accounts.admin_profile_access import active_admin_profile_session
+from amodb.apps.accounts.tenant_authority import active_admin_profile_session
 from amodb.utils.identifiers import generate_uuid7
 
 from . import models, schemas

@@ -1,3 +1,4 @@
+import { isTenantAdmin } from "./tenantAccess";
 import { normalizeDepartmentCode, type PortalUser } from "../services/auth";
 import { getRoleDrivenDepartments } from "./roleAccess";
 
@@ -43,12 +44,7 @@ export function isDepartmentId(value?: string | null): value is DepartmentId {
 
 export function isAdminUser(user: PortalUser | null): boolean {
   if (!user) return false;
-  return (
-    !!user.is_superuser ||
-    !!user.is_amo_admin ||
-    user.role === "SUPERUSER" ||
-    user.role === "AMO_ADMIN"
-  );
+  return isTenantAdmin(user);
 }
 
 /** Return the user's operational identity.
@@ -108,17 +104,11 @@ export function getAssignedDepartment(
   user: PortalUser | null,
   contextDepartment?: string | null
 ): DepartmentId | null {
+  const assigned = normalizeDepartmentCode(user?.department?.code || user?.department_code || "");
+  if (assigned && isDepartmentId(assigned)) return assigned;
+  if (user?.department_code !== undefined) return null;
   const context = normalizeDepartmentCode(contextDepartment || "");
-  if (context && isDepartmentId(context)) {
-    return context;
-  }
-
-  const userDepartmentRaw = normalizeDepartmentCode(
-    user?.department?.code || user?.department_code || ""
-  );
-  if (userDepartmentRaw && isDepartmentId(userDepartmentRaw)) {
-    return userDepartmentRaw;
-  }
+  if (context && isDepartmentId(context)) return context;
 
   return inferDepartmentFromRole(user);
 }
@@ -131,10 +121,11 @@ export function getAllowedDepartments(
     return DEPARTMENT_ITEMS.map((dept) => dept.id);
   }
 
+  if (!user?.amo_id || user.is_superuser || user.is_active === false) return [];
   const departments = new Set<DepartmentId>();
   // Governed module access is authoritative once supplied by the backend;
   // descriptive department metadata cannot recreate a removed module.
-  if (user?.module_access === undefined && assignedDepartment) departments.add(assignedDepartment);
+  if (assignedDepartment && (user?.module_access === undefined || ["planning", "production", "maintenance", "safety", "stores", "workshops"].includes(assignedDepartment))) departments.add(assignedDepartment);
   for (const dept of getRoleDrivenDepartments(user, assignedDepartment)) {
     departments.add(dept);
   }

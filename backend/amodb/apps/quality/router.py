@@ -1,6 +1,8 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from datetime import date, datetime, time, timezone, timedelta
 import calendar
 import json
@@ -251,7 +253,7 @@ def _require_scope_admin(current_user: account_models.User) -> None:
     role = _role_value(current_user)
     standing_admin = bool(
         not getattr(current_user, "is_superuser", False)
-        and not getattr(current_user, "_admin_profile_elevated", False)
+        and is_tenant_admin(current_user)
         and (getattr(current_user, "is_amo_admin", False) or role == "AMO_ADMIN")
     )
     if not (_is_quality_manager(current_user) or standing_admin):
@@ -1414,7 +1416,7 @@ def _role_value(current_user: account_models.User) -> str | account_models.Accou
 
 
 def _is_quality_manager(current_user: account_models.User) -> bool:
-    return _role_value(current_user) in {
+    return is_tenant_admin(current_user) or _role_value(current_user) in {
         account_models.AccountRole.QUALITY_MANAGER,
         "QUALITY_MANAGER",
     }
