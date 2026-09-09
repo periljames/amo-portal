@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
+import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+
 import {
   createExternalProvider,
   createProviderContract,
@@ -534,11 +536,16 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const basePath = useMemo(() => `/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers`, [amoCode]);
 
   if (detailId) {
-    return <ProviderDetailWorkspace amoCode={amoCode} providerId={detailId} tab={detailTab} onBack={() => navigate(`${basePath}/register`)} />;
+    return (
+      <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+        <ProviderDetailWorkspace amoCode={amoCode} providerId={detailId} tab={detailTab} onBack={() => navigate(`${basePath}/register`)} />
+      </DepartmentLayout>
+    );
   }
 
   return (
-    <main className="qms-provider-page">
+    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+    <main className="qms-provider-page qms-surface-root">
       <header className="qms-provider-page__header">
         <div>
           <span className="qms-provider-eyebrow">Quality assurance · outsourced processes</span>
@@ -597,5 +604,6 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
         )}
       </section>
     </main>
+    </DepartmentLayout>
   );
 }
