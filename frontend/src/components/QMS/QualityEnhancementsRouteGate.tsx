@@ -13,7 +13,7 @@ const QualityEnhancementsRouteGate: React.FC = () => {
   const relevant = /^\/car-invite\/?$/i.test(location.pathname)
     || /^\/maintenance\/[^/]+(?:\/|$)/i.test(location.pathname)
     || /^\/platform(?:\/|$)/i.test(location.pathname);
-  const commandPaletteRelevant = /^\/maintenance\/[^/]+(?:\/|$)/i.test(location.pathname);
+  const commandPaletteRelevant = /^\/maintenance\/[^/]+\/quality(?:\/|$)/i.test(location.pathname);
 
   return (
     <>
