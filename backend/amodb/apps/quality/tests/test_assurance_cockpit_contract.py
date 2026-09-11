@@ -49,7 +49,7 @@ def test_dashboard_drilldowns_preserve_period_and_context() -> None:
         amo_id="amo-1",
         amo_code="SLK",
         user_id="user-1",
-        user=None,
+        is_superuser=False,
     )
     drilldowns = _metric_drilldowns(ctx, period=2026, view="mine")
     unscheduled = drilldowns["programme_requirements_unscheduled"]
