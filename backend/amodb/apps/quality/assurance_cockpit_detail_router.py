@@ -21,7 +21,7 @@ def unscheduled_programme_requirements(
     view: ViewContext = Query(default="global"),
     period: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2200),
     limit: int = Query(default=20, ge=1, le=100),
-    ctx: TenantContext = Depends(require_quality_permission("qms.audit_programme.view")),
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -61,6 +61,6 @@ def unscheduled_programme_requirements(
         "total_returned": len(items),
         "view": view,
         "period": period,
-        "planner_path": f"/maintenance/{ctx.amo_code}/quality/calendar/week",
+        "planner_path": f"/maintenance/{ctx.amo_code}/quality/audits/plan",
         "programme_path": f"/maintenance/{ctx.amo_code}/quality/audits/program",
     }
