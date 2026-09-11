@@ -57,6 +57,7 @@ from . import planner_assignment_guard_router as _planner_assignment_guard_route
 from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycle_guard  # noqa: F401,E402
 from . import car_control_loop_router as _car_control_loop_router  # noqa: F401,E402
 from . import car_control_loop_guard_router as _car_control_loop_guard_router  # noqa: F401,E402
+from . import command_search_router as _command_search_router  # noqa: F401,E402
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -171,6 +172,15 @@ _include_once(
 # guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
+# Tenant-scoped command search underpins the portal-wide command palette. Search
+# never accepts arbitrary user ids: mine/global scope is resolved from the
+# authenticated TenantContext.
+_include_once(
+    _canonical_router.router,
+    _command_search_router.router,
+    "/api/maintenance/{amo_code}/quality/command-search",
+)
+
 # Promote static APIs ahead of the canonical catch-all. Route-family promotion
 # fails startup if two handlers could match the same path and method.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
@@ -182,3 +192,4 @@ from . import intelligence_route_order as _intelligence_route_order  # noqa: F40
 from . import audit_preparation_route_order as _audit_preparation_route_order  # noqa: F401,E402
 from . import planner_assignment_guard_route_order as _planner_assignment_guard_route_order  # noqa: F401,E402
 from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
+from . import command_search_route_order as _command_search_route_order  # noqa: F401,E402
