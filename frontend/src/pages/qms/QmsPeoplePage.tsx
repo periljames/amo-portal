@@ -29,7 +29,8 @@ import {
 } from "../../services/qmsPeople";
 import { allowedPrivilegeDecisions, defaultPrivilegeDecision, privilegeDecisionLabel } from "./qmsPeopleDecisions";
 import { catalogEntryForType, humanisePrivilegeType, QMS_PRIVILEGE_ROLE_CATALOG } from "./qmsPrivilegeRoleCatalog";
-import "../../styles/qms-people.css";
+import "../../styles/qms/people.css";
+import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
 
 type Props = { amoCode: string };
 type PageTab = "privileges" | "rules" | "reference";
@@ -377,15 +378,17 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     return () => controller.abort();
   }, [amoCode, selected, snapshotRevision]);
 
+  const [expiringOnly, setExpiringOnly] = useState(false);
   const visiblePrivileges = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return privileges.filter((item) => {
       if (statusFilter !== "ALL" && item.status !== statusFilter) return false;
+      if (expiringOnly && (!item.expires_on || item.status !== "ACTIVE" || new Date(`${item.expires_on}T23:59:59`).getTime() > Date.now() + 60 * 86400000)) return false;
       if (!needle) return true;
       const personLabel = personLabelById.get(item.user_id) || "";
       return [item.user_id, personLabel, item.privilege_code, item.scope_key].some((value) => value.toLowerCase().includes(needle));
     });
-  }, [privileges, search, statusFilter, personLabelById]);
+  }, [privileges, search, statusFilter, personLabelById, expiringOnly]);
 
   const visibleRules = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -851,7 +854,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div>
           <span>People & Privileges</span>
           <h1>Quality authorization board</h1>
-          <p>Configure internal Quality-auditor privilege rules, grant or suspend privileges, and verify audit-assignment eligibility. These append-only decisions are controlled by the Quality Manager; portal administration alone grants no Quality authority.</p>
+          <p>Find qualified auditors, review expiring authorizations and check eligibility before assigning work.</p>
         </div>
         <div className="qms-people__hero-actions">
           <button type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} aria-hidden="true" /> Refresh</button>
@@ -1024,22 +1027,15 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 </button>
               </p>
             ) : null}
-            <div className="qms-people__table-wrap">
-              <table>
-                <thead><tr><th>Person</th><th>Privilege</th><th>Scope</th><th>Status</th><th>Expiry</th></tr></thead>
-                <tbody>
-                  {visiblePrivileges.length ? visiblePrivileges.map((item) => (
-                    <tr key={item.id} className={item.id === selectedId ? "is-selected" : ""} onClick={() => setSelectedId(item.id)}>
-                      <td><button type="button" className="qms-people__row-button" onClick={() => setSelectedId(item.id)}><strong>{personLabel(item.user_id)}</strong><small>{shortIdentifier(item.user_id)}</small></button></td>
-                      <td><strong>{humanise(item.privilege_code)}</strong><small>{item.decisions?.length || 0} recorded decision(s)</small></td>
-                      <td>{humanise(item.scope_key)}</td>
-                      <td><span className={`qms-people__status qms-people__status--${item.status.toLowerCase()}`}>{humanise(item.status)}</span></td>
-                      <td>{dateLabel(item.expires_on)}</td>
-                    </tr>
-                  )) : <tr><td colSpan={5}>{loading ? "Loading governed privileges…" : "No privileges match this view."}</td></tr>}
-                </tbody>
-              </table>
-            </div>
+            <label className="qms-workspace-actions"><input type="checkbox" checked={expiringOnly} onChange={event => setExpiringOnly(event.target.checked)} /> Review authorizations expiring within 60 days</label>
+            <QmsWorkspaceGrid<QmsPrivilege> rowData={visiblePrivileges} loading={loading} getRowId={({ data }) => data.id} onRowClicked={({ data }) => { if (data) setSelectedId(data.id); }} pagination paginationPageSize={20} paginationPageSizeSelector={[20, 50, 100]} columnDefs={[
+              { headerName: "Person", minWidth: 220, valueGetter: ({ data }) => data ? personLabel(data.user_id) : "" },
+              { headerName: "Privilege", field: "privilege_code", valueFormatter: ({ value }) => humanise(value) },
+              { headerName: "Scope", field: "scope_key" },
+              { headerName: "Status", field: "status" },
+              { headerName: "Expiry", field: "expires_on", valueFormatter: ({ value }) => dateLabel(value) },
+              { headerName: "Action", filter: false, sortable: false, cellRenderer: ({ data }: { data?: QmsPrivilege }) => data ? <button type="button" onClick={() => setSelectedId(data.id)}>Review person</button> : null },
+            ]} />
           </section>
 
           <aside className="qms-people__detail" aria-label="Selected person and privilege">

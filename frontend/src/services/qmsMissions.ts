@@ -167,7 +167,7 @@ export function listQmsMissions(
   params.set("offset", String(options.offset ?? 0));
   return apiRequest<QmsMissionListResponse>(qmsPath(amoCode, `/missions?${params.toString()}`), {
     timeoutMs: 15_000,
-    cacheTtlMs: 10_000,
+    cacheTtlMs: 0,
     signal,
   });
 }
@@ -175,13 +175,17 @@ export function listQmsMissions(
 export function getQmsMission(amoCode: string, missionId: string, signal?: AbortSignal): Promise<QmsMission> {
   return apiRequest<QmsMission>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}`), {
     timeoutMs: 15_000,
-    cacheTtlMs: 5_000,
+    cacheTtlMs: 0,
     signal,
   });
 }
 
 export function createQmsMission(amoCode: string, payload: QmsMissionCreate): Promise<QmsMission> {
   return apiRequest<QmsMission>(qmsPath(amoCode, "/missions"), jsonOptions("POST", payload));
+}
+
+export function updateQmsMission(amoCode: string, missionId: string, payload: { owner_user_id: string | null; sponsor_user_id: string | null; target_date: string | null }): Promise<QmsMission> {
+  return apiRequest<QmsMission>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}`), jsonOptions("PATCH", payload));
 }
 
 export function updateQmsMissionGate(

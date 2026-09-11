@@ -1,0 +1,12 @@
+.qms-workspace-grid { width: 100%; min-width: 0; height: clamp(20rem, 48dvh, 38rem); --ag-font-family: inherit; --ag-font-size: 13px; --ag-background-color: var(--qms-panel, var(--surface-elevated, #fff)); --ag-foreground-color: var(--qms-text, var(--text-primary, #172033)); --ag-border-color: var(--qms-line, var(--surface-border, #dbe3ef)); }
+.qms-workspace-heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 1rem; }
+.qms-workspace-heading h2 { margin: 0; font-size: 1.1rem; }
+.qms-workspace-heading p { margin: .4rem 0; color: var(--text-secondary); }
+.qms-workspace-actions, .qms-workspace-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; }
+.qms-workspace-row-actions { height: 100%; justify-content: flex-start; }
+.qms-workspace-actions button, .qms-workspace-row-actions button, .qms-workspace-form button { border: 1px solid var(--surface-border, #dbe3ef); border-radius: .4rem; padding: .4rem .65rem; background: var(--surface-elevated, #fff); color: var(--text-primary); cursor: pointer; }
+.qms-workspace-actions button:disabled, .qms-workspace-row-actions button:disabled { opacity: .55; cursor: wait; }
+.qms-personal-tasks { display: grid; gap: 1rem; min-width: 0; padding: 1rem; border: 1px solid var(--surface-border, #dbe3ef); border-radius: .6rem; }
+.qms-workspace-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .8rem; padding: 1rem; background: var(--surface-muted, #f5f7fb); border-radius: .5rem; }
+.qms-workspace-form label { display: grid; gap: .3rem; min-width: 0; font-size: .8rem; }
+.qms-workspace-form :is(input, select, textarea) { box-sizing: border-box; width: 100%; min-width: 0; padding: .6rem; border: 1px solid var(--surface-border, #dbe3ef); border-radius: .35rem; color: var(--text-primary); background: var(--surface-elevated, #fff); }

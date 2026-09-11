@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -27,6 +28,51 @@ def list_my_tasks(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     return services.list_tasks_for_user(db, amo_id=current_user.amo_id, owner_user_id=current_user.id)
+
+
+@router.post("/tasks/personal", response_model=schemas.TaskRead, status_code=201)
+def create_personal_task(
+    payload: schemas.PersonalTaskCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    task = services.create_task(
+        db, amo_id=current_user.amo_id, owner_user_id=current_user.id,
+        title=payload.title, description=payload.description, due_at=payload.due_at,
+        priority=payload.priority, entity_type="quality_personal", entity_id=str(uuid4()),
+        metadata={"reminder_at": payload.reminder_at.isoformat() if payload.reminder_at else None},
+    )
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.put("/tasks/personal/{task_id}", response_model=schemas.TaskRead)
+def update_personal_task(
+    task_id: str,
+    payload: schemas.PersonalTaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    task = db.query(models.Task).filter(
+        models.Task.id == task_id, models.Task.amo_id == current_user.amo_id,
+        models.Task.owner_user_id == current_user.id, models.Task.entity_type == "quality_personal",
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Personal task not found")
+    metadata = dict(task.metadata_json or {})
+    reminder_at = payload.reminder_at.isoformat() if payload.reminder_at else None
+    if reminder_at != metadata.get("reminder_at"):
+        metadata.pop("reminder_sent_at", None)
+    metadata["reminder_at"] = reminder_at
+    services.update_task_details(db, task=task, actor_user_id=current_user.id, changes={
+        "title": payload.title, "description": payload.description, "due_at": payload.due_at,
+        "priority": payload.priority, "metadata_json": metadata,
+    })
+    services.update_task_status(db, task=task, status=payload.status, actor_user_id=current_user.id)
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 @router.get("/tasks", response_model=List[schemas.TaskRead])

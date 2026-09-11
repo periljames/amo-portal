@@ -1,0 +1,409 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - dialog:
+      - banner:
+        - button:
+          - generic:
+            - img:
+              - generic: TE
+          - generic:
+            - strong: TENANT-A
+            - generic: AMO Portal
+        - generic:
+          - button:
+            - img
+          - button:
+            - img
+      - generic:
+        - generic:
+          - img
+          - generic: Search navigation
+          - textbox:
+            - /placeholder: Search pages
+        - generic:
+          - generic:
+            - img
+            - text: 1 recent
+      - navigation:
+        - region:
+          - heading [level=2]: History Recent Newest first
+          - generic:
+            - generic:
+              - generic:
+                - button:
+                  - generic: My Quality Work
+                  - text: Current
+        - region:
+          - heading [level=2]: Workspace
+          - generic:
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Home
+                - button:
+                  - img
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: My Training
+                - button:
+                  - img
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: My Roster
+                - button:
+                  - img
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Administrator Governance
+                - button:
+                  - img
+        - region:
+          - heading [level=2]: Department Workspaces
+          - generic:
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Quality & Compliance
+                - button [expanded]:
+                  - img
+              - generic:
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Command
+                    - button [expanded]:
+                      - img
+                  - generic:
+                    - generic:
+                      - generic:
+                        - button:
+                          - generic: My Quality Work
+                        - button:
+                          - img
+                    - generic:
+                      - generic:
+                        - button:
+                          - generic: Calendar
+                        - button:
+                          - img
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Assurance
+                    - button:
+                      - img
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Control
+                    - button:
+                      - img
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Reporting
+                    - button:
+                      - img
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Administration
+                    - button:
+                      - img
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Procurement & Supply Chain
+                - button:
+                  - img
+        - region:
+          - heading [level=2]: Records & People
+          - generic:
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Duty Rostering
+                - button:
+                  - img
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Training & Competence
+                - button:
+                  - img
+    - generic [ref=e4]:
+      - banner [ref=e5]:
+        - generic [ref=e6]:
+          - button "Open navigation" [ref=e7] [cursor=pointer]:
+            - img [ref=e8]
+          - button "Open department home" [ref=e9] [cursor=pointer]:
+            - img "TENANT-A mark" [ref=e11]:
+              - generic [ref=e14]: TE
+          - generic [ref=e15]:
+            - strong [ref=e16]: Quality & Compliance
+            - generic [ref=e17]: TENANT-A
+        - generic [ref=e18]:
+          - generic "Live" [ref=e19]:
+            - img [ref=e20]
+          - button "QM Quality Manager" [ref=e25] [cursor=pointer]:
+            - generic [ref=e26]: QM
+            - generic [ref=e27]: Quality Manager
+            - img [ref=e28]
+          - generic "Messages and notifications" [ref=e30]:
+            - button "Messages" [ref=e31] [cursor=pointer]:
+              - img [ref=e32]
+            - button "Notifications" [ref=e34] [cursor=pointer]:
+              - img [ref=e35]
+      - main [ref=e38]:
+        - region "Quality Assurance workspace navigation" [ref=e40]:
+          - generic [ref=e41]:
+            - img [ref=e43]
+            - generic [ref=e46]:
+              - generic [ref=e47]: Quality assurance
+              - heading "inbox" [level=1] [ref=e48]
+          - navigation "Quality Assurance workspaces" [ref=e49]:
+            - button "Control Room" [ref=e50] [cursor=pointer]:
+              - img [ref=e51]
+              - generic [ref=e54]: Control Room
+            - button "Calendar" [ref=e55] [cursor=pointer]:
+              - img [ref=e56]
+              - generic [ref=e58]: Calendar
+            - button "Missions" [ref=e59] [cursor=pointer]:
+              - img [ref=e60]
+              - generic [ref=e62]: Missions
+            - button "People" [ref=e63] [cursor=pointer]:
+              - img [ref=e64]
+              - generic [ref=e68]: People
+            - button "Assurance" [ref=e69] [cursor=pointer]:
+              - img [ref=e70]
+              - generic [ref=e73]: Assurance
+            - button "Intelligence" [ref=e74] [cursor=pointer]:
+              - img [ref=e75]
+              - generic [ref=e87]: Intelligence
+          - generic [ref=e88]:
+            - generic "Quality data refreshes while the workspace is active" [ref=e89]:
+              - img [ref=e90]
+              - text: Live
+            - button "My work" [ref=e95] [cursor=pointer]:
+              - img [ref=e96]
+              - generic [ref=e99]: My work
+        - generic [ref=e101]:
+          - generic [ref=e102]:
+            - generic [ref=e103]:
+              - generic [ref=e104]:
+                - generic [ref=e105]: Quality Management System
+                - navigation "Breadcrumb" [ref=e106]:
+                  - link "Quality" [ref=e107] [cursor=pointer]:
+                    - /url: /maintenance/tenant-a/quality
+                  - img [ref=e108]
+                  - generic [ref=e110]: My Quality Work
+                  - img [ref=e111]
+                  - generic [ref=e113]: Assigned to me
+              - generic [ref=e115]:
+                - heading "My Quality Work" [level=1] [ref=e116]
+                - paragraph [ref=e117]: Assigned to me. Prioritise your assigned approvals, reviews, verifications and assurance work.
+            - button "Refresh" [ref=e119] [cursor=pointer]:
+              - img [ref=e120]
+              - text: Refresh
+          - generic [ref=e125]:
+            - button "Sync calendars" [ref=e126] [cursor=pointer]
+            - link "Open calendar" [ref=e127] [cursor=pointer]:
+              - /url: /maintenance/tenant-a/quality/calendar/week
+          - region "Personal to-do list" [ref=e128]:
+            - generic [ref=e129]:
+              - generic [ref=e130]:
+                - heading "My to-do list" [level=2] [ref=e131]
+                - paragraph [ref=e132]: Plan follow-ups and set email reminders.
+              - generic [ref=e133]:
+                - generic [ref=e134]:
+                  - checkbox "Show completed" [ref=e135]
+                  - text: Show completed
+                - button "Refresh tasks" [ref=e136] [cursor=pointer]
+                - button "New to-do" [ref=e137] [cursor=pointer]
+            - generic [ref=e139]:
+              - generic [ref=e140]: 0 to 0 of 0. Page 0 of 0
+              - treegrid [ref=e141]:
+                - rowgroup [ref=e142]:
+                  - row "To-do Status Due Priority Reminder Actions" [ref=e143]:
+                    - columnheader "To-do" [ref=e144]:
+                      - text: 
+                      - generic [ref=e146] [cursor=pointer]: To-do
+                      - generic:    
+                    - columnheader "Status" [ref=e147]:
+                      - text: 
+                      - generic [ref=e149] [cursor=pointer]: Status
+                      - generic:    
+                    - columnheader "Due" [ref=e150]:
+                      - text: 
+                      - generic [ref=e152] [cursor=pointer]: Due
+                      - generic:    
+                    - columnheader "Priority" [ref=e153]:
+                      - text: 
+                      - generic [ref=e155] [cursor=pointer]: Priority
+                      - generic:    
+                    - columnheader "Reminder" [ref=e156]:
+                      - text: 
+                      - generic [ref=e158] [cursor=pointer]: Reminder
+                      - generic:    
+                    - columnheader "Actions" [ref=e159]:
+                      - text: 
+                      - generic [ref=e161]: Actions
+                      - text: 
+                      - generic: 
+                  - row "Open Filter Menu Open Filter Menu Open Filter Menu Open Filter Menu Open Filter Menu" [ref=e162]:
+                    - gridcell "Open Filter Menu" [ref=e163]:
+                      - textbox "To-do Filter Input" [ref=e164]
+                      - button "Open Filter Menu" [ref=e166] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e167]:
+                      - textbox "Status Filter Input" [ref=e168]
+                      - button "Open Filter Menu" [ref=e170] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e171]:
+                      - textbox "Due Filter Input" [ref=e172]
+                      - button "Open Filter Menu" [ref=e174] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e175]:
+                      - textbox "Priority Filter Input" [ref=e176]
+                      - button "Open Filter Menu" [ref=e178] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e179]:
+                      - textbox "Reminder Filter Input" [ref=e180]
+                      - button "Open Filter Menu" [ref=e182] [cursor=pointer]: 
+                    - gridcell [ref=e183]
+                - rowgroup [ref=e184]
+                - rowgroup
+                - rowgroup [ref=e185]
+                - rowgroup
+                - generic: No Rows To Show
+              - generic [ref=e186]:
+                - generic [ref=e187]:
+                  - generic [ref=e188]: "Page Size:"
+                  - combobox "Page Size" [ref=e189]:
+                    - generic [ref=e190]: "20"
+                    - generic [ref=e191] [cursor=pointer]: 
+                - generic [ref=e192]: 0 to 0 of 0
+                - button "First Page" [disabled] [ref=e193]: 
+                - button "Previous Page" [disabled] [ref=e194]: 
+                - generic [ref=e195]: Page 0 of 0
+                - button "Next Page" [disabled] [ref=e196]: 
+                - button "Last Page" [disabled] [ref=e197]: 
+          - region "My Quality Work Assigned to me" [ref=e198]:
+            - generic [ref=e199]:
+              - generic [ref=e200]:
+                - generic [ref=e201]: Search
+                - img
+                - textbox "Search My Quality Work" [ref=e202]:
+                  - /placeholder: Search my quality work
+              - generic [ref=e203]:
+                - generic [ref=e204]: View
+                - combobox "View" [ref=e205]:
+                  - option "Assigned to me" [selected]
+                  - option "Approvals"
+                  - option "Overdue"
+                  - option "Watching"
+                  - option "Completed"
+              - generic [ref=e206]:
+                - generic [ref=e207]: Status
+                - combobox "Status" [ref=e208]:
+                  - option "All statuses" [selected]
+                  - option "Open"
+                  - option "In progress"
+                  - option "Pending review"
+                  - option "Closed"
+                  - option "Rejected"
+              - generic [ref=e209]:
+                - generic [ref=e210]: Rows
+                - combobox "Rows" [ref=e211]:
+                  - option "15"
+                  - option "30" [selected]
+                  - option "50"
+              - generic [ref=e212]:
+                - strong [ref=e213]: Page 1
+                - generic [ref=e214]: 1–1
+            - status [ref=e215]:
+              - img [ref=e216]
+              - generic [ref=e218]:
+                - text: Some source reads failed; available rows are shown.
+                - group [ref=e219]:
+                  - generic "Review 1 affected authoritative source" [ref=e220]
+            - generic [ref=e222]:
+              - treegrid [ref=e224]:
+                - rowgroup [ref=e225]:
+                  - row "Assignment Type Status Due Received Action" [ref=e226]:
+                    - columnheader "Assignment" [ref=e227]:
+                      - text: 
+                      - generic [ref=e229] [cursor=pointer]: Assignment
+                      - generic:    
+                    - columnheader "Type" [ref=e230]:
+                      - text: 
+                      - generic [ref=e232] [cursor=pointer]: Type
+                      - generic:    
+                    - columnheader "Status" [ref=e233]:
+                      - text: 
+                      - generic [ref=e235] [cursor=pointer]: Status
+                      - generic:    
+                    - columnheader "Due" [ref=e236]:
+                      - text: 
+                      - generic [ref=e238] [cursor=pointer]: Due
+                      - generic:    
+                    - columnheader "Received" [ref=e239]:
+                      - text: 
+                      - generic [ref=e241] [cursor=pointer]: Received
+                      - generic:    
+                    - columnheader "Action" [ref=e242]:
+                      - text: 
+                      - generic [ref=e244]: Action
+                      - text: 
+                      - generic: 
+                  - row "Open Filter Menu Open Filter Menu Open Filter Menu Open Filter Menu Open Filter Menu" [ref=e245]:
+                    - gridcell "Open Filter Menu" [ref=e246]:
+                      - textbox "Assignment Filter Input" [ref=e247]
+                      - button "Open Filter Menu" [ref=e249] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e250]:
+                      - textbox "Type Filter Input" [ref=e251]
+                      - button "Open Filter Menu" [ref=e253] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e254]:
+                      - textbox "Status Filter Input" [ref=e255]
+                      - button "Open Filter Menu" [ref=e257] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e258]:
+                      - textbox "Due Filter Input" [ref=e259]
+                      - button "Open Filter Menu" [ref=e261] [cursor=pointer]: 
+                    - gridcell "Open Filter Menu" [ref=e262]:
+                      - textbox "Received Filter Input" [ref=e263]
+                      - button "Open Filter Menu" [ref=e265] [cursor=pointer]: 
+                    - gridcell [ref=e266]
+                - rowgroup [ref=e267]:
+                  - row "Initial source-backed task Quality work INFO 9/11/2026 — Open record" [ref=e268]:
+                    - gridcell "Initial source-backed task" [ref=e269]
+                    - gridcell "Quality work" [ref=e270]
+                    - gridcell "INFO" [ref=e271]
+                    - gridcell "9/11/2026" [ref=e272]
+                    - gridcell "—" [ref=e273]
+                    - gridcell "Open record" [ref=e274]:
+                      - link "Open record" [ref=e275] [cursor=pointer]:
+                        - /url: /maintenance/tenant-a/quality?workspace=assurance
+                        - text: Open record
+                        - img [ref=e276]
+                - rowgroup
+                - rowgroup [ref=e278]
+                - rowgroup
+              - text:    
+            - generic [ref=e279]:
+              - button "Previous" [disabled] [ref=e280]
+              - generic [ref=e281]: Showing 1–1 · end of results
+              - button "Next" [disabled] [ref=e282]
+          - group [ref=e283]:
+            - generic "Support diagnostics" [ref=e284] [cursor=pointer]
+  - generic "System notifications"
+```

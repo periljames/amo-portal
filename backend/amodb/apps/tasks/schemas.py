@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .models import TaskStatus
 
@@ -27,6 +27,20 @@ class TaskUpdate(BaseModel):
     priority: Optional[int] = None
     description: Optional[str] = None
     escalate: Optional[bool] = None
+
+
+class PersonalTaskCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    due_at: Optional[AwareDatetime] = None
+    reminder_at: Optional[AwareDatetime] = None
+    priority: int = Field(default=3, ge=1, le=5)
+
+
+class PersonalTaskUpdate(PersonalTaskCreate):
+    status: TaskStatus
 
 
 class TaskRead(BaseModel):

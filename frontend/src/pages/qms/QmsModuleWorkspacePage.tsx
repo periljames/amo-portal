@@ -1689,12 +1689,12 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
     { label: module.shortTitle },
   ], [amoCode, module.shortTitle]);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (fresh = false) => {
     setDashboardState("loading");
     setDashboardError(null);
     const started = performance.now();
     try {
-      const result = await getQmsDashboard(amoCode);
+      const result = await getQmsDashboard(amoCode, fresh);
       setDashboard(result);
       setDashboardState("ready");
       console.info("[QMS] dashboard loaded", { amoCode, elapsedMs: Math.round(performance.now() - started) });
@@ -1748,7 +1748,8 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
     const started = performance.now();
     console.info("[QMS] module request started", { amoCode, module: module.key, view, path, offset: nextOffset, pageSize, query, statusFilter });
     try {
-      const result = await apiRequest<QmsModuleResponse>(path, { timeoutMs: 15000, signal: controller.signal });
+      const result = await apiRequest<QmsModuleResponse>(path, { timeoutMs: 15000, cacheTtlMs: force ? 0 : undefined, signal: controller.signal });
+      if (controller.signal.aborted) return;
       cacheRef.current.set(cacheKey, result);
       setModuleData(result);
       setModuleState("ready");
@@ -1804,7 +1805,7 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
 
   const refreshAll = () => {
     cacheRef.current.clear();
-    void loadDashboard();
+    void loadDashboard(true);
     void loadModule({ force: true });
   };
 

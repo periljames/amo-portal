@@ -316,5 +316,31 @@ def personal_calendar(
             status="TENTATIVE" if item.provisional else "CONFIRMED",
         ))
 
+    from amodb.apps.tasks.models import Task, TaskStatus
+
+    personal_tasks = db.query(Task).filter(
+        Task.amo_id == amo_id, Task.owner_user_id == user_id,
+        Task.entity_type == "quality_personal", Task.due_at.is_not(None),
+        Task.due_at >= datetime.combine(start, datetime.min.time(), tzinfo=UTC),
+        Task.due_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=UTC),
+    ).order_by(Task.due_at, Task.id).all()
+    for task in personal_tasks:
+        event = _event(
+            uid=f"quality-task-{task.id}", starts_at=task.due_at,
+            ends_at=task.due_at + timedelta(minutes=30),
+            summary=f"To-do · {task.title}", description=task.description or "",
+            status="CANCELLED" if task.status in (TaskStatus.DONE, TaskStatus.CANCELLED) else "CONFIRMED",
+        )
+        reminder = (task.metadata_json or {}).get("reminder_at")
+        if reminder and task.status not in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            try:
+                reminder_date = datetime.fromisoformat(reminder)
+            except (TypeError, ValueError):
+                reminder_date = None
+            if reminder_date:
+                event[-1:-1] = ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_escape(task.title)}",
+                               f"TRIGGER;VALUE=DATE-TIME:{_datetime(reminder_date)}", "END:VALARM"]
+        lines.extend(event)
+
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines) + "\r\n"

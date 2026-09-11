@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
@@ -7,9 +7,13 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import PageHeader from "../../components/shared/PageHeader";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
+import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
+import QmsPersonalTasks from "./inbox/QmsPersonalTasks";
+import QmsCalendarSyncDialog from "../../components/QMS/QmsCalendarSyncDialog";
+import type { ColDef } from "ag-grid-community";
 import type { QmsSourceError } from "../../types/qms";
 import { classifyQmsPath, qmsBasePath, qmsModulePath, type QmsModuleRoute } from "./routes/qmsRouteRegistry";
-import "../../styles/qms-register.css";
+import "../../styles/qms/register.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type QmsRow = Record<string, unknown>;
@@ -37,7 +41,6 @@ const PAGE_SIZES = [15, 30, 50] as const;
 const CONTROLLED_NEW_VIEWS = new Set(["new"]);
 const SEARCH_DEBOUNCE_MS = 350;
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const DAY_MS = 86_400_000;
 const TECHNICAL_COLUMNS = new Set([
   "id", "uuid", "record_id", "amo_id", "tenant_id", "user_id", "owner_user_id", "assigned_to_user_id",
   "created_by_user_id", "updated_by_user_id", "payload", "raw_payload",
@@ -80,14 +83,6 @@ function formatValue(value: unknown): string {
 function rowId(row: QmsRow): string | null {
   const value = row.id ?? row.uuid ?? row.record_id;
   return value == null ? null : String(value);
-}
-
-function statusTone(value: unknown): string {
-  const status = String(value || "").toUpperCase();
-  if (["CLOSED", "COMPLETE", "COMPLETED", "ACTIVE", "APPROVED", "IMPLEMENTED"].includes(status)) return "positive";
-  if (["OVERDUE", "REJECTED", "CANCELLED", "FAILED", "CRITICAL", "MAJOR"].includes(status)) return "danger";
-  if (["DRAFT", "PENDING", "PENDING_APPROVAL", "OPEN", "IN_PROGRESS", "AWAITING_AUDITEE", "AWAITING_QUALITY_REVIEW"].includes(status)) return "warning";
-  return "neutral";
 }
 
 function deriveColumns(rows: QmsRow[], responseColumns: string[] | undefined): string[] {
@@ -135,47 +130,36 @@ function taskTitle(row: QmsRow): string {
   return value == null ? "Quality assignment" : String(value);
 }
 
-function taskReference(row: QmsRow): string | null {
-  const value = firstValue(row, ["reference", "audit_ref", "car_number", "finding_ref", "doc_code", "case_ref", "mission_ref"]);
-  return value == null ? null : String(value);
-}
-
 function taskKind(row: QmsRow): string {
   const value = firstValue(row, ["assignment_type", "task_type", "event_type", "type", "category", "module", "source_type"]);
   return value == null ? "Quality work" : humanise(value);
 }
 
 function taskDue(row: QmsRow): unknown {
-  return firstValue(row, ["due_date", "target_date", "planned_date", "scheduled_for", "review_date"]);
+  return firstValue(row, ["due_date", "due_at", "target_date", "planned_date", "scheduled_for", "review_date"]);
 }
 
 function taskReceived(row: QmsRow): unknown {
   return firstValue(row, ["received_at", "created_at"]);
 }
 
+function taskDueClass(row?: QmsRow): string {
+  if (!row || ["CLOSED", "COMPLETE", "COMPLETED", "DONE", "CANCELLED"].includes(String(row.status || "").toUpperCase())) return "is-neutral";
+  const value = taskDue(row);
+  if (typeof value !== "string") return "is-neutral";
+  const date = parseDateValue(value);
+  if (!date) return "is-neutral";
+  const now = new Date();
+  if (DATE_ONLY_PATTERN.test(value)) now.setHours(0, 0, 0, 0);
+  const days = (date.getTime() - now.getTime()) / 86_400_000;
+  return days < 0 ? "is-danger" : days <= 7 ? "is-warning" : "is-neutral";
+}
+
 function taskRoute(row: QmsRow): string | null {
   const value = firstValue(row, ["route", "source_route", "link", "href"]);
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed.startsWith("/") ? trimmed : null;
-}
-
-function localCalendarDay(date: Date): number {
-  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
-}
-
-function taskDueTone(value: unknown, status: unknown): "danger" | "warning" | "neutral" {
-  const state = String(status || "").toUpperCase();
-  if (["CLOSED", "COMPLETE", "COMPLETED", "CANCELLED"].includes(state)) return "neutral";
-  if (typeof value !== "string") return statusTone(status) === "danger" ? "danger" : "neutral";
-  const raw = value.trim();
-  const parsed = parseDateValue(raw);
-  if (!parsed) return statusTone(status) === "danger" ? "danger" : "neutral";
-  const now = new Date();
-  const days = DATE_ONLY_PATTERN.test(raw) ? localCalendarDay(parsed) - localCalendarDay(now) : (parsed.getTime() - now.getTime()) / DAY_MS;
-  if (days < 0) return "danger";
-  if (days <= 7) return "warning";
-  return "neutral";
+  return trimmed.startsWith("/") && !trimmed.startsWith("//") && !trimmed.includes("\\") ? trimmed : null;
 }
 
 const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) => {
@@ -187,12 +171,14 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const searchTimerRef = useRef<number | null>(null);
   const [state, setState] = useState<LoadState>("idle");
   const [data, setData] = useState<QmsRegisterResponse | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const query = searchParams.get("q") || "";
   const status = searchParams.get("status") || "";
   const limit = PAGE_SIZES.includes(Number(searchParams.get("limit")) as (typeof PAGE_SIZES)[number]) ? Number(searchParams.get("limit")) : 30;
-  const offset = Math.max(0, Number(searchParams.get("offset") || 0));
+  const requestedOffset = Number(searchParams.get("offset") || 0);
+  const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
   const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
 
   const updateSearch = useCallback((updates: Record<string, string | null>) => {
@@ -214,7 +200,7 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
   useEffect(() => () => {
     if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current);
-  }, []);
+  }, [searchParams]);
 
   const load = useCallback(async (fresh = false) => {
     if (!context || controlledNew) return;
@@ -268,10 +254,24 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const isInbox = module.id === "inbox";
   const sourceErrors = data?.source_errors || [];
 
+  const openRoute = (row: QmsRow) => isInbox ? taskRoute(row) : module.allowRecordDetails && rowId(row) ? recordRoute(amoCode, module, rowId(row)!) : null;
+  const gridColumns: ColDef<QmsRow>[] = isInbox ? [
+    { headerName: "Assignment", valueGetter: ({ data: row }) => row ? taskTitle(row) : "", minWidth: 280, flex: 2 },
+    { headerName: "Type", valueGetter: ({ data: row }) => row ? taskKind(row) : "" },
+    { headerName: "Status", valueGetter: ({ data: row }) => row ? humanise(firstValue(row, ["status", "state", "severity"])) : "" },
+    { colId: "due", headerName: "Due", valueGetter: ({ data: row }) => row ? taskDue(row) : null, valueFormatter: ({ value }) => formatValue(value), cellClass: ({ data: row }) => taskDueClass(row) },
+    { colId: "received", headerName: "Received", valueGetter: ({ data: row }) => row ? taskReceived(row) : null, valueFormatter: ({ value }) => formatValue(value) },
+  ] : columns.map(column => ({ field: column, headerName: humanise(column), valueFormatter: ({ value }) => formatValue(value) }));
+  gridColumns.push({ headerName: "Action", sortable: false, filter: false, minWidth: 130, cellRenderer: ({ data: row }: { data?: QmsRow }) => {
+    const route = row ? openRoute(row) : null;
+    return route ? <Link className="qms-register-open" to={route}>Open record <ArrowRight size={14} /></Link> : "—";
+  } });
+
   const content = (
     <div className={`qms-register-page qms-register-page--${module.id}`}>
       {!embedded ? <PageHeader compact eyebrow="Quality Management System" title={module.label} subtitle={isInbox ? `${viewLabel(view)}. Prioritise your assigned approvals, reviews, verifications and assurance work.` : `${viewLabel(view)} workspace. Results are server-bounded; open the governed record to investigate or act.`} breadcrumbs={[{ label: "Quality", to: qmsBasePath(amoCode) }, { label: module.navigationLabel }, { label: viewLabel(view) }]} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
 
+      {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></> : null}
       {controlledNew ? (
         <section className="qms-register-controlled" role="status"><ShieldCheck size={24} aria-hidden="true" /><div><span>Controlled workflow</span><h2>Creation belongs to the governed source workflow</h2><p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership and approval controls. This register does not manufacture a reduced duplicate form.</p><Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Open {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link></div></section>
       ) : (
@@ -284,14 +284,12 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
             {state === "loading" && !data ? <div className="qms-register-loading" role="status"><RefreshCw size={18} className="is-spinning" /> Loading {module.navigationLabel.toLowerCase()}…</div> : null}
             {state !== "loading" && !error && rows.length === 0 ? <div className="qms-register-empty"><CheckCircle2 size={20} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status and search filters.</p></div></div> : null}
 
-            {rows.length && isInbox ? <div className="qms-register-task-list" aria-label="Quality assignments">{rows.map((row, index) => { const id = rowId(row) || `task-${index}`; const statusValue = firstValue(row, ["status", "state", "severity"]); const dueValue = taskDue(row); const receivedValue = taskReceived(row); const route = taskRoute(row); const tone = taskDueTone(dueValue, statusValue); const temporalContext = dueValue ? `Due ${formatValue(dueValue)}` : receivedValue ? `Received ${formatValue(receivedValue)}` : "No deadline or receipt time returned"; const itemContent = <><span className={`qms-register-task__marker is-${tone}`} aria-hidden="true" /><span className="qms-register-task__body"><span className="qms-register-task__meta"><strong>{taskKind(row)}</strong>{taskReference(row) ? <span>{taskReference(row)}</span> : null}</span><b>{taskTitle(row)}</b><small>{temporalContext}</small></span><span className="qms-register-task__state">{statusValue ? <span className={`qms-register-status qms-register-status--${statusTone(statusValue)}`}>{humanise(statusValue)}</span> : null}{route ? <span className="qms-register-open">Open <ArrowRight size={15} /></span> : <span className="qms-register-task__no-route">Assigned work</span>}</span></>; return route ? <Link key={id} to={route} className="qms-register-task">{itemContent}</Link> : <article key={id} className="qms-register-task">{itemContent}</article>; })}</div> : null}
-
-            {rows.length && !isInbox ? <div className="qms-register-table-wrap"><table className="qms-register-table"><thead><tr>{columns.map((column) => <th key={column}>{humanise(column)}</th>)}{module.allowRecordDetails ? <th>Action</th> : null}</tr></thead><tbody>{rows.map((row, index) => { const id = rowId(row) || `row-${index}`; return <tr key={id}>{columns.map((column) => { const value = row[column]; return <td key={column} data-label={humanise(column)}>{column === "status" || column === "severity" ? <span className={`qms-register-status qms-register-status--${statusTone(value)}`}>{humanise(value) || "Unknown"}</span> : formatValue(value)}</td>; })}{module.allowRecordDetails ? <td data-label="Action">{rowId(row) ? <Link className="qms-register-open" to={recordRoute(amoCode, module, id)}>Open <ArrowRight size={14} /></Link> : "—"}</td> : null}</tr>; })}</tbody></table></div> : null}
+            <QmsWorkspaceGrid<QmsRow> rowData={rows} columnDefs={gridColumns} loading={state === "loading"} onRowDoubleClicked={({ data: row }) => { if (row) { const route = openRoute(row); if (route) navigate(route); } }} />
 
             <footer className="qms-register-pagination"><button type="button" disabled={responseOffset <= 0 || state === "loading"} onClick={() => updateSearch({ offset: String(Math.max(0, responseOffset - responseLimit)) })}>Previous</button><span>{rows.length ? `Showing ${startRow.toLocaleString()}–${endRow.toLocaleString()}` : "No results"}{data?.has_more ? " · additional results available" : " · end of results"}</span><button type="button" disabled={!data?.has_more || state === "loading"} onClick={() => updateSearch({ offset: String(data?.next_offset ?? responseOffset + responseLimit) })}>Next</button></footer>
           </section>
 
-          <details className="qms-register-help"><summary><HelpCircle size={16} aria-hidden="true" /> Workflow guidance</summary><div><strong>{module.label}</strong><p>{isInbox ? "Use this workspace as your personal Quality action queue. Open the authoritative source workflow to approve, review, verify or complete the work; technical record identifiers stay secondary." : "Use this workspace to find and open governed records. Creation, approval, evidence, verification and closure stay in their dedicated workflows instead of being duplicated in the register."}</p></div></details>
+
           {diagnosticsAuthorized ? <details className="qms-register-diagnostics"><summary>Support diagnostics</summary><dl><div><dt>Source</dt><dd>{data?.table || module.segment}</dd></div><div><dt>Trace ID</dt><dd><code>{data?.trace_id || "Unavailable"}</code></dd></div><div><dt>Backend duration</dt><dd>{data?.elapsed_ms == null ? "Unavailable" : `${data.elapsed_ms} ms`}</dd></div><div><dt>Applied view</dt><dd>{data?.view || view}</dd></div></dl></details> : null}
         </>
       )}

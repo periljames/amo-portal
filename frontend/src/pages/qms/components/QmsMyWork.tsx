@@ -24,7 +24,6 @@ const QmsMyWork: React.FC<Props> = ({ amoCode, items, fallbackRoute }) => {
     <section className="qms-overview-section" aria-labelledby="qms-my-work-title">
       <header className="qms-overview-section__header">
         <div>
-          <span>Assigned to the logged-in user</span>
           <h2 id="qms-my-work-title">My work</h2>
         </div>
         <Link to={fallbackRoute}>Open all <ArrowRight size={14} /></Link>

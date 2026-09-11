@@ -34,7 +34,7 @@ describe("QMS dashboard services", () => {
       "/api/maintenance/SAF/quality/dashboard-v2",
       expect.objectContaining({
         timeoutMs: 15_000,
-        cacheTtlMs: 20_000,
+        cacheTtlMs: 0,
         persistCache: true,
         staleWhileOfflineMs: 30 * 60_000,
         signal: controller.signal,

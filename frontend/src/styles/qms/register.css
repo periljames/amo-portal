@@ -119,87 +119,18 @@
 .qms-register-loading { min-height: 110px; justify-content: center; color: var(--qms-register-muted); }
 .qms-register-empty { min-height: 110px; color: var(--qms-register-positive); }
 .qms-register-empty > div { display: grid; gap: 3px; }
-
-.qms-register-table-wrap { width: 100%; min-width: 0; max-height: min(66vh, 760px); overflow: auto; }
-.qms-register-table { width: 100%; min-width: 840px; border-collapse: collapse; table-layout: auto; }
-.qms-register-table th,
-.qms-register-table td { padding: 12px 14px; border-bottom: 1px solid var(--qms-register-border-soft); text-align: left; vertical-align: middle; }
-.qms-register-table th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: color-mix(in srgb, var(--qms-register-muted-surface) 84%, var(--qms-register-surface));
-  color: var(--qms-register-muted);
-  font-size: 11.5px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.qms-register-table td { max-width: 420px; color: var(--qms-register-text); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
-.qms-register-table tbody tr:hover { background: var(--qms-hover, color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface))); }
-.qms-register-table tbody tr:last-child td { border-bottom: 0; }
-
-.qms-register-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 27px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: color-mix(in srgb, currentColor 9%, var(--qms-register-surface));
-  color: var(--qms-register-muted);
-  font-size: 11.5px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-.qms-register-status--positive { color: var(--qms-register-positive); }
-.qms-register-status--warning { color: var(--qms-register-warning); }
-.qms-register-status--danger { color: var(--qms-register-danger); }
-.qms-register-status--neutral { color: var(--qms-register-muted); }
 .qms-register-open { display: inline-flex; gap: 5px; align-items: center; color: var(--qms-register-accent); font-size: 12.5px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 
-/* My Quality Work is task-first instead of a generic one-row database table. */
 .qms-register-page--inbox .qms-register-toolbar { grid-template-columns: minmax(300px, 1.35fr) minmax(170px, .7fr) minmax(160px, .65fr) 92px auto auto; }
-.qms-register-task-list { display: grid; }
-.qms-register-task {
-  display: grid;
-  grid-template-columns: 5px minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  min-height: 92px;
-  padding: 15px 18px;
-  border-bottom: 1px solid var(--qms-register-border-soft);
-  background: var(--qms-register-surface);
-  color: var(--qms-register-text);
-  text-decoration: none;
-}
-.qms-register-task:last-child { border-bottom: 0; }
-a.qms-register-task:hover { background: var(--qms-hover, color-mix(in srgb, var(--qms-register-accent) 3%, var(--qms-register-surface))); }
-.qms-register-task__marker { width: 5px; height: 48px; border-radius: 999px; background: color-mix(in srgb, var(--qms-muted, #98a2b3) 70%, var(--qms-panel, #fff)); }
-.qms-register-task__marker.is-danger { background: var(--qms-register-danger); }
-.qms-register-task__marker.is-warning { background: var(--qms-register-warning); }
-.qms-register-task__body { display: grid; gap: 5px; min-width: 0; }
-.qms-register-task__meta { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; color: var(--qms-register-muted); font-size: 11.5px; }
-.qms-register-task__meta strong { color: var(--qms-register-accent); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
-.qms-register-task__body > b { overflow: hidden; font-size: 15px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.qms-register-task__body > small { color: var(--qms-register-muted); font-size: 12px; }
-.qms-register-task__state { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
-.qms-register-task__no-route { color: var(--qms-register-muted); font-size: 12px; }
 
 .qms-register-pagination { display: flex; gap: 12px; align-items: center; justify-content: space-between; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--qms-register-border-soft); color: var(--qms-register-muted); font-size: 12px; }
 .qms-register-pagination button { min-height: 36px; padding: 0 12px; border: 1px solid var(--qms-register-border); border-radius: 8px; background: var(--qms-register-surface); color: var(--qms-register-text); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 .qms-register-pagination button:hover:not(:disabled) { border-color: var(--qms-register-accent); color: var(--qms-register-accent); }
 .qms-register-pagination button:disabled { cursor: default; opacity: .45; }
 
-.qms-register-help,
 .qms-register-diagnostics { border: 1px solid var(--qms-register-border); border-radius: 10px; background: var(--qms-register-surface); }
-.qms-register-help > summary,
 .qms-register-diagnostics > summary { display: flex; gap: 7px; align-items: center; min-height: 44px; padding: 9px 13px; color: var(--qms-register-muted); font-size: 12px; font-weight: 750; cursor: pointer; }
-.qms-register-help > div,
 .qms-register-diagnostics > dl { margin: 0; padding: 13px 14px; border-top: 1px solid var(--qms-register-border-soft); }
-.qms-register-help > div { display: grid; gap: 4px; }
-.qms-register-help strong { font-size: 13.5px; }
-.qms-register-help p { margin: 0; color: var(--qms-register-muted); font-size: 12.5px; line-height: 1.5; }
 .qms-register-diagnostics > dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .qms-register-diagnostics dl > div { display: grid; gap: 3px; min-width: 0; }
 .qms-register-diagnostics dt { color: var(--qms-register-muted); font-size: 11.5px; font-weight: 750; text-transform: uppercase; }
@@ -218,7 +149,6 @@ a.qms-register-task:hover { background: var(--qms-hover, color-mix(in srgb, var(
 
 @media (min-width: 1800px) {
   .qms-register-toolbar { grid-template-columns: minmax(360px, 1.4fr) 190px 175px 96px auto auto; }
-  .qms-register-table td { max-width: 520px; }
 }
 
 @media (max-width: 1120px) {
@@ -236,21 +166,9 @@ a.qms-register-task:hover { background: var(--qms-hover, color-mix(in srgb, var(
   .qms-register-page--inbox .qms-register-toolbar { grid-template-columns: 1fr 1fr; }
   .qms-register-search { grid-column: 1 / -1; }
   .qms-register-toolbar__state { align-self: center; }
-  .qms-register-table-wrap { max-height: none; }
-  .qms-register-task { grid-template-columns: 5px minmax(0, 1fr); }
-  .qms-register-task__state { grid-column: 2; justify-content: flex-start; }
 }
 
 @media (max-width: 640px) {
-  .qms-register-table { min-width: 0; }
-  .qms-register-table thead { display: none; }
-  .qms-register-table,
-  .qms-register-table tbody,
-  .qms-register-table tr,
-  .qms-register-table td { display: block; width: 100%; }
-  .qms-register-table tr { padding: 10px 13px; border-bottom: 1px solid var(--qms-register-border-soft); }
-  .qms-register-table td { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; max-width: none; padding: 7px 0; border: 0; }
-  .qms-register-table td::before { content: attr(data-label); color: var(--qms-register-muted); font-size: 11.5px; font-weight: 800; text-transform: uppercase; }
   .qms-register-pagination span { display: none; }
 }
 
@@ -259,7 +177,6 @@ a.qms-register-task:hover { background: var(--qms-hover, color-mix(in srgb, var(
   .qms-register-page--inbox .qms-register-toolbar { grid-template-columns: 1fr; }
   .qms-register-search { grid-column: 1; }
   .qms-register-diagnostics > dl { grid-template-columns: 1fr; }
-  .qms-register-task__body > b { white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -275,3 +192,6 @@ body[data-color-scheme="dark"] .qms-register-page,
   /* Shared dark tokens come from qms-surfaces when .qms-register is present; keep aliases live. */
   color: var(--qms-text);
 }
+
+.qms-register-workspace .ag-cell.is-danger { color: var(--qms-register-danger); font-weight: 700; }
+.qms-register-workspace .ag-cell.is-warning { color: var(--qms-register-warning); font-weight: 700; }

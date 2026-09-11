@@ -22,9 +22,7 @@ def _utcnow() -> datetime:
 
 
 def _merge_metadata(task: models.Task, updates: dict) -> None:
-    if task.metadata_json is None:
-        task.metadata_json = {}
-    task.metadata_json.update(updates)
+    task.metadata_json = {**(task.metadata_json or {}), **updates}
 
 
 def create_task(
@@ -268,6 +266,35 @@ def run_task_runner(
     reminders_sent = 0
     escalations_sent = 0
 
+    personal_tasks = db.query(models.Task).filter(
+        models.Task.entity_type == "quality_personal",
+        models.Task.status.in_([models.TaskStatus.OPEN, models.TaskStatus.IN_PROGRESS]),
+    ).all()
+    for task in personal_tasks:
+        metadata = task.metadata_json or {}
+        if not metadata.get("reminder_at") or metadata.get("reminder_sent_at"):
+            continue
+        try:
+            scheduled = datetime.fromisoformat(metadata["reminder_at"])
+        except (TypeError, ValueError):
+            continue
+        comparison_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+        if scheduled.tzinfo is None or scheduled > comparison_now:
+            continue
+        email_log = notification_service.send_email(
+            "task_reminder", _resolve_recipient_email(db, task.owner_user_id),
+            f"Task reminder: {task.title}",
+            {"task_id": str(task.id), "title": task.title, "description": task.description,
+             "due_at": task.due_at.isoformat() if task.due_at else None, "owner_user_id": task.owner_user_id},
+            correlation_id=f"task:{task.id}:personal:{metadata['reminder_at']}",
+            email_class="ROUTINE", recipient_user_id=task.owner_user_id,
+            critical=False, amo_id=task.amo_id, db=db,
+        )
+        if email_log.status != notification_models.EmailStatus.FAILED:
+            _merge_metadata(task, {"reminder_sent_at": now.isoformat()})
+            db.add(task)
+            reminders_sent += 1
+
     reminders = (
         db.query(models.Task)
         .filter(
@@ -280,6 +307,8 @@ def run_task_runner(
     )
 
     for task in reminders:
+        if task.entity_type == "quality_personal":
+            continue
         if not _should_notify(task, now=now, cooldown_hours=reminder_cooldown_hours):
             continue
         recipient = _resolve_recipient_email(db, task.owner_user_id)
@@ -327,6 +356,8 @@ def run_task_runner(
     )
 
     for task in overdue_tasks:
+        if task.entity_type == "quality_personal":
+            continue
         escalation_level = 0
         if task.metadata_json and "escalation_level" in task.metadata_json:
             escalation_level = int(task.metadata_json.get("escalation_level") or 0)

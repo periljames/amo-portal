@@ -1,14 +1,15 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
-import QualityExcellenceCockpit from "../../components/QMS/QualityExcellenceCockpit";
-import QmsIntelligencePage from "./QmsIntelligencePage";
-import QmsMissionsPage from "./QmsMissionsPage";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
-import QmsPeoplePage from "./QmsPeoplePage";
 import { QMS_WORKSPACES, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
+
+const QualityExcellenceCockpit = lazy(() => import("../../components/QMS/QualityExcellenceCockpit"));
+const QmsIntelligencePage = lazy(() => import("./QmsIntelligencePage"));
+const QmsMissionsPage = lazy(() => import("./QmsMissionsPage"));
+const QmsPeoplePage = lazy(() => import("./QmsPeoplePage"));
 
 function decodeSegment(value: string | undefined): string {
   if (!value) return "";
@@ -68,6 +69,7 @@ const QmsOverviewPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      <Suspense fallback={<p role="status">Loading workspace…</p>}>
       {hub
         ? <QualityExcellenceCockpit amoCode={amoCode} />
         : workspace === "control-room"
@@ -77,6 +79,7 @@ const QmsOverviewPage: React.FC = () => {
             : workspace === "people"
               ? <QmsPeoplePage amoCode={amoCode} />
               : <QmsIntelligencePage amoCode={amoCode} />}
+      </Suspense>
     </DepartmentLayout>
   );
 };

@@ -32,7 +32,8 @@
 }
 
 .qms-people__hero {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   justify-content: space-between;
   align-items: flex-start;
   gap: 24px;
@@ -725,9 +726,7 @@
 
 @media (max-width: 760px) {
   .qms-people { padding: 12px; gap: 12px; }
-  .qms-people__hero { flex-direction: column; padding: 18px; }
-  .qms-people__hero-actions { width: 100%; }
-  .qms-people__hero-actions button { flex: 1; }
+  .qms-people__hero { padding: 18px; }
   .qms-people__panel-head { align-items: flex-start; flex-direction: column; }
   .qms-people__filters { width: 100%; }
   .qms-people__search { flex: 1 1 100%; min-width: 0; }
@@ -747,3 +746,5 @@
   .qms-people__facts { grid-template-columns: 1fr; }
   .qms-people__facts > div { border-right: 0; }
 }
+
+.qms-people__hero-actions { justify-self: end; justify-content: flex-end; width: auto; }

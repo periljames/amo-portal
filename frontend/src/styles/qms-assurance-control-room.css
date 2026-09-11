@@ -34,7 +34,8 @@
 }
 
 .qms-assurance-room__header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
@@ -60,7 +61,7 @@
   letter-spacing: -.02em;
 }
 .qms-assurance-room__header p { margin: 0; max-width: 900px; color: var(--qms-muted); font-size: 14px; line-height: 1.55; }
-.qms-assurance-room__header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.qms-assurance-room__header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; max-width: 24rem; justify-self: end; }
 
 .qms-assurance-room__source {
   display: inline-flex;
@@ -238,8 +239,8 @@
 .qms-assurance-room :where(a, button, summary):focus-visible { outline: 2px solid var(--qms-primary); outline-offset: 2px; }
 
 @media (max-width: 1180px) {
-  .qms-assurance-room__header { flex-direction: column; }
-  .qms-assurance-room__header-actions { justify-content: flex-start; }
+
+
   .qms-assurance-room__primary-grid,
   .qms-assurance-room__secondary-grid { grid-template-columns: 1fr; }
   .qms-assurance-room__summary,
@@ -253,8 +254,8 @@
 @media (max-width: 760px) {
   .qms-assurance-room { padding: 12px; gap: 12px; }
   .qms-assurance-room__header { padding: 18px; }
-  .qms-assurance-room__header-actions { width: 100%; }
-  .qms-assurance-room__header-actions > * { flex: 1 1 auto; }
+
+
   .qms-assurance-room__summary,
   .qms-assurance-room__control-health > div { grid-template-columns: 1fr; }
   .qms-assurance-room__summary > a,
@@ -273,4 +274,10 @@ body[data-color-scheme="dark"] .qms-assurance-room,
 .dark .qms-assurance-room {
   /* Dark page/panel/line/text supplied by qms-surfaces.css on this root. */
   color: var(--qms-text);
+}
+
+@media (max-width: 600px) {
+  .qms-assurance-room__header { gap: 12px; padding: 14px; }
+  .qms-assurance-room__header-actions { flex-direction: column; align-items: flex-end; }
+  .qms-assurance-room__source small { display: none; }
 }

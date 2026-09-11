@@ -1,3 +1,4 @@
+import { mockQualityShell } from "./helpers/mockQualityShell";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 function futureToken(): string {
@@ -16,15 +17,16 @@ function localDateKey(date = new Date()): string {
 }
 
 async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => Promise<void>): Promise<void> {
+  await mockQualityShell(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   const token = futureToken();
   await page.addInitScript(({ storedToken }) => {
-    localStorage.setItem("amo_portal_token", storedToken);
+    sessionStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
     localStorage.setItem("amo_color_scheme", "light");
-    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "quality-user-a", amo_id: "amo-a", department_id: "department-quality", staff_code: "QMS-001",
       email: "quality@tenant-a.test", first_name: "Quality", last_name: "Manager", full_name: "Quality Manager",
@@ -117,7 +119,7 @@ test("People uses the governed Planner preflight and never borrows assignment sc
   await expect(readiness).toHaveText("Blocked");
   await expect(page.locator(".qms-people__gate-grid")).toContainText("Selected Privilege Active");
 
-  await page.locator(".qms-people__register tbody tr").nth(1).click();
+  await page.locator(".qms-people__register .ag-center-cols-container .ag-row").nth(1).click();
   await expect(readiness).toHaveText("Ready");
   await page.getByRole("button", { name: "Check audit assignment" }).click();
   await expect(page.locator(".qms-people__context-card")).toContainText("Hangar B");
@@ -185,7 +187,7 @@ test("My Quality Work treats a date-only deadline due today as due today, expose
 
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Initial source-backed task", { exact: true })).toBeVisible();
-  const marker = page.locator(".qms-register-task__marker").first();
+  const marker = page.locator('.qms-register-workspace .ag-cell[col-id="due"]').first();
   await expect(marker).toHaveClass(/is-warning/);
   await expect(marker).not.toHaveClass(/is-danger/);
   await page.getByText("Review 1 affected authoritative source", { exact: true }).click();

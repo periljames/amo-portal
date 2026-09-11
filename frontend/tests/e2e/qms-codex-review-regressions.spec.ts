@@ -1,3 +1,4 @@
+import { mockQualityShell } from "./helpers/mockQualityShell";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 function futureToken(): string {
@@ -20,15 +21,16 @@ async function prepare(
   qualityHandler: (route: Route, url: URL) => Promise<void>,
   role: "QUALITY_MANAGER" | "AUDITOR" = "QUALITY_MANAGER",
 ): Promise<void> {
+  await mockQualityShell(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const token = futureToken();
   await page.addInitScript(({ storedToken, storedRole }) => {
-    localStorage.setItem("amo_portal_token", storedToken);
+    sessionStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
     localStorage.setItem("amo_color_scheme", "light");
-    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "quality-user-a",
       amo_id: "amo-a",
@@ -207,11 +209,58 @@ test("Inbox preserves notification receipt time without treating created_at as a
   });
 
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  const task = page.locator(".qms-register-task").first();
+  const task = page.locator(".qms-register-workspace .ag-center-cols-container .ag-row").first();
   await expect(task).toContainText("Quality notice received from the assurance source");
-  await expect(task.locator("small").last()).toContainText("Received");
+  await expect(task.locator('[col-id="received"]')).not.toHaveText("—");
   await expect(task).not.toContainText("No due date returned");
-  await expect(task.locator(".qms-register-task__marker")).toHaveClass(/is-neutral/);
+  await expect(task.locator('[col-id="due"]')).toHaveClass(/is-neutral/);
+});
+
+test("Personal to-dos save reminders, complete and reopen", async ({ page }) => {
+  await prepare(page, route => emptyRegister(route));
+  let tasks: Array<Record<string, unknown>> = [];
+  await page.route("**/tasks/my", route => json(route, tasks));
+  await page.route("**/tasks/personal{,/**}", async route => {
+    const values = route.request().postDataJSON() as Record<string, unknown>;
+    const task = { ...values, id: "personal-1", amo_id: "amo-a", owner_user_id: "quality-user-a", entity_type: "quality_personal", status: values.status || "OPEN", metadata_json: { reminder_at: values.reminder_at }, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    tasks = [task];
+    return json(route, task);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "New to-do", exact: true }).click();
+  await page.getByLabel("Task", { exact: true }).fill("Review new evidence");
+  await page.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");
+  await page.getByRole("button", { name: "Save task", exact: true }).click();
+  const personal = page.getByRole("region", { name: "Personal to-do list" });
+  await expect(personal.getByText("Review new evidence", { exact: true })).toBeVisible();
+  expect(tasks[0].metadata_json).toMatchObject({ reminder_at: new Date("2026-10-12T09:30").toISOString() });
+  await personal.getByRole("button", { name: "Complete", exact: true }).click();
+  await expect(personal.getByText("Review new evidence", { exact: true })).toHaveCount(0);
+  await personal.getByLabel("Show completed").check();
+  await personal.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expect(personal.getByRole("button", { name: "Complete", exact: true })).toBeVisible();
+  expect(tasks[0].status).toBe("OPEN");
+  for (const width of [800, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await personal.locator(".qms-workspace-grid").boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeLessThanOrEqual(width);
+  }
+});
+
+test("Calendar fits desktop, split screen and phone widths", async ({ page }) => {
+  await prepare(page, route => emptyRegister(route));
+  await page.goto("/maintenance/tenant-a/quality/calendar/month", { waitUntil: "domcontentloaded" });
+  const board = page.locator(".qms-calendar-board");
+  await expect(board).toBeVisible();
+  for (const width of [1440, 800, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => {
+      const box = await board.boundingBox();
+      return box ? box.x + box.width : Infinity;
+    }).toBeLessThanOrEqual(width);
+  }
+  await page.screenshot({ path: "../.test-artifacts/quality-calendar-mobile.png", fullPage: true });
 });
 
 test("People read access does not expose mutation controls to a Quality Auditor", async ({ page }) => {

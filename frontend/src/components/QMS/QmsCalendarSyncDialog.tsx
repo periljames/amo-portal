@@ -22,7 +22,7 @@ import {
   rotateCalendarSubscription,
 } from "../../services/rosteringControl";
 import { resolveRosterCalendarUrls } from "../../pages/rostering/rosterUi";
-import "../../styles/qms-calendar-sync.css";
+
 
 type Props = {
   open: boolean;
@@ -184,6 +184,7 @@ export default function QmsCalendarSyncDialog({ open, onClose }: Props) {
                 <li>Approved QMS audit schedules for each assigned auditor and internal auditee</li>
                 <li>Reschedules, suspensions and live audit dates using stable event identifiers</li>
                 <li>Published duty, training, maintenance and direct aircraft commitments</li>
+                <li>Personal to-dos with due dates, calendar reminders and completed-task cancellations</li>
               </ul>
               <small>External auditees without a portal account receive governed email notices; they do not receive a personal bearer feed.</small>
             </div>

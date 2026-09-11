@@ -280,43 +280,6 @@
 .qms-missions__portfolio > header { border-bottom: 1px solid var(--qms-border); }
 .qms-missions__portfolio > footer { color: var(--qms-muted); border-top: 1px solid var(--qms-border); font-size: 12px; }
 
-.qms-missions__row {
-  display: grid;
-  grid-template-columns: 170px minmax(280px, 1.6fr) 170px 110px 180px 28px;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 14px 18px;
-  color: var(--qms-text);
-  text-align: left;
-  background: var(--qms-surface);
-  border: 0;
-  border-bottom: 1px solid var(--qms-border);
-}
-
-button.qms-missions__row { cursor: pointer; }
-button.qms-missions__row:hover,
-button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qms-primary) 4%, var(--qms-surface)); }
-
-.qms-missions__row-head {
-  min-height: 38px;
-  padding-top: 9px;
-  padding-bottom: 9px;
-  color: var(--qms-muted);
-  background: var(--qms-surface-soft);
-  font-size: 11.5px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.qms-missions__row > span:not(.qms-missions__tone) { min-width: 0; }
-.qms-missions__row strong,
-.qms-missions__row small { display: block; }
-.qms-missions__row strong { overflow: hidden; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.qms-missions__row small { margin-top: 3px; overflow: hidden; color: var(--qms-muted); font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.qms-missions__row-ref strong { color: var(--qms-primary); }
-
 .qms-missions__tone,
 .qms-mission-detail__badges span {
   justify-self: start;
@@ -415,7 +378,6 @@ button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qm
   .qms-mission-detail__summary article:nth-child(2) { border-right: 0; }
   .qms-missions__metrics article:nth-child(-n+2),
   .qms-mission-detail__summary article:nth-child(-n+2) { border-bottom: 1px solid var(--qms-border); }
-  .qms-missions__row,
   .qms-mission-detail__gate-head,
   .qms-mission-detail__gate { min-width: 1060px; }
   .qms-missions__portfolio,
@@ -446,3 +408,6 @@ button.qms-missions__row:focus-visible { background: color-mix(in srgb, var(--qm
   .qms-mission-detail dt { border-bottom: 0; padding-bottom: 2px; }
   .qms-mission-detail dd { padding-top: 2px; }
 }
+
+.qms-missions__header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: start; }
+.qms-missions__header > div:last-child { justify-self: end; justify-content: flex-end; width: auto; }
