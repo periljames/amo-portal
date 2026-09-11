@@ -11,6 +11,7 @@ import { auditSessionPath, auditSessionStageFromPath } from "../../features/qms/
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../services/qmsAuditOccurrenceResolver";
 import { getAuditSession } from "../../services/qmsAuditSession";
 import PortalTextScaleManager from "./PortalTextScaleManager";
+import QualityCommandPalette from "./QualityCommandPalette";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import "../../styles/qms-text-scale-override.css";
@@ -172,6 +173,7 @@ const QualityEnhancementsHost: React.FC = () => {
 
   return <>
     <PortalTextScaleManager />
+    <QualityCommandPalette />
     <QualityContextTabs />
     <QualityDataFreshnessCoordinator />
     <QualityDialogFocusRestorer />
