@@ -14,7 +14,7 @@ vi.mock("../services/auth", async (original) => ({
   getContext: () => ({ amoCode: "tenant-a", amoSlug: "tenant-a", department: "production" }),
 }));
 vi.mock("../services/adminProfileMode", () => ({
-  readCachedAdminProfileState: (code: string) => ({ active: code === "tenant-a" && state.active }),
+  readCachedAdminProfileState: (code: string) => ({ eligible: code === "tenant-a" && state.active, active: code === "tenant-a" && state.active }),
 }));
 
 function user(overrides: Partial<PortalUser> = {}): PortalUser {
@@ -66,6 +66,8 @@ describe("tenant administrator and home routing", () => {
   it("never shares delegated elevation with a different user", () => {
     state.active = true;
     expect(isTenantAdmin(user({ id: "two" }))).toBe(false);
+    state.user = user({ amo_id: "id-b", amo_code: "AMO-B", amo_slug: "tenant-b" });
+    expect(isTenantAdmin(state.user)).toBe(false);
     expect(isTenantAdmin(user({ amo_id: null, is_amo_admin: true }))).toBe(false);
     expect(isTenantAdmin(user({ is_superuser: true, is_amo_admin: true }))).toBe(false);
   });
@@ -73,6 +75,7 @@ describe("tenant administrator and home routing", () => {
   it("rejects return URLs for another tenant or the platform and traversal aliases", () => {
     expect(userBelongsToTenant(state.user, "AMO-A")).toBe(true);
     expect(userBelongsToTenant(state.user, "tenant-b")).toBe(false);
+    expect(buildPortalNavigation({ amoCode: "tenant-b", user: state.user })).toEqual([]);
     for (const path of ["/maintenance/tenant-b/quality", "/platform/control", "/maintenance/tenant-a/%2e%2e/tenant-b/quality", "//example.test/"]) {
       expect(resolvePostLoginReturnTarget(path, false, state.user, "tenant-a")).toBeNull();
     }

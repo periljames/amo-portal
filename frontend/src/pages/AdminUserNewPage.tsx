@@ -530,7 +530,7 @@ const AdminUserNewPage: React.FC = () => {
               <button
                 type="button"
                 className="admin-link-btn"
-                onClick={() => navigate(`${backTarget}#departments-panel`)}
+                onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || ctx.amoSlug || ctx.amoCode || "UNKNOWN")}/admin/amo-assets?section=departments`)}
               >
                 Manage departments
               </button>
@@ -567,7 +567,7 @@ const AdminUserNewPage: React.FC = () => {
                   type="button"
                   size="sm"
                   variant="secondary"
-                  onClick={() => navigate(`${backTarget}#departments-panel`)}
+                  onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || ctx.amoSlug || ctx.amoCode || "UNKNOWN")}/admin/amo-assets?section=departments`)}
                 >
                   Create department
                 </Button>

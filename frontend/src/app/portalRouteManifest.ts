@@ -1,4 +1,4 @@
-import { isTenantAdmin } from "../utils/tenantAccess";
+import { isTenantAdmin, userBelongsToTenant } from "../utils/tenantAccess";
 import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
 import type { PortalUser } from "../services/auth";
 import {
@@ -9,7 +9,7 @@ import {
 } from "../utils/departmentAccess";
 import { canViewFeature, type ModuleFeature } from "../utils/roleAccess";
 import { qmsNavigationItems, type QmsModuleRoute } from "../pages/qms/routes/qmsRouteRegistry";
-import { hasQmsRolePermission, userHasTrainingRolePermission } from "./routeGuards";
+import { userHasQmsRolePermission, userHasTrainingRolePermission } from "./routeGuards";
 
 export type PortalNavIcon =
   | "home" | "work" | "calendar" | "planning" | "production"
@@ -156,7 +156,7 @@ function featureSections(
   });
 }
 
-function qualitySections(amoCode: string): PortalNavItem[] {
+function qualitySections(amoCode: string, user: PortalUser | null): PortalNavItem[] {
   const labels: Record<QmsModuleRoute["section"], string> = {
     command: "Command",
     assurance: "Assurance",
@@ -166,7 +166,7 @@ function qualitySections(amoCode: string): PortalNavItem[] {
   };
   const groups = new Map<QmsModuleRoute["section"], PortalNavItem[]>();
   for (const route of qmsNavigationItems(amoCode)) {
-    if (!hasQmsRolePermission(route.permission)) continue;
+    if (!userHasQmsRolePermission(user, route.permission)) continue;
     const children = groups.get(route.section) ?? [];
     children.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path });
     groups.set(route.section, children);
@@ -233,7 +233,7 @@ function departmentBranch(
   if (department === "planning") return featureBranch("department-planning", "Planning", "planning", "planning", PLANNING);
   if (department === "production") return featureBranch("department-production", "Production", "production", "production", PRODUCTION);
   if (department === "maintenance") return featureBranch("department-maintenance", "Maintenance", "maintenance", "maintenance", MAINTENANCE);
-  if (department === "quality") return { id: "department-quality", label: "Quality & Compliance", icon: "quality", path: `${base}/quality`, children: qualitySections(amoCode) };
+  if (department === "quality") return { id: "department-quality", label: "Quality & Compliance", icon: "quality", path: `${base}/quality`, children: qualitySections(amoCode, user) };
   if (department === "document-control") return { id: "department-document-control", label: "Document Control", icon: "documents", path: `${base}/document-control`, children: documentControlSections(`${base}/document-control`) };
   if (department === "reliability") return {
     id: "department-reliability",
@@ -319,7 +319,7 @@ function supportingBranches(amoCode: string, user: PortalUser | null, contextDep
   const result: PortalNavItem[] = [];
   const records = featureSections(`${base}/production/records`, RECORDS, user, contextDepartment);
   if (records.length) result.push({ id: "technical-records", label: "Technical Records", icon: "records", path: `${base}/production/records`, children: records });
-  const rostering = featureSections(`${base}/rostering`, ROSTERING, user, contextDepartment);
+  const rostering = featureSections(`${base}/rostering`, ROSTERING.filter((section) => section.id !== "rostering-personal"), user, contextDepartment);
   if (rostering.length) result.push({ id: "duty-rostering", label: "Duty Rostering", icon: "rostering", path: `${base}/rostering`, children: rostering });
   if (userHasTrainingRolePermission(user, "training.view", contextDepartment)) {
     result.push({
@@ -352,9 +352,12 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
     { id: "admin-organisation", label: "Organisation", items: [
       item("admin-overview", "Administration Overview", "overview", "settings"),
       item("admin-amos", "AMO Management", "amos", "home"),
-      item("admin-assets", "AMO Assets", "amo-assets", "documents"),
+      item("admin-assets", "AMO Assets & Setup", "amo-assets", "documents"),
     ] },
-    { id: "admin-access", label: "People & Access", items: [item("admin-users", "User Management", "users", "users")] },
+    { id: "admin-access", label: "People & Access", items: [
+      item("admin-users", "User Management", "users", "users"),
+      { id: "administrator-governance", label: "Administrator Governance", icon: "users", path: `${tenantBase(amoCode)}/access-governance` },
+    ] },
     { id: "admin-configuration", label: "Portal Configuration", items: [
       item("admin-settings", "Usage & Limits", "settings", "settings"),
       item("admin-email", "Email Server", "email-settings", "mail"),
@@ -369,7 +372,8 @@ function adminGroups(amoCode: string): PortalNavGroup[] {
 
 export function buildPortalNavigation(context: PortalNavigationContext): PortalNavGroup[] {
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
-  if (!user) return [];
+  if (!user || !user.amo_id || !user.is_active || user.is_superuser || user.role === "SUPERUSER") return [];
+  if ((user.amo_code || user.amo_slug) && !userBelongsToTenant(user, amoCode)) return [];
   const standingAdmin = isTenantAdmin(user);
   const administrationActive = adminModeActive || standingAdmin;
   const operationalUser = getOperationalAccessUser(user);
@@ -379,7 +383,7 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   const allowed = getAllowedDepartments(effectiveUser, assigned).filter(
     (department): department is Exclude<DepartmentId, "admin"> => department !== "admin",
   );
-  const scope: Array<Exclude<DepartmentId, "admin">> = allowed;
+  const scope: Array<Exclude<DepartmentId, "admin">> = [...allowed].sort((left, right) => Number(right === assigned) - Number(left === assigned));
   const base = tenantBase(amoCode);
   const moduleVisible = (module: string): boolean => (
     isTenantAdmin(effectiveUser) || effectiveUser?.module_access === undefined
@@ -393,7 +397,7 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
       { id: "home", label: "Home", icon: "home", path: getFirstAccessibleModuleRoute(amoCode, user, assigned), exact: true },
       ...(moduleVisible("training") ? [{ id: "my-training", label: "My Training", icon: "training" as const, path: `${base}/training` }] : []),
       ...(moduleVisible("rostering") ? [{ id: "my-roster", label: "My Roster", icon: "calendar" as const, path: `${base}/rostering/my-roster` }] : []),
-      ...(canGovernAdministratorAccess ? [{
+      ...(canGovernAdministratorAccess && !administrationActive ? [{
         id: "administrator-governance",
         label: "Administrator Governance",
         icon: "users" as const,
@@ -404,9 +408,10 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   const departments = scope
     .map((department) => departmentBranch(amoCode, department, effectiveUser, contextDepartment))
     .filter((navItem): navItem is PortalNavItem => Boolean(navItem));
-  departments.push(...supportingBranches(amoCode, effectiveUser, contextDepartment));
-  if (departments.length) groups.push({ id: "departments", label: administrationActive ? "Department Workspaces" : "Department", items: departments });
   if (administrationActive) groups.push(...adminGroups(amoCode));
+  if (departments.length) groups.push({ id: "departments", label: "Department Workspaces", items: departments });
+  const shared = supportingBranches(amoCode, effectiveUser, contextDepartment);
+  if (shared.length) groups.push({ id: "shared-workspaces", label: "Records & People", items: shared });
   return groups;
 }
 

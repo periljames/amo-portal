@@ -26,7 +26,7 @@ export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
   { id: "procurement", label: "Procurement & Supply Chain" },
   { id: "stores", label: "Stores & Inventory" },
   { id: "workshops", label: "Workshops" },
-  { id: "admin", label: "System Admin" },
+  { id: "admin", label: "AMO Administration" },
 ];
 
 export const DEPARTMENT_LABELS = DEPARTMENT_ITEMS.reduce(

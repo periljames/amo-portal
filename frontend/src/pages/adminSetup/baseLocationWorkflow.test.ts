@@ -13,7 +13,6 @@ const compatSource = readFileSync(new URL("./BaseStationEditorDialogCompat.tsx",
 const mapSource = readFileSync(new URL("./GoogleBaseLocationPicker.tsx", import.meta.url), "utf8");
 const navigatorSource = readFileSync(new URL("./AdminSetupWorkflowNavigator.tsx", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../AdminSetupCentreResendPage.tsx", import.meta.url), "utf8");
-const v2PageSource = readFileSync(new URL("../AdminSetupCentreV2Page.tsx", import.meta.url), "utf8");
 const foundationServiceSource = readFileSync(new URL("../../services/foundations.ts", import.meta.url), "utf8");
 const pageScopeSource = readFileSync(new URL("../../services/adminPageTenantScope.ts", import.meta.url), "utf8");
 const httpSource = readFileSync(new URL("../../services/crs.ts", import.meta.url), "utf8");
@@ -78,7 +77,7 @@ describe("base identity and location workflow", () => {
     expect(httpSource).toContain('path === "/accounts/admin/context"');
     expect(httpSource).toContain("beginAdminPageTenantScope(body)");
     expect(httpSource).toContain("completeAdminPageTenantScope(contextAttempt, result)");
-    for (const source of [pageSource, v2PageSource]) {
+    for (const source of [pageSource]) {
       expect(source).toContain("setAdminContext({");
       expect(source).toContain("active_amo_id: selected.id");
     }
@@ -149,23 +148,11 @@ describe("base identity and location workflow", () => {
     expect(routedEditor).not.toContain("const code = draft.code.trim()");
   });
 
-  it("keeps the base stage active until the loaded summary confirms all bases are located", () => {
-    expect(navigatorSource).toContain('"needs-location"');
-    expect(navigatorSource).toContain("summary.match");
-    expect(navigatorSource).toContain('params.set("section", "bases")');
-    expect(navigatorSource).toContain('params.set("section", "departments")');
-  });
-
-  it("keeps the navigation portal mounted while observing its host", () => {
-    expect(navigatorSource).toContain("setPortalTarget((current) => current === body ? current : body)");
-    expect(navigatorSource).not.toContain('body?.querySelector(".setup-resend__step-navigation") ? null : body');
-  });
-
-  it("moves each opened stage into view and provides skip and continue controls", () => {
-    expect(navigatorSource).toContain("scrollIntoView");
-    expect(navigatorSource).toContain("Skip for now");
-    expect(navigatorSource).toContain("Continue");
-    expect(navigatorSource).toContain("createPortal");
+  it("derives location readiness from loaded bases without overriding the selected stage", () => {
+    expect(pageSource).toContain("locatedBases.length === activeBases.length");
+    expect(pageSource).toContain("requestedStep || firstIncomplete");
+    expect(navigatorSource).not.toContain("MutationObserver");
+    expect(navigatorSource).not.toContain("querySelector");
   });
 
   it("supports Google place selection and an accessible draggable pin", () => {

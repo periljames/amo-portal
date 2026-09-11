@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from amodb.database import get_db
 
 from . import models, schemas, services
@@ -65,7 +66,7 @@ def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    is_quality_manager = current_user.role == account_models.AccountRole.QUALITY_MANAGER
+    is_quality_manager = is_tenant_admin(current_user) or current_user.role == account_models.AccountRole.QUALITY_MANAGER
     is_owner = task.owner_user_id == current_user.id
     is_supervisor = task.supervisor_user_id == current_user.id
 
@@ -97,7 +98,7 @@ def update_task(
         return task
 
     if payload.status is not None:
-        if is_owner and payload.status not in (models.TaskStatus.IN_PROGRESS, models.TaskStatus.DONE):
+        if is_owner and not (is_quality_manager or is_supervisor) and payload.status not in (models.TaskStatus.IN_PROGRESS, models.TaskStatus.DONE):
             raise HTTPException(status_code=403, detail="Owners may only mark tasks in progress or done")
         if not is_owner and not (is_quality_manager or is_supervisor):
             raise HTTPException(status_code=403, detail="Not authorized to update tasks")

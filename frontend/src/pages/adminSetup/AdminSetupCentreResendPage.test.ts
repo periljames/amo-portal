@@ -13,7 +13,7 @@ describe("AMO Setup Centre supplied workflow adoption", () => {
   it("routes the setup page to the dedicated Resend-derived structure", () => {
     expect(entry).toContain('import AdminSetupCentreResendPage from "./AdminSetupCentreResendPage"');
     expect(entry).toContain("<AdminSetupCentreResendPage />");
-    expect(entry).toContain("<AdminSetupWorkflowNavigator />");
+    expect(page).toContain("<AdminSetupWorkflowNavigator");
     expect(page).toContain('className="setup-resend__rail"');
     expect(page).toContain('className="setup-resend__marker"');
     expect(page).toContain('className="setup-resend__context"');
@@ -42,7 +42,7 @@ describe("AMO Setup Centre supplied workflow adoption", () => {
     expect(page).toContain("listSetupDepartments(true)");
     expect(page).toContain("getWorkforceHrDashboard(500)");
     expect(page).toContain("getPersonnelIdentityHealth()");
-    expect(page).toContain("Failed data sources are cleared");
+    expect(page).toContain("requestId !== requestRef.current");
   });
 
   it("uses dismissible accessible notifications and visibly muted examples", () => {

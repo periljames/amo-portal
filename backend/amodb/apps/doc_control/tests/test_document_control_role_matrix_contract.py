@@ -9,6 +9,8 @@ from amodb.apps.doc_control.workspace_capabilities import document_control_capab
 def _user(role: AccountRole, *, is_amo_admin: bool = False, is_superuser: bool = False):
     return SimpleNamespace(
         role=role,
+        amo_id="tenant-a",
+        is_active=True,
         is_amo_admin=is_amo_admin,
         is_superuser=is_superuser,
     )
@@ -51,12 +53,12 @@ def test_quality_manager_has_control_and_accountable_decision_capability() -> No
     assert manager["publish"] is True
 
 
-def test_tenant_admin_overlay_does_not_create_document_control_authority() -> None:
+def test_tenant_admin_overlay_includes_document_control_authority() -> None:
     admin = document_control_capabilities(_user(AccountRole.AMO_ADMIN, is_amo_admin=True))
     assert admin["control"] is True
-    assert admin["approve"] is False
+    assert admin["approve"] is True
     assert admin["register"] is True
-    assert admin["publish"] is False
+    assert admin["publish"] is True
 
 
 def test_superuser_remains_outside_tenant_document_decisions() -> None:

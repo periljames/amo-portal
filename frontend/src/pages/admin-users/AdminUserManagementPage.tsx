@@ -1,6 +1,7 @@
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -148,7 +149,7 @@ export default function AdminUserManagementPage() {
   const canAccessAdmin = Boolean(
     sessionActive && currentUser && (
       currentUser.is_superuser
-      || currentUser.is_amo_admin
+      || isTenantAdmin(currentUser)
       || readCachedAdminProfileState(amoCode ?? ctx.amoCode ?? "UNKNOWN")?.active
     ),
   );
@@ -421,6 +422,9 @@ export default function AdminUserManagementPage() {
             <p>Accounts, access profiles, approved positions, module boundaries, personal authorizations and employment lifecycle.</p>
           </div>
           <div className="aum2-header-actions">
+            <button type="button" className="aum2-compact-action" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || ctx.amoSlug || ctx.amoCode || "UNKNOWN")}/access-governance`)}>
+              <ShieldCheck size={16} /> Administrator governance
+            </button>
             <IconButton label="Refresh directory" onClick={() => void refreshDirectory()} disabled={directoryQuery.isFetching}>
               <RefreshCw size={17} className={directoryQuery.isFetching ? "is-spinning" : ""} />
             </IconButton>
@@ -440,7 +444,7 @@ export default function AdminUserManagementPage() {
         <nav className="aum2-tabs" aria-label="User management sections">
           {([
             ["directory", "Directory", UsersRound],
-            ["roles", "Access profiles", ShieldCheck],
+            ["roles", "Structure & access", ShieldCheck],
             ["groups", "Groups", UserRoundCog],
             ["permissions", "Certifying authorizations", KeyRound],
             ["lifecycle", "Lifecycle", UserCheck],
@@ -636,9 +640,12 @@ export default function AdminUserManagementPage() {
         ) : null}
 
         {tab === "roles" ? (
-          <React.Suspense fallback={<section className="aum2-panel">Loading roles and structure…</section>}>
+          <><section className="aum2-panel">
+            <div className="aum2-section-heading"><div><h2>Organisation appointments</h2><p>Maintain actual positions, reporting lines and effective-dated appointments in Workforce. The access profiles below define portal permissions.</p></div></div>
+            <Link className="aum2-primary-action" to={`/maintenance/${amoCode}/rostering/settings?section=workforce&workforce_view=governance`}>Open Workforce structure and appointments</Link>
+          </section><React.Suspense fallback={<section className="aum2-panel">Loading roles and structure…</section>}>
             <AccessRolesPanel amoId={effectiveAmoId} />
-          </React.Suspense>
+          </React.Suspense></>
         ) : null}
 
         {tab === "groups" ? (
@@ -653,12 +660,12 @@ export default function AdminUserManagementPage() {
               </div>
             </article>
             <article className="aum2-panel">
-              <div className="aum2-section-heading"><div><h2>Groups</h2><p>{groups.length} configured</p></div></div>
+              <div className="aum2-section-heading"><div><h2>Groups</h2><p>{groups.length} configured. Manage membership from each user’s profile.</p></div></div>
               <div className="aum2-compact-list">
                 {groups.map((group: AdminUserGroupRead) => (
                   <div key={group.id}><div><strong>{group.name}</strong><span>{group.member_count} members · {group.code}</span></div>{!group.is_system_managed ? <IconButton label={`Delete ${group.name}`} danger onClick={() => { if (window.confirm(`Delete ${group.name}?`)) deleteGroupMutation.mutate(group.id); }}><Trash2 size={15} /></IconButton> : null}</div>
                 ))}
-                {!groups.length ? <div className="aum2-empty">No groups configured.</div> : null}
+                {groupsQuery.isPending ? <div role="status" className="aum2-empty">Loading groups…</div> : groupsQuery.isError ? <div role="alert" className="aum2-empty">Unable to load groups. <button type="button" onClick={() => void groupsQuery.refetch()}>Retry groups</button></div> : !groups.length ? <div className="aum2-empty">No groups configured.</div> : null}
               </div>
             </article>
           </section>
@@ -676,7 +683,9 @@ export default function AdminUserManagementPage() {
 
         {tab === "lifecycle" ? (
           <section className="aum2-panel">
-            <div className="aum2-section-heading"><div><h2>Employment lifecycle</h2><p>Employment events update status, department and descriptive title. Governed position and access changes are made in Workforce and Roles &amp; structure.</p></div><UserRoundCog size={18} /></div>
+            <div className="aum2-section-heading"><div><h2>Employment lifecycle</h2><p>Employment events update status, department and descriptive title. Governed position changes are made in Workforce; portal permissions are configured in Structure &amp; access.</p></div><UserRoundCog size={18} /></div>
+            <Link className="aum2-primary-action" to={`/maintenance/${amoCode}/rostering/settings?section=workforce&workforce_view=governance`}>Open Workforce appointments</Link>
+            {lifecycleUsersQuery.isError ? <p role="alert">Unable to load personnel. <button type="button" onClick={() => void lifecycleUsersQuery.refetch()}>Retry personnel</button></p> : null}
             <div className="aum2-form-grid is-lifecycle">
               <label className="is-wide"><span>Find user</span><input value={lifecycleSearch} onChange={(event) => setLifecycleSearch(event.target.value)} placeholder="Search name, email or staff code" /></label>
               <label className="is-wide"><span>User</span><select value={lifecycleUserId} onChange={(event) => setLifecycleUserId(event.target.value)}><option value="">Choose user</option>{(lifecycleUsersQuery.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.full_name} · {user.staff_code}</option>)}</select></label>

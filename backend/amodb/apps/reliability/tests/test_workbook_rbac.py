@@ -12,19 +12,17 @@ from amodb.apps.reliability import workbook_rbac_hardening as rbac
 
 
 def user(role: AccountRole, *, superuser: bool = False):
-    return SimpleNamespace(role=role, is_superuser=superuser)
+    return SimpleNamespace(role=role, is_superuser=superuser, amo_id="amo-1", is_active=True)
 
 
-def test_controlled_approval_remains_with_quality_management():
+def test_controlled_approval_includes_quality_management_and_tenant_admin():
     quality = user(AccountRole.QUALITY_MANAGER)
     admin = user(AccountRole.AMO_ADMIN)
     planner = user(AccountRole.PLANNING_ENGINEER)
     viewer = user(AccountRole.VIEW_ONLY)
 
     assert rbac.APPROVAL_GUARD(quality) is quality
-    with pytest.raises(HTTPException) as admin_denied:
-        rbac.APPROVAL_GUARD(admin)
-    assert admin_denied.value.status_code == 403
+    assert rbac.APPROVAL_GUARD(admin) is admin
     assert rbac.CONFIGURATION_GUARD(admin) is admin
     with pytest.raises(HTTPException) as planner_denied:
         rbac.APPROVAL_GUARD(planner)

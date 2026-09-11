@@ -22,3 +22,5 @@ frontend/dist/
 # Python virtual environments
 .venv/
 venv/
+# Disposable local access-policy and browser verification output
+.test-artifacts/

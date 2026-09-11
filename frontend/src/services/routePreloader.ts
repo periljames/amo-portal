@@ -19,7 +19,7 @@ const COMMON_AFTER_LOGIN: PreloadJob[] = [
 const MODULE_PRELOADERS: Record<string, PreloadJob[]> = {
   admin: [
     { id: "admin-dashboard", load: () => import("../pages/AdminDashboardPage") },
-    { id: "admin-users", load: () => import("../pages/AdminAmoManagementPage") },
+    { id: "admin-organisation", load: () => import("../pages/AdminAmoManagementPage") },
   ],
   quality: [
     { id: "qms-canonical", load: () => import("../pages/qms/QmsCanonicalPage") },

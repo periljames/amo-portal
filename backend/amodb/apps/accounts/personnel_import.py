@@ -154,7 +154,9 @@ def import_personnel_rows(
     rows: list[dict[str, Any]],
     dry_run: bool,
     decisions: Optional[dict[int, str]] = None,
+    actor_user_id: Optional[str] = None,
 ) -> schemas.PersonnelImportSummary:
+    actor = db.get(models.User, actor_user_id) if actor_user_id else None
     issues: list[schemas.PersonnelImportRowIssue] = []
     conflicts: list[schemas.PersonnelImportConflict] = []
     created_personnel = 0
@@ -445,7 +447,7 @@ def import_personnel_rows(
                 existing_user.secondary_phone = parsed.secondary_phone
                 if parsed.status != STATUS_ACTIVE:
                     from .tenant_authority import assert_administrator_removal_allowed
-                    assert_administrator_removal_allowed(db, actor=None, user=existing_user)
+                    assert_administrator_removal_allowed(db, actor=actor, user=existing_user)
                 existing_user.is_active = parsed.status == STATUS_ACTIVE
                 existing_user.email = chosen_email
                 if existing_user.staff_code != parsed.person_id:

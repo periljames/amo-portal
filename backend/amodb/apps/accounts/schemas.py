@@ -42,6 +42,18 @@ class AMOCreate(AMOBase):
     pass
 
 
+class TenantAMOProfileUpdate(BaseModel):
+    """Tenant-editable organisation details; platform controls are excluded."""
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=255)
+    icao_code: Optional[str] = Field(default=None, max_length=8)
+    country: Optional[str] = Field(default=None, max_length=64)
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = Field(default=None, max_length=64)
+    time_zone: Optional[str] = Field(default=None, max_length=64)
+
+
 class AMOUpdate(BaseModel):
     name: Optional[str] = None
     icao_code: Optional[str] = None

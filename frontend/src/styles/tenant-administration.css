@@ -1,0 +1,7 @@
+.tenant-administration__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.tenant-administration__links { display: grid; gap: .65rem; }
+.tenant-administration__links a { display: grid; gap: .4rem; padding: 1rem; border: 1px solid var(--border-subtle, #dbe2e8); border-radius: .65rem; color: inherit; text-decoration: none; }
+.tenant-administration__links a:hover, .tenant-administration__links a:focus-visible { border-color: var(--primary-color, #176b70); background: var(--surface-soft, #f1f7f7); }
+.tenant-administration__links a > span { color: var(--text-secondary, #536170); font-size: .875rem; line-height: 1.5; }
+.tenant-administration__actions { display: flex; gap: .75rem; flex-wrap: wrap; grid-column: 1 / -1; }
+@media (max-width: 900px) { .tenant-administration__grid { grid-template-columns: minmax(0, 1fr); } }

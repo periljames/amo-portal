@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from fastapi import HTTPException
 
 from ..accounts import models as account_models
 from ..audit import services as audit_services
@@ -20,7 +21,10 @@ def tenant_today(db, *, amo_id: str):
 
 def schedule_offboarding(db, *, amo_id: str, user, payload, actor_user_id: str):
     from . import governance_mutations
+    from ..accounts.tenant_authority import assert_administrator_removal_allowed
 
+    if payload.get("revoke_access", True):
+        assert_administrator_removal_allowed(db, actor=db.get(account_models.User, actor_user_id), user=user)
     plan = db.query(governance_models.WorkforceOffboardingPlan).filter(
         governance_models.WorkforceOffboardingPlan.amo_id == amo_id,
         governance_models.WorkforceOffboardingPlan.user_id == user.id,
@@ -35,6 +39,7 @@ def schedule_offboarding(db, *, amo_id: str, user, payload, actor_user_id: str):
             requested_by_user_id=actor_user_id,
         )
         db.add(plan)
+    plan.requested_by_user_id = actor_user_id
     plan.reason = payload["offboarding_reason"].strip()
     plan.revoke_access = bool(payload.get("revoke_access", True))
     plan.end_contracts = bool(payload.get("end_contracts", True))
@@ -70,7 +75,20 @@ def apply_due_offboarding(db, *, limit: int = 100) -> int:
             break
         if plan.effective_on > tenant_today(db, amo_id=str(plan.amo_id)):
             continue
-        if governance_mutations._execute_offboarding(db, plan=plan):
+        try:
+            applied = governance_mutations._execute_offboarding(db, plan=plan)
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            plan.status = "FAILED"
+            audit_services.log_event(
+                db, amo_id=str(plan.amo_id), actor_user_id=plan.requested_by_user_id,
+                entity_type="WorkforceOffboardingPlan", entity_id=str(plan.id), action="denied",
+                after={"user_id": str(plan.user_id), "reason": str(exc.detail)},
+                metadata={"module": "workforce", "automated": True},
+            )
+            continue
+        if applied:
             completed += 1
             audit_services.log_event(
                 db,

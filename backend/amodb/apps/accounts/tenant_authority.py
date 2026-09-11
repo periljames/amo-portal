@@ -38,10 +38,10 @@ def can_revoke_administrator(user: object, amo_id: object) -> bool:
 
 def has_admin_appointment(db, user: object) -> bool:
     """Include future and active delegated appointments when protecting removals."""
-    if is_standing_admin(user):
-        return True
-    if not tenant_member(user):
+    if not getattr(user, "amo_id", None) or getattr(user, "is_superuser", False):
         return False
+    if getattr(user, "is_amo_admin", False) or canonical_role_key(getattr(user, "role", None)) == "AMO_ADMIN":
+        return True
     from datetime import datetime, timezone
     from sqlalchemy import inspect, text
     # Isolated SQLite tests may omit the optional governance schema.

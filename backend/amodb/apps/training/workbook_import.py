@@ -1218,6 +1218,9 @@ def _upsert_person(
             user.phone = payload.get("phone_number")
             user.secondary_phone = payload.get("secondary_phone")
             if str(payload.get("status") or "Active").lower() != "active":
+                from ..accounts.tenant_authority import assert_administrator_removal_allowed
+                actor = db.get(account_models.User, job.actor_user_id) if job.actor_user_id else None
+                assert_administrator_removal_allowed(db, actor=actor, user=user)
                 user.is_active = False
             if selected_email and decision != "KEEP_EXISTING_EMAIL":
                 user.email = selected_email

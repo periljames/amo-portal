@@ -21,8 +21,6 @@ bulk_service.submit_contract_batch = bulk_submission.submit_contract_batch
 from . import governance_directory, governance_mutations, offboarding_governance, supervisor_governance  # noqa: E402
 governance_directory.list_supervisors = supervisor_governance.list_supervisors
 governance_mutations._supervisor = supervisor_governance.require_supervisor
-governance_mutations._schedule_offboarding = offboarding_governance.schedule_offboarding
-governance_mutations.apply_due_offboarding = offboarding_governance.apply_due_offboarding
 
 __all__ = [
     "bulk_models",

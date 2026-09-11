@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -40,7 +37,7 @@ def require_active_admin_profile_or_roles(*allowed_roles: str) -> Callable[..., 
         current_user: models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db),
     ) -> models.User:
-        if _normalise_role(current_user) in canonical_allowed:
+        if tenant_member(current_user) and _normalise_role(current_user) in canonical_allowed:
             return current_user
         return require_active_admin_profile(request=request, current_user=current_user, db=db)
 

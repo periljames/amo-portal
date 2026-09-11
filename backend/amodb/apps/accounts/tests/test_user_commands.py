@@ -159,7 +159,7 @@ def test_admin_cannot_disable_current_signed_in_account(db_session):
     assert "current signed-in user" in str(caught.value.detail)
 
 
-def test_platform_superuser_cannot_remove_tenants_last_admin(db_session):
+def test_platform_superuser_can_deactivate_tenants_last_admin(db_session):
     root = _create_amo(db_session, code="ROOT")
     tenant = _create_amo(db_session, code="AMO5")
     platform_user = _create_user(
@@ -175,15 +175,11 @@ def test_platform_superuser_cannot_remove_tenants_last_admin(db_session):
         is_admin=True,
     )
 
-    with pytest.raises(HTTPException) as caught:
-        router_admin.command_disable_user(
-            tenant_admin.id,
-            db=db_session,
-            current_user=platform_user,
-        )
-
-    assert caught.value.status_code == 409
-    assert "last administrator" in str(caught.value.detail)
+    router_admin.command_disable_user(
+        tenant_admin.id, db=db_session, current_user=platform_user,
+    )
+    db_session.refresh(tenant_admin)
+    assert tenant_admin.is_active is False
 
 
 def test_additional_superuser_creation_is_root_scoped_and_sets_identity_flag(db_session):

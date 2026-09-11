@@ -171,7 +171,6 @@ const AdminUserDetailPage = lazyDefault(() => import("./pages/AdminUserDetailPag
 const AdminDashboardPage = lazyDefault(() => import("./pages/AdminDashboardPage"));
 const AdminOverviewPage = lazyDefault(() => import("./pages/AdminOverviewPage"));
 const AdminAmoManagementPage = lazyDefault(() => import("./pages/AdminAmoManagementPage"));
-const AdminAmoProfilePage = lazyDefault(() => import("./pages/AdminAmoProfilePage"));
 const AdminAmoAssetsPage = lazyDefault(() => import("./pages/AdminAmoAssetsPage"));
 const AdminUsageSettingsPage = lazyDefault(() => import("./pages/AdminUsageSettingsPage"));
 const AdminInvoicesPage = lazyDefault(() => import("./pages/AdminInvoicesPage"));
@@ -536,7 +535,7 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/admin/amo-profile"
         element={
           <RequireAuth>
-            <AdminAmoProfilePage />
+            <Navigate to="../amos" relative="path" replace />
           </RequireAuth>
         }
       />

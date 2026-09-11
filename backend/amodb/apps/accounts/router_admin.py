@@ -412,6 +412,7 @@ def _protect_tenant_admin_continuity(
         removes_access = _canonical_tenant_admin(user) and not (next_active and next_admin)
         if not removes_access:
             continue
+        assert_administrator_removal_allowed(db, actor=actor, user=user)
         if str(actor.id) == str(user.id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1469,6 +1470,49 @@ def create_amo(
     return amo
 
 
+@router.get("/organisation", response_model=schemas.AMORead)
+def get_tenant_organisation(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    from .tenant_authority import is_tenant_admin
+    if not is_tenant_admin(current_user):
+        raise HTTPException(status_code=403, detail="An active tenant administrator is required.")
+    return _get_tenant_or_404(db, amo_id=current_user.amo_id)
+
+
+@router.put("/organisation", response_model=schemas.AMORead)
+def update_tenant_organisation(
+    payload: schemas.TenantAMOProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    amo = get_tenant_organisation(db=db, current_user=current_user)
+    data = payload.model_dump()
+    data["name"] = data["name"].strip()
+    if not data["name"]:
+        raise HTTPException(status_code=422, detail="Organisation name is required.")
+    if data["time_zone"]:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(data["time_zone"])
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(status_code=422, detail="Enter a valid IANA time zone, such as Africa/Nairobi.")
+    before = {key: getattr(amo, key) for key in data}
+    for key, value in data.items():
+        setattr(amo, key, value)
+    audit_services.create_audit_event(
+        db, amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AMO", entity_id=str(amo.id), action="update",
+            actor_user_id=current_user.id, before_json=before, after_json=data,
+        ),
+    )
+    db.commit()
+    db.refresh(amo)
+    return amo
+
+
 @router.get(
     "/amos",
     response_model=List[schemas.AMORead],
@@ -2305,7 +2349,11 @@ async def import_personnel_admin(
             rows=rows,
             dry_run=dry_run,
             decisions=decisions,
+            actor_user_id=str(current_user.id),
         )
+    except HTTPException:
+        db.rollback()
+        raise
     except (ValueError, json.JSONDecodeError) as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -2383,13 +2431,17 @@ def undo_last_personnel_import(
     updated_profiles_before = undo_payload.get("updated_profiles_before") or []
     updated_users_before = undo_payload.get("updated_users_before") or []
 
+    created_users = db.query(models.User).filter(
+        models.User.amo_id == target_amo_id, models.User.id.in_(created_user_ids),
+    ).all() if created_user_ids else []
+    _protect_tenant_admin_continuity(db, actor=current_user, users=created_users, deleting=True)
     if created_profile_ids:
-        db.query(models.PersonnelProfile).filter(models.PersonnelProfile.id.in_(created_profile_ids)).delete(synchronize_session=False)
-    if created_user_ids:
-        db.query(models.User).filter(models.User.id.in_(created_user_ids)).delete(synchronize_session=False)
+        db.query(models.PersonnelProfile).filter(models.PersonnelProfile.amo_id == target_amo_id, models.PersonnelProfile.id.in_(created_profile_ids)).delete(synchronize_session=False)
+    for created_user in created_users:
+        db.delete(created_user)
 
     for state in updated_profiles_before:
-        profile = db.query(models.PersonnelProfile).filter(models.PersonnelProfile.id == state.get("id")).first()
+        profile = db.query(models.PersonnelProfile).filter(models.PersonnelProfile.amo_id == target_amo_id, models.PersonnelProfile.id == state.get("id")).first()
         if not profile:
             continue
         for key in [
@@ -2403,9 +2455,10 @@ def undo_last_personnel_import(
         profile.date_of_birth = _from_iso_date(state.get("date_of_birth"))
 
     for state in updated_users_before:
-        user = db.query(models.User).filter(models.User.id == state.get("id")).first()
+        user = db.query(models.User).filter(models.User.amo_id == target_amo_id, models.User.id == state.get("id")).first()
         if not user:
             continue
+        _protect_tenant_admin_continuity(db, actor=current_user, users=[user], resulting_active=state.get("is_active"))
         for key in [
             "staff_code", "email", "first_name", "last_name", "full_name", "position_title",
             "phone", "secondary_phone", "is_active", "must_change_password",

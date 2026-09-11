@@ -223,7 +223,7 @@ export default function AccessRolesPanel({ amoId }: { amoId?: string | null }) {
     </header>
 
     <div className="access-roles-panel__principles">
-      <div><ShieldCheck size={18} /><span><strong>Standing administrator</strong> is assigned or revoked by the platform superuser; delegated administration uses the governed session workflow.</span></div>
+      <div><ShieldCheck size={18} /><span><strong>Standing administrator</strong> is appointed permanently by the platform superuser. Only the superuser or this AMO’s Accountable Executive can revoke administrator access through Administrator governance.</span></div>
       <div><Network size={18} /><span><strong>Reporting line</strong> does not grant approval authority.</span></div>
       <div><SlidersHorizontal size={18} /><span><strong>Module access</strong> can narrow a role; workflow and personal authorization checks still apply.</span></div>
     </div>

@@ -154,6 +154,10 @@ function readStringArray(key: string): string[] {
 
 function labelForDepartment(value: string): string {
   const labels: Record<string, string> = {
+    "admin-amos": "AMO Management",
+    "admin-assets": "AMO Assets & Setup",
+    "admin-users": "User Management",
+    "admin-overview": "Administration Overview",
     planning: "Planning",
     production: "Production",
     maintenance: "Maintenance",

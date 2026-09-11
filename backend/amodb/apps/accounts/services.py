@@ -826,6 +826,10 @@ def update_user(
     governed_title = governed_workforce_title_for_user(db, user)
     workforce_governed = governed_title is not None
     definition = role_registry.role_definition(resolved_role)
+    if user.role == models.AccountRole.AMO_ADMIN and resolved_role != user.role:
+        from .tenant_authority import assert_administrator_removal_allowed
+        actor = db.get(models.User, actor_user_id) if actor_user_id else None
+        assert_administrator_removal_allowed(db, actor=actor, user=user)
     if explicit_role or resolved_role != user.role:
         user.role = resolved_role
     if workforce_governed:

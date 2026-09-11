@@ -54,7 +54,7 @@ function canonicalTenantSlug(): string | null {
 }
 
 function isPublicTenantRoute(parts: string[]): boolean {
-  return parts[2] === "login" || parts[2] === "onboarding";
+  return parts[2] === "login";
 }
 
 function routeDepartment(parts: string[]): DepartmentId | null {
@@ -135,7 +135,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const allowed = normalAllowed;
   const home = getFirstAccessibleModuleRoute(canonicalTenant, currentUser, assigned);
-  if (isAdminRoute && !standingAdmin && !adminStateResolved) {
+  if (!standingAdmin && !adminStateResolved) {
     return (
       <div className="page-loading" role="status" aria-live="polite">
         <div className="page-loading__card">Confirming Admin profile…</div>

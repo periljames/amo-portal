@@ -841,6 +841,18 @@ def revoke_admin_grant(
     if not is_requester_cancelling:
         _require_governance_approver(db, amo=amo, user=current_user)
 
+    appointer = db.get(models.User, grant["requested_by_user_id"])
+    target = db.query(models.User).filter(
+        models.User.id == grant["user_id"], models.User.amo_id == amo.id,
+    ).first()
+    if (grant["status"] == "ACTIVE" and appointer and appointer.is_superuser
+            and target and _is_implicit_admin(target)):
+        # Platform appointments have both a permanent grant and a standing flag.
+        # Revoking the register entry must remove both sources of authority.
+        remove_administrator(amo_code, str(target.id),
+                             AdminRemovalDecision(comment=payload.comment), current_user, db)
+        return {"id": grant_id, "status": "REVOKED"}
+
     now = _utcnow()
     db.execute(
         text("""

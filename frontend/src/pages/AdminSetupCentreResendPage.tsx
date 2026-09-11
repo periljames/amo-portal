@@ -30,6 +30,8 @@ import BaseStationEditorDialog, {
   type BaseEditorState,
 } from "./adminSetup/BaseStationEditorDialog";
 import DepartmentManager from "./adminSetup/DepartmentManager";
+import AdminSetupWorkflowNavigator from "./adminSetup/AdminSetupWorkflowNavigator";
+import { isTenantAdmin } from "../utils/tenantAccess";
 import { getCachedUser, getContext } from "../services/auth";
 import { hasActiveTenantAdminProfile } from "../services/adminProfileMode";
 import {
@@ -135,7 +137,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
   const isSuperuser = Boolean(currentUser?.is_superuser);
-  const isAmoAdmin = Boolean(currentUser?.is_amo_admin || currentUser?.role === "AMO_ADMIN");
+  const isAmoAdmin = isTenantAdmin(currentUser);
   const canAccessAdmin = isSuperuser || isAmoAdmin || hasActiveTenantAdminProfile(amoCode);
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {
@@ -342,7 +344,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
       summary: activeBases.length
         ? `${activeBases.length} active · ${locatedBases.length} located`
         : "Required before employment contracts",
-      complete: activeBases.length > 0,
+      complete: activeBases.length > 0 && locatedBases.length === activeBases.length,
       icon: MapPin,
     },
     {
@@ -832,8 +834,8 @@ const AdminSetupCentreResendPage: React.FC = () => {
         <header className="setup-resend__header">
           <div className="setup-resend__header-icon"><ShieldCheck size={25} /></div>
           <div>
-            <h1>AMO setup</h1>
-            <p>Configure the shared records every enabled portal module relies on.</p>
+            <h1>AMO Assets & Setup</h1>
+            <p>Manage operating bases, departments, personnel readiness and release assets.</p>
           </div>
           <div className="setup-resend__header-actions">
             {isSuperuser && amos.length ? (
@@ -897,6 +899,12 @@ const AdminSetupCentreResendPage: React.FC = () => {
                       <div className="setup-resend__step-body">
                         <p>{step.description}</p>
                         {renderActiveContent()}
+                        <AdminSetupWorkflowNavigator
+                          previous={steps[activeIndex - 1]?.title}
+                          next={steps[activeIndex + 1]?.title}
+                          onPrevious={() => selectStep(steps[activeIndex - 1].key)}
+                          onNext={() => selectStep(steps[activeIndex + 1].key)}
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -930,7 +938,7 @@ const AdminSetupCentreResendPage: React.FC = () => {
 
             <div className="setup-resend__context-note">
               <ShieldCheck size={16} />
-              <p>Changes apply only to the selected AMO. Failed data sources are cleared rather than replaced with another tenant's records.</p>
+              <p>These settings belong to your AMO. Use AMO Management for organisation details and User Management for appointments and access.</p>
             </div>
           </aside>
         </section>

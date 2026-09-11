@@ -39,7 +39,7 @@ export default function AdminAccessGovernancePage() {
   const context = getContext();
   const currentUser = useMemo(() => getCachedUser(), []);
   const amoCode = routeAmoCode || context.amoCode || context.amoSlug || "UNKNOWN";
-  const activeDepartment = getAssignedDepartment(currentUser, context.department) || "quality";
+  const activeDepartment = getAssignedDepartment(currentUser, context.department) || "admin";
   const canApprove = currentUser?.role === "ACCOUNTABLE_EXECUTIVE";
   const isStandingAdmin = Boolean(
     currentUser
@@ -68,13 +68,13 @@ export default function AdminAccessGovernancePage() {
   const canListGrants = canUseGovernance;
 
   const grantsQuery = useQuery({
-    queryKey: ["admin-access-grants", amoCode],
+    queryKey: ["admin-access-grants", amoCode, currentUser?.id],
     queryFn: () => listAdminAccessGrants(amoCode),
     enabled: canListGrants,
     staleTime: 5_000,
   });
   const candidatesQuery = useQuery({
-    queryKey: ["admin-grant-candidates", amoCode],
+    queryKey: ["admin-grant-candidates", amoCode, currentUser?.id],
     queryFn: () => listAdminGrantCandidates(amoCode),
     enabled: canRequest,
     staleTime: 10_000,
@@ -245,14 +245,17 @@ export default function AdminAccessGovernancePage() {
                         <div className="aag-grant-title"><h3>{subjectName(grant)}</h3><span className={`aag-status is-${grant.status.toLowerCase()}`}>{grant.status}</span></div>
                         <p>{grant.reason}</p>
                         <dl>
-                          <div><dt>Requested by</dt><dd>{grant.requested_by_name || grant.requested_by_user_id}</dd></div>
+                          <div><dt>Appointed / requested by</dt><dd>{grant.requested_by_name || grant.requested_by_user_id}</dd></div>
                           <div><dt>Type</dt><dd>{grant.grant_type === "TEMPORARY" ? `Temporary · ${displayDate(grant.valid_until)}` : "Permanent"}</dd></div>
                           <div><dt>Requested</dt><dd>{displayDate(grant.created_at)}</dd></div>
                         </dl>
                       </div>
                       <div className="aag-decision">
                         <div className="aag-approval-pair" aria-label="Request approval">
-                          <span className={grant.accountable_executive_approved ? "is-complete" : ""}>{grant.accountable_executive_approved ? <CheckCircle2 size={15} /> : <Clock3 size={15} />} Accountable Executive</span>
+                          <span className={grant.status === "ACTIVE" || grant.accountable_executive_approved ? "is-complete" : ""}>
+                            {grant.status === "ACTIVE" || grant.accountable_executive_approved ? <CheckCircle2 size={15} /> : <Clock3 size={15} />}
+                            {grant.accountable_executive_approved ? "Approved by Accountable Executive" : grant.status === "PENDING" ? "Awaiting Accountable Executive" : grant.status === "ACTIVE" ? "Direct appointment" : "Appointment ended"}
+                          </span>
                         </div>
                         {(canApprove || canCancelOwn) && ["PENDING", "ACTIVE"].includes(grant.status) ? <textarea value={decisionNotes[grant.id] || ""} onChange={(event) => setDecisionNotes((current) => ({ ...current, [grant.id]: event.target.value }))} placeholder="Decision note (optional)" maxLength={1000} /> : null}
                         <div className="aag-actions">

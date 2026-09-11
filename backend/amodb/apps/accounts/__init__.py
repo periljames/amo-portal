@@ -45,12 +45,8 @@ def _attach_router_dependency(router, dependency) -> None:
             _attach_route_dependency(route, dependency)
 
 
-# These endpoints resolve module-level helpers at request time. Keep the router
-# modules importable while replacing only the governed policy functions.
-
 # Preserve the original /accounts/admin router object and prefix. Register the
-# profile endpoints, serialize approval requests before their foreign-key insert,
-# then protect every existing and future tenant administration route.
+# profile endpoints, then protect every tenant administration route.
 _admin_routes = _router_admin.router
 _admin_routes.include_router(admin_profile_router.router)
 _admin_routes.include_router(access_router.admin_router)

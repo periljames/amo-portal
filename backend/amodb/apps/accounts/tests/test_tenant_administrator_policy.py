@@ -106,6 +106,8 @@ def test_direct_delegation_expires_and_never_becomes_a_standing_appointment(gove
     delegated = get_current_active_user(users["delegate"], db)
     assert is_tenant_admin(delegated) and not is_standing_admin(delegated)
     assert not delegated.is_amo_admin and delegated.role == models.AccountRole.USER
+    assert "qms.car.close" not in delegated.capability_codes
+    assert "maintenance" not in delegated.module_access
     delegated.auth_session_id = "other-browser"
     assert not active_admin_profile_session(db, delegated, tenant)
     delegated.auth_session_id = "session-delegate"
@@ -160,3 +162,132 @@ def test_platform_appointment_is_permanent_and_tenant_scoped(governed_tenant):
     assert state["active"] and state["grant_type"] == "PERMANENT" and state["expires_at"] is None
     governance.remove_administrator("tenant-a", "delegate", governance.AdminRemovalDecision(), users["superuser"], db)
     assert not active_admin_profile_session(db, users["delegate"], tenant)
+
+
+def test_revoking_platform_grant_removes_standing_authority(governed_tenant):
+    db, tenant, users = governed_tenant
+    result = grant(db, users["superuser"])
+    governance.revoke_admin_grant("tenant-a", result["id"], governance.AdminGrantDecision(), users["ae"], db)
+    db.refresh(users["delegate"])
+    assert not users["delegate"].is_amo_admin
+    assert not active_admin_profile_session(db, users["delegate"], tenant)
+
+
+def test_organisation_profile_is_own_tenant_only_and_excludes_platform_controls(governed_tenant):
+    from pydantic import ValidationError
+    from amodb.apps.accounts import schemas
+    db, tenant, users = governed_tenant
+    assert router_admin.get_tenant_organisation(db, users["admin"]).id == tenant.id
+    for key in ("quality", "delegate", "superuser"):
+        with pytest.raises(HTTPException) as error:
+            router_admin.get_tenant_organisation(db, users[key])
+        assert error.value.status_code == 403
+    for field in ("amo_id", "is_active", "is_demo", "login_slug"):
+        with pytest.raises(ValidationError):
+            schemas.TenantAMOProfileUpdate(name="Test AMO", **{field: "not-allowed"})
+    grant(db, users["admin"])
+    governance.activate_admin_profile("tenant-a", users["delegate"], db)
+    delegate = get_current_active_user(users["delegate"], db)
+    saved = router_admin.update_tenant_organisation(
+        schemas.TenantAMOProfileUpdate(name="Updated tenant", time_zone="Africa/Nairobi"), db, delegate,
+    )
+    assert saved.name == "Updated tenant" and saved.id == tenant.id
+    assert db.get(models.AMO, "tenant-b").name != "Updated tenant"
+    with pytest.raises(HTTPException) as error:
+        router_admin.update_tenant_organisation(
+            schemas.TenantAMOProfileUpdate(name="Test", time_zone="Mars/Olympus"), db, delegate,
+        )
+    assert error.value.status_code == 422
+
+
+def test_administrator_exposes_document_workflow_capabilities(governed_tenant):
+    from amodb.apps.accounts import access_control
+    db, _, users = governed_tenant
+    codes = access_control.capability_codes_for_user(db, user=users["admin"])
+    assert set(access_control.WORKFLOW_CAPABILITIES).issubset(codes)
+    assert access_control.user_has_capability(db, user=users["admin"], capability_code="doc_control.revision.publish")
+
+
+def test_admin_cannot_demote_another_legacy_admin(governed_tenant):
+    db, _, users = governed_tenant
+    users["delegate"].role = models.AccountRole.AMO_ADMIN
+    db.commit()
+    with pytest.raises(HTTPException) as error:
+        router_admin._protect_tenant_admin_continuity(
+            db, actor=users["admin"], users=[users["delegate"]], resulting_role=models.AccountRole.USER,
+        )
+    assert error.value.status_code == 403
+
+
+def test_personnel_import_cannot_disable_a_delegated_administrator(governed_tenant):
+    from amodb.apps.accounts.personnel_import import import_personnel_rows
+    db, tenant, users = governed_tenant
+    grant(db, users["admin"])
+    rows = [{"row_number": 2, "PersonID": "delegate", "FIRSTNAME": "Delegate", "LASTNAME": "User",
+             "Email": "delegate@example.test", "Status": "Inactive"}]
+    with pytest.raises(HTTPException) as error:
+        import_personnel_rows(db, amo_id=tenant.id, rows=rows, dry_run=False, actor_user_id="admin")
+    assert error.value.status_code == 403
+    db.rollback()
+    assert db.get(models.User, "delegate").is_active
+
+
+def test_import_undo_cannot_delete_a_subsequently_appointed_administrator(governed_tenant):
+    from amodb.apps.audit import services as audit_services
+    db, tenant, users = governed_tenant
+    grant(db, users["admin"])
+    audit_services.log_event(db, amo_id=tenant.id, actor_user_id="admin", entity_type="accounts.personnel_import",
+                            entity_id=tenant.id, action="IMPORT", critical=True,
+                            metadata={"undo_payload": {"created_user_ids": ["delegate"]}})
+    db.commit()
+    with pytest.raises(HTTPException) as error:
+        router_admin.undo_last_personnel_import(db=db, current_user=users["admin"])
+    assert error.value.status_code == 403
+    assert db.get(models.User, "delegate") is not None
+
+
+def test_admin_cannot_schedule_another_administrators_deactivation(governed_tenant):
+    from amodb.apps.workforce.governance_mutations import _schedule_offboarding
+    db, tenant, users = governed_tenant
+    grant(db, users["admin"])
+    with pytest.raises(HTTPException) as error:
+        _schedule_offboarding(db, amo_id=tenant.id, user=users["delegate"],
+                             payload={"revoke_access": True}, actor_user_id="admin")
+    assert error.value.status_code == 403
+
+
+def test_denied_offboarding_does_not_block_other_tenant_plans(monkeypatch):
+    from datetime import date
+    from amodb.apps.workforce import governance_mutations, offboarding_governance
+    plans = [SimpleNamespace(id=str(index), amo_id="tenant-a", user_id=str(index),
+                             requested_by_user_id="requester", effective_on=date.today(), status="SCHEDULED")
+             for index in (1, 2)]
+    db = MagicMock()
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.with_for_update.return_value.all.return_value = plans
+    monkeypatch.setattr(offboarding_governance, "tenant_today", lambda *args, **kwargs: date.today())
+    def execute(db, *, plan):
+        if plan.id == "1":
+            raise HTTPException(status_code=403, detail="Administrator removal denied")
+        plan.status = "COMPLETED"
+        return True
+    monkeypatch.setattr(governance_mutations, "_execute_offboarding", execute)
+    audit = MagicMock()
+    monkeypatch.setattr(offboarding_governance.audit_services, "log_event", audit)
+    assert offboarding_governance.apply_due_offboarding(db) == 1
+    assert [plan.status for plan in plans] == ["FAILED", "COMPLETED"]
+    assert audit.call_args_list[0].kwargs["action"] == "denied"
+
+
+def test_rescheduling_offboarding_records_the_authorized_decision_maker(monkeypatch):
+    from datetime import date
+    from amodb.apps.workforce import offboarding_governance
+    plan = SimpleNamespace(id="plan", effective_on=date.today() + timedelta(days=1), requested_by_user_id="old-requester")
+    db = MagicMock()
+    db.get.return_value = actor(id="ae", role=models.AccountRole.ACCOUNTABLE_EXECUTIVE, is_amo_admin=False)
+    db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = plan
+    monkeypatch.setattr(offboarding_governance, "tenant_today", lambda *args, **kwargs: date.today())
+    offboarding_governance.schedule_offboarding(
+        db, amo_id="tenant-a", user=actor(id="target"), actor_user_id="ae",
+        payload={"effective_on": plan.effective_on, "offboarding_reason": "Approved removal", "revoke_access": True},
+    )
+    assert plan.requested_by_user_id == "ae" and plan.status == "SCHEDULED"

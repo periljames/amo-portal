@@ -308,7 +308,7 @@ DEFAULT_ACCESS_PROFILE_TEMPLATES = (
     dict(code="HANGAR_SUPERVISOR", name="Hangar Supervisor", base="MAINTENANCE_SUPERVISOR", category="BASE_MAINTENANCE", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Supervises hangar personnel within assigned scope.", modules=_modules("maintenance", "production", "planning", "technical_records", "training", "documents", "rostering", "fleet", "stores", "quality", manage=("maintenance", "production", "rostering"))),
     dict(code="HANGAR_QUALITY_CONTROL_OFFICER", name="Hangar Quality Control Officer", base="QUALITY_INSPECTOR", category="BASE_MAINTENANCE", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Performs assigned hangar quality-control inspections; certification requires separate authorization.", modules=_modules("maintenance", "production", "quality", "training", "documents", "technical_records", "rostering", manage=("maintenance",))),
     dict(code="WORKSHOP_QUALITY_CONTROL_OFFICER", name="Workshop Quality Control Officer", base="QUALITY_INSPECTOR", category="WORKSHOP", reports="WORKSHOP_MANAGER", regulated=False, description="Performs assigned component-workshop inspections within separately authorized scope.", modules=_modules("maintenance", "production", "quality", "training", "documents", "technical_records", "rostering", manage=("maintenance",))),
-    dict(code="STORES_SUPERVISOR", name="Stores Supervisor", base="STORES_MANAGER", category="BASE_MAINTENANCE", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Supervises stores and procurement-clerk activity.", modules=_modules("stores", "procurement", "maintenance", "production", "training", "documents", "rostering", manage=("stores", "procurement", "rostering"))),
+    dict(code="STORES_SUPERVISOR", name="Procurement & Stores Supervisor", base="STORES_MANAGER", category="BASE_MAINTENANCE", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Supervises stores and procurement-clerk activity.", modules=_modules("stores", "procurement", "maintenance", "production", "training", "documents", "rostering", manage=("stores", "procurement", "rostering"))),
     dict(code="TECHNICAL_RECORDS_PLANNING_SUPERVISOR", name="Technical Records & Planning Supervisor", base="TECHNICAL_RECORDS_SUPERVISOR", category="BASE_MAINTENANCE", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Supervises technical-records custody and planning coordination.", modules=_modules("technical_records", "planning", "production", "maintenance", "training", "documents", "rostering", "fleet", manage=("technical_records", "planning", "rostering"))),
     dict(code="TECHNICAL_RECORDS_OFFICER", name="Technical Records Officer (TRO)", base="TECHNICAL_RECORDS_OFFICER", category="TECHNICAL_RECORDS", reports="TECHNICAL_RECORDS_PLANNING_SUPERVISOR", regulated=False, description="Maintains aircraft technical records, logbooks and controlled record packs.", modules=_modules("technical_records", "planning", "production", "maintenance", "training", "documents", "rostering", "fleet", manage=("technical_records",))),
     dict(code="CERTIFYING_ENGINEER", name="Line Certifying Engineer", base="CERTIFYING_ENGINEER", category="LINE_MAINTENANCE", reports="LINE_MAINTENANCE_SUPERVISOR", regulated=False, description="Line-maintenance execution persona; licence and company authorization determine certification scope.", modules=_modules("maintenance", "production", "technical_records", "training", "documents", "rostering", "fleet", "stores", "procurement", manage=("maintenance", "production", "technical_records", "fleet", "procurement"))),
@@ -322,6 +322,7 @@ DEFAULT_ACCESS_PROFILE_TEMPLATES = (
     dict(code="BATTERY_SHOP_SERVICE_SPECIALIST", name="Battery Shop Service Specialist", base="TECHNICIAN", category="WORKSHOP", reports="WORKSHOP_QUALITY_CONTROL_OFFICER", regulated=False, description="Performs battery-shop service within the approved workshop capability and personal competence.", modules=_modules("maintenance", "production", "training", "documents", "rostering", "stores", manage=("maintenance", "production"))),
     dict(code="GROUND_EQUIPMENT_TECHNICIAN", name="Ground Equipment Operator / Technician", base="TECHNICIAN", category="LINE_MAINTENANCE", reports="LINE_MAINTENANCE_SUPERVISOR", regulated=False, description="Ground-equipment operation and maintenance within assigned competence.", modules=_modules("maintenance", "production", "training", "documents", "rostering", "stores", manage=("maintenance",))),
     dict(code="AIRCRAFT_GROOMER", name="Aircraft Groomer", base="MAINTENANCE_SUPPORT", category="LINE_MAINTENANCE", reports="LINE_MAINTENANCE_SUPERVISOR", regulated=False, description="Limited maintenance-support and workforce self-service profile.", modules=_modules("maintenance", "training", "documents", "rostering")),
+    dict(code="TECHNICAL_STORES_PERSONNEL", name="Technical Stores Personnel", base="STOREKEEPER", category="SUPPLY_CHAIN", reports="STORES_SUPERVISOR", regulated=False, description="Technical stores custody, receiving and issuing within assigned authority.", modules=_modules("stores", "procurement", "maintenance", "training", "documents", "rostering", manage=("stores",))),
     dict(code="STORES_PROCUREMENT_CLERK", name="Stores & Procurement Clerk", base="STOREKEEPER", category="SUPPLY_CHAIN", reports="STORES_SUPERVISOR", regulated=False, description="Operational stores custody and procurement coordination.", modules=_modules("stores", "procurement", "maintenance", "production", "training", "documents", "rostering", manage=("stores", "procurement"))),
     dict(code="PLANNING_ENGINEER", name="Planning Engineer", base="PLANNING_ENGINEER", category="PLANNING", reports="TECHNICAL_RECORDS_PLANNING_SUPERVISOR", regulated=False, description="Maintenance forecasting and work-package planning.", modules=_modules("planning", "technical_records", "maintenance", "production", "training", "documents", "rostering", "fleet", "stores", "procurement", "reliability", manage=("planning", "technical_records", "procurement", "reliability", "rostering", "fleet"))),
     dict(code="PRODUCTION_ENGINEER", name="Production Engineer", base="PRODUCTION_ENGINEER", category="PRODUCTION", reports="BASE_MAINTENANCE_MANAGER", regulated=False, description="Production coordination and maintenance execution oversight.", modules=_modules("production", "maintenance", "planning", "technical_records", "training", "documents", "rostering", "fleet", "stores", "procurement", "reliability", manage=("production", "maintenance", "technical_records", "procurement", "reliability", "rostering", "fleet"))),
@@ -734,7 +735,7 @@ def assign_default_profile_for_role(
     )
 
 
-def capability_codes_for_user(db: Session, *, user: models.User) -> list[str]:
+def capability_codes_for_user(db: Session, *, user: models.User, include_admin_authority: bool = True) -> list[str]:
     if user.is_superuser:
         return sorted(
             _capability_code(module_code, "view")
@@ -772,12 +773,10 @@ def capability_codes_for_user(db: Session, *, user: models.User) -> list[str]:
             module_permissions=template["modules"],
         ))
     role_key = role_registry.canonical_role_key(user.role) or "USER"
-    if is_tenant_admin(user):
-        # A standing administrator is a platform-assigned tenant overlay. Keep
-        # the user's operational workflow capabilities intact, but expose all
-        # tenant module view/manage boundaries until that overlay is revoked.
-        # Commercial/module entitlements and in-module decision gates still
-        # apply independently.
+    if include_admin_authority and is_tenant_admin(user):
+        # Publish the same tenant workflow authority used by server-side guards.
+        # Personal certification and subscription entitlements remain separate.
+        codes.update(WORKFLOW_CAPABILITIES)
         for module_code in MODULE_CODES:
             codes.add(_capability_code(module_code, "view"))
             codes.add(_capability_code(module_code, "manage"))
@@ -797,13 +796,15 @@ def module_access_from_capabilities(capability_codes: Iterable[str]) -> dict[str
 
 
 def attach_user_access(db: Session, user: models.User) -> models.User:
+    # Cache the operational profile only. Temporary administrator authority is
+    # evaluated separately per authenticated session and must disappear at expiry.
     if user.is_superuser:
         profile = None
-        capabilities = capability_codes_for_user(db, user=user)
+        capabilities = capability_codes_for_user(db, user=user, include_admin_authority=False)
         display_name = "Platform superuser"
     else:
         profile = primary_access_profile(db, user=user)
-        capabilities = capability_codes_for_user(db, user=user)
+        capabilities = capability_codes_for_user(db, user=user, include_admin_authority=False)
         display_name = profile.display_name if profile else role_registry.role_definition(user.role).label
     department = getattr(user, "department", None)
     setattr(user, "department_code", department.code if department and str(department.amo_id) == str(user.amo_id) and department.is_active else None)

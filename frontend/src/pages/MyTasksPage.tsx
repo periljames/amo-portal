@@ -1,3 +1,4 @@
+import { isTenantAdmin } from "../utils/tenantAccess";
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -60,17 +61,17 @@ const MyTasksPage: React.FC = () => {
   const currentUser = getCachedUser();
 
   const canViewOthers = Boolean(
-    currentUser?.role === "QUALITY_MANAGER"
+    isTenantAdmin(currentUser) || currentUser?.role === "QUALITY_MANAGER"
   );
 
   const myTasksQuery = useQuery({
-    queryKey: ["my-tasks"],
+    queryKey: ["my-tasks", currentUser?.amo_id, currentUser?.id],
     queryFn: listMyTasks,
     staleTime: 30_000,
   });
 
   const allTasksQuery = useQuery({
-    queryKey: ["tasks"],
+    queryKey: ["tasks", currentUser?.amo_id],
     queryFn: () => listTasks(),
     staleTime: 30_000,
     retry: false,

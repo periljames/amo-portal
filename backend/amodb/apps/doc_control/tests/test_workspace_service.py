@@ -15,6 +15,7 @@ from amodb.apps.manuals import models as manual_models
 def _user(role: str, *, superuser: bool = False, amo_admin: bool = False):
     return SimpleNamespace(
         id="user-1",
+        amo_id="amo-1",
         role=role,
         is_superuser=superuser,
         is_amo_admin=amo_admin,
@@ -72,7 +73,7 @@ def test_document_approval_roles_are_narrower_than_general_control_roles() -> No
     assert service.is_approver(_user("ACCOUNTABLE_EXECUTIVE")) is True
     assert service.is_approver(_user("QUALITY_INSPECTOR")) is False
     assert service.is_approver(_user("AUDITOR")) is False
-    assert service.is_approver(_user("TECHNICIAN", amo_admin=True)) is False
+    assert service.is_approver(_user("TECHNICIAN", amo_admin=True)) is True
 
 
 def test_normal_user_can_use_library_and_reader_originated_change_request() -> None:
