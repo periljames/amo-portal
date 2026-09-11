@@ -8,10 +8,10 @@ import "./qms-command-palette.css";
 
 const QUICK_ACTIONS = [
   { id: "open-assurance", title: "Open Audit Assurance", subtitle: "Live assurance cockpit", path: "audits/dashboard" },
-  { id: "schedule-audit", title: "Schedule audit", subtitle: "Commit work in the Quality Planner", path: "calendar/week" },
+  { id: "schedule-audit", title: "Open Audit Planner", subtitle: "Commit programme work to an exact date and team", path: "audits/plan" },
   { id: "open-programme", title: "Open Audit Programme", subtitle: "Coverage, readiness and surveillance requirements", path: "audits/program" },
   { id: "open-findings", title: "Open Findings Register", subtitle: "Findings and corrective-action closeout", path: "audits/register?tab=findings" },
-  { id: "open-evidence", title: "Open Evidence Vault", subtitle: "Retained assurance evidence", path: "audits/evidence-vault" },
+  { id: "open-evidence", title: "Open Evidence Vault", subtitle: "Retained assurance evidence", path: "evidence-vault/search" },
 ] as const;
 
 function activeAmoCode(pathname: string): string | null {
