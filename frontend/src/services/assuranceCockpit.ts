@@ -63,6 +63,24 @@ export type AssuranceCommandResult = {
   path: string;
 };
 
+export type UnscheduledProgrammeRequirement = {
+  id: string;
+  programme_id: string;
+  programme_ref: string;
+  programme_title: string;
+  title: string;
+  audit_type: string;
+  mandatory_surveillance: boolean;
+  target_start: string | null;
+  target_end: string | null;
+  default_duration_days: number;
+  default_location: string | null;
+  lead_auditor_user_id: string | null;
+  observer_auditor_user_id: string | null;
+  auditee_user_id: string | null;
+  state: string;
+};
+
 export function getAssuranceCockpit(
   amoCode: string,
   options: { view: AssuranceViewContext; period: number },
@@ -74,6 +92,28 @@ export function getAssuranceCockpit(
   return apiRequest<AssuranceCockpitOverview>(
     `${qualityPath(amoCode, "/excellence/cockpit")}?${params.toString()}`,
     { cacheTtlMs: 15_000, timeoutMs: 25_000 },
+  );
+}
+
+export function getUnscheduledProgrammeRequirements(
+  amoCode: string,
+  options: { view: AssuranceViewContext; period: number; limit?: number },
+): Promise<{
+  items: UnscheduledProgrammeRequirement[];
+  total_returned: number;
+  view: AssuranceViewContext;
+  period: number;
+  planner_path: string;
+  programme_path: string;
+}> {
+  const params = new URLSearchParams({
+    view: options.view,
+    period: String(options.period),
+    limit: String(options.limit ?? 20),
+  });
+  return apiRequest(
+    `${qualityPath(amoCode, "/excellence/cockpit/unscheduled-requirements")}?${params.toString()}`,
+    { cacheTtlMs: 8_000, timeoutMs: 20_000 },
   );
 }
 
