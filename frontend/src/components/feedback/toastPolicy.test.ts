@@ -36,8 +36,8 @@ const notificationPreferences = readFileSync(
 );
 
 describe("portal notification policy", () => {
-  it("uses one 30-second audible default across feature notifications", () => {
-    expect(policy).toContain("TOAST_AUTO_CLOSE_MS = 30_000");
+  it("uses one 7-second audible default across feature notifications", () => {
+    expect(policy).toContain("TOAST_AUTO_CLOSE_MS = 7_000");
     expect(provider).toContain("duration: TOAST_AUTO_CLOSE_MS");
     expect(provider).toContain("sound: toast.sound ?? true");
     expect(provider).toContain("prepareAudio?.()");

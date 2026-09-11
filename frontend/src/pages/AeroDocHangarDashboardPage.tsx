@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { fetchEntitlements } from "../services/billing";
 import { apiGet } from "../services/crs";
 import { authHeaders } from "../services/auth";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
 
 type VerifyResponse = { serial: string; status: string; current: boolean; approved_version?: string | null };
 
 const MODULE_KEY = "aerodoc_hybrid_dms";
 
 export default function AeroDocHangarDashboardPage() {
+  const { amoCode = "" } = useParams<{ amoCode: string }>();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [serial, setSerial] = useState("");
   const [result, setResult] = useState<VerifyResponse | null>(null);
@@ -35,17 +38,15 @@ export default function AeroDocHangarDashboardPage() {
       if (data.status === "RED" && typeof navigator !== "undefined" && "vibrate" in navigator) {
         navigator.vibrate?.([120, 80, 120]);
       }
-    } catch (err: any) {
-      setError(err?.message || "Verification failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed");
     }
   };
 
-  if (enabled === false) {
-    return <section className="panel"><h2>Module not enabled</h2><p>AeroDoc Hybrid-DMS is not enabled for this tenant.</p></section>;
-  }
-
-  return (
-    <section className="panel">
+  const content = enabled === false ? (
+    <section className="panel qms-surface-root"><h2>Module not enabled</h2><p>AeroDoc Hybrid-DMS is not enabled for this tenant.</p></section>
+  ) : (
+    <section className="panel qms-surface-root">
       <h2>Hangar Dashboard</h2>
       <p>Offline-ready verification of controlled copy QR serials.</p>
       <div style={{ display: "flex", gap: 8 }}>
@@ -61,5 +62,11 @@ export default function AeroDocHangarDashboardPage() {
         </div>
       ) : null}
     </section>
+  );
+
+  return (
+    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      {content}
+    </DepartmentLayout>
   );
 }

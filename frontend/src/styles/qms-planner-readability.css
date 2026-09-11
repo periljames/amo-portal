@@ -67,24 +67,9 @@
 .qms-modern-planner-v2 .qms-planner-month__day { padding: .46rem; }
 .qms-modern-planner-v2 .qms-planner-month__day > header { min-height: 1.7rem; margin-bottom: .3rem; }
 .qms-modern-planner-v2 .qms-planner-month__day > header strong { width: 1.7rem; height: 1.7rem; font-size: .8rem; }
-.qms-modern-planner-v2 .qms-planner-month__day:not(.is-muted) {
-  background: #252830 !important;
-}
-.qms-modern-planner-v2 .qms-planner-month__day.is-muted {
-  background: #12151a !important;
-}
-.qms-modern-planner-v2 .qms-planner-month__day.is-muted > header strong {
-  color: #6b7280 !important;
-  -webkit-text-fill-color: #6b7280 !important;
-  opacity: 1 !important;
-  font-weight: 560 !important;
-}
-.qms-modern-planner-v2 .qms-planner-month__day:not(.is-muted) > header strong {
-  color: #f8fafc !important;
-  -webkit-text-fill-color: #f8fafc !important;
-  opacity: 1 !important;
-  font-weight: 720 !important;
-}
+/* Month-cell surfaces/day-number colors are owned by the theme-aware token rules in
+   qms-modern-planner-v2.css (base = light via --planner-panel, dark via guarded overrides).
+   Do not hardcode dark backgrounds here — that forced the grid dark in light mode. */
 .qms-modern-planner-v2 .qms-planner-month__day > header span { min-width: 1.35rem; height: 1.3rem; font-size: .69rem; }
 .qms-modern-planner-v2 .qms-planner-month__events { gap: .25rem; }
 .qms-modern-planner-v2 .qms-planner-month__more { min-height: 1.6rem; font-size: .72rem; }
