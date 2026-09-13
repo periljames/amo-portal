@@ -43,6 +43,14 @@ describe("QMS audit assignment action gates", () => {
     expect(canExecuteAssignedAudit(audit)).toBe(false);
   });
 
+  it("does not convert a legacy duplicated observer into a supporting auditor", () => {
+    currentUser = { id: "observer-1" };
+    expect(canExecuteAssignedAudit({
+      ...audit,
+      supporting_auditor_user_ids: ["support-1", "observer-1"],
+    })).toBe(false);
+  });
+
   it("reserves fieldwork completion to the assigned lead", () => {
     currentUser = { id: "lead-1" };
     expect(canCompleteAuditFieldwork(audit)).toBe(true);
