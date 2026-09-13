@@ -34,6 +34,7 @@ import { heartbeatAuditPresence, listAuditPresence } from "../../../services/qms
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { completeAuditFieldwork, getAuditSession } from "../../../services/qmsAuditSession";
 import { listExternalFindingDraftsForQuality } from "../../../services/qmsExternalFindingDraftReview";
+import FieldworkLockedPreview from "./FieldworkLockedPreview";
 import LiveAuditEvidenceStrip from "./LiveAuditEvidenceStrip";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
@@ -152,7 +153,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const bindingsQuery = useQuery({
     queryKey: ["qms", "live-audit-bindings", amoCode, auditId],
     queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal),
-    enabled: fieldworkEnabled,
+    enabled: Boolean(auditId),
     staleTime: 30_000,
   });
   const findingsQuery = useQuery({
@@ -406,14 +407,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }
   if (!isLiveStage) {
     return (
-      <AuditStageLoadError
-        className="qms-live-audit-focus qms-live-audit-focus--error"
-        title="Prepare the audit before fieldwork"
+      <FieldworkLockedPreview
+        amoCode={amoCode}
+        auditKey={auditKey}
+        stageLabel={sessionQuery.data.current_stage_label}
         detail={`Fieldwork requires the authoritative Fieldwork stage (or later). Current stage: ${sessionQuery.data.current_stage_label}. Complete preparation and advance the lifecycle before checklist execution, presence, or findings load.`}
-        exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
-        exitLabel="Back to Prepare"
-        secondaryHref={auditSessionPath(amoCode, auditKey, "setup")}
-        secondaryLabel="Open Setup"
+        bindings={bindingsQuery.data?.items ?? []}
       />
     );
   }
@@ -423,21 +422,15 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const prerequisiteError = checklistQuery.error || bindingsQuery.error;
   if (prerequisiteError) {
     return (
-      <AuditStageLoadError
-        className="qms-live-audit-focus qms-live-audit-focus--error"
-        title="Prepare the audit before fieldwork"
+      <FieldworkLockedPreview
+        amoCode={amoCode}
+        auditKey={auditKey}
+        stageLabel={sessionQuery.data.current_stage_label}
         detail={auditPrerequisiteLoadDetail(
           prerequisiteError,
           "Fieldwork is not initialized yet. Complete preparation and apply the governed checklist before opening Fieldwork.",
         )}
-        onRetry={() => {
-          void checklistQuery.refetch();
-          void bindingsQuery.refetch();
-        }}
-        exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
-        exitLabel="Back to Prepare"
-        secondaryHref={auditSessionPath(amoCode, auditKey, "setup")}
-        secondaryLabel="Open Setup"
+        bindings={bindingsQuery.data?.items ?? []}
       />
     );
   }
