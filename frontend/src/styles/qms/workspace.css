@@ -1,4 +1,5 @@
 .qms-workspace-grid { width: 100%; min-width: 0; height: clamp(20rem, 48dvh, 38rem); --ag-font-family: inherit; --ag-font-size: 13px; --ag-background-color: var(--qms-panel, var(--surface-elevated, #fff)); --ag-foreground-color: var(--qms-text, var(--text-primary, #172033)); --ag-border-color: var(--qms-line, var(--surface-border, #dbe3ef)); }
+.qms-people__register .qms-workspace-grid { --ag-font-size: 13.5px; }
 .qms-workspace-heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 1rem; }
 .qms-workspace-heading h2 { margin: 0; font-size: 1.1rem; }
 .qms-workspace-heading p { margin: .4rem 0; color: var(--text-secondary); }
