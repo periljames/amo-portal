@@ -2,6 +2,7 @@ import React from "react";
 
 import AccessElevationLauncher from "../access/AccessElevationLauncher";
 import AccessRealtimeBridge from "../access/AccessRealtimeBridge";
+import AdminAccessRequestDock from "../access/AdminAccessRequestDock";
 import DepartmentLayoutImpl from "./DepartmentLayoutImpl";
 
 type Props = {
@@ -16,6 +17,7 @@ const DepartmentLayout: React.FC<Props> = (props) => (
     <AccessRealtimeBridge />
     <DepartmentLayoutImpl {...props} />
     <AccessElevationLauncher />
+    <AdminAccessRequestDock />
   </>
 );
 
