@@ -73,7 +73,7 @@ export type QmsRiskPlanningContext = {
     method: string;
   }>;
   global_factors: QmsRiskPlanningFactor[];
-  authoritative_metrics: Record<string, number>;
+  authoritative_metrics: Record<string, number | null>;
   reliability: Record<string, number>;
   source_warnings: Array<{ source: string; message: string; type: string }>;
   method: { type: string; statement: string };

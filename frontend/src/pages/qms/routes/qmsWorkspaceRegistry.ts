@@ -1,3 +1,5 @@
+import { qmsBasePath, qmsModulePath, qmsRouteWorkspace, QMS_ROUTE_REGISTRY } from "./qmsRouteRegistry";
+
 export type QmsWorkspaceId =
   | "control-room"
   | "planner"
@@ -24,7 +26,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "Control Room",
     permission: "qms.dashboard.view",
     description: "Live assurance signals, decisions, exposure and changes requiring Quality attention.",
-    activePrefixes: ["", "control-room"],
+    activePrefixes: [],
   },
   {
     id: "planner",
@@ -33,7 +35,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "Planner",
     permission: "qms.calendar.view",
     description: "The temporal view of audits, surveillance, decisions, missions and assurance obligations.",
-    activePrefixes: ["planner", "calendar"],
+    activePrefixes: [],
   },
   {
     id: "missions",
@@ -42,7 +44,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "Missions",
     permission: "qms.change.view",
     description: "Controlled cross-department projects such as capability additions, renewals and major changes.",
-    activePrefixes: ["missions", "change-control"],
+    activePrefixes: [],
   },
   {
     id: "people",
@@ -51,7 +53,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "People",
     permission: "qms.training.view",
     description: "Competence, internal privileges, authorization evidence and future qualified-coverage exposure.",
-    activePrefixes: ["people"],
+    activePrefixes: [],
   },
   {
     id: "assurance",
@@ -60,16 +62,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "Assurance",
     permission: "qms.audit.view",
     description: "Audits, findings, corrective action, evidence, and effectiveness review for the Quality programme.",
-    activePrefixes: [
-      "assurance",
-      "audits",
-      "findings",
-      "cars",
-      "suppliers",
-      "equipment-calibration",
-      "external-interface",
-      "evidence-vault",
-    ],
+    activePrefixes: [],
   },
   {
     id: "intelligence",
@@ -78,24 +71,27 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
     shortLabel: "Intelligence",
     permission: "qms.reports.view",
     description: "Performance, risk, trends, regulatory impact, approval readiness and management-review intelligence.",
-    activePrefixes: ["intelligence", "risk", "management-review", "reports", "system"],
+    activePrefixes: [],
   },
-] as const;
+].map((workspace) => ({
+  ...workspace,
+  activePrefixes: [workspace.segment, ...QMS_ROUTE_REGISTRY.filter((module) => qmsRouteWorkspace(module.segment) === workspace.id).map((module) => module.segment)],
+})) as readonly QmsWorkspaceDefinition[];
 
 function encodeSegment(value: string): string {
   return encodeURIComponent(value);
 }
 
 export function qmsWorkspacePath(amoCode: string, workspace: QmsWorkspaceId): string {
-  return `/maintenance/${encodeSegment(amoCode)}/quality/${workspace}`;
+  return `${qmsBasePath(amoCode)}/${workspace}`;
 }
 
 export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId): string {
-  const base = `/maintenance/${encodeSegment(amoCode)}/quality`;
+  const base = qmsBasePath(amoCode);
   if (workspace === "control-room") return base;
-  if (workspace === "planner") return `${base}/calendar/week`;
+  if (workspace === "planner") return qmsModulePath(amoCode, "calendar", "week");
   // Assurance work starts from the consolidated audits hub.
-  if (workspace === "assurance") return `${base}/audits/dashboard`;
+  if (workspace === "assurance") return qmsModulePath(amoCode, "audits", "dashboard");
   return `${base}?workspace=${encodeSegment(workspace)}`;
 }
 
@@ -109,7 +105,7 @@ export function qmsPeopleWorkspacePath(
   if (options.action) params.set("action", options.action);
   if (options.ruleType) params.set("ruleType", options.ruleType);
   if (options.ruleId) params.set("ruleId", options.ruleId);
-  return `/maintenance/${encodeSegment(amoCode)}/quality?${params.toString()}`;
+  return `${qmsBasePath(amoCode)}?${params.toString()}`;
 }
 
 export function qmsWorkspaceNavigationItems(amoCode: string): Array<QmsWorkspaceDefinition & { path: string; canonicalPath: string }> {
@@ -120,15 +116,8 @@ export function qmsWorkspaceNavigationItems(amoCode: string): Array<QmsWorkspace
   }));
 }
 
-export function qmsWorkspaceFromRelativePath(relativePath: string): QmsWorkspaceId | null {
-  const first = relativePath.split("/").filter(Boolean)[0] || "";
-  if (!first) return "control-room";
-
-  const direct = QMS_WORKSPACES.find((workspace) => workspace.segment === first);
-  if (direct) return direct.id;
-
-  const owner = QMS_WORKSPACES.find((workspace) => workspace.activePrefixes.includes(first));
-  return owner?.id || null;
+export function qmsWorkspaceFromRelativePath(relativePath: string): QmsWorkspaceId {
+  return qmsRouteWorkspace(relativePath);
 }
 
 export function isQmsWorkspaceSegment(value: string): value is QmsWorkspaceId {

@@ -56,6 +56,9 @@ const Drawer: React.FC<DrawerProps> = ({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // A native modal above this drawer owns focus and Escape until it closes.
+      const modal = document.querySelector("dialog:modal");
+      if (modal && !panelRef.current?.contains(modal)) return;
       if (event.key === "Escape" && !closeDisabled) {
         event.preventDefault();
         onClose();

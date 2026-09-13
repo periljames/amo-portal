@@ -24,15 +24,15 @@ export type AssuranceCockpitOverview = {
   period: number;
   as_of: string;
   readiness: {
-    score: number;
-    band: "STRONG" | "WATCH" | "AT_RISK" | "CRITICAL";
-    dimensions: Array<{ id: string; label: string; score: number; weight: number }>;
+    score: number | null;
+    band: "STRONG" | "WATCH" | "AT_RISK" | "CRITICAL" | "UNAVAILABLE";
+    dimensions: Array<{ id: string; label: string; score: number | null; weight: number }>;
     method: string;
     disclaimer: string;
   };
-  metrics: Record<string, number>;
+  metrics: Record<string, number | null>;
   priority_queue: AssuranceCockpitPriority[];
-  audit_pipeline: Array<{ status: string; count: number }>;
+  audit_pipeline: Array<{ status: string; count: number }> | null;
   finding_trend: Array<{
     month: string;
     level_1: number;
@@ -40,9 +40,9 @@ export type AssuranceCockpitOverview = {
     level_3: number;
     observations: number;
     other: number;
-  }>;
-  closure_ageing: Array<{ bucket: string; count: number }>;
-  control_exposure: Array<{ category: string; count: number }>;
+  }> | null;
+  closure_ageing: Array<{ bucket: string; count: number }> | null;
+  control_exposure: Array<{ category: string; count: number }> | null;
   drilldowns: Record<string, AssuranceCockpitDrilldown>;
   scope: {
     mode: AssuranceViewContext;
@@ -50,6 +50,9 @@ export type AssuranceCockpitOverview = {
     server_resolved_user: string | null;
     note: string;
   };
+  source_health: "SUCCESS" | "PARTIAL";
+  metric_basis: Record<string, "PERIOD_EVENT" | "PERIOD_DUE" | "AS_OF_CURRENT">;
+  period_note: string;
   warnings: Array<{ source: string; message: string; type: string }>;
 };
 
@@ -95,34 +98,32 @@ export function getAssuranceCockpit(
   );
 }
 
-export function getUnscheduledProgrammeRequirements(
+export async function getUnscheduledProgrammeRequirements(
   amoCode: string,
   options: { view: AssuranceViewContext; period: number; limit?: number },
-): Promise<{
-  items: UnscheduledProgrammeRequirement[];
-  total_returned: number;
-  view: AssuranceViewContext;
-  period: number;
-  planner_path: string;
-  programme_path: string;
-}> {
-  const params = new URLSearchParams({
-    view: options.view,
-    period: String(options.period),
-    limit: String(options.limit ?? 20),
-  });
-  return apiRequest(
-    `${qualityPath(amoCode, "/excellence/cockpit/unscheduled-requirements")}?${params.toString()}`,
-    { cacheTtlMs: 8_000, timeoutMs: 20_000 },
-  );
+): Promise<{ items: UnscheduledProgrammeRequirement[]; total_returned: number; total: number;
+  view: AssuranceViewContext; period: number; planner_path: string; programme_path: string }> {
+  const items: UnscheduledProgrammeRequirement[] = [];
+  let offset = 0;
+  while (true) {
+    const params = new URLSearchParams({ view: options.view, period: String(options.period), limit: String(options.limit ?? 100), offset: String(offset) });
+    const page = await apiRequest<{ items: UnscheduledProgrammeRequirement[]; total: number;
+      view: AssuranceViewContext; period: number; planner_path: string; programme_path: string }>(
+      `${qualityPath(amoCode, "/excellence/cockpit/unscheduled-requirements")}?${params}`, { cacheTtlMs: 0, timeoutMs: 20_000 });
+    items.push(...page.items);
+    offset += page.items.length;
+    if (offset >= page.total) return { ...page, items, total_returned: items.length };
+    if (!page.items.length) throw new Error("Programme changed during pagination; refresh and retry.");
+  }
 }
 
 export function searchAssuranceCommands(
   amoCode: string,
   query: string,
   limit = 20,
-): Promise<{ items: AssuranceCommandResult[]; query: string; as_of: string; ranking?: string }> {
-  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  view: AssuranceViewContext = "global",
+): Promise<{ items: AssuranceCommandResult[]; query: string; as_of: string; ranking?: string; warnings?: Array<{ source: string; message: string; type: string }> }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit), view });
   return apiRequest(
     `${qualityPath(amoCode, "/excellence/command-search")}?${params.toString()}`,
     { cacheTtlMs: 5_000, timeoutMs: 15_000 },

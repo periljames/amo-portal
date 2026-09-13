@@ -1,0 +1,36 @@
+name: QMS Source Snapshot
+
+on:
+  push:
+    branches:
+      - feat/qms-foundation-hardening
+    paths:
+      - ".github/workflows/qms-source-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - name: Archive repository source
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=.venv \
+            --exclude=dist \
+            --exclude=test-results \
+            -czf /tmp/amo-portal-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qms-source-${{ github.sha }}
+          path: /tmp/amo-portal-source.tgz
+          retention-days: 1
+          if-no-files-found: error

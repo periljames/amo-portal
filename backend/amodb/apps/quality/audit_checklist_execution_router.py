@@ -343,11 +343,15 @@ def _existing_receipt_or_none(
         QualityAuditFieldworkMutationReceipt.client_mutation_id == client_mutation_id,
     ).first()
     if existing is not None and existing.payload_hash != payload_hash:
+        message = "This client mutation id was already used with different fieldwork content."
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "FIELDWORK_IDEMPOTENCY_CONFLICT",
-                "message": "This client mutation id was already used with different fieldwork content.",
+                "error_code": "FIELDWORK_IDEMPOTENCY_CONFLICT",
+                "message": message,
+                "detail": message,
+                "retryable": False,
                 "client_mutation_id": client_mutation_id,
             },
         )
@@ -379,11 +383,15 @@ def _assert_base_version(
 ) -> int:
     current_version = int(governance.entity_version or 1) if governance is not None else 0
     if payload_base_version != current_version:
+        message = "This checklist item changed after the device copy was read. Review the server version before retrying."
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "FIELDWORK_VERSION_CONFLICT",
-                "message": "This checklist item changed after the device copy was read. Review the server version before retrying.",
+                "error_code": "FIELDWORK_VERSION_CONFLICT",
+                "message": message,
+                "detail": message,
+                "retryable": True,
                 "client_mutation_id": client_mutation_id,
                 "base_version": payload_base_version,
                 "server_version": current_version,

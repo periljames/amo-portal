@@ -1,6 +1,6 @@
 import { apiRequest, qualityPath } from "./apiClient";
 
-export type ReadinessBand = "STRONG" | "WATCH" | "AT_RISK" | "CRITICAL";
+export type ReadinessBand = "STRONG" | "WATCH" | "AT_RISK" | "CRITICAL" | "UNAVAILABLE";
 export type ControlCriticality = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ControlStatus = "DRAFT" | "ACTIVE" | "RETIRED";
 export type ControlApprovalStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "RETIRED";
@@ -29,17 +29,17 @@ export type ExcellenceOverview = {
   tenant: { amo_code: string; amo_id: string };
   as_of: string;
   readiness: {
-    score: number;
+    score: number | null;
     band: ReadinessBand;
     dimensions: ExcellenceDimension[];
     method: string;
     disclaimer: string;
   };
-  metrics: Record<string, number>;
+  metrics: Record<string, number | null>;
   priority_queue: ExcellencePriority[];
   forecast: {
-    commitments_due_30_days: number;
-    band: "MANAGEABLE" | "ELEVATED" | "HEAVY";
+    commitments_due_30_days: number | null;
+    band: "MANAGEABLE" | "ELEVATED" | "HEAVY" | "UNAVAILABLE";
     explanation: string;
   };
   capabilities: Array<{ id: string; label: string; description: string; path: string }>;
@@ -229,11 +229,11 @@ export type ManagementReviewPack = {
     count: number;
     path: string;
   }>;
-  metrics: Record<string, number>;
+  metrics: Record<string, number | null>;
   evidence_gaps: {
-    invalid_evidence: number;
-    controls_due: number;
-    pending_events: number;
+    invalid_evidence: number | null;
+    controls_due: number | null;
+    pending_events: number | null;
   };
   source_warnings: Array<{ source: string; message: string; type: string }>;
 };
@@ -248,11 +248,16 @@ export function getQualityExcellenceOverview(amoCode: string): Promise<Excellenc
   });
 }
 
-export function getAssuranceControls(amoCode: string): Promise<ControlListResponse> {
-  return apiRequest<ControlListResponse>(qualityPath(amoCode, "/excellence/controls"), {
-    cacheTtlMs: 12_000,
-    timeoutMs: 20_000,
-  });
+export async function getAssuranceControls(amoCode: string, view: "global" | "mine" = "global"): Promise<ControlListResponse> {
+  const items: AssuranceControl[] = [];
+  let offset = 0;
+  while (true) {
+    const page = await apiRequest<ControlListResponse>(`${qualityPath(amoCode, "/excellence/controls")}?view=${view}&limit=500&offset=${offset}`, { cacheTtlMs: 0, timeoutMs: 20_000 });
+    items.push(...page.items);
+    offset += page.items.length;
+    if (offset >= page.total) return { ...page, items };
+    if (!page.items.length) throw new Error("Control collection changed; refresh and retry.");
+  }
 }
 
 export function createAssuranceControl(amoCode: string, payload: AssuranceControlCreate): Promise<AssuranceControl> {

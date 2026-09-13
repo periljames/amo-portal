@@ -21,7 +21,7 @@ import { hasQmsRolePermission } from "../../app/routeGuards";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
   qmsGetAuditDeletionImpact,
-  qmsListAudits,
+  qmsListAllAudits,
   qmsListAuditSchedules,
   qmsPurgeAudit,
   qmsPurgeAuditSchedule,
@@ -114,7 +114,7 @@ const QualityAuditRecycleBinPage: React.FC = () => {
 
   const auditsQuery = useQuery({
     queryKey: ["qms-audit-recycle-bin", "audits"],
-    queryFn: () => qmsListAudits({ domain: "AMO", deleted_only: true, limit: 500 }),
+    queryFn: () => qmsListAllAudits({ domain: "AMO", deleted_only: true, limit: 500 }),
     staleTime: 15_000,
   });
 

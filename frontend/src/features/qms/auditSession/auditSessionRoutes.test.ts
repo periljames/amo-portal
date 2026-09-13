@@ -28,9 +28,9 @@ describe("audit session routes", () => {
     expect(isAtLeastLiveStage(undefined)).toBe(false);
   });
 
-  it("builds encoded canonical occurrence links", () => {
+  it("builds canonical occurrence links with separator-normalised audit keys", () => {
     expect(auditSessionPath("tenant a", "QAR/MO/26/015", "live")).toBe(
-      "/maintenance/tenant%20a/quality/audits/QAR%2FMO%2F26%2F015/live",
+      "/maintenance/tenant%20a/quality/audits/qar-mo-26-015/live",
     );
   });
 

@@ -184,6 +184,12 @@ async function prepare(page: Page): Promise<void> {
       return json(route, { items: [assuranceCase], total: 1, limit: 150, offset: 0, has_more: false });
     }
     if (path.endsWith("/quality/assurance-cases/case-1") && request.method() === "GET") return json(route, assuranceCase);
+    if (path.endsWith("/quality/audits/register/paged")) {
+      return json(route, {
+        rows: [], total: 0, limit: 25, offset: 0, has_more: false,
+        car_linked_findings: 0, open_car_count: 0,
+      });
+    }
 
     if (path.endsWith("/quality/intelligence/overview")) {
       return json(route, {
@@ -271,7 +277,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "People and current privileges", exact: true })).toBeVisible();
   await expect(page.getByText("Current authorization readiness", { exact: true })).toBeVisible();
-  await expectFontAtLeast(page.locator(".qms-people__row-button strong").first(), 13.5);
+  await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
 
   await page.getByRole("button", { name: /Check audit assignment/i }).click();
   await expect(page.getByRole("heading", { name: "Check governed audit assignment", exact: true })).toBeVisible();
@@ -280,27 +286,17 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await expectMinHeightAtLeast(input, 42);
 });
 
-test("Assurance keeps case triage primary and opens creation as a readable governed drawer", async ({ page }) => {
+test("Assurance keeps case triage primary in the consolidated finding lifecycle", async ({ page }) => {
   await prepare(page);
-  await page.goto("/maintenance/tenant-a/quality?workspace=assurance", { waitUntil: "domcontentloaded" });
+  await page.goto("/maintenance/tenant-a/quality/audits/register", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.getByRole("heading", { name: "Cases, investigation & effectiveness", exact: true }), 28);
-  await expect(page.getByRole("heading", { name: "Governed assurance work", exact: true })).toBeVisible();
-  await expect(page.getByText("Repeat tooling-control finding", { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: /New case/i }).click();
-  const createHeading = page.getByRole("heading", { name: "Source-backed assurance problem", exact: true });
-  await expect(createHeading).toBeVisible();
-  const createPanel = createHeading.locator("xpath=ancestor::section[contains(@class,'qms-assurance-cases__panel')]").first();
-  expect(await createPanel.evaluate((element) => window.getComputedStyle(element).position)).toBe("fixed");
-  await expectFontAtLeast(page.locator("#case-title"), 14);
-  await expectMinHeightAtLeast(page.locator("#case-title"), 42);
-
-  await page.getByRole("button", { name: /Close create assurance case/i }).click();
-  await expect(createHeading).toHaveCount(0);
-  await page.getByText("Repeat tooling-control finding", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fact → hypothesis → causal conclusion", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Define, observe & conclude effectiveness", exact: true })).toBeVisible();
+  await expectFontAtLeast(page.locator(".qa-register-grid-page__heading h1"), 17.5);
+  await expect(page.getByRole("heading", { name: "Findings & corrective actions", exact: true })).toBeVisible();
+  // The consolidated register owns the visible heading; the legacy shell subtitle stays suppressed to avoid duplicate chrome.
+  await expect(page.getByText(/one lifecycle from audit finding through auditee action/i)).toBeHidden();
+  await expect(page.getByText("No findings or corrective actions yet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Open audits/i }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Finding trends/i })).toBeVisible();
 });
 
 test("Intelligence leads with ranked deterministic surveillance and source provenance at 1080p", async ({ page }) => {

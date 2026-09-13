@@ -10,8 +10,71 @@ export type OfflineCapabilityRule = {
   validate?: (body: Record<string, unknown>) => boolean;
 };
 
+const QMS_FIELDWORK_MUTATION_PATH = /^\/api\/maintenance\/[^/]+\/quality\/audits\/[^/]+\/checklist-items\/[^/]+\/fieldwork-mutations\/?$/;
+const QMS_FIELDWORK_FINDING_PATH = /^\/api\/maintenance\/[^/]+\/quality\/audits\/[^/]+\/checklist-items\/[^/]+\/fieldwork-findings\/?$/;
+const CANONICAL_CHECKLIST_RESPONSES = new Set([
+  "COMPLIANT",
+  "NONCOMPLIANT",
+  "OBSERVATION",
+  "NOT_APPLICABLE",
+  "NOT_VERIFIED",
+]);
+const FIELDWORK_FINDING_RESPONSES = new Set(["NONCOMPLIANT", "OBSERVATION"]);
+const FIELDWORK_FINDING_LEVELS = new Set(["LEVEL_1", "LEVEL_2", "LEVEL_3", "LEVEL_4"]);
+const FIELDWORK_FINDING_SEVERITIES = new Set(["MINOR", "MAJOR", "CRITICAL"]);
+
+function validFieldworkEnvelope(body: Record<string, unknown>, operation: string): boolean {
+  return typeof body.client_mutation_id === "string"
+    && body.client_mutation_id.trim().length > 8
+    && typeof body.device_id === "string"
+    && body.device_id.trim().length > 8
+    && Number.isFinite(Number(body.device_sequence))
+    && Number(body.device_sequence) >= 0
+    && typeof body.client_timestamp === "string"
+    && !Number.isNaN(Date.parse(body.client_timestamp))
+    && Number.isFinite(Number(body.base_version))
+    && Number(body.base_version) >= 0
+    && body.operation === operation
+    && typeof body.reason === "string"
+    && body.reason.trim().length > 0;
+}
+
+function validChecklistFieldwork(body: Record<string, unknown>): boolean {
+  return validFieldworkEnvelope(body, "CHECKLIST_UPDATE")
+    && typeof body.canonical_response_status === "string"
+    && CANONICAL_CHECKLIST_RESPONSES.has(body.canonical_response_status);
+}
+
+function validChecklistFinding(body: Record<string, unknown>): boolean {
+  return validFieldworkEnvelope(body, "CREATE_FINDING")
+    && typeof body.canonical_response_status === "string"
+    && FIELDWORK_FINDING_RESPONSES.has(body.canonical_response_status)
+    && typeof body.level === "string"
+    && FIELDWORK_FINDING_LEVELS.has(body.level)
+    && typeof body.severity === "string"
+    && FIELDWORK_FINDING_SEVERITIES.has(body.severity)
+    && typeof body.description === "string"
+    && body.description.trim().length > 0;
+}
+
 /** Every mutation is classified; only reviewed, guarded drafts enter the outbox. */
 export const OFFLINE_CAPABILITY_REGISTRY: readonly OfflineCapabilityRule[] = [
+  {
+    id: "qms-checklist-fieldwork-update",
+    method: "POST",
+    path: QMS_FIELDWORK_MUTATION_PATH,
+    capability: "draft-safe",
+    label: "QMS checklist fieldwork update",
+    validate: validChecklistFieldwork,
+  },
+  {
+    id: "qms-checklist-fieldwork-finding",
+    method: "POST",
+    path: QMS_FIELDWORK_FINDING_PATH,
+    capability: "draft-safe",
+    label: "QMS checklist finding draft",
+    validate: validChecklistFinding,
+  },
   {
     id: "roster-assignment-create", method: "POST",
     path: /^\/rostering\/versions\/([^/]+)\/assignments\/?$/,

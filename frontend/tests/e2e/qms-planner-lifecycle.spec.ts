@@ -144,7 +144,7 @@ test.describe("QMS planner lifecycle", () => {
     await expect(commandTrigger).toBeFocused();
 
     await page.keyboard.press("c");
-    const quickDialog = page.getByRole("dialog", { name: "Create an audit schedule draft" });
+    const quickDialog = page.getByRole("dialog", { name: "Schedule a programme requirement" });
     await expect(quickDialog).toBeVisible();
     await expect(page.locator("[role='dialog'][aria-modal='true']")).toHaveCount(1);
 
@@ -167,7 +167,7 @@ test.describe("QMS planner lifecycle", () => {
 
     await page.keyboard.press("Escape");
     await expect(quickDialog).toBeHidden();
-    await expect(page.locator(".qms-planner-quick-schedule")).toBeFocused();
+    await expect(commandTrigger).toBeFocused();
 
     const shortcutsTrigger = page.locator(".qms-planner-shortcut-link");
     await shortcutsTrigger.focus();

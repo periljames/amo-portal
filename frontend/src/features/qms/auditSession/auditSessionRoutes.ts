@@ -1,4 +1,6 @@
+import { qmsAuditPath } from "../../../pages/qms/routes/qmsRouteRegistry";
 import type { AuditSessionStageId } from "../../../services/qmsAuditSession";
+import { auditOccurrenceResolverKey } from "../../../services/qmsAuditOccurrenceResolver";
 
 export const AUDIT_SESSION_STAGES: readonly AuditSessionStageId[] = [
   "setup",
@@ -55,7 +57,9 @@ export function auditSessionStageFromPath(pathname: string): AuditSessionStageId
 }
 
 export function auditSessionPath(amoCode: string, auditKey: string, stage: AuditSessionStageId): string {
-  return `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/${encodeURIComponent(auditKey)}/${stage}`;
+  const routeKey = auditOccurrenceResolverKey(auditKey);
+  if (!routeKey) throw new Error("Audit occurrence key is required.");
+  return qmsAuditPath(amoCode, routeKey, stage);
 }
 
 export function auditOccurrenceFunctionalPath(

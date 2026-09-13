@@ -13,6 +13,11 @@ export type QmsAuditRegisterPage = {
 
 export type QmsAuditRegisterPageParams = {
   domain?: string;
+  view?: "global" | "mine";
+  period?: number;
+  openOnly?: boolean;
+  status?: "open" | "closed";
+  level?: string;
   auditId?: string;
   findingId?: string;
   onlyWithCars?: boolean;
@@ -57,6 +62,7 @@ export type QmsCarRegisterPage = {
 
 export type QmsCarRegisterPageParams = {
   program?: CARProgram;
+  view?: "global" | "mine";
   status?: CARStatus;
   scope?: QmsCarRegisterScope;
   carId?: string;
@@ -77,6 +83,11 @@ function setIfPresent(query: URLSearchParams, key: string, value: string | undef
 export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {}): Promise<QmsAuditRegisterPage> {
   const query = new URLSearchParams();
   setIfPresent(query, "domain", params.domain);
+  setIfPresent(query, "view", params.view);
+  if (params.period != null) query.set("period", String(params.period));
+  setIfPresent(query, "finding_status", params.status);
+  setIfPresent(query, "level", params.level);
+  if (params.openOnly) query.set("open_only", "true");
   setIfPresent(query, "audit_id", params.auditId);
   setIfPresent(query, "finding_id", params.findingId);
   setIfPresent(query, "workflow_stage", params.workflowStage);
@@ -104,6 +115,7 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
 export function qmsGetCarRegisterPage(params: QmsCarRegisterPageParams = {}): Promise<QmsCarRegisterPage> {
   const query = new URLSearchParams();
   setIfPresent(query, "program", params.program);
+  setIfPresent(query, "view", params.view);
   setIfPresent(query, "status_", params.status);
   setIfPresent(query, "scope", params.scope);
   setIfPresent(query, "car_id", params.carId);

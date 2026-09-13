@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QMSAuditOut } from "../../services/qmsCore";
 import {
-  AUDITS_LIST_BOUND,
   buildAuditProgrammeLinkIndex,
   clampWorkspacePage,
   filterWorkspaceAudits,
@@ -40,7 +39,6 @@ describe("auditsWorkspaceModel", () => {
     expect(parseWorkspacePageSize("999")).toBe(25);
     expect(parseWorkspacePage("3")).toBe(3);
     expect(parseWorkspacePage("0")).toBe(1);
-    expect(AUDITS_LIST_BOUND).toBe(250);
   });
 
   it("labels programme-linked audits from real schedule/requirement titles only", () => {

@@ -1,5 +1,5 @@
 import { apiRequest } from "./apiClient";
-import { qmsListAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsCore";
+import { qmsListAllAudits, type QMSAuditOut, type QmsServiceOptions } from "./qmsCore";
 
 function normalizedAuditKey(value: string): string {
   return value
@@ -34,7 +34,7 @@ export async function qmsResolveAudit(
     // compatibility fixtures do not yet expose the direct resolver. This is
     // deliberately a 404-only fallback: authorization, tenant-boundary and
     // server failures must never be hidden by enumerating the audit register.
-    const audits = await qmsListAudits({ limit: 500 }, options);
+    const audits = await qmsListAllAudits({ limit: 500 }, options);
     return audits.find((audit) =>
       audit.id === key
       || normalizedAuditKey(audit.audit_ref || "") === routeKey

@@ -44,6 +44,7 @@ from . import assurance_metrics_router as _assurance_metrics_router  # noqa: F40
 from . import assurance_cockpit_router as _assurance_cockpit_router  # noqa: F401,E402
 from . import assurance_cockpit_detail_router as _assurance_cockpit_detail_router  # noqa: F401,E402
 from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_router  # noqa: F401,E402
+from . import control_traceability_router as _control_traceability_router  # noqa: F401,E402
 from . import mission_router as _mission_router  # noqa: F401,E402
 from . import mission_management_guard_router as _mission_management_guard_router  # noqa: F401,E402
 from . import mission_lifecycle_guard_router as _mission_lifecycle_guard_router  # noqa: F401,E402
@@ -88,6 +89,11 @@ _canonical_router.router.include_router(_assurance_cockpit_detail_router.router)
 
 # Lifecycle endpoints own control creation, approval and test transitions.
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)
+
+# Traceability is a focused extension of the existing assurance-control model;
+# it records framework revision and applicability without creating a parallel
+# compliance register or asserting regulatory compliance.
+_canonical_router.router.include_router(_control_traceability_router.router)
 
 # Missions are additive governed workflows rather than a duplicate operational
 # register. They coordinate evidence and decisions sourced from other AMO

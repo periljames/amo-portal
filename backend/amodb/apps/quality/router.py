@@ -3163,23 +3163,15 @@ def list_audits(
     limit: int = Query(default=250, ge=1, le=1000),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    qs = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == _current_amo_id(current_user))
-    if deleted_only:
-        qs = qs.filter(models.QMSAudit.deleted_at.is_not(None))
-    elif not include_deleted:
-        qs = qs.filter(models.QMSAudit.deleted_at.is_(None))
-    if domain:
-        qs = qs.filter(models.QMSAudit.domain == domain)
-    if status_:
-        qs = qs.filter(models.QMSAudit.status == status_)
-    if kind:
-        qs = qs.filter(models.QMSAudit.kind == kind)
-    if deleted_only:
-        qs = qs.order_by(models.QMSAudit.deleted_at.desc())
-    else:
-        qs = qs.order_by(models.QMSAudit.planned_start.desc().nullslast(), models.QMSAudit.created_at.desc())
-    audits = qs.limit(limit).all()
-    return [_serialize_audit(audit, db) for audit in audits]
+    # External array contract retained; query ownership lives in audit_list_service.
+    from .audit_list_service import audit_page
+    from .tenant_security import TenantContext, assert_quality_permission
+    amo_id = _current_amo_id(current_user)
+    ctx = TenantContext(amo_code="", amo_id=str(amo_id), user_id=str(current_user.id), is_superuser=False)
+    assert_quality_permission(db, ctx, "qms.audit.view")
+    return audit_page(db, ctx, limit=limit, domain=domain, status=status_, kind=kind,
+        deleted_only=deleted_only, include_deleted=include_deleted,
+        sort="deleted_at" if deleted_only else "planned_start", direction="desc")["items"]
 
 
 @router.get("/audits/findings", response_model=List[QMSFindingOut])

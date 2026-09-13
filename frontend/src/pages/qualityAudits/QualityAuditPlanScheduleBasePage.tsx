@@ -40,7 +40,7 @@ import {
   qmsDeleteAuditSchedule,
   qmsListAuditPersonnelOptions,
   qmsListAuditScopes,
-  qmsListAudits,
+  qmsListAllAudits,
   qmsListAuditSchedules,
   qmsRunAuditSchedule,
   qmsUpdateAudit,
@@ -621,7 +621,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const plannedAuditsQuery = useQuery({
     queryKey: ["qms-audits-planned", amoCode, department],
-    queryFn: () => qmsListAudits({ domain: "AMO", status_: "PLANNED" }),
+    queryFn: () => qmsListAllAudits({ domain: "AMO", status_: "PLANNED" }),
     staleTime: 30_000,
   });
 

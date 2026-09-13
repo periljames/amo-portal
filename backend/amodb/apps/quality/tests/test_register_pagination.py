@@ -174,6 +174,7 @@ def test_foreign_tenant_car_link_does_not_enter_audit_register(db_session):
 
     car_only = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
+        period=None,
         only_with_cars=True,
         limit=25,
         offset=0,
@@ -187,6 +188,7 @@ def test_foreign_tenant_car_link_does_not_enter_audit_register(db_session):
 
     searched = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
+        period=None,
         search=foreign_car.car_number,
         limit=25,
         offset=0,

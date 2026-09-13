@@ -153,6 +153,7 @@ function workflowStep(car: CAROut): string {
 
 function routeScope(pathname: string, queryStatus: string | null): QmsCarRegisterScope {
   const normalized = pathname.toLowerCase();
+  if (queryStatus === "active" || queryStatus === "open") return "active";
   if (normalized.endsWith("/overdue") || queryStatus === "overdue") return "overdue";
   if (normalized.endsWith("/due-soon")) return "due_soon";
   if (normalized.endsWith("/awaiting-auditee")) return "awaiting_auditee";
@@ -334,6 +335,7 @@ const QualityCarsPage: React.FC = () => {
     };
   }, [attachmentPreview]);
 
+  const actorView = searchParams.get("view") === "mine" ? "mine" : "global";
   const dueWindow = searchParams.get("dueWindow");
   const dueSoonDays = dueWindow === "today" ? 0 : dueWindow === "week" ? 7 : 30;
   const exactStatus = statusFilter !== "ALL" && statusFilter !== "ACTIVE" ? statusFilter : undefined;
@@ -345,7 +347,7 @@ const QualityCarsPage: React.FC = () => {
 
   const registerQuery = useQuery({
     queryKey: [
-      "qms-car-register-paged",
+      "qms-car-register-paged", actorView,
       amoSlug,
       directCarId ? "any-program" : programFilter,
       effectiveScope,
@@ -358,6 +360,7 @@ const QualityCarsPage: React.FC = () => {
       currentPage,
     ],
     queryFn: ({ signal }) => qmsGetCarRegisterPage({
+      view: actorView,
       program: directCarId ? undefined : programFilter,
       status: exactStatus,
       scope: effectiveScope,
@@ -369,7 +372,6 @@ const QualityCarsPage: React.FC = () => {
       offset: directCarId ? 0 : (currentPage - 1) * pageSize,
       signal,
     }),
-    placeholderData: (previous) => previous,
     staleTime: 20_000,
   });
 

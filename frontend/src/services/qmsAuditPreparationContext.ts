@@ -54,7 +54,7 @@ export type AuditPreparationContext = {
   };
   cross_source_assurance_pressure: {
     factors: Array<{ code: string; label: string; value: unknown; source: string; hard_requirement: boolean; rationale: string }>;
-    authoritative_metrics: Record<string, number>;
+    authoritative_metrics: Record<string, number | null>;
     reliability: Record<string, number>;
     statement: string;
   };

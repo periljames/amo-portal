@@ -28,6 +28,7 @@ const AuditFollowUpWorkspace = lazy(() => import("../../features/qms/auditSessio
 const AuditArchiveWorkspace = lazy(() => import("../../features/qms/auditSession/AuditArchiveWorkspace"));
 const QualityChecklistTemplateHost = lazy(() => import("./QualityChecklistTemplateHost"));
 const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
+const QualityAuditGovernancePanelHost = lazy(() => import("./QualityAuditGovernancePanelHost"));
 const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
 const QualityPlannerStrategicHost = lazy(() => import("./QualityPlannerStrategicHost"));
 
@@ -201,6 +202,7 @@ const QualityEnhancementsHost: React.FC = () => {
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading prepare workspace…</div>}>
               <AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
               <AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
+              <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "live" ? (

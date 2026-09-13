@@ -5,8 +5,8 @@
 // Mature workflow helpers use the active Quality API contracts for detailed
 // document, audit, CAR, AeroDoc, and manpower flows.
 
-import { ApiClientError, apiRequest } from "./apiClient";
-import { getToken, handleAuthFailure } from "./auth";
+import { ApiClientError, apiRequest, qualityPath } from "./apiClient";
+import { getToken, handleAuthFailure, getContext } from "./auth";
 import { getApiBaseUrl } from "./config";
 import {
   beginBackgroundLoading,
@@ -283,7 +283,7 @@ export interface QMSAuditWorkflowOut {
   workflow: QMSAuditWorkflowSummaryOut;
 }
 
-export type QmsServiceOptions = { silent?: boolean };
+export type QmsServiceOptions = { silent?: boolean; amoCode?: string };
 
 export interface QMSAuditNoticeDispatchOut {
   audit_id: string;
@@ -961,21 +961,39 @@ export async function qmsUpdateAuditScope(
   );
 }
 
+export type QMSAuditListParams = {
+  domain?: string; status_?: QMSAuditStatus; kind?: string;
+  deleted_only?: boolean; include_deleted?: boolean; limit?: number; offset?: number;
+  view?: "all" | "global" | "mine" | "upcoming" | "active" | "completed";
+  q?: string; period?: number;
+  sort?: "planned_start" | "created_at" | "actual_end" | "deleted_at" | "title" | "status" | "audit_ref";
+  direction?: "asc" | "desc";
+};
+export type QMSAuditPage = { items: QMSAuditOut[]; total: number; limit: number; offset: number };
+
 export async function qmsListAudits(
-  params?: {
-    domain?: string;
-    status_?: QMSAuditStatus;
-    kind?: string;
-    deleted_only?: boolean;
-    include_deleted?: boolean;
-    limit?: number;
-  },
-  options?: QmsServiceOptions,
+  params: QMSAuditListParams = {}, options?: QmsServiceOptions,
+): Promise<QMSAuditPage> {
+  const amoCode = options?.amoCode ?? getContext().amoCode;
+  if (!amoCode) throw new Error("Select an AMO before loading audits.");
+  const { status_, ...filters } = params;
+  return apiRequest<QMSAuditPage>(`${qualityPath(amoCode, "/audits")}${toQuery({ ...filters, status: status_ })}`,
+    { cacheTtlMs: 0 });
+}
+
+/** Complete collection adapter for existing selectors/registers; never truncates at a row cap. */
+export async function qmsListAllAudits(
+  params: QMSAuditListParams = {}, options?: QmsServiceOptions,
 ): Promise<QMSAuditOut[]> {
-  return fetchJson<QMSAuditOut[]>(
-    `/quality/audits${toQuery(params ?? {})}`,
-    options,
-  );
+  const items: QMSAuditOut[] = [];
+  let offset = 0;
+  while (true) {
+    const page = await qmsListAudits({ ...params, limit: 500, offset }, options);
+    items.push(...page.items);
+    offset += page.items.length;
+    if (offset >= page.total) return items;
+    if (!page.items.length) throw new Error("Audit collection changed during pagination; refresh and retry.");
+  }
 }
 
 export type QMSAuditCreatePayload = {

@@ -313,3 +313,39 @@
   .assurance-context-toggle { width: 100%; }
   .assurance-context-toggle button { flex: 1; }
 }
+
+/* Preserve the existing breakpoints while making every operation reachable. */
+.assurance-cockpit, .assurance-panel, .assurance-health, .qa-workspace-main { min-width: 0; }
+.assurance-cockpit :is(button, select, summary), .assurance-cockpit__toolbar :is(button, select),
+.assurance-unscheduled-drawer :is(button, select), .qa-workspace-mobile-tabs select { min-height: 44px; }
+.assurance-cockpit :is(button, a, select, summary):focus-visible,
+.assurance-cockpit__toolbar :is(button, select):focus-visible,
+.assurance-unscheduled-drawer :is(button, a):focus-visible,
+.qa-workspace-rail__tab:focus-visible, .qa-workspace-mobile-tabs select:focus-visible {
+  outline: 3px solid var(--accent-primary, #2563eb); outline-offset: 3px;
+}
+.assurance-cockpit__toolbar { flex-wrap: wrap; min-width: 0; }
+.assurance-health__headline, .assurance-panel > header { flex-wrap: wrap; }
+.assurance-health__headline strong { overflow-wrap: anywhere; font-size: clamp(1.5rem, 4vw, 3rem); }
+.assurance-kpi, .assurance-action-list__copy { overflow-wrap: anywhere; min-width: 0; }
+.assurance-unscheduled-drawer__body { max-height: calc(100dvh - 5rem); overscroll-behavior: contain; padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+.assurance-data-summary { padding: 0.75rem; color: var(--qms-text, #0f172a); font-size: 0.85rem; }
+.assurance-data-summary summary { cursor: pointer; display: list-item; padding-block: 0.5rem; }
+.assurance-data-summary__scroll { max-width: 100%; overflow-x: auto; }
+.assurance-data-summary table { width: 100%; border-collapse: collapse; }
+.assurance-data-summary :is(th, td) { text-align: left; padding: 0.45rem; border-bottom: 1px solid var(--qms-line-soft, #cbd5e1); }
+.assurance-data-summary caption { text-align: left; font-weight: 700; padding-block: 0.5rem; }
+.qms-source-health { display: grid; gap: 0.5rem; color: var(--qms-muted, #64748b); }
+.qms-source-health li { overflow-wrap: anywhere; }
+.assurance-health--unavailable { background: var(--qms-panel, #fff); border-color: var(--qms-line, #94a3b8); }
+.assurance-unscheduled-list__top b { background: var(--assurance-major-soft, #fef3c7); color: var(--assurance-major, #92400e); }
+@media (max-width: 520px) {
+  .assurance-health__signals { grid-template-columns: 1fr; }
+  .assurance-chart--large { height: 16rem; }
+  .assurance-cockpit__toolbar > * { max-width: 100%; }
+  .assurance-panel header button { white-space: normal; }
+  .assurance-unscheduled-drawer { width: 100vw; max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assurance-cockpit *, .assurance-cockpit__toolbar *, .assurance-unscheduled-drawer * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

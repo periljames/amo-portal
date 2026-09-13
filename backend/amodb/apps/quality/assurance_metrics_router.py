@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -14,8 +13,8 @@ from amodb.apps.training.integration import training_record_summary
 from .assurance_wiring_router import (
     SOURCE_REGISTRY,
     _safe_identifier,
-    _table_columns,
 )
+from .assurance_sources import source_columns, source_result, responsibility, query_scalar, require_source_access, SourceFailure
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -26,7 +25,13 @@ def _score(value: float) -> int:
     return max(0, min(100, int(round(value))))
 
 
-def _readiness(metrics: dict[str, int]) -> dict[str, Any]:
+def _readiness(metrics: dict[str, int | None]) -> dict[str, Any]:
+    if any(value is None for value in metrics.values()):
+        return {
+            "score": None, "band": "UNAVAILABLE", "dimensions": [],
+            "method": "cross_module_continuous_assurance_v2",
+            "disclaimer": "Readiness is unavailable while required source data is incomplete. This indicator supports operational review; organizational approval remains external.",
+        }
     total_docs = metrics.get("active_documents", 0) + metrics.get("draft_documents", 0)
     active_controls = metrics.get("active_controls", 0)
     dimensions = {
@@ -64,7 +69,7 @@ def _readiness(metrics: dict[str, int]) -> dict[str, Any]:
     }
 
 
-def _priority_queue(metrics: dict[str, int], amo_code: str) -> list[dict[str, Any]]:
+def _priority_queue(metrics: dict[str, int | None], amo_code: str) -> list[dict[str, Any]]:
     candidates = [
         ("overdue-cars", "Overdue corrective actions", "overdue_cars", "CRITICAL", "Closure dates have passed while CAR records remain open.", f"/maintenance/{amo_code}/quality/cars/overdue"),
         ("regulator-findings", "Open regulator findings", "open_regulator_findings", "CRITICAL", "Authority findings remain open and require governed response evidence.", f"/maintenance/{amo_code}/quality/external-interface/regulator-findings"),
@@ -82,7 +87,7 @@ def _priority_queue(metrics: dict[str, int], amo_code: str) -> list[dict[str, An
     items = [
         {"id": item_id, "label": label, "count": metrics.get(metric, 0), "severity": severity, "why": why, "path": path}
         for item_id, label, metric, severity, why, path in candidates
-        if metrics.get(metric, 0) > 0
+        if metrics.get(metric) is not None and metrics[metric] > 0
     ]
     return sorted(items, key=lambda item: (rank[item["severity"]], -item["count"]))
 
@@ -112,6 +117,10 @@ def _first(columns: set[str], *candidates: str) -> str | None:
     return next((candidate for candidate in candidates if candidate in columns), None)
 
 
+def _projection_columns(db, table):
+    return source_result(lambda: source_columns(db, table)).value or set()
+
+
 def _count(
     db: Session,
     ctx: TenantContext,
@@ -121,32 +130,28 @@ def _count(
     conditions: list[str] | None = None,
     params: dict[str, Any] | None = None,
     warnings: list[dict[str, str]],
-) -> int:
-    columns = _table_columns(db, table)
-    if not columns:
-        warnings.append({
-            "source": source,
-            "message": f"Authoritative source table '{table}' is unavailable.",
-            "type": "SourceUnavailable",
-        })
-        return 0
-    where = list(conditions or [])
-    query_params: dict[str, Any] = dict(params or {})
-    if "amo_id" in columns:
-        where.insert(0, "amo_id = :amo_id")
-        query_params["amo_id"] = ctx.amo_id
-    if "deleted_at" in columns:
-        where.append("deleted_at IS NULL")
-    sql = f"SELECT COUNT(*) FROM {_safe_identifier(table)}"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    try:
-        with db.begin_nested():
-            return int(db.execute(text(sql), query_params).scalar() or 0)
-    except Exception as exc:
-        warnings.append({"source": source, "message": str(exc), "type": exc.__class__.__name__})
-        set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-        return 0
+    view: str = "global",
+) -> int | None:
+    def run():
+        require_source_access(db, ctx, table)
+        columns = source_columns(db, table)
+        where = ["amo_id = :amo_id", *(conditions or [])]
+        query_params = {**(params or {}), "amo_id": ctx.amo_id, "actor_user_id": ctx.user_id}
+        if "deleted_at" in columns:
+            where.append("deleted_at IS NULL")
+        if table == "qms_audit_findings":
+            source_columns(db, "qms_audits", ("id", "deleted_at"))
+            where.append("EXISTS (SELECT 1 FROM qms_audits parent WHERE parent.id = qms_audit_findings.audit_id AND parent.amo_id = qms_audit_findings.amo_id AND parent.deleted_at IS NULL)")
+        if view == "mine":
+            scope = responsibility(db, table, columns)
+            if scope == "1 = 0":
+                raise SourceFailure("SOURCE_UNAVAILABLE", "This source has no supported personal responsibility projection.")
+            where.append(scope)
+        return query_scalar(db, f"SELECT COUNT(*) FROM {_safe_identifier(table)} WHERE " + " AND ".join(where), query_params)
+    result = source_result(run)
+    if result.status != "SUCCESS":
+        warnings.append(result.warning(source))
+    return result.value
 
 
 def _status_open_condition(columns: set[str]) -> str | None:
@@ -164,23 +169,21 @@ def _due_counts(
     due_candidates: tuple[str, ...],
     warnings: list[dict[str, str]],
     open_only: bool = True,
-) -> tuple[int, int]:
-    columns = _table_columns(db, table)
+    view: str = "global",
+) -> tuple[int | None, int | None]:
+    shape = source_result(lambda: source_columns(db, table))
+    columns = shape.value or set()
     if not columns:
-        warnings.append({
-            "source": source,
-            "message": f"Authoritative source table '{table}' is unavailable.",
-            "type": "SourceUnavailable",
-        })
-        return 0, 0
+        warnings.append(shape.warning(source))
+        return None, None
     due_column = _first(columns, *due_candidates)
     if not due_column:
         warnings.append({
             "source": source,
             "message": f"Source table '{table}' has no supported due or validity column.",
-            "type": "SourceShapeUnsupported",
+            "type": "SCHEMA_UNAVAILABLE",
         })
-        return 0, 0
+        return None, None
     base: list[str] = []
     status_condition = _status_open_condition(columns) if open_only else None
     if status_condition:
@@ -195,7 +198,7 @@ def _due_counts(
         table=table,
         conditions=[*base, f"{quoted_due} IS NOT NULL", f"{quoted_due} < :today"],
         params={"today": today},
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     upcoming = _count(
         db,
@@ -204,25 +207,26 @@ def _due_counts(
         table=table,
         conditions=[*base, f"{quoted_due} BETWEEN :today AND :due_30"],
         params={"today": today, "due_30": due_30},
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     return overdue, upcoming
 
 
-def _risk_counts(db: Session, ctx: TenantContext, warnings: list[dict[str, str]]) -> tuple[int, int]:
+def _risk_counts(db: Session, ctx: TenantContext, warnings: list[dict[str, str]], view: str = "global") -> tuple[int | None, int | None]:
     table = "qms_risks"
-    columns = _table_columns(db, table)
+    shape = source_result(lambda: source_columns(db, table))
+    columns = shape.value or set()
     if not columns:
-        warnings.append({"source": "risks", "message": "Risk register source is unavailable.", "type": "SourceUnavailable"})
-        return 0, 0
+        warnings.append(shape.warning("risks"))
+        return None, None
     severity_column = _first(columns, "rating", "risk_level", "severity")
     if severity_column:
         expression = f"UPPER(COALESCE({_safe_identifier(severity_column)}, ''))"
     elif "payload" in columns:
         expression = "UPPER(COALESCE(payload->>'rating', payload->>'risk_level', payload->>'severity', ''))"
     else:
-        warnings.append({"source": "risks", "message": "Risk severity is not represented in a supported field.", "type": "SourceShapeUnsupported"})
-        return 0, 0
+        warnings.append({"source": "risks", "message": "Risk severity is not represented in a supported field.", "type": "SCHEMA_UNAVAILABLE"})
+        return None, None
     open_condition = _status_open_condition(columns)
     base = [open_condition] if open_condition else []
     critical = _count(
@@ -231,7 +235,7 @@ def _risk_counts(db: Session, ctx: TenantContext, warnings: list[dict[str, str]]
         source="critical_risks",
         table=table,
         conditions=[*base, f"{expression} = 'CRITICAL'"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     high = _count(
         db,
@@ -239,14 +243,14 @@ def _risk_counts(db: Session, ctx: TenantContext, warnings: list[dict[str, str]]
         source="high_risks",
         table=table,
         conditions=[*base, f"{expression} = 'HIGH'"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     return critical, high
 
 
-def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list[dict[str, str]]]:
+def _full_metrics(db: Session, ctx: TenantContext, *, view: str = "global") -> tuple[dict[str, int | None], list[dict[str, str]]]:
     warnings: list[dict[str, str]] = []
-    metrics: dict[str, int] = {}
+    metrics: dict[str, int | None] = {}
 
     metrics["overdue_audits"], metrics["audits_due_30"] = _due_counts(
         db,
@@ -254,17 +258,17 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="audit_programme",
         table="qms_audit_schedules",
         due_candidates=("next_due_date", "due_date"),
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["overdue_cars"], metrics["cars_due_30"] = _due_counts(
         db,
         ctx,
         source="corrective_actions",
         table="quality_cars",
-        due_candidates=("due_date", "target_close_date"),
-        warnings=warnings,
+        due_candidates=("due_date", "target_closure_date"),
+        warnings=warnings, view=view,
     )
-    car_columns = _table_columns(db, "quality_cars")
+    car_columns = _projection_columns(db, "quality_cars")
     car_open = _status_open_condition(car_columns)
     metrics["open_cars"] = _count(
         db,
@@ -272,10 +276,10 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="open_cars",
         table="quality_cars",
         conditions=[car_open] if car_open else [],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    finding_columns = _table_columns(db, "qms_audit_findings")
+    finding_columns = _projection_columns(db, "qms_audit_findings")
     finding_condition = (
         "closed_at IS NULL"
         if "closed_at" in finding_columns
@@ -287,10 +291,10 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="open_findings",
         table="qms_audit_findings",
         conditions=[finding_condition] if finding_condition else [],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    document_columns = _table_columns(db, "qms_documents")
+    document_columns = _projection_columns(db, "qms_documents")
     if "status" in document_columns:
         metrics["active_documents"] = _count(
             db,
@@ -298,7 +302,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
             source="active_documents",
             table="qms_documents",
             conditions=["UPPER(status) IN ('ACTIVE','APPROVED','EFFECTIVE','PUBLISHED')"],
-            warnings=warnings,
+            warnings=warnings, view=view,
         )
         metrics["draft_documents"] = _count(
             db,
@@ -306,30 +310,27 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
             source="draft_documents",
             table="qms_documents",
             conditions=["UPPER(status) IN ('DRAFT','PENDING_APPROVAL','UNDER_REVIEW')"],
-            warnings=warnings,
+            warnings=warnings, view=view,
         )
     else:
-        metrics["active_documents"] = 0
-        metrics["draft_documents"] = 0
-        warnings.append({"source": "documents", "message": "Document status is unavailable.", "type": "SourceShapeUnsupported"})
+        metrics["active_documents"] = None
+        metrics["draft_documents"] = None
+        warnings.append({"source": "documents", "message": "Document status is unavailable.", "type": "SCHEMA_UNAVAILABLE"})
 
-    training_columns = _table_columns(db, "training_records")
-    training_validity = _first(training_columns, "valid_until", "due_date")
-    if training_validity:
-        try:
-            metrics["expired_training"] = training_record_summary(
-                db,
-                amo_id=ctx.amo_id,
-                as_of=date.today(),
-            ).expired
-        except Exception as exc:
-            db.rollback()
-            metrics["expired_training"] = 0
-            warnings.append({"source": "expired_training", "message": str(exc), "type": exc.__class__.__name__})
-    else:
-        metrics["expired_training"] = 0
-    if training_columns and not training_validity:
-        warnings.append({"source": "expired_training", "message": "Training validity is not represented in a supported field.", "type": "SourceShapeUnsupported"})
+    def training_count():
+        require_source_access(db, ctx, "training_records")
+        source_columns(db, "training_records", ("valid_until",))
+        # The integration resolves latest recurrent evidence. It has no personal
+        # scope contract; never substitute a tenant aggregate for My Work.
+        if view == "mine":
+            from .assurance_sources import SourceFailure
+            raise SourceFailure("SCHEMA_UNAVAILABLE", "Personal latest-training projection is not supported.")
+        with db.begin_nested():
+            return training_record_summary(db, amo_id=ctx.amo_id, as_of=date.today()).expired
+    training = source_result(training_count)
+    metrics["expired_training"] = training.value
+    if training.status != "SUCCESS":
+        warnings.append(training.warning("expired_training"))
 
     metrics["expired_supplier_approvals"], metrics["supplier_approvals_due_30"] = _due_counts(
         db,
@@ -337,7 +338,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="supplier_approvals",
         table="qms_supplier_approvals",
         due_candidates=("valid_until", "expiry_date", "approval_expiry", "due_date"),
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["overdue_calibrations"], metrics["calibrations_due_30"] = _due_counts(
         db,
@@ -345,10 +346,10 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="calibration",
         table="qms_calibration_records",
         due_candidates=("next_due_date", "due_date", "valid_until"),
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    oot_columns = _table_columns(db, "qms_out_of_tolerance_events")
+    oot_columns = _projection_columns(db, "qms_out_of_tolerance_events")
     oot_open = _status_open_condition(oot_columns)
     metrics["out_of_tolerance"] = _count(
         db,
@@ -356,12 +357,12 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="out_of_tolerance",
         table="qms_out_of_tolerance_events",
         conditions=[oot_open] if oot_open else [],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    metrics["critical_risks"], metrics["high_risks"] = _risk_counts(db, ctx, warnings)
+    metrics["critical_risks"], metrics["high_risks"] = _risk_counts(db, ctx, warnings, view=view)
 
-    change_columns = _table_columns(db, "qms_change_controls")
+    change_columns = _projection_columns(db, "qms_change_controls")
     change_open = _status_open_condition(change_columns)
     metrics["pending_changes"] = _count(
         db,
@@ -369,7 +370,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="pending_changes",
         table="qms_change_controls",
         conditions=[change_open] if change_open else [],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
     metrics["overdue_review_actions"], _ = _due_counts(
@@ -378,10 +379,10 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="management_review_actions",
         table="qms_management_review_actions",
         due_candidates=("due_date",),
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    regulator_columns = _table_columns(db, "qms_regulator_findings")
+    regulator_columns = _projection_columns(db, "qms_regulator_findings")
     regulator_open = _status_open_condition(regulator_columns)
     metrics["open_regulator_findings"] = _count(
         db,
@@ -389,7 +390,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="regulator_findings",
         table="qms_regulator_findings",
         conditions=[regulator_open] if regulator_open else [],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
     metrics["overdue_external_commitments"], _ = _due_counts(
@@ -398,13 +399,13 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="external_commitments",
         table="qms_external_commitments",
         due_candidates=("due_date",),
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
 
-    control_columns = _table_columns(db, "quality_assurance_controls")
+    control_columns = _projection_columns(db, "quality_assurance_controls")
     control_active = ["status = 'ACTIVE'"] if "status" in control_columns else []
-    metrics["active_controls"] = _count(db, ctx, source="active_controls", table="quality_assurance_controls", conditions=control_active, warnings=warnings)
-    metrics["approved_controls"] = _count(db, ctx, source="approved_controls", table="quality_assurance_controls", conditions=[*control_active, "approval_status = 'APPROVED'"], warnings=warnings)
+    metrics["active_controls"] = _count(db, ctx, source="active_controls", table="quality_assurance_controls", conditions=control_active, warnings=warnings, view=view)
+    metrics["approved_controls"] = _count(db, ctx, source="approved_controls", table="quality_assurance_controls", conditions=[*control_active, "approval_status = 'APPROVED'"], warnings=warnings, view=view)
     metrics["controls_due"] = _count(
         db,
         ctx,
@@ -412,7 +413,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         table="quality_assurance_controls",
         conditions=[*control_active, "(next_test_due IS NULL OR next_test_due <= :due_30)"],
         params={"due_30": date.today() + timedelta(days=30)},
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["verified_controls"] = _count(
         db,
@@ -423,7 +424,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
             "EXISTS (SELECT 1 FROM quality_assurance_evidence_links e WHERE e.amo_id = quality_assurance_controls.amo_id AND e.control_id = quality_assurance_controls.id AND e.evidence_status = 'VERIFIED' AND (e.valid_until IS NULL OR e.valid_until >= :today))"
         ],
         params={"today": date.today()},
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["invalid_evidence"] = _count(
         db,
@@ -431,7 +432,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="invalid_evidence",
         table="quality_assurance_evidence_links",
         conditions=["evidence_status IN ('EXPIRED','REJECTED')"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["failed_control_tests"] = _count(
         db,
@@ -439,7 +440,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="failed_control_tests",
         table="quality_control_tests",
         conditions=["result IN ('FAIL','PARTIAL')", "tested_at >= NOW() - INTERVAL '365 days'"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["pending_assurance_events"] = _count(
         db,
@@ -447,7 +448,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="pending_assurance_events",
         table="quality_assurance_events",
         conditions=["processing_status = 'PENDING'"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     metrics["proposed_insights"] = _count(
         db,
@@ -455,7 +456,7 @@ def _full_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], list
         source="proposed_insights",
         table="quality_intelligence_reviews",
         conditions=["status = 'PROPOSED'"],
-        warnings=warnings,
+        warnings=warnings, view=view,
     )
     return metrics, warnings
 
@@ -467,7 +468,7 @@ def schema_aware_assurance_overview(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     metrics, warnings = _full_metrics(db, ctx)
-    pressure = sum(
+    pressure_values = [
         metrics.get(key, 0)
         for key in (
             "audits_due_30",
@@ -476,7 +477,8 @@ def schema_aware_assurance_overview(
             "supplier_approvals_due_30",
             "calibrations_due_30",
         )
-    )
+    ]
+    pressure = None if any(value is None for value in pressure_values) else sum(pressure_values)
     return {
         "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
         "as_of": _now().isoformat(),
@@ -485,7 +487,7 @@ def schema_aware_assurance_overview(
         "priority_queue": _priority_queue(metrics, ctx.amo_code),
         "forecast": {
             "commitments_due_30_days": pressure,
-            "band": "HEAVY" if pressure >= 20 else "ELEVATED" if pressure >= 8 else "MANAGEABLE",
+            "band": "UNAVAILABLE" if pressure is None else "HEAVY" if pressure >= 20 else "ELEVATED" if pressure >= 8 else "MANAGEABLE",
             "explanation": "Audit, CAR, control-test, supplier-approval and calibration commitments falling within 30 days.",
         },
         "capabilities": [
@@ -495,7 +497,7 @@ def schema_aware_assurance_overview(
             {"id": "human-intelligence", "label": "Human-governed intelligence", "description": "Deterministic and future AI recommendations remain advisory until a named decision is recorded.", "path": f"/maintenance/{ctx.amo_code}/quality?hub=intelligence"},
         ],
         "source_coverage": {
-            "available": sum(1 for spec in SOURCE_REGISTRY.values() if _table_columns(db, spec.table)),
+            "available": sum(1 for spec in SOURCE_REGISTRY.values() if _projection_columns(db, spec.table)),
             "warnings": len(warnings),
         },
         "warnings": warnings,
@@ -511,15 +513,16 @@ def schema_aware_management_review_pack(
     metrics, warnings = _full_metrics(db, ctx)
     readiness = _readiness(metrics)
     priorities = _priority_queue(metrics, ctx.amo_code)
+    display = lambda key: "unavailable" if metrics.get(key) is None else str(metrics[key])
     return {
         "generated_at": _now().isoformat(),
         "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
         "readiness": readiness,
         "executive_summary": [
-            f"Operational readiness is {readiness['score']}% ({readiness['band'].replace('_', ' ').lower()}).",
-            f"{metrics.get('overdue_cars', 0)} corrective actions and {metrics.get('overdue_audits', 0)} audit commitments are overdue.",
-            f"{metrics.get('invalid_evidence', 0)} assurance relationships are expired or rejected.",
-            f"{metrics.get('critical_risks', 0)} critical quality risks and {metrics.get('open_regulator_findings', 0)} regulator findings remain open.",
+            "Operational readiness is unavailable while source data is incomplete." if readiness["score"] is None else f"Operational readiness is {readiness['score']}% ({readiness['band'].replace('_', ' ').lower()}).",
+            f"{display('overdue_cars')} corrective actions and {display('overdue_audits')} audit commitments are overdue.",
+            f"{display('invalid_evidence')} assurance relationships are expired or rejected.",
+            f"{display('critical_risks')} critical quality risks and {display('open_regulator_findings')} regulator findings remain open.",
         ],
         "decisions_required": [
             {
