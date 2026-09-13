@@ -167,9 +167,8 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/maintenance/tenant-a/quality/reports/car-performance", { waitUntil: "domcontentloaded" });
 
-  // The CAR-performance compatibility route is surfaced in the consolidated
-  // Assurance rail as Finding trends.
-  await expect(page.getByRole("heading", { name: "Finding trends", exact: true })).toBeVisible();
+  // Assert the report's operational content rather than duplicating shell copy.
+  await expect(page.getByRole("heading", { name: "QPI and workload", exact: true })).toBeVisible();
   await expect(page.getByText(/QMSM 2\.5 QPI 3 target: at least 80%/)).toBeVisible();
   await expect(page.getByText("QPI target below requirement")).toBeVisible();
   await expect(page.getByText("50.0%").first()).toBeVisible();
