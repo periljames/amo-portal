@@ -75,6 +75,8 @@ export type AtomicFieldworkFindingPayload = {
 
 const FIELDWORK_DEVICE_KEY = "amo:qms:fieldwork-device-id";
 const FIELDWORK_SEQUENCE_KEY = "amo:qms:fieldwork-device-sequence";
+const FIELDWORK_CACHE_TTL_MS = 30_000;
+const FIELDWORK_STALE_OFFLINE_MS = 24 * 60 * 60_000;
 
 function randomIdentifier(prefix: string): string {
   const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -118,7 +120,12 @@ function fieldworkEnvelope(clientMutationId: string, baseVersion: number) {
 export function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<ChecklistExecutionGovernanceResponse>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-execution-governance`),
-    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+    {
+      timeoutMs: 15_000,
+      cacheTtlMs: FIELDWORK_CACHE_TTL_MS,
+      staleWhileOfflineMs: FIELDWORK_STALE_OFFLINE_MS,
+      signal,
+    },
   );
 }
 
