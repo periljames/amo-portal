@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CalendarPlus, CheckCircle2, PanelRightClose, PanelRightOpen, ShieldAlert } from "lucide-react";
@@ -57,23 +57,18 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
     enabled: Boolean(open && resolvedAmo && workspace),
   });
 
-  const sources = sourceQuery.data || [];
-  const selected = useMemo<AuditHandoffSource | undefined>(() => sources.find((row) => row.id === sourceId), [sources, sourceId]);
-
-  useEffect(() => {
-    if (!sourceId && sources.length) setSourceId(sources[0].id);
-  }, [sourceId, sources]);
-  useEffect(() => {
-    if (selected && !title) setTitle(`Targeted audit · ${selected.label}`);
-  }, [selected, title]);
+  const sources = useMemo(() => sourceQuery.data ?? [], [sourceQuery.data]);
+  const effectiveSourceId = sourceId || sources[0]?.id || "";
+  const selected = useMemo<AuditHandoffSource | undefined>(() => sources.find((row) => row.id === effectiveSourceId), [effectiveSourceId, sources]);
+  const effectiveTitle = title || (selected ? `Targeted audit · ${selected.label}` : "");
 
   const createMutation = useMutation({
     mutationFn: () => {
-      if (!workspace || !sourceId) return Promise.reject(new Error("Select a governed source."));
-      return createAuditHandoff(resolvedAmo, workspace === "missions" ? "MISSION" : "SIGNAL", sourceId, {
+      if (!workspace || !effectiveSourceId) return Promise.reject(new Error("Select a governed source."));
+      return createAuditHandoff(resolvedAmo, workspace === "missions" ? "MISSION" : "SIGNAL", effectiveSourceId, {
         rationale,
         schedule: {
-          title,
+          title: effectiveTitle,
           next_due_date: date,
           start_time: time,
           duration_days: 1,
@@ -95,7 +90,7 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
   });
 
   if (!workspace || !resolvedAmo) return null;
-  const ready = Boolean(sourceId && title.trim().length >= 3 && date && rationale.trim().length >= 8);
+  const ready = Boolean(effectiveSourceId && effectiveTitle.trim().length >= 3 && date && rationale.trim().length >= 8);
 
   return <>
     <button className="qms-audit-handoff-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="qms-audit-handoff-panel">
@@ -107,9 +102,9 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
         <p>The source remains authoritative in {workspace === "missions" ? "Missions" : "Intelligence"}. This action creates a guarded one-time Planner schedule and retains immutable source lineage.</p>
         {error ? <div className="qms-audit-handoff-error" role="alert"><ShieldAlert size={16} /> {error}</div> : null}
         {success ? <div className="qms-audit-handoff-success"><CheckCircle2 size={17} /><div><strong>Planner schedule created</strong><span>{success.title} · {success.next_due_date}</span><a href={`/maintenance/${encodeURIComponent(resolvedAmo)}/quality/calendar/week`}>Open Planner</a></div></div> : null}
-        <label>Governed source<select value={sourceId} onChange={(event) => { setSourceId(event.target.value); setTitle(""); setSuccess(null); }}><option value="">Select source</option>{sources.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
+        <label>Governed source<select value={effectiveSourceId} onChange={(event) => { setSourceId(event.target.value); setTitle(""); setSuccess(null); }}><option value="">Select source</option>{sources.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
         {selected?.detail ? <small>{selected.detail}</small> : null}
-        <label>Audit title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+        <label>Audit title<input value={effectiveTitle} onChange={(event) => setTitle(event.target.value)} /></label>
         <div className="qms-audit-handoff-grid"><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Start time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div>
         <label>Lead auditor<select value={leadAuditor} onChange={(event) => setLeadAuditor(event.target.value)}><option value="">Unassigned</option>{optionsQuery.data?.people.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>
         <label>Location<input value={locationText} onChange={(event) => setLocationText(event.target.value)} /></label>

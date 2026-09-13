@@ -11,7 +11,14 @@ from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 
 from . import models, schemas, services  # noqa: F401
-from . import access_router, admin_profile_router, department_home_router, portal_preferences_router, router_amo_assets
+from . import (
+    access_request_router,
+    access_router,
+    admin_profile_router,
+    department_home_router,
+    portal_preferences_router,
+    router_amo_assets,
+)
 from .tenant_authority import active_admin_profile_session
 from .admin_profile_guard import require_active_admin_profile
 from .admin_profile_logout import revoke_admin_profile_on_logout
@@ -46,10 +53,12 @@ def _attach_router_dependency(router, dependency) -> None:
 
 
 # Preserve the original /accounts/admin router object and prefix. Register the
-# profile endpoints, then protect every tenant administration route.
+# profile endpoints and the access-request decision queue, then protect every
+# tenant administration route with the active administrator-profile guard.
 _admin_routes = _router_admin.router
 _admin_routes.include_router(admin_profile_router.router)
 _admin_routes.include_router(access_router.admin_router)
+_admin_routes.include_router(access_request_router.admin_router)
 _attach_router_dependency(_admin_routes, require_active_admin_profile)
 
 # AMO logo and CRS-template mutations are mounted by main.py through a separate
@@ -74,18 +83,20 @@ for _route in _router_public.router.routes:
 
 # Mounted below the authenticated /auth surface. The endpoint independently
 # resolves the AMO and validates effective department access before returning any
-# composed data. Portal preferences are also mounted here so every deployment
-# profile that already exposes the authenticated accounts router receives the
-# same per-user accessibility and appearance contract.
+# composed data. Portal preferences and self-service access elevation are also
+# mounted here so a normal tenant user can inspect/request portal access without
+# receiving administrator mutation authority.
 _router_public.router.include_router(department_home_router.router)
 _router_public.router.include_router(portal_preferences_router.router)
 _router_public.router.include_router(access_router.context_router)
+_router_public.router.include_router(access_request_router.context_router)
 
 __all__ = [
     "models",
     "schemas",
     "services",
     "access_router",
+    "access_request_router",
     "admin_profile_router",
     "department_home_router",
     "portal_preferences_router",

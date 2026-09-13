@@ -9,6 +9,7 @@ from amodb.security import get_current_active_user, require_admin
 from amodb.apps.audit import services as audit_services
 
 from . import access_control, models, schemas
+from .access_realtime import publish_access_sync
 
 
 admin_router = APIRouter(tags=["accounts_access"])
@@ -125,6 +126,12 @@ def initialize_access_framework(
     except Exception:
         db.rollback()
         raise
+    publish_access_sync(
+        amo_id=tenant_id,
+        action="FRAMEWORK_INITIALIZED",
+        entity_id=tenant_id,
+        actor_user_id=str(current_user.id),
+    )
     return schemas.TenantAccessFrameworkInitializeResult(**outcome)
 
 
@@ -173,6 +180,13 @@ def create_access_profile(
     except Exception:
         db.rollback()
         raise
+    publish_access_sync(
+        amo_id=tenant_id,
+        action="PROFILE_CREATED",
+        entity_id=str(row.id),
+        actor_user_id=str(current_user.id),
+        profile_id=str(row.id),
+    )
     return _profile_read(db, row)
 
 
@@ -244,6 +258,13 @@ def update_access_profile(
     except Exception:
         db.rollback()
         raise
+    publish_access_sync(
+        amo_id=tenant_id,
+        action="PROFILE_UPDATED",
+        entity_id=str(row.id),
+        actor_user_id=str(current_user.id),
+        profile_id=str(row.id),
+    )
     return _profile_read(db, row)
 
 
@@ -292,6 +313,14 @@ def assign_user_access_profile(
     except Exception:
         db.rollback()
         raise
+    publish_access_sync(
+        amo_id=tenant_id,
+        action="USER_ASSIGNED",
+        entity_id=str(user.id),
+        actor_user_id=str(current_user.id),
+        subject_user_id=str(user.id),
+        profile_id=str(profile.id),
+    )
     return access_control.attach_user_access(db, user)
 
 

@@ -70,7 +70,6 @@ const riskTone = (openLevel1: number, openLevel2: number) => {
   return { label: "Low", className: "qms-pill qms-pill--success" };
 };
 
-
 const findingLevelLabel = (value?: string | null): string => {
   const normalized = String(value || "").toUpperCase();
   if (normalized === "LEVEL_1") return "Level 1 · Critical";
@@ -85,7 +84,6 @@ const statusClassName = (status: "Open" | "Closed" | "Overdue") => {
   if (status === "Overdue") return "qms-status-pill qms-status-pill--overdue";
   return "qms-status-pill qms-status-pill--open";
 };
-
 
 const personName = (peopleById: Map<string, QMSPersonOption>, userId?: string | null): string => {
   if (!userId) return "Unassigned";
@@ -259,12 +257,6 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     [scheduleId, schedulesQuery.data]
   );
 
-  useEffect(() => {
-    setParticipantForm(participantFormFromSchedule(schedule));
-    setEditingParticipants(false);
-    setParticipantMessage(null);
-  }, [schedule?.id]);
-
   const participantUpdate = useMutation({
     mutationFn: async () => qmsUpdateAuditSchedule(scheduleId, {
       lead_auditor_user_id: participantForm.lead_auditor_user_id || null,
@@ -432,6 +424,11 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
   const goToEvidence = () => navigate(`${baseQmsPath}/evidence`);
   const personnelOptions = personnelQuery.data ?? [];
   const setParticipantField = (field: keyof ParticipantFormState, value: string) => setParticipantForm((prev) => ({ ...prev, [field]: value }));
+  const beginParticipantEdit = () => {
+    setParticipantForm(participantFormFromSchedule(schedule));
+    setParticipantMessage(null);
+    setEditingParticipants(true);
+  };
   const cancelParticipantEdit = () => {
     setParticipantForm(participantFormFromSchedule(schedule));
     setEditingParticipants(false);
@@ -515,7 +512,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
                   <button type="button" className="btn btn--sm" onClick={() => participantUpdate.mutate()} disabled={participantUpdate.isPending}><Save size={13} /> Save</button>
                 </div>
               ) : (
-                <button type="button" className="secondary-chip-btn" onClick={() => setEditingParticipants(true)}><Pencil size={13} /> Edit team</button>
+                <button type="button" className="secondary-chip-btn" onClick={beginParticipantEdit}><Pencil size={13} /> Edit team</button>
               )}
             </div>
             {participantMessage ? <p className="qms-audit-detail__team-message">{participantMessage}</p> : null}

@@ -24,7 +24,6 @@ const QualityFindingDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const context = getContext();
   const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
-  const department = params.department ?? "quality";
   const findingId = params.findingId?.trim() || "";
 
   const detailQuery = useQuery({
@@ -172,4 +171,3 @@ const QualityFindingDetailPage: React.FC = () => {
 };
 
 export default QualityFindingDetailPage;
-

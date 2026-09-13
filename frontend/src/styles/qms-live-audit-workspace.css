@@ -437,6 +437,108 @@
 .qms-live-audit-finding label { display: grid; gap: 0.3rem; margin-top: 0.75rem; font-weight: 700; }
 .qms-live-audit-finding .is-primary { background: var(--accent-primary, #2563eb); border-color: var(--accent-primary, #2563eb); color: #fff; }
 
+.qms-live-audit-focus--locked {
+  grid-template-rows: 1fr;
+  isolation: isolate;
+}
+
+.qms-live-audit-focus__preview-surface {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  opacity: 0.46;
+  filter: saturate(0.72) contrast(0.94);
+  pointer-events: none;
+  user-select: none;
+}
+
+.qms-live-audit-focus--locked .qms-live-audit-focus__question-list button:disabled,
+.qms-live-audit-focus--locked .qms-live-audit-focus__responses button:disabled,
+.qms-live-audit-focus--locked .qms-live-audit-focus__note-actions button:disabled,
+.qms-live-audit-focus--locked .qms-live-audit-focus__nav button:disabled {
+  opacity: 1;
+}
+
+.qms-live-audit-focus__lock-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  background: color-mix(in srgb, var(--qms-page) 36%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.qms-live-audit-focus__lock-card {
+  width: min(640px, 100%);
+  padding: clamp(1rem, 2.4vw, 1.5rem);
+  border: 1px solid color-mix(in srgb, var(--qms-line) 76%, transparent);
+  border-radius: calc(var(--qms-radius) + 4px);
+  background: color-mix(in srgb, var(--qms-panel) 84%, transparent);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 20%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.qms-live-audit-focus__lock-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.qms-live-audit-focus__lock-card h2 {
+  margin: 0.6rem 0 0.45rem;
+  font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+  line-height: 1.2;
+}
+
+.qms-live-audit-focus__lock-card p {
+  margin: 0;
+  color: var(--qms-text);
+  line-height: 1.55;
+}
+
+.qms-live-audit-focus__lock-card > small {
+  display: block;
+  margin-top: 0.75rem;
+  color: var(--qms-muted);
+  line-height: 1.45;
+}
+
+.qms-live-audit-focus__lock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+}
+
+.qms-live-audit-focus__lock-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.55rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: color-mix(in srgb, var(--qms-panel) 92%, transparent);
+  color: var(--qms-text);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.qms-live-audit-focus__lock-actions a.is-primary {
+  border-color: var(--accent-primary, #2563eb);
+  background: var(--accent-primary, #2563eb);
+  color: #fff;
+}
+
 @media (max-width: 1050px) {
   .qms-live-audit-focus__body { grid-template-columns: 220px minmax(0, 1fr); }
   .qms-live-audit-focus__summary { display: none; }
@@ -450,6 +552,10 @@
   .qms-live-audit-focus__sections { display: none; }
   .qms-live-audit-focus__references { grid-template-columns: 1fr; }
   .qms-live-audit-focus__responses { grid-template-columns: 1fr 1fr; }
+  .qms-live-audit-focus__lock-overlay { align-items: end; padding: 0.75rem; }
+  .qms-live-audit-focus__lock-card { max-height: min(70vh, 560px); overflow: auto; }
+  .qms-live-audit-focus__lock-actions { justify-content: stretch; }
+  .qms-live-audit-focus__lock-actions a { flex: 1 1 10rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

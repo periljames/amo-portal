@@ -12,6 +12,15 @@ const TRAINING_READ = new Set([
 // QUALITY_INSPECTOR and AUDITOR receive these additional view-only permissions
 // so the Control Room and its supporting governed workspaces are inspectable
 // without granting their corresponding mutation permissions.
+const QMS_AUDITOR_CONTROL_CENTRE_READ = new Set([
+  "qms.management_review.view",
+  "qms.supplier.view",
+  "qms.equipment.view",
+  "qms.risk.view",
+  "qms.change.view",
+  "qms.training.view",
+]);
+
 const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.dashboard.view",
   "qms.inbox.view",
@@ -24,12 +33,7 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.document.view",
   "qms.evidence.view",
   "qms.evidence.download",
-  "qms.management_review.view",
-  "qms.supplier.view",
-  "qms.equipment.view",
-  "qms.risk.view",
-  "qms.change.view",
-  "qms.training.view",
+  ...QMS_AUDITOR_CONTROL_CENTRE_READ,
 ]);
 
 // Keep this set aligned with backend/apps/quality/tenant_security.py.
@@ -41,6 +45,28 @@ const QMS_OFFICER_PERMISSIONS = new Set([
   "qms.reports.view",
   "qms.reports.export",
   "qms.external.view",
+]);
+
+const QMS_SUPPORT_PERMISSIONS = new Set([
+  "qms.dashboard.view",
+  "qms.inbox.view",
+  "qms.calendar.view",
+  "qms.audit.view",
+  "qms.finding.view",
+  "qms.car.view",
+  "qms.document.view",
+  "qms.evidence.view",
+  "qms.training.view",
+  "qms.reports.view",
+]);
+
+const QMS_DOCUMENT_CONTROL_PERMISSIONS = new Set([
+  "qms.dashboard.view",
+  "qms.inbox.view",
+  "qms.document.view",
+  "qms.evidence.view",
+  "qms.evidence.download",
+  "qms.training.view",
 ]);
 
 // Keep this set aligned with backend/apps/quality/tenant_security.py VIEW_ONLY.
@@ -93,6 +119,9 @@ export function userHasQmsRolePermission(
 
   if (isTenantAdmin(user)) return permission.startsWith("qms.");
 
+  // These are regulated/reserved decisions. A generic capability grant must
+  // never turn another persona into the Accountable Executive or Quality
+  // Manager for the decision itself.
   if (permission === "qms.reports.attest_authority" || permission === "qms.audit.programme.approve") {
     return user.role === "ACCOUNTABLE_EXECUTIVE";
   }
@@ -100,18 +129,42 @@ export function userHasQmsRolePermission(
     return user.role === "QUALITY_MANAGER";
   }
 
-  // Tenant module grants are a narrowing boundary. They never create a QMS
-  // decision right, but removing Quality from a profile must also remove the
-  // corresponding route and action surface.
+  // Module access is the outer subscription/profile boundary. Once an explicit
+  // capability list is present, it is the same writer-side authorization state
+  // returned by /auth/me and is authoritative for individual QMS routes/actions.
   const qualityLevel = user.module_access?.quality;
   if (user.module_access !== undefined && !qualityLevel) return false;
-  if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
 
+  if (user.capability_codes !== undefined) {
+    if (user.capability_codes.includes(permission)) return true;
+
+    // Auditor/inspector Control Centre reads are a deliberate non-mutating
+    // policy supplement. Older tenant profiles may not yet have had these six
+    // capability bindings repaired, so keep the browser aligned with the API's
+    // mandatory role-read supplement during rollout.
+    if (
+      (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR")
+      && QMS_AUDITOR_CONTROL_CENTRE_READ.has(permission)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Compatibility for legacy sessions/tests that predate writer-side capability
+  // projection. This fallback must mirror tenant_security.py exactly.
+  if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_OFFICER") return QMS_OFFICER_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_INSPECTOR" || user.role === "AUDITOR") {
     return QMS_INSPECTOR_PERMISSIONS.has(permission);
+  }
+  if (user.role === "QUALITY_SUPPORT_OFFICER") {
+    return QMS_SUPPORT_PERMISSIONS.has(permission);
+  }
+  if (user.role === "DOCUMENT_CONTROL_OFFICER") {
+    return QMS_DOCUMENT_CONTROL_PERMISSIONS.has(permission);
   }
   if (user.role === "VIEW_ONLY") {
     return QMS_VIEW_ONLY_PERMISSIONS.has(permission);

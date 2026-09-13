@@ -216,6 +216,7 @@ jobs:
           src/features/qms/auditSession/ExternalAuditorFieldworkWorkspace.tsx
           src/features/qms/auditSession/ExternalAuditorFindingDraftPanel.tsx
           src/features/qms/auditSession/ExternalFindingDraftReviewPanel.tsx
+          src/features/qms/auditSession/FieldworkLockedPreview.tsx
           src/features/qms/auditSession/LiveAuditWorkspace.tsx
           src/features/qms/auditSession/LiveAuditEvidenceStrip.tsx
           src/features/qms/auditSession/LiveFindingReleasePanel.tsx

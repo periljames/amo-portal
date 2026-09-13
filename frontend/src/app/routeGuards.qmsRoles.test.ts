@@ -71,4 +71,64 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.notice.manage")).toBe(true);
     expect(userHasQmsRolePermission(user("VIEW_ONLY"), "qms.reports.attest_authority")).toBe(false);
   });
+
+  it("maps Quality Support and Document Control to their narrow read surfaces", () => {
+    const support = user("QUALITY_SUPPORT_OFFICER");
+    expect(userHasQmsRolePermission(support, "qms.dashboard.view")).toBe(true);
+    expect(userHasQmsRolePermission(support, "qms.audit.view")).toBe(true);
+    expect(userHasQmsRolePermission(support, "qms.reports.view")).toBe(true);
+    expect(userHasQmsRolePermission(support, "qms.audit.execute")).toBe(false);
+    expect(userHasQmsRolePermission(support, "qms.finding.create")).toBe(false);
+
+    const documentControl = user("DOCUMENT_CONTROL_OFFICER");
+    expect(userHasQmsRolePermission(documentControl, "qms.dashboard.view")).toBe(true);
+    expect(userHasQmsRolePermission(documentControl, "qms.document.view")).toBe(true);
+    expect(userHasQmsRolePermission(documentControl, "qms.evidence.download")).toBe(true);
+    expect(userHasQmsRolePermission(documentControl, "qms.audit.view")).toBe(false);
+    expect(userHasQmsRolePermission(documentControl, "qms.document.approve")).toBe(false);
+  });
+
+  it("uses writer-side capability codes as the authoritative modern profile boundary", () => {
+    const narrowedOfficer = user("QUALITY_OFFICER", {
+      module_access: { quality: "manage" },
+      capability_codes: ["qms.audit.view"],
+    });
+    expect(userHasQmsRolePermission(narrowedOfficer, "qms.audit.view")).toBe(true);
+    expect(userHasQmsRolePermission(narrowedOfficer, "qms.audit.manage")).toBe(false);
+    expect(userHasQmsRolePermission(narrowedOfficer, "qms.car.manage")).toBe(false);
+
+    const qualityReadProfile = user("SAFETY_OFFICER", {
+      module_access: { quality: "view" },
+      capability_codes: ["qms.dashboard.view", "qms.settings.view"],
+    });
+    expect(userHasQmsRolePermission(qualityReadProfile, "qms.settings.view")).toBe(true);
+    expect(userHasQmsRolePermission(qualityReadProfile, "qms.audit.execute")).toBe(false);
+  });
+
+  it("keeps the mandatory Auditor/Inspector Control Centre reads during profile reconciliation", () => {
+    for (const role of ["AUDITOR", "QUALITY_INSPECTOR"] as const) {
+      const actor = user(role, {
+        module_access: { quality: "manage" },
+        capability_codes: ["qms.audit.view", "qms.audit.execute"],
+      });
+      expect(userHasQmsRolePermission(actor, "qms.management_review.view")).toBe(true);
+      expect(userHasQmsRolePermission(actor, "qms.supplier.view")).toBe(true);
+      expect(userHasQmsRolePermission(actor, "qms.training.view")).toBe(true);
+      expect(userHasQmsRolePermission(actor, "qms.audit.manage")).toBe(false);
+    }
+  });
+
+  it("never lets a module grant manufacture reserved executive or manager decisions", () => {
+    const customAuditor = user("AUDITOR", {
+      module_access: { quality: "manage" },
+      capability_codes: [
+        "qms.reports.attest_authority",
+        "qms.audit.programme.approve",
+        "qms.audit.programme.quality_review",
+      ],
+    });
+    expect(userHasQmsRolePermission(customAuditor, "qms.reports.attest_authority")).toBe(false);
+    expect(userHasQmsRolePermission(customAuditor, "qms.audit.programme.approve")).toBe(false);
+    expect(userHasQmsRolePermission(customAuditor, "qms.audit.programme.quality_review")).toBe(false);
+  });
 });

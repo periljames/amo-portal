@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from amodb.apps.accounts import access_control
 from amodb.apps.quality import audit_authority_pack as authority_pack
 from amodb.apps.quality.audit_authority_pack import build_authority_pack_zip
 from amodb.apps.quality.audit_external_access_router import AUDITEE_ALLOWED
@@ -23,20 +24,27 @@ def _user(role: str, user_id: str = "user-1"):
         id=user_id,
         role=role,
         amo_id="amo-1",
+        effective_amo_id="amo-1",
         is_active=True,
         is_superuser=False,
         is_platform_context=False,
         is_amo_admin=role == "AMO_ADMIN",
+        _admin_profile_elevated=False,
+    )
+
+
+def _assigned_audit():
+    return SimpleNamespace(
+        lead_auditor_user_id="lead-1",
+        observer_auditor_user_id="observer-1",
+        assistant_auditor_user_id="assistant-1",
+        supporting_auditor_user_ids=["support-1"],
     )
 
 
 def test_assigned_auditor_can_execute_but_unassigned_auditor_cannot() -> None:
     assigned = _user("AUDITOR", "lead-1")
-    audit = SimpleNamespace(
-        lead_auditor_user_id="lead-1",
-        observer_auditor_user_id="observer-1",
-        assistant_auditor_user_id="assistant-1",
-    )
+    audit = _assigned_audit()
     assert _has_role_permission(assigned, "qms.audit.execute") is True
     assert _has_role_permission(assigned, "qms.audit.manage") is False
     _require_audit_fieldwork_write_access(assigned, audit)
@@ -44,6 +52,54 @@ def test_assigned_auditor_can_execute_but_unassigned_auditor_cannot() -> None:
     with pytest.raises(HTTPException) as exc:
         _require_audit_fieldwork_write_access(_user("AUDITOR", "other-1"), audit)
     assert exc.value.status_code == 403
+
+
+def test_fieldwork_assignment_roles_are_distinct() -> None:
+    audit = _assigned_audit()
+
+    # Lead, assistant and governed supporting auditors may author fieldwork.
+    _require_audit_fieldwork_write_access(_user("AUDITOR", "lead-1"), audit)
+    _require_audit_fieldwork_write_access(_user("AUDITOR", "assistant-1"), audit)
+    _require_audit_fieldwork_write_access(_user("AUDITOR", "support-1"), audit)
+
+    # Observer remains on the audit team for visibility/presence but cannot
+    # author checklist responses, notes or findings.
+    with pytest.raises(HTTPException) as exc:
+        _require_audit_fieldwork_write_access(_user("AUDITOR", "observer-1"), audit)
+    assert exc.value.status_code == 403
+    assert "read-only" in str(exc.value.detail).lower()
+
+
+def test_auditor_control_centre_reads_are_aligned_across_role_and_profile_policy() -> None:
+    required_reads = {
+        "qms.management_review.view",
+        "qms.supplier.view",
+        "qms.equipment.view",
+        "qms.risk.view",
+        "qms.change.view",
+        "qms.training.view",
+    }
+    for role in ("AUDITOR", "QUALITY_INSPECTOR"):
+        actor = _user(role)
+        assert all(_has_role_permission(actor, permission) for permission in required_reads)
+    assert required_reads.issubset(set(access_control.QUALITY_AUDITOR_CAPABILITIES))
+
+
+def test_quality_support_and_document_control_are_read_only_and_narrow() -> None:
+    support = _user("QUALITY_SUPPORT_OFFICER")
+    assert _has_role_permission(support, "qms.dashboard.view") is True
+    assert _has_role_permission(support, "qms.audit.view") is True
+    assert _has_role_permission(support, "qms.reports.view") is True
+    assert _has_role_permission(support, "qms.audit.execute") is False
+    assert _has_role_permission(support, "qms.finding.create") is False
+    assert _has_role_permission(support, "qms.car.close") is False
+
+    document_control = _user("DOCUMENT_CONTROL_OFFICER")
+    assert _has_role_permission(document_control, "qms.dashboard.view") is True
+    assert _has_role_permission(document_control, "qms.document.view") is True
+    assert _has_role_permission(document_control, "qms.evidence.download") is True
+    assert _has_role_permission(document_control, "qms.audit.view") is False
+    assert _has_role_permission(document_control, "qms.document.approve") is False
 
 
 def test_quality_officer_can_prepare_audits_but_not_review_approve_or_close() -> None:

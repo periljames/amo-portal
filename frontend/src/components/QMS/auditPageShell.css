@@ -1,0 +1,21 @@
+/* QualityContextTabs replaces the duplicate page title/navigation chrome, but
+   page-specific actions still belong to the page and must remain available. */
+html.quality-context-active .audit-shell-header.audit-shell-header--has-toolbar {
+  display: block !important;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.quality-context-active .audit-shell-header--has-toolbar .audit-shell-header__title-block,
+html.quality-context-active .audit-shell-header--has-toolbar .audit-shell-header__nav {
+  display: none;
+}
+
+html.quality-context-active .audit-shell-header--has-toolbar .audit-shell-header__top-row,
+html.quality-context-active .audit-shell-header--has-toolbar .audit-shell-header__actions {
+  width: 100%;
+  justify-content: flex-end;
+}
