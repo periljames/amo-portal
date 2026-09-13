@@ -53,12 +53,14 @@ def upgrade() -> None:
         "user_access_profile_requests",
         ["user_id", "status", "created_at"],
     )
+    pending_only = sa.text("status = 'PENDING'")
     op.create_index(
         "uq_user_access_profile_pending",
         "user_access_profile_requests",
         ["amo_id", "user_id"],
         unique=True,
-        postgresql_where=sa.text("status = 'PENDING'"),
+        postgresql_where=pending_only,
+        sqlite_where=pending_only,
     )
 
 
