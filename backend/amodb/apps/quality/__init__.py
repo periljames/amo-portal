@@ -41,6 +41,8 @@ from . import canonical_router as _canonical_router  # noqa: F401,E402
 from . import excellence_router as _excellence_router  # noqa: F401,E402
 from . import assurance_wiring_router as _assurance_wiring_router  # noqa: F401,E402
 from . import assurance_metrics_router as _assurance_metrics_router  # noqa: F401,E402
+from . import assurance_cockpit_router as _assurance_cockpit_router  # noqa: F401,E402
+from . import assurance_cockpit_detail_router as _assurance_cockpit_detail_router  # noqa: F401,E402
 from . import assurance_lifecycle_guard_router as _assurance_lifecycle_guard_router  # noqa: F401,E402
 from . import mission_router as _mission_router  # noqa: F401,E402
 from . import mission_management_guard_router as _mission_management_guard_router  # noqa: F401,E402
@@ -78,6 +80,11 @@ _include_once(
 
 # Schema-aware metrics own the full overview and management-review projections.
 _canonical_router.router.include_router(_assurance_metrics_router.router)
+
+# The cockpit composes actionable assurance intelligence, authenticated personal
+# scope and command search without creating a shadow source of QMS truth.
+_canonical_router.router.include_router(_assurance_cockpit_router.router)
+_canonical_router.router.include_router(_assurance_cockpit_detail_router.router)
 
 # Lifecycle endpoints own control creation, approval and test transitions.
 _canonical_router.router.include_router(_assurance_lifecycle_guard_router.router)

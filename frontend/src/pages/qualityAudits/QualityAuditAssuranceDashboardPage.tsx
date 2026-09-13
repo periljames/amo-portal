@@ -1,679 +1,425 @@
 import React, { useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
   CalendarClock,
   CheckCircle2,
-  ClipboardList,
-  ListChecks,
-  PlayCircle,
-  Plus,
+  Command,
   RefreshCw,
-  ShieldAlert,
-  TimerReset,
-  Workflow,
+  ShieldCheck,
+  Target,
+  UserRound,
+  UsersRound,
 } from "lucide-react";
-import Button from "../../components/UI/Button";
-import InlineError from "../../components/shared/InlineError";
-import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+
+import Drawer from "../../components/shared/Drawer";
 import { getContext } from "../../services/auth";
 import {
-  qmsGetAuditRegister,
-  qmsGetDashboard,
-  qmsListAudits,
-  qmsListAuditSchedules,
-  qmsListCars,
-  type CAROut,
-  type QMSAuditOut,
-  type QMSAuditRegisterRowOut,
-  type QMSAuditScheduleOut,
-  type QMSAuditStatus,
-  type QMSDashboardOut,
-} from "../../services/qms";
-import { getQmsCalendar } from "../../services/qmsCalendar";
-import {
-  listedReadinessOf,
-  listAuditProgrammes,
-  readinessExceptionCount,
-} from "../../services/qmsAuditProgramme";
-import { auditNavigationHref } from "./auditNavigation";
-import { uniqueById } from "./auditDashboardModel";
-import "./quality-audit-dashboard.css";
+  cockpitDrilldownHref,
+  getAssuranceCockpit,
+  getUnscheduledProgrammeRequirements,
+  type AssuranceCockpitDrilldown,
+  type AssuranceViewContext,
+} from "../../services/assuranceCockpit";
+import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
+import "./assurance-cockpit.css";
 
-type KpiTone = "neutral" | "success" | "warning" | "danger" | "info";
-type ActionUrgency = "danger" | "warning" | "info" | "neutral";
-
-type AuditActionItem = {
+type MetricCard = {
   id: string;
   label: string;
-  meta: string;
-  href: string;
-  urgency: ActionUrgency;
-};
-
-type OpsCard = {
-  id: string;
-  label: string;
-  value: number | string;
+  value: string;
   helper: string;
-  tone: KpiTone;
-  href: string;
-  icon: React.ComponentType<{ size?: number }>;
+  tone: "neutral" | "good" | "warn" | "danger" | "info";
+  drilldown?: AssuranceCockpitDrilldown;
 };
 
-const ACTIVE_CAR_STATUSES = new Set(["DRAFT", "OPEN", "IN_PROGRESS", "PENDING_VERIFICATION", "ESCALATED"]);
-const CLOSED_AUDIT_STATUSES = new Set<QMSAuditStatus>(["CLOSED"]);
-const ACTIVE_PROGRAMME_STATUSES = new Set(["ACTIVE", "APPROVED", "UNDER_REVIEW"]);
+const PIPELINE_ORDER = ["PLANNED", "IN_PROGRESS", "CAP_OPEN", "CLOSED"];
 
-function todayDateOnly(): string {
-  return new Date().toISOString().slice(0, 10);
+function formatNumber(value: number | undefined): string {
+  return new Intl.NumberFormat().format(Number(value || 0));
 }
 
-function addDays(dateIso: string, days: number): string {
-  const date = parseDateOnly(dateIso);
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+function formatPercent(value: number | undefined): string {
+  return `${Number(value || 0).toFixed(1)}%`;
 }
 
-function parseDateOnly(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return new Date(value);
-  return new Date(Date.UTC(year, month - 1, day));
+function labelize(value: string): string {
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function isDateBefore(value: string | null | undefined, compareTo: string): boolean {
-  return !!value && value < compareTo;
-}
-
-function isDateBetween(value: string | null | undefined, start: string, end: string): boolean {
-  return !!value && value >= start && value <= end;
-}
-
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat().format(value);
+function formatMonth(value: string): string {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
 }
 
 function formatDate(value?: string | null): string {
   if (!value) return "Not set";
-  const date = parseDateOnly(value.slice(0, 10));
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-function formatStatus(value: string): string {
-  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function normalizeLevel(value?: string | null): "1" | "2" | "3" | "4" | "other" {
-  const raw = String(value || "").toLowerCase();
-  if (raw.includes("level_1") || raw === "1" || raw.includes("critical")) return "1";
-  if (raw.includes("level_2") || raw === "2" || raw.includes("major")) return "2";
-  if (raw.includes("level_3") || raw === "3" || raw.includes("minor")) return "3";
-  if (raw.includes("level_4") || raw === "4" || raw.includes("observation")) return "4";
-  return "other";
-}
-
-function isObservationFinding(row: QMSAuditRegisterRowOut): boolean {
-  const type = String(row.finding.finding_type || "").toUpperCase();
-  return type === "OBSERVATION" || normalizeLevel(row.finding.level || row.finding.severity) === "4";
-}
-
-function carDueDate(car: CAROut): string | null {
-  return car.due_date || car.target_closure_date || null;
-}
-
-function openCar(car: CAROut): boolean {
-  return ACTIVE_CAR_STATUSES.has(car.status);
-}
-
-function scheduleHref(amoCode: string, schedule?: QMSAuditScheduleOut): string {
-  return schedule ? `/maintenance/${amoCode}/quality/audits/schedules/${schedule.id}` : `/maintenance/${amoCode}/quality/calendar/week`;
-}
-
-function auditCalendarDate(audit: QMSAuditOut): string | null {
-  return audit.planned_start || audit.planned_end || audit.actual_start || audit.actual_end || null;
-}
-
-type UpcomingAuditCommitment =
-  | { kind: "schedule"; id: string; date: string; title: string; helper: string; href: string }
-  | { kind: "audit"; id: string; date: string; title: string; helper: string; href: string };
-
-function auditHref(amoCode: string, audit: QMSAuditOut): string {
-  return auditNavigationHref(amoCode, audit);
-}
-
-function carHref(amoCode: string, car: CAROut): string {
-  return `/maintenance/${amoCode}/quality/cars/${car.id}/overview`;
-}
-
-function registerHref(amoCode: string, tab: "findings" | "cars" = "findings", auditId?: string): string {
-  const params = new URLSearchParams({ tab });
-  if (auditId) params.set("auditId", auditId);
-  return `/maintenance/${amoCode}/quality/audits/register?${params.toString()}`;
-}
-
-function programmeHref(amoCode: string): string {
-  return `/maintenance/${amoCode}/quality/audits/program`;
-}
-
-function queryErrorMessage(error: unknown): string | null {
-  if (!error) return null;
-  return error instanceof Error ? error.message : String(error);
-}
-
-function uniqueRegisterRows(rows: QMSAuditRegisterRowOut[]): QMSAuditRegisterRowOut[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = row.finding?.id || `${row.audit?.id}-${row.finding?.description}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+function readinessCopy(band: string): string {
+  if (band === "STRONG") return "Assurance controls are operating within the current monitoring thresholds.";
+  if (band === "WATCH") return "Some assurance pressure requires active monitoring.";
+  if (band === "AT_RISK") return "Multiple assurance conditions require intervention.";
+  return "Immediate management attention is required.";
 }
 
 const QualityAuditAssuranceDashboardPage: React.FC = () => {
-  const params = useParams<{ amoCode?: string; department?: string }>();
+  const params = useParams<{ amoCode?: string }>();
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const today = todayDateOnly();
-  const inSevenDays = addDays(today, 7);
-  const inThirtyDays = addDays(today, 30);
-  const inFortyFiveDays = addDays(today, 45);
+
   const currentYear = new Date().getFullYear();
+  const rawView = searchParams.get("view");
+  const view: AssuranceViewContext = rawView === "mine" ? "mine" : "global";
+  const rawPeriod = Number(searchParams.get("period") || currentYear);
+  const period = Number.isFinite(rawPeriod) && rawPeriod >= 2000 && rawPeriod <= 2200 ? rawPeriod : currentYear;
+  const drawer = searchParams.get("drawer");
+  const unscheduledDrawerOpen = drawer === "unscheduled-requirements";
 
-  const dashboardQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-summary", amoCode],
-    queryFn: () => qmsGetDashboard({ domain: "AMO" }),
-    staleTime: 45_000,
+  const cockpitQuery = useQuery({
+    queryKey: ["qms-assurance-cockpit", amoCode, view, period],
+    queryFn: () => getAssuranceCockpit(amoCode, { view, period }),
+    staleTime: 30_000,
   });
 
-  const auditsQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-audits", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO" }),
-    staleTime: 45_000,
+  const unscheduledQuery = useQuery({
+    queryKey: ["qms-assurance-unscheduled", amoCode, view, period],
+    queryFn: () => getUnscheduledProgrammeRequirements(amoCode, { view, period, limit: 50 }),
+    enabled: unscheduledDrawerOpen,
+    staleTime: 15_000,
   });
 
-  const schedulesQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-schedules", amoCode],
-    queryFn: () => qmsListAuditSchedules({ domain: "AMO", active: true }),
-    staleTime: 45_000,
-  });
+  const data = cockpitQuery.data;
+  const metrics = data?.metrics ?? {};
 
-  const auditCalendarQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-calendar", amoCode, today, inFortyFiveDays],
-    queryFn: () => getQmsCalendar(amoCode, { source: "audits", start: today, end: inFortyFiveDays, limit: 200 }),
-    staleTime: 45_000,
-  });
-
-  const registerQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-register", amoCode],
-    queryFn: () => qmsGetAuditRegister({ domain: "AMO", limit: 500 }),
-    staleTime: 45_000,
-  });
-
-  const carsQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-cars", amoCode],
-    queryFn: () => qmsListCars({ program: "QUALITY", limit: 500 }),
-    staleTime: 45_000,
-  });
-
-  const programmesQuery = useQuery({
-    queryKey: ["qms-audit-dashboard-programmes", amoCode, currentYear],
-    queryFn: ({ signal }) => listAuditProgrammes(amoCode, currentYear, signal),
-    staleTime: 45_000,
-  });
-
-  const dashboard = dashboardQuery.data as QMSDashboardOut | undefined;
-  const audits = uniqueById(auditsQuery.data ?? []);
-  const schedules = uniqueById(schedulesQuery.data ?? []);
-  const registerRows = useMemo(() => uniqueRegisterRows(registerQuery.data?.rows ?? []), [registerQuery.data?.rows]);
-  const cars = carsQuery.data ?? [];
-  const programmes = programmesQuery.data?.items ?? [];
-  const integratedAuditCalendarItems = (auditCalendarQuery.data?.items ?? []).filter((item) => item.module === "audits" && Boolean(item.date));
-
-  const loading =
-    dashboardQuery.isLoading ||
-    auditsQuery.isLoading ||
-    schedulesQuery.isLoading ||
-    auditCalendarQuery.isLoading ||
-    registerQuery.isLoading ||
-    carsQuery.isLoading ||
-    programmesQuery.isLoading;
-  const refreshing =
-    dashboardQuery.isFetching ||
-    auditsQuery.isFetching ||
-    schedulesQuery.isFetching ||
-    auditCalendarQuery.isFetching ||
-    registerQuery.isFetching ||
-    carsQuery.isFetching ||
-    programmesQuery.isFetching;
-  const firstError =
-    queryErrorMessage(dashboardQuery.error) ||
-    queryErrorMessage(auditsQuery.error) ||
-    queryErrorMessage(schedulesQuery.error) ||
-    queryErrorMessage(auditCalendarQuery.error) ||
-    queryErrorMessage(registerQuery.error) ||
-    queryErrorMessage(carsQuery.error) ||
-    queryErrorMessage(programmesQuery.error);
-
-  const activeProgrammes = programmes.filter((programme) => ACTIVE_PROGRAMME_STATUSES.has(programme.status));
-  const programmeReadiness = programmes.map(listedReadinessOf);
-  const programmesMissingReadiness = programmeReadiness.filter((readiness) => readiness === null).length;
-  const hasCompleteProgrammeReadiness = programmes.length > 0 && programmesMissingReadiness === 0;
-  const programmeUnscheduledTotal = programmeReadiness.reduce(
-    (sum, readiness) => sum + (readiness?.unscheduled_requirement_count ?? 0),
-    0,
-  );
-  const programmeReadinessIssueTotal = programmeReadiness.reduce(
-    (sum, readiness) => sum + (readiness ? readinessExceptionCount(readiness) : 0),
-    0,
-  );
-
-  const activeSchedules = schedules.filter((schedule) => schedule.is_active !== false);
-  const overdueSchedules = activeSchedules.filter((schedule) => isDateBefore(schedule.next_due_date, today));
-  const dueSevenSchedules = activeSchedules.filter((schedule) => isDateBetween(schedule.next_due_date, today, inSevenDays));
-  const dueThirtySchedules = activeSchedules.filter((schedule) => isDateBetween(schedule.next_due_date, today, inThirtyDays));
-  const dueFortyFiveSchedules = activeSchedules.filter((schedule) => isDateBetween(schedule.next_due_date, today, inFortyFiveDays));
-  const unassignedLeadSchedules = activeSchedules.filter((schedule) => !schedule.lead_auditor_user_id);
-
-  const plannedAuditRecords = audits.filter((audit) => audit.status === "PLANNED" && Boolean(auditCalendarDate(audit)));
-  const overdueAuditRecords = plannedAuditRecords.filter((audit) => isDateBefore(auditCalendarDate(audit), today));
-  const dueSevenAuditRecords = plannedAuditRecords.filter((audit) => isDateBetween(auditCalendarDate(audit), today, inSevenDays));
-  const dueThirtyAuditRecords = plannedAuditRecords.filter((audit) => isDateBetween(auditCalendarDate(audit), today, inThirtyDays));
-  const dueFortyFiveAuditRecords = plannedAuditRecords.filter((audit) => isDateBetween(auditCalendarDate(audit), today, inFortyFiveDays));
-  const dueFortyFiveIntegratedCalendarItems = integratedAuditCalendarItems.filter((item) => isDateBetween(item.date, today, inFortyFiveDays));
-  const dueThirtyIntegratedCalendarItems = integratedAuditCalendarItems.filter((item) => isDateBetween(item.date, today, inThirtyDays));
-  const dueSevenIntegratedCalendarItems = integratedAuditCalendarItems.filter((item) => isDateBetween(item.date, today, inSevenDays));
-  const unassignedLeadAuditRecords = plannedAuditRecords.filter((audit) => !audit.lead_auditor_user_id);
-  const dueSevenCommitments = Math.max(dueSevenSchedules.length + dueSevenAuditRecords.length, dueSevenIntegratedCalendarItems.length);
-  const dueThirtyCommitments = Math.max(dueThirtySchedules.length + dueThirtyAuditRecords.length, dueThirtyIntegratedCalendarItems.length);
-
-  const openAudits = audits.filter((audit) => !CLOSED_AUDIT_STATUSES.has(audit.status));
-  const auditStatusCounts = audits.reduce<Record<QMSAuditStatus, number>>(
-    (acc, audit) => ({ ...acc, [audit.status]: (acc[audit.status] ?? 0) + 1 }),
-    { PLANNED: 0, IN_PROGRESS: 0, CAP_OPEN: 0, CLOSED: 0 }
-  );
-
-  const openFindings = registerRows.filter((row) => !row.finding.closed_at);
-  const overdueFindings = openFindings.filter((row) => isDateBefore(row.finding.target_close_date, today));
-  const findingsWithoutCars = openFindings.filter((row) => !row.linked_cars.length);
-  const levelCounts = openFindings.reduce(
-    (acc, row) => {
-      const level = isObservationFinding(row) ? "4" : normalizeLevel(row.finding.level || row.finding.severity);
-      acc[level] += 1;
-      return acc;
-    },
-    { "1": 0, "2": 0, "3": 0, "4": 0, other: 0 }
-  );
-
-  const openCars = cars.filter(openCar);
-  const overdueCars = openCars.filter((car) => isDateBefore(carDueDate(car), today));
-  const carsDueSoon = openCars.filter((car) => isDateBetween(carDueDate(car), today, inSevenDays));
-  const pendingVerificationCars = openCars.filter((car) => car.status === "PENDING_VERIFICATION");
-  const escalatedCars = openCars.filter((car) => car.status === "ESCALATED");
-  const followUpAttention =
-    overdueFindings.length + overdueCars.length + pendingVerificationCars.length + escalatedCars.length + findingsWithoutCars.filter((row) => normalizeLevel(row.finding.level || row.finding.severity) !== "4").length;
-
-  const opsCards: OpsCard[] = [
-    {
-      id: "programmes",
-      label: "Active programmes",
-      value: activeProgrammes.length,
-      helper: `${programmes.length} revision${programmes.length === 1 ? "" : "s"} in ${currentYear}`,
-      tone: activeProgrammes.length ? "info" : "neutral",
-      href: programmeHref(amoCode),
-      icon: Workflow,
-    },
-    {
-      id: "due-soon",
-      label: "Due soon",
-      value: dueSevenCommitments,
-      helper: `${dueThirtyCommitments} in 30 days · ${overdueSchedules.length + overdueAuditRecords.length} overdue`,
-      tone: overdueSchedules.length + overdueAuditRecords.length ? "danger" : dueSevenCommitments ? "warning" : "neutral",
-      href: `/maintenance/${amoCode}/quality/calendar/week`,
-      icon: TimerReset,
-    },
-    {
-      id: "unscheduled",
-      label: "Unscheduled",
-      value: programmes.length === 0 ? "—" : hasCompleteProgrammeReadiness ? programmeUnscheduledTotal : "Unavailable",
-      helper:
-        programmes.length === 0
-          ? "No programmes in current year"
-          : !hasCompleteProgrammeReadiness
-            ? "Programme readiness unavailable on list payload"
-            : programmeUnscheduledTotal
-              ? "Programme requirements awaiting Calendar"
-              : "No unscheduled requirements reported",
-      tone: hasCompleteProgrammeReadiness && programmeUnscheduledTotal ? "warning" : hasCompleteProgrammeReadiness ? "success" : "neutral",
-      href: programmeHref(amoCode),
-      icon: CalendarClock,
-    },
-    {
-      id: "execution",
-      label: "In execution",
-      value: auditStatusCounts.IN_PROGRESS,
-      helper: `${auditStatusCounts.CAP_OPEN} CAP open · ${openAudits.length} open records`,
-      tone: auditStatusCounts.IN_PROGRESS ? "info" : "neutral",
-      href: registerHref(amoCode, "findings"),
-      icon: PlayCircle,
-    },
-    {
-      id: "follow-up",
-      label: "Findings / CAR attention",
-      value: followUpAttention,
-      helper: `${dashboard?.findings_open_total ?? openFindings.length} open findings · ${overdueCars.length} overdue CARs`,
-      tone: followUpAttention ? "danger" : "success",
-      href: registerHref(amoCode, overdueCars.length ? "cars" : "findings"),
-      icon: ShieldAlert,
-    },
-    {
-      id: "readiness",
-      label: "Coverage / readiness",
-      value:
-        programmes.length === 0
-          ? "—"
-          : !hasCompleteProgrammeReadiness
-            ? "Unavailable"
-            : programmeReadinessIssueTotal,
-      helper:
-        programmes.length === 0
-          ? "No programmes in current year"
-          : !hasCompleteProgrammeReadiness
-            ? "Readiness unavailable on list payload — open Programme"
-            : programmeReadinessIssueTotal
-              ? "Programme approval blockers"
-              : "No readiness blockers reported",
-      tone: hasCompleteProgrammeReadiness && programmeReadinessIssueTotal ? "warning" : hasCompleteProgrammeReadiness ? "success" : "neutral",
-      href: programmeHref(amoCode),
-      icon: ListChecks,
-    },
-  ];
-
-  const upcoming: UpcomingAuditCommitment[] = [
-    ...dueFortyFiveAuditRecords.map((audit) => ({
-      kind: "audit" as const,
-      id: audit.id,
-      date: auditCalendarDate(audit) || "",
-      title: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
-      helper: `${formatStatus(audit.kind)} · ${audit.auditee || audit.auditee_email || "Auditee not set"}`,
-      href: auditHref(amoCode, audit),
-    })),
-    ...dueFortyFiveSchedules.map((schedule) => ({
-      kind: "schedule" as const,
-      id: schedule.id,
-      date: schedule.next_due_date,
-      title: schedule.title,
-      helper: `${formatStatus(schedule.kind)} · ${schedule.auditee || "Auditee not set"}`,
-      href: scheduleHref(amoCode, schedule),
-    })),
-    ...dueFortyFiveIntegratedCalendarItems.map((item) => ({
-      kind: item.entity_type === "audit_schedule" ? ("schedule" as const) : ("audit" as const),
-      id: String(item.entity_id || item.id),
-      date: String(item.date || ""),
-      title: String(item.title || item.audit_ref || "Audit commitment"),
-      helper: `${item.audit_ref ? `${item.audit_ref} · ` : ""}${item.subtitle || item.status || item.event_type || "Calendar"}`,
-      href: item.link || `/maintenance/${amoCode}/quality/calendar/week`,
-    })),
-  ]
-    .filter((item, index, rows) => Boolean(item.date) && index === rows.findIndex((candidate) => `${candidate.kind}:${candidate.id}:${candidate.date}` === `${item.kind}:${item.id}:${item.date}`))
-    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
-    .slice(0, 6);
-
-  const actionQueue: AuditActionItem[] = [
-    ...overdueAuditRecords.slice(0, 3).map((audit) => ({
-      id: `audit-${audit.id}`,
-      label: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
-      meta: `Planned audit overdue since ${formatDate(auditCalendarDate(audit))}`,
-      href: auditHref(amoCode, audit),
-      urgency: "danger" as ActionUrgency,
-    })),
-    ...overdueSchedules.slice(0, 3).map((schedule) => ({
-      id: `schedule-${schedule.id}`,
-      label: schedule.title,
-      meta: `Schedule overdue since ${formatDate(schedule.next_due_date)}`,
-      href: scheduleHref(amoCode, schedule),
-      urgency: "danger" as ActionUrgency,
-    })),
-    ...overdueFindings.slice(0, 3).map((row) => ({
-      id: `finding-${row.finding.id}`,
-      label: row.finding.finding_ref || row.audit.audit_ref || "Finding",
-      meta: `Finding target close ${formatDate(row.finding.target_close_date)} · ${row.audit.title}`,
-      href: registerHref(amoCode, "findings", row.audit.id),
-      urgency: "danger" as ActionUrgency,
-    })),
-    ...overdueCars.slice(0, 3).map((car) => ({
-      id: `car-${car.id}`,
-      label: car.car_number || car.title,
-      meta: `CAR overdue since ${formatDate(carDueDate(car))} · ${formatStatus(car.status)}`,
-      href: carHref(amoCode, car),
-      urgency: "danger" as ActionUrgency,
-    })),
-    ...unassignedLeadAuditRecords.slice(0, 2).map((audit) => ({
-      id: `unassigned-audit-${audit.id}`,
-      label: audit.audit_ref ? `${audit.audit_ref} · ${audit.title}` : audit.title,
-      meta: `Lead auditor not assigned · starts ${formatDate(auditCalendarDate(audit))}`,
-      href: auditHref(amoCode, audit),
-      urgency: "warning" as ActionUrgency,
-    })),
-    ...unassignedLeadSchedules.slice(0, 2).map((schedule) => ({
-      id: `unassigned-${schedule.id}`,
-      label: schedule.title,
-      meta: `Lead auditor not assigned · due ${formatDate(schedule.next_due_date)}`,
-      href: scheduleHref(amoCode, schedule),
-      urgency: "warning" as ActionUrgency,
-    })),
-  ];
-  const distinctActionQueue = uniqueById(actionQueue).slice(0, 6);
-
-  const nextAttention = distinctActionQueue[0];
-
-  const refreshDashboard = () => {
-    void queryClient.invalidateQueries({ queryKey: ["qms-audit-dashboard"] });
-    void queryClient.invalidateQueries({ queryKey: ["qms-audit-dashboard-programmes", amoCode] });
-    void dashboardQuery.refetch();
-    void auditsQuery.refetch();
-    void schedulesQuery.refetch();
-    void registerQuery.refetch();
-    void carsQuery.refetch();
-    void programmesQuery.refetch();
+  const setContext = (nextView: AssuranceViewContext) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", nextView);
+    next.set("period", String(period));
+    next.delete("drawer");
+    setSearchParams(next, { replace: false });
   };
+
+  const setPeriod = (nextPeriod: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("period", String(nextPeriod));
+    next.set("view", view);
+    next.delete("drawer");
+    setSearchParams(next, { replace: false });
+  };
+
+  const openDrawer = (drawerId: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("drawer", drawerId);
+    setSearchParams(next, { replace: false });
+  };
+
+  const closeDrawer = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("drawer");
+    setSearchParams(next, { replace: true });
+  };
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms-assurance-cockpit", amoCode] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-assurance-unscheduled", amoCode] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-dashboard"] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-calendar"] }),
+    ]);
+  };
+
+  const go = (drilldown?: AssuranceCockpitDrilldown) => {
+    if (!drilldown) return;
+    if (drilldown.drawer) {
+      openDrawer(drilldown.drawer);
+      return;
+    }
+    const href = cockpitDrilldownHref(drilldown);
+    if (href) navigate(href);
+  };
+
+  const metricCards = useMemo<MetricCard[]>(() => {
+    if (!data) return [];
+    const openFindings = Number(metrics.open_findings || 0);
+    const overdueCars = Number(metrics.overdue_cars || 0);
+    const unscheduled = Number(metrics.programme_requirements_unscheduled || 0);
+    return [
+      {
+        id: "programme_coverage_pct",
+        label: "Programme coverage",
+        value: formatPercent(metrics.programme_coverage_pct),
+        helper: `${formatNumber(metrics.programme_requirements_scheduled)} of ${formatNumber(metrics.programme_requirements_total)} requirements scheduled`,
+        tone: unscheduled ? "warn" : "good",
+        drilldown: data.drilldowns.programme_coverage_pct,
+      },
+      {
+        id: "programme_requirements_unscheduled",
+        label: "Unscheduled",
+        value: formatNumber(unscheduled),
+        helper: unscheduled ? "Programme requirements awaiting Planner commitment" : "No programme scheduling gaps",
+        tone: unscheduled ? "warn" : "good",
+        drilldown: data.drilldowns.programme_requirements_unscheduled,
+      },
+      {
+        id: "audit_completion_pct",
+        label: "Audit completion",
+        value: formatPercent(metrics.audit_completion_pct),
+        helper: `${formatNumber(metrics.closed_audits)} closed · ${formatNumber(metrics.open_audits)} open`,
+        tone: Number(metrics.open_audits || 0) ? "info" : "good",
+        drilldown: data.drilldowns.audit_completion_pct,
+      },
+      {
+        id: "open_findings",
+        label: "Open findings",
+        value: formatNumber(openFindings),
+        helper: openFindings ? "Current unresolved assurance findings" : "Finding queue clear",
+        tone: openFindings ? "warn" : "good",
+        drilldown: data.drilldowns.open_findings,
+      },
+      {
+        id: "overdue_cars",
+        label: "Overdue CARs",
+        value: formatNumber(overdueCars),
+        helper: `${formatNumber(metrics.open_cars)} open corrective actions`,
+        tone: overdueCars ? "danger" : Number(metrics.open_cars || 0) ? "info" : "good",
+        drilldown: data.drilldowns.overdue_cars,
+      },
+      {
+        id: "controls_due",
+        label: "Controls due",
+        value: formatNumber(metrics.controls_due),
+        helper: `${formatNumber(metrics.active_controls)} active assurance controls`,
+        tone: Number(metrics.controls_due || 0) ? "warn" : "good",
+        drilldown: { path: `/maintenance/${amoCode}/quality`, query: { hub: "controls" } },
+      },
+    ];
+  }, [amoCode, data, metrics]);
+
+  const pipeline = useMemo(() => {
+    const lookup = new Map((data?.audit_pipeline || []).map((row) => [row.status, Number(row.count || 0)]));
+    return PIPELINE_ORDER.map((status) => ({ status, count: lookup.get(status) || 0 }));
+  }, [data?.audit_pipeline]);
+
+  const findingTrend = useMemo(
+    () => (data?.finding_trend || []).map((row) => ({ ...row, label: formatMonth(row.month) })),
+    [data?.finding_trend],
+  );
+
+  const closureAgeing = useMemo(
+    () => (data?.closure_ageing || []).map((row) => ({
+      ...row,
+      label: row.bucket === "not_due" ? "Not due" : row.bucket === "over_90" ? ">90d" : row.bucket.replace("_", "–") + "d",
+    })),
+    [data?.closure_ageing],
+  );
+
+  const toolbar = (
+    <div className="assurance-cockpit__toolbar">
+      <label className="assurance-cockpit__period">
+        <span>Period</span>
+        <select value={period} onChange={(event) => setPeriod(Number(event.target.value))}>
+          {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1].map((year) => <option key={year} value={year}>{year}</option>)}
+        </select>
+      </label>
+      <div className="assurance-context-toggle" role="group" aria-label="Assurance data scope">
+        <button type="button" className={view === "global" ? "is-active" : undefined} onClick={() => setContext("global")}><UsersRound size={15} /> Global</button>
+        <button type="button" className={view === "mine" ? "is-active" : undefined} onClick={() => setContext("mine")}><UserRound size={15} /> My Work</button>
+      </div>
+      <button type="button" className="assurance-command-trigger" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}>
+        <Command size={15} /> Search <kbd>Ctrl K</kbd>
+      </button>
+      <button type="button" className="assurance-refresh" onClick={() => void refresh()} disabled={cockpitQuery.isFetching}>
+        <RefreshCw size={15} className={cockpitQuery.isFetching ? "is-spinning" : undefined} /> Refresh
+      </button>
+    </div>
+  );
 
   return (
     <QualityAuditsSectionLayout
       title="Audit Assurance"
-      subtitle="Operational pressure across programme, planner, register and CARs."
-      toolbar={
-        <div className="qa-dashboard-toolbar">
-          <Button variant="secondary" size="sm" onClick={refreshDashboard} loading={refreshing && !loading}>
-            <RefreshCw size={14} /> Refresh
-          </Button>
-          <Link className="btn btn--primary btn--sm" to={programmeHref(amoCode)}>
-            <Workflow size={14} /> Manage programme
-          </Link>
-        </div>
-      }
+      subtitle="Live assurance health, delivery, exposure and corrective-action control."
+      toolbar={toolbar}
     >
-      <div className="qa-dashboard qa-dashboard--ops" aria-busy={loading || undefined}>
-        {firstError ? <InlineError message={`Some audit dashboard data could not load. ${firstError}`} /> : null}
+      <main className="assurance-cockpit" data-view-context={view}>
+        {cockpitQuery.isLoading ? <div className="assurance-cockpit__loading">Building the live assurance picture…</div> : null}
+        {cockpitQuery.error ? (
+          <div className="assurance-cockpit__error" role="alert">
+            <AlertTriangle size={18} />
+            <div><strong>Unable to load the Assurance cockpit</strong><span>{cockpitQuery.error instanceof Error ? cockpitQuery.error.message : "The live assurance projection is unavailable."}</span></div>
+          </div>
+        ) : null}
 
-        <section className="qa-ops-card-grid" aria-label="Operational attention cards">
-          {opsCards.map((item) => {
-            const Icon = item.icon;
-            const tone = firstError && !loading ? "neutral" : item.tone;
-            const helper = loading ? "Loading…" : firstError ? "Partial data — see error above" : item.helper;
-            return (
-              <Link key={item.id} to={item.href} className={`qa-ops-card qa-ops-card--${tone}`} title={`${item.label}: ${helper}`}>
-                <span className="qa-ops-card__icon">
-                  <Icon size={15} />
-                </span>
-                <span className="qa-ops-card__body">
-                  <strong>{loading ? "—" : typeof item.value === "number" ? formatNumber(item.value) : item.value}</strong>
-                  <span title={item.label}>{item.label}</span>
-                  <small title={helper.trim() || undefined}>{helper.trim()}</small>
-                </span>
-                <ArrowRight size={13} className="qa-ops-card__arrow" aria-hidden />
-              </Link>
-            );
-          })}
-        </section>
+        {data ? (
+          <>
+            <section className={`assurance-health assurance-health--${data.readiness.band.toLowerCase()}`}>
+              <div className="assurance-health__identity">
+                <span className="assurance-health__eyebrow"><ShieldCheck size={15} /> {view === "mine" ? "My assurance position" : "AMO assurance position"}</span>
+                <div className="assurance-health__headline">
+                  <strong>{data.readiness.score}%</strong>
+                  <div><h2>{labelize(data.readiness.band)}</h2><p>{readinessCopy(data.readiness.band)}</p></div>
+                </div>
+                <small>{data.readiness.disclaimer}</small>
+              </div>
+              <div className="assurance-health__signals">
+                <div><span>Priority actions</span><strong>{formatNumber(data.priority_queue.length)}</strong></div>
+                <div><span>Overdue CARs</span><strong>{formatNumber(metrics.overdue_cars)}</strong></div>
+                <div><span>Open regulator findings</span><strong>{formatNumber(metrics.open_regulator_findings)}</strong></div>
+                <div><span>Updated</span><strong>{new Date(data.as_of).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong></div>
+              </div>
+            </section>
 
-        <section className="qa-dashboard-grid qa-dashboard-grid--ops" aria-label="Audit dashboard panels">
-          <article className={`qa-panel qa-panel--span-7${nextAttention ? " qa-panel--priority" : " qa-panel--priority-clear"}`}>
-            <div className="qa-panel__header qa-panel__header--compact">
-              <div>
-                <h3>
-                  {nextAttention ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />} Needs attention
-                </h3>
-              </div>
-              <Link to={programmeHref(amoCode)}>Programme</Link>
-            </div>
-            <div
-              className={`qa-next-action-card qa-next-action-card--inline${nextAttention ? "" : " qa-next-action-card--clear"}`}
-            >
-              <span className={`qa-action-item__marker qa-action-item__marker--${nextAttention?.urgency || "neutral"}`} />
-              <div>
-                <small>{nextAttention ? "Next action" : "Status"}</small>
-                {nextAttention ? (
-                  <Link to={nextAttention.href} title={nextAttention.label}>
-                    {nextAttention.label}
-                    <ArrowRight size={14} />
-                  </Link>
-                ) : firstError ? (
-                  <strong>Data incomplete</strong>
-                ) : (
-                  <strong>Nothing urgent</strong>
-                )}
-                <p title={nextAttention?.meta || undefined}>
-                  {nextAttention?.meta ||
-                    (firstError
-                      ? "Attention queue unavailable until dashboard data loads successfully."
-                      : "No overdue audits, findings, or CARs in the loaded set.")}
-                </p>
-              </div>
-            </div>
-            <div className="qa-action-queue" aria-label="Attention queue">
-              {distinctActionQueue.length ? (
-                distinctActionQueue.map((item) => (
-                  <Link key={item.id} to={item.href} className={`qa-action-queue__item qa-action-queue__item--${item.urgency}`} title={item.label}>
-                    <span className={`qa-action-item__marker qa-action-item__marker--${item.urgency}`} />
-                    <span>
-                      <strong title={item.label}>{item.label}</strong>
-                      <small title={item.meta}>{item.meta}</small>
-                    </span>
-                    <ArrowRight size={13} />
-                  </Link>
-                ))
-              ) : (
-                <EmptyDashboardState
-                  icon={<CheckCircle2 size={16} />}
-                  title={firstError ? "Queue unavailable until data loads" : "Queue clear for current data window"}
-                />
-              )}
-            </div>
-          </article>
+            <section className="assurance-kpi-grid" aria-label="Assurance headline metrics">
+              {metricCards.map((card) => (
+                <button key={card.id} type="button" className={`assurance-kpi assurance-kpi--${card.tone}`} onClick={() => go(card.drilldown)}>
+                  <span className="assurance-kpi__label">{card.label}</span>
+                  <strong>{card.value}</strong>
+                  <small>{card.helper}</small>
+                  <span className="assurance-kpi__open">Open <ArrowRight size={13} /></span>
+                </button>
+              ))}
+            </section>
 
-          <article className="qa-panel qa-panel--span-5">
-            <div className="qa-panel__header qa-panel__header--compact">
-              <div>
-                <h3>
-                  <CalendarClock size={15} /> Upcoming
-                </h3>
-              </div>
-              <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Calendar</Link>
-            </div>
-            <div className="qa-upcoming-list qa-upcoming-list--compact">
-              {upcoming.length ? (
-                upcoming.map((item) => (
-                  <Link key={`${item.kind}-${item.id}`} to={item.href} className={`qa-upcoming-item qa-upcoming-item--${item.kind}`} title={item.title}>
-                    <span className="qa-upcoming-item__date">{formatDate(item.date)}</span>
-                    <span className="qa-upcoming-item__copy">
-                      <strong title={item.title}>{item.title}</strong>
-                      <small title={item.helper}>{item.helper}</small>
-                    </span>
-                    <ArrowRight size={13} />
-                  </Link>
-                ))
-              ) : (
-                <EmptyDashboardState icon={<CheckCircle2 size={16} />} title="Nothing due in the next 45 days" />
-              )}
-            </div>
-          </article>
+            <section className="assurance-cockpit__grid assurance-cockpit__grid--primary">
+              <article className="assurance-panel assurance-panel--trend">
+                <header><div><span>Finding intelligence</span><h3>Findings trend</h3><p>Finding creation by severity for the selected period.</p></div><button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings&period=${period}&view=${view}`)}>Open register <ArrowRight size={13} /></button></header>
+                {findingTrend.length ? (
+                  <div className="assurance-chart assurance-chart--large">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={findingTrend} margin={{ top: 12, right: 12, left: -20, bottom: 0 }}>
+                        <CartesianGrid vertical={false} stroke="var(--qms-line-soft, #e2e8f0)" />
+                        <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={11} />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="level_1" name="Level 1" stackId="findings" stroke="var(--assurance-critical, #dc2626)" fill="var(--assurance-critical-soft, #fee2e2)" />
+                        <Area type="monotone" dataKey="level_2" name="Level 2" stackId="findings" stroke="var(--assurance-major, #d97706)" fill="var(--assurance-major-soft, #fef3c7)" />
+                        <Area type="monotone" dataKey="level_3" name="Level 3" stackId="findings" stroke="var(--accent-primary, #2563eb)" fill="var(--assurance-minor-soft, #dbeafe)" />
+                        <Area type="monotone" dataKey="observations" name="Observations" stackId="findings" stroke="var(--assurance-observation, #059669)" fill="var(--assurance-observation-soft, #d1fae5)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : <div className="assurance-empty"><CheckCircle2 size={22} /><strong>No finding trend for {period}</strong><span>No findings have been recorded in the selected scope and period.</span></div>}
+              </article>
 
-          <article className="qa-panel qa-panel--span-7">
-            <div className="qa-panel__header qa-panel__header--compact">
-              <div>
-                <h3>
-                  <ShieldAlert size={15} /> Finding exposure
-                </h3>
-              </div>
-              <Link to={registerHref(amoCode, "findings")}>Register</Link>
-            </div>
-            <div className="qa-exposure-stack qa-exposure-stack--compact">
-              <ExposureRow label="Level 1 · Critical" value={dashboard?.findings_open_level_1 ?? levelCounts["1"]} tone="danger" />
-              <ExposureRow label="Level 2 · Major" value={dashboard?.findings_open_level_2 ?? levelCounts["2"]} tone="warning" />
-              <ExposureRow label="Level 3 · Minor" value={levelCounts["3"]} tone="info" />
-              <ExposureRow label="Observations" value={dashboard?.findings_open_level_4 ?? levelCounts["4"]} tone="success" />
-              <ExposureRow label="Open without CAR" value={findingsWithoutCars.length} tone={findingsWithoutCars.length ? "warning" : "neutral"} />
-            </div>
-          </article>
+              <article className="assurance-panel assurance-panel--actions">
+                <header><div><span>Action centre</span><h3>{view === "mine" ? "My priority queue" : "Management attention"}</h3><p>Ranked from live assurance conditions.</p></div></header>
+                <div className="assurance-action-list">
+                  {data.priority_queue.length ? data.priority_queue.slice(0, 7).map((item) => (
+                    <button key={item.id} type="button" onClick={() => {
+                      if (item.id === "programme-unscheduled") openDrawer("unscheduled-requirements");
+                      else navigate(item.path);
+                    }}>
+                      <span className={`assurance-priority assurance-priority--${item.severity.toLowerCase()}`}>{item.severity}</span>
+                      <span className="assurance-action-list__copy"><strong>{item.label}</strong><small>{item.why}</small></span>
+                      <b>{item.count}</b><ArrowRight size={14} />
+                    </button>
+                  )) : (
+                    <div className="assurance-inbox-zero"><CheckCircle2 size={24} /><strong>{view === "mine" ? "You're clear" : "Priority queue clear"}</strong><span>No current conditions require action in this scope.</span></div>
+                  )}
+                </div>
+              </article>
+            </section>
 
-          <article className="qa-panel qa-panel--span-5">
-            <div className="qa-panel__header qa-panel__header--compact">
-              <div>
-                <h3>
-                  <ClipboardList size={15} /> CAR closeout
-                </h3>
+            <section className="assurance-cockpit__grid assurance-cockpit__grid--secondary">
+              <article className="assurance-panel">
+                <header><div><span>Exposure</span><h3>Risk by control category</h3><p>Open finding concentration by available control classification.</p></div></header>
+                {data.control_exposure.length ? (
+                  <div className="assurance-chart">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={data.control_exposure} layout="vertical" margin={{ top: 6, right: 16, left: 12, bottom: 0 }}>
+                        <CartesianGrid horizontal={false} stroke="var(--qms-line-soft, #e2e8f0)" />
+                        <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={10} />
+                        <YAxis type="category" dataKey="category" width={116} tickLine={false} axisLine={false} fontSize={10} />
+                        <Tooltip />
+                        <Bar dataKey="count" name="Open findings" fill="var(--accent-primary, #2563eb)" radius={[0, 5, 5, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : <div className="assurance-empty assurance-empty--compact"><Target size={20} /><strong>No categorized exposure</strong><span>Open findings are clear or no control category is available.</span></div>}
+              </article>
+
+              <article className="assurance-panel">
+                <header><div><span>Closeout discipline</span><h3>CAR ageing</h3><p>Open corrective actions by due-state and overdue age.</p></div><button type="button" onClick={() => go(data.drilldowns.open_cars)}>Open CARs <ArrowRight size={13} /></button></header>
+                <div className="assurance-ageing">
+                  {closureAgeing.map((item) => <button key={item.bucket} type="button" onClick={() => go(item.bucket === "not_due" ? data.drilldowns.open_cars : data.drilldowns.overdue_cars)}><strong>{item.count}</strong><span>{item.label}</span></button>)}
+                </div>
+              </article>
+
+              <article className="assurance-panel">
+                <header><div><span>Delivery</span><h3>Audit pipeline</h3><p>Current audit occurrence state in the selected scope.</p></div></header>
+                <div className="assurance-pipeline">
+                  {pipeline.map((item, index) => (
+                    <button key={item.status} type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits?status=${item.status}&period=${period}&view=${view}`)}>
+                      <span>{index + 1}</span><strong>{item.count}</strong><small>{labelize(item.status)}</small>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            </section>
+
+            <section className="assurance-readiness-panel">
+              <header><div><span>Readiness dimensions</span><h3>What is driving the assurance position?</h3></div><small>{view === "mine" ? "Personal scope where an attributable owner/participant exists; otherwise tenant-wide indicators remain governed by source availability." : "Tenant-wide live source projection."}</small></header>
+              <div className="assurance-readiness-grid">
+                {data.readiness.dimensions.map((dimension) => (
+                  <div key={dimension.id}><span>{dimension.label}</span><div><i style={{ width: `${dimension.score}%` }} /></div><strong>{dimension.score}%</strong></div>
+                ))}
               </div>
-              <Link to={registerHref(amoCode, "cars")}>CARs</Link>
-            </div>
-            <div className="qa-car-grid qa-car-grid--compact">
-              <HealthMetric label="Open" value={openCars.length} tone={openCars.length ? "warning" : "success"} />
-              <HealthMetric label="Overdue" value={overdueCars.length} tone={overdueCars.length ? "danger" : "success"} />
-              <HealthMetric label="Due 7d" value={carsDueSoon.length} tone={carsDueSoon.length ? "warning" : "neutral"} />
-              <HealthMetric label="Verify" value={pendingVerificationCars.length} tone={pendingVerificationCars.length ? "info" : "neutral"} />
-            </div>
-            <div className="qa-ops-mini-links">
-              <Link to={programmeHref(amoCode)}>
-                <Plus size={13} /> Manage programme coverage
-              </Link>
-              <Link to={`/maintenance/${amoCode}/quality/calendar/week`}>Open Calendar</Link>
-            </div>
-          </article>
-        </section>
-      </div>
+            </section>
+
+            {data.warnings.length ? <details className="assurance-source-warnings"><summary>{data.warnings.length} source warning{data.warnings.length === 1 ? "" : "s"}</summary><ul>{data.warnings.slice(0, 12).map((warning, index) => <li key={`${warning.source}-${index}`}><strong>{warning.source}</strong> — {warning.message}</li>)}</ul></details> : null}
+          </>
+        ) : null}
+      </main>
+
+      <Drawer title="Unscheduled programme requirements" isOpen={unscheduledDrawerOpen} onClose={closeDrawer} panelClassName="assurance-unscheduled-drawer">
+        <div className="assurance-unscheduled-drawer__body">
+          <p>Commit governed programme requirements to the authoritative Planner without losing your place in the Assurance cockpit.</p>
+          {unscheduledQuery.isLoading ? <div className="assurance-cockpit__loading">Loading programme gaps…</div> : null}
+          {unscheduledQuery.error ? <div className="assurance-cockpit__error"><AlertTriangle size={17} /><span>Unable to load unscheduled requirements.</span></div> : null}
+          <div className="assurance-unscheduled-list">
+            {(unscheduledQuery.data?.items || []).map((item) => (
+              <article key={item.id}>
+                <div className="assurance-unscheduled-list__top"><span>{item.audit_type.replaceAll("_", " ")}</span>{item.mandatory_surveillance ? <b>Mandatory</b> : null}</div>
+                <h4>{item.title}</h4>
+                <p>{item.programme_ref} · {item.programme_title}</p>
+                <dl>
+                  <div><dt>Target</dt><dd>{formatDate(item.target_start)}{item.target_end ? ` – ${formatDate(item.target_end)}` : ""}</dd></div>
+                  <div><dt>Duration</dt><dd>{item.default_duration_days} day{item.default_duration_days === 1 ? "" : "s"}</dd></div>
+                  <div><dt>Location</dt><dd>{item.default_location || "Not set"}</dd></div>
+                  <div><dt>Lead</dt><dd>{item.lead_auditor_user_id ? "Assigned" : "Unassigned"}</dd></div>
+                </dl>
+                <div className="assurance-unscheduled-list__actions">
+                  <button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/calendar/week?focusRequirementId=${encodeURIComponent(item.id)}`)}><CalendarClock size={14} /> Schedule in Planner</button>
+                  <button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/program?focusId=${encodeURIComponent(item.programme_id)}`)}>Open programme <ArrowRight size={13} /></button>
+                </div>
+              </article>
+            ))}
+          </div>
+          {!unscheduledQuery.isLoading && !unscheduledQuery.error && (unscheduledQuery.data?.items.length || 0) === 0 ? <div className="assurance-inbox-zero"><CheckCircle2 size={24} /><strong>No unscheduled requirements</strong><span>The selected programme scope is fully committed to the Planner.</span></div> : null}
+        </div>
+      </Drawer>
     </QualityAuditsSectionLayout>
   );
 };
-
-function HealthMetric({ label, value, tone }: { label: string; value: number; tone: KpiTone }): React.ReactElement {
-  return (
-    <div className={`qa-health-metric qa-health-metric--${tone}`}>
-      <strong>{formatNumber(value)}</strong>
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function ExposureRow({ label, value, tone }: { label: string; value: number; tone: KpiTone }): React.ReactElement {
-  return (
-    <div className={`qa-exposure-row qa-exposure-row--${tone}`}>
-      <span>{label}</span>
-      <strong>{formatNumber(value)}</strong>
-    </div>
-  );
-}
-
-function EmptyDashboardState({ icon, title }: { icon: React.ReactNode; title: string }): React.ReactElement {
-  return (
-    <div className="qa-empty-state">
-      {icon}
-      <span>{title}</span>
-    </div>
-  );
-}
 
 export default QualityAuditAssuranceDashboardPage;
