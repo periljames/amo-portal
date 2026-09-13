@@ -167,7 +167,7 @@ def test_export_car_pdf_logs_audit_event(db_session, monkeypatch, tmp_path):
         summary="Summary",
         priority=quality_models.CARPriority.MEDIUM,
         requested_by_user_id=user.id,
-        assigned_to_user_id=None,
+        assigned_to_user_id=user.id,
         due_date=None,
         target_closure_date=None,
         finding_id=None,
@@ -304,6 +304,7 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
 
     first_page = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
+        period=None,
         limit=1,
         offset=0,
         db=db_session,
@@ -318,6 +319,7 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
 
     car_only = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
+        period=None,
         only_with_cars=True,
         limit=25,
         offset=0,
@@ -329,6 +331,7 @@ def test_audit_register_page_is_bounded_and_tenant_scoped(db_session):
 
     searched = register_pagination.get_audit_register_paged(
         domain=quality_models.QMSDomain.AMO,
+        period=None,
         search=car.car_number,
         limit=25,
         offset=0,
