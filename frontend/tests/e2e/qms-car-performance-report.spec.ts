@@ -172,9 +172,9 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await expect(page.getByText(/QMSM 2\.5 QPI 3 target: at least 80%/)).toBeVisible();
   await expect(page.getByText("QPI target below requirement")).toBeVisible();
   await expect(page.getByText("50.0%").first()).toBeVisible();
-  await expect(page.getByText("QMS-CAR-001")).toBeVisible();
-  await expect(page.getByText("QMS-CAR-002")).toBeVisible();
-  await expect(page.getByText("QMS-CAR-003")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open QMS-CAR-001" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open QMS-CAR-002" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open QMS-CAR-003" })).toBeVisible();
   const departmentSection = page.getByRole("heading", { name: "Department performance" }).locator("xpath=ancestor::section[1]");
   await expect(departmentSection.getByText("Engineering", { exact: true })).toBeVisible();
   await expect(departmentSection.getByText("Quality", { exact: true })).toBeVisible();
