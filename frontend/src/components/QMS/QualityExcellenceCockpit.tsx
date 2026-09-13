@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 
+import { SourceHealthNotice } from "./SourceHealthNotice";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import {
   createAssuranceControl,
@@ -509,13 +510,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
             ) : null}
           </section>
 
-          {overview.warnings.length ? (
-            <section className="qew-alert qew-alert--warning">
-              <AlertTriangle size={19} />
-              <div><strong>{overview.warnings.length} source check{overview.warnings.length === 1 ? "" : "s"} need attention</strong><span>Available records are shown, but missing sources are not treated as proof that no exposure exists.</span></div>
-              <details><summary>Technical detail</summary><pre>{JSON.stringify(overview.warnings, null, 2)}</pre></details>
-            </section>
-          ) : null}
+          <SourceHealthNotice warnings={overview.warnings} asOf={overview.as_of} />
         </div>
       ) : null}
 

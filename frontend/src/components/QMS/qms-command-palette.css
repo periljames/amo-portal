@@ -157,3 +157,35 @@
   .qms-command-palette__search-row kbd { display: none; }
   .qms-command-palette__search-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
+
+/* Native dialog supplies focus containment and inert background behavior. */
+dialog.qms-command-palette {
+  border: 0;
+  margin: 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  color: inherit;
+  overflow: auto;
+}
+dialog.qms-command-palette:not([open]) { display: none; }
+dialog.qms-command-palette::backdrop { background: transparent; }
+.qms-command-palette__dialog { min-width: 0; max-height: calc(100dvh - 2rem); }
+.qms-command-palette__results { min-height: 0; overscroll-behavior: contain; }
+.qms-command-palette :is(input, button):focus-visible {
+  outline: 3px solid var(--accent-primary, #2563eb);
+  outline-offset: 2px;
+}
+.qms-command-palette__search-row button { min-width: 44px; min-height: 44px; }
+.qms-command-palette__results > button { min-height: 48px; }
+@media (max-width: 640px) {
+  dialog.qms-command-palette { padding: max(env(safe-area-inset-top), 0.5rem) 0.5rem; }
+  .qms-command-palette__dialog { width: 100%; }
+  .qms-command-palette__copy strong, .qms-command-palette__copy small { white-space: normal; overflow-wrap: anywhere; }
+  .qms-command-palette__status { max-width: 7rem; overflow-wrap: anywhere; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qms-command-palette *, .qms-command-palette *::before, .qms-command-palette *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

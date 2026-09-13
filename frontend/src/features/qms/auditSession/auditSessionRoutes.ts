@@ -1,3 +1,4 @@
+import { qmsAuditPath } from "../../../pages/qms/routes/qmsRouteRegistry";
 import type { AuditSessionStageId } from "../../../services/qmsAuditSession";
 
 export const AUDIT_SESSION_STAGES: readonly AuditSessionStageId[] = [
@@ -55,7 +56,7 @@ export function auditSessionStageFromPath(pathname: string): AuditSessionStageId
 }
 
 export function auditSessionPath(amoCode: string, auditKey: string, stage: AuditSessionStageId): string {
-  return `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/${encodeURIComponent(auditKey)}/${stage}`;
+  return qmsAuditPath(amoCode, auditKey, stage);
 }
 
 export function auditOccurrenceFunctionalPath(

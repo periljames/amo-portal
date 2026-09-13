@@ -70,6 +70,8 @@ def get_audit_register_paged(
     view: Literal["global", "mine"] = "global",
     period: int | None = Query(None, ge=2000, le=2200),
     open_only: bool = False,
+    finding_status: Literal["open", "closed"] | None = None,
+    level: Literal["LEVEL_1", "LEVEL_2", "LEVEL_3", "LEVEL_4"] | None = None,
     audit_id: Optional[UUID] = None,
     finding_id: Optional[UUID] = None,
     only_with_cars: bool = False,
@@ -109,8 +111,12 @@ def get_audit_register_paged(
 
     if view == "mine":
         query = query.filter(text(responsibility(db, "qms_audit_findings", set(Finding.__table__.columns.keys())))).params(actor_user_id=ctx.user_id)
-    if open_only:
+    if open_only or finding_status == "open":
         query = query.filter(Finding.closed_at.is_(None))
+    elif finding_status == "closed":
+        query = query.filter(Finding.closed_at.is_not(None))
+    if level:
+        query = query.filter(cast(Finding.level, String) == level)
     if period is not None:
         query = query.filter(Finding.created_at >= date(period, 1, 1), Finding.created_at < date(period + 1, 1, 1))
     if domain is not None:

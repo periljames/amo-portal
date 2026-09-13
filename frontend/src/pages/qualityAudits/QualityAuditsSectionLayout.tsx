@@ -8,11 +8,9 @@ import {
   Gauge,
   ListTree,
   ListChecks,
-  ShieldCheck,
   TableProperties,
   Trash2,
   Workflow,
-  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { userHasQmsRolePermission } from "../../app/routeGuards";
@@ -24,7 +22,7 @@ import {
   isAuditAssuranceDestinationActive,
   type AuditAssuranceNavGroup,
   type AuditAssuranceNavId,
-} from "./auditAssuranceNavigation";
+} from "../qms/routes/qmsRouteRegistry";
 import "./quality-audits-workspace.css";
 import "./qa-dark-contrast.css";
 
@@ -49,7 +47,6 @@ const NAV_GROUPS: ReadonlyArray<{
   { id: "planning", label: "Planning", ariaLabel: "Audit programme" },
   { id: "execution", label: "Execution", ariaLabel: "Audits and controlled checklists" },
   { id: "follow-up", label: "Follow-up", ariaLabel: "Finding lifecycle and analysis" },
-  { id: "oversight", label: "Oversight", ariaLabel: "Provider, tooling and regulatory assurance" },
   { id: "records", label: "Records", ariaLabel: "Audit records" },
 ];
 
@@ -62,9 +59,6 @@ const DESTINATION_ICONS: Record<AuditAssuranceNavId, LucideIcon> = {
   checklists: ListChecks,
   "findings-actions": TableProperties,
   "finding-intelligence": BarChart3,
-  "external-providers": ShieldCheck,
-  "tooling-assurance": Wrench,
-  "external-regulatory": ShieldCheck,
   evidence: Archive,
   bin: Trash2,
 };

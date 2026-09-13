@@ -25,6 +25,11 @@ import {
 } from "recharts";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
+import { openQmsCommandPalette } from "../../services/qmsCommandPalette";
+import { SourceHealthNotice } from "../../components/QMS/SourceHealthNotice";
+import { AssuranceDataSummary } from "../../components/QMS/AssuranceDataSummary";
+import { qmsModulePath, qmsBasePath, qmsProgrammeItemSchedulePath } from "../qms/routes/qmsRouteRegistry";
+import { parseQmsPeriod, parseQmsView, qmsRegisterPath, withQmsQuery } from "../qms/routes/qmsQueryState";
 import Drawer from "../../components/shared/Drawer";
 import { getContext } from "../../services/auth";
 import {
@@ -91,10 +96,8 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   const currentYear = new Date().getFullYear();
-  const rawView = searchParams.get("view");
-  const view: AssuranceViewContext = rawView === "mine" ? "mine" : "global";
-  const rawPeriod = Number(searchParams.get("period") || currentYear);
-  const period = Number.isFinite(rawPeriod) && rawPeriod >= 2000 && rawPeriod <= 2200 ? rawPeriod : currentYear;
+  const view: AssuranceViewContext = parseQmsView(searchParams.get("view"));
+  const period = parseQmsPeriod(searchParams.get("period")) ?? currentYear;
   const drawer = searchParams.get("drawer");
   const unscheduledDrawerOpen = drawer === "unscheduled-requirements";
 
@@ -139,7 +142,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
   const closeDrawer = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("drawer");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, { replace: false });
   };
 
   const refresh = async () => {
@@ -213,7 +216,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
         value: formatNumber(metrics.controls_due),
         helper: `${formatNumber(metrics.active_controls)} active assurance controls`,
         tone: Number(metrics.controls_due || 0) ? "warn" : "good",
-        drilldown: { path: `/maintenance/${amoCode}/quality`, query: { hub: "controls" } },
+        drilldown: { path: qmsBasePath(amoCode), query: { hub: "controls" } },
       },
     ];
   }, [amoCode, data, metrics]);
@@ -245,10 +248,10 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
         </select>
       </label>
       <div className="assurance-context-toggle" role="group" aria-label="Assurance data scope">
-        <button type="button" className={view === "global" ? "is-active" : undefined} onClick={() => setContext("global")}><UsersRound size={15} /> Global</button>
-        <button type="button" className={view === "mine" ? "is-active" : undefined} onClick={() => setContext("mine")}><UserRound size={15} /> My Work</button>
+        <button type="button" className={view === "global" ? "is-active" : undefined} aria-pressed={view === "global"} onClick={() => setContext("global")}><UsersRound size={15} /> Global</button>
+        <button type="button" className={view === "mine" ? "is-active" : undefined} aria-pressed={view === "mine"} onClick={() => setContext("mine")}><UserRound size={15} /> My Work</button>
       </div>
-      <button type="button" className="assurance-command-trigger" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}>
+      <button type="button" className="assurance-command-trigger" onClick={openQmsCommandPalette}>
         <Command size={15} /> Search <kbd>Ctrl K</kbd>
       </button>
       <button type="button" className="assurance-refresh" onClick={() => void refresh()} disabled={cockpitQuery.isFetching}>
@@ -305,9 +308,9 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
 
             <section className="assurance-cockpit__grid assurance-cockpit__grid--primary">
               <article className="assurance-panel assurance-panel--trend">
-                <header><div><span>Finding intelligence</span><h3>Findings trend</h3><p>Finding creation by severity for the selected period.</p></div><button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings&period=${period}&view=${view}`)}>Open register <ArrowRight size={13} /></button></header>
+                <header><div><span>Finding intelligence</span><h3>Findings trend</h3><p>Finding creation by severity for the selected period.</p></div><button type="button" onClick={() => navigate(qmsRegisterPath(amoCode, { period, view }))}>Open register <ArrowRight size={13} /></button></header>
                 {data.finding_trend == null ? <div className="assurance-empty">Finding data unavailable.</div> : findingTrend.length ? (
-                  <div className="assurance-chart assurance-chart--large">
+                  <div className="assurance-chart assurance-chart--large" aria-hidden="true">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={findingTrend} margin={{ top: 12, right: 12, left: -20, bottom: 0 }}>
                         <CartesianGrid vertical={false} stroke="var(--qms-line-soft, #e2e8f0)" />
@@ -322,6 +325,10 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                     </ResponsiveContainer>
                   </div>
                 ) : <div className="assurance-empty"><CheckCircle2 size={22} /><strong>No finding trend for {period}</strong><span>No findings have been recorded in the selected scope and period.</span></div>}
+                {data.finding_trend != null ? <AssuranceDataSummary title={`Findings created in ${period}`} rows={findingTrend} columns={[
+                  { key: "month", label: "Month" }, { key: "level_1", label: "Level 1" }, { key: "level_2", label: "Level 2" },
+                  { key: "level_3", label: "Level 3" }, { key: "observations", label: "Observations" }, { key: "other", label: "Other" },
+                ]} /> : null}
               </article>
 
               <article className="assurance-panel assurance-panel--actions">
@@ -347,7 +354,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               <article className="assurance-panel">
                 <header><div><span>Exposure</span><h3>Risk by control category</h3><p>Current open finding concentration by available control classification.</p></div></header>
                 {data.control_exposure == null ? <div className="assurance-empty">Exposure data unavailable.</div> : data.control_exposure.length ? (
-                  <div className="assurance-chart">
+                  <div className="assurance-chart" aria-hidden="true">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={data.control_exposure} layout="vertical" margin={{ top: 6, right: 16, left: 12, bottom: 0 }}>
                         <CartesianGrid horizontal={false} stroke="var(--qms-line-soft, #e2e8f0)" />
@@ -358,14 +365,15 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                ) : <div className="assurance-empty assurance-empty--compact"><Target size={20} /><strong>No categorized exposure</strong><span>Open findings are clear or no control category is available.</span></div>}
+                ) : <div className="assurance-empty assurance-empty--compact"><Target size={20} /><strong>No categorized exposure</strong><span>No open findings in the available categories.</span></div>}
+                {data.control_exposure != null ? <AssuranceDataSummary title="Current open findings by category" rows={data.control_exposure} columns={[{ key: "category", label: "Category" }, { key: "count", label: "Open findings" }]} /> : null}
               </article>
 
               <article className="assurance-panel">
                 <header><div><span>Closeout discipline</span><h3>CAR ageing</h3><p>Current open corrective actions by due-state and overdue age.</p></div><button type="button" onClick={() => go(data.drilldowns.open_cars)}>Open CARs <ArrowRight size={13} /></button></header>
                 <div className="assurance-ageing">
                   {data.closure_ageing == null ? <p>CAR data unavailable.</p> : null}
-                  {closureAgeing.map((item) => <button key={item.bucket} type="button" onClick={() => go(item.bucket === "not_due" ? data.drilldowns.open_cars : data.drilldowns.overdue_cars)}><strong>{item.count}</strong><span>{item.label}</span></button>)}
+                  {closureAgeing.map((item) => <button key={item.bucket} type="button" aria-label={`${item.count} current CARs: ${item.label}. Open register`} onClick={() => go(item.bucket === "not_due" ? data.drilldowns.open_cars : data.drilldowns.overdue_cars)}><strong>{item.count}</strong><span>{item.label}</span></button>)}
                 </div>
               </article>
 
@@ -373,7 +381,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                 <header><div><span>Delivery</span><h3>Audit pipeline</h3><p>Current status of audit occurrences planned or created in the selected year.</p></div></header>
                 <div className="assurance-pipeline">
                   {data.audit_pipeline == null ? <p>Audit data unavailable.</p> : pipeline.map((item, index) => (
-                    <button key={item.status} type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits?status=${item.status}&period=${period}&view=${view}`)}>
+                    <button key={item.status} type="button" aria-label={`${item.count} ${labelize(item.status)} audits in ${period}. Open audits`} onClick={() => navigate(withQmsQuery(qmsModulePath(amoCode, "audits", "workspace"), new URLSearchParams({ status: item.status, period: String(period), view })))}>
                       <span>{index + 1}</span><strong>{item.count}</strong><small>{labelize(item.status)}</small>
                     </button>
                   ))}
@@ -385,12 +393,12 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               <header><div><span>Readiness dimensions</span><h3>What is driving the assurance position?</h3></div><small>{view === "mine" ? "Personal scope uses supported assignments and ownership. Unsupported personal projections are excluded." : "Tenant-wide live source projection."}</small></header>
               <div className="assurance-readiness-grid">
                 {data.readiness.dimensions.map((dimension) => (
-                  <div key={dimension.id}><span>{dimension.label}</span><div><i style={{ width: `${dimension.score}%` }} /></div><strong>{dimension.score}%</strong></div>
+                  <div key={dimension.id}><span>{dimension.label}</span><div aria-hidden="true"><i style={{ width: `${dimension.score ?? 0}%` }} /></div><strong>{dimension.score == null ? "Unavailable" : `${dimension.score}%`}</strong></div>
                 ))}
               </div>
             </section>
 
-            {data.warnings.length ? <details className="assurance-source-warnings"><summary>{data.warnings.length} source warning{data.warnings.length === 1 ? "" : "s"}</summary><ul>{data.warnings.slice(0, 12).map((warning, index) => <li key={`${warning.source}-${index}`}><strong>{warning.source}</strong> — {warning.message}</li>)}</ul></details> : null}
+            <SourceHealthNotice warnings={data.warnings} asOf={data.as_of} />
           </>
         ) : null}
       </main>
@@ -413,8 +421,8 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                   <div><dt>Lead</dt><dd>{item.lead_auditor_user_id ? "Assigned" : "Unassigned"}</dd></div>
                 </dl>
                 <div className="assurance-unscheduled-list__actions">
-                  <button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/calendar/week?focusRequirementId=${encodeURIComponent(item.id)}`)}><CalendarClock size={14} /> Schedule in Planner</button>
-                  <button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/program?focusId=${encodeURIComponent(item.programme_id)}`)}>Open programme <ArrowRight size={13} /></button>
+                  <button type="button" onClick={() => navigate(qmsProgrammeItemSchedulePath(amoCode, item.programme_id, item.id))}><CalendarClock size={14} /> Schedule in Planner</button>
+                  <button type="button" onClick={() => navigate(withQmsQuery(qmsModulePath(amoCode, "audits", "program"), new URLSearchParams({ programme: item.programme_id, period: String(period) })))}>Open programme <ArrowRight size={13} /></button>
                 </div>
               </article>
             ))}

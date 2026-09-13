@@ -16,6 +16,8 @@ export type QmsAuditRegisterPageParams = {
   view?: "global" | "mine";
   period?: number;
   openOnly?: boolean;
+  status?: "open" | "closed";
+  level?: string;
   auditId?: string;
   findingId?: string;
   onlyWithCars?: boolean;
@@ -83,6 +85,8 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
   setIfPresent(query, "domain", params.domain);
   setIfPresent(query, "view", params.view);
   if (params.period != null) query.set("period", String(params.period));
+  setIfPresent(query, "finding_status", params.status);
+  setIfPresent(query, "level", params.level);
   if (params.openOnly) query.set("open_only", "true");
   setIfPresent(query, "audit_id", params.auditId);
   setIfPresent(query, "finding_id", params.findingId);

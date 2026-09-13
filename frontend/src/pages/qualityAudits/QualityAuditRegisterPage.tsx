@@ -22,13 +22,14 @@ import { getContext } from "../../services/auth";
 import { qmsGetAuditRegisterPage } from "../../services/qmsRegisters";
 import type { CAROut, QMSAuditOut, QMSFindingOut } from "../../services/qms";
 import { auditNavigationHref } from "./auditNavigation";
+import { qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
+import { parseQmsRegisterFilters, withQmsQuery, buildPreservedQmsQuery } from "../qms/routes/qmsQueryState";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
   FINDING_LIFECYCLE_OPTIONS,
   findingLifecycleLabel,
   findingLifecycleView,
   findingNextAction,
-  parseFindingLifecycleView,
   primaryLinkedCar,
   toRegisterWorkflowStage,
   type FindingLifecycleView,
@@ -36,7 +37,6 @@ import {
 import "./quality-audits-list-workspace.css";
 
 type RegisterPageSize = 25 | 50 | 100;
-type CarTiming = "overdue" | "due_soon" | "";
 
 type RegisterRow = {
   id: string;
@@ -62,33 +62,38 @@ const QualityAuditRegisterPage: React.FC = () => {
   const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const actorView = searchParams.get("view") === "mine" ? "mine" : "global";
-  const period = searchParams.get("period") ? Number(searchParams.get("period")) : undefined;
-  const openOnly = searchParams.get("status") === "open";
-  const stage = parseFindingLifecycleView(searchParams.get("stage"));
-  const rawTiming = searchParams.get("timing");
-  const timing: CarTiming = rawTiming === "overdue" || rawTiming === "due_soon" ? rawTiming : "";
-  const auditId = searchParams.get("auditId")?.trim() || "";
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [pageSize, setPageSize] = useState<RegisterPageSize>(25);
-  const [page, setPage] = useState(1);
+  const filters = parseQmsRegisterFilters(searchParams);
+  const { view: actorView, period, status: findingStatus, stage, timing, auditId, q: search, pageSize, page, level } = filters;
+  const [searchDraft, setSearchDraft] = useState(search);
+  useEffect(() => setSearchDraft(search), [search]);
+  const patchFilters = useCallback((patch: Record<string, string | number | null>, replace = false) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(patch).forEach(([key, value]) => {
+      if (value == null || value === "" || value === "all") next.delete(key);
+      else next.set(key, String(value));
+    });
+    next.delete("tab");
+    setSearchParams(next, { replace });
+  }, [searchParams, setSearchParams]);
+  useEffect(() => {
+    // Migrate old cockpit bookmarks into the receiving page's real grammar.
+    if (searchParams.get("tab") === "cars") {
+      navigate(withQmsQuery(qmsModulePath(amoCode, "cars", timing === "overdue" ? "overdue" : "register"), buildPreservedQmsQuery(searchParams, {}, ["view", "status"])), { replace: true });
+    } else if (searchParams.has("tab")) {
+      const next = new URLSearchParams(searchParams); next.delete("tab"); setSearchParams(next, { replace: true });
+    }
+  }, [amoCode, navigate, searchParams, setSearchParams, timing]);
   const canCreateCar = hasQmsRolePermission("qms.car.create");
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [search]);
-
   const registerQuery = useQuery({
-    queryKey: ["qms-assurance-register", amoCode, actorView, period, openOnly, auditId, stage, timing, debouncedSearch, pageSize, page],
+    queryKey: ["qms-assurance-register", amoCode, actorView, period, findingStatus, level, auditId, stage, timing, search, pageSize, page],
     queryFn: ({ signal }) => qmsGetAuditRegisterPage({
-      domain: "AMO", view: actorView, period, openOnly,
+      domain: "AMO", view: actorView, period, status: findingStatus || undefined, level: level || undefined,
       auditId: auditId || undefined,
       onlyWithCars: false,
       workflowStage: toRegisterWorkflowStage(stage),
       carTiming: timing || undefined,
-      search: debouncedSearch || undefined,
+      search: search || undefined,
       limit: pageSize,
       offset: (page - 1) * pageSize,
       signal,
@@ -109,15 +114,15 @@ const QualityAuditRegisterPage: React.FC = () => {
   }), [registerQuery.data?.rows]);
 
   const openFinding = useCallback((row: RegisterRow) => navigate(
-    `/maintenance/${encodeURIComponent(amoCode)}/quality/findings/${encodeURIComponent(row.finding.id)}/overview`,
+    qmsRecordPath(amoCode, "findings", row.finding.id, "overview"),
   ), [amoCode, navigate]);
   const openCorrectiveAction = useCallback((row: RegisterRow) => {
     if (row.primaryCar) {
-      navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/${encodeURIComponent(row.primaryCar.id)}`);
+      navigate(qmsRecordPath(amoCode, "cars", row.primaryCar.id, "overview"));
       return;
     }
     if (canCreateCar && !isObservation(row.finding)) {
-      navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/new?findingId=${encodeURIComponent(row.finding.id)}`);
+      navigate(withQmsQuery(qmsModulePath(amoCode, "cars", "new"), new URLSearchParams({ findingId: row.finding.id })));
       return;
     }
     openFinding(row);
@@ -205,7 +210,7 @@ const QualityAuditRegisterPage: React.FC = () => {
 
   const defaultColDef = useMemo<ColDef<RegisterRow>>(() => ({
     resizable: true,
-    sortable: true,
+    sortable: false,
     suppressMovable: true,
     wrapHeaderText: false,
   }), []);
@@ -214,28 +219,14 @@ const QualityAuditRegisterPage: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const firstVisible = total ? ((page - 1) * pageSize) + 1 : 0;
   const lastVisible = Math.min(total, page * pageSize);
-  const hasFilters = Boolean(auditId || search.trim() || stage !== "all" || timing);
-  const updateFilter = (key: "stage" | "timing", value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value && value !== "all") next.set(key, value);
-    else next.delete(key);
-    if (key === "stage" && value) next.delete("timing");
-    if (key === "timing" && value) next.delete("stage");
-    setPage(1);
-    setSearchParams(next);
-  };
-  const clearFilters = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete("stage");
-    next.delete("timing");
-    next.delete("auditId");
-    setSearch("");
-    setPage(1);
-    setSearchParams(next);
-  };
-
-  const auditsHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/workspace`;
-  const trendsHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/reports/car-performance`;
+  useEffect(() => {
+    if (registerQuery.data && page > totalPages) patchFilters({ page: totalPages }, true);
+  }, [page, totalPages, registerQuery.data, patchFilters]);
+  const hasFilters = Boolean(auditId || search || stage !== "all" || timing || findingStatus || level || period || actorView === "mine");
+  const updateFilter = (key: string, value: string) => patchFilters({ [key]: value, page: null });
+  const clearFilters = () => patchFilters({ q: null, stage: null, timing: null, auditId: null, status: null, level: null, period: null, view: null, page: null });
+  const auditsHref = withQmsQuery(qmsModulePath(amoCode, "audits", "workspace"), buildPreservedQmsQuery(searchParams));
+  const trendsHref = qmsModulePath(amoCode, "reports", "car-performance");
 
   return (
     <QualityAuditsSectionLayout
@@ -257,15 +248,20 @@ const QualityAuditRegisterPage: React.FC = () => {
 
         <div className="qa-register-grid-page__metrics" aria-label="Register totals">
           <article><span>Findings</span><strong>{total}</strong><small>Matching this view</small></article>
-          <article><span>Linked actions</span><strong>{registerQuery.data?.car_linked_findings || 0}</strong><small>Findings with a CAR</small></article>
-          <article><span>Open actions</span><strong>{registerQuery.data?.open_car_count || 0}</strong><small>Requiring follow-up</small></article>
+          <article><span>Linked actions</span><strong>{registerQuery.data?.car_linked_findings ?? "Unavailable"}</strong><small>Findings with a CAR</small></article>
+          <article><span>Open actions</span><strong>{registerQuery.data?.open_car_count ?? "Unavailable"}</strong><small>Requiring follow-up</small></article>
         </div>
 
         <header className="qa-register-grid-page__toolbar">
-          <label className="qa-audits-list__search">
+          <form className="qa-audits-list__search" onSubmit={(event) => { event.preventDefault(); updateFilter("q", searchDraft.trim()); }}>
             <Search size={15} aria-hidden />
-            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search finding, audit, owner or CAR" />
-          </label>
+            <input aria-label="Search finding, audit, owner or CAR" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Search finding, audit, owner or CAR" maxLength={160} />
+            <button type="submit">Search</button>
+          </form>
+          <label>Scope <select value={actorView} onChange={(event) => updateFilter("view", event.target.value)}><option value="global">Global</option><option value="mine">My Work</option></select></label>
+          <label>Year <input type="number" min={2000} max={2200} value={period ?? ""} placeholder="All years" onChange={(event) => updateFilter("period", event.target.value)} /></label>
+          <label>Status <select value={findingStatus} onChange={(event) => updateFilter("status", event.target.value)}><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+          <label>Level <select value={level} onChange={(event) => updateFilter("level", event.target.value)}><option value="">All</option>{[1, 2, 3, 4].map((number) => <option key={number} value={`LEVEL_${number}`}>Level {number}</option>)}</select></label>
           <label>Stage
             <select value={stage} onChange={(event) => updateFilter("stage", event.target.value)}>
               {FINDING_LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -310,10 +306,10 @@ const QualityAuditRegisterPage: React.FC = () => {
 
             <footer className="qa-register-grid-page__pagination">
               <span>Showing {firstVisible}–{lastVisible} of {total}</span>
-              <label>Rows per page <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value) as RegisterPageSize); setPage(1); }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+              <label>Rows per page <select value={pageSize} onChange={(event) => { patchFilters({ pageSize: Number(event.target.value) as RegisterPageSize, page: null }); }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
               <strong>Page {Math.min(page, totalPages)} of {totalPages}</strong>
-              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1 || registerQuery.isFetching} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></button>
-              <button type="button" title="Next page" aria-label="Next page" disabled={!registerQuery.data?.has_more || registerQuery.isFetching} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}><ChevronRight size={16} /></button>
+              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1 || registerQuery.isFetching} onClick={() => patchFilters({ page: Math.max(1, page - 1) })}><ChevronLeft size={16} /></button>
+              <button type="button" title="Next page" aria-label="Next page" disabled={!registerQuery.data?.has_more || registerQuery.isFetching} onClick={() => patchFilters({ page: Math.min(totalPages, page + 1) })}><ChevronRight size={16} /></button>
             </footer>
           </>
         ) : (
