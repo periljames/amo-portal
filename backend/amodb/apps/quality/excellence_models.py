@@ -38,9 +38,18 @@ class QualityAssuranceControl(Base):
             "approval_status IN ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'RETIRED')",
             name="ck_quality_assurance_control_approval_status",
         ),
+        CheckConstraint(
+            "applicability_status IN ('APPLICABLE', 'NOT_APPLICABLE', 'PENDING_REVIEW')",
+            name="ck_quality_assurance_control_applicability",
+        ),
+        CheckConstraint(
+            "mapping_status IN ('MAPPED', 'EXCEPTION', 'NOT_ASSESSED', 'PENDING')",
+            name="ck_quality_assurance_control_mapping_status",
+        ),
         CheckConstraint("test_frequency_days > 0", name="ck_quality_assurance_control_frequency"),
         Index("ix_quality_assurance_controls_due", "amo_id", "status", "next_test_due"),
         Index("ix_quality_assurance_controls_framework", "amo_id", "framework", "process_area"),
+        Index("ix_quality_assurance_controls_framework_version", "amo_id", "framework", "framework_version", "applicability_status"),
         Index("ix_quality_assurance_controls_approval", "amo_id", "approval_status", "criticality"),
     )
 
@@ -52,7 +61,15 @@ class QualityAssuranceControl(Base):
     control_objective = Column(Text, nullable=True)
     test_method = Column(Text, nullable=True)
     framework = Column(String(120), nullable=False, default="INTERNAL_QMS", server_default="INTERNAL_QMS")
+    framework_version = Column(String(80), nullable=True)
     clause_reference = Column(String(255), nullable=True)
+    requirement_title = Column(String(255), nullable=True)
+    requirement_source_reference = Column(String(500), nullable=True)
+    requirement_effective_from = Column(Date, nullable=True)
+    requirement_effective_to = Column(Date, nullable=True)
+    applicability_status = Column(String(24), nullable=False, default="PENDING_REVIEW", server_default="PENDING_REVIEW")
+    applicability_rationale = Column(Text, nullable=True)
+    mapping_status = Column(String(24), nullable=False, default="NOT_ASSESSED", server_default="NOT_ASSESSED")
     process_area = Column(String(160), nullable=False)
     owner_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     criticality = Column(String(16), nullable=False, default="MEDIUM", server_default="MEDIUM")
