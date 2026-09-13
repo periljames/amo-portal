@@ -2,7 +2,12 @@ import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { getCachedUser } from "../../../services/auth";
 import type { QMSAuditOut } from "../../../services/qms";
 
-export function canExecuteAssignedAudit(audit?: Pick<QMSAuditOut, "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id"> | null): boolean {
+type FieldworkAssignment = Pick<
+  QMSAuditOut,
+  "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id" | "supporting_auditor_user_ids"
+>;
+
+export function canExecuteAssignedAudit(audit?: FieldworkAssignment | null): boolean {
   if (!hasQmsRolePermission("qms.audit.execute") && !hasQmsRolePermission("qms.audit.manage")) return false;
   const user = getCachedUser();
   if (!user) return false;
@@ -10,9 +15,13 @@ export function canExecuteAssignedAudit(audit?: Pick<QMSAuditOut, "lead_auditor_
 
   // Assignment duties are intentionally distinct. The observer is part of the
   // audit team and may see governed fieldwork, but cannot author checklist
-  // responses, notes or findings. Execution is reserved to lead/assistant
-  // auditors (and any separately governed supporting-auditor path on the API).
-  return [audit.lead_auditor_user_id, audit.assistant_auditor_user_id].includes(user.id);
+  // responses, notes or findings. Execution is reserved to lead, assistant and
+  // explicitly governed supporting auditors.
+  return [
+    audit.lead_auditor_user_id,
+    audit.assistant_auditor_user_id,
+    ...(audit.supporting_auditor_user_ids || []),
+  ].includes(user.id);
 }
 
 export function canGovernAudit(): boolean {
