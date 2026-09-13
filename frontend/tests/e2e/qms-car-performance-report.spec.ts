@@ -135,6 +135,22 @@ async function prepare(page: Page): Promise<void> {
     });
   });
 
+  await page.route("**/quality/audits/register/paged**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        rows: [],
+        total: 0,
+        limit: 100,
+        offset: 0,
+        has_more: false,
+        car_linked_findings: 0,
+        open_car_count: 0,
+      }),
+    });
+  });
+
   await page.route("**/auth/portal-preferences/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user_id: "quality-user-a", amo_id: "amo-a", text_scale: "standard", density: "comfortable", motion: "system", color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-12T08:00:00Z" }) });
   });
@@ -151,7 +167,9 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/maintenance/tenant-a/quality/reports/car-performance", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "CAR performance", exact: true })).toBeVisible();
+  // The CAR-performance compatibility route is surfaced in the consolidated
+  // Assurance rail as Finding trends.
+  await expect(page.getByRole("heading", { name: "Finding trends", exact: true })).toBeVisible();
   await expect(page.getByText(/QMSM 2\.5 QPI 3 target: at least 80%/)).toBeVisible();
   await expect(page.getByText("QPI target below requirement")).toBeVisible();
   await expect(page.getByText("50.0%").first()).toBeVisible();
