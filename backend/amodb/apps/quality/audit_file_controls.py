@@ -22,6 +22,7 @@ from amodb.database import get_db
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user
 
+from .audit_assignment_permissions import fieldwork_execution_user_ids
 from .router import (
     AUDIT_CHECKLIST_ALLOWED_EXTENSIONS,
     AUDIT_CHECKLIST_ALLOWED_MIME_TYPES,
@@ -52,21 +53,16 @@ def _audit_status_value(audit: object) -> str:
 def _require_checklist_editor(current_user: account_models.User, audit: object) -> None:
     if is_tenant_admin(current_user) or _is_quality_admin(current_user):
         return
-    assigned_ids = {
-        str(value)
-        for value in (
-            getattr(audit, "lead_auditor_user_id", None),
-            getattr(audit, "observer_auditor_user_id", None),
-            getattr(audit, "assistant_auditor_user_id", None),
-            *(getattr(audit, "supporting_auditor_user_ids", None) or []),
-        )
-        if value
-    }
-    if str(current_user.id) in assigned_ids:
+    if str(current_user.id) in fieldwork_execution_user_ids(audit):
         return
+    if str(getattr(audit, "observer_auditor_user_id", None) or "") == str(current_user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="Observer auditors are read-only and cannot replace the controlled audit checklist.",
+        )
     raise HTTPException(
         status_code=403,
-        detail="Only the assigned audit team or an AMO administrator may replace the controlled checklist.",
+        detail="Only Quality management, the AMO administrator, or an assigned executing auditor may replace the controlled checklist.",
     )
 
 
