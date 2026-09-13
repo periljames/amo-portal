@@ -84,6 +84,20 @@ export const AppRouter: React.FC = () => {
 
   if (!isTenantPath) return <PortalRoutes />;
 
+  const legacyCloseoutDeepLink = module === "quality"
+    && view === "audits"
+    && Boolean(parts[4])
+    && parts.length === 5
+    && new URLSearchParams(location.search).get("tab")?.toLowerCase() === "closeout";
+  if (legacyCloseoutDeepLink) {
+    return (
+      <Navigate
+        replace
+        to={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/${encodeURIComponent(parts[4])}/closing`}
+      />
+    );
+  }
+
   const canonicalAuditStage = module === "quality"
     && view === "audits"
     && Boolean(parts[4])
