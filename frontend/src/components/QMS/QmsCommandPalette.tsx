@@ -60,12 +60,26 @@ const QmsCommandPalette: React.FC = () => {
 
   const visibleResults = query.trim().length >= 2 ? results : quickResults;
 
-  const close = useCallback(() => setOpen(false), []);
+  const resetSearchState = useCallback(() => {
+    requestRef.current += 1;
+    setQuery("");
+    setResults([]);
+    setSearching(false);
+    setActiveIndex(0);
+    setSourceMessage(null);
+  }, []);
+
+  const close = useCallback(() => {
+    resetSearchState();
+    setOpen(false);
+  }, [resetSearchState]);
+
   const show = useCallback(() => {
     if (!amoCode || open) return;
     triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    resetSearchState();
     setOpen(true);
-  }, [amoCode, open]);
+  }, [amoCode, open, resetSearchState]);
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -111,18 +125,20 @@ const QmsCommandPalette: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!open || !amoCode) return;
-    const clean = query.trim();
-    const requestId = ++requestRef.current;
+  const onQueryChange = (value: string) => {
+    requestRef.current += 1;
+    setQuery(value);
     setActiveIndex(0);
     setSourceMessage(null);
     setResults([]);
-    if (clean.length < 2) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
+    if (value.trim().length < 2) setSearching(false);
+  };
+
+  useEffect(() => {
+    if (!open || !amoCode) return;
+    const clean = query.trim();
+    if (clean.length < 2) return;
+    const requestId = ++requestRef.current;
     const timer = window.setTimeout(() => {
       setSearching(true);
       void searchAssuranceCommands(amoCode, clean, 20, actorView)
@@ -142,20 +158,11 @@ const QmsCommandPalette: React.FC = () => {
     return () => { window.clearTimeout(timer); requestRef.current += 1; };
   }, [amoCode, actorView, open, query]);
 
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setSourceMessage(null);
-      setResults([]);
-      setActiveIndex(0);
-    }
-  }, [open]);
-
   if (!amoCode || !open) return null;
 
   const select = (result: AssuranceCommandResult) => {
     navigate(result.path);
-    setOpen(false);
+    close();
   };
 
   return (
@@ -169,7 +176,7 @@ const QmsCommandPalette: React.FC = () => {
           <input
             ref={inputRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search audits, CARs, controlled documents, clauses or actions…"
             aria-label="Search QMS"
             role="combobox"
@@ -181,7 +188,7 @@ const QmsCommandPalette: React.FC = () => {
             autoComplete="off"
           />
           <kbd>{navigator.platform?.toLowerCase().includes("mac") ? "⌘ K" : "Ctrl K"}</kbd>
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close command palette"><X size={17} /></button>
+          <button type="button" onClick={close} aria-label="Close command palette"><X size={17} /></button>
         </header>
 
         <div className="qms-command-palette__meta">
