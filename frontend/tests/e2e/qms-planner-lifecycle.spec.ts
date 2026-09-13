@@ -167,7 +167,7 @@ test.describe("QMS planner lifecycle", () => {
 
     await page.keyboard.press("Escape");
     await expect(quickDialog).toBeHidden();
-    await expect(page.locator(".qms-planner-quick-schedule")).toBeFocused();
+    await expect(commandTrigger).toBeFocused();
 
     const shortcutsTrigger = page.locator(".qms-planner-shortcut-link");
     await shortcutsTrigger.focus();
