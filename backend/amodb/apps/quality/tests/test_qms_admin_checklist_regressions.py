@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 
 from amodb.apps.manuals import core_router as manual_core
 from amodb.apps.quality.audit_file_controls import _require_checklist_editor
@@ -91,3 +92,50 @@ def test_quality_router_export_exposes_fieldwork_helper_contract() -> None:
         "task_services",
     ):
         assert hasattr(quality_package.router, helper_name), helper_name
+
+
+def test_observer_read_only_guard_is_installed_on_legacy_audit_content_mutations() -> None:
+    quality_package = importlib.import_module("amodb.apps.quality")
+    guarded = {
+        ("POST", "/quality/audits/{audit_id}/document-requests"),
+        ("PATCH", "/quality/audits/{audit_id}/document-requests/{request_id}"),
+        ("POST", "/quality/audits/{audit_id}/checklist-items"),
+        ("PATCH", "/quality/audits/{audit_id}/checklist-items/{item_id}"),
+        ("POST", "/quality/audits/{audit_id}/findings"),
+        ("PATCH", "/quality/audits/{audit_id}/findings/{finding_id}"),
+        ("POST", "/quality/audits/{audit_id}/post-brief"),
+        ("POST", "/quality/audits/{audit_id}/archive-package"),
+        ("POST", "/quality/audits/{audit_id}/report"),
+        ("POST", "/quality/audits/{audit_id}/report/share"),
+    }
+    seen: set[tuple[str, str]] = set()
+    for route in quality_package.router.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        for method in route.methods or set():
+            key = (method, str(route.path))
+            if key not in guarded:
+                continue
+            seen.add(key)
+            dependency_names = {
+                getattr(dependency.call, "__name__", "")
+                for dependency in route.dependant.dependencies
+            }
+            assert "_deny_observer_audit_mutation" in dependency_names, key
+    assert seen == guarded
+
+
+def test_observer_guard_does_not_turn_read_routes_into_write_routes() -> None:
+    quality_package = importlib.import_module("amodb.apps.quality")
+    checklist_get = next(
+        route
+        for route in quality_package.router.routes
+        if isinstance(route, APIRoute)
+        and str(route.path) == "/quality/audits/{audit_id}/checklist-items"
+        and "GET" in (route.methods or set())
+    )
+    dependency_names = {
+        getattr(dependency.call, "__name__", "")
+        for dependency in checklist_get.dependant.dependencies
+    }
+    assert "_deny_observer_audit_mutation" not in dependency_names
