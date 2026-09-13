@@ -226,10 +226,9 @@
 
 .dlibrary__categories {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
-  overflow-x: auto;
   padding: 0.15rem 0 0.35rem;
-  scrollbar-width: thin;
 }
 
 .dlibrary__categories button {
