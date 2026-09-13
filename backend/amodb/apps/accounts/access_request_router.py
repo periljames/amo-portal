@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
@@ -181,6 +182,12 @@ def request_access_elevation(
             critical=True,
         )
         db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="You already have a pending access request. Cancel it or wait for an administrator decision.",
+        ) from exc
     except Exception:
         db.rollback()
         raise
@@ -282,9 +289,21 @@ def decide_access_elevation_request(
         models.User.id == str(row["user_id"]),
         models.User.amo_id == tenant_id,
         models.User.is_active.is_(True),
-    ).first()
+    ).with_for_update().first()
     if user is None:
         raise HTTPException(status_code=409, detail="The requesting user is no longer an active tenant user.")
+
+    access_control.attach_user_access(db, user)
+    requested_from_profile_id = str(row["current_profile_id"]) if row["current_profile_id"] else None
+    actual_profile_id = str(getattr(user, "access_profile_id", "") or "") or None
+    if actual_profile_id != requested_from_profile_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The user's access changed after this request was submitted. "
+                "Have the user submit a new request so the decision is based on current access."
+            ),
+        )
 
     note = (payload.note or "").strip() or None
     if payload.decision == "DENY" and (not note or len(note) < 3):
