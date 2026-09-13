@@ -19,18 +19,24 @@ def fieldwork_execution_user_ids(audit: object) -> set[str]:
     author checklist responses, auditor notes or findings. Lead, assistant and
     explicitly governed supporting auditors may execute fieldwork; completion
     remains a separate lead-only gate.
+
+    Legacy schedules can contain the observer again in
+    ``supporting_auditor_user_ids``. That duplicate must never convert the
+    observer seat into execution authority. An explicit lead or assistant seat
+    remains authoritative if old data contains an overlapping observer value.
     """
 
-    values = {
-        getattr(audit, "lead_auditor_user_id", None),
-        getattr(audit, "assistant_auditor_user_id", None),
-    }
+    lead_id = str(getattr(audit, "lead_auditor_user_id", None) or "")
+    assistant_id = str(getattr(audit, "assistant_auditor_user_id", None) or "")
+    observer_id = str(getattr(audit, "observer_auditor_user_id", None) or "")
+
+    values = {value for value in (lead_id, assistant_id) if value}
     values.update(
         str(value)
         for value in (getattr(audit, "supporting_auditor_user_ids", None) or [])
-        if value
+        if value and str(value) != observer_id
     )
-    return {str(value) for value in values if value}
+    return values
 
 
 def audit_allows_fieldwork_execution(audit: object, user_id: str | None) -> bool:
