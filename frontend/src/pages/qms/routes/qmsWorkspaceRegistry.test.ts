@@ -55,7 +55,7 @@ describe("QMS assurance workspace registry", () => {
     expect(qmsWorkspaceFromRelativePath("change-control/register")).toBe("missions");
     expect(qmsWorkspaceFromRelativePath("audits/register")).toBe("assurance");
     expect(qmsWorkspaceFromRelativePath("cars/overdue")).toBe("assurance");
-    expect(qmsWorkspaceFromRelativePath("equipment-calibration/overdue")).toBe("assurance");
+    expect(qmsWorkspaceFromRelativePath("equipment-calibration/overdue")).toBe("control-room");
     expect(qmsWorkspaceFromRelativePath("risk/risk-matrix")).toBe("intelligence");
     expect(qmsWorkspaceFromRelativePath("management-review/dashboard")).toBe("intelligence");
   });
