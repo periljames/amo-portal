@@ -40,6 +40,10 @@ const QmsCommandPalette: React.FC = () => {
   const [sourceMessage, setSourceMessage] = useState<string | null>(null);
   const actorView = new URLSearchParams(location.search).get("view") === "mine" ? "mine" : "global";
   const amoCode = activeAmoCode(location.pathname);
+  // The Planner has its own Ctrl/Cmd+K command surface and plain-key shortcuts.
+  // Let that route own the keyboard accelerator so a second modal cannot remain
+  // underneath it and capture the next planner shortcut after Escape.
+  const plannerOwnsCommandShortcut = /\/quality\/calendar(?:\/|$)/i.test(location.pathname);
 
   const quickResults = useMemo<AssuranceCommandResult[]>(() => {
     if (!amoCode) return [];
@@ -66,6 +70,7 @@ const QmsCommandPalette: React.FC = () => {
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        if (plannerOwnsCommandShortcut) return;
         event.preventDefault();
         openQmsCommandPalette();
       }
@@ -73,7 +78,7 @@ const QmsCommandPalette: React.FC = () => {
     window.addEventListener(QMS_COMMAND_PALETTE_OPEN, show);
     window.addEventListener("keydown", shortcut);
     return () => { window.removeEventListener(QMS_COMMAND_PALETTE_OPEN, show); window.removeEventListener("keydown", shortcut); };
-  }, [show]);
+  }, [plannerOwnsCommandShortcut, show]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
