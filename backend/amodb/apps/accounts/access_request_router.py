@@ -287,6 +287,11 @@ def decide_access_elevation_request(
         raise HTTPException(status_code=409, detail="The requesting user is no longer an active tenant user.")
 
     note = (payload.note or "").strip() or None
+    if payload.decision == "DENY" and (not note or len(note) < 3):
+        raise HTTPException(
+            status_code=422,
+            detail="Add a short decision reason when denying access so the requester receives useful feedback.",
+        )
     now = _utcnow()
     decision_status = "APPROVED" if payload.decision == "APPROVE" else "DENIED"
     profile_id = str(row["requested_profile_id"])
