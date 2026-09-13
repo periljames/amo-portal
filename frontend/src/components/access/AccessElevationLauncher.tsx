@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -48,12 +48,13 @@ function statusIcon(request: AccessElevationRequest) {
 
 export default function AccessElevationLauncher() {
   const queryClient = useQueryClient();
-  const { status: realtimeStatus } = useRealtime();
+  const { status: realtimeStatus, activity } = useRealtime();
   const user = getCachedUser();
   const [open, setOpen] = useState(false);
   const [profileId, setProfileId] = useState("");
   const [reason, setReason] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [lastDecisionEventId, setLastDecisionEventId] = useState("");
 
   const hidden = !user
     || Boolean(user.is_superuser)
@@ -87,6 +88,19 @@ export default function AccessElevationLauncher() {
   const pending = history.find((item) => item.status === "PENDING") || null;
   const latestDecision = history.find((item) => item.status !== "PENDING") || null;
 
+  useEffect(() => {
+    const event = activity[0];
+    if (!event || event.id === lastDecisionEventId || event.entityType !== "accounts.access_sync") return;
+    const subjectUserId = String(event.metadata?.subjectUserId || "");
+    const decisionStatus = String(event.metadata?.status || "");
+    if (!user || subjectUserId !== user.id || !["APPROVED", "DENIED"].includes(decisionStatus)) return;
+    setLastDecisionEventId(event.id);
+    setFeedback(decisionStatus === "APPROVED"
+      ? "Your access request was approved. The new portal access is being applied now."
+      : "Your access request was declined. Open Request history to review the administrator’s reason.");
+    void requests.refetch();
+  }, [activity, lastDecisionEventId, requests, user]);
+
   const requestMutation = useMutation({
     mutationFn: () => requestAccessElevation(profileId, reason.trim()),
     onSuccess: async (result) => {
@@ -115,6 +129,7 @@ export default function AccessElevationLauncher() {
       className="access-elevation-launcher__trigger"
       onClick={() => setOpen(true)}
       aria-label="Request additional portal access"
+      title={feedback || "Request additional portal access"}
     >
       <KeyRound size={17} />
       <span>Request access</span>
