@@ -15,13 +15,15 @@ export function canExecuteAssignedAudit(audit?: FieldworkAssignment | null): boo
 
   // Assignment duties are intentionally distinct. The observer is part of the
   // audit team and may see governed fieldwork, but cannot author checklist
-  // responses, notes or findings. Execution is reserved to lead, assistant and
-  // explicitly governed supporting auditors.
-  return [
+  // responses, notes or findings. Legacy schedules may also duplicate the
+  // observer inside supporting_auditor_user_ids; that duplicate is ignored.
+  const observerId = audit.observer_auditor_user_id || "";
+  const executingIds = [
     audit.lead_auditor_user_id,
     audit.assistant_auditor_user_id,
-    ...(audit.supporting_auditor_user_ids || []),
-  ].includes(user.id);
+    ...(audit.supporting_auditor_user_ids || []).filter((id) => id !== observerId),
+  ];
+  return executingIds.includes(user.id);
 }
 
 export function canGovernAudit(): boolean {
