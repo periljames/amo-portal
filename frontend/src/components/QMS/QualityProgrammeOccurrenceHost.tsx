@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, CheckCircle2, History, PanelRightClose, PanelRightOpen, ShieldAlert, Zap } from "lucide-react";
+import { CalendarPlus, CheckCircle2, History, PanelRightClose, PanelRightOpen, ShieldAlert } from "lucide-react";
 
 import {
   createProgrammeOccurrence,
@@ -54,15 +54,21 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
     queryFn: ({ signal }) => listOccurrenceProgrammes(resolvedAmo, signal),
     enabled: Boolean(open && isProgrammeRoute && resolvedAmo),
   });
+  const programmes = useMemo(
+    () => (programmesQuery.data?.items || []).filter((row) => row.status === "APPROVED" || row.status === "ACTIVE"),
+    [programmesQuery.data?.items],
+  );
+  const effectiveProgrammeId = programmeId || programmes[0]?.id || "";
+
   const programmeQuery = useQuery({
-    queryKey: ["qms-occurrence-programme", resolvedAmo, programmeId],
-    queryFn: ({ signal }) => getOccurrenceProgramme(resolvedAmo, programmeId, signal),
-    enabled: Boolean(open && programmeId),
+    queryKey: ["qms-occurrence-programme", resolvedAmo, effectiveProgrammeId],
+    queryFn: ({ signal }) => getOccurrenceProgramme(resolvedAmo, effectiveProgrammeId, signal),
+    enabled: Boolean(open && effectiveProgrammeId),
   });
   const linksQuery = useQuery({
-    queryKey: ["qms-programme-occurrence-links", resolvedAmo, programmeId],
-    queryFn: ({ signal }) => listProgrammeOccurrenceLinks(resolvedAmo, programmeId, signal),
-    enabled: Boolean(open && programmeId),
+    queryKey: ["qms-programme-occurrence-links", resolvedAmo, effectiveProgrammeId],
+    queryFn: ({ signal }) => listProgrammeOccurrenceLinks(resolvedAmo, effectiveProgrammeId, signal),
+    enabled: Boolean(open && effectiveProgrammeId),
   });
   const signalsQuery = useQuery({
     queryKey: ["qms-occurrence-signals", resolvedAmo],
@@ -75,50 +81,31 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
     enabled: Boolean(open && resolvedAmo),
   });
 
-  const programmes = useMemo(
-    () => (programmesQuery.data?.items || []).filter((row) => row.status === "APPROVED" || row.status === "ACTIVE"),
-    [programmesQuery.data?.items],
-  );
   const recurrenceItems = useMemo(
     () => (programmeQuery.data?.items || []).filter((item) => item.recurrence === "CUSTOM" || item.recurrence === "RISK_TRIGGERED"),
     [programmeQuery.data?.items],
   );
-  const selectedItem = recurrenceItems.find((item) => item.id === itemId);
+  const effectiveItemId = itemId || recurrenceItems[0]?.id || "";
+  const selectedItem = recurrenceItems.find((item) => item.id === effectiveItemId);
   const occurrenceType = selectedItem?.recurrence as OccurrenceType | undefined;
   const links = linksQuery.data?.items || [];
-
-  useEffect(() => {
-    if (!programmeId && programmes.length) setProgrammeId(programmes[0].id);
-  }, [programmeId, programmes]);
-  useEffect(() => {
-    if (programmeId) {
-      setItemId("");
-      setSuccess(null);
-    }
-  }, [programmeId]);
-  useEffect(() => {
-    if (!itemId && recurrenceItems.length) setItemId(recurrenceItems[0].id);
-  }, [itemId, recurrenceItems]);
-  useEffect(() => {
-    if (!selectedItem) return;
-    const label = recurrenceItemLabel(selectedItem);
-    setTitle(`Programme audit · ${label}`);
-    if (!date) setDate(selectedItem.target_start || "");
-    setOccurrenceKey(`${selectedItem.recurrence.toLowerCase()}-${selectedItem.id.slice(0, 8)}-${selectedItem.target_start || "occurrence"}`);
-    setSignalId("");
-    setSuccess(null);
-  }, [selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  const defaultOccurrenceKey = selectedItem
+    ? `${selectedItem.recurrence.toLowerCase()}-${selectedItem.id.slice(0, 8)}-${selectedItem.target_start || "occurrence"}`
+    : "";
+  const effectiveOccurrenceKey = occurrenceKey || defaultOccurrenceKey;
+  const effectiveTitle = title || (selectedItem ? `Programme audit · ${recurrenceItemLabel(selectedItem)}` : "");
+  const effectiveDate = date || selectedItem?.target_start || "";
 
   const mutation = useMutation({
     mutationFn: () => {
       if (!selectedItem || !occurrenceType) return Promise.reject(new Error("Select a CUSTOM or RISK_TRIGGERED programme requirement."));
-      return createProgrammeOccurrence(resolvedAmo, programmeId, selectedItem.id, occurrenceType, {
-        occurrence_key: occurrenceKey,
+      return createProgrammeOccurrence(resolvedAmo, effectiveProgrammeId, selectedItem.id, occurrenceType, {
+        occurrence_key: effectiveOccurrenceKey,
         rationale,
         signal_id: occurrenceType === "RISK_TRIGGERED" ? signalId : undefined,
         schedule: {
-          title,
-          next_due_date: date,
+          title: effectiveTitle,
+          next_due_date: effectiveDate,
           start_time: time,
           duration_days: 1,
           timezone_name: optionsQuery.data?.timezone_name || "Africa/Nairobi",
@@ -135,8 +122,8 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
       setError("");
       setSuccess(row);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["qms-programme-occurrence-links", resolvedAmo, programmeId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-occurrence-programme", resolvedAmo, programmeId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-programme-occurrence-links", resolvedAmo, effectiveProgrammeId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-occurrence-programme", resolvedAmo, effectiveProgrammeId] }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-programme"] }),
         queryClient.invalidateQueries({ queryKey: ["qms-planner"] }),
       ]);
@@ -146,9 +133,28 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
 
   if (!isProgrammeRoute || !resolvedAmo) return null;
   const ready = Boolean(
-    programmeId && selectedItem && occurrenceType && occurrenceKey.trim().length >= 3 && title.trim().length >= 3
-      && date && rationale.trim().length >= 8 && (occurrenceType !== "RISK_TRIGGERED" || signalId),
+    effectiveProgrammeId && selectedItem && occurrenceType && effectiveOccurrenceKey.trim().length >= 3 && effectiveTitle.trim().length >= 3
+      && effectiveDate && rationale.trim().length >= 8 && (occurrenceType !== "RISK_TRIGGERED" || signalId),
   );
+
+  const changeProgramme = (nextProgrammeId: string) => {
+    setProgrammeId(nextProgrammeId);
+    setItemId("");
+    setOccurrenceKey("");
+    setSignalId("");
+    setTitle("");
+    setDate("");
+    setSuccess(null);
+  };
+
+  const changeRequirement = (nextItemId: string) => {
+    setItemId(nextItemId);
+    setOccurrenceKey("");
+    setSignalId("");
+    setTitle("");
+    setDate("");
+    setSuccess(null);
+  };
 
   return <>
     <button className="qms-programme-occurrence-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="qms-programme-occurrence-panel">
@@ -161,14 +167,14 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
         {error ? <div className="qms-programme-occurrence-error" role="alert"><ShieldAlert size={16} /> {error}</div> : null}
         {success ? <div className="qms-programme-occurrence-success"><CheckCircle2 size={17} /><div><strong>Occurrence linked to Planner</strong><span>{success.title} · {success.next_due_date}</span><a href={`/maintenance/${encodeURIComponent(resolvedAmo)}/quality/calendar/week`}>Open Planner</a></div></div> : null}
 
-        <label>Programme<select value={programmeId} onChange={(event) => setProgrammeId(event.target.value)}><option value="">Select approved programme</option>{programmes.map((programme) => <option key={programme.id} value={programme.id}>{programme.programme_ref} · {programme.title}</option>)}</select></label>
-        <label>Requirement<select value={itemId} onChange={(event) => setItemId(event.target.value)}><option value="">Select custom requirement</option>{recurrenceItems.map((item) => <option key={item.id} value={item.id}>{item.recurrence} · {recurrenceItemLabel(item)}</option>)}</select></label>
+        <label>Programme<select value={effectiveProgrammeId} onChange={(event) => changeProgramme(event.target.value)}><option value="">Select approved programme</option>{programmes.map((programme) => <option key={programme.id} value={programme.id}>{programme.programme_ref} · {programme.title}</option>)}</select></label>
+        <label>Requirement<select value={effectiveItemId} onChange={(event) => changeRequirement(event.target.value)}><option value="">Select custom requirement</option>{recurrenceItems.map((item) => <option key={item.id} value={item.id}>{item.recurrence} · {recurrenceItemLabel(item)}</option>)}</select></label>
         {selectedItem ? <div className="qms-programme-occurrence-source"><strong>{occurrenceType}</strong><span>{selectedItem.universe_item?.source_owner_module || "Audit Universe"} · {selectedItem.universe_item?.risk_classification || "UNCLASSIFIED"} risk · {selectedItem.universe_item?.regulatory_criticality || "UNCLASSIFIED"} regulatory criticality</span><small>Target window {selectedItem.target_start || "open"} → {selectedItem.target_end || selectedItem.target_start || "open"}</small></div> : null}
 
         {occurrenceType === "RISK_TRIGGERED" ? <label>Triggered signal<select value={signalId} onChange={(event) => setSignalId(event.target.value)}><option value="">Select open triggered signal</option>{signalsQuery.data?.items.filter((row) => row.triggered && row.state !== "CLOSED").map((row) => <option key={row.id} value={row.id}>{row.rule_code || row.metric} · {row.severity}</option>)}</select></label> : null}
-        <label>Occurrence key<input value={occurrenceKey} onChange={(event) => setOccurrenceKey(event.target.value)} /></label>
-        <label>Audit title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <div className="qms-programme-occurrence-grid"><label>Date<input type="date" value={date} min={selectedItem?.target_start || undefined} max={selectedItem?.target_end || undefined} onChange={(event) => setDate(event.target.value)} /></label><label>Start time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div>
+        <label>Occurrence key<input value={effectiveOccurrenceKey} onChange={(event) => setOccurrenceKey(event.target.value)} /></label>
+        <label>Audit title<input value={effectiveTitle} onChange={(event) => setTitle(event.target.value)} /></label>
+        <div className="qms-programme-occurrence-grid"><label>Date<input type="date" value={effectiveDate} min={selectedItem?.target_start || undefined} max={selectedItem?.target_end || undefined} onChange={(event) => setDate(event.target.value)} /></label><label>Start time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div>
         <label>Lead auditor<select value={leadAuditor} onChange={(event) => setLeadAuditor(event.target.value)}><option value="">Unassigned</option>{optionsQuery.data?.people.filter((person) => (person.auditor_roles || []).includes("LEAD_AUDITOR")).map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>
         <label>Location<input value={locationText} onChange={(event) => setLocationText(event.target.value)} /></label>
         <label>Scope<textarea value={scope} onChange={(event) => setScope(event.target.value)} /></label>
