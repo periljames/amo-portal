@@ -16,6 +16,7 @@ const audit = {
   lead_auditor_user_id: "lead-1",
   observer_auditor_user_id: "observer-1",
   assistant_auditor_user_id: "assistant-1",
+  supporting_auditor_user_ids: ["support-1"],
 };
 
 describe("QMS audit assignment action gates", () => {
@@ -23,11 +24,14 @@ describe("QMS audit assignment action gates", () => {
     currentUser = null;
   });
 
-  it("lets the lead and assistant execute fieldwork", () => {
+  it("lets lead, assistant and governed supporting auditors execute fieldwork", () => {
     currentUser = { id: "lead-1" };
     expect(canExecuteAssignedAudit(audit)).toBe(true);
 
     currentUser = { id: "assistant-1" };
+    expect(canExecuteAssignedAudit(audit)).toBe(true);
+
+    currentUser = { id: "support-1" };
     expect(canExecuteAssignedAudit(audit)).toBe(true);
   });
 
@@ -44,6 +48,9 @@ describe("QMS audit assignment action gates", () => {
     expect(canCompleteAuditFieldwork(audit)).toBe(true);
 
     currentUser = { id: "assistant-1" };
+    expect(canCompleteAuditFieldwork(audit)).toBe(false);
+
+    currentUser = { id: "support-1" };
     expect(canCompleteAuditFieldwork(audit)).toBe(false);
 
     currentUser = { id: "observer-1" };
