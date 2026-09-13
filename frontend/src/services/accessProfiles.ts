@@ -55,6 +55,34 @@ export type AccessProfileUpdate = Partial<Omit<AccessProfileCreate, "code">> & {
   is_active?: boolean;
 };
 
+export type AccessElevationStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
+
+export type AccessElevationRequest = {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  current_profile_id: string | null;
+  requested_profile_id: string;
+  requested_by_user_id: string;
+  reason: string;
+  status: AccessElevationStatus;
+  decision_note: string | null;
+  decided_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+  user_name?: string | null;
+  user_email?: string | null;
+  staff_code?: string | null;
+  current_profile_name?: string | null;
+  requested_profile_name?: string | null;
+  requested_profile_code?: string | null;
+  requested_base_role_key?: string | null;
+  decided_by_name?: string | null;
+};
+
+export type AccessElevationRequestList = { items: AccessElevationRequest[] };
+
 export function getTenantAccessFramework(amoId?: string | null): Promise<TenantAccessFramework> {
   const query = amoId ? `?amo_id=${encodeURIComponent(amoId)}` : "";
   return apiGet<TenantAccessFramework>(`/accounts/admin/access-framework${query}`);
@@ -100,5 +128,44 @@ export function assignUserAccessProfile(
   return apiPut(
     `/accounts/admin/users/${encodeURIComponent(userId)}/access-profile${query}`,
     JSON.stringify({ access_profile_id: accessProfileId }),
+  );
+}
+
+export function listMyAccessElevationRequests(): Promise<AccessElevationRequestList> {
+  return apiGet<AccessElevationRequestList>("/auth/access-elevation-requests");
+}
+
+export function requestAccessElevation(
+  requestedProfileId: string,
+  reason: string,
+): Promise<AccessElevationRequest> {
+  return apiPost<AccessElevationRequest>(
+    "/auth/access-elevation-requests",
+    JSON.stringify({ requested_profile_id: requestedProfileId, reason }),
+  );
+}
+
+export function cancelAccessElevationRequest(requestId: string): Promise<{ id: string; status: AccessElevationStatus }> {
+  return apiPost(
+    `/auth/access-elevation-requests/${encodeURIComponent(requestId)}/cancel`,
+    JSON.stringify({}),
+  );
+}
+
+export function listAdminAccessElevationRequests(
+  status: AccessElevationStatus | "ALL" = "PENDING",
+): Promise<AccessElevationRequestList> {
+  const query = status === "ALL" ? "?status=" : `?status=${encodeURIComponent(status)}`;
+  return apiGet<AccessElevationRequestList>(`/accounts/admin/access-elevation-requests${query}`);
+}
+
+export function decideAccessElevationRequest(
+  requestId: string,
+  decision: "APPROVE" | "DENY",
+  note?: string,
+): Promise<AccessElevationRequest> {
+  return apiPost<AccessElevationRequest>(
+    `/accounts/admin/access-elevation-requests/${encodeURIComponent(requestId)}/decision`,
+    JSON.stringify({ decision, note: note?.trim() || null }),
   );
 }
