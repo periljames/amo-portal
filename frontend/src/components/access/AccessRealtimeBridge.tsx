@@ -34,7 +34,8 @@ export default function AccessRealtimeBridge() {
     if (!current) return;
     const subjectUserId = String(latest.metadata?.subjectUserId || "");
     const profileId = String(latest.metadata?.profileId || "");
-    const affectsCurrentUser = subjectUserId === current.id
+    const affectsCurrentUser = latest.action === "FRAMEWORK_INITIALIZED"
+      || subjectUserId === current.id
       || (Boolean(profileId) && profileId === current.access_profile_id);
     if (!affectsCurrentUser) return;
 
