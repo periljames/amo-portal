@@ -13,6 +13,14 @@ from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # no
 from amodb.apps.doc_control.knowledge_access_router import publication_tree_router
 
 from . import core_router as _core
+from amodb.apps.doc_control.workspace_service import require_control_user as _require_control_user
+
+# Keep the legacy Manuals intake helper aligned with the canonical Document
+# Control authority policy. In particular, a tenant/AMO administrator is a
+# control user for document intake, but never gains approval authority merely
+# through this bridge.
+_core._require_manual_control_user = _require_control_user
+
 from .approved_intake_router import router as _approved_intake_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
