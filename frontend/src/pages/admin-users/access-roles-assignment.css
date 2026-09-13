@@ -1,0 +1,43 @@
+.access-role-assignment {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.28));
+}
+
+.access-role-assignment__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.access-role-assignment__heading > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.access-role-assignment__heading small,
+.access-role-assignment__notice,
+.access-role-assignment__warning {
+  color: var(--text-muted, #64748b);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.access-role-assignment__notice {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--warning, #d97706) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 24%, transparent);
+}
+
+.access-role-assignment__button {
+  justify-content: center;
+  width: 100%;
+}
+
+.access-role-assignment__warning {
+  display: block;
+}
