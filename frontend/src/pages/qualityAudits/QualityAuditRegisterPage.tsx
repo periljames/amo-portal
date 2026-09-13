@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { ColDef, ICellRendererParams, RowDoubleClickedEvent } from "ag-grid-community";
@@ -64,8 +64,7 @@ const QualityAuditRegisterPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = parseQmsRegisterFilters(searchParams);
   const { view: actorView, period, status: findingStatus, stage, timing, auditId, q: search, pageSize, page, level } = filters;
-  const [searchDraft, setSearchDraft] = useState(search);
-  useEffect(() => setSearchDraft(search), [search]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const patchFilters = useCallback((patch: Record<string, string | number | null>, replace = false) => {
     const next = new URLSearchParams(searchParams);
     Object.entries(patch).forEach(([key, value]) => {
@@ -253,9 +252,9 @@ const QualityAuditRegisterPage: React.FC = () => {
         </div>
 
         <header className="qa-register-grid-page__toolbar">
-          <form className="qa-audits-list__search" onSubmit={(event) => { event.preventDefault(); updateFilter("q", searchDraft.trim()); }}>
+          <form className="qa-audits-list__search" onSubmit={(event) => { event.preventDefault(); updateFilter("q", searchInputRef.current?.value.trim() ?? ""); }}>
             <Search size={15} aria-hidden />
-            <input aria-label="Search finding, audit, owner or CAR" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Search finding, audit, owner or CAR" maxLength={160} />
+            <input key={search} ref={searchInputRef} aria-label="Search finding, audit, owner or CAR" defaultValue={search} placeholder="Search finding, audit, owner or CAR" maxLength={160} />
             <button type="submit">Search</button>
           </form>
           <label>Scope <select value={actorView} onChange={(event) => updateFilter("view", event.target.value)}><option value="global">Global</option><option value="mine">My Work</option></select></label>
