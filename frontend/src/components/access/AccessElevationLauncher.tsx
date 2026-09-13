@@ -70,7 +70,7 @@ export default function AccessElevationLauncher() {
   const requests = useQuery({
     queryKey: ["access-elevation-requests", "mine"],
     queryFn: listMyAccessElevationRequests,
-    enabled: !hidden,
+    enabled: open && !hidden,
     staleTime: 5_000,
     refetchInterval: realtimeStatus === "live" ? false : 15_000,
     refetchOnWindowFocus: true,
