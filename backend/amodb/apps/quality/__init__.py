@@ -1,10 +1,29 @@
 # backend/amodb/apps/quality/__init__.py
 from __future__ import annotations
 
+from importlib import import_module
+
 from fastapi import APIRouter
 
 # Primary Quality API exports.
 from .router import router, public_router  # noqa: F401
+
+# Several focused Quality services historically resolve ``from . import router``
+# and therefore receive this package-level APIRouter export rather than the
+# ``amodb.apps.quality.router`` module. Expose the narrow shared helper surface on
+# the exported router so those services keep their intended authorization and
+# finding behavior instead of failing with AttributeError at runtime.
+_router_module = import_module(f"{__name__}.router")
+for _helper_name in (
+    "_is_quality_admin",
+    "_audit_allows_user_by_audit",
+    "_require_audit_fieldwork_write_access",
+    "_next_audit_finding_ref",
+    "_date_to_datetime",
+    "_ensure_car_for_finding",
+    "task_services",
+):
+    setattr(router, _helper_name, getattr(_router_module, _helper_name))
 
 # Register extension metadata and assurance permission alignment before route
 # dependencies are evaluated during application startup.
