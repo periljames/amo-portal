@@ -215,3 +215,8 @@ router.routes[:] = [
     )
 ]
 router.routes[0:0] = list(_extension_router.routes)
+
+# Install cross-cutting observer read-only guards after the replacement checklist
+# route is composed, so both modern and retained legacy audit-content mutations
+# obey the same assignment-role boundary.
+from . import audit_observer_mutation_guards as _audit_observer_mutation_guards  # noqa: E402,F401
