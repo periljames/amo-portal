@@ -29,6 +29,8 @@ on:
       - "frontend/src/router.tsx"
       - "frontend/src/portalRoutes.tsx"
       - "frontend/src/app/PortalRouteSurface.tsx"
+      - "frontend/src/app/routeGuards.ts"
+      - "frontend/src/app/routeGuards.qmsRoles.test.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
       - ".github/workflows/quality-module-ci.yml"
@@ -88,6 +90,7 @@ jobs:
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
           amodb/apps/quality/tests/test_qms_admin_checklist_regressions.py
+          amodb/apps/quality/tests/test_authority_pack_and_roles.py
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_register_pagination.py
           amodb/apps/quality/tests/test_task_integrations.py
@@ -185,6 +188,8 @@ jobs:
       - name: Lint Quality-owned surfaces
         run: >-
           npm exec -- eslint
+          src/app/routeGuards.ts
+          src/app/routeGuards.qmsRoles.test.ts
           src/services/qmsAssuranceCases.ts
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditProgramme.ts
@@ -199,6 +204,8 @@ jobs:
           src/pages/qualityAudits
           src/pages/qms
           src/components/QMS
+          src/features/qms/auditSession/qmsAuditActionGates.ts
+          src/features/qms/auditSession/qmsAuditActionGates.test.ts
           src/types/qms.ts
 
   canonical-browser-gates:
