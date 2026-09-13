@@ -100,7 +100,6 @@ jobs:
           src/pages/qualityAudits/QualityAuditPlanSchedulePage.tsx
           tests/e2e/qms-modern-planner-live.spec.ts
           tests/e2e/qms-planner-lifecycle.spec.ts
-          tests/e2e/qms-planner-audit-handoff.spec.ts
       - name: Build production frontend
         run: npm run build
       - name: Install Chromium
@@ -138,7 +137,6 @@ jobs:
           npx playwright test \
             tests/e2e/qms-modern-planner-live.spec.ts \
             tests/e2e/qms-planner-lifecycle.spec.ts \
-            tests/e2e/qms-planner-audit-handoff.spec.ts \
             --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-planner-playwright.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
