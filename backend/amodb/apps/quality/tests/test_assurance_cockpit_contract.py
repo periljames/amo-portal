@@ -36,8 +36,8 @@ def test_personal_scope_is_derived_from_authenticated_actor() -> None:
         {"lead_auditor_user_id", "auditee_user_id", "title"},
     )
     assert params == {"actor_user_id": "user-123"}
-    assert "a.lead_auditor_user_id = :actor_user_id" in condition
-    assert "a.auditee_user_id = :actor_user_id" in condition
+    assert '"a"."lead_auditor_user_id" = :actor_user_id' in condition
+    assert '"a"."auditee_user_id" = :actor_user_id' in condition
     assert "observer_auditor_user_id" not in condition
 
 
