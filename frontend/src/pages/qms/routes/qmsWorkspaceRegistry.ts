@@ -29,8 +29,8 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "planner",
     segment: "planner",
-    label: "Calendar",
-    shortLabel: "Calendar",
+    label: "Planner",
+    shortLabel: "Planner",
     permission: "qms.calendar.view",
     description: "The temporal view of audits, surveillance, decisions, missions and assurance obligations.",
     activePrefixes: ["planner", "calendar"],
