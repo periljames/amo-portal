@@ -134,13 +134,13 @@ test("critical public workspace exposes semantic heading, main content, accessib
 test("expired access fails closed with an actionable public error and no audit projection", async ({ page }) => {
   await installSessionFixture(page, "expired");
   await page.goto("/qms/audit-access/expired-token", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("alert")).toContainText(/expired/i);
+  await expect(page.locator(".qms-public-audit__message[role='alert']")).toContainText(/expired/i);
   await expect(page.getByText(LONG_FINDING)).toHaveCount(0);
 });
 
 test("revoked access fails closed with an actionable public error and no audit projection", async ({ page }) => {
   await installSessionFixture(page, "revoked");
   await page.goto("/qms/audit-access/revoked-token", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("alert")).toContainText(/revoked/i);
+  await expect(page.locator(".qms-public-audit__message[role='alert']")).toContainText(/revoked/i);
   await expect(page.getByText(LONG_FINDING)).toHaveCount(0);
 });
