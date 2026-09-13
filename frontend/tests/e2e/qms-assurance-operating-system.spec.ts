@@ -271,7 +271,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "People and current privileges", exact: true })).toBeVisible();
   await expect(page.getByText("Current authorization readiness", { exact: true })).toBeVisible();
-  await expectFontAtLeast(page.locator(".qms-people__row-button strong").first(), 13.5);
+  await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
 
   await page.getByRole("button", { name: /Check audit assignment/i }).click();
   await expect(page.getByRole("heading", { name: "Check governed audit assignment", exact: true })).toBeVisible();
