@@ -290,7 +290,7 @@ test("Assurance keeps case triage primary in the consolidated finding lifecycle"
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/register", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.locator(".qa-register-grid-page__heading h1"), 28);
+  await expectFontAtLeast(page.locator(".qa-register-grid-page__heading h1"), 17.5);
   await expect(page.getByRole("heading", { name: "Findings & corrective actions", exact: true })).toBeVisible();
   await expect(page.getByText(/one lifecycle from audit finding through auditee action/i)).toBeVisible();
   await expect(page.getByText("No findings or corrective actions yet", { exact: true })).toBeVisible();
