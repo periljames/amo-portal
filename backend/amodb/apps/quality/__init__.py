@@ -8,12 +8,21 @@ from fastapi import APIRouter
 # Primary Quality API exports.
 from .router import router, public_router  # noqa: F401
 
+# Install the assignment-specific fieldwork guard on the legacy router module as
+# well as the focused services that consume the exported helper surface. This
+# keeps audit-team visibility broad while making Observer Auditor explicitly
+# read-only for fieldwork authoring.
+_router_module = import_module(f"{__name__}.router")
+from .audit_assignment_permissions import (  # noqa: E402
+    require_audit_fieldwork_write_access as _assignment_fieldwork_write_guard,
+)
+_router_module._require_audit_fieldwork_write_access = _assignment_fieldwork_write_guard
+
 # Several focused Quality services historically resolve ``from . import router``
 # and therefore receive this package-level APIRouter export rather than the
 # ``amodb.apps.quality.router`` module. Expose the narrow shared helper surface on
 # the exported router so those services keep their intended authorization and
 # finding behavior instead of failing with AttributeError at runtime.
-_router_module = import_module(f"{__name__}.router")
 for _helper_name in (
     "_is_quality_admin",
     "_audit_allows_user_by_audit",
