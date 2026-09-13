@@ -27,6 +27,7 @@ async function prepare(page: Page) {
     else if (url.pathname === "/auth/me") data = user;
     else if (url.pathname.includes("onboarding")) data = { is_complete: true, missing: [] };
     else if (url.pathname.endsWith("/access-framework")) data = { initialized: true, source: "test", profiles: [], modules: [] };
+    else if (url.pathname.includes("/access-elevation-requests")) data = { items: [] };
     else if (url.pathname.includes("amo-assets")) data = { crs_logo_filename: null, crs_template_filename: null };
     else if (url.pathname.includes("identity-health")) data = { active_users_without_profile: 0, active_profiles_without_user: 0, issues: [] };
     else if (url.pathname.includes("dashboard")) data = { employees_without_contract_count: 0, employees_without_base_count: 0, employees_without_pattern_count: 0 };
@@ -70,13 +71,18 @@ test("foreign tenant URL returns to the assigned department despite stale depart
 });
 
 
-test("user management exposes frontend access-role administration and governed appointments", async ({ page }) => {
+test("user management exposes persisted live access-role administration and approval queue", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/admin/users?tab=roles");
   await expect(page.getByRole("link", { name: "Open Workforce structure and appointments" })).toHaveAttribute("href", "/maintenance/tenant-a/rostering/settings?section=workforce&workforce_view=governance");
   await expect(page.getByRole("heading", { name: "Access Roles", exact: true })).toBeVisible();
   await expect(page.getByText(/Supporting access roles.*editable by AMO administrators/i)).toBeVisible();
   await expect(page.getByText(/Create and edit tenant access profiles/i)).toBeVisible();
+  await page.getByRole("button", { name: "Access requests" }).click();
+  await expect(page.getByRole("heading", { name: "Approval queue" })).toBeVisible();
+  await expect(page.getByText("Server persisted", { exact: true })).toBeVisible();
+  await expect(page.getByText("No pending access requests.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Close access request queue" }).click();
   await page.goto("/maintenance/tenant-a/admin/users?tab=lifecycle");
   await expect(page.getByRole("heading", { name: "Employment lifecycle", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Workforce appointments" })).toHaveAttribute("href", "/maintenance/tenant-a/rostering/settings?section=workforce&workforce_view=governance");
