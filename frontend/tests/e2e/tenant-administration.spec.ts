@@ -70,11 +70,13 @@ test("foreign tenant URL returns to the assigned department despite stale depart
 });
 
 
-test("user management connects access profiles and lifecycle to governed appointments", async ({ page }) => {
+test("user management exposes frontend access-role administration and governed appointments", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/admin/users?tab=roles");
   await expect(page.getByRole("link", { name: "Open Workforce structure and appointments" })).toHaveAttribute("href", "/maintenance/tenant-a/rostering/settings?section=workforce&workforce_view=governance");
-  await expect(page.getByText(/Only the superuser or this AMO’s Accountable Executive/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Access Roles", exact: true })).toBeVisible();
+  await expect(page.getByText(/Supporting access roles.*editable by AMO administrators/i)).toBeVisible();
+  await expect(page.getByText(/Create and edit tenant access profiles/i)).toBeVisible();
   await page.goto("/maintenance/tenant-a/admin/users?tab=lifecycle");
   await expect(page.getByRole("heading", { name: "Employment lifecycle", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Workforce appointments" })).toHaveAttribute("href", "/maintenance/tenant-a/rostering/settings?section=workforce&workforce_view=governance");
