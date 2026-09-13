@@ -30,6 +30,8 @@ const QmsCommandPalette: React.FC = () => {
   const [results, setResults] = useState<AssuranceCommandResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
+  const actorView = new URLSearchParams(location.search).get("view") === "mine" ? "mine" : "global";
   const amoCode = activeAmoCode(location.pathname);
   const qualityBase = amoCode ? `/maintenance/${encodeURIComponent(amoCode)}/quality/` : null;
 
@@ -96,19 +98,22 @@ const QmsCommandPalette: React.FC = () => {
     }
     const timer = window.setTimeout(() => {
       setSearching(true);
-      void searchAssuranceCommands(amoCode, clean, 20)
+      void searchAssuranceCommands(amoCode, clean, 20, actorView)
         .then((response) => {
-          if (requestId === requestRef.current) setResults(response.items || []);
+          if (requestId === requestRef.current) {
+            setResults(response.items || []);
+            setSourceMessage(response.warnings?.length ? "Some search sources are unavailable; results are incomplete." : null);
+          }
         })
         .catch(() => {
-          if (requestId === requestRef.current) setResults([]);
+          if (requestId === requestRef.current) { setResults([]); setSourceMessage("Search unavailable. Retry when the connection is restored."); }
         })
         .finally(() => {
           if (requestId === requestRef.current) setSearching(false);
         });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [amoCode, open, query]);
+  }, [amoCode, actorView, open, query]);
 
   useEffect(() => {
     if (!open) {
@@ -130,6 +135,7 @@ const QmsCommandPalette: React.FC = () => {
       if (event.target === event.currentTarget) setOpen(false);
     }}>
       <section className="qms-command-palette__dialog" role="dialog" aria-modal="true" aria-label="QMS command palette">
+        {sourceMessage ? <p role="status">{sourceMessage}</p> : null}
         <header className="qms-command-palette__search-row">
           <Search size={19} aria-hidden />
           <input

@@ -9,7 +9,7 @@ import InlineError from "../components/shared/InlineError";
 import SectionCard from "../components/shared/SectionCard";
 import Button from "../components/UI/Button";
 import { getContext } from "../services/auth";
-import { qmsListAudits, type QMSAuditOut } from "../services/qms";
+import { qmsListAllAudits, type QMSAuditOut } from "../services/qms";
 import { buildAuditWorkspacePath } from "../utils/auditSlug";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -110,7 +110,7 @@ const QMSAuditsPage: React.FC = () => {
     setState("loading");
     setError(null);
     try {
-      const data = await qmsListAudits({ domain: "AMO", limit: 400 }, { silent: true });
+      const data = await qmsListAllAudits({ domain: "AMO", limit: 400 }, { silent: true });
       setAudits(data);
       setState("ready");
     } catch (e: any) {

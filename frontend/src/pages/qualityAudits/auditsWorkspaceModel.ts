@@ -89,9 +89,6 @@ export const WORKSPACE_VIEWS: readonly WorkspaceView[] = [
 export const WORKSPACE_PAGE_SIZES = [25, 50, 100] as const;
 export type WorkspacePageSize = (typeof WORKSPACE_PAGE_SIZES)[number];
 
-/** Server list bound for `GET /quality/audits` (no page/offset). */
-export const AUDITS_LIST_BOUND = 250;
-
 const ACTIVE_STATUSES = new Set<QMSAuditOut["status"]>(["IN_PROGRESS", "CAP_OPEN"]);
 
 export function parseWorkspaceView(raw: string | null | undefined): WorkspaceView {

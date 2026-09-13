@@ -14,7 +14,7 @@ import {
 import { getBrandContext } from "../../services/branding";
 import {
   qmsGetDashboard,
-  qmsListAudits,
+  qmsListAllAudits,
   qmsListCars,
   qmsListFindingsBulk,
   qmsListAuditSchedules,
@@ -244,7 +244,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
 
   const auditsQuery = useQuery({
     queryKey: ["qms-audits", "schedule-detail", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO", limit: 300 }, { silent: true }),
+    queryFn: () => qmsListAllAudits({ domain: "AMO", limit: 300 }, { silent: true }),
     staleTime: 60_000,
   });
 

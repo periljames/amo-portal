@@ -2,7 +2,6 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import {
@@ -19,10 +18,7 @@ import {
 } from "react-router-dom";
 import type {
   ColDef,
-  GridApi,
-  GridReadyEvent,
   ICellRendererParams,
-  PaginationChangedEvent,
   RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
@@ -43,7 +39,7 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useToast } from "../../components/feedback/ToastProvider";
-import { getCachedUser, getContext } from "../../services/auth";
+import { getContext } from "../../services/auth";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import {
   addAuditProgrammeItem,
@@ -58,6 +54,8 @@ import {
 import {
   qmsDeleteAudit,
   qmsListAudits,
+  qmsListAllAudits,
+  type QMSAuditListParams,
   type QMSAuditOut,
 } from "../../services/qmsCore";
 import { auditNavigationHref } from "./auditNavigation";
@@ -65,11 +63,9 @@ import { auditNextAction } from "./auditNextAction";
 import AuditLaunchDrawer, { type AuditLaunchMode } from "./AuditLaunchDrawer";
 import { workingDayCount } from "../qms/qmsAuditProgrammePlanning";
 import {
-  AUDITS_LIST_BOUND,
   attentionLabel,
   buildAuditProgrammeLinkIndex,
   clampWorkspacePage,
-  filterWorkspaceAudits,
   formatAuditDate,
   lifecycleLabel,
   parseWorkspacePage,
@@ -77,7 +73,6 @@ import {
   parseWorkspaceView,
   programmeLabelForAudit,
   WORKSPACE_PAGE_SIZES,
-  type WorkspacePageSize,
   type WorkspaceView,
 } from "./auditsWorkspaceModel";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
@@ -150,9 +145,6 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const context = getContext();
   const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
-  const currentUser = getCachedUser();
-  const gridApiRef = useRef<GridApi<AuditGridRow> | null>(null);
-  const syncingPaginationRef = useRef(false);
   const canDeleteAudit = hasQmsRolePermission("qms.audit.manage");
   const canCreateAudit = hasQmsRolePermission("qms.audit.manage");
   const [launchMode, setLaunchMode] = useState<AuditLaunchMode | null>(null);
@@ -173,6 +165,8 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   const view = parseWorkspaceView(searchParams.get("view"));
   const search = searchParams.get("q") ?? "";
   const pageSize = parseWorkspacePageSize(searchParams.get("pageSize"));
+  const sort = (searchParams.get("sort") || (view === "completed" ? "actual_end" : "planned_start")) as QMSAuditListParams["sort"];
+  const direction = searchParams.get("direction") === "desc" || (!searchParams.has("direction") && view === "completed") ? "desc" : "asc";
   const pageFromUrl = parseWorkspacePage(searchParams.get("page"));
 
   const patchParams = useCallback(
@@ -195,9 +189,18 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   };
 
   const auditsQuery = useQuery({
-    queryKey: ["qms-audits-workspace", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO", limit: AUDITS_LIST_BOUND }),
+    queryKey: ["qms-audits-workspace", amoCode, view, search, sort, direction, pageFromUrl, pageSize, searchParams.get("period"), searchParams.get("status")],
+    queryFn: () => qmsListAudits({ domain: "AMO", limit: pageSize, offset: (pageFromUrl - 1) * pageSize,
+      view, q: search, period: searchParams.get("period") ? Number(searchParams.get("period")) : undefined,
+      status_: (searchParams.get("status") || undefined) as QMSAuditOut["status"] | undefined,
+      sort, direction }, { amoCode }),
     staleTime: 30_000,
+  });
+
+  const launchAuditsQuery = useQuery({
+    queryKey: ["qms-audits-launch-collection", amoCode],
+    queryFn: () => qmsListAllAudits({ domain: "AMO" }, { amoCode }),
+    enabled: Boolean(launchMode),
   });
 
   const programmeYear = new Date().getUTCFullYear();
@@ -256,17 +259,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     return buildAuditProgrammeLinkIndex(programmes, linksByProgrammeId);
   }, [programmeDetails, programmeSummaries, scheduleLinkQueries]);
 
-  const filteredAudits = useMemo(
-    () =>
-      filterWorkspaceAudits(auditsQuery.data ?? [], {
-        view,
-        userId: currentUser?.id,
-        search,
-        programmeIndex,
-      }),
-    [auditsQuery.data, currentUser?.id, programmeIndex, search, view],
-  );
-
+  const filteredAudits = auditsQuery.data?.items ?? [];
   const editableProgrammes = useMemo(
     () =>
       programmeDetails.filter((programme) =>
@@ -393,7 +386,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
 
   const safePage = clampWorkspacePage(
     pageFromUrl,
-    filteredAudits.length,
+    auditsQuery.data?.total ?? pageFromUrl * pageSize,
     pageSize,
   );
 
@@ -401,16 +394,11 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     mutationFn: ({ auditId, reason }: { auditId: string; reason?: string }) =>
       qmsDeleteAudit(auditId, reason),
     onSuccess: (_result, variables) => {
-      queryClient.setQueryData<QMSAuditOut[]>(
-        ["qms-audits-workspace", amoCode],
-        (current) => current?.filter((audit) => audit.id !== variables.auditId),
-      );
       setDeleteTarget(null);
       setDeleteReason("");
       setDeleteError(null);
       void queryClient.invalidateQueries({
         queryKey: ["qms-audits-workspace", amoCode],
-        refetchType: "none",
       });
     },
     onError: () => setDeleteError(AUDIT_DELETE_FAILURE_MESSAGE),
@@ -577,54 +565,6 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     [],
   );
 
-  const syncGridPagination = useCallback(
-    (api: GridApi<AuditGridRow>) => {
-      syncingPaginationRef.current = true;
-      const currentSize = api.paginationGetPageSize();
-      if (currentSize !== pageSize) {
-        api.setGridOption("paginationPageSize", pageSize);
-      }
-      const zeroBased = safePage - 1;
-      if (api.paginationGetCurrentPage() !== zeroBased) {
-        api.paginationGoToPage(zeroBased);
-      }
-      window.setTimeout(() => {
-        syncingPaginationRef.current = false;
-      }, 0);
-    },
-    [pageSize, safePage],
-  );
-
-  const onGridReady = useCallback(
-    (event: GridReadyEvent<AuditGridRow>) => {
-      gridApiRef.current = event.api;
-      syncGridPagination(event.api);
-    },
-    [syncGridPagination],
-  );
-
-  useEffect(() => {
-    const api = gridApiRef.current;
-    if (!api) return;
-    syncGridPagination(api);
-  }, [rowData, syncGridPagination]);
-
-  const onPaginationChanged = useCallback(
-    (event: PaginationChangedEvent<AuditGridRow>) => {
-      if (syncingPaginationRef.current || !event.api) return;
-      const nextPage = event.api.paginationGetCurrentPage() + 1;
-      const nextSize = event.api.paginationGetPageSize() as WorkspacePageSize;
-      const normalizedSize = WORKSPACE_PAGE_SIZES.includes(nextSize)
-        ? nextSize
-        : pageSize;
-      patchParams({
-        page: nextPage <= 1 ? null : String(nextPage),
-        pageSize: normalizedSize === 25 ? null : String(normalizedSize),
-      });
-    },
-    [pageSize, patchParams],
-  );
-
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AuditGridRow>) => {
       const target = event.event?.target;
@@ -645,16 +585,9 @@ const QualityAuditsWorkspacePage: React.FC = () => {
 
   const handleAuditCreated = useCallback(
     (audit: QMSAuditOut, creation: { offerProgramme: boolean }) => {
-      queryClient.setQueryData<QMSAuditOut[]>(
-        ["qms-audits-workspace", amoCode],
-        (current) => [
-          audit,
-          ...(current || []).filter((entry) => entry.id !== audit.id),
-        ],
-      );
+      void queryClient.invalidateQueries({ queryKey: ["qms-audits-launch-collection", amoCode] });
       void queryClient.invalidateQueries({
         queryKey: ["qms-audits-workspace", amoCode],
-        refetchType: "none",
       });
       setLaunchMode(null);
       pushToast({
@@ -754,6 +687,11 @@ const QualityAuditsWorkspacePage: React.FC = () => {
               placeholder="Search audits"
             />
           </label>
+          <label>Sort <select value={sort} onChange={(event) => patchParams({ sort: event.target.value, page: null })}>
+            <option value="planned_start">Scheduled date</option><option value="actual_end">Completion date</option>
+            <option value="audit_ref">Reference</option><option value="title">Title</option><option value="created_at">Created</option>
+          </select></label>
+          <label>Order <select value={direction} onChange={(event) => patchParams({ direction: event.target.value, page: null })}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
           {canCreateAudit ? (
             <div
               className="qa-audits-list__create-actions"
@@ -794,17 +732,12 @@ const QualityAuditsWorkspacePage: React.FC = () => {
           <AgGridReact<AuditGridRow>
             rowData={auditsQuery.isError ? [] : rowData}
             columnDefs={columnDefs}
-            defaultColDef={defaultColDef}
+            defaultColDef={{ ...defaultColDef, sortable: false }}
             getRowId={(row) => row.data.id}
             rowHeight={40}
             headerHeight={36}
             animateRows={false}
             suppressCellFocus
-            pagination
-            paginationPageSize={pageSize}
-            paginationPageSizeSelector={[...WORKSPACE_PAGE_SIZES]}
-            onGridReady={onGridReady}
-            onPaginationChanged={onPaginationChanged}
             onRowClicked={onRowClicked}
             rowClass="qa-audits-grid__row"
             loading={auditsQuery.isLoading}
@@ -814,8 +747,16 @@ const QualityAuditsWorkspacePage: React.FC = () => {
             containerStyle={{ width: "100%", height: "100%" }}
           />
         </div>
+        <nav aria-label="Audit result pages">
+          <span>{auditsQuery.data?.total ?? "…"} results · Page {safePage}</span>
+          <button type="button" disabled={safePage <= 1 || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage - 1) })}>Previous</button>
+          <button type="button" disabled={!auditsQuery.data || safePage * pageSize >= auditsQuery.data.total || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage + 1) })}>Next</button>
+          <label>Results per page <select value={pageSize} onChange={(event) => patchParams({ pageSize: event.target.value, page: null })}>{WORKSPACE_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+        </nav>
       </section>
-      {launchMode ? (
+      {launchMode && launchAuditsQuery.isLoading ? <p role="status">Loading existing audits...</p> : null}
+      {launchMode && launchAuditsQuery.isError ? <p role="alert">Existing audits could not be loaded. <button onClick={() => void launchAuditsQuery.refetch()}>Retry</button></p> : null}
+      {launchMode && launchAuditsQuery.data ? (
         <AuditLaunchDrawer
           key={launchMode}
           amoCode={amoCode}
@@ -824,7 +765,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
           programmes={
             programmeDetails.length ? programmeDetails : programmeSummaries
           }
-          existingAudits={auditsQuery.data || []}
+          existingAudits={launchAuditsQuery.data || []}
           onClose={() => setLaunchMode(null)}
           onCreated={handleAuditCreated}
           onOpenExisting={openAudit}

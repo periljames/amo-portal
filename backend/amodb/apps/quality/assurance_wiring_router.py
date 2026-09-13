@@ -75,7 +75,7 @@ SOURCE_ALIASES = {
 }
 
 INVALID_SOURCE_STATUSES = {"CANCELLED", "OBSOLETE", "REJECTED", "DELETED", "VOID", "SUPERSEDED"}
-_TABLE_COLUMNS_CACHE: dict[str, set[str]] = {}
+_TABLE_COLUMNS_CACHE: dict[tuple[Any, str], set[str]] = {}
 
 
 class ControlCreate(BaseModel):
@@ -163,7 +163,8 @@ def _safe_identifier(value: str) -> str:
 
 
 def _table_columns(db: Session, table: str) -> set[str]:
-    cached = _TABLE_COLUMNS_CACHE.get(table)
+    cache_key = (db.get_bind(), table)
+    cached = _TABLE_COLUMNS_CACHE.get(cache_key)
     if cached is not None:
         return cached
     if db.get_bind().dialect.name != "postgresql":
@@ -179,7 +180,8 @@ def _table_columns(db: Session, table: str) -> set[str]:
         {"table": table},
     ).scalars().all()
     columns = set(rows)
-    _TABLE_COLUMNS_CACHE[table] = columns
+    if columns:
+        _TABLE_COLUMNS_CACHE[cache_key] = columns
     return columns
 
 
@@ -444,12 +446,20 @@ def source_search(
 def list_controls(
     status_filter: ControlStatus | None = Query(default=None, alias="status"),
     approval_status: ApprovalStatus | None = Query(default=None),
+    view: Literal["global", "mine"] = "global",
+    offset: int = Query(default=0, ge=0),
+    due_only: bool = False,
     limit: int = Query(default=250, ge=1, le=500),
     ctx: TenantContext = Depends(require_quality_permission("qms.dashboard.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     query = db.query(QualityAssuranceControl).filter(QualityAssuranceControl.amo_id == ctx.amo_id)
+    if view == "mine":
+        from .assurance_sources import responsibility
+        query = query.filter(text(responsibility(db, "quality_assurance_controls", set(QualityAssuranceControl.__table__.columns.keys())))).params(actor_user_id=ctx.user_id)
+    if due_only:
+        query = query.filter(QualityAssuranceControl.status == "ACTIVE", or_(QualityAssuranceControl.next_test_due.is_(None), QualityAssuranceControl.next_test_due <= date.today() + timedelta(days=30)))
     if status_filter:
         query = query.filter(QualityAssuranceControl.status == status_filter)
     if approval_status:
@@ -461,7 +471,7 @@ def list_controls(
         (QualityAssuranceControl.criticality == "MEDIUM", 2),
         else_=3,
     )
-    rows = query.order_by(criticality_order, QualityAssuranceControl.control_code.asc()).limit(limit).all()
+    rows = query.order_by(criticality_order, QualityAssuranceControl.control_code.asc()).offset(offset).limit(limit).all()
     ids = [row.id for row in rows]
     evidence_rows = db.query(
         QualityAssuranceEvidenceLink.control_id,
@@ -481,7 +491,7 @@ def list_controls(
         latest_tests.setdefault(test.control_id, test)
     return {
         "items": [_control_dict(row, *counts.get(row.id, (0, 0)), latest_tests.get(row.id)) for row in rows],
-        "total": total,
+        "total": total, "limit": limit, "offset": offset,
         "as_of": _now().isoformat(),
     }
 def _create_control(

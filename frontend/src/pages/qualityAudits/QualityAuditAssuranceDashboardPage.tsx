@@ -48,12 +48,13 @@ type MetricCard = {
 
 const PIPELINE_ORDER = ["PLANNED", "IN_PROGRESS", "CAP_OPEN", "CLOSED"];
 
-function formatNumber(value: number | undefined): string {
+function formatNumber(value: number | null | undefined): string {
+  if (value == null) return "Unavailable";
   return new Intl.NumberFormat().format(Number(value || 0));
 }
 
-function formatPercent(value: number | undefined): string {
-  return `${Number(value || 0).toFixed(1)}%`;
+function formatPercent(value: number | null | undefined): string {
+  return value == null ? "Unavailable" : `${value.toFixed(1)}%`;
 }
 
 function labelize(value: string): string {
@@ -74,6 +75,7 @@ function formatDate(value?: string | null): string {
 }
 
 function readinessCopy(band: string): string {
+  if (band === "UNAVAILABLE") return "Required source data is incomplete. Review source warnings before making decisions.";
   if (band === "STRONG") return "Assurance controls are operating within the current monitoring thresholds.";
   if (band === "WATCH") return "Some assurance pressure requires active monitoring.";
   if (band === "AT_RISK") return "Multiple assurance conditions require intervention.";
@@ -276,7 +278,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               <div className="assurance-health__identity">
                 <span className="assurance-health__eyebrow"><ShieldCheck size={15} /> {view === "mine" ? "My assurance position" : "AMO assurance position"}</span>
                 <div className="assurance-health__headline">
-                  <strong>{data.readiness.score}%</strong>
+                  <strong>{data.readiness.score == null ? "Unavailable" : `${data.readiness.score}%`}</strong>
                   <div><h2>{labelize(data.readiness.band)}</h2><p>{readinessCopy(data.readiness.band)}</p></div>
                 </div>
                 <small>{data.readiness.disclaimer}</small>
@@ -289,12 +291,13 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               </div>
             </section>
 
+            <p>{data.period_note} Current as of {new Date(data.as_of).toLocaleDateString()}.</p>
             <section className="assurance-kpi-grid" aria-label="Assurance headline metrics">
               {metricCards.map((card) => (
-                <button key={card.id} type="button" className={`assurance-kpi assurance-kpi--${card.tone}`} onClick={() => go(card.drilldown)}>
+                <button key={card.id} type="button" className={`assurance-kpi assurance-kpi--${metrics[card.id] == null ? "neutral" : card.tone}`} onClick={() => go(card.drilldown)}>
                   <span className="assurance-kpi__label">{card.label}</span>
-                  <strong>{card.value}</strong>
-                  <small>{card.helper}</small>
+                  <strong>{metrics[card.id] == null ? "Unavailable" : card.value}</strong>
+                  <small>{metrics[card.id] == null ? "Required source data is unavailable" : card.helper}</small>
                   <span className="assurance-kpi__open">Open <ArrowRight size={13} /></span>
                 </button>
               ))}
@@ -303,7 +306,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
             <section className="assurance-cockpit__grid assurance-cockpit__grid--primary">
               <article className="assurance-panel assurance-panel--trend">
                 <header><div><span>Finding intelligence</span><h3>Findings trend</h3><p>Finding creation by severity for the selected period.</p></div><button type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings&period=${period}&view=${view}`)}>Open register <ArrowRight size={13} /></button></header>
-                {findingTrend.length ? (
+                {data.finding_trend == null ? <div className="assurance-empty">Finding data unavailable.</div> : findingTrend.length ? (
                   <div className="assurance-chart assurance-chart--large">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={findingTrend} margin={{ top: 12, right: 12, left: -20, bottom: 0 }}>
@@ -334,7 +337,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
                       <b>{item.count}</b><ArrowRight size={14} />
                     </button>
                   )) : (
-                    <div className="assurance-inbox-zero"><CheckCircle2 size={24} /><strong>{view === "mine" ? "You're clear" : "Priority queue clear"}</strong><span>No current conditions require action in this scope.</span></div>
+                    <div className="assurance-inbox-zero"><CheckCircle2 size={24} /><strong>{data.source_health === "PARTIAL" ? "Priority queue incomplete" : view === "mine" ? "You're clear" : "Priority queue clear"}</strong><span>{data.source_health === "PARTIAL" ? "Unavailable sources may contain additional work." : "No current conditions require action in this scope."}</span></div>
                   )}
                 </div>
               </article>
@@ -342,8 +345,8 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
 
             <section className="assurance-cockpit__grid assurance-cockpit__grid--secondary">
               <article className="assurance-panel">
-                <header><div><span>Exposure</span><h3>Risk by control category</h3><p>Open finding concentration by available control classification.</p></div></header>
-                {data.control_exposure.length ? (
+                <header><div><span>Exposure</span><h3>Risk by control category</h3><p>Current open finding concentration by available control classification.</p></div></header>
+                {data.control_exposure == null ? <div className="assurance-empty">Exposure data unavailable.</div> : data.control_exposure.length ? (
                   <div className="assurance-chart">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={data.control_exposure} layout="vertical" margin={{ top: 6, right: 16, left: 12, bottom: 0 }}>
@@ -359,16 +362,17 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
               </article>
 
               <article className="assurance-panel">
-                <header><div><span>Closeout discipline</span><h3>CAR ageing</h3><p>Open corrective actions by due-state and overdue age.</p></div><button type="button" onClick={() => go(data.drilldowns.open_cars)}>Open CARs <ArrowRight size={13} /></button></header>
+                <header><div><span>Closeout discipline</span><h3>CAR ageing</h3><p>Current open corrective actions by due-state and overdue age.</p></div><button type="button" onClick={() => go(data.drilldowns.open_cars)}>Open CARs <ArrowRight size={13} /></button></header>
                 <div className="assurance-ageing">
+                  {data.closure_ageing == null ? <p>CAR data unavailable.</p> : null}
                   {closureAgeing.map((item) => <button key={item.bucket} type="button" onClick={() => go(item.bucket === "not_due" ? data.drilldowns.open_cars : data.drilldowns.overdue_cars)}><strong>{item.count}</strong><span>{item.label}</span></button>)}
                 </div>
               </article>
 
               <article className="assurance-panel">
-                <header><div><span>Delivery</span><h3>Audit pipeline</h3><p>Current audit occurrence state in the selected scope.</p></div></header>
+                <header><div><span>Delivery</span><h3>Audit pipeline</h3><p>Current status of audit occurrences planned or created in the selected year.</p></div></header>
                 <div className="assurance-pipeline">
-                  {pipeline.map((item, index) => (
+                  {data.audit_pipeline == null ? <p>Audit data unavailable.</p> : pipeline.map((item, index) => (
                     <button key={item.status} type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits?status=${item.status}&period=${period}&view=${view}`)}>
                       <span>{index + 1}</span><strong>{item.count}</strong><small>{labelize(item.status)}</small>
                     </button>
@@ -378,7 +382,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
             </section>
 
             <section className="assurance-readiness-panel">
-              <header><div><span>Readiness dimensions</span><h3>What is driving the assurance position?</h3></div><small>{view === "mine" ? "Personal scope where an attributable owner/participant exists; otherwise tenant-wide indicators remain governed by source availability." : "Tenant-wide live source projection."}</small></header>
+              <header><div><span>Readiness dimensions</span><h3>What is driving the assurance position?</h3></div><small>{view === "mine" ? "Personal scope uses supported assignments and ownership. Unsupported personal projections are excluded." : "Tenant-wide live source projection."}</small></header>
               <div className="assurance-readiness-grid">
                 {data.readiness.dimensions.map((dimension) => (
                   <div key={dimension.id}><span>{dimension.label}</span><div><i style={{ width: `${dimension.score}%` }} /></div><strong>{dimension.score}%</strong></div>

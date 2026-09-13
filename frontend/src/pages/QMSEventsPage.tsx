@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QMSLayout from "../components/QMS/QMSLayout";
 import { getContext } from "../services/auth";
-import { qmsListAudits, qmsUpdateAudit } from "../services/qms";
+import { qmsListAllAudits, qmsUpdateAudit } from "../services/qms";
 import { getDueMessage } from "./qualityAudits/dueStatus";
 import { selectRelevantDueAudit, shiftAuditWindowByDays } from "../utils/auditDate";
 
@@ -23,7 +23,7 @@ const QMSEventsPage: React.FC = () => {
 
   const auditsQuery = useQuery({
     queryKey: ["qms-events-audits", amoCode, department],
-    queryFn: () => qmsListAudits({ domain: "AMO", limit: 300 }, { silent: true }),
+    queryFn: () => qmsListAllAudits({ domain: "AMO", limit: 300 }, { silent: true }),
     refetchInterval: 60_000,
   });
 

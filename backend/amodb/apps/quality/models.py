@@ -531,6 +531,7 @@ class QMSAudit(Base):
         Index("ix_qms_audits_domain_kind", "domain", "kind"),
         Index("ix_qms_audits_amo_domain_created", "amo_id", "domain", "created_at"),
         Index("ix_qms_audits_amo_deleted", "amo_id", "deleted_at"),
+        Index("ix_qms_audits_active_page", "amo_id", "domain", "planned_start", "id", postgresql_where=deleted_at.is_(None)),
         CheckConstraint(
             "planned_start IS NULL OR planned_end IS NULL OR planned_end >= planned_start",
             name="ck_qms_audit_planned_dates_order",
@@ -626,6 +627,7 @@ class QMSAuditFinding(Base):
 
     __table_args__ = (
         Index("ix_qms_findings_audit_created", "audit_id", "created_at"),
+        Index("ix_qms_findings_amo_created", "amo_id", "created_at"),
         Index("ix_qms_findings_audit_level", "audit_id", "level"),
         Index("ix_qms_findings_audit_severity", "audit_id", "severity"),
         # If a finding_ref is used, keep it unique per audit.

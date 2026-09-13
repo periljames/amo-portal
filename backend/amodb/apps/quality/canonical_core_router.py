@@ -931,31 +931,24 @@ def _append_calendar_rows(
 @core_router.get("/audits")
 def list_audits(
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    domain: quality_models.QMSDomain | None = None,
+    status: quality_models.QMSAuditStatus | None = None,
+    kind: quality_models.QMSAuditKind | None = None,
+    deleted_only: bool = False,
+    include_deleted: bool = False,
+    view: str = Query("all", pattern="^(all|global|mine|upcoming|active|completed)$"),
+    q: str | None = Query(None, max_length=200),
+    sort: str = Query("planned_start", pattern="^(planned_start|created_at|actual_end|deleted_at|title|status|audit_ref)$"),
+    direction: str = Query("asc", pattern="^(asc|desc)$"),
+    period: int | None = Query(None, ge=2000, le=2200),
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    rows = (
-        db.query(quality_models.QMSAudit)
-        .filter(quality_models.QMSAudit.amo_id == ctx.amo_id)
-        .order_by(quality_models.QMSAudit.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return {
-        "items": [
-            {
-                "id": _row_id(row),
-                "audit_ref": row.audit_ref,
-                "title": row.title,
-                "status": _as_text(row.status),
-                "kind": _as_text(row.kind),
-                "planned_start": _as_date(row.planned_start),
-                "planned_end": _as_date(row.planned_end),
-            }
-            for row in rows
-        ]
-    }
+    from .audit_list_service import audit_page
+    return audit_page(db, ctx, limit=limit, offset=offset, domain=domain, status=status,
+        kind=kind, deleted_only=deleted_only, include_deleted=include_deleted,
+        view=view, q=q, sort=sort, direction=direction, period=period)
 
 
 @core_router.get("/findings")

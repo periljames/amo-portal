@@ -62,6 +62,9 @@ const QualityAuditRegisterPage: React.FC = () => {
   const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const actorView = searchParams.get("view") === "mine" ? "mine" : "global";
+  const period = searchParams.get("period") ? Number(searchParams.get("period")) : undefined;
+  const openOnly = searchParams.get("status") === "open";
   const stage = parseFindingLifecycleView(searchParams.get("stage"));
   const rawTiming = searchParams.get("timing");
   const timing: CarTiming = rawTiming === "overdue" || rawTiming === "due_soon" ? rawTiming : "";
@@ -78,9 +81,9 @@ const QualityAuditRegisterPage: React.FC = () => {
   }, [search]);
 
   const registerQuery = useQuery({
-    queryKey: ["qms-assurance-register", amoCode, auditId, stage, timing, debouncedSearch, pageSize, page],
+    queryKey: ["qms-assurance-register", amoCode, actorView, period, openOnly, auditId, stage, timing, debouncedSearch, pageSize, page],
     queryFn: ({ signal }) => qmsGetAuditRegisterPage({
-      domain: "AMO",
+      domain: "AMO", view: actorView, period, openOnly,
       auditId: auditId || undefined,
       onlyWithCars: false,
       workflowStage: toRegisterWorkflowStage(stage),
@@ -91,7 +94,6 @@ const QualityAuditRegisterPage: React.FC = () => {
       signal,
     }),
     staleTime: 15_000,
-    placeholderData: (previous) => previous,
   });
 
   const rows = useMemo<RegisterRow[]>(() => (registerQuery.data?.rows || []).map((row) => {

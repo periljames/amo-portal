@@ -123,7 +123,8 @@ function labelFromKey(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function scoreTone(score: number): string {
+function scoreTone(score: number | null): string {
+  if (score == null) return "unavailable";
   if (score >= 85) return "strong";
   if (score >= 70) return "watch";
   if (score >= 50) return "risk";
@@ -142,7 +143,8 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`qew-status qew-status--${status.toLowerCase().replaceAll("_", "-")}`}>{status.replaceAll("_", " ")}</span>;
 }
 
-function ReadinessGauge({ score, band }: { score: number; band: string }) {
+function ReadinessGauge({ score, band }: { score: number | null; band: string }) {
+  if (score == null) return <div role="status">Readiness unavailable</div>;
   const tone = scoreTone(score);
   return (
     <div className={`qew-gauge qew-gauge--${tone}`} aria-label={`Operational readiness ${score} percent, ${band}`}>
@@ -161,6 +163,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.settings.manage") || hasQmsRolePermission("qms.audit.manage");
   const view = activeHub(location.search);
+  const actorView = new URLSearchParams(location.search).get("view") === "mine" ? "mine" : "global";
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(null);
@@ -184,8 +187,8 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   });
 
   const controlsQuery = useQuery({
-    queryKey: ["qms-excellence-controls", amoCode],
-    queryFn: () => getAssuranceControls(amoCode),
+    queryKey: ["qms-excellence-controls", amoCode, actorView],
+    queryFn: () => getAssuranceControls(amoCode, actorView),
     staleTime: 12_000,
   });
 
@@ -455,16 +458,16 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
                     </button>
                   ))}
                 </div>
-              ) : <div className="qew-empty"><CheckCircle2 size={24} /><strong>No urgent assurance exposure</strong><span>Continue scheduled surveillance and operating-effectiveness testing.</span></div>}
+              ) : <div className="qew-empty"><CheckCircle2 size={24} /><strong>{overview.warnings.length ? "Assurance sources incomplete" : "No urgent assurance exposure"}</strong><span>{overview.warnings.length ? "Unavailable sources may contain additional work." : "Continue scheduled surveillance and operating-effectiveness testing."}</span></div>}
             </section>
 
             <section className="qew-panel qew-panel--forecast">
               <header><div><p>Next 30 days</p><h2>Workload forecast</h2></div><StatusBadge status={overview.forecast.band} /></header>
-              <strong className="qew-forecast-number">{overview.forecast.commitments_due_30_days}</strong>
+              <strong className="qew-forecast-number">{overview.forecast.commitments_due_30_days ?? "Unavailable"}</strong>
               <p>{overview.forecast.explanation}</p>
               <div className="qew-forecast-metrics">
                 {["audits_due_30", "cars_due_30", "controls_due", "supplier_approvals_due_30", "calibrations_due_30"].map((key) => (
-                  <div key={key}><span>{labelFromKey(key)}</span><strong>{overview.metrics[key] || 0}</strong></div>
+                  <div key={key}><span>{labelFromKey(key)}</span><strong>{overview.metrics[key] ?? "Unavailable"}</strong></div>
                 ))}
               </div>
             </section>
@@ -484,7 +487,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
                 ["invalid_evidence", "Invalid evidence", Link2],
               ].map(([key, label, Icon]) => {
                 const MetricIcon = Icon as React.ComponentType<{ size?: number }>;
-                return <article key={String(key)}><MetricIcon size={19} /><span><strong>{overview.metrics[String(key)] || 0}</strong><small>{String(label)}</small></span></article>;
+                return <article key={String(key)}><MetricIcon size={19} /><span><strong>{overview.metrics[String(key)] ?? "Unavailable"}</strong><small>{String(label)}</small></span></article>;
               })}
             </div>
           </section>
