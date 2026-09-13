@@ -260,6 +260,11 @@ def _resolve_source(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"The authoritative {spec.label.lower()} source is unavailable because table '{spec.table}' is missing.",
         )
+    if "amo_id" not in columns:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"The authoritative {spec.label.lower()} source cannot prove tenant ownership and is unavailable for evidence linking.",
+        )
     identity_fields = [field for field in spec.identity_fields if field in columns]
     if not identity_fields:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"The {spec.label.lower()} source has no supported identity field.")
@@ -272,11 +277,11 @@ def _resolve_source(
             "supplier_id", "equipment_id", "owner_user_id", "due_date", "valid_until",
         ) if field in columns
     )
-    where = ["(" + " OR ".join(f"CAST({_safe_identifier(field)} AS TEXT) = :source_id" for field in identity_fields) + ")"]
-    params: dict[str, Any] = {"source_id": source_id}
-    if "amo_id" in columns:
-        where.append("amo_id = :amo_id")
-        params["amo_id"] = ctx.amo_id
+    where = [
+        "(" + " OR ".join(f"CAST({_safe_identifier(field)} AS TEXT) = :source_id" for field in identity_fields) + ")",
+        "amo_id = :amo_id",
+    ]
+    params: dict[str, Any] = {"source_id": source_id, "amo_id": ctx.amo_id}
     sql = f"SELECT {', '.join(_safe_identifier(field) for field in sorted(projection))} FROM {_safe_identifier(spec.table)} WHERE {' AND '.join(where)} LIMIT 1"
     row = db.execute(text(sql), params).mappings().first()
     if not row:
@@ -389,7 +394,7 @@ def source_catalog(
                 "source_type": spec.source_type,
                 "label": spec.label,
                 "table": spec.table,
-                "available": bool(_table_columns(db, spec.table)),
+                "available": (lambda columns: bool(columns and "amo_id" in columns))(_table_columns(db, spec.table)),
                 "description": spec.description,
             }
             for spec in SOURCE_REGISTRY.values()
@@ -413,10 +418,16 @@ def source_search(
     columns = _table_columns(db, spec.table)
     if not columns:
         return {"items": [], "source_type": normalised, "warning": f"Table '{spec.table}' is unavailable."}
+    if "amo_id" not in columns:
+        return {
+            "items": [],
+            "source_type": normalised,
+            "warning": f"Table '{spec.table}' cannot prove tenant ownership and is unavailable for evidence search.",
+        }
     searchable = [field for field in (*spec.identity_fields, *spec.label_fields) if field in columns]
     projection = set(searchable)
     projection.update(field for field in ("id", "amo_id", "status", "user_id", "supplier_id", "equipment_id", *spec.valid_until_fields) if field in columns)
-    where = ["amo_id = :amo_id"] if "amo_id" in columns else ["1=1"]
+    where = ["amo_id = :amo_id"]
     params: dict[str, Any] = {"amo_id": ctx.amo_id, "limit": limit}
     if q.strip() and searchable:
         where.append("(" + " OR ".join(f"CAST({_safe_identifier(field)} AS TEXT) ILIKE :q" for field in searchable) + ")")
