@@ -2,6 +2,7 @@ import React from "react";
 import { clsx } from "clsx";
 import { ChevronRight, Ellipsis, type LucideIcon } from "lucide-react";
 import QMSLayout from "../QMS/QMSLayout";
+import "./auditPageShell.css";
 
 export type AuditShellNavItem = {
   id: string;
@@ -47,7 +48,7 @@ const AuditPageShell: React.FC<Props> = ({
   overflowActionLabel = "More audit page actions",
 }) => {
   const customHeader = suppressHeader ? <></> : (
-    <div className="audit-shell-header">
+    <div className={clsx("audit-shell-header", toolbar && "audit-shell-header--has-toolbar")}>
       <div className="audit-shell-header__top-row">
         <div className="audit-shell-header__title-block">
           <nav className="audit-shell-header__breadcrumbs" aria-label="Breadcrumb">
