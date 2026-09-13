@@ -39,13 +39,17 @@ export default function AdminAccessRequestDock() {
   const recent = items.filter((item) => item.status !== "PENDING").slice(0, 8);
 
   const decide = useMutation({
-    mutationFn: ({ item, decision }: { item: AccessElevationRequest; decision: "APPROVE" | "DENY" }) => (
-      decideAccessElevationRequest(item.id, decision, notes[item.id])
-    ),
+    mutationFn: ({ item, decision }: { item: AccessElevationRequest; decision: "APPROVE" | "DENY" }) => {
+      const note = (notes[item.id] || "").trim();
+      if (decision === "DENY" && note.length < 3) {
+        throw new Error("Add a short reason before denying the request so the user receives useful feedback.");
+      }
+      return decideAccessElevationRequest(item.id, decision, note);
+    },
     onSuccess: async (result) => {
       setFeedback(result.status === "APPROVED"
         ? `${personLabel(result)} was approved for ${result.requested_profile_name || "the requested profile"}.`
-        : `${personLabel(result)} access request was denied.`);
+        : `${personLabel(result)} access request was denied with feedback.`);
       setNotes((current) => ({ ...current, [result.id]: "" }));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["access-elevation-requests"] }),
@@ -89,7 +93,7 @@ export default function AdminAccessRequestDock() {
             <div className="admin-access-request-card__transition"><span>{item.current_profile_name || "Current access"}</span><b>→</b><strong>{item.requested_profile_name || item.requested_profile_code || "Requested access"}</strong></div>
             <p>{item.reason}</p>
             <small>Submitted {new Date(item.created_at).toLocaleString()}</small>
-            <label><span>Decision note</span><textarea rows={2} value={notes[item.id] || ""} onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional approval note; give a reason when declining." /></label>
+            <label><span>Decision note</span><textarea rows={2} value={notes[item.id] || ""} onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional for approval. Required when declining." /></label>
             <div className="admin-access-request-card__actions">
               <button type="button" className="is-approve" onClick={() => decide.mutate({ item, decision: "APPROVE" })} disabled={decide.isPending}><Check size={14} /> Approve & apply</button>
               <button type="button" className="is-deny" onClick={() => decide.mutate({ item, decision: "DENY" })} disabled={decide.isPending}><ShieldX size={14} /> Deny</button>
