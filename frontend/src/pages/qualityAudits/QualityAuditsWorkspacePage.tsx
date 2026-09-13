@@ -259,7 +259,10 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     return buildAuditProgrammeLinkIndex(programmes, linksByProgrammeId);
   }, [programmeDetails, programmeSummaries, scheduleLinkQueries]);
 
-  const filteredAudits = auditsQuery.data?.items ?? [];
+  const filteredAudits = useMemo(
+    () => auditsQuery.data?.items ?? [],
+    [auditsQuery.data?.items],
+  );
   const editableProgrammes = useMemo(
     () =>
       programmeDetails.filter((programme) =>
@@ -393,7 +396,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   const deleteMutation = useMutation({
     mutationFn: ({ auditId, reason }: { auditId: string; reason?: string }) =>
       qmsDeleteAudit(auditId, reason),
-    onSuccess: (_result, variables) => {
+    onSuccess: () => {
       setDeleteTarget(null);
       setDeleteReason("");
       setDeleteError(null);
@@ -417,7 +420,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     setDeleteTarget(audit);
     setDeleteReason("");
     setDeleteError(null);
-  }, []);
+  }, [setDeleteError, setDeleteReason, setDeleteTarget]);
 
   useEffect(() => {
     if (safePage !== pageFromUrl) {
@@ -580,7 +583,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       setLaunchMode(null);
       navigate(auditNavigationHref(amoCode, audit));
     },
-    [amoCode, navigate],
+    [amoCode, navigate, setLaunchMode],
   );
 
   const handleAuditCreated = useCallback(
@@ -621,7 +624,20 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       }
       navigate(auditNavigationHref(amoCode, audit));
     },
-    [amoCode, editableProgrammes, navigate, pushToast, queryClient],
+    [
+      amoCode,
+      editableProgrammes,
+      navigate,
+      pushToast,
+      queryClient,
+      setLaunchMode,
+      setNewUniverseLabel,
+      setNewUniverseType,
+      setProgrammePrompt,
+      setProgrammePromptError,
+      setTargetProgrammeId,
+      setTargetUniverseId,
+    ],
   );
 
   return (
@@ -748,7 +764,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
           />
         </div>
         <nav aria-label="Audit result pages">
-          <span>{auditsQuery.data?.total ?? "…"} results · Page {safePage}</span>
+          <span>{auditsQuery.data?.total ?? "â€¦"} results Â· Page {safePage}</span>
           <button type="button" disabled={safePage <= 1 || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage - 1) })}>Previous</button>
           <button type="button" disabled={!auditsQuery.data || safePage * pageSize >= auditsQuery.data.total || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage + 1) })}>Next</button>
           <label>Results per page <select value={pageSize} onChange={(event) => patchParams({ pageSize: event.target.value, page: null })}>{WORKSPACE_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
