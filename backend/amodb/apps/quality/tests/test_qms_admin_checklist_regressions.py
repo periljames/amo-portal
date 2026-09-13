@@ -10,9 +10,9 @@ from amodb.apps.manuals import core_router as manual_core
 from amodb.apps.quality.audit_file_controls import _require_checklist_editor
 
 
-def _user(role: str, *, amo_id: str = "amo-1", is_amo_admin: bool = False):
+def _user(role: str, *, user_id: str | None = None, amo_id: str = "amo-1", is_amo_admin: bool = False):
     return SimpleNamespace(
-        id=f"user-{role.lower()}",
+        id=user_id or f"user-{role.lower()}",
         role=role,
         amo_id=amo_id,
         effective_amo_id=amo_id,
@@ -20,6 +20,7 @@ def _user(role: str, *, amo_id: str = "amo-1", is_amo_admin: bool = False):
         is_system_account=False,
         is_superuser=False,
         is_amo_admin=is_amo_admin,
+        _admin_profile_elevated=False,
     )
 
 
@@ -32,11 +33,31 @@ def _unassigned_audit():
     )
 
 
+def _assigned_audit():
+    return SimpleNamespace(
+        lead_auditor_user_id="lead-1",
+        observer_auditor_user_id="observer-1",
+        assistant_auditor_user_id="assistant-1",
+        supporting_auditor_user_ids=["support-1"],
+    )
+
+
 def test_amo_admin_can_replace_controlled_audit_checklist() -> None:
     _require_checklist_editor(
         _user("AMO_ADMIN", is_amo_admin=True),
         _unassigned_audit(),
     )
+
+
+def test_executing_audit_team_can_replace_controlled_audit_checklist_but_observer_cannot() -> None:
+    audit = _assigned_audit()
+    for user_id in ("lead-1", "assistant-1", "support-1"):
+        _require_checklist_editor(_user("AUDITOR", user_id=user_id), audit)
+
+    with pytest.raises(HTTPException) as caught:
+        _require_checklist_editor(_user("AUDITOR", user_id="observer-1"), audit)
+    assert caught.value.status_code == 403
+    assert "read-only" in str(caught.value.detail).lower()
 
 
 def test_unassigned_non_admin_still_cannot_replace_controlled_audit_checklist() -> None:
