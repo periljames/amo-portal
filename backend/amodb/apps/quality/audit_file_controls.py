@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from amodb.apps.audit import services as audit_services
 from amodb.database import get_db
 from amodb.entitlements import require_module
@@ -49,7 +50,7 @@ def _audit_status_value(audit: object) -> str:
 
 
 def _require_checklist_editor(current_user: account_models.User, audit: object) -> None:
-    if _is_quality_admin(current_user):
+    if is_tenant_admin(current_user) or _is_quality_admin(current_user):
         return
     assigned_ids = {
         str(value)
