@@ -1,0 +1,15 @@
+/* Final QMS hardening overrides for canonical planner/audit surfaces.
+ * These rules preserve existing components while fixing stacking and
+ * accessibility regressions exposed by the exact-head browser gate.
+ */
+
+.qms-modern-planner-v2 .qms-audit-programme--embedded .qms-audit-programme__header--embedded {
+  display: flex !important;
+}
+
+@media (max-width: 820px) {
+  .qms-modern-planner-v2 .qms-modern-planner__toolbar {
+    position: relative;
+    z-index: 95;
+  }
+}
