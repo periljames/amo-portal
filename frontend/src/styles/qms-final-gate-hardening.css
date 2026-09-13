@@ -12,4 +12,11 @@
     position: relative;
     z-index: 95;
   }
+
+  /* Keep the mobile rail inside the planner coordinate space so it opens
+   * below the planner toolbar instead of overlapping and intercepting it. */
+  .qms-modern-planner-v2 .qms-planner-left-rail {
+    position: absolute;
+    top: 3.45rem;
+  }
 }
