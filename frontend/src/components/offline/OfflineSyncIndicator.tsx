@@ -25,6 +25,12 @@ import {
   type OfflineReplayProgress,
 } from "../../services/offlinePersistence";
 import {
+  isQmsFieldworkConflict,
+  keepServerVersionForQmsFieldwork,
+  qmsFieldworkConflictSnapshot,
+  reapplyQmsFieldworkConflict,
+} from "../../services/qmsOfflineFieldworkConflict";
+import {
   getPortalConnectivity,
   onPortalConnectivityChange,
   probePortalReadiness,
@@ -45,6 +51,7 @@ const EMPTY_PROGRESS: OfflineReplayProgress = {
 type IndicatorState = "online" | "offline" | "degraded" | "queued" | "syncing" | "conflict";
 
 function entryLabel(entry: OfflineOutboxEntry): string {
+  if (entry.entityType === "qms-audit-checklist-item") return "Audit checklist fieldwork";
   const entity = entry.entityType?.replace(/-/g, " ") || "local change";
   return entity.replace(/^./, (letter) => letter.toUpperCase());
 }
@@ -56,6 +63,13 @@ function formatLastReady(value: number | null): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
+}
+
+function compactFieldworkState(value: Record<string, unknown> | null): string {
+  if (!value) return "Unavailable";
+  const response = typeof value.canonical_response_status === "string" ? value.canonical_response_status.replaceAll("_", " ") : "Not recorded";
+  const notes = typeof value.auditor_notes === "string" && value.auditor_notes.trim() ? ` · ${value.auditor_notes.trim().slice(0, 160)}` : "";
+  return `${response}${notes}`;
 }
 
 export function OfflineSyncIndicator() {
@@ -110,6 +124,48 @@ export function OfflineSyncIndicator() {
       await refresh();
     }
   }, [busyId, online, refresh]);
+
+  const reapplyQmsEntry = useCallback(async (entry: OfflineOutboxEntry) => {
+    if (busyId) return;
+    const snapshot = qmsFieldworkConflictSnapshot(entry);
+    if (!snapshot) {
+      setActionError("The server version for this checklist item is unavailable. Reopen the audit online before retrying.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Reapply your saved fieldwork against server version ${snapshot.serverVersion}? This creates a new attributable mutation and preserves the rejected attempt in audit history.`,
+    );
+    if (!confirmed) return;
+    setBusyId(entry.id);
+    setActionError(null);
+    try {
+      await reapplyQmsFieldworkConflict(entry);
+      if (online) await replayOfflineMutations();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyId(null);
+      await refresh();
+    }
+  }, [busyId, online, refresh]);
+
+  const keepServerQmsEntry = useCallback(async (entry: OfflineOutboxEntry) => {
+    if (busyId) return;
+    const confirmed = window.confirm(
+      "Keep the current server version and discard this local fieldwork attempt? The local queued copy will be removed.",
+    );
+    if (!confirmed) return;
+    setBusyId(entry.id);
+    setActionError(null);
+    try {
+      await keepServerVersionForQmsFieldwork(entry);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyId(null);
+      await refresh();
+    }
+  }, [busyId, refresh]);
 
   const discardEntry = useCallback(async (entry: OfflineOutboxEntry) => {
     if (busyId) return;
@@ -261,22 +317,48 @@ export function OfflineSyncIndicator() {
               <strong className="portal-offline-recovery__review-title">Offline changes need review</strong>
               {reviewEntries.map((entry) => {
                 const busy = busyId === entry.id;
+                const qmsConflict = isQmsFieldworkConflict(entry);
+                const snapshot = qmsConflict ? qmsFieldworkConflictSnapshot(entry) : null;
                 return (
                   <article className="portal-offline-recovery__item" key={entry.id}>
                     <div className="portal-offline-recovery__item-copy">
                       <strong>{entryLabel(entry)}</strong>
                       <span>{entry.serverDetail || entry.error || "The server rejected this local change."}</span>
+                      {snapshot ? (
+                        <details>
+                          <summary>Compare saved and server versions</summary>
+                          <dl>
+                            <div><dt>Saved base version</dt><dd>{snapshot.baseVersion ?? "Unknown"}</dd></div>
+                            <div><dt>Current server version</dt><dd>{snapshot.serverVersion}</dd></div>
+                            <div><dt>Your saved response</dt><dd>{compactFieldworkState(snapshot.localBody)}</dd></div>
+                            <div><dt>Current server response</dt><dd>{compactFieldworkState(snapshot.serverRow)}</dd></div>
+                          </dl>
+                        </details>
+                      ) : null}
                       {entry.retryable === false ? <small>Correct the source record, then recreate this item.</small> : null}
                     </div>
                     <div className="portal-offline-recovery__actions">
-                      {entry.retryable !== false ? (
-                        <button type="button" onClick={() => void retryEntry(entry)} disabled={!online || Boolean(busyId)}>
-                          <RotateCcw size={15} aria-hidden="true" />{busy ? "Working…" : "Retry"}
-                        </button>
-                      ) : null}
-                      <button type="button" className="portal-offline-recovery__discard" onClick={() => void discardEntry(entry)} disabled={Boolean(busyId)}>
-                        <Trash2 size={15} aria-hidden="true" />Discard
-                      </button>
+                      {qmsConflict ? (
+                        <>
+                          <button type="button" onClick={() => void reapplyQmsEntry(entry)} disabled={Boolean(busyId)}>
+                            <RotateCcw size={15} aria-hidden="true" />{busy ? "Working…" : "Reapply my change"}
+                          </button>
+                          <button type="button" className="portal-offline-recovery__discard" onClick={() => void keepServerQmsEntry(entry)} disabled={Boolean(busyId)}>
+                            <CheckCircle2 size={15} aria-hidden="true" />Keep server version
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {entry.retryable !== false ? (
+                            <button type="button" onClick={() => void retryEntry(entry)} disabled={!online || Boolean(busyId)}>
+                              <RotateCcw size={15} aria-hidden="true" />{busy ? "Working…" : "Retry"}
+                            </button>
+                          ) : null}
+                          <button type="button" className="portal-offline-recovery__discard" onClick={() => void discardEntry(entry)} disabled={Boolean(busyId)}>
+                            <Trash2 size={15} aria-hidden="true" />Discard
+                          </button>
+                        </>
+                      )}
                     </div>
                   </article>
                 );
