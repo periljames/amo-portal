@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from amodb.apps.quality import canonical_router
-from amodb.apps.quality.assurance_cockpit_router import _metric_drilldowns, _user_scope
+from amodb.apps.quality.assurance_cockpit_router import _audit_scope_condition, _metric_drilldowns
+from amodb.apps.quality.assurance_sources import AUDIT_ACTORS, actor_condition
 from amodb.apps.quality.tenant_security import TenantContext
 
 
@@ -23,25 +24,38 @@ def test_assurance_cockpit_routes_are_canonical_and_unique() -> None:
 
 
 def test_personal_scope_is_derived_from_authenticated_actor() -> None:
-    condition, params = _user_scope(
-        {"lead_auditor_user_id", "auditee_user_id", "title"},
+    ctx = TenantContext(
+        amo_id="amo-1",
+        amo_code="SLK",
         user_id="user-123",
-        candidates=("lead_auditor_user_id", "observer_auditor_user_id", "auditee_user_id"),
+        is_superuser=False,
+    )
+    condition, params = _audit_scope_condition(
+        "a",
+        ctx,
+        {"lead_auditor_user_id", "auditee_user_id", "title"},
     )
     assert params == {"actor_user_id": "user-123"}
-    assert "lead_auditor_user_id = :actor_user_id" in condition
-    assert "auditee_user_id = :actor_user_id" in condition
+    assert "a.lead_auditor_user_id = :actor_user_id" in condition
+    assert "a.auditee_user_id = :actor_user_id" in condition
     assert "observer_auditor_user_id" not in condition
 
 
 def test_personal_scope_fails_closed_when_source_has_no_owner_columns() -> None:
-    condition, params = _user_scope(
+    condition = actor_condition(
         {"id", "title"},
-        user_id="user-123",
-        candidates=("owner_user_id", "assigned_to_user_id"),
+        ("owner_user_id", "assigned_to_user_id"),
     )
     assert condition == "1 = 0"
-    assert params == {"actor_user_id": "user-123"}
+
+
+def test_audit_actor_contract_remains_explicit() -> None:
+    assert AUDIT_ACTORS == (
+        "lead_auditor_user_id",
+        "observer_auditor_user_id",
+        "assistant_auditor_user_id",
+        "auditee_user_id",
+    )
 
 
 def test_dashboard_drilldowns_preserve_period_and_context() -> None:
