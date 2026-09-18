@@ -83,6 +83,7 @@ QUALITY_MANAGER_CAPABILITIES = QUALITY_ALL_CAPABILITIES - frozenset({
     "qms.audit.programme.approve", "qms.reports.attest_authority",
 })
 QUALITY_OFFICER_CAPABILITIES = QUALITY_VIEW_CAPABILITIES | frozenset({
+    "qms.training.manage",
     "qms.audit.execute", "qms.audit.manage", "qms.audit.notice.manage",
     "qms.calendar.manage", "qms.finding.create", "qms.car.issue",
     "qms.car.manage", "qms.car.respond", "qms.reports.export",

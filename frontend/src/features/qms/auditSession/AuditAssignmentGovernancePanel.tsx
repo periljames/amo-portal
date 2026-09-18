@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { savedTeamOptions } from "./auditSetupControls";
+import { useAuditAuthorityOnline } from "./useSavedAuditTeam";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ShieldAlert, UserCheck } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -16,12 +18,12 @@ import {
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { qmsPeopleWorkspacePath } from "../../../pages/qms/routes/qmsWorkspaceRegistry";
 
-type Props = { amoCode: string; auditKey: string };
+type Props = { amoCode: string; auditKey: string; onDirtyChange?: (dirty: boolean) => void };
 type RoleField = "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id";
 type AssignmentDraft = Record<RoleField, string>;
 type DeclarationDraft = {
   userId: string;
-  declaration: "INDEPENDENT" | "CONFLICT" | "REQUIRES_REVIEW";
+  declaration: "" | "INDEPENDENT" | "CONFLICT" | "REQUIRES_REVIEW";
   relationship: string;
   rationale: string;
 };
@@ -75,16 +77,17 @@ function privilegeTypeForRole(role: AuditAssignmentRole): "LEAD_AUDITOR" | "AUDI
   return role === "LEAD_AUDITOR" ? "LEAD_AUDITOR" : "AUDITOR";
 }
 
-const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
+const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, onDirtyChange }) => {
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
+  const authorityOnline = useAuditAuthorityOnline();
   const [draftOverride, setDraftOverride] = useState<AssignmentDraft | null>(null);
   const [reason, setReason] = useState("Assign audit team after eligibility checks.");
   const [declaration, setDeclaration] = useState<DeclarationDraft>({
     userId: "",
-    declaration: "INDEPENDENT",
+    declaration: "",
     relationship: "",
-    rationale: "No conflict of interest for this occurrence.",
+    rationale: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,6 +108,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
     };
   }, [auditQuery.data]);
   const draft = draftOverride ?? persistedDraft;
+  const dirty = ROLE_CONFIG.some(({ field }) => draft[field] !== persistedDraft[field]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   const updateDraft = (field: RoleField, value: string) => {
     setDraftOverride((current) => ({ ...(current ?? persistedDraft), [field]: value }));
   };
@@ -121,7 +126,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
       queryKey: ["qms-audit-assignment-eligibility", amoCode, auditId, role, draft[field]],
       queryFn: ({ signal }: { signal: AbortSignal }) => getAuditAssignmentEligibility(amoCode, auditId, draft[field], role, signal),
       enabled: Boolean(auditId && draft[field]),
-      staleTime: 1_500,
+      staleTime: 30_000,
+      refetchOnMount: "always" as const,
       retry: false,
     })),
   });
@@ -154,10 +160,16 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
       assistant_auditor_user_id: draft.assistant_auditor_user_id || null,
       reason: reason.trim(),
     }),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      queryClient.setQueryData(auditOccurrenceQueryKey(amoCode, auditKey), {
+        ...auditQuery.data,
+        lead_auditor_user_id: saved.lead_auditor_user_id,
+        observer_auditor_user_id: saved.observer_auditor_user_id,
+        assistant_auditor_user_id: saved.assistant_auditor_user_id,
+      });
       setDraftOverride(null);
       setError(null);
-      setNotice("Team assignments committed.");
+      setNotice("Team saved.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
@@ -167,12 +179,15 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
   });
 
   const declarationMutation = useMutation({
-    mutationFn: () => declareAuditIndependence(amoCode, auditId, {
+    mutationFn: () => {
+      if (!declaration.userId || !declaration.declaration) throw new Error("Select a person and their declaration.");
+      return declareAuditIndependence(amoCode, auditId, {
       user_id: declaration.userId,
       declaration: declaration.declaration,
       relationship_to_subject: declaration.relationship.trim() || null,
       rationale: declaration.rationale.trim(),
-    }),
+    });
+    },
     onSuccess: async () => {
       setError(null);
       setNotice("Independence declaration recorded.");
@@ -182,7 +197,15 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
   });
 
   if (auditQuery.isLoading) return <article className="qms-occurrence-stage__card">Evaluating governed audit-team assignments…</article>;
-  if (auditQuery.isError || !auditQuery.data) return <article className="qms-occurrence-stage__card" role="alert"><AlertTriangle size={16} /> Audit assignment context is unavailable.</article>;
+  if (!auditQuery.data) return <article className="qms-occurrence-stage__card" role="alert"><AlertTriangle size={16} /> Audit assignment context is unavailable.</article>;
+  const people = savedTeamOptions(auditQuery.data, personnelQuery.data || []);
+  const saveBlocked = !authorityOnline ? "Reconnect to verify and save assignments."
+    : !draft.lead_auditor_user_id ? "A lead auditor is required. Observer and assistant are optional."
+    : !dirty ? "No assignment changes to save."
+    : duplicateSelection ? "Choose a different person for each role."
+    : eligibilityQueries.some((query, index) => draft[ROLE_CONFIG[index].field] && query.isError) ? "Eligibility checks failed. Retry the affected check."
+    : !allSelectedEligible ? "All selected auditors must pass eligibility and independence checks."
+    : reason.trim().length < 8 ? "Enter a decision reason of at least 8 characters." : "";
 
   return (
     <article id="audit-occurrence-team" className="qms-occurrence-stage__card" aria-label="Audit team assignment">
@@ -216,23 +239,28 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
         </div>
       ) : null}
 
+      {personnelQuery.isError ? <div role="alert" className="qms-occurrence-stage__message is-error">
+        The personnel directory could not be loaded. Saved assignments are retained.
+        <button type="button" onClick={() => void personnelQuery.refetch()}>Retry directory</button>
+      </div> : null}
+      <p role="status">{dirty ? "Unsaved team changes" : "Showing saved team assignments"}</p>
       <div className="qms-occurrence-stage__fields">
         {ROLE_CONFIG.map(({ field, role, label }) => {
           const assessment = eligibilityByRole.get(role);
           const independence = assessmentFor(assessment)?.independence;
           return (
             <label key={field}>
-              <span>{label}</span>
-              <select disabled={!canManage} value={draft[field]} onChange={(event) => updateDraft(field, event.target.value)}>
+              <span>{label} · {role === "LEAD_AUDITOR" ? "Required" : "Optional"}</span>
+              <select disabled={!canManage || assignmentMutation.isPending || personnelQuery.isPending} value={draft[field]} onChange={(event) => updateDraft(field, event.target.value)}>
                 <option value="">Unassigned</option>
-                {(personnelQuery.data || []).map((person) => (
+                {people.map((person) => (
                   <option key={person.id} value={person.id}>
                     {person.full_name}
-                    {person.role ? ` · ${person.role}` : ""}
                   </option>
                 ))}
               </select>
-              <small className={assessment && !assessment.eligible ? "is-error" : ""}>{eligibilitySummary(assessment)}</small>
+              <small className={assessment && !assessment.eligible ? "is-error" : ""}>{draft[field] && !assessment ? "Checking eligibility…" : eligibilitySummary(assessment)}</small>
+              {eligibilityQueries[ROLE_CONFIG.findIndex((item) => item.field === field)]?.isError ? <button type="button" onClick={() => void eligibilityQueries[ROLE_CONFIG.findIndex((item) => item.field === field)].refetch()}>Retry eligibility</button> : null}
               {independence?.required ? (
                 <small>
                   Independence:{" "}
@@ -250,20 +278,24 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
           <ShieldAlert size={15} /> Same person cannot hold multiple auditor roles.
         </div>
       ) : null}
-      <label>
+      <details><summary>Assignment note</summary><label>
         <span>Decision reason</span>
         <textarea rows={2} disabled={!canManage} value={reason} onChange={(event) => setReason(event.target.value)} />
-      </label>
+      </label></details>
       {canManage ? (
         <button
           type="button"
           className="is-primary"
-          disabled={assignmentMutation.isPending || duplicateSelection || !allSelectedEligible || reason.trim().length < 8}
+          disabled={assignmentMutation.isPending || Boolean(saveBlocked)}
+          aria-describedby="audit-team-save-help"
           onClick={() => assignmentMutation.mutate()}
         >
-          <UserCheck size={15} /> {assignmentMutation.isPending ? "Committing…" : "Commit team"}
+          <UserCheck size={15} /> {assignmentMutation.isPending ? "Saving…" : "Save team assignments"}
         </button>
       ) : null}
+
+      <small id="audit-team-save-help">{saveBlocked || "Ready to save team changes."}</small>
+      {dirty ? <button type="button" disabled={assignmentMutation.isPending} onClick={() => setDraftOverride(null)}>Discard team changes</button> : null}
 
       {canManage ? (
         <details className="qms-occurrence-stage__independence">
@@ -274,10 +306,10 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
               <span>Person</span>
               <select
                 value={declaration.userId}
-                onChange={(event) => setDeclaration((current) => ({ ...current, userId: event.target.value }))}
+                onChange={(event) => setDeclaration({ userId: event.target.value, declaration: "", relationship: "", rationale: "" })}
               >
                 <option value="">Select person</option>
-                {(personnelQuery.data || []).map((person) => (
+                {people.map((person) => (
                   <option key={person.id} value={person.id}>
                     {person.full_name}
                   </option>
@@ -287,6 +319,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
             <label>
               <span>Declaration</span>
               <select
+                disabled={!declaration.userId}
                 value={declaration.declaration}
                 onChange={(event) =>
                   setDeclaration((current) => ({
@@ -295,6 +328,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
                   }))
                 }
               >
+                <option value="">Select declaration</option>
                 <option value="INDEPENDENT">Independent</option>
                 <option value="CONFLICT">Conflict</option>
                 <option value="REQUIRES_REVIEW">Requires review</option>
@@ -322,6 +356,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey }) 
             type="button"
             disabled={
               !declaration.userId ||
+              !authorityOnline ||
+              !declaration.declaration ||
               declaration.rationale.trim().length < 8 ||
               declarationMutation.isPending ||
               (declaration.declaration === "CONFLICT" && !declaration.relationship.trim())

@@ -113,7 +113,7 @@ class QualityPrivilege(Base):
 
 
 class QualityPrivilegeDecision(Base):
-    """Append-only human decision changing privilege state."""
+    """Human decision history; removable with an authorised privilege purge."""
 
     __tablename__ = "quality_privilege_decisions"
     __table_args__ = (

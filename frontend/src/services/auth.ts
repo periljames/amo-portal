@@ -10,8 +10,10 @@ import { getApiBaseUrl } from "./config";
 import { clearBrandContext, setBrandContext } from "./branding";
 import { setPortalDataMode } from "./runtimeMode";
 import { getPortalConnectivity, probePortalReadiness } from "./portalConnectivity";
+import { AuthRecoveryBackoff } from "./authRecoveryBackoff";
 
 const TOKEN_KEY = "amo_portal_token";
+const TOKEN_EXPIRY_KEY = "amo_portal_token_expiry_v1";
 const AMO_KEY = "amo_code";
 const AMO_SLUG_KEY = "amo_slug";
 const DEPT_KEY = "amo_department";
@@ -25,6 +27,7 @@ const LOGIN_CONTEXT_CACHE_KEY = "amo_login_context_cache";
 const PENDING_SERVER_LOGOUT_KEY = "amo_pending_server_logout";
 const AUTH_CHANNEL_NAME = "amo-auth-session-v1";
 const AUTH_REFRESH_LEASE_KEY = "amo_auth_refresh_lease_v1";
+const AUTH_REFRESH_RETRY_KEY = "amo_auth_refresh_retry_v1";
 const AUTH_REFRESH_LEASE_MS = 20_000;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
@@ -47,6 +50,8 @@ let memoryToken: string | null = (() => {
   return sessionToken || legacyToken;
 })();
 let refreshSessionInFlight: Promise<LoginResponse | null> | null = null;
+const recoveryBackoff = new AuthRecoveryBackoff();
+let lastAuthResponse: LoginResponse | null = null;
 const authTabId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let authChannelInstance: BroadcastChannel | null = null;
@@ -228,13 +233,16 @@ export interface LoginResponse {
 }
 
 type AuthChannelMessage = {
-  type: "authenticated" | "refresh-failed";
+  type: "authenticated" | "refresh-failed" | "refresh-deferred";
   source: string;
   response?: LoginResponse;
+  sentAt?: number;
+  retryAt?: number;
 };
 
 function applyAuthResponse(data: LoginResponse): void {
-  saveToken(data.access_token);
+  lastAuthResponse = data;
+  saveToken(data.access_token, data.expires_in);
   if (data.user) cacheCurrentUser(data.user);
   if (data.amo) {
     setContext(data.amo.amo_code, data.department?.code || null, data.amo.login_slug);
@@ -263,10 +271,13 @@ function authChannel(): BroadcastChannel | null {
     const message = event.data;
     if (!message || message.source === authTabId) return;
     if (message.type === "authenticated" && message.response) {
-      applyAuthResponse(message.response);
+      if (sessionEnded || localStorage.getItem(PENDING_SERVER_LOGOUT_KEY)) return;
+      applyAuthResponse({ ...message.response, expires_in: Math.max(0,
+        message.response.expires_in - Math.max(0, Date.now() - (message.sentAt ?? Date.now())) / 1000) });
       authRefreshWaiters.forEach((resolve) => resolve(message.response!));
       authRefreshWaiters.clear();
-    } else if (message.type === "refresh-failed") {
+    } else if (message.type === "refresh-failed" || message.type === "refresh-deferred") {
+      if (message.retryAt) recoveryBackoff.retryAt = Math.max(recoveryBackoff.retryAt, message.retryAt);
       authRefreshWaiters.forEach((resolve) => resolve(null));
       authRefreshWaiters.clear();
     }
@@ -275,8 +286,8 @@ function authChannel(): BroadcastChannel | null {
 }
 
 function broadcastAuthentication(data: LoginResponse): void {
-  authChannel()?.postMessage({ type: "authenticated", source: authTabId, response: data } satisfies AuthChannelMessage);
-  void probePortalReadiness(true);
+  authChannel()?.postMessage({ type: "authenticated", source: authTabId, response: data, sentAt: Date.now() } satisfies AuthChannelMessage);
+  if (getPortalConnectivity().state !== "ONLINE") void probePortalReadiness();
 }
 
 function acquireRefreshLeadership(): boolean {
@@ -346,11 +357,18 @@ export type PasswordResetDeliveryMethod = "email" | "whatsapp" | "both";
 // localStorage helpers
 // -----------------------------------------------------------------------------
 
-export function saveToken(token: string): void {
+export function saveToken(token: string, expiresIn?: number): void {
   sessionEnded = false;
   memoryToken = token;
   sessionStorage.setItem(TOKEN_KEY, token);
   localStorage.removeItem(TOKEN_KEY);
+  recoveryBackoff.reset();
+  localStorage.removeItem(AUTH_REFRESH_RETRY_KEY);
+  if (expiresIn !== undefined && Number.isFinite(expiresIn) && expiresIn >= 0) {
+    sessionStorage.setItem(TOKEN_EXPIRY_KEY, JSON.stringify({ token, expiresAt: Date.now() + expiresIn * 1000 }));
+  } else {
+    sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  }
 }
 
 export function getToken(): string | null {
@@ -361,6 +379,7 @@ export function clearToken(): void {
   memoryToken = null;
   sessionStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
 }
 
 export function setContext(
@@ -511,6 +530,14 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 export function getTokenSecondsRemaining(): number | null {
   const token = getToken();
   if (!token) return null;
+  // Server-issued lifetime avoids refresh loops on devices with skewed clocks.
+  // Persist it alongside the exact token so reloads retain the same deadline.
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TOKEN_EXPIRY_KEY) || "null");
+    if (saved?.token === token && Number.isFinite(saved.expiresAt)) {
+      return Math.floor((saved.expiresAt - Date.now()) / 1000);
+    }
+  } catch { /* old sessions use the JWT expiry until their next refresh */ }
   const payload = decodeJwtPayload(token);
   const exp = Number(payload?.exp);
   if (!Number.isFinite(exp)) return null;
@@ -671,7 +698,7 @@ export async function login(
 
   const data: LoginResponse = await res.json();
 
-  saveToken(data.access_token);
+  saveToken(data.access_token, data.expires_in);
 
   // Store context (AMO code + department code, if provided)
   if (data.amo) {
@@ -755,7 +782,7 @@ export async function extendSession(reason = "active"): Promise<LoginResponse | 
   }
   if (!res.ok) throw new Error(await readErrorMessage(res));
   const data = (await res.json()) as LoginResponse;
-  saveToken(data.access_token);
+  saveToken(data.access_token, data.expires_in);
   if (data.user) cacheCurrentUser(data.user);
   if (data.amo) {
     setContext(data.amo.amo_code, data.department ? data.department.code : null, data.amo.login_slug);
@@ -786,6 +813,24 @@ export function extendSessionIfNeeded(reason = "active"): Promise<LoginResponse 
 }
 
 /** Recover the browser session without exposing the refresh credential to JS. */
+function deferRefresh(response?: Response): void {
+  const retryAt = recoveryBackoff.defer(response);
+  try { localStorage.setItem(AUTH_REFRESH_RETRY_KEY, String(retryAt)); } catch { /* memory fallback */ }
+  authChannel()?.postMessage({ type: "refresh-deferred", source: authTabId, retryAt } satisfies AuthChannelMessage);
+}
+
+function refreshDeferred(): boolean {
+  try {
+    recoveryBackoff.retryAt = Math.max(recoveryBackoff.retryAt, Number(localStorage.getItem(AUTH_REFRESH_RETRY_KEY)) || 0);
+  } catch { /* memory fallback */ }
+  return Date.now() < recoveryBackoff.retryAt;
+}
+
+export function getSessionRecoveryRetryAt(): number {
+  refreshDeferred();
+  return recoveryBackoff.retryAt;
+}
+
 export function recoverSessionAfterUnauthorized(reason = "access-expired"): Promise<LoginResponse | null> {
   if (sessionEnded) return Promise.resolve(null);
   const connectivity = getPortalConnectivity().state;
@@ -793,8 +838,15 @@ export function recoverSessionAfterUnauthorized(reason = "access-expired"): Prom
     return Promise.resolve(null);
   }
   if (refreshSessionInFlight) return refreshSessionInFlight;
+  if (refreshDeferred()) return Promise.resolve(null);
+  authChannel();
+  const requestedToken = getToken();
 
-  refreshSessionInFlight = (async () => {
+  const performRefresh = async (): Promise<LoginResponse | null> => {
+    if (sessionEnded || refreshDeferred()) return null;
+    if (getToken() !== requestedToken && lastAuthResponse && (getTokenSecondsRemaining() ?? 0) > 0) {
+      return lastAuthResponse;
+    }
     if (!acquireRefreshLeadership()) return waitForCrossTabRefresh();
     try {
       const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/refresh`, {
@@ -812,20 +864,31 @@ export function recoverSessionAfterUnauthorized(reason = "access-expired"): Prom
         handleAuthFailure("refresh-rejected");
         return null;
       }
-      if (!res.ok) return null;
+      if (!res.ok) {
+        deferRefresh(res);
+        return null;
+      }
       const data = (await res.json()) as LoginResponse;
+      if (sessionEnded || localStorage.getItem(PENDING_SERVER_LOGOUT_KEY)) return null;
       applyAuthResponse(data);
       broadcastAuthentication(data);
       emitSessionEvent({ type: "authenticated", reason });
       return data;
     } catch {
+      deferRefresh();
       // Transport failure means degraded mode, not invalid credentials. Keep
       // the cached identity and let readiness recovery call this again.
       return null;
     } finally {
       releaseRefreshLeadership();
     }
-  })().finally(() => {
+  };
+  // Web Locks serialize cookie rotation across tabs. The lease remains a
+  // fallback for browsers without Web Locks and expires after a crashed tab.
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  refreshSessionInFlight = (async () => locks
+    ? await locks.request(AUTH_REFRESH_LEASE_KEY, performRefresh)
+    : await performRefresh())().finally(() => {
     refreshSessionInFlight = null;
   });
   return refreshSessionInFlight;

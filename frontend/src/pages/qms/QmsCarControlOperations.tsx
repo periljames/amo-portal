@@ -1,3 +1,4 @@
+import { personDisplay } from "../../utils/personDisplay";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -82,7 +83,7 @@ function formatBytes(value: number | null | undefined): string {
 function assigneeName(assignees: CARAssignee[], userId: string | null | undefined): string {
   if (!userId) return "Unassigned";
   const match = assignees.find((item) => item.id === userId);
-  return match?.full_name || match?.email || userId;
+  return personDisplay(match?.full_name || match?.email);
 }
 
 function escapeHtml(value: unknown): string {
@@ -307,7 +308,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     attachments.forEach((item) => rows.push([
       "Evidence",
       item.filename,
-      `type=${item.content_type || ""}; size=${item.size_bytes || ""}; sha256=${item.sha256 || ""}; uploaded=${item.uploaded_at}`,
+      `type=${item.content_type || ""}; size=${item.size_bytes || ""}; uploaded=${item.uploaded_at}`,
     ]));
     control.events.forEach((item) => rows.push([
       "Timeline",
@@ -334,7 +335,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     const milestoneRows = control.milestones.map((item) => `<tr><td>${item.phase_order}. ${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.original_due_date))}</td><td>${escapeHtml(formatDate(item.current_due_date))}</td><td>${escapeHtml(item.evidence_ref || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("");
     const dependencyRows = control.dependencies.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.dependency_type))}</td><td>${escapeHtml(humanize(item.risk_level))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.due_date))}</td><td>${item.blocks_closure ? "Yes" : "No"}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.mitigation_plan || "")}</td></tr>`).join("");
     const extensionRows = control.deadline_changes.map((item) => `<tr><td>${escapeHtml(formatDate(item.previous_due_date))}</td><td>${escapeHtml(formatDate(item.requested_due_date))}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(item.impact_statement || "")}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.review_note || "")}</td></tr>`).join("");
-    const evidenceRows = attachments.map((item) => `<tr><td>${escapeHtml(item.filename)}</td><td>${escapeHtml(item.content_type || "")}</td><td>${escapeHtml(formatBytes(item.size_bytes))}</td><td>${escapeHtml(formatDateTime(item.uploaded_at))}</td><td class="mono">${escapeHtml(item.sha256 || "")}</td></tr>`).join("");
+    const evidenceRows = attachments.map((item) => `<tr><td>${escapeHtml(item.filename)}</td><td>${escapeHtml(item.content_type || "")}</td><td>${escapeHtml(formatBytes(item.size_bytes))}</td><td>${escapeHtml(formatDateTime(item.uploaded_at))}</td></tr>`).join("");
     const eventRows = control.events.map((item) => `<tr><td>${escapeHtml(formatDateTime(item.created_at))}</td><td>${escapeHtml(humanize(item.event_type))}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(assigneeName(assignees, item.actor_user_id))}</td></tr>`).join("");
     const blockerItems = control.closure_readiness.blockers.map((item) => `<li><strong>${escapeHtml(item.code)}</strong> — ${escapeHtml(item.message)}</li>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(control.car.car_number)} CAR Package</title><style>
@@ -347,7 +348,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <h2>Governed lifecycle milestones</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Owner</th><th>Original due</th><th>Current due</th><th>Evidence ref</th><th>Control note</th></tr></thead><tbody>${milestoneRows || '<tr><td colspan="7">No milestones recorded.</td></tr>'}</tbody></table>
       <h2>Dependencies and blockers</h2><table><thead><tr><th>Dependency</th><th>Type</th><th>Risk</th><th>Owner</th><th>Due</th><th>Blocks closure</th><th>Status</th><th>Description</th><th>Mitigation</th></tr></thead><tbody>${dependencyRows || '<tr><td colspan="9">No dependencies recorded.</td></tr>'}</tbody></table>
       <h2>Deadline / extension history</h2><table><thead><tr><th>Previous</th><th>Requested</th><th>Reason</th><th>Impact</th><th>Status</th><th>Decision</th></tr></thead><tbody>${extensionRows || '<tr><td colspan="6">No staged deadline changes recorded.</td></tr>'}</tbody></table>
-      <h2>Objective evidence index</h2><table><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Uploaded</th><th>SHA-256</th></tr></thead><tbody>${evidenceRows || '<tr><td colspan="5">No attachment evidence recorded.</td></tr>'}</tbody></table>
+      <h2>Objective evidence index</h2><table><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Uploaded</th></tr></thead><tbody>${evidenceRows || '<tr><td colspan="4">No attachment evidence recorded.</td></tr>'}</tbody></table>
       <h2>Effectiveness and closure readiness</h2><div class="box">Effectiveness verification: ${control.profile?.effectiveness_required ? "Required" : "Not required"}\nClosure ready: ${control.closure_readiness.ready ? "Yes" : "No"}</div>${blockerItems ? `<ul>${blockerItems}</ul>` : ""}
       <h2>Complete control timeline</h2><table><thead><tr><th>Time</th><th>Event</th><th>Severity</th><th>Reason</th><th>Actor</th></tr></thead><tbody>${eventRows || '<tr><td colspan="5">No control events recorded.</td></tr>'}</tbody></table>
       <div class="footer">Controlled output generated from the live AMO Portal QMS CAR record. Verify signatures/authorizations and the current controlled evidence set before regulatory submission.</div></body></html>`;
@@ -414,7 +415,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <section className="card" aria-labelledby="car-evidence-heading">
         <div className="card__header"><div><h2 id="car-evidence-heading">Objective evidence</h2><p>Upload, index, link and retrieve the evidence used to accept implementation and closure.</p></div><span className="badge badge--neutral">{attachments.length} file{attachments.length === 1 ? "" : "s"}</span></div>
         {canManage ? <div className="form-grid"><label>Link new evidence to milestone<select className="input" value={evidenceMilestoneId} onChange={(event) => setEvidenceMilestoneId(event.target.value)}><option value="">CAR-wide evidence</option>{control.milestones.map((item) => <option key={item.id} value={item.id}>{item.phase_order}. {item.title}</option>)}</select></label><label>Upload evidence files<input className="input" type="file" multiple disabled={uploadBusy} onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ""; }} /></label><div className="muted">Use the underlying evidence record for documents, photos, spreadsheets, certificates, work orders and other accepted proof. File hash and upload time remain visible below.</div></div> : null}
-        <div className="table-wrap"><table className="table"><thead><tr><th>Evidence</th><th>Type</th><th>Size</th><th>Uploaded</th><th>SHA-256</th><th>Actions</th></tr></thead><tbody>{attachmentsQuery.isLoading ? <tr><td colSpan={6}>Loading evidence…</td></tr> : attachments.length ? attachments.map((item) => <tr key={item.id}><td><strong>{item.filename}</strong>{item.description ? <div className="muted">{item.description}</div> : null}</td><td>{item.content_type || "—"}</td><td>{formatBytes(item.size_bytes)}</td><td>{formatDateTime(item.uploaded_at)}</td><td><code>{item.sha256 ? `${item.sha256.slice(0, 12)}…` : "—"}</code></td><td><div className="toolbar"><button className="btn btn--small" type="button" disabled={actionBusy !== null} onClick={() => void handleDownload(item)}>Download</button>{canManage ? <button className="btn btn--small" type="button" disabled={actionBusy !== null} onClick={() => void handleDelete(item)}>Remove</button> : null}</div></td></tr>) : <tr><td colSpan={6} className="muted">No objective evidence files are currently linked to this CAR.</td></tr>}</tbody></table></div>
+        <div className="table-wrap"><table className="table"><thead><tr><th>Evidence</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>{attachmentsQuery.isLoading ? <tr><td colSpan={5}>Loading evidence…</td></tr> : attachments.length ? attachments.map((item) => <tr key={item.id}><td><strong>{item.filename}</strong>{item.description ? <div className="muted">{item.description}</div> : null}</td><td>{item.content_type || "—"}</td><td>{formatBytes(item.size_bytes)}</td><td>{formatDateTime(item.uploaded_at)}</td><td><code>{item.sha256 ? `${item.sha256.slice(0, 12)}…` : "—"}</code></td><td><div className="toolbar"><button className="btn btn--small" type="button" disabled={actionBusy !== null} onClick={() => void handleDownload(item)}>Download</button>{canManage ? <button className="btn btn--small" type="button" disabled={actionBusy !== null} onClick={() => void handleDelete(item)}>Remove</button> : null}</div></td></tr>) : <tr><td colSpan={5} className="muted">No objective evidence files are currently linked to this CAR.</td></tr>}</tbody></table></div>
       </section>
 
       <section className="card" aria-labelledby="dependency-detail-heading">

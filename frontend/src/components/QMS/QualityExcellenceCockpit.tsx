@@ -531,7 +531,7 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
             {controls.map((control) => (
               <article key={control.id} role="row">
                 <div className="qew-control-table__identity"><span>{control.control_code} · v{control.version_no}</span><strong>{control.title}</strong><small>{control.framework}{control.clause_reference ? ` · ${control.clause_reference}` : ""}</small></div>
-                <div><small>Process</small><strong>{control.process_area}</strong><span>{control.owner_user_id || "Owner not assigned"}</span></div>
+                <div><small>Process</small><strong>{control.process_area}</strong><span>{control.owner_user_id ? "Owner assigned" : "Owner not assigned"}</span></div>
                 <div><small>Evidence</small><strong>{control.verified_evidence_count}/{control.evidence_count} verified</strong><span>{control.evidence_expectation || "Expectation not defined"}</span></div>
                 <div><small>Test status</small><strong>{control.latest_test_result || "Not tested"}</strong><span>{formatDate(control.next_test_due)}</span></div>
                 <div className="qew-control-table__status"><SeverityBadge level={control.criticality} /><StatusBadge status={control.approval_status} /><StatusBadge status={control.due_state} /></div>

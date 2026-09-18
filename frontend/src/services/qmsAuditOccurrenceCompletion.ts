@@ -1,6 +1,10 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
 
+export function deleteAuditMeeting(amoCode: string, auditId: string, meetingId: string): Promise<void> {
+  return apiRequest<void>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings/${encodeURIComponent(meetingId)}`), { method: "DELETE" });
+}
+
 export type AuditControlledSourceSystem = "QMS_LOCAL" | "DOCUMENT_CONTROL";
 
 export type ControlledDocumentSubmission = {

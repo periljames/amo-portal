@@ -1131,6 +1131,7 @@ export async function qmsListAuditPersonnelOptions(
   _amoCode: string,
   params?: {
     search?: string;
+    auditorsOnly?: boolean;
     limit?: number;
     bypassCache?: boolean;
   },
@@ -1138,8 +1139,8 @@ export async function qmsListAuditPersonnelOptions(
 ): Promise<QMSPersonOption[]> {
   const suffix = toQuery({
     search: params?.search,
-    // Backend validates limit <= 100; clamp here so assignment pickers do not 422.
-    limit: Math.min(params?.limit ?? 50, 100),
+    auditors_only: params?.auditorsOnly ?? true,
+    limit: Math.min(params?.limit ?? 50, 1000),
   });
   // Legacy quality route remains authoritative; session carries tenant AMO context.
   return apiRequest<QMSPersonOption[]>(

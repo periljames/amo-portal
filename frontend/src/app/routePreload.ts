@@ -1,10 +1,10 @@
 type RouteLoader = () => Promise<unknown>;
+import { qmsPageLoaders, qmsRouteLoaderKey } from "./qmsRouteLoaders";
 
 const loadPlanningProductionPages: RouteLoader = () => import("../pages/PlanningProductionPages");
 const loadTechnicalRecordsPages: RouteLoader = () => import("../pages/TechnicalRecordsPages");
 const loadRosteringPages: RouteLoader = () => import("../pages/rostering/RosteringPages");
 const loadDocControlPages: RouteLoader = () => import("../pages/DocControlPages");
-const loadQmsCanonicalPage: RouteLoader = () => import("../pages/qms/QmsCanonicalPage");
 const loadProcurementModule: RouteLoader = () => import("../pages/procurement/ProcurementModule");
 const loadDashboardPage: RouteLoader = () => import("../pages/DashboardPage");
 const loadProductionWorkspacePage: RouteLoader = () => import("../pages/ProductionWorkspacePage");
@@ -42,7 +42,6 @@ const routeLoaders: Array<{ test: RegExp; loaders: RouteLoader[] }> = [
   { test: /\/maintenance\/[^/]+\/maintenance(?:\/dashboard)?(?:\/|$)/, loaders: [loadMaintenanceDashboardPage] },
   { test: /\/maintenance\/[^/]+\/procurement(?:\/|$)/, loaders: [loadProcurementModule] },
   { test: /\/(?:document-control|doc-control)(?:\/|$)/, loaders: [loadDocControlPages] },
-  { test: /\/qms(?:\/|$)/, loaders: [loadQmsCanonicalPage] },
   { test: /\/manuals(?:\/|$)/, loaders: [loadManualsDashboardPage] },
   { test: /\/reliability\/ehm(?:\/|$)/, loaders: [loadEhmDashboardPage] },
   { test: /\/reliability(?:\/|$)/, loaders: [loadReliabilityWorkspacePage] },
@@ -76,6 +75,8 @@ function loadOnce(loader: RouteLoader): Promise<unknown> {
 
 export function preloadRoute(path: string): Promise<unknown[]> {
   const pathname = normalizePath(path);
+  const qmsKey = qmsRouteLoaderKey(pathname);
+  if (qmsKey) return Promise.all([loadOnce(qmsPageLoaders[qmsKey])]);
   const match = routeLoaders.find((entry) => entry.test.test(pathname));
   if (!match) return Promise.resolve([]);
   return Promise.all(match.loaders.map(loadOnce));

@@ -432,7 +432,7 @@ function buildRefresherAnomalies(
     anomalies.push({
       key,
       userId: record.user_id,
-      userName: userById.get(record.user_id)?.full_name || userById.get(record.user_id)?.email || record.user_id,
+      userName: userById.get(record.user_id)?.full_name || userById.get(record.user_id)?.email || "Person unavailable",
       coursePk: record.course_id,
       courseCode: course.course_id,
       courseName: course.course_name,
@@ -1090,7 +1090,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
     setDeferralTarget({
       participantId: participant.id,
       userId: participant.user_id,
-      userName: row?.user.full_name || row?.user.email || participant.user_id,
+      userName: row?.user.full_name || row?.user.email || "Person unavailable",
       coursePk,
       originalDueDate: statusItem?.extended_due_date || statusItem?.valid_until || null,
     });
@@ -1377,7 +1377,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
       const course = resolveCourse(courseLookup, record.course_id);
       const user = users.find((entry) => entry.id === record.user_id);
       return {
-        person_name: user?.full_name || user?.email || record.user_id,
+        person_name: user?.full_name || user?.email || "Person unavailable",
         staff_code: user?.staff_code || "",
         role: user?.position_title || user?.role || "",
         course_id: course?.course_id || record.course_id,
@@ -2029,7 +2029,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                         return (
                           <tr key={participant.id}>
                             <td>
-                              <div>{user?.full_name || participant.user_id}</div>
+                              <div>{user?.full_name || "Person unavailable"}</div>
                               <div className="tc-table__hint">{user?.staff_code || "—"} · {user?.position_title || user?.role || "—"}</div>
                             </td>
                             <td><span className={`tc-status-pill ${participant.status === "DEFERRED" ? "deferred" : participant.status === "ATTENDED" ? "ok" : "due-soon"}`}>{participant.status}</span></td>
@@ -2044,7 +2044,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                                     const refreshed = await listTrainingEventParticipants(selectedEventId);
                                     setParticipants(refreshed);
                                     await load();
-                                    pushToast({ title: "Attendance closed", message: `${user?.full_name || participant.user_id} is now marked attended and the completion workflow has run.`, variant: "info" });
+                                    pushToast({ title: "Attendance closed", message: `${user?.full_name || "Person unavailable"} is now marked attended and the completion workflow has run.`, variant: "info" });
                                   }}
                                 >
                                   Mark attended
@@ -2096,7 +2096,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
                     const user = users.find((entry) => entry.id === record.user_id);
                     return (
                       <tr key={record.id}>
-                        <td><button type="button" className="tc-link-button" onMouseEnter={() => prefetchPerson(record.user_id)} onFocus={() => prefetchPerson(record.user_id)} onClick={() => openPerson(record.user_id)}>{user?.full_name || record.user_id}</button></td>
+                        <td><button type="button" className="tc-link-button" onMouseEnter={() => prefetchPerson(record.user_id)} onFocus={() => prefetchPerson(record.user_id)} onClick={() => openPerson(record.user_id)}>{user?.full_name || "Person unavailable"}</button></td>
                         <td>{course?.course_id || "—"} · {course?.course_name || "Unknown course"}</td>
                         <td>{compactDate(record.completion_date)}</td>
                         <td>{compactDate(record.valid_until)}</td>

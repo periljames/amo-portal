@@ -22,6 +22,7 @@ from .audit_occurrence_completion_models import (
     QualityAuditMeeting,
 )
 from .audit_schedule_rules import normalise_tenant_datetime, tenant_timezone
+from .audit_meeting_validation import validate_meeting_timeline
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -656,12 +657,12 @@ def create_audit_meeting(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, ctx.amo_id, audit_id)
+    audit = _audit(db, ctx.amo_id, audit_id)
     zone = tenant_timezone(db, amo_id=ctx.amo_id)
     start = _normalise_datetime(payload.scheduled_start, zone=zone)
     end = _normalise_datetime(payload.scheduled_end, zone=zone) if payload.scheduled_end else None
-    if end and end < start:
-        raise HTTPException(status_code=422, detail="Meeting end cannot be before its start.")
+    if payload.status != "CANCELLED":
+        validate_meeting_timeline(audit, payload.meeting_type, start, end, zone, planned=payload.status == "PLANNED")
     # Opening and closing are singleton governance events. A client retry must
     # update the committed row instead of creating duplicates when a prior
     # response failed after commit.
@@ -720,8 +721,13 @@ def update_audit_meeting(
         elif isinstance(value, str):
             value = value.strip() or None
         setattr(row, field, value)
-    if row.scheduled_end and row.scheduled_end < row.scheduled_start:
-        raise HTTPException(status_code=422, detail="Meeting end cannot be before its start.")
+    if row.scheduled_start is None:
+        raise HTTPException(status_code=422, detail="Meeting start is required.")
+    if row.status is None or row.meeting_type is None:
+        raise HTTPException(status_code=422, detail="Meeting type and status are required.")
+    if row.status != "CANCELLED" and ({"scheduled_start", "scheduled_end", "meeting_type", "status"} & update.keys()):
+        audit = _audit(db, ctx.amo_id, audit_id)
+        validate_meeting_timeline(audit, row.meeting_type, row.scheduled_start, row.scheduled_end, zone, planned=row.status == "PLANNED")
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
     db.flush()
@@ -729,6 +735,21 @@ def update_audit_meeting(
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     db.refresh(row)
     return _meeting_dict(row)
+
+
+@router.delete("/audits/{audit_id}/meetings/{meeting_id}", status_code=204)
+def delete_audit_meeting(
+    audit_id: uuid.UUID, meeting_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_write_db),
+):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(QualityAuditMeeting).filter(QualityAuditMeeting.amo_id == ctx.amo_id,
+        QualityAuditMeeting.audit_id == audit_id, QualityAuditMeeting.id == meeting_id).with_for_update().first()
+    if row is None:
+        raise HTTPException(404, "Meeting not found.")
+    db.delete(row)
+    db.commit()
 
 
 @router.get("/audits/{audit_id}/closing-narrative")

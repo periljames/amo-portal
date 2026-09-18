@@ -7,6 +7,7 @@ import {
   ensureAuthenticatedRequestAllowed,
 } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
+import { isQmsLiveAuthority } from "./qmsCachePolicy";
 import {
   isProxyTransportFailureResponse,
   portalFetch,
@@ -308,7 +309,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   const scope = ensureScope();
   const urls = buildRequestUrls(path);
   const primaryUrl = urls[0];
-  const canUseCache = method === "GET" && !body && cacheTtlMs !== 0;
+  const canUseCache = method === "GET" && !body && cacheTtlMs !== 0 && !isQmsLiveAuthority(path);
   const ttlMultiplier = networkCacheMultiplier();
   const effectiveCacheTtlMs = Math.min((cacheTtlMs ?? DEFAULT_GET_CACHE_TTL_MS) * ttlMultiplier, 5 * 60_000);
   const effectiveStaleMs = Math.max(staleWhileOfflineMs, effectiveCacheTtlMs);
@@ -340,7 +341,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           {
             cache: canUseCache,
             cacheTtlMs: effectiveCacheTtlMs,
-            allowStaleFallback: true,
+            allowStaleFallback: offline?.allowStaleFallback !== false,
             queueMutation: offline?.queueMutation === true,
             entityType: offline?.entityType,
             entityId: offline?.entityId,
@@ -380,14 +381,14 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
           continue;
         }
-        if (staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
+        if (offline?.allowStaleFallback !== false && staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
           console.warn("[apiClient] serving tenant-scoped stale response after network failure", { path, error });
           return staleEntry.value as T;
         }
         throw error;
       }
     }
-    if (staleEntry && staleEntry.scope === currentApiCacheScope()) return staleEntry.value as T;
+    if (offline?.allowStaleFallback !== false && staleEntry && staleEntry.scope === currentApiCacheScope()) return staleEntry.value as T;
     throw lastError instanceof Error ? lastError : new Error("Request failed.");
   })().finally(() => {
     if (canUseCache) inFlightGets.delete(cacheKey);

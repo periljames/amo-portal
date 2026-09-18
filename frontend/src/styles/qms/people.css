@@ -254,7 +254,16 @@
 .qms-people__status--revoked,
 .qms-people__status--expired { background: #fdecea; color: #9f2d24; }
 
-.qms-people__detail { position: sticky; top: 16px; }
+.qms-people__detail { position: sticky; top: 16px; max-height: calc(100dvh - 100px); overflow-y: auto; }
+.qms-people__detail details > summary { cursor: pointer; padding: 12px 0; font-weight: 650; }
+.qms-people__detail details[open] > summary { margin-bottom: 8px; }
+.qms-people__register .qms-workspace-grid { min-height: 420px; }
+.qms-people__lifecycle-actions button, .qms-people__detail-actions button { min-height: 40px; }
+.qms-people__filters { flex-wrap: wrap; }
+.qms-people__rank-action { display: grid; gap: 10px; padding: 16px; border-bottom: 1px solid var(--qms-people-border); }
+.qms-people__rank-action label { display: grid; gap: 6px; font-weight: 600; }
+.qms-people__rank-action select { width: 100%; min-height: 42px; padding: 8px; border: 1px solid var(--qms-people-border); border-radius: 6px; background: var(--qms-people-surface); color: inherit; }
+.qms-people__rank-action button { min-height: 40px; border: 1px solid var(--qms-people-border); border-radius: 6px; background: var(--qms-people-surface-soft); color: inherit; cursor: pointer; }
 .qms-people__detail-head { padding: 18px 18px 14px; border-bottom: 1px solid var(--qms-people-border); }
 .qms-people__detail-head p { margin: 5px 0 0; color: var(--qms-people-muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .qms-people__detail-badges { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }

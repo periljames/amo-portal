@@ -70,9 +70,9 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
 
 
-def _audit_setup_ready(audit: models.QMSAudit) -> bool:
+def _audit_setup_ready(audit: models.QMSAudit, db: Session | None = None) -> bool:
     """Return whether the manual-defined audit basis and accountable parties exist."""
-    return bool(
+    basis_ready = bool(
         audit.planned_start
         and audit.planned_end
         and audit.planned_start_time
@@ -81,6 +81,20 @@ def _audit_setup_ready(audit: models.QMSAudit) -> bool:
         and (audit.criteria or "").strip()
         and audit.lead_auditor_user_id
         and (audit.auditee or audit.auditee_email or audit.auditee_user_id)
+    )
+    if not basis_ready or db is None:
+        return basis_ready
+    # Use the same governed checks as assignment editing; a stored user ID
+    # alone does not prove training, privilege or independence is satisfied.
+    from .audit_occurrence_assignment_router import _evaluate
+
+    return all(
+        _evaluate(db, audit=audit, amo_id=str(audit.amo_id), user_id=str(user_id), role=role).get("eligible") is True
+        for role, user_id in (
+            ("LEAD_AUDITOR", audit.lead_auditor_user_id),
+            ("OBSERVER_AUDITOR", audit.observer_auditor_user_id),
+            ("ASSISTANT_AUDITOR", audit.assistant_auditor_user_id),
+        ) if user_id
     )
 
 
@@ -280,7 +294,7 @@ def _workflow_facts(db: Session, audit: models.QMSAudit) -> tuple[WorkflowFacts,
 
     status_value = _enum_value(audit.status).upper()
     facts = WorkflowFacts(
-        war_room_ready=_audit_setup_ready(audit),
+        war_room_ready=_audit_setup_ready(audit, db),
         checklist_source_present=checklist_source_present,
         checklist_total=checklist_total,
         checklist_completed=checklist_completed,

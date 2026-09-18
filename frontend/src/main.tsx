@@ -6,6 +6,7 @@ import { onlineManager, QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
+import { isQmsLiveAuthority } from "./services/qmsCachePolicy";
 import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRouteGate";
 import PortalAuxiliaryBoundary from "./components/feedback/PortalAuxiliaryBoundary";
 import { ToastProvider } from "./components/feedback/ToastProvider";
@@ -17,6 +18,7 @@ import {
   hasRecoverableSession,
   getToken,
   getTokenSecondsRemaining,
+  getSessionRecoveryRetryAt,
   onSessionEvent,
   recoverSession,
 } from "./services/auth";
@@ -30,6 +32,8 @@ import {
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
 import {
   isPortalReady,
+  getPortalConnectivity,
+  type PortalConnectivitySnapshot,
   onPortalConnectivityChange,
   probePortalReadiness,
   startPortalConnectivity,
@@ -62,7 +66,7 @@ type GuardedWindow = Window & {
 function shouldPersistQuery(query: { queryKey: readonly unknown[]; state: { status: string } }): boolean {
   if (query.state.status !== "success") return false;
   const marker = query.queryKey.map((part) => String(part)).join(":").toLowerCase();
-  return !SENSITIVE_QUERY_MARKERS.some((value) => marker.includes(value));
+  return !isQmsLiveAuthority(marker) && !SENSITIVE_QUERY_MARKERS.some((value) => marker.includes(value));
 }
 
 function ensureManifest(): void {
@@ -253,14 +257,17 @@ async function configurePortalServiceWorker(): Promise<void> {
 if (typeof window !== "undefined") {
   let wasPortalReady = false;
   let recoverySequence: Promise<void> | null = null;
-  onPortalConnectivityChange((connectivity) => {
+  let recoveryTimer: number | null = null;
+  const recoverPortalWhenReady = (connectivity: PortalConnectivitySnapshot) => {
     const ready = connectivity.state === "ONLINE";
     if (!ready) {
+      if (recoveryTimer !== null) window.clearTimeout(recoveryTimer);
+      recoveryTimer = null;
       wasPortalReady = false;
       onlineManager.setOnline(false);
       return;
     }
-    if (wasPortalReady) return;
+    if (wasPortalReady || recoverySequence) return;
     wasPortalReady = true;
     recoverySequence = (async () => {
       await flushPendingSessionRevocation();
@@ -271,7 +278,13 @@ if (typeof window !== "undefined") {
         if (!getToken() || (recoveredRemaining !== null && recoveredRemaining <= 0)) {
           wasPortalReady = false;
           onlineManager.setOnline(false);
-          window.setTimeout(() => void probePortalReadiness(true), 2_000);
+          // Readiness can remain ONLINE throughout a refresh 429. Retry the
+          // recovery itself; an unchanged health probe emits no transition.
+          if (recoveryTimer !== null) window.clearTimeout(recoveryTimer);
+          recoveryTimer = window.setTimeout(() => {
+            recoveryTimer = null;
+            recoverPortalWhenReady(getPortalConnectivity());
+          }, Math.max(2_000, getSessionRecoveryRetryAt() - Date.now()));
           return;
         }
       }
@@ -282,7 +295,8 @@ if (typeof window !== "undefined") {
     })().finally(() => {
       recoverySequence = null;
     });
-  });
+  };
+  onPortalConnectivityChange(recoverPortalWhenReady);
 
   onSessionEvent((detail) => {
     if (detail.type === "authenticated") {

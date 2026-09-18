@@ -448,7 +448,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
             <dl className="qms-provider-definition-list">
               <div><dt>Provider type</dt><dd>{titleCase(provider.provider_kind)}</dd></div>
               <div><dt>Quality contact</dt><dd>{provider.quality_contact_name || provider.quality_contact_email || "Not assigned"}</dd></div>
-              <div><dt>Oversight owner</dt><dd>{provider.oversight_owner_user_id || "Not assigned"}</dd></div>
+              <div><dt>Oversight owner</dt><dd>{provider.oversight_owner_user_id ? "Assigned" : "Not assigned"}</dd></div>
               <div><dt>Review due</dt><dd className={provider.review_due ? "is-alert" : ""}>{dateLabel(provider.next_review_due_on)}</dd></div>
               <div><dt>Contract mandatory</dt><dd>{provider.contract_required ? "Yes" : "No"}</dd></div>
               <div><dt>Governance version</dt><dd>{provider.governance_version || "Legacy record"}</dd></div>

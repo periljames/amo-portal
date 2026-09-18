@@ -71,6 +71,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.evidence.download",
     },
     "QUALITY_OFFICER": {
+        "qms.training.manage",
         "qms.dashboard.view",
         "qms.inbox.view",
         "qms.calendar.view",

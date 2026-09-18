@@ -96,6 +96,147 @@ class IndependenceCreate(BaseModel):
     source_references: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
+class RankChange(BaseModel):
+    rule_id: str = Field(min_length=1, max_length=36)
+    rationale: str = Field(min_length=8, max_length=4000)
+
+
+def _lock_person(db: Session, amo_id: str, user_id: str):
+    person = db.query(account_models.User).filter(
+        account_models.User.amo_id == amo_id, account_models.User.id == user_id,
+    ).with_for_update().first()
+    if person is None:
+        raise HTTPException(404, "Person not found.")
+    return person
+
+
+def _retire_other_ranks(db: Session, ctx: TenantContext, privilege: QualityPrivilege):
+    rank_rules = db.query(QualityPrivilegeRule.id).filter(
+        QualityPrivilegeRule.amo_id == ctx.amo_id,
+        QualityPrivilegeRule.privilege_type.in_(["AUDITOR", "LEAD_AUDITOR"]),
+    )
+    others = db.query(QualityPrivilege).options(noload(QualityPrivilege.decisions)).filter(
+        QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.user_id == privilege.user_id,
+        QualityPrivilege.id != privilege.id, QualityPrivilege.rule_id.in_(rank_rules),
+        QualityPrivilege.status.in_(["ACTIVE", "SUSPENDED"]),
+    ).with_for_update().all()
+    for other in others:
+        decision = QualityPrivilegeDecision(
+            amo_id=ctx.amo_id, privilege_id=other.id, decision_type="REVOKE", resulting_status="REVOKED",
+            rationale="Replaced by the person's current auditor rank.",
+            eligibility_snapshot={"replacement_rank": privilege.privilege_code}, source_references=[],
+            decided_by_user_id=ctx.user_id, decided_at=_utcnow(),
+        )
+        db.add(decision)
+        db.flush()
+        other.status = "REVOKED"
+        other.latest_decision_id = decision.id
+        other.updated_by_user_id = ctx.user_id
+        other.updated_at = _utcnow()
+
+
+@router.post("/privileges/{privilege_id}/rank")
+def change_rank(privilege_id: str, payload: RankChange,
+                ctx: TenantContext = Depends(write_tenant_context), db: Session = Depends(get_write_db)):
+    assert_quality_permission(db, ctx, "qms.training.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(QualityPrivilege).filter(QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.id == privilege_id).first()
+    if row is None:
+        raise HTTPException(404, "Authorization not found.")
+    _lock_person(db, ctx.amo_id, row.user_id)
+    db.refresh(row)
+    if row.status != "ACTIVE":
+        raise HTTPException(409, "Activate the authorization before changing rank.")
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=payload.rule_id)
+    previous = _rule(db, amo_id=ctx.amo_id, rule_id=row.rule_id)
+    if not rule.is_active or rule.privilege_type not in {"AUDITOR", "LEAD_AUDITOR"} or previous.privilege_type not in {"AUDITOR", "LEAD_AUDITOR"}:
+        raise HTTPException(422, "Choose an active auditor rank.")
+    if row.expires_on and row.expires_on < date.today():
+        raise HTTPException(409, "Renew the expired authorization before changing rank.")
+    eligibility = evaluate_eligibility(db, amo_id=ctx.amo_id, user_id=row.user_id, rule=rule,
+                                       as_of=date.today(), require_active_privilege=False)
+    gates = {key: value for key, value in eligibility["hard_gates"].items() if key not in {"active_privilege", "independence"}}
+    if not all(gates.values()):
+        raise HTTPException(409, {"message": "Required training or personnel checks are incomplete.", "eligibility": eligibility})
+    # Consolidate a legacy target-rank duplicate into this same authorization.
+    duplicates = db.query(QualityPrivilege).options(noload(QualityPrivilege.decisions)).filter(
+        QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.user_id == row.user_id,
+        QualityPrivilege.privilege_code == rule.privilege_code, QualityPrivilege.scope_key == row.scope_key,
+        QualityPrivilege.id != row.id,
+    ).all()
+    for duplicate in duplicates:
+        db.query(QualityPrivilegeDecision).filter(QualityPrivilegeDecision.privilege_id == duplicate.id,
+            QualityPrivilegeDecision.amo_id == ctx.amo_id).update({"privilege_id": row.id}, synchronize_session=False)
+        db.delete(duplicate)
+    db.flush()
+    old_code = row.privilege_code
+    row.rule_id = rule.id
+    row.privilege_code = rule.privilege_code
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
+    decision = QualityPrivilegeDecision(amo_id=ctx.amo_id, privilege_id=row.id, decision_type="RENEW",
+        resulting_status="ACTIVE", rationale=payload.rationale.strip(), eligibility_snapshot=eligibility,
+        source_references=[{"previous_rank": old_code, "new_rank": rule.privilege_code}],
+        effective_from=row.effective_from, expires_on=row.expires_on, decided_by_user_id=ctx.user_id, decided_at=_utcnow())
+    db.add(decision)
+    db.flush()
+    row.latest_decision_id = decision.id
+    _retire_other_ranks(db, ctx, row)
+    db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    db.refresh(row)
+    return _privilege_dict(row, include_history=True)
+
+
+@router.delete("/privileges/{privilege_id}", status_code=204)
+def purge_privilege(privilege_id: str, ctx: TenantContext = Depends(write_tenant_context), db: Session = Depends(get_write_db)):
+    assert_quality_permission(db, ctx, "qms.training.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(QualityPrivilege).filter(QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.id == privilege_id).first()
+    if row is None:
+        raise HTTPException(404, "Authorization not found.")
+    _lock_person(db, ctx.amo_id, row.user_id)
+    db.refresh(row)
+    if row.status not in {"REVOKED", "DRAFT", "EXPIRED"}:
+        raise HTTPException(409, "Revoke the authorization before deleting it.")
+    db.query(QualityPrivilegeDecision).filter(QualityPrivilegeDecision.amo_id == ctx.amo_id,
+        QualityPrivilegeDecision.privilege_id == row.id).delete(synchronize_session=False)
+    db.delete(row)
+    db.commit()
+
+
+@router.get("/privileges/{privilege_id}/record")
+def authorization_record(privilege_id: str, ctx: TenantContext = Depends(require_quality_permission("qms.training.view")),
+                         db: Session = Depends(get_read_db)):
+    from io import BytesIO
+    from html import escape
+    from fastapi.responses import Response
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(QualityPrivilege).filter(QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.id == privilege_id).first()
+    if row is None:
+        raise HTTPException(404, "Authorization not found.")
+    person = db.query(account_models.User).filter(account_models.User.amo_id == ctx.amo_id, account_models.User.id == row.user_id).first()
+    if person is None:
+        raise HTTPException(404, "Person not found.")
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=row.rule_id)
+    name = person.full_name or f"{person.first_name or ''} {person.last_name or ''}".strip() or person.email or "Person unavailable"
+    output = BytesIO()
+    styles = getSampleStyleSheet()
+    title = "Quality authorization certificate" if person.is_active and row.status == "ACTIVE" and (not row.expires_on or row.expires_on >= date.today()) and (not row.effective_from or row.effective_from <= date.today()) else "Quality authorization record"
+    lines = [Paragraph(title, styles["Title"]), Spacer(1, 18)]
+    for label, value in [("Name", name), ("Authorization", rule.title), ("Status", row.status), ("Scope", row.scope_key),
+                         ("Effective from", row.effective_from), ("Expires", row.expires_on), ("Generated", date.today())]:
+        lines.append(Paragraph(f"<b>{label}:</b> {escape(str(value or 'Not set'))}", styles["Normal"]))
+        lines.append(Spacer(1, 8))
+    for decision in row.decisions:
+        lines.append(Paragraph(escape(f"{decision.decided_at:%d %b %Y} — {decision.decision_type}: {decision.rationale}"), styles["Normal"]))
+        lines.append(Spacer(1, 6))
+    SimpleDocTemplate(output).build(lines)
+    return Response(output.getvalue(), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="quality-authorization.pdf"', "Cache-Control": "no-store"})
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -510,7 +651,9 @@ def list_privileges(
     if status_filter:
         query = query.filter(QualityPrivilege.status == status_filter.upper())
     rows = query.order_by(QualityPrivilege.updated_at.desc()).limit(500).all()
-    return {"items": [_privilege_dict(row, include_history=True) for row in rows]}
+    users = db.query(account_models.User).filter(account_models.User.amo_id == ctx.amo_id, account_models.User.id.in_({row.user_id for row in rows})).all() if rows else []
+    names = {str(user.id): user.full_name or f"{user.first_name or chr(32)} {user.last_name or chr(32)}".strip() or user.email or "Person unavailable" for user in users}
+    return {"items": [{**_privilege_dict(row, include_history=True), "person_name": names.get(str(row.user_id), "Person unavailable")} for row in rows]}
 
 
 @router.post("/privileges", status_code=status.HTTP_201_CREATED)
@@ -522,8 +665,8 @@ def create_privilege(
     assert_quality_permission(db, ctx, "qms.training.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     rule = _rule(db, amo_id=ctx.amo_id, rule_id=payload.rule_id)
-    _person(db, amo_id=ctx.amo_id, user_id=payload.user_id)
-    scope_key = payload.scope_key.strip() or "GLOBAL"
+    _lock_person(db, ctx.amo_id, payload.user_id)
+    scope_key = payload.scope_key.strip().upper() or "GLOBAL"
     existing = db.query(QualityPrivilege.id).filter(
         QualityPrivilege.amo_id == ctx.amo_id,
         QualityPrivilege.user_id == payload.user_id,
@@ -584,6 +727,10 @@ def decide_privilege(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.training.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    identity = db.query(QualityPrivilege.user_id).filter(QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.id == privilege_id).first()
+    if identity is None:
+        raise HTTPException(404, "Authorization not found.")
+    _lock_person(db, ctx.amo_id, identity[0])
     # Lock the privilege row only. Do not eager-load relationships here: a joined
     # rule load produces LEFT OUTER JOIN … FOR UPDATE, which Postgres rejects.
     privilege = (
@@ -644,7 +791,7 @@ def decide_privilege(
         rule=rule,
         as_of=effective_from or date.today(),
         require_active_privilege=False,
-    )
+    ) if activation_decision else {"lifecycle_only": True}
     if payload.decision_type in {"GRANT", "RENEW", "REINSTATE"}:
         grant_gates = dict(eligibility["hard_gates"])
         grant_gates.pop("active_privilege", None)
@@ -677,6 +824,8 @@ def decide_privilege(
     db.add(decision)
     db.flush()
     privilege.status = resulting_status
+    if activation_decision and rule.privilege_type in {"AUDITOR", "LEAD_AUDITOR"}:
+        _retire_other_ranks(db, ctx, privilege)
     if activation_decision:
         privilege.effective_from = effective_from
         privilege.expires_on = expires_on

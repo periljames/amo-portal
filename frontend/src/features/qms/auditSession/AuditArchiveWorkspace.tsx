@@ -258,8 +258,8 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <div><dt>Retention due</dt><dd>{manifest.retention_due_at ? dateTime(manifest.retention_due_at) : "Indefinite"}</dd></div>
                   <div><dt>Package</dt><dd>{manifest.package_filename || "Structured manifest retained"}</dd></div>
                   <div><dt>Package size</dt><dd>{readableBytes(manifest.package_size_bytes)}</dd></div>
-                  <div className="is-wide"><dt>Manifest SHA-256</dt><dd><code>{manifest.manifest_sha256}</code></dd></div>
-                  {manifest.package_sha256 ? <div className="is-wide"><dt>Package SHA-256</dt><dd><code>{manifest.package_sha256}</code></dd></div> : null}
+                  
+                  
                 </dl>
                 <div className="qms-audit-archive__groups">{itemGroups.map(([type, count]) => <span key={type}>{type.replaceAll("_", " ")} · {count}</span>)}</div>
                 <div className="qms-audit-archive__actions">

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { collectQmsPrecacheUrls } from './scripts/qmsPrecacheGraph'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type { ServerOptions } from 'node:https'
@@ -178,10 +179,12 @@ const portalPrecacheManifestPlugin = (): Plugin => {
       if (!resolvedConfig) return
       const outputRoot = path.resolve(resolvedConfig.root, resolvedConfig.build.outDir)
       const urls = new Set<string>(['/', '/index.html', '/portal.webmanifest'])
+      let qmsUrls: string[] = []
       const manifestPath = path.join(outputRoot, '.vite', 'manifest.json')
       if (fs.existsSync(manifestPath)) {
         type ManifestEntry = { file?: string; imports?: string[]; css?: string[]; assets?: string[] }
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, ManifestEntry>
+        qmsUrls = collectQmsPrecacheUrls(manifest)
         const visited = new Set<string>()
         const includeEntryGraph = (key: string) => {
           if (visited.has(key)) return
@@ -197,7 +200,7 @@ const portalPrecacheManifestPlugin = (): Plugin => {
       }
       fs.writeFileSync(
         path.join(outputRoot, 'portal-precache.json'),
-        `${JSON.stringify({ version: Date.now(), urls: [...urls].sort() }, null, 2)}\n`,
+        `${JSON.stringify({ version: Date.now(), urls: [...urls].sort(), qmsUrls }, null, 2)}\n`,
         'utf8',
       )
     },

@@ -95,7 +95,7 @@ const TrainingSessionCloseoutDrawer = ({ eventId, eventTitle, isOpen, canManage,
           <div className="tos-section-heading"><h3>Learner decisions</h3><small>{closeout?.learners.length || 0} retained decisions</small></div>
           <div className="tos-list">
             {(closeout?.learners || []).map((learner) => <div key={learner.id}>
-              <div><strong>{people.get(learner.user_id) || learner.user_id}</strong><small>{learner.blockers.length ? learner.blockers.join(" · ") : "Persisted completion evidence satisfies the governed gates."}</small></div>
+              <div><strong>{people.get(learner.user_id) || "Person unavailable"}</strong><small>{learner.blockers.length ? learner.blockers.join(" · ") : "Persisted completion evidence satisfies the governed gates."}</small></div>
               <span className={`tos-pill ${learner.completed ? "tos-pill--ok" : "tos-pill--critical"}`}>{learner.status}</span>
             </div>)}
             {closeout && !closeout.learners.length ? <p className="tos-muted">No eligible roster members are present in this governed session.</p> : null}

@@ -1,16 +1,21 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
+import { qmsPageLoaders } from "../../app/qmsRouteLoaders";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
-import QualityChecklistTemplateHost from "../../components/QMS/QualityChecklistTemplateHost";
-import QualityCarsPage from "../QualityCarsPage";
 import QualityAuditsSectionLayout from "../qualityAudits/QualityAuditsSectionLayout";
-import QmsAuditProgrammeSchedulePage from "./QmsAuditProgrammeSchedulePage";
-import QmsAuditProgrammeWorkspacePage from "./QmsAuditProgrammeWorkspacePage";
-import QmsModuleWorkspacePage from "./QmsModuleWorkspacePage";
-import QmsCarControlLoopPage from "./QmsCarControlLoopPage";
-import QmsCarPerformanceReportPage from "./QmsCarPerformanceReportPage";
-import QmsExternalProvidersPage from "./QmsExternalProvidersPage";
-import QmsRegisterPage from "./QmsRegisterPage";
-import QmsPlannerLivePage from "./planner/QmsPlannerLivePage";
+const QualityChecklistTemplateHost = lazy(qmsPageLoaders.checklist);
+const QualityCarsPage = lazy(qmsPageLoaders.cars);
+const QmsAuditProgrammeSchedulePage = lazy(qmsPageLoaders.programmeSchedule);
+const QmsAuditProgrammeWorkspacePage = lazy(qmsPageLoaders.programme);
+const QmsModuleWorkspacePage = lazy(qmsPageLoaders.module);
+const QmsCarControlLoopPage = lazy(qmsPageLoaders.carControl);
+const QmsCarPerformanceReportPage = lazy(qmsPageLoaders.carReport);
+const QmsExternalProvidersPage = lazy(qmsPageLoaders.providers);
+const QmsRegisterPage = lazy(qmsPageLoaders.register);
+const QmsPlannerLivePage = lazy(qmsPageLoaders.planner);
+
+export default function QmsCanonicalPage(): React.ReactElement {
+  return <Suspense fallback={<div role="status" className="qms-route-loading">Loading Quality workspace…</div>}><QmsCanonicalContent /></Suspense>;
+}
 
 function assuranceWorkspace(title: string, subtitle: string, content: React.ReactNode): React.ReactElement {
   return (
@@ -29,7 +34,7 @@ function assuranceWorkspace(title: string, subtitle: string, content: React.Reac
  * Planner V2 remains the sole calendar owner at `/quality/calendar/*`.
  * When opened as an Audit Assurance destination it keeps Assurance chrome.
  */
-export default function QmsCanonicalPage(): React.ReactElement {
+function QmsCanonicalContent(): React.ReactElement {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const pathname = location.pathname.toLowerCase();

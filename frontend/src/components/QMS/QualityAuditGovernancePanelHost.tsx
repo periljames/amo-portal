@@ -213,7 +213,7 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
                     <div><dt>Document requests</dt><dd>{latestPrep.document_request_snapshot.length}</dd></div>
                     <div><dt>Source links</dt><dd>{latestPrep.source_references.length}</dd></div>
                   </dl>
-                  <code className="qms-audit-governance-hash" title={latestPrep.source_fingerprint}>{latestPrep.source_fingerprint}</code>
+                  
                   <ol className="qms-audit-governance-history">
                     {latestPrep.events.map((event) => <li key={event.id}><strong>{event.event_type}</strong><span>{event.reason}</span><time>{displayDateTime(event.created_at)}</time></li>)}
                   </ol>

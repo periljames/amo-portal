@@ -3282,8 +3282,9 @@ def list_audit_schedules(
 
 @router.get("/audits/personnel/options", response_model=List[QMSPersonOptionOut])
 def list_audit_personnel_options(
+    auditors_only: bool = True,
     search: Optional[str] = Query(default=None, max_length=100),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -3308,6 +3309,13 @@ def list_audit_personnel_options(
                 cast(account_models.User.id, String).ilike(pattern),
             )
         )
+    from .planner_schedule_router import _auditor_roles_by_user
+
+    auditor_roles = _auditor_roles_by_user(db, amo_id=amo_id)
+    if auditors_only:
+        if not auditor_roles:
+            return []
+        qs = qs.filter(cast(account_models.User.id, String).in_(list(auditor_roles)))
     users = (
         qs.order_by(
             func.coalesce(account_models.User.full_name, ""),
@@ -3319,15 +3327,12 @@ def list_audit_personnel_options(
         .all()
     )
 
-    from .planner_schedule_router import _auditor_roles_by_user
-
-    auditor_roles = _auditor_roles_by_user(db, amo_id=amo_id)
     results: list[QMSPersonOptionOut] = []
     for user in users:
         roles = sorted(auditor_roles.get(str(user.id), set()))
-        if not roles:
+        if auditors_only and not roles:
             continue
-        full_name = (getattr(user, "full_name", None) or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip() or getattr(user, "email", None) or getattr(user, "staff_code", None) or str(user.id))
+        full_name = _portal_user_name(user) or getattr(user, "email", None) or "Person unavailable"
         role_value = getattr(user, "role", None)
         role_value = getattr(role_value, "value", role_value)
         results.append(

@@ -352,6 +352,7 @@ app.add_middleware(
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After", "X-Request-ID", "X-Error-Code"],
 )
 app.add_middleware(
     GZipMiddleware,

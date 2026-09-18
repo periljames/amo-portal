@@ -303,7 +303,7 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
               <label>External recipient/reference<input value={externalRecipient} onChange={(event) => setExternalRecipient(event.target.value)} placeholder="Optional authority / controlled recipient reference" /></label>
               <button type="submit" className="rfg-primary" disabled={busy || !selectedReportId}>Record distribution</button>
             </form>
-            <div className="rfg-distribution">{distribution.map((row) => <div key={row.id}><strong>{row.recipient_role || row.external_recipient_ref || row.recipient_user_id || "Controlled recipient"}</strong><span>Rev {row.revision} · {new Date(row.distributed_at).toLocaleString()}</span><small>{row.report_hash.slice(0, 16)}…</small></div>)}{selectedReportId && distribution.length === 0 && <p>No distribution records for this revision.</p>}</div>
+            <div className="rfg-distribution">{distribution.map((row) => <div key={row.id}><strong>{row.recipient_role || row.external_recipient_ref || (row.recipient_user_id ? "Selected person" : "") || "Controlled recipient"}</strong><span>Rev {row.revision} · {new Date(row.distributed_at).toLocaleString()}</span><small>{row.report_hash.slice(0, 16)}…</small></div>)}{selectedReportId && distribution.length === 0 && <p>No distribution records for this revision.</p>}</div>
           </div>
         </div>
       </section>

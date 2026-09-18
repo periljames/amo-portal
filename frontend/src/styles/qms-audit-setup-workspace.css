@@ -281,7 +281,7 @@
 }
 
 .qms-audit-setup-stage__checks label > span {
-  display: none;
+  display: inline;
 }
 
 .qms-audit-setup-stage__actions {
@@ -888,8 +888,34 @@
 }
 
 .qms-audit-setup-stage .qms-occurrence-stage__independence > p {
-  display: none;
+  display: block;
+  color: var(--qms-muted);
+  line-height: 1.5;
 }
+
+/* Explicit selectors override the generic form grid for checkbox controls. */
+.qms-audit-setup-stage .qms-audit-setup-stage__checks label,
+.qms-audit-setup-stage .qms-audit-setup-stage__check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: auto;
+  min-width: 0;
+  white-space: normal;
+}
+.qms-audit-setup-stage .qms-audit-setup-stage__checks input[type="checkbox"],
+.qms-audit-setup-stage .qms-audit-setup-stage__check-row input[type="checkbox"] {
+  flex: 0 0 1rem;
+  width: 1rem;
+  height: 1rem;
+  min-height: 0;
+  margin-top: 0.15rem;
+}
+.qms-audit-setup-stage__checks label > span { overflow: visible; white-space: normal; }
+.qms-audit-setup-stage [id^="audit-occurrence-"],
+.qms-audit-setup-stage [id^="audit-setup-field-"] { scroll-margin-top: 14rem; }
+.qms-audit-setup-stage button:disabled { cursor: not-allowed; }
+.qms-audit-setup-stage__notice-meta dd { overflow-wrap: anywhere; }
 
 @media (max-width: 980px) {
   .qms-audit-setup-stage__fields,

@@ -7,6 +7,9 @@ import { clearQmsApiResponseCache } from "../../services/apiClient";
 import { qmsListAuditPersonnelOptions, type QMSPersonOption } from "../../services/qmsCore";
 import {
   createQmsPrivilege,
+  changeQmsAuditorRank,
+  purgeQmsPrivilege,
+  downloadQmsAuthorization,
   createQmsPrivilegeRule,
   decideQmsPrivilege,
   declareQmsIndependence,
@@ -30,6 +33,8 @@ import {
 import { allowedPrivilegeDecisions, defaultPrivilegeDecision, privilegeDecisionLabel } from "./qmsPeopleDecisions";
 import { catalogEntryForType, humanisePrivilegeType, QMS_PRIVILEGE_ROLE_CATALOG } from "./qmsPrivilegeRoleCatalog";
 import "../../styles/qms/people.css";
+import { downloadBlob } from "../../services/typedApi";
+import { personDisplay } from "../../utils/personDisplay";
 import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
 
 type Props = { amoCode: string };
@@ -57,10 +62,6 @@ const QUICK_RATIONALE = {
   SUSPEND: "Suspended via People authorization board quick action.",
   REVOKE: "Revoked via People authorization board quick action.",
   REINSTATE: "Reinstated via People authorization board quick action.",
-  PROMOTE_GRANT: "Promoted from Observer/Trainee to Auditor under competence lifecycle.",
-  PROMOTE_SUSPEND: "Suspended Observer/Trainee after promotion to Auditor.",
-  DEMOTE_GRANT: "Demoted from Auditor to Observer/Trainee under competence lifecycle.",
-  DEMOTE_SUSPEND: "Suspended Auditor after demotion to Observer/Trainee.",
 } as const;
 
 function messageFromError(error: unknown): string {
@@ -127,10 +128,6 @@ function localDateKey(date = new Date()): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function shortIdentifier(value: string): string {
-  if (value.length <= 24) return value;
-  return `${value.slice(0, 10)}…${value.slice(-6)}`;
-}
 
 function bindEligibilityToPrivilege(snapshot: QmsEligibility, privilege: QmsPrivilege): QmsEligibility {
   const selectedPrivilegeMatches = privilege.status === "ACTIVE" && snapshot.active_privilege?.id === privilege.id;
@@ -229,17 +226,20 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const personLabelById = useMemo(() => {
     const map = new Map<string, string>();
     for (const person of personnel) {
-      map.set(person.id, person.full_name || person.id);
+      map.set(person.id, personDisplay(person.full_name));
+    }
+    for (const privilege of privileges) {
+      if (!map.has(privilege.user_id) && privilege.person_name) map.set(privilege.user_id, personDisplay(privilege.person_name));
     }
     return map;
-  }, [personnel]);
+  }, [personnel, privileges]);
 
-  const loadPersonnel = useCallback(async (signal?: AbortSignal, options: { bypassCache?: boolean } = {}) => {
+  const loadPersonnel = useCallback(async (signal?: AbortSignal, options: { bypassCache?: boolean; search?: string } = {}) => {
     setPersonnelLoading(true);
     try {
       const personnelResponse = await qmsListAuditPersonnelOptions(
         amoCode,
-        { limit: 100, bypassCache: options.bypassCache },
+        { limit: 200, search: options.search, auditorsOnly: false, bypassCache: options.bypassCache },
         signal,
       );
       if (signal?.aborted) return;
@@ -253,6 +253,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       setPersonnelLoading(false);
     }
   }, [amoCode]);
+
+  useEffect(() => {
+    if (actionMode !== "CREATE") return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void loadPersonnel(controller.signal, { search: personQuery }), 300);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [actionMode, personQuery, loadPersonnel]);
 
   const loadGenerationRef = useRef(0);
 
@@ -410,7 +417,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const assignmentEligible = Boolean(assignmentResultAppliesToSelection && assignmentResult?.eligible && assignmentAssessment?.eligible && assignmentUsesSelectedPrivilege);
 
   function personLabel(userIdValue: string): string {
-    return personLabelById.get(userIdValue) || shortIdentifier(userIdValue);
+    return personLabelById.get(userIdValue) || "Person unavailable";
   }
 
   function resetRuleForm(rule?: QmsPrivilegeRule | null) {
@@ -604,55 +611,6 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     }
   }
 
-  async function ensureTargetPrivilegeActive(
-    targetRule: QmsPrivilegeRule,
-    userId: string,
-    grantRationale: string,
-  ): Promise<string> {
-    const existing = matchingPrivilegeRecord(privileges, {
-      userId,
-      privilegeCode: targetRule.privilege_code,
-      scopeKey: "GLOBAL",
-    });
-    if (!existing) {
-      const created = await createQmsPrivilege(amoCode, {
-        rule_id: targetRule.id,
-        user_id: userId,
-        scope_key: "GLOBAL",
-      });
-      await decideQmsPrivilege(amoCode, created.id, {
-        decision_type: "GRANT",
-        rationale: grantRationale,
-      });
-      return created.id;
-    }
-    if (existing.status === "ACTIVE") return existing.id;
-    if (existing.status === "DRAFT") {
-      await decideQmsPrivilege(amoCode, existing.id, {
-        decision_type: "GRANT",
-        rationale: grantRationale,
-      });
-      return existing.id;
-    }
-    if (existing.status === "SUSPENDED") {
-      await decideQmsPrivilege(amoCode, existing.id, {
-        decision_type: "REINSTATE",
-        rationale: grantRationale,
-      });
-      return existing.id;
-    }
-    if (existing.status === "EXPIRED") {
-      await decideQmsPrivilege(amoCode, existing.id, {
-        decision_type: "RENEW",
-        rationale: grantRationale,
-      });
-      return existing.id;
-    }
-    throw new Error(
-      `Cannot activate ${targetRule.privilege_code} for this person: an existing GLOBAL privilege is revoked and records are append-only.`,
-    );
-  }
-
   async function runQuickDecision(
     decision: Extract<QmsPrivilegeDecision["decision_type"], "SUSPEND" | "REVOKE" | "REINSTATE">,
     rationale: string,
@@ -676,64 +634,33 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     }
   }
 
-  async function promoteToAuditor() {
-    if (!canManagePrivileges || !selected || !selectedIsObserverTrainee || selected.status !== "ACTIVE" || lifecycleBusy) return;
-    if (!defaultAuditorRule) {
-      setError("Auditor rule (AUDITOR_GLOBAL) is not active. Refresh defaults or create the auditor rule first.");
-      return;
-    }
+  async function changeRankTo(target: QmsPrivilegeRule | null) {
+    if (!canManagePrivileges || !selected || !target || selected.status !== "ACTIVE" || lifecycleBusy) return;
     setLifecycleBusy(true);
     setError("");
     setNotice("");
     try {
-      const targetId = await ensureTargetPrivilegeActive(
-        defaultAuditorRule,
-        selected.user_id,
-        QUICK_RATIONALE.PROMOTE_GRANT,
-      );
-      await decideQmsPrivilege(amoCode, selected.id, {
-        decision_type: "SUSPEND",
-        rationale: QUICK_RATIONALE.PROMOTE_SUSPEND,
-      });
+      const updated = await changeQmsAuditorRank(amoCode, selected.id, target.id, `Rank changed to ${target.title} by Quality.`);
       await load();
-      setSelectedId(targetId);
-      setNotice("Promoted to Auditor: AUDITOR_GLOBAL granted and Observer/Trainee suspended.");
-    } catch (nextError) {
-      setError(messageFromError(nextError));
-      await load();
-    } finally {
-      setLifecycleBusy(false);
-    }
+      setSelectedId(updated.id);
+      setNotice(`Current rank: ${target.title}. Previous auditor ranks have been replaced.`);
+    } catch (cause) { setError(messageFromError(cause)); }
+    finally { setLifecycleBusy(false); }
   }
 
-  async function demoteToObserverTrainee() {
-    if (!canManagePrivileges || !selected || !selectedIsFullAuditor || selected.status !== "ACTIVE" || lifecycleBusy) return;
-    if (!defaultObserverTraineeRule) {
-      setError("Observer/Trainee rule (OBSERVER_TRAINEE_GLOBAL) is not active. Refresh defaults or create the supervised auditor rule first.");
-      return;
-    }
+  async function purgeSelected() {
+    if (!selected || !canManagePrivileges || lifecycleBusy) return;
+    if (!window.confirm(`Permanently delete this authorization and its history for ${personLabel(selected.user_id)}?`)) return;
     setLifecycleBusy(true);
     setError("");
-    setNotice("");
     try {
-      const targetId = await ensureTargetPrivilegeActive(
-        defaultObserverTraineeRule,
-        selected.user_id,
-        QUICK_RATIONALE.DEMOTE_GRANT,
-      );
-      await decideQmsPrivilege(amoCode, selected.id, {
-        decision_type: "SUSPEND",
-        rationale: QUICK_RATIONALE.DEMOTE_SUSPEND,
-      });
+      await purgeQmsPrivilege(amoCode, selected.id);
+      setSelectedId("");
+      setSelectedSnapshot(null);
       await load();
-      setSelectedId(targetId);
-      setNotice("Demoted to Observer/Trainee: OBSERVER_TRAINEE_GLOBAL granted and Auditor suspended.");
-    } catch (nextError) {
-      setError(messageFromError(nextError));
-      await load();
-    } finally {
-      setLifecycleBusy(false);
-    }
+      setNotice("Authorization and its history deleted.");
+    } catch (cause) { setError(messageFromError(cause)); }
+    finally { setLifecycleBusy(false); }
   }
 
   async function submitAuditAssignment(event: FormEvent) {
@@ -802,7 +729,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     }
   }
 
-  const selectedName = selectedSnapshot?.person.full_name || personLabel(selected?.user_id || "") || "No person selected";
+  const selectedName = personDisplay(selectedSnapshot?.person.full_name, personLabel(selected?.user_id || ""));
   const readinessLabel = snapshotLoading ? "Checking authoritative gates…" : !selectedSnapshot ? "Readiness unavailable" : selectedSnapshot.eligible ? "Ready" : "Blocked";
   const activeRules = rules.filter((rule) => rule.is_active);
   const hasLeadRule = activeRules.some((rule) => rule.privilege_type === "LEAD_AUDITOR");
@@ -996,7 +923,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   </section>
                 ) : null}
                 {canManagePrivileges ? (
-                  <div className="qms-people__detail-actions">
+                  {canManagePrivileges && selectedIsAuditorPrivilege && selected.status === "ACTIVE" ? <div className="qms-people__rank-action"><label>Current auditor rank<select value={selected.rule_id} disabled={lifecycleBusy} onChange={(event) => void changeRankTo(rules.find((rule) => rule.id === event.target.value) || null)}>{activeRules.filter((rule) => ["AUDITOR", "LEAD_AUDITOR"].includes(rule.privilege_type)).map((rule) => <option key={rule.id} value={rule.id}>{rule.title}</option>)}</select></label><button type="button" disabled={lifecycleBusy} onClick={() => void changeRankTo(selectedRule)}>Keep this rank and remove duplicates</button></div> : null}
+                <div className="qms-people__detail-actions">
+                  <button type="button" disabled={lifecycleBusy} onClick={() => void downloadQmsAuthorization(amoCode, selected.id).then(({ blob, filename }) => downloadBlob(blob, filename || "quality-authorization.pdf")).catch((cause) => setError(messageFromError(cause)))}>Download {selected.status === "ACTIVE" ? "certificate" : "record"}</button>
+                  {canManagePrivileges && ["REVOKED", "EXPIRED", "DRAFT"].includes(selected.status) ? <button type="button" className="is-danger" disabled={lifecycleBusy} onClick={() => void purgeSelected()}>Delete permanently</button> : null}
                     <button type="button" className="is-primary" onClick={() => openAction("EDIT_RULE")}>Edit rule</button>
                     {catalogRule.is_active ? <button type="button" onClick={() => void updateQmsPrivilegeRule(amoCode, catalogRule.id, { is_active: false }).then(() => load()).catch((nextError) => setError(messageFromError(nextError)))}>Deactivate rule</button> : <button type="button" onClick={() => void updateQmsPrivilegeRule(amoCode, catalogRule.id, { is_active: true }).then(() => load()).catch((nextError) => setError(messageFromError(nextError)))}>Reactivate rule</button>}
                   </div>
@@ -1028,7 +958,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
               </p>
             ) : null}
             <label className="qms-workspace-actions"><input type="checkbox" checked={expiringOnly} onChange={event => setExpiringOnly(event.target.checked)} /> Review authorizations expiring within 60 days</label>
-            <QmsWorkspaceGrid<QmsPrivilege> rowData={visiblePrivileges} loading={loading} getRowId={({ data }) => data.id} onRowClicked={({ data }) => { if (data) setSelectedId(data.id); }} pagination paginationPageSize={20} paginationPageSizeSelector={[20, 50, 100]} columnDefs={[
+            <QmsWorkspaceGrid<QmsPrivilege> defaultColDef={{ sortable: true, filter: false, floatingFilter: false, resizable: true, minWidth: 120, flex: 1 }} rowData={visiblePrivileges} loading={loading} getRowId={({ data }) => data.id} onRowClicked={({ data }) => { if (data) setSelectedId(data.id); }} pagination paginationPageSize={20} paginationPageSizeSelector={[20, 50, 100]} columnDefs={[
               { headerName: "Person", minWidth: 220, valueGetter: ({ data }) => data ? personLabel(data.user_id) : "" },
               { headerName: "Privilege", field: "privilege_code", valueFormatter: ({ value }) => humanise(value) },
               { headerName: "Scope", field: "scope_key" },
@@ -1044,7 +974,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 <div className="qms-people__detail-head">
                   <span>Selected authorization</span>
                   <h2>{selectedName}</h2>
-                  <p>{selectedSnapshot?.person.email || selected.user_id}</p>
+                  <p>{selectedSnapshot?.person.email || "Email not recorded"}</p>
                   <div className="qms-people__detail-badges">
                     <span className={`qms-people__status qms-people__status--${selected.status.toLowerCase()}`}>{humanise(selected.status)}</span>
                     <span>{humanise(selected.privilege_code)}</span>
@@ -1058,7 +988,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   <div><dt>Decision history</dt><dd>{selected.decisions?.length || 0} event(s)</dd></div>
                   {selectedRule ? <div><dt>Rule contract</dt><dd>{selectedRule.title} · independence {selectedRule.independence_required ? "required" : "optional"}</dd></div> : null}
                 </dl>
-                <section className="qms-people__eligibility-summary">
+                <details className="qms-people__eligibility-summary"><summary>Training and eligibility details</summary>
                   <header><div><span>Current authorization readiness</span><h3>{readinessLabel}</h3></div>{selectedSnapshot?.eligible ? <CheckCircle2 size={20} /> : <ShieldCheck size={20} />}</header>
                   {selectedSnapshot ? (
                     <>
@@ -1067,7 +997,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       {selectedIsAuditorPrivilege ? <p>Audit assignment scope, role, date, capacity and independence are verified separately by the governed Planner assignment preflight.</p> : null}
                     </>
                   ) : <p>Authoritative readiness evidence is unavailable for this selected authorization.</p>}
-                </section>
+                </details>
                 {canManagePrivileges && (selected.status === "ACTIVE" || selected.status === "SUSPENDED") ? (
                   <div className="qms-people__lifecycle-actions" aria-label="Privilege lifecycle actions">
                     {selected.status === "ACTIVE" ? (
@@ -1092,8 +1022,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                             type="button"
                             className="is-primary"
                             disabled={lifecycleBusy || !defaultAuditorRule}
-                            title={!defaultAuditorRule ? "Active AUDITOR_GLOBAL rule required" : "Grant Auditor and suspend this Observer/Trainee privilege"}
-                            onClick={() => void promoteToAuditor()}
+                            title={!defaultAuditorRule ? "Active AUDITOR_GLOBAL rule required" : "Replace Observer/Trainee with Auditor"}
+                            onClick={() => void changeRankTo(defaultAuditorRule)}
                           >
                             Promote to Auditor
                           </button>
@@ -1102,8 +1032,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                           <button
                             type="button"
                             disabled={lifecycleBusy || !defaultObserverTraineeRule}
-                            title={!defaultObserverTraineeRule ? "Active OBSERVER_TRAINEE_GLOBAL rule required" : "Grant Observer/Trainee and suspend this Auditor privilege"}
-                            onClick={() => void demoteToObserverTrainee()}
+                            title={!defaultObserverTraineeRule ? "Active OBSERVER_TRAINEE_GLOBAL rule required" : "Change the current rank to Observer/Trainee"}
+                            onClick={() => void changeRankTo(defaultObserverTraineeRule)}
                           >
                             Demote to Observer/Trainee
                           </button>
@@ -1137,18 +1067,16 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   {canManagePrivileges && allowedDecisions.length ? <button type="button" onClick={() => openAction("DECISION")}><ShieldCheck size={16} /> Change privilege</button> : null}
                   {canManageAuditGovernance ? <button type="button" onClick={() => openAction("INDEPENDENCE")}><UserRoundCheck size={16} /> Independence</button> : null}
                 </div>
-                <section className="qms-people__history">
-                  <header><span>Decision history</span><h3>Immutable authorization record</h3></header>
+                <details className="qms-people__history"><summary>Authorization history</summary>
                   {selected.decisions?.length ? selected.decisions.slice().reverse().map((decision) => (
                     <article key={decision.id}><div><strong>{humanise(decision.decision_type)}</strong><span>{humanise(decision.resulting_status)}</span></div><p>{decision.rationale}</p><small>{new Date(decision.decided_at).toLocaleString()}</small></article>
                   )) : <p className="qms-people__empty">No authorization decision has been recorded yet.</p>}
-                </section>
-                <section className="qms-people__history">
-                  <header><span>Independence declarations</span><h3>Recorded for this person</h3></header>
+                </details>
+                <details className="qms-people__history"><summary>Independence declarations</summary>
                   {independenceRows.length ? independenceRows.map((row) => (
-                    <article key={row.id}><div><strong>{humanise(row.declaration)}</strong><span>{humanise(row.context_type)}</span></div><p>{row.rationale}</p><small>{row.context_id} · {new Date(row.declared_at).toLocaleString()}</small></article>
+                    <article key={row.id}><div><strong>{humanise(row.declaration)}</strong><span>{humanise(row.context_type)}</span></div><p>{row.rationale}</p><small>{new Date(row.declared_at).toLocaleString()}</small></article>
                   )) : <p className="qms-people__empty">No independence declarations recorded for this person.</p>}
-                </section>
+                </details>
               </>
             ) : (
               <div className="qms-people__placeholder"><UserRoundCheck size={30} /><strong>Select a person or privilege</strong><p>The selected authorization, readiness posture and governed actions will appear here.</p></div>

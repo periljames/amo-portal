@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 import secrets
+from typing import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -116,7 +117,10 @@ def create_session(
     return IssuedSession(session_id=session_id, refresh_token=raw, expires_at=expires_at)
 
 
-def rotate_session(db: Session, *, raw_token: str) -> RotatedSession:
+def rotate_session(
+    db: Session, *, raw_token: str,
+    before_rotation: Callable[[str], None] | None = None,
+) -> RotatedSession:
     now = _utcnow()
     token_hash = _hash_token(raw_token)
     row = (
@@ -142,6 +146,9 @@ def rotate_session(db: Session, *, raw_token: str) -> RotatedSession:
         raise RefreshRejected("Refresh session has expired.")
     if row.revoked_at is not None or not token_expiry or token_expiry <= now:
         raise RefreshRejected("Refresh token has expired.")
+
+    if before_rotation is not None:
+        before_rotation(str(session.id))
 
     replacement_raw = _next_token(raw_token)
     replacement_hash = _hash_token(replacement_raw)

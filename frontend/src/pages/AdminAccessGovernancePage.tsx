@@ -30,7 +30,7 @@ function displayDate(value?: string | null): string {
 }
 
 function subjectName(grant: AdminAccessGrant): string {
-  return grant.user_name?.trim() || grant.user_email?.trim() || grant.user_id;
+  return grant.user_name?.trim() || grant.user_email?.trim() || "Person unavailable";
 }
 
 export default function AdminAccessGovernancePage() {
@@ -245,7 +245,7 @@ export default function AdminAccessGovernancePage() {
                         <div className="aag-grant-title"><h3>{subjectName(grant)}</h3><span className={`aag-status is-${grant.status.toLowerCase()}`}>{grant.status}</span></div>
                         <p>{grant.reason}</p>
                         <dl>
-                          <div><dt>Appointed / requested by</dt><dd>{grant.requested_by_name || grant.requested_by_user_id}</dd></div>
+                          <div><dt>Appointed / requested by</dt><dd>{grant.requested_by_name || "Person unavailable"}</dd></div>
                           <div><dt>Type</dt><dd>{grant.grant_type === "TEMPORARY" ? `Temporary · ${displayDate(grant.valid_until)}` : "Permanent"}</dd></div>
                           <div><dt>Requested</dt><dd>{displayDate(grant.created_at)}</dd></div>
                         </dl>

@@ -92,7 +92,7 @@ function jitter(delay: number): number {
 }
 
 function nextDelay(): number {
-  if (snapshot.state === "ONLINE") return HEALTHY_PROBE_MS;
+  if (snapshot.state === "ONLINE") return jitter(HEALTHY_PROBE_MS);
   const index = Math.min(snapshot.attempt, BACKOFF_MS.length - 1);
   return jitter(BACKOFF_MS[index]);
 }
@@ -309,7 +309,7 @@ export function probePortalReadiness(force = false): Promise<PortalConnectivityS
           retryAt: now + HEALTHY_PROBE_MS,
           reason,
         }, changed);
-        schedule(HEALTHY_PROBE_MS);
+        schedule(jitter(HEALTHY_PROBE_MS));
         return next;
       }
       const delay = retryAfterMs(response) ?? nextDelay();

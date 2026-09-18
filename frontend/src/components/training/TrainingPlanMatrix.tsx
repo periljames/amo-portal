@@ -69,7 +69,7 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
         if (!next.items.length) break;
       }
       setPeoplePage({ ...peoplePage, items, offset: 0, has_more: items.length < peoplePage.total });
-      await navigator.clipboard.writeText(items.map((person) => `${person.person_name}\t${person.staff_code || person.user_id}\t${person.planned_due_date || ""}`).join("\n"));
+      await navigator.clipboard.writeText(items.map((person) => `${person.person_name}\t${person.person_name}\t${person.planned_due_date || ""}`).join("\n"));
       setCopyState("Copied");
       window.setTimeout(() => setCopyState("Copy list"), 1600);
     } catch (reason) {
@@ -134,7 +134,7 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
                 const label = `${cell.personnel_count} personnel due or planned for ${course.course_name} in ${monthLabel(cell.month, true)} ${planYear}`;
                 return <td key={cell.month} className={isSelected ? "is-selected" : ""}>
                   {cell.personnel_count ? <button className="tos-plan-cell" type="button" aria-label={label} aria-expanded={isSelected} onClick={() => setSelected(isSelected ? null : { course, cell })}><strong>{cell.personnel_count}</strong></button> : <span className="tos-plan-cell--empty" aria-label={`No personnel due or planned for ${course.course_name} in ${monthLabel(cell.month, true)} ${planYear}`}>—</span>}
-                  {isSelected ? <div className="tos-plan-cell-preview">{cell.preview.map((person) => <span key={person.user_id} title={person.staff_code || person.user_id}>{person.person_name}</span>)}{cell.personnel_count > 5 ? <button type="button" onClick={() => setDrawerCell({ course, cell })}>+ More ({cell.personnel_count - 5})</button> : null}</div> : null}
+                  {isSelected ? <div className="tos-plan-cell-preview">{cell.preview.map((person) => <span key={person.user_id} title={person.person_name}>{person.person_name}</span>)}{cell.personnel_count > 5 ? <button type="button" onClick={() => setDrawerCell({ course, cell })}>+ More ({cell.personnel_count - 5})</button> : null}</div> : null}
                 </td>;
               })}
             </tr>)}
@@ -149,7 +149,7 @@ const TrainingPlanMatrix: React.FC<Props> = ({ planId, planYear }) => {
         <div className="tos-drawer-form">
           <div className="tos-section-heading"><div><h3>{drawerCell?.course.course_name}</h3><p>{peoplePage?.total ?? drawerCell?.cell.personnel_count ?? 0} unique personnel due for enrolment.</p></div><button disabled={!peoplePage?.items.length || copyState === "Preparing…"} onClick={() => void copyPeople()}><Copy size={16} /> {copyState}</button></div>
           {peopleLoading && !peoplePage ? <div className="tos-empty"><Loader2 className="tos-spin" size={22} /><span>Loading personnel…</span></div> : null}
-          <div className="tos-copy-columns">{peoplePage?.items.map((person, index) => <div key={person.user_id}><span>{index + 1}</span><strong>{person.person_name}</strong><small>{person.staff_code || person.user_id}{person.planned_due_date ? ` · due ${person.planned_due_date}` : ""}</small></div>)}</div>
+          <div className="tos-copy-columns">{peoplePage?.items.map((person, index) => <div key={person.user_id}><span>{index + 1}</span><strong>{person.person_name}</strong><small>{person.person_name}{person.planned_due_date ? ` · due ${person.planned_due_date}` : ""}</small></div>)}</div>
           {peoplePage?.has_more ? <button disabled={peopleLoading} onClick={() => void loadMorePeople()}><UsersRound size={16} /> Load next {Math.min(PERSON_PAGE_SIZE, peoplePage.total - peoplePage.items.length)}</button> : null}
         </div>
       </Drawer>

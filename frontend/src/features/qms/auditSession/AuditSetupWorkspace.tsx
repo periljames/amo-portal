@@ -21,6 +21,7 @@ import {
 import { downloadBlob } from "../../../services/typedApi";
 import {
   createAuditMeeting,
+  deleteAuditMeeting,
   listAuditMeetings,
   updateAuditMeeting,
   type AuditMeeting,
@@ -31,6 +32,8 @@ import {
   updateAuditOccurrenceSetup,
 } from "../../../services/qmsAuditOccurrenceResolver";
 import AuditAssignmentGovernancePanel from "./AuditAssignmentGovernancePanel";
+import { useSavedAuditTeam } from "./useSavedAuditTeam";
+import { meetingTimelineIssue, setupDateLabel, reconcileSetupDraft, normalizeMeetingWindow } from "./auditSetupControls";
 import AuditNoticePdfPreview from "./AuditNoticePdfPreview";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditSetupIssues, auditSetupReadiness, type AuditSetupFieldId } from "./auditSetupModel";
@@ -96,7 +99,7 @@ function formatPlannedDisplay(value: string): string {
 
 function formatPlannedWindow(dateValue: string, timeValue: string): string {
   const day = formatPlannedDisplay(dateValue);
-  return day === "—" ? day : `${day} ${timeValue || "—"}`;
+  return day === "—" ? day : setupDateLabel(`${day}T${timeValue || "00:00"}`);
 }
 
 function shiftTime(value: string, minutes: number): string {
@@ -147,8 +150,12 @@ function meetingDraftFromRow(
       ...inherited,
     };
   }
-  const start = localDateTime(row.scheduled_start, timezoneName);
-  const end = localDateTime(row.scheduled_end, timezoneName);
+  const originalStart = localDateTime(row.scheduled_start, timezoneName);
+  const originalEnd = localDateTime(row.scheduled_end, timezoneName);
+  const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), timezoneName);
+  const { start, end } = row.status === "PLANNED"
+    ? normalizeMeetingWindow(originalStart, originalEnd, now, type === "CLOSING" ? inherited.start : now)
+    : { start: originalStart, end: originalEnd };
   const matchesDefinition =
     Boolean(inherited.start) && start === inherited.start && (!end || !inherited.end || end === inherited.end);
   return {
@@ -232,9 +239,18 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const canManageNotice = canManage || hasQmsRolePermission("qms.audit.notice.manage");
   const [draft, setDraft] = useState<SetupDraft | null>(null);
+  const [teamDirty, setTeamDirty] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const savedDefinitionRef = useRef<{ id: string; draft: SetupDraft } | null>(null);
+  const savedOpeningRef = useRef<{ id: string; draft: MeetingDraft } | null>(null);
+  const savedClosingRef = useRef<{ id: string; draft: MeetingDraft } | null>(null);
   const [openingDraft, setOpeningDraft] = useState<MeetingDraft>(emptyMeeting);
   const [closingDraft, setClosingDraft] = useState<MeetingDraft>(emptyMeeting);
-  const [openTile, setOpenTile] = useState<SetupTileId>("definition");
+  const [openTile, setOpenTile] = useState<SetupTileId | null>("definition");
   const [noticeReason, setNoticeReason] = useState("Final audit notice generated for review before controlled email delivery.");
   const [noticePreview, setNoticePreview] = useState<{ url: string; blob: Blob; filename: string; notice: AuditNotice } | null>(null);
   const [guidedField, setGuidedField] = useState<AuditSetupFieldId | null>(null);
@@ -266,6 +282,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
+  const savedTeam = useSavedAuditTeam(amoCode, auditQuery.data);
 
   useEffect(() => {
     const hash = location.hash.replace(/^#/, "");
@@ -358,7 +375,10 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const row = auditQuery.data;
     if (!row) return;
     const frame = window.requestAnimationFrame(() => {
-      setDraft(draftFromAudit(row));
+      const incoming = draftFromAudit(row);
+      const previous = savedDefinitionRef.current?.id === row.id ? savedDefinitionRef.current.draft : null;
+      setDraft((current) => reconcileSetupDraft(current, previous, incoming));
+      savedDefinitionRef.current = { id: row.id, draft: incoming };
     });
     return () => window.cancelAnimationFrame(frame);
   }, [auditQuery.data]);
@@ -368,20 +388,26 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const plannedStartTime = (auditQuery.data?.planned_start_time || "09:00").slice(0, 5);
     const plannedEndTime = (auditQuery.data?.planned_end_time || "17:00").slice(0, 5);
     const frame = window.requestAnimationFrame(() => {
-      setOpeningDraft(meetingDraftFromRow(openingMeeting, "OPENING", plannedStart, plannedEnd, plannedStartTime, plannedEndTime, meetingsQuery.data?.timezone_name));
+      const incoming = meetingDraftFromRow(openingMeeting, "OPENING", plannedStart, plannedEnd, plannedStartTime, plannedEndTime, meetingsQuery.data?.timezone_name);
+      const previous = savedOpeningRef.current?.id === auditId ? savedOpeningRef.current.draft : null;
+      setOpeningDraft((current) => reconcileSetupDraft(current, previous, incoming));
+      savedOpeningRef.current = { id: auditId, draft: incoming };
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [openingMeeting, auditQuery.data?.planned_start, auditQuery.data?.planned_end, auditQuery.data?.planned_start_time, auditQuery.data?.planned_end_time, meetingsQuery.data?.timezone_name]);
+  }, [auditId, openingMeeting, auditQuery.data?.planned_start, auditQuery.data?.planned_end, auditQuery.data?.planned_start_time, auditQuery.data?.planned_end_time, meetingsQuery.data?.timezone_name]);
   useEffect(() => {
     const plannedStart = datePart(auditQuery.data?.planned_start || "");
     const plannedEnd = datePart(auditQuery.data?.planned_end || "");
     const plannedStartTime = (auditQuery.data?.planned_start_time || "09:00").slice(0, 5);
     const plannedEndTime = (auditQuery.data?.planned_end_time || "17:00").slice(0, 5);
     const frame = window.requestAnimationFrame(() => {
-      setClosingDraft(meetingDraftFromRow(closingMeeting, "CLOSING", plannedStart, plannedEnd, plannedStartTime, plannedEndTime, meetingsQuery.data?.timezone_name));
+      const incoming = meetingDraftFromRow(closingMeeting, "CLOSING", plannedStart, plannedEnd, plannedStartTime, plannedEndTime, meetingsQuery.data?.timezone_name);
+      const previous = savedClosingRef.current?.id === auditId ? savedClosingRef.current.draft : null;
+      setClosingDraft((current) => reconcileSetupDraft(current, previous, incoming));
+      savedClosingRef.current = { id: auditId, draft: incoming };
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [closingMeeting, auditQuery.data?.planned_start, auditQuery.data?.planned_end, auditQuery.data?.planned_start_time, auditQuery.data?.planned_end_time, meetingsQuery.data?.timezone_name]);
+  }, [auditId, closingMeeting, auditQuery.data?.planned_start, auditQuery.data?.planned_end, auditQuery.data?.planned_start_time, auditQuery.data?.planned_end_time, meetingsQuery.data?.timezone_name]);
 
   // Keep inherited schedules aligned with Definition dates while custom schedule is off.
   const inheritedPlannedStart = draft?.plannedStart;
@@ -413,9 +439,28 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => window.cancelAnimationFrame(frame);
   }, [inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime]);
 
+  const correctDefinitionDates = () => {
+    if (!draft) return;
+    const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+    const window = normalizeMeetingWindow(`${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, now);
+    let start = window.start;
+    if (start.slice(11) < "09:00") start = `${start.slice(0, 10)}T09:00`;
+    if (start.slice(11) >= "17:00") start = `${new Date(Date.parse(`${start.slice(0, 10)}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)}T09:00`;
+    let end = window.end;
+    if (end <= start || end.slice(11) <= start.slice(11) || end.slice(11) > "17:00") {
+      end = new Date(Date.parse(`${start}:00Z`) + 30 * 60_000).toISOString().slice(0, 16);
+      if (end.slice(11) > "17:00") end = `${start.slice(0, 10)}T17:00`;
+    }
+    const next = { ...draft, plannedStart: start.slice(0, 10), plannedStartTime: start.slice(11), plannedEnd: end.slice(0, 10), plannedEndTime: end.slice(11) };
+    if (JSON.stringify(next) !== JSON.stringify(draft)) {
+      setDraft(next);
+      setNotice("Dates adjusted to the next available audit time. Save the definition to apply.");
+    }
+  };
+
   const selectTile = (tile: SetupTileId) => (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
-    setOpenTile(tile);
+    setOpenTile((current) => current === tile ? null : tile);
   };
 
   const refresh = async () => {
@@ -442,7 +487,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         planned_end_time: draft.plannedEndTime || null,
         notify_auditors: draft.notifyAuditors,
         notify_auditees: draft.notifyAuditees,
-        reminder_interval_days: Math.max(1, Number(draft.reminderIntervalDays) || 7),
+        reminder_interval_days: Math.max(1, Math.min(60, Number(draft.reminderIntervalDays) || 7)),
       });
     },
     onSuccess: async (row) => {
@@ -463,7 +508,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       const end = value.customSchedule ? value.end : inherited.end;
       if (!start) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting start is required.`);
       if (!end) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting end is required.`);
-      if (end < start) throw new Error("Meeting end cannot be before its start.");
+      const timelineIssue = meetingTimelineIssue(type, start, end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name));
+      if (timelineIssue) throw new Error(timelineIssue);
       if ((value.modality === "PHYSICAL" || value.modality === "HYBRID") && !value.location.trim()) {
         throw new Error("Physical location is required for this meeting modality.");
       }
@@ -486,6 +532,12 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       await refresh();
     },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit meeting could not be saved."),
+  });
+
+  const removeMeetingMutation = useMutation({
+    mutationFn: (row: AuditMeeting) => deleteAuditMeeting(amoCode, auditId, row.id),
+    onSuccess: async () => { setNotice("Meeting deleted."); await refresh(); },
+    onError: (cause) => setLocalError(errorMessage(cause, "Meeting could not be deleted.")),
   });
 
   const previewNoticeMutation = useMutation({
@@ -600,7 +652,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   if (auditQuery.isLoading && !auditQuery.data) {
     return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit setup…</section>;
   }
-  if (auditQuery.isError || !auditQuery.data) {
+  if (!auditQuery.data) {
     return (
       <AuditStageLoadError
         className="qms-occurrence-stage qms-occurrence-stage--loading qms-audit-stage-load-error"
@@ -621,7 +673,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ...draft,
     leadAuditorUserId: auditQuery.data.lead_auditor_user_id,
   });
-  const setupReady = readiness.ready && !definitionDirty;
+  const setupReady = readiness.ready && savedTeam.ready && !definitionDirty && !teamDirty;
   const guidedIssue = guidedField ? setupIssues.find((item) => item.field === guidedField) : null;
   const guidedClass = (field: AuditSetupFieldId) => guidedField === field ? "is-guided-required" : undefined;
   const supportingErrorCount = [meetingsQuery.error, noticesQuery.error, policiesQuery.error, templateQuery.error].filter(Boolean).length;
@@ -635,6 +687,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const needsLocation = value.modality === "PHYSICAL" || value.modality === "HYBRID";
     const needsUrl = value.modality === "ONLINE" || value.modality === "HYBRID";
     const inherited = inheritedMeetingWindow(type, draft.plannedStart, draft.plannedEnd, draft.plannedStartTime, draft.plannedEndTime);
+    const timelineIssue = meetingTimelineIssue(type, value.customSchedule ? value.start : inherited.start,
+      value.customSchedule ? value.end : inherited.end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name));
     return (
       <div className="qms-audit-setup-stage__meeting">
         <strong>{type === "OPENING" ? "Opening" : "Closing"}</strong>
@@ -682,7 +736,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   }));
                 }}
               />
-              Different schedule from Definition dates
+              Use a custom meeting schedule
             </label>
 
             {value.customSchedule ? (
@@ -691,6 +745,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <span>Start</span>
                   <input
                     type="datetime-local"
+                    min={localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name)}
+                    onBlur={() => setValue((current) => ({ ...current, ...normalizeMeetingWindow(current.start, current.end, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name), type === "CLOSING" ? inherited.start : undefined) }))}
                     disabled={!canManage}
                     value={value.start}
                     onChange={(event) => setValue((current) => ({ ...current, start: event.target.value }))}
@@ -700,6 +756,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <span>End</span>
                   <input
                     type="datetime-local"
+                    min={localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name)}
+                    onBlur={() => setValue((current) => ({ ...current, ...normalizeMeetingWindow(current.start, current.end, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name), type === "CLOSING" ? inherited.start : undefined) }))}
                     disabled={!canManage}
                     value={value.end}
                     onChange={(event) => setValue((current) => ({ ...current, end: event.target.value }))}
@@ -739,16 +797,19 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ) : null}
             </div>
 
-            <small>{row ? row.status.replaceAll("_", " ") : "Not saved"}</small>
+            <small>{row ? `Saved status: ${row.status.replaceAll("_", " ")}` : "Not saved"} · Times in {meetingsQuery.data?.timezone_name || "tenant local time"}</small>
+            {definitionDirty ? <p role="status">Save the audit dates before updating meetings.</p> : null}
+            {timelineIssue ? <p className="qms-occurrence-stage__message is-error" role="alert">{timelineIssue}</p> : null}
             {canManage ? (
               <div className="qms-audit-setup-stage__actions">
                 <button
                   type="button"
-                  disabled={!meetingReady(type, value, draft.plannedStart, draft.plannedEnd, draft.plannedStartTime, draft.plannedEndTime) || meetingMutation.isPending}
+                  disabled={definitionDirty || Boolean(timelineIssue) || !meetingReady(type, value, draft.plannedStart, draft.plannedEnd, draft.plannedStartTime, draft.plannedEndTime) || meetingMutation.isPending}
                   onClick={() => meetingMutation.mutate({ type, row, value })}
                 >
                   <Save size={15} /> {row ? "Update" : "Save"}
                 </button>
+                {row ? <button type="button" disabled={removeMeetingMutation.isPending || meetingMutation.isPending} onClick={() => { if (window.confirm("Delete this meeting?")) removeMeetingMutation.mutate(row); }}>Delete meeting</button> : null}
               </div>
             ) : null}
           </>
@@ -771,6 +832,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   return (
     <section className="qms-occurrence-stage qms-audit-setup-stage" aria-label="Audit setup workspace" id="audit-occurrence-overview">
+      {auditQuery.isError ? <div className="qms-audit-setup-stage__supporting-warning" role="status">Showing the saved audit record. Live updates are unavailable; your edits are retained. <button type="button" onClick={() => void auditQuery.refetch()}>Retry</button></div> : null}
       <div className="qms-audit-setup-stage__toolbar">
         <div className="qms-audit-setup-stage__intro">
           <h2 className="qms-audit-setup-stage__title">Setup</h2>
@@ -779,10 +841,10 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </p>
           <div className="qms-audit-setup-stage__status" role="status" aria-label="Setup status">
             <span className={`qms-audit-setup-stage__chip${readiness.definitionReady ? "" : " is-warning"}`}>
-              Definition {readiness.definitionReady ? "complete" : "incomplete"}
+              Definition {definitionDirty ? "unsaved" : readiness.definitionReady ? "saved" : "incomplete"}
             </span>
             <span className={`qms-audit-setup-stage__chip${readiness.leadAssigned ? "" : " is-warning"}`}>
-              Lead auditor {readiness.leadAssigned ? "assigned" : "missing"}
+              Team {teamDirty ? "unsaved" : savedTeam.ready ? "verified" : "needs review"}
             </span>
             <span className="qms-audit-setup-stage__chip">
               Meetings {meetingsQuery.isPending ? "loading…" : `${meetingCount}/2`}
@@ -795,7 +857,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <div className="qms-audit-setup-stage__toolbar-actions">
           {setupReady ? (
             <Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "prepare")}>
-              Continue to Prepare
+              Open Prepare
               <ArrowRight size={16} aria-hidden />
             </Link>
           ) : (
@@ -805,7 +867,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               disabled
               title={definitionDirty ? "Save the audit definition before continuing." : readiness.issues.join(" ")}
             >
-              Continue to Prepare
+              Open Prepare
               <ArrowRight size={16} aria-hidden />
             </button>
           )}
@@ -822,10 +884,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <strong>{setupReady ? "Required setup is complete" : "Complete setup before Prepare"}</strong>
           <p>
             {setupReady
-              ? "Scope, criteria, audit dates, auditee and lead auditor are saved. Meetings and notice remain visible as governance tasks."
+              ? "The definition is saved and selected auditors pass eligibility and independence checks. Meetings and notice have separate control statuses below."
               : definitionDirty
                 ? "Save the audit definition before continuing."
-                : readiness.issues.join(" ")}
+                : teamDirty ? "Save or discard team changes before continuing."
+                : readiness.issues.length ? readiness.issues.join(" ") : savedTeam.message}
           </p>
         </div>
       </div>
@@ -866,7 +929,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span className="qms-audit-setup-tile__title">Audit definition</span>
             <span className="qms-audit-setup-tile__hint">{definitionSummary || "Title, scope, dates"}</span>
             <span className={`qms-audit-setup-tile__state${readiness.definitionReady ? " is-complete" : " is-required"}`}>
-              {readiness.definitionReady ? "Complete" : "Required"}
+              {definitionDirty ? "Unsaved" : readiness.definitionReady ? "Saved" : "Required"}
             </span>
           </summary>
           <div className="qms-audit-setup-tile__body">
@@ -919,6 +982,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   type="date"
                   disabled={!canManage}
                   value={draft.plannedStart}
+                  onBlur={correctDefinitionDates}
                   onChange={(event) => { clearGuidance("plannedStart"); setDraft({ ...draft, plannedStart: event.target.value }); }}
                 />
               </label>
@@ -931,6 +995,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   step={900}
                   disabled={!canManage}
                   value={draft.plannedStartTime}
+                  onBlur={correctDefinitionDates}
                   onChange={(event) => { clearGuidance("plannedStartTime"); setDraft({ ...draft, plannedStartTime: event.target.value }); }}
                 />
               </label>
@@ -941,6 +1006,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   disabled={!canManage}
                   min={draft.plannedStart || undefined}
                   value={draft.plannedEnd}
+                  onBlur={correctDefinitionDates}
                   onChange={(event) => { clearGuidance("plannedEnd"); setDraft({ ...draft, plannedEnd: event.target.value }); }}
                 />
               </label>
@@ -953,6 +1019,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   step={900}
                   disabled={!canManage}
                   value={draft.plannedEndTime}
+                  onBlur={correctDefinitionDates}
                   onChange={(event) => { clearGuidance("plannedEndTime"); setDraft({ ...draft, plannedEndTime: event.target.value }); }}
                 />
               </label>
@@ -964,6 +1031,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   max={60}
                   disabled={!canManage}
                   value={draft.reminderIntervalDays}
+                  onBlur={() => setDraft({ ...draft, reminderIntervalDays: String(Math.max(1, Math.min(60, Number(draft.reminderIntervalDays) || 7))) })}
                   onChange={(event) => setDraft({ ...draft, reminderIntervalDays: event.target.value })}
                 />
               </label>
@@ -1016,14 +1084,14 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span className="qms-audit-setup-tile__step" aria-hidden>2</span>
             <span className="qms-audit-setup-tile__title">Audit team</span>
             <span className={`qms-audit-setup-tile__hint${readiness.leadAssigned ? "" : " is-warning"}`}>
-              {readiness.leadAssigned ? "Lead auditor assigned" : "Lead auditor required"}
+              {teamDirty ? "Unsaved changes" : savedTeam.message}
             </span>
-            <span className={`qms-audit-setup-tile__state${readiness.leadAssigned ? " is-complete" : " is-required"}`}>
-              {readiness.leadAssigned ? "Complete" : "Required"}
+            <span className={`qms-audit-setup-tile__state${savedTeam.ready && !teamDirty ? " is-complete" : " is-required"}`}>
+              {teamDirty ? "Unsaved" : savedTeam.ready ? "Verified" : savedTeam.pending ? "Checking" : "Review required"}
             </span>
           </summary>
           <div className="qms-audit-setup-tile__body" id="audit-setup-field-leadAuditorUserId">
-            <AuditAssignmentGovernancePanel amoCode={amoCode} auditKey={auditKey} />
+            <AuditAssignmentGovernancePanel key={auditId} amoCode={amoCode} auditKey={auditKey} onDirtyChange={setTeamDirty} />
           </div>
         </details>
 
@@ -1082,7 +1150,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             {!templateQuery.isPending && !templateQuery.isError ? (
               <div className="qms-audit-notice-template">
                 <label>
-                  <span>Controlled notice form (DMS)</span>
+                  <span>Template catalogue · for new notices</span>
                   <select
                     value={selectedTemplateId}
                     disabled={!canManageNotice || Boolean(latestNotice) || templateMutation.isPending}
@@ -1113,20 +1181,32 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <dd>{latestNotice.status.replaceAll("_", " ")}</dd>
                 </div>
                 <div>
-                  <dt>Revision</dt>
+                  <dt>Notice revision</dt>
                   <dd>{latestNotice.revision_no}</dd>
                 </div>
                 <div>
-                  <dt>Required days</dt>
-                  <dd>{latestNotice.required_notice_days}</dd>
+                  <dt>Minimum lead time to audit start</dt>
+                  <dd>{latestNotice.required_notice_days} days</dd>
                 </div>
                 <div>
                   <dt>Notice date</dt>
-                  <dd>{latestNotice.notice_date}</dd>
+                  <dd>{setupDateLabel(latestNotice.notice_date)}</dd>
                 </div>
                 <div>
-                  <dt>Controlled form</dt>
+                  <dt>Template captured for this notice</dt>
                   <dd>{latestNotice.form_number}{latestNotice.form_revision ? ` · Rev ${latestNotice.form_revision}` : ""}</dd>
+                </div>
+                <div>
+                  <dt>Signed by</dt>
+                  <dd>{latestNotice.artifact?.signed_by_name || "Not recorded"}</dd>
+                </div>
+                <div>
+                  <dt>Approved</dt>
+                  <dd>{latestNotice.approved_at ? setupDateLabel(latestNotice.approved_at) : "Not recorded"}</dd>
+                </div>
+                <div>
+                  <dt>Delivered</dt>
+                  <dd>{latestNotice.delivered_at ? setupDateLabel(latestNotice.delivered_at) : "Not delivered"}</dd>
                 </div>
               </dl>
             ) : !noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending ? (
@@ -1233,7 +1313,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     ? "Attached signed notice"
                     : "Generated and electronically signed notice"}
                 </strong>
-                <span>Status: {previewedNotice.status.replaceAll("_", " ")} · SHA-256 retained in the controlled record</span>
+                <span>Status: {previewedNotice.status.replaceAll("_", " ")}</span>
               </div>
               {canManageNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
                 <label className="qms-audit-notice-modal__reason">

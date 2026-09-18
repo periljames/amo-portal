@@ -273,7 +273,11 @@ export function installPortalFetchErrorBridge(): () => void {
     try {
       let response = await originalFetch(activeInput, activeInit);
       if (response.status === 401 && authenticatedRequest) {
-        const recovered = await recoverSessionAfterUnauthorized("unauthorized-response");
+        const sentToken = requestHeaders(activeInput, activeInit).get("Authorization");
+        const newerToken = getToken() && sentToken !== `Bearer ${getToken()}`
+          && (getTokenSecondsRemaining() ?? 0) > 0;
+        const recovered = newerToken || await recoverSessionAfterUnauthorized("unauthorized-response");
+        if (!recovered) return recoveryPendingResponse();
         if (recovered) {
           const [retryInput, retryInit] = withCurrentAccessToken(input, init, retryRequest);
           response = await originalFetch(retryInput, retryInit);

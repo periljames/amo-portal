@@ -34,6 +34,7 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
 
 // Keep this set aligned with backend/apps/quality/tenant_security.py.
 const QMS_OFFICER_PERMISSIONS = new Set([
+  "qms.training.manage",
   ...QMS_INSPECTOR_PERMISSIONS,
   "qms.audit.manage",
   "qms.audit.notice.manage",

@@ -102,7 +102,7 @@ function isOnTimeClosure(car: CAROut): boolean {
 }
 
 function ownerLabel(car: CAROut): string {
-  return car.responsible_personnel || car.assigned_to_user_id || "Unassigned";
+  return car.responsible_personnel || (car.assigned_to_user_id ? "Assigned" : "Unassigned");
 }
 
 function departmentLabel(car: CAROut): string {

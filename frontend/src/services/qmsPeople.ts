@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { apiBlob } from "./typedApi";
 
 export type QmsPrivilegeRule = {
   id: string;
@@ -28,6 +29,7 @@ export type QmsPrivilegeDecision = {
 };
 
 export type QmsPrivilege = {
+  person_name?: string;
   id: string;
   rule_id: string;
   user_id: string;
@@ -43,6 +45,18 @@ export type QmsPrivilege = {
   updated_at: string;
   decisions?: QmsPrivilegeDecision[];
 };
+
+export function changeQmsAuditorRank(amoCode: string, privilegeId: string, ruleId: string, rationale: string): Promise<QmsPrivilege> {
+  return apiRequest<QmsPrivilege>(qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}/rank`), jsonOptions("POST", { rule_id: ruleId, rationale }));
+}
+
+export function purgeQmsPrivilege(amoCode: string, privilegeId: string): Promise<void> {
+  return apiRequest<void>(qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}`), { method: "DELETE" });
+}
+
+export function downloadQmsAuthorization(amoCode: string, privilegeId: string) {
+  return apiBlob(qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}/record`));
+}
 
 export type QmsPeopleSummary = {
   active_privileges: number;

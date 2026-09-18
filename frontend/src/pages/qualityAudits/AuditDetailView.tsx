@@ -90,7 +90,7 @@ const statusClassName = (status: "Open" | "Closed" | "Overdue") => {
 const personName = (peopleById: Map<string, QMSPersonOption>, userId?: string | null): string => {
   if (!userId) return "Unassigned";
   const person = peopleById.get(userId);
-  return person ? (person.position_title ? `${person.full_name} · ${person.position_title}` : person.full_name) : userId;
+  return person ? (person.position_title ? `${person.full_name} · ${person.position_title}` : person.full_name) : "Person unavailable";
 };
 
 const participantFormFromSchedule = (schedule: {

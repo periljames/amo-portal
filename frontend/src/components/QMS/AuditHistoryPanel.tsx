@@ -92,7 +92,7 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
                     {canContinue(event) ? "Continue" : "Open"}
                   </button>
                 )}
-                <span className="qms-pill">{event.actor_user_id || "system"}</span>
+                <span className="qms-pill">{event.actor_user_id === currentUserId ? "You" : event.actor_user_id ? "Team member" : "System"}</span>
               </div>
             </div>
           ))}

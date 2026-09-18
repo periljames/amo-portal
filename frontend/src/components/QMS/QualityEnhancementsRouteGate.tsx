@@ -1,8 +1,11 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect } from "react";
+import { scheduleQmsOfflineWarmup } from "../../services/qmsOfflineWarmup";
 import { useLocation } from "react-router-dom";
 
 import { ModalTopLayerGuard } from "../shared/ModalTopLayerGuard";
 import QmsCommandPalette from "./QmsCommandPalette";
+import QmsOfflineStatus from "./QmsOfflineStatus";
+import "../../styles/qms-offline-status.css";
 
 const QualityEnhancementsHost = lazy(
   () => import("./QualityEnhancementsHost"),
@@ -14,11 +17,15 @@ const QualityEnhancementsRouteGate: React.FC = () => {
     || /^\/maintenance\/[^/]+(?:\/|$)/i.test(location.pathname)
     || /^\/platform(?:\/|$)/i.test(location.pathname);
   const commandPaletteRelevant = /^\/maintenance\/[^/]+\/quality(?:\/|$)/i.test(location.pathname);
+  useEffect(() => {
+    if (commandPaletteRelevant) return scheduleQmsOfflineWarmup();
+  }, [commandPaletteRelevant]);
 
   return (
     <>
       <ModalTopLayerGuard />
       {commandPaletteRelevant ? <QmsCommandPalette /> : null}
+      {commandPaletteRelevant ? <QmsOfflineStatus /> : null}
       {relevant ? (
         <Suspense fallback={null}>
           <QualityEnhancementsHost />

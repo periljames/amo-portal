@@ -325,7 +325,7 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
                   <div className="action-panel__label">Acknowledgement status</div>
                   <ul>
                     {documentAcks.map((ack) => (
-                      <li key={ack.id}>{ack.recipient_user_id} · {ack.acked_at ? "Acknowledged" : "Pending"}</li>
+                      <li key={ack.id}>Recipient · {ack.acked_at ? "Acknowledged" : "Pending"}</li>
                     ))}
                   </ul>
                 </div>

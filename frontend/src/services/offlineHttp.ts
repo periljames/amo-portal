@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from "./config";
+import { isQmsLiveAuthority } from "./qmsCachePolicy";
 import {
   currentOfflineScope,
   enqueueOfflineMutation,
@@ -126,7 +127,7 @@ function normalizedCachePath(path: string): string {
 
 export function isPortalCacheablePath(path: string): boolean {
   const normalized = normalizedCachePath(path).toLowerCase();
-  return !SENSITIVE_PATH_PARTS.some((part) => normalized.includes(part));
+  return !isQmsLiveAuthority(normalized) && !SENSITIVE_PATH_PARTS.some((part) => normalized.includes(part));
 }
 
 export function isReplaySafeMutation(path: string, method: string): boolean {

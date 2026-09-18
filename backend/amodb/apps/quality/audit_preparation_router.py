@@ -339,6 +339,12 @@ def issue_preparation_revision(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only a DRAFT preparation revision may be issued.")
     current = _capture_sources(db, amo_id=ctx.amo_id, audit=audit)
     readiness_blockers = _preparation_readiness_blockers(current)
+    from .audit_workflow_contract import _audit_setup_ready
+    if not _audit_setup_ready(audit, db):
+        readiness_blockers.append({
+            "type": "SETUP",
+            "reason": "Save the audit definition and assign eligible auditors with required independence declarations before issue.",
+        })
     if readiness_blockers:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

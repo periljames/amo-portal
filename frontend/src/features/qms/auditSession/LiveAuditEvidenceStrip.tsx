@@ -47,7 +47,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
         findingId: item.finding_id || null,
       });
       setFile(null); setDescription("");
-      onNotice(`Evidence attached · ${result.artifact.filename} · SHA-256 ${result.artifact.sha256.slice(0, 12)}… · checklist v${result.committed_version}.`);
+      onNotice(`Evidence attached · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await evidenceQuery.refetch();
       await onChanged();
     } catch (cause) {

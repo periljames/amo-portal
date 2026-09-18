@@ -42,7 +42,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
-    refetchInterval: routeStage === "live" ? 5_000 : 15_000,
+    refetchInterval: routeStage === "live" ? 5_000 : 60_000,
   });
 
   const stageState = useMemo(() => {
@@ -79,7 +79,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
               </span>
             ) : (
               <span className="qms-audit-session-rail__progress-pct">
-                {sessionQuery.data ? `${sessionQuery.data.percent_complete}% complete` : "Loading…"}
+                {sessionQuery.data ? `${sessionQuery.data.stages.filter((stage) => stage.complete).length} of ${AUDIT_SESSION_STAGES.length} stages complete` : "Loading…"}
               </span>
             )}
           </div>
@@ -134,12 +134,12 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
       {sessionQuery.data && viewingOtherStage ? (
         <div className="qms-audit-session-rail__authority" role="status">
           <span>
-            Current: <strong>{sessionQuery.data.current_stage_label}</strong>
+            Current workflow stage: <strong>{sessionQuery.data.current_stage_label}</strong>
             {routeStage ? (
-              <span className="qms-audit-session-rail__viewing"> · Viewing {STAGE_LABELS[routeStage]}</span>
+              <span className="qms-audit-session-rail__viewing"> · Viewing the saved {STAGE_LABELS[routeStage]} record</span>
             ) : null}
           </span>
-          {nextStageHref ? (
+          {nextStageHref && routeStage !== "setup" ? (
             <Link to={nextStageHref} className="qms-audit-session-rail__next-action">
               Go to {sessionQuery.data.current_stage_label}
               <ArrowRight size={14} aria-hidden />

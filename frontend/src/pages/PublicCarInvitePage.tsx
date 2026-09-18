@@ -514,7 +514,10 @@ const PublicCarInvitePage: React.FC = () => {
   const [camera, setCamera] = useState<CameraState | null>(null);
   const [activeSteps, setActiveSteps] = useState<Record<string, InviteStepId>>({});
   const [now, setNow] = useState(() => new Date());
-  const initialized = useRef(false);
+  const initialized = useRef<string | null | undefined>(undefined);
+  const pendingSubmissions = useRef(new Set<string>());
+  const pendingUploads = useRef(new Set<string>());
+  const activeCameraStream = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -530,11 +533,15 @@ const PublicCarInvitePage: React.FC = () => {
   }, [camera?.stream]);
 
   const stopCamera = () => {
-    camera?.stream?.getTracks().forEach((track) => track.stop());
+    activeCameraStream.current?.getTracks().forEach((track) => track.stop());
+    activeCameraStream.current = null;
     setCamera(null);
   };
 
-  useEffect(() => stopCamera, []);
+  useEffect(() => {
+    activeCameraStream.current = camera?.stream || null;
+    return () => camera?.stream?.getTracks().forEach((track) => track.stop());
+  }, [camera?.stream]);
 
   const updateEntry = (tokenValue: string, updater: (entry: InviteEntry) => InviteEntry) => {
     setEntries((prev) => prev.map((entry) => (entry.token === tokenValue ? updater(entry) : entry)));
@@ -613,13 +620,14 @@ const PublicCarInvitePage: React.FC = () => {
     if (stepId === "identity") {
       if (!fieldHasValue(entry.form.submitted_by_name)) return "Your name is required.";
       if (!fieldHasValue(entry.form.submitted_by_email)) return "Your email is required.";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry.form.submitted_by_email.trim())) return "Enter a valid email address.";
     }
     if (stepId === "containment" && !fieldHasValue(entry.form.containment_action)) {
       return "Immediate containment is required. Enter N/A if no containment was required.";
     }
     if (stepId === "analysis" && !fieldHasValue(entry.form.root_cause)) return "Root cause is required.";
     if (stepId === "corrective" && !fieldHasValue(entry.form.corrective_action)) return "Corrective action plan is required.";
-    if (stepId === "evidence" && entry.invite.evidence_required && !fieldHasValue(entry.form.evidence_ref) && entry.attachments.length === 0) {
+    if (stepId === "evidence" && entry.invite.evidence_required && !fieldHasValue(entry.form.evidence_ref) && entry.attachments.length === 0 && !entry.invite.evidence_received_at) {
       return "Evidence is required before submission.";
     }
     return null;
@@ -632,7 +640,7 @@ const PublicCarInvitePage: React.FC = () => {
       return;
     }
     const next = INVITE_STEPS[stepIndex(stepId) + 1]?.id ?? "review";
-    updateEntry(entry.token, (current) => ({ ...current, error: null, notice: `${INVITE_STEPS[stepIndex(stepId)].label} saved. Continue with ${INVITE_STEPS[stepIndex(next)].label}.` }));
+    updateEntry(entry.token, (current) => ({ ...current, error: null, notice: `${INVITE_STEPS[stepIndex(stepId)].label} complete. Continue with ${INVITE_STEPS[stepIndex(next)].label}.` }));
     setActiveStep(entry.token, next);
   };
 
@@ -683,8 +691,10 @@ const PublicCarInvitePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+    if (initialized.current === token) return;
+    initialized.current = token;
+    setActiveSteps({});
+    setSelectedPreview(null);
     if (!token) {
       setEntries([{ ...createEntry(""), state: "error", error: "Invite token missing." }]);
       return;
@@ -712,12 +722,13 @@ const PublicCarInvitePage: React.FC = () => {
 
   const submitInvite = async (tokenValue: string) => {
     const current = entries.find((entry) => entry.token === tokenValue);
-    if (!current || !current.invite) return;
+    if (!current || !current.invite || pendingSubmissions.current.has(tokenValue)) return;
     const validationError = validateEntry(current);
     if (validationError) {
       updateEntry(tokenValue, (entry) => ({ ...entry, error: validationError }));
       return;
     }
+    pendingSubmissions.current.add(tokenValue);
     updateEntry(tokenValue, (entry) => ({ ...entry, error: null, notice: null, submitting: true }));
     try {
       await qmsSubmitCarInvite(tokenValue, {
@@ -740,7 +751,7 @@ const PublicCarInvitePage: React.FC = () => {
         submitting: false,
         error: getErrorMessage(error, "Failed to submit CAR response."),
       }));
-    }
+    } finally { pendingSubmissions.current.delete(tokenValue); }
   };
 
   const handleSubmit = (tokenValue: string) => (event: React.FormEvent) => {
@@ -774,7 +785,7 @@ const PublicCarInvitePage: React.FC = () => {
   };
 
   const uploadFiles = async (tokenValue: string, files: File[]) => {
-    if (!files.length) return;
+    if (!files.length || pendingUploads.current.has(tokenValue)) return;
     const current = entries.find((entry) => entry.token === tokenValue);
     if (!current?.invite || !isInviteEditable(current.invite)) {
       updateEntry(tokenValue, (entry) => ({ ...entry, attachmentsError: current?.invite?.locked_reason || "This CAR is not editable." }));
@@ -797,17 +808,18 @@ const PublicCarInvitePage: React.FC = () => {
       }));
       return;
     }
+    pendingUploads.current.add(tokenValue);
     updateEntry(tokenValue, (entry) => ({ ...entry, uploading: true, attachmentsError: rejected.length ? rejected.join(" ") : null, notice: null }));
     try {
       const results: CARAttachmentOut[] = [];
       for (const upload of uploads) {
         const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload);
         results.push(uploaded);
+        updateEntry(tokenValue, (entry) => ({ ...entry, attachments: [...entry.attachments.filter((item) => item.id !== uploaded.id), uploaded] }));
       }
       const actions = await qmsListCarInviteActions(tokenValue).catch(() => []);
       updateEntry(tokenValue, (entry) => ({
         ...entry,
-        attachments: [...entry.attachments, ...results],
         actions,
         uploading: false,
         notice: `${results.length} evidence file${results.length === 1 ? "" : "s"} uploaded successfully.`,
@@ -818,7 +830,7 @@ const PublicCarInvitePage: React.FC = () => {
         uploading: false,
         attachmentsError: getErrorMessage(error, "Failed to upload attachment."),
       }));
-    }
+    } finally { pendingUploads.current.delete(tokenValue); }
   };
 
   const handleUpload = (tokenValue: string) => async (event: React.ChangeEvent<HTMLInputElement>) => {

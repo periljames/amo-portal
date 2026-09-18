@@ -249,10 +249,10 @@ export function WorkforceBulkSetupPanel({ canManageContracts, canManagePatterns 
         <span className={TERMINAL.has(operation.status) ? "is-done" : ""}><CheckCircle2 size={13} /> Refresh workforce</span>
       </div>
       <div className="workforce-bulk__live-row">
-        <div><span>Now</span><strong>{activeItem ? `${activeItem.full_name || activeItem.staff_code || activeItem.user_id}` : operation.status === "QUEUED" ? "Waiting for a worker" : TERMINAL.has(operation.status) ? "Finished" : "Preparing next record"}</strong></div>
+        <div><span>Now</span><strong>{activeItem ? `${activeItem.full_name || "Person unavailable"}` : operation.status === "QUEUED" ? "Waiting for a worker" : TERMINAL.has(operation.status) ? "Finished" : "Preparing next record"}</strong></div>
         <div><span>Estimated remaining</span><strong><Clock3 size={13} /> {TERMINAL.has(operation.status) ? "Complete" : formatDuration(remainingSeconds)}</strong></div>
       </div>
-      {upcoming.length && !TERMINAL.has(operation.status) ? <p className="workforce-bulk__up-next">Up next: {upcoming.map((item) => item.full_name || item.staff_code || item.user_id).join(", ")}</p> : null}
+      {upcoming.length && !TERMINAL.has(operation.status) ? <p className="workforce-bulk__up-next">Up next: {upcoming.map((item) => item.full_name || "Person").join(", ")}</p> : null}
       <div className="workforce-bulk__result-counts"><span>{operation.succeeded_count} succeeded</span><span>{operation.skipped_count} skipped</span><span className={operation.failed_count ? "has-failures" : ""}>{operation.failed_count} failed</span></div>
       {operation.status === "QUEUED" && !queueIsSlow ? <p className="workforce-bulk__queue-note">The request is accepted. Live progress will start as soon as the first record is claimed.</p> : null}
       {queueIsSlow ? <div className="wr-inline-error">This operation has waited longer than expected. It can be released without repeating completed records.</div> : null}
@@ -262,7 +262,7 @@ export function WorkforceBulkSetupPanel({ canManageContracts, canManagePatterns 
         {operation.failed_count ? <><button type="button" onClick={() => void run("retry", async () => setOperation(await retryWorkforceHrBulkOperation(operation.id, key("retry"))))}><RotateCcw size={14} /> Retry failed only</button><button type="button" onClick={() => void downloadWorkforceHrBulkFailures(operation.id)}><Download size={14} /> Failure report</button></> : null}
         {operation.status === "FAILED" || queueIsSlow || runningIsStale ? <button type="button" disabled={busy === "resume"} onClick={() => void run("resume", async () => setOperation(await resumeWorkforceHrBulkOperation(operation.id)))}>{operation.status === "FAILED" || runningIsStale ? "Resume interrupted job" : "Release queued job now"}</button> : null}
       </div>
-      {failures.data?.items.length ? <ul>{failures.data.items.map((item) => <li key={item.id}>{item.staff_code || item.user_id}: {item.outcome_message}</li>)}</ul> : null}
+      {failures.data?.items.length ? <ul>{failures.data.items.map((item) => <li key={item.id}>{"Person"}: {item.outcome_message}</li>)}</ul> : null}
     </aside> : null}
   </section>;
 }

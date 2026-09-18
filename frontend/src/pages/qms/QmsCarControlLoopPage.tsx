@@ -1,3 +1,4 @@
+import { personDisplay } from "../../utils/personDisplay";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -76,7 +77,7 @@ function toneClass(value: string): string {
 function assigneeName(assignees: CARAssignee[], userId: string | null | undefined): string {
   if (!userId) return "Unassigned";
   const match = assignees.find((item) => item.id === userId);
-  return match?.full_name || match?.email || userId;
+  return personDisplay(match?.full_name || match?.email);
 }
 
 type MilestoneDraft = {

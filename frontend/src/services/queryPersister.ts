@@ -1,4 +1,5 @@
 import type { PersistedClient, Persister } from "@tanstack/react-query-persist-client";
+import { withoutQmsAuthority } from "./qmsCachePolicy";
 
 import {
   currentOfflineScope,
@@ -103,7 +104,7 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       boundScope = scope;
       const database = await openDatabase();
       if (currentOfflineScope() !== scope) return undefined;
-      if (!database) return memoryClients.get(scope);
+      if (!database) return withoutQmsAuthority(memoryClients.get(scope));
 
       const transaction = database.transaction(STORE_NAME, "readonly");
       const done = transactionDone(transaction);
@@ -112,11 +113,11 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       );
       await done;
       if (currentOfflineScope() !== scope) return undefined;
-      if (!record || record.scope !== scope) return memoryClients.get(scope);
+      if (!record || record.scope !== scope) return withoutQmsAuthority(memoryClients.get(scope));
       const client = record.encryptedClient
         ? await decryptDeviceValue<PersistedClient>(record.encryptedClient).catch(() => undefined)
         : record.client;
-      if (!client) return memoryClients.get(scope);
+      if (!client) return withoutQmsAuthority(memoryClients.get(scope));
       memoryClients.set(scope, client);
       if (!record.encryptedClient) {
         // Transparently replace legacy plaintext cache records after upgrade.
@@ -128,7 +129,7 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
           await migrated.catch(() => undefined);
         }
       }
-      return client;
+      return withoutQmsAuthority(client);
     },
 
     async removeClient(): Promise<void> {

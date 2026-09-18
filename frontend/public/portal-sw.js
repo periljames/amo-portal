@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v7";
+const VERSION = "v8";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
@@ -18,9 +18,25 @@ const SHELL_URLS = ["/", "/portal.webmanifest"];
 // can compete with the login/API traffic that the live portal actually needs.
 // Keep release warming bounded while preserving the same offline cache coverage.
 const PRECACHE_CONCURRENCY = 4;
+let qmsWarmup = null;
+
+async function precacheQms() {
+  if (qmsWarmup) return qmsWarmup;
+  qmsWarmup = (async () => {
+    const response = await fetch("/portal-precache.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    const urls = [...new Set(Array.isArray(manifest.qmsUrls) ? manifest.qmsUrls : [])]
+      .filter((url) => typeof url === "string" && /^\/(assets|pdfjs)\/[^?#]+$/.test(url));
+    const [shellCache, assetCache] = await Promise.all([caches.open(SHELL_CACHE), caches.open(ASSET_CACHE)]);
+    await precacheWithBoundedConcurrency(urls, shellCache, assetCache, 2);
+  })().finally(() => { qmsWarmup = null; });
+  return qmsWarmup;
+}
 
 async function cacheReleaseUrl(url, shellCache, assetCache) {
   try {
+    if ((url.startsWith("/assets/") || url.startsWith("/pdfjs/")) && await assetCache.match(url)) return;
     const response = await fetch(url, { cache: "reload" });
     if (!response.ok) return;
     const target = url.startsWith("/assets/") || url.startsWith("/pdfjs/")
@@ -32,9 +48,9 @@ async function cacheReleaseUrl(url, shellCache, assetCache) {
   }
 }
 
-async function precacheWithBoundedConcurrency(urls, shellCache, assetCache) {
+async function precacheWithBoundedConcurrency(urls, shellCache, assetCache, concurrency = PRECACHE_CONCURRENCY) {
   let cursor = 0;
-  const workerCount = Math.min(PRECACHE_CONCURRENCY, urls.length);
+  const workerCount = Math.min(concurrency, urls.length);
   const workers = Array.from({ length: workerCount }, async () => {
     while (cursor < urls.length) {
       const index = cursor;
@@ -89,6 +105,7 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "PRECACHE_RELEASE") {
     event.waitUntil(precacheRelease().catch(() => undefined));
@@ -132,16 +149,28 @@ function isStaticAsset(request, url) {
   ].includes(url.pathname);
 }
 
-async function networkFirstNavigation(request, preloadResponsePromise) {
+async function networkFirstNavigation(request, preloadResponsePromise, event) {
   const cache = await caches.open(SHELL_CACHE);
+  const fallback = (await cache.match(request)) || (await cache.match("/"));
+  const network = (async () => {
+    try {
+      const preloaded = preloadResponsePromise ? await preloadResponsePromise : null;
+      const response = preloaded || await fetch(request);
+      if (response.ok && (response.headers.get("Content-Type") || "").includes("text/html")) await cache.put("/", response.clone());
+      if (response.status >= 500 && fallback) return fallback.clone();
+      return response;
+    } catch { return fallback ? fallback.clone() : Response.error(); }
+  })();
+  if (!fallback) return network;
+  // Weak connectivity must not strand an already-cached workspace on a blank
+  // navigation. Keep the refresh alive after delivering the offline shell.
+  event.waitUntil(network.then(() => undefined));
+  let timer;
   try {
-    const preloaded = preloadResponsePromise ? await preloadResponsePromise : null;
-    const response = preloaded || await fetch(request);
-    if (response.ok) await cache.put("/", response.clone());
-    return response;
-  } catch {
-    return (await cache.match(request)) || (await cache.match("/")) || Response.error();
-  }
+    return await Promise.race([network, new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallback.clone()), 2500);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 async function cacheFirstAsset(request) {
@@ -161,7 +190,7 @@ self.addEventListener("fetch", (event) => {
   if (isApiRequest(url)) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirstNavigation(request, event.preloadResponse));
+    event.respondWith(networkFirstNavigation(request, event.preloadResponse, event));
     return;
   }
   if (isStaticAsset(request, url)) {

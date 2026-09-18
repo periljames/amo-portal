@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import time
-import threading
 import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlencode
@@ -28,6 +27,7 @@ from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.notifications import service as notification_service
 from amodb.security import get_current_active_user
 from . import access_control, models, schemas, services, session_service
+from . import auth_rate_limit
 from ..training import compliance as training_compliance
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -66,28 +66,14 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-# Basic in-memory auth rate limiting (per-IP + endpoint).
-_AUTH_RATE_LIMIT_WINDOW_SEC = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SEC", "60") or "60")
-_AUTH_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "10") or "10")
-_RATE_LIMIT_STATE: dict[tuple[str, str], list[float]] = {}
-_RATE_LIMIT_LOCK = threading.Lock()
+_AUTH_RATE_LIMIT_MAX_ATTEMPTS = auth_rate_limit.MAX_ATTEMPTS
+_RATE_LIMIT_STATE = auth_rate_limit.STATE
 
 
 def _enforce_auth_rate_limit(request: Request, endpoint_key: str) -> None:
     ip = _client_ip(request) or "unknown"
-    now = time.monotonic()
-    key = (ip, endpoint_key)
-    with _RATE_LIMIT_LOCK:
-        attempts = _RATE_LIMIT_STATE.get(key, [])
-        cutoff = now - _AUTH_RATE_LIMIT_WINDOW_SEC
-        attempts = [ts for ts in attempts if ts >= cutoff]
-        if len(attempts) >= _AUTH_RATE_LIMIT_MAX_ATTEMPTS:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many authentication attempts. Please try again shortly.",
-            )
-        attempts.append(now)
-        _RATE_LIMIT_STATE[key] = attempts
+    limit = auth_rate_limit.IP_MAX_ATTEMPTS if endpoint_key in {"login", "refresh", "logout-session"} else auth_rate_limit.MAX_ATTEMPTS
+    auth_rate_limit.enforce(ip, endpoint_key, limit)
 
 RESET_LINK_BASE_URL = (
     os.getenv("PORTAL_BASE_URL")
@@ -257,6 +243,8 @@ def login(
     """
     _enforce_auth_rate_limit(request, "login")
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
+    identity = (payload.email or payload.staff_code or payload.identifier or "").strip().casefold()
+    auth_rate_limit.enforce(f"{payload.amo_slug.casefold()}:{identity}", "login-identity")
     if payload.identifier and not payload.email and not payload.staff_code:
         identifier = payload.identifier.strip()
         if "@" in identifier:
@@ -496,7 +484,10 @@ def refresh_session(
             detail="Refresh session is unavailable. Please sign in again.",
         )
     try:
-        rotated = session_service.rotate_session(db, raw_token=raw_token)
+        rotated = session_service.rotate_session(
+            db, raw_token=raw_token,
+            before_rotation=lambda session_id: auth_rate_limit.enforce(session_id, "refresh-session"),
+        )
     except session_service.RefreshRejected as exc:
         db.rollback()
         _clear_refresh_cookie(response)
