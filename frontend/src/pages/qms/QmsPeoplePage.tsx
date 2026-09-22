@@ -727,7 +727,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <article className="qms-authz-card qms-authz-detail">
             {caseDetail ? (
               <>
-                <SectionTitle icon={<History size={19} />} title={caseDetail.case.person as unknown as string || caseDetail.case.person?.toString?.() || caseDetail.case.person} subtitle={caseDetail.case.authorization} />
+                <SectionTitle icon={<History size={19} />} title={caseDetail.case.person.name || "Person unavailable"} subtitle={caseDetail.case.authorization} />
                 <div className="qms-authz-case-banner">
                   <Pill tone={statusTone(caseDetail.case.status)}>{human(caseDetail.case.status)}</Pill>
                   <span>{human(caseDetail.case.case_type)} · Nominated {shortDate(caseDetail.case.nomination_date)} by {caseDetail.case.nominator}</span>
