@@ -333,7 +333,7 @@ def evaluate_auditor_assignment(
             ),
             None,
         )
-        # Prefer the in-scope row for bypass/suspend even if not currently ACTIVE.
+        # Prefer the in-scope row for controlled-exception and suspension checks even if not currently ACTIVE.
         scoped_privilege = next(
             (
                 row
@@ -439,7 +439,7 @@ def evaluate_auditor_assignment(
                 "developmental_exception": developmental and not bool(training.get("passed")),
                 "controlled_exception": controlled_exception,
             },
-            "qm_bypass": bypass,
+            "controlled_exception": controlled_exception,
             "capacity": capacity,
             "independence": independence,
             "eligible": all(hard_gates.values()),
