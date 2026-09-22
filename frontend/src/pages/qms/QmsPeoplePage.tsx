@@ -431,11 +431,32 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   async function makeDecision() {
-    if (!selectedCaseId || !decisionReason.trim()) {
+    if (!selectedCaseId || !caseDetail || !decisionReason.trim()) {
       setError("A decision reason is required.");
       return;
     }
-    if (!window.confirm(`Confirm final decision: ${human(decision)}?`)) return;
+    if (
+      decision === "APPROVE"
+      && caseDetail.case.case_type === "CHANGE_AUTHORIZATION"
+      && caseDetail.readiness.development.observed_audits < caseDetail.readiness.development.target
+      && !developmentBasis.trim()
+    ) {
+      setError("Record the approval basis when the three-observer-audit development target is incomplete.");
+      return;
+    }
+    if (decision === "APPROVE" && caseDetail.evidence.length > 0 && decisionEvidenceIds.length === 0) {
+      setError("Select the case evidence considered for this authorization decision.");
+      return;
+    }
+    if (!window.confirm("Confirm final decision: " + human(decision) + "?")) return;
+    const sourceReferences = caseDetail.evidence
+      .filter((item) => decisionEvidenceIds.includes(item.id))
+      .map((item) => ({
+        type: "AUTHORIZATION_EVIDENCE",
+        evidence_id: item.id,
+        evidence_type: item.type,
+        label: item.label,
+      }));
     await run("Authorization decision recorded.", () => decideQmsAuthorizationCase(amoCode, selectedCaseId, {
       decision,
       reason: decisionReason,
@@ -443,6 +464,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       expires_on: decision === "APPROVE" && decisionExpiry ? decisionExpiry : undefined,
       next_review_due: decision === "APPROVE" && decisionReviewDue ? decisionReviewDue : undefined,
       incomplete_development_basis: developmentBasis || undefined,
+      source_references: sourceReferences,
       confirmed: true,
     }));
   }
