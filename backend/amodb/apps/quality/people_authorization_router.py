@@ -30,7 +30,6 @@ from .people_competence import cap_privilege_expires_on, evaluate_qms_competence
 from .people_models import QualityPrivilege, QualityPrivilegeDecision, QualityPrivilegeRule
 from .tenant_security import (
     TenantContext,
-    assert_quality_permission,
     has_quality_permission,
     require_quality_permission,
     require_quality_write_permission,
