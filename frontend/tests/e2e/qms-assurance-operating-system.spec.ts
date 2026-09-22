@@ -284,7 +284,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
 
   await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
   await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "People", exact: true }).click();
+  await page.locator(".qms-authz").getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
   await page.getByRole("button", { name: /Amina Wanjiku/ }).click();
