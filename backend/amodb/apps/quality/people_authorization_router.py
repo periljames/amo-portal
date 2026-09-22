@@ -657,7 +657,33 @@ def _decision_event(
     ))
 
 
+def _can_view_tenant_authorization_register(db: Session, ctx: TenantContext) -> bool:
+    return any(
+        has_quality_permission(db, ctx, permission)
+        for permission in (
+            "qms.authorization.prepare",
+            "qms.authorization.approve",
+            "qms.authorization.review",
+            "qms.authorization.exemption.approve",
+            "qms.authorization.policy.manage",
+            "qms.authorization.oversight",
+        )
+    )
+
+
+def _require_self_or_register_access(db: Session, ctx: TenantContext, person_user_id: str) -> None:
+    if str(person_user_id) == str(ctx.user_id):
+        return
+    if _can_view_tenant_authorization_register(db, ctx):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You can only view your own Quality authorization record.",
+    )
+
+
 def _permissions(db: Session, ctx: TenantContext) -> dict[str, bool]:
+    register_access = _can_view_tenant_authorization_register(db, ctx)
     return {
         "can_view": has_quality_permission(db, ctx, "qms.people.view"),
         "can_prepare": has_quality_permission(db, ctx, "qms.authorization.prepare"),
@@ -666,6 +692,7 @@ def _permissions(db: Session, ctx: TenantContext) -> dict[str, bool]:
         "can_approve_exemption": has_quality_permission(db, ctx, "qms.authorization.exemption.approve"),
         "can_manage_policy": has_quality_permission(db, ctx, "qms.authorization.policy.manage"),
         "can_oversight": has_quality_permission(db, ctx, "qms.authorization.oversight"),
+        "self_service_only": not register_access,
     }
 
 
@@ -720,18 +747,26 @@ def authorization_overview(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     today = date.today()
-    privileges = db.query(QualityPrivilege).options(noload(QualityPrivilege.decisions)).filter(
+    register_access = _can_view_tenant_authorization_register(db, ctx)
+    privilege_query = db.query(QualityPrivilege).options(noload(QualityPrivilege.decisions)).filter(
         QualityPrivilege.amo_id == ctx.amo_id,
-    ).all()
-    open_cases = db.query(QualityAuthorizationCase).filter(
+    )
+    case_query = db.query(QualityAuthorizationCase).filter(
         QualityAuthorizationCase.amo_id == ctx.amo_id,
         QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
-    ).all()
-    active_exemptions = db.query(QualityControlledExemption).filter(
+    )
+    exemption_query = db.query(QualityControlledExemption).filter(
         QualityControlledExemption.amo_id == ctx.amo_id,
         QualityControlledExemption.status == "ACTIVE",
         QualityControlledExemption.expires_on >= today,
-    ).count()
+    )
+    if not register_access:
+        privilege_query = privilege_query.filter(QualityPrivilege.user_id == ctx.user_id)
+        case_query = case_query.filter(QualityAuthorizationCase.user_id == ctx.user_id)
+        exemption_query = exemption_query.filter(QualityControlledExemption.person_user_id == ctx.user_id)
+    privileges = privilege_query.all()
+    open_cases = case_query.all()
+    active_exemptions = exemption_query.count()
     due_reviews = sum(
         1
         for privilege in privileges
@@ -783,6 +818,8 @@ def authorization_people(
         account_models.User.amo_id == ctx.amo_id,
         account_models.User.is_system_account.is_(False),
     )
+    if not _can_view_tenant_authorization_register(db, ctx):
+        query = query.filter(account_models.User.id == ctx.user_id)
     if not include_inactive:
         query = query.filter(account_models.User.is_active.is_(True))
     if search and search.strip():
@@ -855,6 +892,7 @@ def authorization_person_detail(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _require_self_or_register_access(db, ctx, user_id)
     user = _person(db, amo_id=ctx.amo_id, user_id=user_id)
     rows = (
         db.query(QualityPrivilege, QualityPrivilegeRule)
@@ -923,6 +961,8 @@ def list_authorization_cases(
     query = db.query(QualityAuthorizationCase).options(selectinload(QualityAuthorizationCase.requested_rule)).filter(
         QualityAuthorizationCase.amo_id == ctx.amo_id,
     )
+    if not _can_view_tenant_authorization_register(db, ctx):
+        query = query.filter(QualityAuthorizationCase.user_id == ctx.user_id)
     if status_filter:
         query = query.filter(QualityAuthorizationCase.status == status_filter.upper())
     rows = query.order_by(QualityAuthorizationCase.updated_at.desc()).limit(limit).all()
@@ -1113,6 +1153,7 @@ def get_authorization_case(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     row = _case(db, amo_id=ctx.amo_id, case_id=case_id)
+    _require_self_or_register_access(db, ctx, str(row.user_id))
     user = _person(db, amo_id=ctx.amo_id, user_id=str(row.user_id))
     rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(row.requested_rule_id))
     current = row.current_privilege
@@ -1689,6 +1730,8 @@ def list_authorization_reviews(
         .join(account_models.User, account_models.User.id == QualityPrivilege.user_id)
         .filter(QualityAuthorizationReview.amo_id == ctx.amo_id)
     )
+    if not _can_view_tenant_authorization_register(db, ctx):
+        query = query.filter(QualityPrivilege.user_id == ctx.user_id)
     if due_only:
         query = query.filter(
             QualityAuthorizationReview.next_review_due.is_not(None),
@@ -2068,6 +2111,19 @@ def download_authorization_evidence(
     ).first()
     if row is None or not row.storage_path:
         raise HTTPException(status_code=404, detail="Authorization evidence file not found.")
+    if not _can_view_tenant_authorization_register(db, ctx):
+        owner_user_id = None
+        if row.case_id:
+            owner_user_id = db.query(QualityAuthorizationCase.user_id).filter(
+                QualityAuthorizationCase.amo_id == ctx.amo_id,
+                QualityAuthorizationCase.id == row.case_id,
+            ).scalar()
+        elif row.privilege_id:
+            owner_user_id = db.query(QualityPrivilege.user_id).filter(
+                QualityPrivilege.amo_id == ctx.amo_id,
+                QualityPrivilege.id == row.privilege_id,
+            ).scalar()
+        _require_self_or_register_access(db, ctx, str(owner_user_id or ""))
     path = Path(row.storage_path)
     if not path.is_file():
         raise HTTPException(status_code=409, detail="Authorization evidence file is missing from storage.")
@@ -2094,6 +2150,8 @@ def list_authorizations(
         .join(account_models.User, account_models.User.id == QualityPrivilege.user_id)
         .filter(QualityPrivilege.amo_id == ctx.amo_id)
     )
+    if not _can_view_tenant_authorization_register(db, ctx):
+        query = query.filter(QualityPrivilege.user_id == ctx.user_id)
     if status_filter:
         query = query.filter(QualityPrivilege.status == status_filter.upper())
     rows = query.order_by(QualityPrivilege.updated_at.desc()).limit(500).all()
@@ -2133,6 +2191,7 @@ def authorization_record(
 
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     privilege = _privilege(db, amo_id=ctx.amo_id, privilege_id=privilege_id)
+    _require_self_or_register_access(db, ctx, str(privilege.user_id))
     rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(privilege.rule_id))
     person = _person(db, amo_id=ctx.amo_id, user_id=str(privilege.user_id))
     reviews = db.query(QualityAuthorizationReview).filter(
