@@ -15,12 +15,6 @@ async function expectFontAtLeast(locator: Locator, pixels: number): Promise<void
   expect(actual).toBeGreaterThanOrEqual(pixels);
 }
 
-async function expectMinHeightAtLeast(locator: Locator, pixels: number): Promise<void> {
-  await expect(locator).toBeVisible();
-  const actual = await locator.evaluate((element) => element.getBoundingClientRect().height);
-  expect(actual).toBeGreaterThanOrEqual(pixels);
-}
-
 const assuranceCase = {
   id: "case-1",
   case_ref: "ASC-26-001",
