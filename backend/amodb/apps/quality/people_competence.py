@@ -483,6 +483,29 @@ def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None =
     as_of = as_of or date.today()
 
     scope = privilege.scope if isinstance(privilege.scope, dict) else {}
+    controlled = scope.get("controlled_exemption")
+    if isinstance(controlled, dict):
+        effective_from = _parse_date(controlled.get("effective_from"))
+        valid_until = _parse_date(controlled.get("expires_on"))
+        if (
+            valid_until
+            and valid_until >= as_of
+            and (effective_from is None or effective_from <= as_of)
+            and str(controlled.get("criterion") or "").strip()
+        ):
+            return {
+                "rationale": "Controlled exemption / conditional authorization",
+                "valid_until": valid_until.isoformat(),
+                "approved_by_user_id": controlled.get("approved_by_user_id"),
+                "approved_at": controlled.get("approved_at"),
+                "criterion": controlled.get("criterion"),
+                "conditions": list(controlled.get("conditions") or []),
+                "limitations": list(controlled.get("limitations") or []),
+                "supervision_required": bool(controlled.get("supervision_required")),
+                "supervisor_user_id": controlled.get("supervisor_user_id"),
+                "source": "controlled_exemption",
+            }
+
     scoped = scope.get("qm_training_bypass")
     if isinstance(scoped, dict):
         valid_until = _parse_date(scoped.get("valid_until"))
