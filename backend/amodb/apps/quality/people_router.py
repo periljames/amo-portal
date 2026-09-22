@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from amodb.database import get_write_db
+from amodb.database import get_read_db, get_write_db
 
 from .independence_conflict import get_independence_policy, set_independence_policy
 from .people_default_rules import (
@@ -102,9 +102,9 @@ def _rule_dict(row: QualityPrivilegeRule, counts: dict[str, int] | None = None) 
 def list_rules(
     include_inactive: bool = False,
     ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
-    db: Session = Depends(get_write_db),
+    db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """Administrative authorization policy catalog used by case and assignment engines."""
+    """Read the governed authorization-policy catalog without mutating tenant state."""
 
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     query = db.query(QualityPrivilegeRule).filter(QualityPrivilegeRule.amo_id == ctx.amo_id)
