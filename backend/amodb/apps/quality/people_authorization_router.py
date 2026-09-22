@@ -1745,6 +1745,8 @@ def _create_controlled_exemption(
         raise HTTPException(status_code=422, detail="Controlled exemptions require explicit final confirmation.")
     if payload.expires_on < payload.effective_from:
         raise HTTPException(status_code=422, detail="Controlled exemption expiry cannot precede its effective date.")
+    if not payload.equivalent_evidence:
+        raise HTTPException(status_code=422, detail="Record equivalent evidence supporting the controlled exemption.")
     if payload.supervision_required and not payload.supervisor_user_id:
         raise HTTPException(status_code=422, detail="Select a supervisor when supervision is required.")
     if payload.supervisor_user_id:
