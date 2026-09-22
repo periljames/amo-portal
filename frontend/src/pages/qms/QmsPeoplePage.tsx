@@ -579,6 +579,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     setLifecycleReason("");
     setLifecycleDate(todayKey());
     setLifecycleExpiry(item.expires_on || "");
+    setLifecycleReviewDue(item.next_review_due || "");
+    setLifecycleEvidenceReferences("");
     setLifecycleOpen(true);
   }
 
@@ -594,6 +596,12 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         reason: lifecycleReason,
         effective_date: lifecycleDate,
         expires_on: ["RENEW", "REINSTATE"].includes(lifecycleDecision) && lifecycleExpiry ? lifecycleExpiry : undefined,
+        next_review_due: lifecycleReviewDue || undefined,
+        source_references: lifecycleEvidenceReferences
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((reference) => ({ reference })),
         confirmed: true,
       },
     ));
@@ -608,6 +616,12 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       review_outcome: reviewOutcome,
       review_reason: reviewReason,
       next_review_due: reviewNextDue || undefined,
+      review_evidence: reviewEvidenceReferences
+        .split("\n")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((reference) => ({ reference })),
+      review_notes: reviewNotes || undefined,
       confirmed: true,
     }));
     if (ok) setReviewOpen(false);
