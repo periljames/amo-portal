@@ -107,17 +107,12 @@ def list_rules(
     """Administrative authorization policy catalog used by case and assignment engines."""
 
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
-    sync_default_quality_privilege_rule_competence(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
-    db.flush()
     query = db.query(QualityPrivilegeRule).filter(QualityPrivilegeRule.amo_id == ctx.amo_id)
     if not include_inactive:
         query = query.filter(QualityPrivilegeRule.is_active.is_(True))
     rows = query.order_by(QualityPrivilegeRule.title.asc()).limit(250).all()
     counts = _holder_counts(db, amo_id=ctx.amo_id, rule_ids=[str(row.id) for row in rows])
-    payload = {"items": [_rule_dict(row, counts.get(str(row.id))) for row in rows]}
-    db.commit()
-    return payload
+    return {"items": [_rule_dict(row, counts.get(str(row.id))) for row in rows]}
 
 
 @router.post("/rules/ensure-defaults")
