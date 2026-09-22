@@ -49,6 +49,16 @@ _ROLE_CAPABILITIES = {
 def _postgres() -> bool:
     return op.get_bind().dialect.name == "postgresql"
 
+def _decision_type_check_name() -> str | None:
+    inspector = sa.inspect(op.get_bind())
+    for check in inspector.get_check_constraints("quality_privilege_decisions"):
+        sqltext = str(check.get("sqltext") or "").lower()
+        if "decision_type" in sqltext:
+            name = check.get("name")
+            return str(name) if name else None
+    return None
+
+
 
 def _enable_rls(table_name: str) -> None:
     if not _postgres():
@@ -330,7 +340,9 @@ def upgrade() -> None:
     _append_only("quality_privilege_decisions")
 
     if _postgres():
-        op.drop_constraint(op.f("ck_quality_privilege_decision_type"), "quality_privilege_decisions", type_="check")
+        decision_type_check = _decision_type_check_name()
+        if decision_type_check:
+            op.drop_constraint(decision_type_check, "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
             op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
@@ -363,7 +375,9 @@ def downgrade() -> None:
             ["id"],
             ondelete="CASCADE",
         )
-        op.drop_constraint("ck_quality_privilege_decision_type", "quality_privilege_decisions", type_="check")
+        decision_type_check = _decision_type_check_name()
+        if decision_type_check:
+            op.drop_constraint(decision_type_check, "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
             op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
