@@ -192,6 +192,7 @@ export type QmsAuthorizationCaseDetail = {
   };
   readiness: QmsAuthorizationReadiness;
   evidence: QmsAuthorizationEvidence[];
+  authorization_reviews: QmsAuthorizationReview[];
   controlled_exemption?: QmsControlledExemption | null;
   history: Array<{
     action: string;
