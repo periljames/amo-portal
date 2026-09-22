@@ -59,6 +59,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.people.view",
     },
     "AUDITOR": {
+        "qms.people.view",
         "qms.dashboard.view",
         "qms.inbox.view",
         "qms.calendar.view",
@@ -176,6 +177,7 @@ _READ_ONLY_SUPPORT_PERMISSIONS = {
     "qms.evidence.view",
     "qms.evidence.download",
     "qms.settings.view",
+    "qms.people.view",
 }
 
 
