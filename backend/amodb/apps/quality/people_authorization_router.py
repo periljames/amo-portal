@@ -1163,11 +1163,23 @@ def get_authorization_case(
         QualityAuthorizationCaseEvent.case_id == row.id,
     ).order_by(QualityAuthorizationCaseEvent.occurred_at.asc()).all()
     evidences = _evidence_rows(db, amo_id=ctx.amo_id, case_id=str(row.id))
+    authorization_reviews = (
+        db.query(QualityAuthorizationReview)
+        .filter(
+            QualityAuthorizationReview.amo_id == ctx.amo_id,
+            QualityAuthorizationReview.privilege_id == current.id,
+        )
+        .order_by(QualityAuthorizationReview.reviewed_at.desc())
+        .all()
+        if current is not None
+        else []
+    )
     actor_ids = {
         str(value)
         for value in [
             row.nominated_by_user_id, row.recommendation_by_user_id, row.decided_by_user_id,
             *[item.actor_user_id for item in events],
+            *[item.reviewed_by_user_id for item in authorization_reviews],
         ] if value
     }
     names = _actor_names(db, amo_id=ctx.amo_id, ids=actor_ids)
@@ -1191,6 +1203,15 @@ def get_authorization_case(
         },
         "readiness": readiness,
         "evidence": [_evidence_dict(item) for item in evidences],
+        "authorization_reviews": [
+            _review_dict(
+                review,
+                names,
+                authorization=(row.current_authorization_snapshot or {}).get("authorization"),
+                person=(row.person_snapshot or {}).get("name"),
+            )
+            for review in authorization_reviews
+        ],
         "controlled_exemption": _exemption_dict(exemption, _actor_names(db, amo_id=ctx.amo_id, ids={str(exemption.approved_by_user_id), str(exemption.supervisor_user_id)} if exemption else set())),
         "history": [
             {
