@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 from amodb.apps.quality.people_competence import (
-    active_qm_bypass,
+    active_controlled_authorization_exception,
     apply_auto_suspend_if_currency_lapsed,
     cap_privilege_expires_on,
     earliest_competence_valid_until,
@@ -345,24 +345,50 @@ def test_auto_suspend_is_idempotent_for_active_privilege() -> None:
     assert len(db.added) == 1
 
 
-def test_active_qm_bypass_requires_future_valid_until() -> None:
-    today = date(2026, 9, 18)
+def test_controlled_authorization_exception_requires_current_effectivity() -> None:
+    today = date(2026, 9, 22)
     privilege = SimpleNamespace(
         scope={
-            "qm_training_bypass": {
-                "rationale": "Covering audit this week with documented justification.",
-                "valid_until": (today + timedelta(days=7)).isoformat(),
+            "controlled_exemption": {
+                "criterion": "training_current_verified",
+                "effective_from": today.isoformat(),
+                "expires_on": (today + timedelta(days=7)).isoformat(),
                 "approved_by_user_id": "qm-1",
+                "conditions": ["Direct supervision during assigned audit work."],
+                "limitations": ["Observer role only."],
+                "supervision_required": True,
             }
         },
         decisions=[],
     )
-    bypass = active_qm_bypass(privilege, as_of=today)  # type: ignore[arg-type]
-    assert bypass is not None
-    assert bypass["valid_until"] == (today + timedelta(days=7)).isoformat()
+    exception = active_controlled_authorization_exception(privilege, as_of=today)  # type: ignore[arg-type]
+    assert exception is not None
+    assert exception["valid_until"] == (today + timedelta(days=7)).isoformat()
+    assert exception["criterion"] == "training_current_verified"
+    assert exception["supervision_required"] is True
 
-    privilege.scope["qm_training_bypass"]["valid_until"] = (today - timedelta(days=1)).isoformat()
-    assert active_qm_bypass(privilege, as_of=today) is None  # type: ignore[arg-type]
+    privilege.scope["controlled_exemption"]["expires_on"] = (today - timedelta(days=1)).isoformat()
+    assert active_controlled_authorization_exception(privilege, as_of=today) is None  # type: ignore[arg-type]
+
+
+def test_legacy_qm_bypass_is_read_only_compatibility_not_a_writer() -> None:
+    today = date(2026, 9, 22)
+    privilege = SimpleNamespace(
+        scope={
+            "qm_training_bypass": {
+                "rationale": "Historic recorded exception retained for traceability.",
+                "valid_until": (today + timedelta(days=1)).isoformat(),
+                "approved_by_user_id": "qm-legacy",
+            }
+        },
+        decisions=[],
+    )
+    legacy = active_controlled_authorization_exception(privilege, as_of=today)  # type: ignore[arg-type]
+    assert legacy is not None
+    assert legacy["source"] == "legacy_privilege_scope"
+
+    from amodb.apps.quality import people_competence
+    assert not hasattr(people_competence, "record_qm_training_bypass")
 
 
 def test_select_best_qms_certificate_prefers_ref_then_init_then_admin() -> None:
