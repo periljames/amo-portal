@@ -122,6 +122,7 @@ def ensure_default_rules(
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     rows = ensure_default_quality_privilege_rules(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    sync_default_quality_privilege_rule_competence(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
     db.commit()
     return {"items": [_rule_dict(row) for row in rows]}
 
