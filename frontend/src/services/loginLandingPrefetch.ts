@@ -7,7 +7,7 @@ import {
   listAuditProgrammeSchedulingQueue,
   listAuditUniverse,
 } from "./qmsAuditProgramme";
-import { getQmsPeopleSummary, listQmsPrivileges } from "./qmsPeople";
+import { getQmsAuthorizationOverview, listQmsAuthorizations } from "./qmsPeople";
 import { getQmsIntelligenceOverview } from "./qmsIntelligence";
 import { getQualityExcellenceOverview } from "./qualityExcellence";
 import { getTrainingAccess, getTrainingControlRoom } from "./trainingOperating";
@@ -123,8 +123,8 @@ async function prefetchRosteringDashboard(): Promise<void> {
 /** Warm People via service calls (page still uses local state; apiClient TTL helps first paint). */
 async function warmPeopleHttp(amoCode: string): Promise<void> {
   await Promise.all([
-    getQmsPeopleSummary(amoCode),
-    listQmsPrivileges(amoCode),
+    getQmsAuthorizationOverview(amoCode),
+    listQmsAuthorizations(amoCode),
   ]);
 }
 
