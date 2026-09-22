@@ -7,6 +7,7 @@ import { saveDownloadedFile } from "../../../utils/downloads";
 import { AnalysisMarkdown } from "./AnalysisEditor";
 
 type Props = { tenant: string; data: AnalysisSnapshot; selected: AnalysisSource[]; study?: QmsAssuranceCase; references: Record<string, unknown>[]; answer: DocumentationAssistResponse | null };
+/* eslint-disable-next-line react-refresh/only-export-components -- CSV escaping is exported for contract tests. */
 export function csvCell(value: unknown) {
   const text = String(value ?? "");
   return `"${(/^[\s]*[=+@\-\t\r]/.test(text) ? "'" : "") + text.replaceAll('"', '""')}"`;
