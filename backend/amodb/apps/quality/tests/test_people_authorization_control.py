@@ -184,3 +184,18 @@ def test_rule_catalog_requires_preparation_authority_not_plain_people_read() -> 
     )
     dependency_source = inspect.getsource(route.endpoint)
     assert 'require_quality_permission("qms.authorization.prepare")' in dependency_source
+
+
+def test_observer_development_does_not_make_normal_auditor_training_a_hard_gate() -> None:
+    source = inspect.getsource(people_authorization_router._readiness)
+    assert "developmental = _developmental(rule)" in source
+    assert "if not developmental and not bool(training.get(\"passed\"))" in source
+    assert '"supervision_required": developmental' in source
+
+
+def test_reinstatement_and_renewal_rerun_source_backed_readiness() -> None:
+    source = inspect.getsource(people_authorization_router.authorization_lifecycle_decision)
+    assert 'activation = payload.decision in {"REINSTATE", "RENEW"}' in source
+    assert "_readiness(" in source
+    assert 'if activation and readiness["hard_blockers"]' in source
+    assert "evaluate_qms_competence_for_privilege" in source
