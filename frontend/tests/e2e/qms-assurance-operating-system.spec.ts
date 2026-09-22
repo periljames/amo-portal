@@ -193,13 +193,6 @@ async function prepare(page: Page): Promise<void> {
       return json(route, { items: [assuranceCase], total: 1, limit: 150, offset: 0, has_more: false });
     }
     if (path.endsWith("/quality/assurance-cases/case-1") && request.method() === "GET") return json(route, assuranceCase);
-    if (path.endsWith("/quality/audits/register/paged")) {
-      return json(route, {
-        rows: [], total: 0, limit: 25, offset: 0, has_more: false,
-        car_linked_findings: 0, open_car_count: 0,
-      });
-    }
-
     if (path.endsWith("/quality/intelligence/overview")) {
       return json(route, {
         as_of: "2026-08-09T10:00:00Z",
