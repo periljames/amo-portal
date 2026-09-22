@@ -319,6 +319,34 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
   const filteredCases = useMemo(() => cases.filter((item) => !caseStatus || item.status === caseStatus), [cases, caseStatus]);
 
+  const reviewQueues = useMemo(() => {
+    const today = new Date(todayKey() + "T00:00:00");
+    const daysUntil = (value?: string | null) => {
+      if (!value) return null;
+      const parsed = new Date(value.slice(0, 10) + "T00:00:00");
+      if (Number.isNaN(parsed.getTime())) return null;
+      return Math.floor((parsed.getTime() - today.getTime()) / 86_400_000);
+    };
+    const overdue = authorizations.filter((item) => {
+      const days = daysUntil(item.next_review_due);
+      return days != null && days < 0 && item.status !== "REVOKED";
+    });
+    const dueSoon = authorizations.filter((item) => {
+      const days = daysUntil(item.next_review_due);
+      return days != null && days >= 0 && days <= 60 && item.status !== "REVOKED";
+    });
+    const conditionalExpiring = authorizations.filter((item) => {
+      const exemption = item.readiness?.controlled_exemption;
+      const days = daysUntil(exemption?.expires_on);
+      return Boolean(exemption && days != null && days >= 0 && days <= 60);
+    });
+    const suspended = authorizations.filter((item) => item.status === "SUSPENDED");
+    const competenceLapses = authorizations.filter((item) =>
+      item.readiness?.hard_blockers.some((blocker) => blocker.code === "training_current_verified"),
+    );
+    return { overdue, dueSoon, conditionalExpiring, suspended, competenceLapses };
+  }, [authorizations]);
+
   function chooseTab(next: Tab) {
     setTab(next);
     const params = new URLSearchParams(searchParams);
@@ -1053,9 +1081,58 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className="qms-authz-stack">
           <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
-              <SectionTitle icon={<CalendarClock size={19} />} title="Periodic Reviews" subtitle="Immutable review history with next-review control." />
+              <SectionTitle icon={<CalendarClock size={19} />} title="Review Control" subtitle="Due, overdue, conditional, suspended and competence-driven reassessment queues." />
               {canReview ? <button type="button" className="qms-authz-button" onClick={() => setReviewOpen(true)}>Record review</button> : null}
             </div>
+            <div className="qms-authz-metrics">
+              {[
+                ["Due soon", reviewQueues.dueSoon.length],
+                ["Overdue", reviewQueues.overdue.length],
+                ["Conditions expiring", reviewQueues.conditionalExpiring.length],
+                ["Suspended", reviewQueues.suspended.length],
+                ["Competence lapses", reviewQueues.competenceLapses.length],
+                ["Completed reviews", reviews.length],
+              ].map(([label, value]) => (
+                <article className="qms-authz-metric" key={String(label)}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </article>
+              ))}
+            </div>
+          </article>
+
+          {([
+            ["Overdue", reviewQueues.overdue, "Next review date has passed."],
+            ["Due soon", reviewQueues.dueSoon, "Next governed review is due within 60 days."],
+            ["Conditional authorizations expiring", reviewQueues.conditionalExpiring, "Controlled exemption expires within 60 days."],
+            ["Suspensions requiring reassessment", reviewQueues.suspended, "Authorization remains suspended until a governed decision changes it."],
+            ["Competence lapses", reviewQueues.competenceLapses, "Mandatory current competence is not verified."],
+          ] as Array<[string, QmsAuthorization[], string]>).map(([title, items, helper]) => (
+            <article className="qms-authz-card" key={title}>
+              <SectionTitle icon={<AlertTriangle size={18} />} title={title} subtitle={helper} />
+              <div className="qms-authz-list">
+                {items.length ? items.map((item) => (
+                  <div className="qms-authz-row" key={item.key}>
+                    <div>
+                      <strong>{item.person || "Person unavailable"}</strong>
+                      <span>{item.authorization} · {human(item.status)}</span>
+                    </div>
+                    <div>
+                      {item.readiness?.controlled_exemption ? <Pill tone="warn">Conditional</Pill> : <Pill tone={statusTone(item.status)}>{human(item.status)}</Pill>}
+                      <small>
+                        {item.readiness?.controlled_exemption
+                          ? "Condition expires " + shortDate(item.readiness.controlled_exemption.expires_on)
+                          : "Next review " + shortDate(item.next_review_due)}
+                      </small>
+                    </div>
+                  </div>
+                )) : <div className="qms-authz-empty">No items in this queue.</div>}
+              </div>
+            </article>
+          ))}
+
+          <article className="qms-authz-card">
+            <SectionTitle icon={<History size={19} />} title="Completed Reviews" subtitle="Immutable governed review history." />
             <div className="qms-authz-list">
               {reviews.length ? reviews.map((item) => (
                 <div className="qms-authz-row" key={item.id}>
