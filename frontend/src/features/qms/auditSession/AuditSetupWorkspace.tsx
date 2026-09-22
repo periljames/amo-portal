@@ -160,7 +160,7 @@ function meetingDraftFromRow(
   }
   const originalStart = localDateTime(row.scheduled_start, timezoneName);
   const originalEnd = localDateTime(row.scheduled_end, timezoneName);
-  const now = localDateTime(new Date(currentTime + 60_000).toISOString(), timezoneName);
+  const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), timezoneName);
   const { start, end } = row.status === "PLANNED"
     ? normalizeMeetingWindow(originalStart, originalEnd, now, type === "CLOSING" ? inherited.start : now)
     : { start: originalStart, end: originalEnd };
@@ -220,7 +220,7 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
 
 function draftFromAuditReady(audit: QMSAuditOut, nowLocal?: string): SetupDraft {
   const base = draftFromAudit(audit);
-  const floor = nowLocal || localDateTime(new Date(currentTime + 60_000).toISOString());
+  const floor = nowLocal || localDateTime(new Date(Date.now() + 60_000).toISOString());
   const normalized = normalizePlannedAuditWindow(
     base.plannedStart ? `${base.plannedStart}T${base.plannedStartTime}` : "",
     base.plannedEnd ? `${base.plannedEnd}T${base.plannedEndTime}` : "",
