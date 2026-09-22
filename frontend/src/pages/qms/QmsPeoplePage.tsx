@@ -83,7 +83,7 @@ function inOneYear(): string {
 
 function human(value?: string | null): string {
   if (!value) return "Not recorded";
-  return value.replaceAll("_", " ").toLowerCase().replace(/\\b\\w/g, (char) => char.toUpperCase());
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function shortDate(value?: string | null): string {
