@@ -342,7 +342,7 @@ def upgrade() -> None:
     if _postgres():
         decision_type_check = _decision_type_check_name()
         if decision_type_check:
-            op.drop_constraint(decision_type_check, "quality_privilege_decisions", type_="check")
+            op.drop_constraint(op.f(decision_type_check), "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
             op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
@@ -351,10 +351,10 @@ def upgrade() -> None:
         inspector = sa.inspect(op.get_bind())
         for foreign_key in inspector.get_foreign_keys("quality_privilege_decisions"):
             if foreign_key.get("referred_table") == "quality_privileges" and foreign_key.get("constrained_columns") == ["privilege_id"]:
-                op.drop_constraint(foreign_key["name"], "quality_privilege_decisions", type_="foreignkey")
+                op.drop_constraint(op.f(str(foreign_key["name"])), "quality_privilege_decisions", type_="foreignkey")
                 break
         op.create_foreign_key(
-            "fk_quality_privilege_decisions_privilege_retained",
+            op.f("fk_quality_privilege_decisions_privilege_retained"),
             "quality_privilege_decisions",
             "quality_privileges",
             ["privilege_id"],
@@ -366,9 +366,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     if _postgres():
-        op.drop_constraint("fk_quality_privilege_decisions_privilege_retained", "quality_privilege_decisions", type_="foreignkey")
+        op.drop_constraint(op.f("fk_quality_privilege_decisions_privilege_retained"), "quality_privilege_decisions", type_="foreignkey")
         op.create_foreign_key(
-            "quality_privilege_decisions_privilege_id_fkey",
+            op.f("quality_privilege_decisions_privilege_id_fkey"),
             "quality_privilege_decisions",
             "quality_privileges",
             ["privilege_id"],
@@ -377,7 +377,7 @@ def downgrade() -> None:
         )
         decision_type_check = _decision_type_check_name()
         if decision_type_check:
-            op.drop_constraint(decision_type_check, "quality_privilege_decisions", type_="check")
+            op.drop_constraint(op.f(decision_type_check), "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
             op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
