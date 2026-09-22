@@ -160,7 +160,7 @@ function meetingDraftFromRow(
   }
   const originalStart = localDateTime(row.scheduled_start, timezoneName);
   const originalEnd = localDateTime(row.scheduled_end, timezoneName);
-  const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), timezoneName);
+  const now = localDateTime(new Date(currentTime + 60_000).toISOString(), timezoneName);
   const { start, end } = row.status === "PLANNED"
     ? normalizeMeetingWindow(originalStart, originalEnd, now, type === "CLOSING" ? inherited.start : now)
     : { start: originalStart, end: originalEnd };
@@ -220,7 +220,7 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
 
 function draftFromAuditReady(audit: QMSAuditOut, nowLocal?: string): SetupDraft {
   const base = draftFromAudit(audit);
-  const floor = nowLocal || localDateTime(new Date(Date.now() + 60_000).toISOString());
+  const floor = nowLocal || localDateTime(new Date(currentTime + 60_000).toISOString());
   const normalized = normalizePlannedAuditWindow(
     base.plannedStart ? `${base.plannedStart}T${base.plannedStartTime}` : "",
     base.plannedEnd ? `${base.plannedEnd}T${base.plannedEndTime}` : "",
@@ -401,7 +401,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const row = auditQuery.data;
     if (!row) return;
     const frame = window.requestAnimationFrame(() => {
-      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       const incoming = draftFromAuditReady(row, now);
       const previous = savedDefinitionRef.current?.id === row.id ? savedDefinitionRef.current.draft : null;
       setDraft((current) => reconcileSetupDraft(current, previous, incoming));
@@ -448,7 +448,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   useEffect(() => {
     if (inheritedPlannedStart === undefined || inheritedPlannedEnd === undefined || inheritedPlannedStartTime === undefined || inheritedPlannedEndTime === undefined) return;
     const frame = window.requestAnimationFrame(() => {
-      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       const openingInherited = inheritedMeetingWindow("OPENING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
       const closingInherited = inheritedMeetingWindow("CLOSING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
       const openingWindow = normalizeMeetingWindow(openingInherited.start, openingInherited.end, now);
@@ -461,7 +461,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const correctDefinitionDates = () => {
     if (!draft) return;
-    const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+    const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
     const normalized = normalizePlannedAuditWindow(
       `${draft.plannedStart}T${draft.plannedStartTime}`,
       `${draft.plannedEnd}T${draft.plannedEndTime}`,
@@ -507,7 +507,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
     },
     onSuccess: async (row) => {
-      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       setDraft(draftFromAuditReady(row, now));
       setLocalError(null);
       setNotice("Definition saved.");
@@ -525,7 +525,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       const end = value.customSchedule ? value.end : inherited.end;
       if (!start) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting start is required.`);
       if (!end) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting end is required.`);
-      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       const snapped = normalizeMeetingWindow(start, end, now, type === "CLOSING" ? inherited.start : now);
       const timelineIssue = meetingTimelineIssue(type, snapped.start, snapped.end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, now);
       if (timelineIssue) throw new Error(timelineIssue);
@@ -938,7 +938,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <input
                     type="datetime-local"
                     min={localDateTime(
-                      new Date(Date.now() + 60_000).toISOString(),
+                      new Date(currentTime + 60_000).toISOString(),
                       meetingsQuery.data?.timezone_name,
                     )}
                     onBlur={() =>
@@ -948,7 +948,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                           current.start,
                           current.end,
                           localDateTime(
-                            new Date(Date.now() + 60_000).toISOString(),
+                            new Date(currentTime + 60_000).toISOString(),
                             meetingsQuery.data?.timezone_name,
                           ),
                           type === "CLOSING" ? inherited.start : undefined,
@@ -970,7 +970,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <input
                     type="datetime-local"
                     min={localDateTime(
-                      new Date(Date.now() + 60_000).toISOString(),
+                      new Date(currentTime + 60_000).toISOString(),
                       meetingsQuery.data?.timezone_name,
                     )}
                     onBlur={() =>
@@ -980,7 +980,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                           current.start,
                           current.end,
                           localDateTime(
-                            new Date(Date.now() + 60_000).toISOString(),
+                            new Date(currentTime + 60_000).toISOString(),
                             meetingsQuery.data?.timezone_name,
                           ),
                           type === "CLOSING" ? inherited.start : undefined,
