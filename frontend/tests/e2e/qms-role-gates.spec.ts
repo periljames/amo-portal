@@ -272,6 +272,7 @@ test("QUALITY_OFFICER can work the CAR control loop and prepare authorization ca
   await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Record review", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Record final decision/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Controlled Exemption|Controlled exemption/i })).toHaveCount(0);
 });
 
 function issuedRevision() {
