@@ -43,6 +43,11 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(officer, "qms.car.manage")).toBe(true);
     expect(userHasQmsRolePermission(officer, "qms.car.close")).toBe(false);
     expect(userHasQmsRolePermission(officer, "qms.reports.attest_authority")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.people.view")).toBe(true);
+    expect(userHasQmsRolePermission(officer, "qms.authorization.prepare")).toBe(true);
+    expect(userHasQmsRolePermission(officer, "qms.authorization.approve")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.authorization.review")).toBe(false);
+    expect(userHasQmsRolePermission(officer, "qms.authorization.exemption.approve")).toBe(false);
   });
 
   it("gives only the Accountable Executive the Authority attestation capability", () => {
@@ -54,6 +59,9 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(accountable, "qms.audit.manage")).toBe(false);
     expect(userHasQmsRolePermission(accountable, "qms.audit.programme.quality_review")).toBe(false);
     expect(userHasQmsRolePermission(accountable, "qms.audit.programme.approve")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.people.view")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.authorization.oversight")).toBe(true);
+    expect(userHasQmsRolePermission(accountable, "qms.authorization.approve")).toBe(false);
   });
 
   it("keeps manager, auditor, and administrator boundaries explicit", () => {
@@ -62,6 +70,10 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.programme.approve")).toBe(false);
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.audit.notice.manage")).toBe(true);
     expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.reports.attest_authority")).toBe(false);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.authorization.prepare")).toBe(true);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.authorization.approve")).toBe(true);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.authorization.review")).toBe(true);
+    expect(userHasQmsRolePermission(user("QUALITY_MANAGER"), "qms.authorization.exemption.approve")).toBe(true);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.audit.execute")).toBe(true);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.audit.manage")).toBe(false);
     expect(userHasQmsRolePermission(user("AUDITOR"), "qms.car.manage")).toBe(false);
@@ -69,6 +81,9 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.programme.quality_review")).toBe(true);
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.programme.approve")).toBe(true);
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.audit.notice.manage")).toBe(true);
+    expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.authorization.approve")).toBe(true);
+    expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.authorization.review")).toBe(true);
+    expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.authorization.exemption.approve")).toBe(true);
     expect(userHasQmsRolePermission(user("VIEW_ONLY"), "qms.reports.attest_authority")).toBe(false);
   });
 });
