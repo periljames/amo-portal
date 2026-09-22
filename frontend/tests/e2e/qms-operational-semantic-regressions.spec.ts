@@ -48,98 +48,80 @@ function emptyRegister(route: Route) {
   return json(route, { items: [], columns: [], limit: 30, offset: 0, next_offset: null, has_more: false });
 }
 
-function auditorAssessment(options: { scopeMatches: boolean }) {
-  return {
-    rule_id: "rule-auditor",
-    privilege_code: "AUDITOR_INTERNAL",
-    privilege_type: "AUDITOR",
-    hard_gates: {
-      workforce_active: true,
-      active_privilege: options.scopeMatches,
-      scope_authorized: options.scopeMatches,
-      training_current_verified: true,
-      capacity: true,
-      independence: true,
-    },
-    active_privilege: options.scopeMatches ? { id: "priv-hangar-b", scope_key: "HANGAR_B", effective_from: "2026-01-01", expires_on: "2026-12-31" } : null,
-    training: { required: ["QMS-AUD"], satisfied: ["QMS-AUD"], missing: [], records: [], passed: true },
-    capacity: { active_assignments: 0, max_concurrent_assignments: 3, assignments: [], passed: true },
-    independence: { required: true, passed: true, pending: false, declaration: "INDEPENDENT" },
-    eligible: options.scopeMatches,
-  };
-}
-
-test("People uses the governed Planner preflight and never borrows assignment scope from another authorization", async ({ page }) => {
-  const preflightBodies: Array<Record<string, unknown>> = [];
+test("People authorization cases keep preparation and final decision in the governed workflow", async ({ page }) => {
+  const decisionBodies: Array<Record<string, unknown>> = [];
   await prepare(page, async (route, url) => {
     const path = url.pathname;
-    if (path.endsWith("/quality/people/summary")) return json(route, { active_privileges: 1, expiring_within_60_days: 0, suspended_privileges: 1, independence_exceptions: 0 });
-    if (path.endsWith("/quality/people/rules")) return json(route, { items: [{
-      id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Internal Auditor", privilege_type: "AUDITOR",
-      required_training_course_codes: ["QMS-AUD"], independence_required: true, max_concurrent_assignments: 3,
-      scope_schema: {}, is_active: true, updated_at: "2026-08-09T10:00:00Z",
-    }] });
-    if (path.endsWith("/quality/people/privileges")) return json(route, { items: [
-      { id: "priv-hangar-a", rule_id: "rule-auditor", user_id: "auditor-1", privilege_code: "AUDITOR_INTERNAL", scope_key: "HANGAR_A", scope: {}, limitations: [], status: "SUSPENDED", effective_from: "2026-01-01", expires_on: "2026-12-31", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-08-09T10:00:00Z", decisions: [] },
-      { id: "priv-hangar-b", rule_id: "rule-auditor", user_id: "auditor-1", privilege_code: "AUDITOR_INTERNAL", scope_key: "HANGAR_B", scope: {}, limitations: [], status: "ACTIVE", effective_from: "2026-01-01", expires_on: "2026-12-31", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-08-09T10:00:00Z", decisions: [] },
-    ] });
-    if (path.endsWith("/quality/people/eligibility")) return json(route, {
-      eligible: true, as_of: localDateKey(),
-      person: { user_id: "auditor-1", full_name: "Amina Wanjiku", email: "amina@tenant-a.test", role: "QUALITY_INSPECTOR" },
-      rule: { id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Internal Auditor", privilege_type: "AUDITOR" },
-      hard_gates: { workforce_active: true, training_current_verified: true, independence: true, capacity: true, active_privilege: true },
-      training: { required: ["QMS-AUD"], satisfied: ["QMS-AUD"], missing: [], records: [], passed: true },
-      independence: { required: true, passed: true, pending: true }, workload: { passed: true },
-      active_privilege: { id: "priv-hangar-b", status: "ACTIVE", effective_from: "2026-01-01", expires_on: "2026-12-31" },
+    if (path.endsWith("/quality/people/authorization-control/overview")) return json(route, {
+      permissions: {
+        can_view: true, can_prepare: true, can_approve: true, can_review: true,
+        can_approve_exemption: true, can_manage_policy: true, can_oversight: true,
+      },
+      metrics: {
+        active_authorizations: 0, suspended_authorizations: 0, expiring_within_60_days: 0,
+        open_authorization_cases: 1, reviews_due: 0, active_controlled_exemptions: 0,
+      },
+      attention: [],
     });
-    if (path.endsWith("/quality/integrations/calendar/auditor-eligibility") && route.request().method() === "POST") {
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      preflightBodies.push(body);
-      const scopeMatches = body.assignment_scope_key === "HANGAR_B";
-      const assessment = auditorAssessment({ scopeMatches });
-      return json(route, {
-        eligible: scopeMatches,
-        governance_configured: true,
-        mode: "GOVERNED",
-        assignment_role: body.assignment_role,
-        user_id: "auditor-1",
-        reason: scopeMatches ? undefined : "No configured Quality privilege rule passes every hard eligibility gate for this assignment.",
-        rule_id: scopeMatches ? "rule-auditor" : undefined,
-        privilege_code: scopeMatches ? "AUDITOR_INTERNAL" : undefined,
-        independence_pending: false,
-        assessment: scopeMatches ? assessment : undefined,
-        assessments: [assessment],
-      });
+    if (path.endsWith("/quality/people/authorization-control/people")) return json(route, { items: [], total: 0 });
+    if (path.endsWith("/quality/people/authorization-control/cases") && route.request().method() === "GET") return json(route, {
+      items: [{
+        id: "auth-case-1", person: "Amina Wanjiku", home_role: "QUALITY_INSPECTOR", department: "Quality",
+        authorization: "Auditor", case_type: "CHANGE_AUTHORIZATION", status: "READY_FOR_DECISION",
+        nomination_date: localDateKey(), nominator: "Quality Officer", recommendation: "Promote based on verified competence.",
+        updated_at: new Date().toISOString(), next_action: "Decision required",
+      }],
+      total: 1,
+    });
+    if (path.endsWith("/quality/people/authorization-control/cases/auth-case-1") && route.request().method() === "GET") return json(route, {
+      case: {
+        id: "auth-case-1", person: { name: "Amina Wanjiku", home_role: "QUALITY_INSPECTOR", department: "Quality", active: true },
+        home_role: "QUALITY_INSPECTOR", department: "Quality", authorization: "Auditor", case_type: "CHANGE_AUTHORIZATION",
+        status: "READY_FOR_DECISION", nomination_date: localDateKey(), nominator: "Quality Officer",
+        recommendation: "Promote based on verified competence.", next_action: "Decision required",
+        current_authorization: { authorization: "Observer / Trainee Auditor", status: "ACTIVE", scope: "Global" },
+        requested_authorization: { authorization: "Auditor", scope: "Global" },
+      },
+      readiness: {
+        authorization: "Auditor", as_of: localDateKey(), status: "Ready for decision", hard_blockers: [],
+        training: { status: "Current", current: true, developmental_exception: false, courses: [{ course: "QMS-INIT", status: "Current" }], required: ["QMS-INIT"], missing: [] },
+        development: { observed_audits: 3, target: 3, progress_label: "3 / 3", target_is_hard_gate: false, supervision_required: false, audit_participation: [] },
+        annual_review: null, controlled_exemption: null, affected_assignments: [],
+      },
+      evidence: [],
+      controlled_exemption: null,
+      history: [{ action: "SUBMITTED_FOR_DECISION", from: "UNDER_REVIEW", to: "READY_FOR_DECISION", reason: "Prepared.", actor: "Quality Officer", occurred_at: new Date().toISOString() }],
+      permissions: {
+        can_view: true, can_prepare: true, can_approve: true, can_review: true,
+        can_approve_exemption: true, can_manage_policy: true, can_oversight: true,
+      },
+    });
+    if (path.endsWith("/quality/people/authorization-control/cases/auth-case-1/decision") && route.request().method() === "POST") {
+      decisionBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      return json(route, { status: "APPROVED", authorization: { key: "auth-1", authorization: "Auditor", status: "ACTIVE", scope: "Global" } });
     }
+    if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/authorization-control/authorizations")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/rules")) return json(route, { items: [] });
     return emptyRegister(route);
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  const readiness = page.locator(".qms-people__eligibility-summary h3");
-  await expect(readiness).toHaveText("Blocked");
-  await expect(page.locator(".qms-people__gate-grid")).toContainText("Selected Privilege Active");
+  await page.getByRole("button", { name: "Authorization Cases", exact: true }).click();
+  await page.getByRole("button", { name: /Amina Wanjiku/ }).click();
+  await expect(page.getByRole("heading", { name: "Final authorization decision", exact: true })).toBeVisible();
+  await expect(page.getByText("3 / 3", { exact: true })).toBeVisible();
+  await page.locator(".qms-authz-workflow--decision textarea").first().fill("Competence evidence reviewed and authorization approved.");
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Record final decision", exact: true }).click();
 
-  await page.locator(".qms-people__register .ag-center-cols-container .ag-row").nth(1).click();
-  await expect(readiness).toHaveText("Ready");
-  await page.getByRole("button", { name: "Check audit assignment" }).click();
-  await expect(page.locator(".qms-people__context-card")).toContainText("Hangar B");
-
-  const preflight = page.getByRole("button", { name: "Run governed assignment preflight" });
-  await expect(preflight).toBeDisabled();
-  await page.getByLabel("Assignment scope code").fill("HANGAR_A");
-  await page.getByLabel("Assignment context").selectOption("AUDIT_SCHEDULE");
-  await page.getByLabel("Context ID").fill("audit-schedule-44");
-  await expect(preflight).toBeEnabled();
-  await preflight.click();
-  await expect(page.locator(".qms-people__eligibility > strong")).toHaveText("Blocked for this assignment");
-  await expect(page.locator(".qms-people__eligibility")).toContainText("Scope Authorized");
-
-  await page.getByLabel("Assignment scope code").fill("HANGAR_B");
-  await preflight.click();
-  await expect(page.locator(".qms-people__eligibility > strong")).toHaveText("Eligible for this assignment");
-  await expect(preflightBodies).toHaveLength(2);
-  expect(preflightBodies[0]).toMatchObject({ assignment_role: "OBSERVER_AUDITOR", assignment_scope_key: "HANGAR_A", context_type: "AUDIT_SCHEDULE", context_id: "audit-schedule-44", enforce_independence: true });
-  expect(preflightBodies[1]).toMatchObject({ assignment_scope_key: "HANGAR_B" });
+  await expect.poll(() => decisionBodies.length).toBe(1);
+  expect(decisionBodies[0]).toMatchObject({
+    decision: "APPROVE",
+    reason: "Competence evidence reviewed and authorization approved.",
+    confirmed: true,
+  });
+  await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
 });
 
 test("Intelligence keeps authoritative source-warning provenance available to the operator", async ({ page }) => {
