@@ -2179,6 +2179,13 @@ def list_authorizations(
     items = []
     for privilege, rule, user in rows:
         review = _latest_review(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id))
+        readiness = _readiness(
+            db,
+            amo_id=ctx.amo_id,
+            user=user,
+            rule=rule,
+            privilege=privilege,
+        )
         items.append({
             "key": str(privilege.id),
             "person": _person_name(user),
@@ -2194,6 +2201,7 @@ def list_authorizations(
                 else None
             ),
             "limitations": list(privilege.limitations or []),
+            "readiness": readiness,
         })
     return {"items": items}
 
