@@ -470,6 +470,17 @@ export function createQmsAuthorizationControlledExemption(
   );
 }
 
+export function revokeQmsControlledExemption(
+  amoCode: string,
+  exemptionId: string,
+  payload: { reason: string; confirmed: boolean },
+) {
+  return apiRequest<{ controlled_exemption: QmsControlledExemption }>(
+    qmsPath(amoCode, `/people/authorization-control/controlled-exemptions/${encodeURIComponent(exemptionId)}/revoke`),
+    jsonOptions("POST", payload),
+  );
+}
+
 export function listQmsAuthorizations(
   amoCode: string,
   options: { status?: string } = {},
