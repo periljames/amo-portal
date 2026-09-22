@@ -632,7 +632,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       <header className="qms-authz-header">
         <div>
           <p className="qms-authz-eyebrow">Quality Management System</p>
-          <h1>People &amp; Authorization Control</h1>
+          <h2 className="qms-authz-page-heading">Authorization governance</h2>
           <p>
             Govern Quality appointments, authorization cases, competence evidence, periodic reviews and authorization decisions.
             Audit assignment remains in the audit workflow.
