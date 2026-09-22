@@ -166,6 +166,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [decisionExpiry, setDecisionExpiry] = useState("");
   const [decisionReviewDue, setDecisionReviewDue] = useState("");
   const [developmentBasis, setDevelopmentBasis] = useState("");
+  const [decisionEvidenceIds, setDecisionEvidenceIds] = useState<string[]>([]);
 
   const [evidenceLabel, setEvidenceLabel] = useState("");
   const [evidenceType, setEvidenceType] = useState("OTHER");
@@ -188,6 +189,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [reviewOutcome, setReviewOutcome] = useState<"CONTINUE" | "CONTINUE_WITH_CONDITIONS" | "SUSPEND" | "REVOKE" | "REQUIRES_ACTION">("CONTINUE");
   const [reviewReason, setReviewReason] = useState("");
   const [reviewNextDue, setReviewNextDue] = useState("");
+  const [reviewEvidenceReferences, setReviewEvidenceReferences] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
 
   const [lifecycleOpen, setLifecycleOpen] = useState(false);
   const [lifecycleAuthorization, setLifecycleAuthorization] = useState<QmsAuthorization | null>(null);
@@ -195,6 +198,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [lifecycleReason, setLifecycleReason] = useState("");
   const [lifecycleDate, setLifecycleDate] = useState(todayKey());
   const [lifecycleExpiry, setLifecycleExpiry] = useState("");
+  const [lifecycleReviewDue, setLifecycleReviewDue] = useState("");
+  const [lifecycleEvidenceReferences, setLifecycleEvidenceReferences] = useState("");
 
   const [ruleOpen, setRuleOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<QmsPrivilegeRule | null>(null);
@@ -287,6 +292,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       .then((detail) => {
         setCaseDetail(detail);
         setRecommendation(detail.case.recommendation || "");
+        setDecisionEvidenceIds([]);
       })
       .catch((cause) => {
         if (!controller.signal.aborted) setError(errorText(cause));
