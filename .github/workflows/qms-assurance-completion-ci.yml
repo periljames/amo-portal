@@ -147,7 +147,7 @@ jobs:
         run: >-
           npx eslint
           src/components/QMS/QualityAuditGovernancePanelHost.tsx
-          src/components/QMS/QualityAuditReportCloseoutHost.tsx
+          src/features/qms/auditSession/AuditClosingWorkspace.tsx
           src/components/QMS/QualityChecklistExecutionGovernanceHost.tsx
           src/components/QMS/QualityEnhancementsHost.tsx
           src/pages/qms/QmsIntelligencePage.tsx
