@@ -101,10 +101,10 @@ def _rule_dict(row: QualityPrivilegeRule, counts: dict[str, int] | None = None) 
 @router.get("/rules")
 def list_rules(
     include_inactive: bool = False,
-    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    ctx: TenantContext = Depends(require_quality_permission("qms.authorization.prepare")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """Read the governed authorization-policy catalog without mutating tenant state."""
+    """Read the governed authorization-policy catalog for authorization preparers."""
 
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     query = db.query(QualityPrivilegeRule).filter(QualityPrivilegeRule.amo_id == ctx.amo_id)
