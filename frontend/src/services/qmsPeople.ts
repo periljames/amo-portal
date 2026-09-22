@@ -555,6 +555,13 @@ export function listQmsPrivilegeRules(
   );
 }
 
+export function ensureQmsDefaultPrivilegeRules(amoCode: string) {
+  return apiRequest<{ items: QmsPrivilegeRule[] }>(
+    qmsPath(amoCode, "/people/rules/ensure-defaults"),
+    { method: "POST" },
+  );
+}
+
 export function createQmsPrivilegeRule(
   amoCode: string,
   payload: {
