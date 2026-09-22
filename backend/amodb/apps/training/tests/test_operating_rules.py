@@ -268,12 +268,16 @@ class TrainingOperatingSystemScenarioTests(unittest.TestCase):
         self.assertIn("access_control.capability_codes_for_user", permissions)
 
     def test_46_qms_and_dms_share_the_training_evidence_adapter(self):
-        people = (AMODB_ROOT / "apps/quality/people_router.py").read_text(encoding="utf-8")
+        competence = (AMODB_ROOT / "apps/quality/people_competence.py").read_text(encoding="utf-8")
+        authorization = (AMODB_ROOT / "apps/quality/people_authorization_router.py").read_text(encoding="utf-8")
         assignment = (AMODB_ROOT / "apps/quality/audit_assignment_guard.py").read_text(encoding="utf-8")
         dms = (AMODB_ROOT / "apps/doc_control/workspace_integration_router.py").read_text(encoding="utf-8")
-        self.assertIn("current_training_evidence", people)
-        self.assertIn("current_training_evidence", assignment)
+        self.assertIn("current_training_evidence", competence)
+        self.assertIn("evaluate_qms_competence_for_privilege", authorization)
+        self.assertIn("evaluate_qms_competence_for_privilege", assignment)
         self.assertIn("training_source_status_snapshot", dms)
+        self.assertNotIn("TrainingCourse(", authorization)
+        self.assertNotIn("frequency_months", authorization)
 
     def test_47_dms_training_catalog_excludes_internal_security_tables(self):
         dms = (AMODB_ROOT / "apps/doc_control/workspace_integration_router.py").read_text(encoding="utf-8")
