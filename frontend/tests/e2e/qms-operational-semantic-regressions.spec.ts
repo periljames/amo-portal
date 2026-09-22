@@ -55,7 +55,7 @@ test("People authorization cases keep preparation and final decision in the gove
     if (path.endsWith("/quality/people/authorization-control/overview")) return json(route, {
       permissions: {
         can_view: true, can_prepare: true, can_approve: true, can_review: true,
-        can_approve_exemption: true, can_manage_policy: true, can_oversight: true,
+        can_approve_exemption: true, can_manage_policy: true, can_oversight: true, self_service_only: false,
       },
       metrics: {
         active_authorizations: 0, suspended_authorizations: 0, expiring_within_60_days: 0,
@@ -89,6 +89,7 @@ test("People authorization cases keep preparation and final decision in the gove
         annual_review: null, controlled_exemption: null, affected_assignments: [],
       },
       evidence: [],
+      authorization_reviews: [],
       controlled_exemption: null,
       history: [{ action: "SUBMITTED_FOR_DECISION", from: "UNDER_REVIEW", to: "READY_FOR_DECISION", reason: "Prepared.", actor: "Quality Officer", occurred_at: new Date().toISOString() }],
       permissions: {
