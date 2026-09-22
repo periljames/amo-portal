@@ -59,6 +59,14 @@ def _decision_type_check_name() -> str | None:
     return None
 
 
+def _drop_reflected_constraint(table_name: str, constraint_name: str) -> None:
+    """Drop the exact reflected PostgreSQL identifier without reapplying naming conventions."""
+    preparer = op.get_bind().dialect.identifier_preparer
+    table_sql = preparer.quote_identifier(table_name)
+    constraint_sql = preparer.quote_identifier(constraint_name)
+    op.execute(sa.text(f"ALTER TABLE {table_sql} DROP CONSTRAINT {constraint_sql}"))
+
+
 
 def _enable_rls(table_name: str) -> None:
     if not _postgres():
@@ -342,16 +350,16 @@ def upgrade() -> None:
     if _postgres():
         decision_type_check = _decision_type_check_name()
         if decision_type_check:
-            op.drop_constraint(op.f(decision_type_check), "quality_privilege_decisions", type_="check")
+            _drop_reflected_constraint("quality_privilege_decisions", decision_type_check)
         op.create_check_constraint(
-            "ck_quality_privilege_decision_type",
+            op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','CHANGE','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
         inspector = sa.inspect(op.get_bind())
         for foreign_key in inspector.get_foreign_keys("quality_privilege_decisions"):
             if foreign_key.get("referred_table") == "quality_privileges" and foreign_key.get("constrained_columns") == ["privilege_id"]:
-                op.drop_constraint(op.f(str(foreign_key["name"])), "quality_privilege_decisions", type_="foreignkey")
+                _drop_reflected_constraint("quality_privilege_decisions", str(foreign_key["name"]))
                 break
         op.create_foreign_key(
             op.f("fk_quality_privilege_decisions_privilege_retained"),
