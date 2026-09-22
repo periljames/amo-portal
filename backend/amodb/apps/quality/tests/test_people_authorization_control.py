@@ -95,7 +95,7 @@ def test_development_target_is_evidence_not_automatic_gate() -> None:
 
 
 def test_assignment_guard_keeps_assignment_specific_authority() -> None:
-    source = inspect.getsource(audit_assignment_guard.evaluate_auditor_assignment_eligibility)
+    source = inspect.getsource(audit_assignment_guard.evaluate_auditor_assignment)
     assert "LEAD_AUDITOR" in source
     assert "OBSERVER_AUDITOR" in inspect.getsource(audit_assignment_guard._privilege_types_for_assignment)
     assert "active_privilege" in source
