@@ -2198,6 +2198,18 @@ def authorization_record(
         QualityAuthorizationReview.amo_id == ctx.amo_id,
         QualityAuthorizationReview.privilege_id == privilege.id,
     ).order_by(QualityAuthorizationReview.reviewed_at.asc()).all()
+    active_exemption = _active_exemption(
+        db,
+        amo_id=ctx.amo_id,
+        privilege_id=str(privilege.id),
+        as_of=date.today(),
+    )
+    latest_decision = max(
+        privilege.decisions,
+        key=lambda item: item.decided_at or datetime.min.replace(tzinfo=timezone.utc),
+        default=None,
+    )
+    next_review_due = _next_review_due(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id))
     names = _actor_names(
         db, amo_id=ctx.amo_id,
         ids={
@@ -2205,25 +2217,64 @@ def authorization_record(
             for value in [
                 *[item.decided_by_user_id for item in privilege.decisions],
                 *[item.reviewed_by_user_id for item in reviews],
+                active_exemption.approved_by_user_id if active_exemption else None,
+                active_exemption.supervisor_user_id if active_exemption else None,
             ] if value
         },
     )
     output = BytesIO()
     styles = getSampleStyleSheet()
     story = [Paragraph("Quality Authorization Record", styles["Title"]), Spacer(1, 16)]
+    decision_actor = (
+        names.get(str(latest_decision.decided_by_user_id), "Recorded decision authority")
+        if latest_decision
+        else "Not recorded"
+    )
+    conditional_status = (
+        f"CONTROLLED EXEMPTION ACTIVE until {active_exemption.expires_on.isoformat()}"
+        if active_exemption
+        else "No active controlled exemption"
+    )
     facts = [
         ("Person", _person_name(person)),
         ("Quality authorization", _authorization_label(rule)),
-        ("Status", privilege.status.title()),
+        ("Status", "Conditional" if active_exemption and privilege.status == "ACTIVE" else privilege.status.title()),
         ("Scope", "Global" if str(privilege.scope_key or "").upper() == "GLOBAL" else privilege.scope_key),
         ("Effective from", privilege.effective_from or "Not set"),
         ("Expires", privilege.expires_on or "Not set"),
+        ("Next review due", next_review_due or "Not set"),
+        ("Conditional status", conditional_status),
+        ("Decision authority", decision_actor),
+        ("Decision date", latest_decision.decided_at.date() if latest_decision and latest_decision.decided_at else "Not recorded"),
     ]
     for label, value in facts:
         story.append(Paragraph(f"<b>{escape(str(label))}:</b> {escape(str(value))}", styles["Normal"]))
         story.append(Spacer(1, 6))
     if privilege.limitations:
         story.append(Paragraph(f"<b>Limitations:</b> {escape('; '.join(str(item) for item in privilege.limitations))}", styles["Normal"]))
+        story.append(Spacer(1, 10))
+    if active_exemption:
+        story.append(Paragraph("<b>Conditional authorization</b>", styles["Heading2"]))
+        story.append(Paragraph(
+            escape(
+                f"Criterion: {active_exemption.criterion}; "
+                f"effective {active_exemption.effective_from.isoformat()} to {active_exemption.expires_on.isoformat()}."
+            ),
+            styles["Normal"],
+        ))
+        if active_exemption.conditions:
+            story.append(Paragraph(
+                f"<b>Conditions:</b> {escape('; '.join(str(item) for item in active_exemption.conditions))}",
+                styles["Normal"],
+            ))
+        if active_exemption.limitations:
+            story.append(Paragraph(
+                f"<b>Conditional limitations:</b> {escape('; '.join(str(item) for item in active_exemption.limitations))}",
+                styles["Normal"],
+            ))
+        if active_exemption.supervision_required:
+            supervisor = names.get(str(active_exemption.supervisor_user_id), "Recorded supervisor")
+            story.append(Paragraph(f"<b>Required supervision:</b> {escape(supervisor)}", styles["Normal"]))
         story.append(Spacer(1, 10))
     story.append(Paragraph("<b>Decision history</b>", styles["Heading2"]))
     for item in privilege.decisions:
