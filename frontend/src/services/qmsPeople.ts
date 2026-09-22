@@ -26,6 +26,7 @@ export type QmsAuthorizationPermissions = {
   can_approve_exemption: boolean;
   can_manage_policy: boolean;
   can_oversight: boolean;
+  self_service_only: boolean;
 };
 
 export type QmsAuthorizationOverview = {
