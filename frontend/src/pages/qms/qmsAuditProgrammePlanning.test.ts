@@ -165,7 +165,7 @@ describe("audit programme planning rules", () => {
     expect(
       resolveAircraftRegistration({
         title: "5Y-SLL",
-        scope: null,
+        scope: "",
         audit_type: "PRODUCT",
         auditable_entity: {
           entity_type: "AIRCRAFT_TYPE",
@@ -179,7 +179,7 @@ describe("audit programme planning rules", () => {
       programmeMatrixSlotLabel(
         {
           title: "5Y-SLE",
-          scope: null,
+          scope: "",
           audit_type: "PRODUCT",
           auditable_entity: {
             entity_type: "AIRCRAFT_TYPE",
@@ -195,7 +195,7 @@ describe("audit programme planning rules", () => {
       programmeMatrixSlotLabel(
         {
           title: "Hangar audit",
-          scope: null,
+          scope: "",
           audit_type: "FACILITY",
           auditable_entity: {
             entity_type: "FACILITY",
