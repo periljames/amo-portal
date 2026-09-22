@@ -60,12 +60,15 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
   const sources = sourceQuery.data || [];
   const selected = useMemo<AuditHandoffSource | undefined>(() => sources.find((row) => row.id === sourceId), [sources, sourceId]);
 
+  /* These effects initialize editable handoff fields when authoritative query data arrives. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!sourceId && sources.length) setSourceId(sources[0].id);
   }, [sourceId, sources]);
   useEffect(() => {
     if (selected && !title) setTitle(`Targeted audit · ${selected.label}`);
   }, [selected, title]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const createMutation = useMutation({
     mutationFn: () => {
