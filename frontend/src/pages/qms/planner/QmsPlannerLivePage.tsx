@@ -155,7 +155,15 @@ function usePlannerDialogFocusManagement(): void {
       }
 
       const trigger = shortcutTrigger(event);
-      if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
+      if (isFocusable(trigger)) {
+        const activeTrigger = active
+          && active.matches(FOCUSABLE_SELECTOR)
+          && isFocusable(active)
+          && !active.closest("[role='dialog']")
+          ? active
+          : null;
+        intendedTriggerRef.current = activeTrigger || trigger;
+      }
 
       const dialogs = currentDialogs();
       const topDialog = dialogs[dialogs.length - 1];
