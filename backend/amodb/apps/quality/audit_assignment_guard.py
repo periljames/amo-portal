@@ -13,7 +13,7 @@ from amodb.apps.training.integration import current_training_evidence
 from . import models as quality_models
 from .independence_conflict import evaluate_independence_conflicts
 from .people_competence import (
-    active_qm_bypass,
+    active_controlled_authorization_exception,
     apply_auto_suspend_if_currency_lapsed,
     evaluate_qms_competence_for_privilege,
 )
@@ -349,7 +349,7 @@ def evaluate_auditor_assignment(
             rule=rule,
             as_of=as_of,
         )
-        bypass = active_qm_bypass(scoped_privilege, as_of=as_of) if scoped_privilege else None
+        controlled_exception = active_controlled_authorization_exception(scoped_privilege, as_of=as_of) if scoped_privilege else None
         if scoped_privilege is not None and scoped_privilege.status == "ACTIVE":
             apply_auto_suspend_if_currency_lapsed(
                 db,
@@ -403,7 +403,7 @@ def evaluate_auditor_assignment(
                         },
                         "active_privilege": None,
                         "training": training,
-                        "qm_bypass": bypass,
+                        "controlled_exception": controlled_exception,
                         "capacity": capacity,
                         "independence": independence,
                         "eligible": False,
@@ -411,7 +411,7 @@ def evaluate_auditor_assignment(
                     }
                 )
                 continue
-        training_passed = bool(training.get("passed")) or developmental or bypass is not None
+        training_passed = bool(training.get("passed")) or developmental or controlled_exception is not None
         hard_gates = {
             "workforce_active": True,
             "active_privilege": privilege is not None,
@@ -437,7 +437,7 @@ def evaluate_auditor_assignment(
                 **training,
                 "passed": training_passed,
                 "developmental_exception": developmental and not bool(training.get("passed")),
-                "qm_bypass": bypass,
+                "controlled_exception": controlled_exception,
             },
             "qm_bypass": bypass,
             "capacity": capacity,
