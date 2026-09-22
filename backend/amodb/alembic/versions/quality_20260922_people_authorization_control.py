@@ -330,9 +330,9 @@ def upgrade() -> None:
     _append_only("quality_privilege_decisions")
 
     if _postgres():
-        op.drop_constraint("ck_quality_privilege_decision_type", "quality_privilege_decisions", type_="check")
+        op.drop_constraint(op.f("ck_quality_privilege_decision_type"), "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
-            "ck_quality_privilege_decision_type",
+            op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','CHANGE','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
@@ -365,7 +365,7 @@ def downgrade() -> None:
         )
         op.drop_constraint("ck_quality_privilege_decision_type", "quality_privilege_decisions", type_="check")
         op.create_check_constraint(
-            "ck_quality_privilege_decision_type",
+            op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
