@@ -150,6 +150,8 @@ jobs:
         run: python -m amodb.apps.quality.tests.postgres_audit_programme_probe
       - name: Run People, Assurance, Intelligence and Approval Graph probe
         run: python -m amodb.apps.quality.tests.postgres_assurance_operating_system_probe
+      - name: Run People authorization control migration and RLS probe
+        run: python -m amodb.apps.quality.tests.postgres_people_authorization_control_probe
       - name: Run completed assurance OS and audit preparation RLS probe
         run: python -m amodb.apps.quality.tests.postgres_assurance_os_probe
 
