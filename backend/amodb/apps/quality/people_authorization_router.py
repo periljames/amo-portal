@@ -1067,3 +1067,527 @@ def get_authorization_case(
     }
 
 
+@router.get("/authorization-control/overview")
+def authorization_overview(
+    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    today = date.today()
+    privileges = db.query(QualityPrivilege).options(noload(QualityPrivilege.decisions)).filter(
+        QualityPrivilege.amo_id == ctx.amo_id,
+    ).all()
+    open_cases = db.query(QualityAuthorizationCase).filter(
+        QualityAuthorizationCase.amo_id == ctx.amo_id,
+        QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
+    ).all()
+    active_exemptions = db.query(QualityControlledExemption).filter(
+        QualityControlledExemption.amo_id == ctx.amo_id,
+        QualityControlledExemption.status == "ACTIVE",
+        QualityControlledExemption.expires_on >= today,
+    ).count()
+    due_reviews = db.query(QualityAuthorizationReview).filter(
+        QualityAuthorizationReview.amo_id == ctx.amo_id,
+        QualityAuthorizationReview.next_review_due.is_not(None),
+        QualityAuthorizationReview.next_review_due <= today,
+    ).count()
+    status_counts = {"ACTIVE": 0, "SUSPENDED": 0, "REVOKED": 0, "EXPIRED": 0, "DRAFT": 0}
+    expiring = 0
+    for item in privileges:
+        status_counts[item.status] = status_counts.get(item.status, 0) + 1
+        if item.status == "ACTIVE" and item.expires_on and today <= item.expires_on <= today.replace(year=today.year + 1):
+            if (item.expires_on - today).days <= 60:
+                expiring += 1
+    attention = [
+        {
+            "type": "Authorization case",
+            "person": (row.person_snapshot or {}).get("name") or "Person unavailable",
+            "authorization": (row.requested_authorization_snapshot or {}).get("authorization"),
+            "status": row.status,
+            "reason": "Final Quality decision required" if row.status == "READY_FOR_DECISION" else "Case preparation is incomplete",
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in sorted(open_cases, key=lambda item: item.updated_at or _utcnow(), reverse=True)[:12]
+    ]
+    return {
+        "permissions": _permissions(db, ctx),
+        "metrics": {
+            "active_authorizations": status_counts.get("ACTIVE", 0),
+            "suspended_authorizations": status_counts.get("SUSPENDED", 0),
+            "expiring_within_60_days": expiring,
+            "open_authorization_cases": len(open_cases),
+            "reviews_due": due_reviews,
+            "active_controlled_exemptions": active_exemptions,
+        },
+        "attention": attention,
+    }
+
+
+@router.get("/authorization-control/people")
+def authorization_people(
+    search: str | None = Query(default=None, max_length=100),
+    include_inactive: bool = False,
+    limit: int = Query(default=250, ge=1, le=500),
+    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    query = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.is_system_account.is_(False),
+    )
+    if not include_inactive:
+        query = query.filter(account_models.User.is_active.is_(True))
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.filter(or_(
+            account_models.User.full_name.ilike(pattern),
+            account_models.User.first_name.ilike(pattern),
+            account_models.User.last_name.ilike(pattern),
+            account_models.User.email.ilike(pattern),
+            account_models.User.staff_code.ilike(pattern),
+        ))
+    users = query.order_by(account_models.User.full_name.asc()).limit(limit).all()
+    user_ids = [str(row.id) for row in users]
+    privileges = (
+        db.query(QualityPrivilege, QualityPrivilegeRule)
+        .join(QualityPrivilegeRule, QualityPrivilegeRule.id == QualityPrivilege.rule_id)
+        .filter(
+            QualityPrivilege.amo_id == ctx.amo_id,
+            QualityPrivilege.user_id.in_(user_ids) if user_ids else False,
+        )
+        .all()
+        if user_ids else []
+    )
+    privilege_by_user: dict[str, list[tuple[QualityPrivilege, QualityPrivilegeRule]]] = {}
+    for privilege, rule in privileges:
+        privilege_by_user.setdefault(str(privilege.user_id), []).append((privilege, rule))
+    open_cases = (
+        db.query(QualityAuthorizationCase)
+        .filter(
+            QualityAuthorizationCase.amo_id == ctx.amo_id,
+            QualityAuthorizationCase.user_id.in_(user_ids) if user_ids else False,
+            QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
+        )
+        .all()
+        if user_ids else []
+    )
+    case_count: dict[str, int] = {}
+    for row in open_cases:
+        case_count[str(row.user_id)] = case_count.get(str(row.user_id), 0) + 1
+    items: list[dict[str, Any]] = []
+    for user in users:
+        auths = privilege_by_user.get(str(user.id), [])
+        active_auths = [
+            {
+                "authorization": _authorization_label(rule),
+                "status": privilege.status,
+                "scope": "Global" if str(privilege.scope_key or "").upper() == "GLOBAL" else privilege.scope_key,
+                "expires_on": privilege.expires_on.isoformat() if privilege.expires_on else None,
+            }
+            for privilege, rule in auths
+            if privilege.status in {"ACTIVE", "SUSPENDED"}
+        ]
+        items.append({
+            "key": str(user.id),
+            "name": _person_name(user),
+            "staff_code": getattr(user, "staff_code", None),
+            "home_role": _enum(getattr(user, "role", None)) or None,
+            "department": _person_snapshot(db, user).get("department"),
+            "workforce_status": "Active" if user.is_active else "Inactive",
+            "authorizations": active_auths,
+            "open_cases": case_count.get(str(user.id), 0),
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/authorization-control/people/{user_id}")
+def authorization_person_detail(
+    user_id: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    user = _person(db, amo_id=ctx.amo_id, user_id=user_id)
+    rows = (
+        db.query(QualityPrivilege, QualityPrivilegeRule)
+        .join(QualityPrivilegeRule, QualityPrivilegeRule.id == QualityPrivilege.rule_id)
+        .filter(QualityPrivilege.amo_id == ctx.amo_id, QualityPrivilege.user_id == user_id)
+        .order_by(QualityPrivilege.updated_at.desc())
+        .all()
+    )
+    authorizations = []
+    for privilege, rule in rows:
+        readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=privilege)
+        latest_review = _latest_review(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id))
+        authorizations.append({
+            "key": str(privilege.id),
+            **_privilege_snapshot(privilege, rule),
+            "authorization": _authorization_label(rule),
+            "readiness": readiness,
+            "last_reviewed": latest_review.last_reviewed.isoformat() if latest_review else None,
+            "next_review_due": latest_review.next_review_due.isoformat() if latest_review and latest_review.next_review_due else None,
+        })
+    cases = db.query(QualityAuthorizationCase).filter(
+        QualityAuthorizationCase.amo_id == ctx.amo_id,
+        QualityAuthorizationCase.user_id == user_id,
+    ).order_by(QualityAuthorizationCase.created_at.desc()).limit(50).all()
+    ids = {
+        str(value)
+        for row in cases
+        for value in (row.nominated_by_user_id, row.recommendation_by_user_id, row.decided_by_user_id)
+        if value
+    }
+    names = _actor_names(db, amo_id=ctx.amo_id, ids=ids)
+    appointments = db.query(QualityAppointment).filter(
+        QualityAppointment.amo_id == ctx.amo_id,
+        QualityAppointment.user_id == user_id,
+    ).order_by(QualityAppointment.created_at.desc()).all()
+    return {
+        "person": _person_snapshot(db, user),
+        "appointments": [
+            {
+                "function": row.title,
+                "status": row.status,
+                "effective_from": row.effective_from.isoformat() if row.effective_from else None,
+                "effective_until": row.effective_until.isoformat() if row.effective_until else None,
+            }
+            for row in appointments
+        ],
+        "authorizations": authorizations,
+        "cases": [_case_summary(db, amo_id=ctx.amo_id, row=row, names=names) for row in cases],
+        "audit_participation": _audit_participation(db, amo_id=ctx.amo_id, user_id=user_id),
+    }
+
+
+@router.get("/authorization-control/cases")
+def list_authorization_cases(
+    status_filter: str | None = Query(default=None, alias="status"),
+    search: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=250, ge=1, le=500),
+    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    query = db.query(QualityAuthorizationCase).options(selectinload(QualityAuthorizationCase.requested_rule)).filter(
+        QualityAuthorizationCase.amo_id == ctx.amo_id,
+    )
+    if status_filter:
+        query = query.filter(QualityAuthorizationCase.status == status_filter.upper())
+    rows = query.order_by(QualityAuthorizationCase.updated_at.desc()).limit(limit).all()
+    if search and search.strip():
+        term = search.strip().lower()
+        rows = [
+            row for row in rows
+            if term in str((row.person_snapshot or {}).get("name") or "").lower()
+            or term in str((row.requested_authorization_snapshot or {}).get("authorization") or "").lower()
+            or term in str(row.status or "").lower()
+        ]
+    actor_ids = {
+        str(value)
+        for row in rows
+        for value in (row.nominated_by_user_id, row.recommendation_by_user_id, row.decided_by_user_id)
+        if value
+    }
+    names = _actor_names(db, amo_id=ctx.amo_id, ids=actor_ids)
+    return {"items": [_case_summary(db, amo_id=ctx.amo_id, row=row, names=names) for row in rows], "total": len(rows)}
+
+
+@router.post("/authorization-control/cases", status_code=status.HTTP_201_CREATED)
+def create_authorization_case(
+    payload: AuthorizationCaseCreate,
+    ctx: TenantContext = Depends(require_quality_write_permission("qms.authorization.prepare")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    user = _person(db, amo_id=ctx.amo_id, user_id=payload.user_id, active_only=True)
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=payload.requested_rule_id)
+    if not rule.is_active:
+        raise HTTPException(status_code=409, detail="This Quality authorization type is inactive.")
+    existing_case = db.query(QualityAuthorizationCase.id).filter(
+        QualityAuthorizationCase.amo_id == ctx.amo_id,
+        QualityAuthorizationCase.user_id == payload.user_id,
+        QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
+    ).first()
+    if existing_case:
+        raise HTTPException(status_code=409, detail="This person already has an open Quality authorization case.")
+
+    scope_key = str(payload.requested_scope_key or "GLOBAL").strip().upper() or "GLOBAL"
+    live_query = (
+        db.query(QualityPrivilege, QualityPrivilegeRule)
+        .join(QualityPrivilegeRule, QualityPrivilegeRule.id == QualityPrivilege.rule_id)
+        .filter(
+            QualityPrivilege.amo_id == ctx.amo_id,
+            QualityPrivilege.user_id == payload.user_id,
+            QualityPrivilege.status.in_(["ACTIVE", "SUSPENDED"]),
+        )
+    )
+    if rule.privilege_type in {"AUDITOR", "LEAD_AUDITOR"}:
+        live_query = live_query.filter(QualityPrivilegeRule.privilege_type.in_(["AUDITOR", "LEAD_AUDITOR"]))
+    else:
+        live_query = live_query.filter(QualityPrivilege.rule_id == rule.id)
+    current_pair = live_query.order_by(QualityPrivilege.updated_at.desc()).first()
+    current = current_pair[0] if current_pair else None
+    current_rule = current_pair[1] if current_pair else None
+    historical_target = db.query(QualityPrivilege).filter(
+        QualityPrivilege.amo_id == ctx.amo_id,
+        QualityPrivilege.user_id == payload.user_id,
+        QualityPrivilege.rule_id == rule.id,
+        QualityPrivilege.scope_key == scope_key,
+    ).order_by(QualityPrivilege.updated_at.desc()).first()
+    linked = current or historical_target
+
+    if current and current.rule_id != rule.id:
+        case_type = "CHANGE_AUTHORIZATION"
+    elif current and current.status == "SUSPENDED":
+        case_type = "REINSTATEMENT"
+    elif current and current.rule_id == rule.id:
+        case_type = "RENEWAL"
+    else:
+        case_type = "NEW_AUTHORIZATION"
+
+    row = QualityAuthorizationCase(
+        amo_id=ctx.amo_id,
+        user_id=payload.user_id,
+        current_privilege_id=linked.id if linked else None,
+        requested_rule_id=rule.id,
+        case_type=case_type,
+        status="NOMINATED",
+        requested_scope_key=scope_key,
+        requested_scope=payload.requested_scope,
+        nomination_date=date.today(),
+        nominated_by_user_id=ctx.user_id,
+        person_snapshot=_person_snapshot(db, user),
+        current_authorization_snapshot=_privilege_snapshot(current, current_rule),
+        requested_authorization_snapshot={
+            "authorization": _authorization_label(rule),
+            "scope": "Global" if scope_key == "GLOBAL" else scope_key,
+            "developmental": _developmental(rule),
+        },
+        readiness_snapshot={},
+        source_references=[],
+        created_by_user_id=ctx.user_id,
+        updated_by_user_id=ctx.user_id,
+    )
+    db.add(row)
+    db.flush()
+    readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=current, case=row)
+    row.readiness_snapshot = readiness
+    _case_event(
+        db, ctx=ctx, row=row, action="NOMINATED", previous_status=None,
+        reason=payload.nomination_reason,
+        after={"status": row.status, "authorization": _authorization_label(rule), "readiness": readiness},
+    )
+    db.commit()
+    return {"case": _case_summary(db, amo_id=ctx.amo_id, row=row, names=_actor_names(db, amo_id=ctx.amo_id, ids={ctx.user_id})), "readiness": readiness}
+
+
+@router.post("/authorization-control/cases/batch", status_code=status.HTTP_201_CREATED)
+def create_authorization_cases_batch(
+    payload: AuthorizationCaseBatchCreate,
+    ctx: TenantContext = Depends(require_quality_write_permission("qms.authorization.prepare")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=payload.requested_rule_id)
+    if not rule.is_active:
+        raise HTTPException(status_code=409, detail="This Quality authorization type is inactive.")
+    unique_ids = list(dict.fromkeys(str(value).strip() for value in payload.user_ids if str(value).strip()))
+    created: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for user_id in unique_ids:
+        user = db.query(account_models.User).filter(
+            account_models.User.amo_id == ctx.amo_id,
+            account_models.User.id == user_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        ).first()
+        if user is None:
+            skipped.append({"person": "Unavailable person", "reason": "Inactive or unavailable workforce record."})
+            continue
+        open_case = db.query(QualityAuthorizationCase.id).filter(
+            QualityAuthorizationCase.amo_id == ctx.amo_id,
+            QualityAuthorizationCase.user_id == user_id,
+            QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
+        ).first()
+        if open_case:
+            skipped.append({"person": _person_name(user), "reason": "Open authorization case already exists."})
+            continue
+        scope_key = "GLOBAL"
+        current_pair = (
+            db.query(QualityPrivilege, QualityPrivilegeRule)
+            .join(QualityPrivilegeRule, QualityPrivilegeRule.id == QualityPrivilege.rule_id)
+            .filter(
+                QualityPrivilege.amo_id == ctx.amo_id,
+                QualityPrivilege.user_id == user_id,
+                QualityPrivilege.status.in_(["ACTIVE", "SUSPENDED"]),
+                QualityPrivilegeRule.privilege_type.in_(["AUDITOR", "LEAD_AUDITOR"]) if rule.privilege_type in {"AUDITOR", "LEAD_AUDITOR"} else QualityPrivilege.rule_id == rule.id,
+            )
+            .order_by(QualityPrivilege.updated_at.desc())
+            .first()
+        )
+        current = current_pair[0] if current_pair else None
+        current_rule = current_pair[1] if current_pair else None
+        row = QualityAuthorizationCase(
+            amo_id=ctx.amo_id,
+            user_id=user_id,
+            current_privilege_id=current.id if current else None,
+            requested_rule_id=rule.id,
+            case_type="CHANGE_AUTHORIZATION" if current and current.rule_id != rule.id else ("REINSTATEMENT" if current and current.status == "SUSPENDED" else ("RENEWAL" if current else "NEW_AUTHORIZATION")),
+            status="NOMINATED",
+            requested_scope_key=scope_key,
+            requested_scope={},
+            nomination_date=date.today(),
+            nominated_by_user_id=ctx.user_id,
+            person_snapshot=_person_snapshot(db, user),
+            current_authorization_snapshot=_privilege_snapshot(current, current_rule),
+            requested_authorization_snapshot={"authorization": _authorization_label(rule), "scope": "Global", "developmental": _developmental(rule)},
+            readiness_snapshot={},
+            source_references=[],
+            created_by_user_id=ctx.user_id,
+            updated_by_user_id=ctx.user_id,
+        )
+        db.add(row)
+        db.flush()
+        readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=current, case=row)
+        row.readiness_snapshot = readiness
+        _case_event(
+            db, ctx=ctx, row=row, action="NOMINATED", previous_status=None,
+            reason=payload.nomination_reason,
+            after={"status": row.status, "authorization": _authorization_label(rule), "readiness": readiness},
+        )
+        created.append({"person": _person_name(user), "case_id": str(row.id)})
+    db.commit()
+    return {"created": created, "skipped": skipped, "created_count": len(created), "skipped_count": len(skipped)}
+
+
+@router.get("/authorization-control/cases/{case_id}")
+def get_authorization_case(
+    case_id: str,
+    ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = _case(db, amo_id=ctx.amo_id, case_id=case_id)
+    user = _person(db, amo_id=ctx.amo_id, user_id=str(row.user_id))
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(row.requested_rule_id))
+    current = row.current_privilege
+    readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=current, case=row)
+    events = db.query(QualityAuthorizationCaseEvent).filter(
+        QualityAuthorizationCaseEvent.amo_id == ctx.amo_id,
+        QualityAuthorizationCaseEvent.case_id == row.id,
+    ).order_by(QualityAuthorizationCaseEvent.occurred_at.asc()).all()
+    evidences = _evidence_rows(db, amo_id=ctx.amo_id, case_id=str(row.id))
+    actor_ids = {
+        str(value)
+        for value in [
+            row.nominated_by_user_id, row.recommendation_by_user_id, row.decided_by_user_id,
+            *[item.actor_user_id for item in events],
+        ] if value
+    }
+    names = _actor_names(db, amo_id=ctx.amo_id, ids=actor_ids)
+    exemption = _active_exemption(db, amo_id=ctx.amo_id, case_id=str(row.id))
+    return {
+        "case": {
+            **_case_summary(db, amo_id=ctx.amo_id, row=row, names=names),
+            "person": row.person_snapshot,
+            "current_authorization": row.current_authorization_snapshot or {},
+            "requested_authorization": row.requested_authorization_snapshot or {},
+            "recommendation": row.recommendation,
+            "recommendation_by": names.get(str(row.recommendation_by_user_id)) if row.recommendation_by_user_id else None,
+            "recommendation_at": row.recommendation_at.isoformat() if row.recommendation_at else None,
+            "decision": row.decision,
+            "decision_reason": row.decision_reason,
+            "decided_by": names.get(str(row.decided_by_user_id)) if row.decided_by_user_id else None,
+            "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+            "effective_from": row.effective_from.isoformat() if row.effective_from else None,
+            "expires_on": row.expires_on.isoformat() if row.expires_on else None,
+            "next_review_due": row.next_review_due.isoformat() if row.next_review_due else None,
+        },
+        "readiness": readiness,
+        "evidence": [_evidence_dict(item) for item in evidences],
+        "controlled_exemption": _exemption_dict(exemption, _actor_names(db, amo_id=ctx.amo_id, ids={str(exemption.approved_by_user_id), str(exemption.supervisor_user_id)} if exemption else set())),
+        "history": [
+            {
+                "action": event.action,
+                "from": event.previous_status,
+                "to": event.new_status,
+                "reason": event.reason,
+                "actor": names.get(str(event.actor_user_id), "Recorded actor"),
+                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+            }
+            for event in events
+        ],
+        "permissions": _permissions(db, ctx),
+    }
+
+
+@router.patch("/authorization-control/cases/{case_id}/preparation")
+def prepare_authorization_case(
+    case_id: str,
+    payload: AuthorizationCasePrepare,
+    ctx: TenantContext = Depends(require_quality_write_permission("qms.authorization.prepare")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = _case(db, amo_id=ctx.amo_id, case_id=case_id, lock=True)
+    if row.status in TERMINAL_CASE_STATUSES:
+        raise HTTPException(status_code=409, detail="A completed authorization case cannot be edited.")
+    before = {"status": row.status, "recommendation": row.recommendation}
+    previous = row.status
+    if payload.status:
+        row.status = payload.status
+    elif row.status == "NOMINATED":
+        row.status = "UNDER_REVIEW"
+    if payload.recommendation is not None:
+        row.recommendation = payload.recommendation.strip() or None
+        row.recommendation_by_user_id = ctx.user_id
+        row.recommendation_at = _utcnow()
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
+    user = _person(db, amo_id=ctx.amo_id, user_id=str(row.user_id))
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(row.requested_rule_id))
+    readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=row.current_privilege, case=row)
+    row.readiness_snapshot = readiness
+    _case_event(
+        db, ctx=ctx, row=row, action="PREPARATION_UPDATED", previous_status=previous,
+        reason=payload.reason, before=before,
+        after={"status": row.status, "recommendation": row.recommendation, "readiness": readiness},
+    )
+    db.commit()
+    return {"status": row.status, "readiness": readiness}
+
+
+@router.post("/authorization-control/cases/{case_id}/submit")
+def submit_authorization_case(
+    case_id: str,
+    payload: AuthorizationCaseSubmit,
+    ctx: TenantContext = Depends(require_quality_write_permission("qms.authorization.prepare")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = _case(db, amo_id=ctx.amo_id, case_id=case_id, lock=True)
+    if row.status in TERMINAL_CASE_STATUSES:
+        raise HTTPException(status_code=409, detail="A completed authorization case cannot be resubmitted.")
+    user = _person(db, amo_id=ctx.amo_id, user_id=str(row.user_id), active_only=True)
+    rule = _rule(db, amo_id=ctx.amo_id, rule_id=str(row.requested_rule_id))
+    readiness = _readiness(db, amo_id=ctx.amo_id, user=user, rule=rule, privilege=row.current_privilege, case=row)
+    if readiness["hard_blockers"]:
+        raise HTTPException(status_code=409, detail={"message": "Authorization case has unresolved hard blockers.", "readiness": readiness})
+    previous = row.status
+    row.status = "READY_FOR_DECISION"
+    row.recommendation = payload.recommendation.strip()
+    row.recommendation_by_user_id = ctx.user_id
+    row.recommendation_at = _utcnow()
+    row.readiness_snapshot = readiness
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
+    _case_event(
+        db, ctx=ctx, row=row, action="SUBMITTED_FOR_DECISION", previous_status=previous,
+        reason=payload.reason,
+        after={"status": row.status, "recommendation": row.recommendation, "readiness": readiness},
+    )
+    db.commit()
+    return {"status": row.status, "readiness": readiness}
+
+
