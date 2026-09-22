@@ -447,7 +447,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
               <button type="button" onClick={() => setShowRules(false)}>
                 Close
               </button>
-              <Link to={qmsPeopleWorkspacePath(amoCode, { tab: "privileges" })}>
+              <Link to={qmsPeopleWorkspacePath(amoCode, { tab: "people" })}>
                 Open People &amp; Authorization Control
               </Link>
             </footer>
