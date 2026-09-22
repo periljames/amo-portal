@@ -28,6 +28,9 @@ def test_people_surface_has_one_governed_authorization_lifecycle() -> None:
     assert ("/people/authorization-control/cases/{case_id}/decision", "POST") in routes
     assert ("/people/authorization-control/authorizations/{privilege_id}/lifecycle", "POST") in routes
     assert ("/people/authorization-control/authorizations/{privilege_id}/reviews", "POST") in routes
+    assert ("/people/authorization-control/controlled-exemptions/{exemption_id}/revoke", "POST") in routes
+    assert not any(path == "/people/authorization-workspace" for path, _method in routes)
+    assert not any(path.startswith("/people/authorization-cases") for path, _method in routes)
     assert not any("/people/privileges" in path for path, _method in routes)
     assert not any("qm-bypass" in path or path.endswith("/rank") for path, _method in routes)
     assert not any(method == "DELETE" for path, method in routes if path.startswith("/people/"))
@@ -46,6 +49,27 @@ def test_quality_officer_prepares_but_does_not_approve_authorizations() -> None:
     assert "qms.authorization.approve" in access_control.QUALITY_MANAGER_CAPABILITIES
     assert "qms.authorization.review" in access_control.QUALITY_MANAGER_CAPABILITIES
     assert "qms.authorization.exemption.approve" in access_control.QUALITY_MANAGER_CAPABILITIES
+
+
+def test_amo_admin_inherits_all_quality_manager_authority() -> None:
+    admin = tenant_security._QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"]
+    manager = tenant_security._QUALITY_ROLE_PERMISSIONS["QUALITY_MANAGER"]
+    assert "qms.*" in admin
+    for permission in (
+        "qms.authorization.prepare",
+        "qms.authorization.approve",
+        "qms.authorization.review",
+        "qms.authorization.exemption.approve",
+        "qms.authorization.policy.manage",
+    ):
+        assert any(
+            grant == "qms.*" or grant == permission
+            for grant in admin
+        )
+        assert any(
+            grant == "qms.*" or grant == permission
+            for grant in manager
+        )
 
 
 def test_accountable_executive_has_oversight_without_mutation_authority() -> None:
