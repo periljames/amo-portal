@@ -148,9 +148,7 @@ _canonical_router.router.include_router(_audit_programme_queue_router.router)
 # authoritative audit schedule engine.
 _canonical_router.router.include_router(_audit_programme_schedule_router.router)
 
-# People & Privileges owns only Quality authorization decisions, hard eligibility
-# and independence declarations. Training, Workforce and Rostering stay the
-# authoritative source of their own records.
+# People & Authorization Control owns Quality appointments, authorization cases,\n# governed decisions and retained evidence. Training, Workforce and Rostering stay\n# the authoritative source of their own records.
 _include_once(
     _canonical_router.router,
     _people_router.router,
@@ -190,8 +188,7 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/audits/{audit_id}/preparation-revisions",
 )
 
-# Governed assignment routes own Planner writes after People & Privileges hard
-# gates have been evaluated.
+# Governed assignment routes own Planner writes after current Quality authorization\n# and assignment-specific hard gates have been evaluated.
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
 
 # CAR/CAPA control-loop records are an additive governance layer over the
