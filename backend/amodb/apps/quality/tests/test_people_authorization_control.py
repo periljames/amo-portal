@@ -128,3 +128,59 @@ def test_assignment_guard_keeps_assignment_specific_authority() -> None:
     assert "training_current_verified" in source
     assert "capacity" in source
     assert "independence" in source
+
+
+def test_read_only_people_access_is_bounded_to_self_service() -> None:
+    permissions_source = inspect.getsource(people_authorization_router._permissions)
+    assert '"self_service_only"' in permissions_source
+
+    people_source = inspect.getsource(people_authorization_router.authorization_people)
+    cases_source = inspect.getsource(people_authorization_router.list_authorization_cases)
+    reviews_source = inspect.getsource(people_authorization_router.list_authorization_reviews)
+    authorizations_source = inspect.getsource(people_authorization_router.list_authorizations)
+    person_detail_source = inspect.getsource(people_authorization_router.authorization_person_detail)
+    record_source = inspect.getsource(people_authorization_router.authorization_record)
+
+    assert "_can_view_tenant_authorization_register" in people_source
+    assert "_can_view_tenant_authorization_register" in cases_source
+    assert "_can_view_tenant_authorization_register" in reviews_source
+    assert "_can_view_tenant_authorization_register" in authorizations_source
+    assert "_require_self_or_register_access" in person_detail_source
+    assert "_require_self_or_register_access" in record_source
+
+
+def test_case_file_includes_prior_authorization_review_history() -> None:
+    source = inspect.getsource(people_authorization_router.get_authorization_case)
+    assert "QualityAuthorizationReview" in source
+    assert '"authorization_reviews"' in source
+    assert "_review_dict" in source
+
+
+def test_authorization_record_is_quality_record_not_training_certificate() -> None:
+    source = inspect.getsource(people_authorization_router.authorization_record)
+    assert "Quality Authorization Record" in source
+    assert "Decision authority" in source
+    assert "Next review due" in source
+    assert "CONTROLLED EXEMPTION ACTIVE" in source
+    assert "training certificate" not in source.lower()
+    assert "sha256" not in source.lower()
+    assert "storage_path" not in source.lower()
+
+
+def test_actual_actor_is_recorded_for_decisions_reviews_and_exemptions() -> None:
+    decision_source = inspect.getsource(people_authorization_router._record_privilege_decision)
+    review_source = inspect.getsource(people_authorization_router.create_authorization_review)
+    exemption_source = inspect.getsource(people_authorization_router._create_controlled_exemption)
+    assert "decided_by_user_id=ctx.user_id" in decision_source
+    assert "reviewed_by_user_id=ctx.user_id" in review_source
+    assert "approved_by_user_id=ctx.user_id" in exemption_source
+
+
+def test_rule_catalog_requires_preparation_authority_not_plain_people_read() -> None:
+    route = next(
+        route
+        for route in people_router.router.routes
+        if str(route.path) == "/people/rules" and "GET" in (getattr(route, "methods", None) or set())
+    )
+    dependency_source = inspect.getsource(route.endpoint)
+    assert 'require_quality_permission("qms.authorization.prepare")' in dependency_source
