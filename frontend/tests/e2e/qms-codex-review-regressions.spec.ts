@@ -69,119 +69,73 @@ function emptyRegister(route: Route) {
   return json(route, { items: [], columns: [], limit: 30, offset: 0, next_offset: null, has_more: false });
 }
 
-function peopleResponses(route: Route, url: URL): Promise<void> | void {
+function peopleResponses(route: Route, url: URL, canManage = true): Promise<void> | void {
   const path = url.pathname;
-  if (path.endsWith("/quality/people/summary")) {
-    return json(route, { active_privileges: 1, expiring_within_60_days: 0, suspended_privileges: 0, independence_exceptions: 0 });
+  if (path.endsWith("/quality/people/authorization-control/overview")) {
+    return json(route, {
+      permissions: {
+        can_view: true,
+        can_prepare: canManage,
+        can_approve: canManage,
+        can_review: canManage,
+        can_approve_exemption: canManage,
+        can_manage_policy: canManage,
+        can_oversight: canManage,
+      },
+      metrics: {
+        active_authorizations: 1, suspended_authorizations: 0, expiring_within_60_days: 0,
+        open_authorization_cases: 0, reviews_due: 0, active_controlled_exemptions: 0,
+      },
+      attention: [],
+    });
+  }
+  if (path.endsWith("/quality/people/authorization-control/people")) {
+    return json(route, {
+      items: [{
+        key: "auditor-1", name: "Amina Wanjiku", staff_code: "QMS-018",
+        home_role: "AUDITOR", department: "Quality", workforce_status: "Active",
+        authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
+        open_cases: 0,
+      }],
+      total: 1,
+    });
+  }
+  if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+  if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
+  if (path.endsWith("/quality/people/authorization-control/authorizations")) {
+    return json(route, { items: [{
+      key: "priv-hangar-b", person: "Amina Wanjiku", authorization: "Auditor", status: "ACTIVE",
+      scope: "Global", effective_from: "2026-01-01", expires_on: "2026-12-31",
+      last_reviewed: null, next_review_due: null, limitations: [],
+    }] });
   }
   if (path.endsWith("/quality/people/rules")) {
     return json(route, { items: [{
-      id: "rule-auditor",
-      privilege_code: "AUDITOR_INTERNAL",
-      title: "Internal Auditor",
-      privilege_type: "AUDITOR",
-      required_training_course_codes: ["QMS-AUD"],
-      independence_required: true,
-      max_concurrent_assignments: 3,
-      scope_schema: {},
-      is_active: true,
-      updated_at: "2026-08-10T08:00:00Z",
+      id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Auditor", privilege_type: "AUDITOR",
+      required_training_course_codes: ["QMS-AUD"], independence_required: true, max_concurrent_assignments: 3,
+      scope_schema: {}, is_active: true, updated_at: "2026-08-10T08:00:00Z",
     }] });
-  }
-  if (path.endsWith("/quality/people/privileges")) {
-    return json(route, { items: [{
-      id: "priv-hangar-b",
-      rule_id: "rule-auditor",
-      user_id: "auditor-1",
-      privilege_code: "AUDITOR_INTERNAL",
-      scope_key: "HANGAR_B",
-      scope: {},
-      limitations: [],
-      status: "ACTIVE",
-      effective_from: "2026-01-01",
-      expires_on: "2026-12-31",
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-08-10T08:00:00Z",
-      decisions: [],
-    }] });
-  }
-  if (path.endsWith("/quality/people/eligibility")) {
-    return json(route, {
-      eligible: true,
-      as_of: localDateKey(),
-      person: { user_id: "auditor-1", full_name: "Amina Wanjiku", email: "amina@tenant-a.test", role: "AUDITOR" },
-      rule: { id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Internal Auditor", privilege_type: "AUDITOR" },
-      hard_gates: { workforce_active: true, training_current_verified: true, independence: true, capacity: true, active_privilege: true },
-      training: { required: ["QMS-AUD"], satisfied: ["QMS-AUD"], missing: [], records: [], passed: true },
-      independence: { required: true, passed: true, pending: true },
-      workload: { passed: true },
-      active_privilege: { id: "priv-hangar-b", status: "ACTIVE", effective_from: "2026-01-01", expires_on: "2026-12-31" },
-    });
   }
   return undefined;
 }
 
-test("People invalidates a governed assignment result when any checked input changes and locks inputs in flight", async ({ page }) => {
+test("People uses authorization cases and does not duplicate audit assignment workflow", async ({ page }) => {
   await prepare(page, async (route, url) => {
-    const handled = peopleResponses(route, url);
+    const handled = peopleResponses(route, url, true);
     if (handled) return handled;
-    if (url.pathname.endsWith("/quality/integrations/calendar/auditor-eligibility") && route.request().method() === "POST") {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      return json(route, {
-        eligible: true,
-        governance_configured: true,
-        mode: "GOVERNED",
-        assignment_role: body.assignment_role,
-        user_id: "auditor-1",
-        rule_id: "rule-auditor",
-        privilege_code: "AUDITOR_INTERNAL",
-        independence_pending: false,
-        assessment: {
-          rule_id: "rule-auditor",
-          privilege_code: "AUDITOR_INTERNAL",
-          privilege_type: "AUDITOR",
-          hard_gates: { workforce_active: true, active_privilege: true, scope_authorized: true, training_current_verified: true, capacity: true, independence: true },
-          active_privilege: { id: "priv-hangar-b", scope_key: "HANGAR_B", effective_from: "2026-01-01", expires_on: "2026-12-31" },
-          training: { required: ["QMS-AUD"], satisfied: ["QMS-AUD"], missing: [], records: [], passed: true },
-          capacity: { active_assignments: 0, max_concurrent_assignments: 3, assignments: [], passed: true },
-          independence: { required: true, passed: true, pending: false, declaration: "INDEPENDENT" },
-          eligible: true,
-        },
-        assessments: [],
-      });
-    }
     return emptyRegister(route);
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Check audit assignment" }).click();
-
-  const scope = page.getByLabel("Assignment scope code");
-  const contextType = page.getByLabel("Assignment context");
-  const contextId = page.getByLabel("Context ID");
-  const submit = page.getByRole("button", { name: "Run governed assignment preflight" });
-
-  await expect(scope).toHaveValue("HANGAR_B");
-  await contextType.selectOption("AUDIT_SCHEDULE");
-  await contextId.fill("schedule-44");
-  await submit.click();
-
-  await expect(scope).toBeDisabled();
-  await expect(contextType).toBeDisabled();
-  await expect(contextId).toBeDisabled();
-  await expect(page.getByLabel("Assignment date")).toBeDisabled();
-  await expect(page.getByLabel("Assignment role")).toBeDisabled();
-
-  await expect(page.getByText("Eligible for this assignment", { exact: true })).toBeVisible();
-  const result = page.locator(".qms-people__eligibility");
-  await expect(result).toContainText("Hangar B");
-  await expect(result).toContainText("Audit Schedule · schedule-44");
-  await expect(scope).toBeEnabled();
-
-  await scope.fill("HANGAR_A");
-  await expect(page.getByText("Eligible for this assignment", { exact: true })).toHaveCount(0);
-  await expect(page.locator(".qms-people__eligibility")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Change privilege/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "Nominate", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Nominate person for Quality authorization" })).toBeVisible();
 });
 
 test("Inbox preserves notification receipt time without treating created_at as a deadline", async ({ page }) => {
@@ -265,15 +219,19 @@ test("Calendar fits desktop, split screen and phone widths", async ({ page }) =>
 
 test("People read access does not expose mutation controls to a Quality Auditor", async ({ page }) => {
   await prepare(page, async (route, url) => {
-    const handled = peopleResponses(route, url);
+    const handled = peopleResponses(route, url, false);
     if (handled) return handled;
     return emptyRegister(route);
   }, "AUDITOR");
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Quality authorization board", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New privilege" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Change privilege" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Independence" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Check audit assignment" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Nominate", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Reviews", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Record review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
 });
