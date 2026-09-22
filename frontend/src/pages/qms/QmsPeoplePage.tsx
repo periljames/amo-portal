@@ -213,6 +213,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const canReview = permissions?.can_review === true;
   const canExempt = permissions?.can_approve_exemption === true;
   const canManagePolicy = permissions?.can_manage_policy === true;
+  const selfServiceOnly = permissions?.self_service_only === true;
 
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -220,16 +221,21 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     const controller = new AbortController();
     setPageLoading(true);
     setError(null);
-    void Promise.all([
-      getQmsAuthorizationOverview(amoCode, controller.signal),
-      listQmsAuthorizationPeople(amoCode, { limit: 500 }, controller.signal),
-      listQmsAuthorizationCases(amoCode, { limit: 500 }, controller.signal),
-      listQmsAuthorizationReviews(amoCode, {}, controller.signal),
-      listQmsAuthorizations(amoCode, {}, controller.signal),
-      listQmsPrivilegeRules(amoCode, { includeInactive: true }, controller.signal),
-    ])
-      .then(([overviewData, peopleData, caseData, reviewData, authorizationData, ruleData]) => {
+    void getQmsAuthorizationOverview(amoCode, controller.signal)
+      .then(async (overviewData) => {
+        if (controller.signal.aborted) return;
         setOverview(overviewData);
+        const canReadPolicy = overviewData.permissions.can_prepare || overviewData.permissions.can_manage_policy;
+        const [peopleData, caseData, reviewData, authorizationData, ruleData] = await Promise.all([
+          listQmsAuthorizationPeople(amoCode, { limit: 500 }, controller.signal),
+          listQmsAuthorizationCases(amoCode, { limit: 500 }, controller.signal),
+          listQmsAuthorizationReviews(amoCode, {}, controller.signal),
+          listQmsAuthorizations(amoCode, {}, controller.signal),
+          canReadPolicy
+            ? listQmsPrivilegeRules(amoCode, { includeInactive: true }, controller.signal)
+            : Promise.resolve({ items: [] as QmsPrivilegeRule[] }),
+        ]);
+        if (controller.signal.aborted) return;
         setPeople(peopleData.items);
         setCases(caseData.items);
         setReviews(reviewData.items);
@@ -244,6 +250,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       });
     return () => controller.abort();
   }, [amoCode, revision]);
+
+  useEffect(() => {
+    if (!selfServiceOnly) return;
+    const currentUserId = getCachedUser()?.id;
+    if (currentUserId) setSelectedPersonKey(currentUserId);
+    setTab("people");
+  }, [selfServiceOnly]);
 
   useEffect(() => {
     if (!selectedPersonKey) {
@@ -647,20 +660,23 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {notice ? <div className="qms-authz-alert qms-authz-alert--success" role="status"><CheckCircle2 size={17} /> {notice}</div> : null}
 
       <nav className="qms-authz-tabs" aria-label="Authorization control views">
-        {([
-          ["overview", "Overview"],
-          ["people", "People"],
-          ["cases", "Authorization Cases"],
-          ["reviews", "Reviews"],
-          ...(canManagePolicy ? [["administration", "Administration"]] : []),
-        ] as Array<[Tab, string]>).map(([value, label]) => (
+        {(selfServiceOnly
+          ? [["people", "My Authorization"]]
+          : [
+              ["overview", "Overview"],
+              ["people", "People"],
+              ["cases", "Authorization Cases"],
+              ["reviews", "Reviews"],
+              ...(canManagePolicy ? [["administration", "Administration"]] : []),
+            ] as Array<[Tab, string]>
+        ).map(([value, label]) => (
           <button key={value} type="button" className={tab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
             {label}
           </button>
         ))}
       </nav>
 
-      {tab === "overview" && overview ? (
+      {tab === "overview" && overview && !selfServiceOnly ? (
         <div className="qms-authz-stack">
           <div className="qms-authz-metrics">
             {[
@@ -700,8 +716,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {tab === "people" ? (
-        <div className="qms-authz-grid qms-authz-grid--split">
-          <article className="qms-authz-card">
+        <div className={selfServiceOnly ? "qms-authz-stack" : "qms-authz-grid qms-authz-grid--split"}>
+          {!selfServiceOnly ? <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
               <SectionTitle icon={<Users size={19} />} title="People" subtitle="Workforce identity and current Quality authorization status." />
               {canPrepare ? (
@@ -726,7 +742,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 </button>
               ))}
             </div>
-          </article>
+          </article> : null}
 
           <article className="qms-authz-card qms-authz-detail">
             {personDetail ? (
@@ -756,7 +772,26 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       <div><span>Effective</span><strong>{shortDate(item.effective_from)}</strong></div>
                       <div><span>Expires</span><strong>{shortDate(item.expires_on)}</strong></div>
                       <div><span>Next review</span><strong>{shortDate(item.next_review_due)}</strong></div>
+                      {item.readiness ? <div><span>Training</span><strong>{item.readiness.training.status}</strong></div> : null}
                     </div>
+                    {item.readiness?.development.supervision_required ? (
+                      <div className="qms-authz-alert qms-authz-alert--info">
+                        <BadgeCheck size={16} />
+                        Development authorization · Training: {item.readiness.training.status} · Supervision required · Observed audits {item.readiness.development.progress_label}
+                      </div>
+                    ) : null}
+                    {item.readiness?.controlled_exemption ? (
+                      <div className="qms-authz-exemption">
+                        <Pill tone="warn">Conditional</Pill>
+                        <strong>Controlled Exemption Active until {shortDate(item.readiness.controlled_exemption.expires_on)}</strong>
+                        {item.readiness.controlled_exemption.limitations.length ? (
+                          <p><strong>Limitations:</strong> {item.readiness.controlled_exemption.limitations.map(String).join("; ")}</p>
+                        ) : null}
+                        {item.readiness.controlled_exemption.conditions.length ? (
+                          <p><strong>Conditions:</strong> {item.readiness.controlled_exemption.conditions.map(String).join("; ")}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="qms-authz-actions">
                       <button type="button" className="qms-authz-link" onClick={() => void downloadAuthorization(item)}><Download size={15} /> Authorization record</button>
                       {canApprove && item.status === "ACTIVE" ? <>
