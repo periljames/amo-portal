@@ -31,13 +31,13 @@
   gap: 24px;
 }
 
-.qms-authz-header h1,
+.qms-authz-page-heading,
 .qms-authz-section-title h2,
 .qms-authz-modal__header h2 {
   margin: 0;
 }
 
-.qms-authz-header h1 {
+.qms-authz-page-heading {
   font-size: clamp(1.55rem, 2.5vw, 2.15rem);
 }
 
