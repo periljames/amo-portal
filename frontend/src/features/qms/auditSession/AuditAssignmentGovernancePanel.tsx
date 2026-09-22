@@ -25,16 +25,16 @@ type RoleField = "lead_auditor_user_id" | "observer_auditor_user_id" | "assistan
 type AssignmentDraft = Record<RoleField, string>;
 
 const ROLE_CONFIG: Array<{ field: RoleField; role: AuditAssignmentRole; label: string }> = [
-  { field: "lead_auditor_user_id", role: "LEAD_AUDITOR", label: "Lead auditor" },
-  { field: "observer_auditor_user_id", role: "OBSERVER_AUDITOR", label: "Observer auditor" },
-  { field: "assistant_auditor_user_id", role: "ASSISTANT_AUDITOR", label: "Assistant auditor" },
+  { field: "lead_auditor_user_id", role: "LEAD_AUDITOR", label: "Lead Auditor" },
+  { field: "observer_auditor_user_id", role: "OBSERVER_AUDITOR", label: "Observer / Trainee Auditor" },
+  { field: "assistant_auditor_user_id", role: "ASSISTANT_AUDITOR", label: "Assistant Auditor" },
 ];
 
 const GATE_LABELS: Record<string, string> = {
   workforce_active: "active workforce record",
-  active_privilege: "active Quality privilege",
+  active_privilege: "current Quality authorization",
   scope_authorized: "scope authorisation",
-  training_current_verified: "current required training",
+  training_current_verified: "required training is not currently verified",
   capacity: "assignment capacity",
   independence: "audit-specific independence",
 };
