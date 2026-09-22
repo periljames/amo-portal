@@ -88,7 +88,10 @@ test("People authorization cases keep preparation and final decision in the gove
         development: { observed_audits: 3, target: 3, progress_label: "3 / 3", target_is_hard_gate: false, supervision_required: false, audit_participation: [] },
         annual_review: null, controlled_exemption: null, affected_assignments: [],
       },
-      evidence: [],
+      evidence: [{
+        id: "evidence-1", type: "COMPETENCE_ASSESSMENT", label: "Competence assessment",
+        source_module: "QUALITY", source_reference: {}, has_file: false, created_at: new Date().toISOString(),
+      }],
       authorization_reviews: [],
       controlled_exemption: null,
       history: [{ action: "SUBMITTED_FOR_DECISION", from: "UNDER_REVIEW", to: "READY_FOR_DECISION", reason: "Prepared.", actor: "Quality Officer", occurred_at: new Date().toISOString() }],
@@ -113,6 +116,7 @@ test("People authorization cases keep preparation and final decision in the gove
   await expect(page.getByRole("heading", { name: "Final authorization decision", exact: true })).toBeVisible();
   await expect(page.getByText("3 / 3", { exact: true })).toBeVisible();
   await page.locator(".qms-authz-workflow--decision textarea").first().fill("Competence evidence reviewed and authorization approved.");
+  await page.getByLabel(/Competence assessment · Competence Assessment/).check();
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Record final decision", exact: true }).click();
 
@@ -120,6 +124,12 @@ test("People authorization cases keep preparation and final decision in the gove
   expect(decisionBodies[0]).toMatchObject({
     decision: "APPROVE",
     reason: "Competence evidence reviewed and authorization approved.",
+    source_references: [{
+      type: "AUTHORIZATION_EVIDENCE",
+      evidence_id: "evidence-1",
+      evidence_type: "COMPETENCE_ASSESSMENT",
+      label: "Competence assessment",
+    }],
     confirmed: true,
   });
   await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
