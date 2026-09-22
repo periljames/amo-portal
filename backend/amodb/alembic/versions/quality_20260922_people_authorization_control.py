@@ -385,9 +385,9 @@ def downgrade() -> None:
         )
         decision_type_check = _decision_type_check_name()
         if decision_type_check:
-            op.drop_constraint(op.f(decision_type_check), "quality_privilege_decisions", type_="check")
+            _drop_reflected_constraint("quality_privilege_decisions", decision_type_check)
         op.create_check_constraint(
-            "ck_quality_privilege_decision_type",
+            op.f("ck_quality_privilege_decision_type"),
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
