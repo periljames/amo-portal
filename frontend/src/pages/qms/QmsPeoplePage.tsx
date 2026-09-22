@@ -851,6 +851,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   <span>{human(caseDetail.case.case_type)} · Nominated {shortDate(caseDetail.case.nomination_date)} by {caseDetail.case.nominator}</span>
                 </div>
 
+                <div className="qms-authz-decision-context">
+                  <span><strong>Current authorization:</strong> {String(caseDetail.case.current_authorization.authorization || "None")} {caseDetail.case.current_authorization.status ? \`· \${human(String(caseDetail.case.current_authorization.status))}\` : ""}</span>
+                  <span><strong>Requested authorization:</strong> {String(caseDetail.case.requested_authorization.authorization || caseDetail.case.authorization)} · {String(caseDetail.case.requested_authorization.scope || "Global")}</span>
+                </div>
+
                 <div className="qms-authz-facts">
                   <div><span>Readiness</span><strong>{caseDetail.readiness.status}</strong></div>
                   <div><span>Training</span><strong>{caseDetail.readiness.training.status}</strong></div>
@@ -1012,6 +1017,21 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                     <button type="button" className="qms-authz-button" onClick={() => void makeDecision()} disabled={busy}>Record final decision</button>
                   </div>
                 ) : null}
+
+                <h3>Prior authorization review history</h3>
+                {caseDetail.authorization_reviews.length ? (
+                  <div className="qms-authz-list">
+                    {caseDetail.authorization_reviews.map((item) => (
+                      <div className="qms-authz-subrow" key={item.id}>
+                        <div>
+                          <strong>{human(item.outcome)}</strong>
+                          <span>{shortDate(item.last_reviewed)} · Reviewed by {item.reviewed_by}</span>
+                        </div>
+                        <small>Next review: {shortDate(item.next_review_due)}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="qms-authz-muted">No prior governed authorization reviews are recorded for the current authorization.</p>}
 
                 <h3>Case history</h3>
                 <div className="qms-authz-timeline">
