@@ -276,6 +276,12 @@ async function prepare(page: Page): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  // qmsGetAuditRegisterPage can resolve through the preview readiness origin in CI.
+  // Keep this explicit route last so the register test never falls through to the readiness stub.
+  await page.route("**/quality/audits/register/paged**", (route) => json(route, {
+    rows: [], total: 0, limit: 25, offset: 0, has_more: false,
+    car_linked_findings: 0, open_car_count: 0,
+  }));
 }
 
 test("People is person-first, contextual and readable at native 1080p", async ({ page }) => {
