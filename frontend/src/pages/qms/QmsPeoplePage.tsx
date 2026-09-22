@@ -214,6 +214,18 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const canExempt = permissions?.can_approve_exemption === true;
   const canManagePolicy = permissions?.can_manage_policy === true;
   const selfServiceOnly = permissions?.self_service_only === true;
+  const currentUserId = getCachedUser()?.id || "";
+  const activePersonKey = selfServiceOnly ? currentUserId : selectedPersonKey;
+  const effectiveTab: Tab = selfServiceOnly ? "people" : tab;
+  const visibleTabs: Array<[Tab, string]> = selfServiceOnly
+    ? [["people", "My Authorization"]]
+    : [
+        ["overview", "Overview"],
+        ["people", "People"],
+        ["cases", "Authorization Cases"],
+        ["reviews", "Reviews"],
+        ...(canManagePolicy ? [["administration", "Administration"] as [Tab, string]] : []),
+      ];
 
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -252,25 +264,18 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }, [amoCode, revision]);
 
   useEffect(() => {
-    if (!selfServiceOnly) return;
-    const currentUserId = getCachedUser()?.id;
-    if (currentUserId) setSelectedPersonKey(currentUserId);
-    setTab("people");
-  }, [selfServiceOnly]);
-
-  useEffect(() => {
-    if (!selectedPersonKey) {
+    if (!activePersonKey) {
       setPersonDetail(null);
       return;
     }
     const controller = new AbortController();
-    void getQmsAuthorizationPerson(amoCode, selectedPersonKey, controller.signal)
+    void getQmsAuthorizationPerson(amoCode, activePersonKey, controller.signal)
       .then(setPersonDetail)
       .catch((cause) => {
         if (!controller.signal.aborted) setError(errorText(cause));
       });
     return () => controller.abort();
-  }, [amoCode, selectedPersonKey, revision]);
+  }, [activePersonKey, amoCode, revision]);
 
   useEffect(() => {
     if (!selectedCaseId) {
@@ -660,23 +665,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {notice ? <div className="qms-authz-alert qms-authz-alert--success" role="status"><CheckCircle2 size={17} /> {notice}</div> : null}
 
       <nav className="qms-authz-tabs" aria-label="Authorization control views">
-        {(selfServiceOnly
-          ? [["people", "My Authorization"]]
-          : [
-              ["overview", "Overview"],
-              ["people", "People"],
-              ["cases", "Authorization Cases"],
-              ["reviews", "Reviews"],
-              ...(canManagePolicy ? [["administration", "Administration"]] : []),
-            ] as Array<[Tab, string]>
-        ).map(([value, label]) => (
-          <button key={value} type="button" className={tab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
+        {visibleTabs.map(([value, label]) => (
+          <button key={value} type="button" className={effectiveTab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
             {label}
           </button>
         ))}
       </nav>
 
-      {tab === "overview" && overview && !selfServiceOnly ? (
+      {effectiveTab === "overview" && overview && !selfServiceOnly ? (
         <div className="qms-authz-stack">
           <div className="qms-authz-metrics">
             {[
@@ -715,7 +711,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         </div>
       ) : null}
 
-      {tab === "people" ? (
+      {effectiveTab === "people" ? (
         <div className={selfServiceOnly ? "qms-authz-stack" : "qms-authz-grid qms-authz-grid--split"}>
           {!selfServiceOnly ? <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
@@ -825,7 +821,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         </div>
       ) : null}
 
-      {tab === "cases" ? (
+      {effectiveTab === "cases" ? (
         <div className="qms-authz-grid qms-authz-grid--split">
           <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
@@ -1033,7 +1029,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         </div>
       ) : null}
 
-      {tab === "reviews" ? (
+      {effectiveTab === "reviews" ? (
         <div className="qms-authz-stack">
           <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
@@ -1052,7 +1048,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         </div>
       ) : null}
 
-      {tab === "administration" && canManagePolicy ? (
+      {effectiveTab === "administration" && canManagePolicy ? (
         <article className="qms-authz-card">
           <div className="qms-authz-toolbar">
             <SectionTitle icon={<Settings2 size={19} />} title="Authorization Policy Administration" subtitle="Restricted configuration. Training course recurrence remains owned by Training." />
