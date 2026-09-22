@@ -1095,9 +1095,8 @@ def authorization_overview(
     expiring = 0
     for item in privileges:
         status_counts[item.status] = status_counts.get(item.status, 0) + 1
-        if item.status == "ACTIVE" and item.expires_on and today <= item.expires_on <= today.replace(year=today.year + 1):
-            if (item.expires_on - today).days <= 60:
-                expiring += 1
+        if item.status == "ACTIVE" and item.expires_on and 0 <= (item.expires_on - today).days <= 60:
+            expiring += 1
     attention = [
         {
             "type": "Authorization case",
@@ -2069,6 +2068,7 @@ def create_authorization_review(
         after_snapshot={**before, "review_outcome": payload.review_outcome},
     )
     db.add(review)
+    db.flush()
     if payload.review_outcome in {"SUSPEND", "REVOKE"}:
         if payload.review_outcome == "SUSPEND" and privilege.status != "ACTIVE":
             raise HTTPException(status_code=409, detail="Only an active authorization can be suspended.")
@@ -2157,7 +2157,7 @@ def _create_controlled_exemption(
             "approved_at": row.approved_at.isoformat(),
         }
         privilege.scope = scope
-        privilege.limitations = list(dict.fromkeys([*list(privilege.limitations or []), *list(row.limitations or [])]))
+        privilege.limitations = [*list(privilege.limitations or []), *list(row.limitations or [])]
         privilege.updated_by_user_id = ctx.user_id
         privilege.updated_at = _utcnow()
     _decision_event(
