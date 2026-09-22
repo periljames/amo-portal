@@ -45,7 +45,7 @@ export default function AnalysisReport(props: Props & { canExport: boolean }) {
     await saveDownloadedFile(new Blob(["\ufeff" + rows.map(row => row.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }), `${name}-aggregates.csv`);
   };
   const [error, setError] = useState("");
-  const run = async (action: () => Promise<unknown>) => { setError(""); try { await action(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Export failed."); } };
+  const run = async (action: () => Promise<unknown> | unknown) => { setError(""); try { await action(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Export failed."); } };
   return <section className="qa-analysis-card"><div className="qa-analysis-actions qa-analysis-report-actions">
     <button disabled={!props.canExport} onClick={() => void run(downloadHtml)}>Download formatted report</button>
     <button disabled={!props.canExport} onClick={() => void run(downloadCsv)}>Export aggregate CSV</button>
