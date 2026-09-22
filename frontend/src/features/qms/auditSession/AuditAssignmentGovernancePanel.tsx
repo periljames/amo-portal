@@ -195,8 +195,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
     return null;
   })();
   const peopleSetupPath = configurationGap
-    ? qmsPeopleWorkspacePath(amoCode, { tab: "rules", action: "CREATE_RULE", ruleType: configurationGap.ruleType })
-    : qmsPeopleWorkspacePath(amoCode, { tab: "privileges", action: "CREATE" });
+    ? qmsPeopleWorkspacePath(amoCode, { tab: "administration", action: "CREATE_RULE", ruleType: configurationGap.ruleType })
+    : qmsPeopleWorkspacePath(amoCode, { tab: "people", action: "CREATE" });
 
   const assignmentMutation = useMutation({
     mutationFn: () => updateAuditAssignments(amoCode, auditId, {
