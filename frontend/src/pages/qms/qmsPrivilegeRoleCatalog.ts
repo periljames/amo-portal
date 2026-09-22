@@ -13,24 +13,24 @@ export type QmsRoleCatalogEntry = {
 export const QMS_PRIVILEGE_ROLE_CATALOG: QmsRoleCatalogEntry[] = [
   {
     type: "LEAD_AUDITOR",
-    label: "Lead auditor",
+    label: "Lead Auditor",
     summary: "Authoritative lead for governed internal audits. Required before committing a lead auditor on an audit occurrence.",
     auditAssignmentRoles: ["Lead auditor"],
     typicalScope: "GLOBAL or programme/line scope (e.g. LINE_MAINTENANCE)",
   },
   {
     type: "AUDITOR",
-    label: "Auditor / Observer",
-    summary: "Default tenant catalog includes Auditor (full) and Observer / Trainee (supervised development) rules under this type.",
-    auditAssignmentRoles: ["Observer auditor", "Assistant auditor"],
-    typicalScope: "GLOBAL or the same scope code used on the assignment preflight",
+    label: "Auditor",
+    summary: "Quality audit authorization. Observer / Trainee is a supervised development authorization under the same governed audit-authorization family.",
+    auditAssignmentRoles: ["Observer / Trainee Auditor", "Assistant Auditor"],
+    typicalScope: "Global, unless a governed scope is configured",
   },
   {
     type: "QUALITY_INSPECTOR",
-    label: "Quality inspector",
-    summary: "Release/inspection privileges used outside the audit assignment guard.",
+    label: "Quality Assurance Inspector",
+    summary: "Quality-assurance inspection authorization only. It does not represent maintenance certifying, Airworthiness Release, Duplicate Inspection or maintenance Quality Control authority.",
     auditAssignmentRoles: ["Not used for audit team assignment"],
-    typicalScope: "Hangar, line station or product family scope",
+    typicalScope: "As defined by the applicable Quality assurance procedure",
   },
   {
     type: "AUTHORIZATION_REVIEWER",
