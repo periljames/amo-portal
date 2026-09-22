@@ -302,7 +302,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     setSearchParams(params, { replace: true });
   }
 
-  async function run(label: string, action: () => Promise<unknown>) {
+  async function run(label: string, action: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -310,9 +310,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       await action();
       setNotice(label);
       refresh();
+      return true;
     } catch (cause) {
       setError(errorText(cause));
-      throw cause;
+      return false;
     } finally {
       setBusy(false);
     }
@@ -321,33 +322,29 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   async function submitNomination(event: FormEvent) {
     event.preventDefault();
     if (!nominatePerson || !nominateRule) return;
-    try {
-      await run("Authorization case created.", () => createQmsAuthorizationCase(amoCode, {
-        user_id: nominatePerson,
-        requested_rule_id: nominateRule,
-        nomination_reason: nominateReason,
-      }));
+    const ok = await run("Authorization case created.", () => createQmsAuthorizationCase(amoCode, {
+      user_id: nominatePerson,
+      requested_rule_id: nominateRule,
+      nomination_reason: nominateReason,
+    }));
+    if (ok) {
       setNominateOpen(false);
       chooseTab("cases");
-    } catch {
-      // Surface handled by run().
     }
   }
 
   async function submitBatch(event: FormEvent) {
     event.preventDefault();
     if (!batchPeople.length || !batchRule) return;
-    try {
-      await run("Batch nomination completed.", () => createQmsAuthorizationCasesBatch(amoCode, {
-        user_ids: batchPeople,
-        requested_rule_id: batchRule,
-        nomination_reason: batchReason,
-      }));
+    const ok = await run("Batch nomination completed.", () => createQmsAuthorizationCasesBatch(amoCode, {
+      user_ids: batchPeople,
+      requested_rule_id: batchRule,
+      nomination_reason: batchReason,
+    }));
+    if (ok) {
       setBatchOpen(false);
       setBatchPeople([]);
       chooseTab("cases");
-    } catch {
-      // Surface handled by run().
     }
   }
 
@@ -420,7 +417,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       return;
     }
     if (!window.confirm("Approve this time-bounded Controlled Exemption / Conditional Authorization?")) return;
-    await run("Controlled exemption approved.", () => createQmsCaseControlledExemption(amoCode, selectedCaseId, {
+    const ok = await run("Controlled exemption approved.", () => createQmsCaseControlledExemption(amoCode, selectedCaseId, {
       criterion: exemptionCriterion,
       reason_normal_compliance_impossible: exemptionReason,
       limitations: exemptionLimitations.split("\n").map((value) => value.trim()).filter(Boolean),
@@ -429,7 +426,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       expires_on: exemptionExpiry,
       confirmed: true,
     }));
-    setExemptionOpen(false);
+    if (ok) setExemptionOpen(false);
   }
 
   function openLifecycle(item: QmsAuthorization, action: "SUSPEND" | "REVOKE" | "REINSTATE" | "RENEW") {
@@ -445,7 +442,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     event.preventDefault();
     if (!lifecycleAuthorization || !lifecycleReason.trim()) return;
     if (!window.confirm(`Confirm ${human(lifecycleDecision)} for ${lifecycleAuthorization.person || "this person"}?`)) return;
-    await run(`${human(lifecycleDecision)} decision recorded.`, () => decideQmsAuthorizationLifecycle(
+    const ok = await run(`${human(lifecycleDecision)} decision recorded.`, () => decideQmsAuthorizationLifecycle(
       amoCode,
       lifecycleAuthorization.key,
       {
@@ -456,20 +453,20 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         confirmed: true,
       },
     ));
-    setLifecycleOpen(false);
+    if (ok) setLifecycleOpen(false);
   }
 
   async function submitReview(event: FormEvent) {
     event.preventDefault();
     if (!reviewAuthorization || !reviewReason.trim()) return;
     if (!window.confirm("Confirm this governed periodic authorization review?")) return;
-    await run("Periodic authorization review recorded.", () => createQmsAuthorizationReview(amoCode, reviewAuthorization, {
+    const ok = await run("Periodic authorization review recorded.", () => createQmsAuthorizationReview(amoCode, reviewAuthorization, {
       review_outcome: reviewOutcome,
       review_reason: reviewReason,
       next_review_due: reviewNextDue || undefined,
       confirmed: true,
     }));
-    setReviewOpen(false);
+    if (ok) setReviewOpen(false);
   }
 
   async function downloadAuthorization(item: QmsAuthorization) {
@@ -515,15 +512,16 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ? { supervised_development: true, allowed_assignment_roles: ["OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"] }
       : {};
     if (editingRule) {
-      await run("Authorization policy updated.", () => updateQmsPrivilegeRule(amoCode, editingRule.id, {
+      const ok = await run("Authorization policy updated.", () => updateQmsPrivilegeRule(amoCode, editingRule.id, {
         title: ruleTitle,
         description: ruleDescription,
         required_training_course_codes: training,
         independence_required: ruleIndependence,
         scope_schema,
       }));
+      if (!ok) return;
     } else {
-      await run("Authorization policy created.", () => createQmsPrivilegeRule(amoCode, {
+      const ok = await run("Authorization policy created.", () => createQmsPrivilegeRule(amoCode, {
         privilege_code: ruleCode.trim().toUpperCase().replace(/[^A-Z0-9_-]+/g, "_"),
         title: ruleTitle,
         privilege_type: ruleType,
@@ -532,6 +530,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         independence_required: ruleIndependence,
         scope_schema,
       }));
+      if (!ok) return;
     }
     setRuleOpen(false);
   }
