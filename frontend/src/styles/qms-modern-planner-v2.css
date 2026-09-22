@@ -1135,7 +1135,12 @@ body:not([data-color-scheme="light"]):not([data-theme="light"]) .qms-planner-too
 }
 
 @media (max-width: 520px) {
-  .qms-planner-toolbar__leading .qms-planner-title { max-width: 10rem; }
+  .qms-planner-toolbar__leading { flex: 0 0 auto; }
+  .qms-planner-toolbar__leading .qms-planner-title,
+  .qms-planner-toolbar__leading .qms-planner-toolbar__search { display: none; }
+  .qms-planner-toolbar__controls { flex: 1 1 auto; min-width: 0; }
+  .qms-planner-toolbar__controls .qms-planner-queue-chip span { display: none; }
+  .qms-planner-icon-button--menu { position: relative; z-index: 1; }
   .qms-planner-nav { display: none; }
   .qms-planner-view-switch button.is-active { min-width: 4.5rem; }
   .qms-planner-agenda { padding-inline: .45rem; }
