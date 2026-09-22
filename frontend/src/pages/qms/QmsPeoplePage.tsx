@@ -752,6 +752,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "SUSPEND")}>Suspend</button>
                         <button type="button" className="qms-authz-link qms-authz-link--danger" onClick={() => openLifecycle(item, "REVOKE")}>Revoke</button>
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "RENEW")}>Renew</button>
+                        {canExempt ? <button type="button" className="qms-authz-link" onClick={() => openAuthorizationExemption(item)}>Controlled exemption</button> : null}
                       </> : null}
                       {canApprove && item.status === "SUSPENDED" ? <>
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "REINSTATE")}>Reinstate</button>
@@ -837,7 +838,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 {caseDetail.evidence.length ? caseDetail.evidence.map((item) => (
                   <div className="qms-authz-subrow" key={item.id}>
                     <div><strong>{item.label}</strong><span>{human(item.type)}{item.source_module ? ` · ${item.source_module}` : ""}</span></div>
-                    <Pill>{item.has_file ? "File" : "Reference"}</Pill>
+                    <div>
+                      <Pill>{item.has_file ? "File" : "Reference"}</Pill>
+                      {item.has_file ? <button type="button" className="qms-authz-link" onClick={() => void downloadEvidence(item.id, item.filename || "authorization-evidence")}>Download</button> : null}
+                    </div>
                   </div>
                 )) : <p className="qms-authz-muted">No case evidence linked yet.</p>}
 
@@ -848,7 +852,15 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       <strong>{caseDetail.controlled_exemption.criterion}</strong>
                       <p>{caseDetail.controlled_exemption.reason}</p>
                       <span>{shortDate(caseDetail.controlled_exemption.effective_from)} – {shortDate(caseDetail.controlled_exemption.expires_on)}</span>
+                      {caseDetail.controlled_exemption.supervision_required ? <p><strong>Supervisor:</strong> {caseDetail.controlled_exemption.supervisor || "Recorded supervisor"}</p> : null}
+                      <p><strong>Equivalent evidence</strong></p>
+                      <ul>{caseDetail.controlled_exemption.equivalent_evidence.map((item, index) => <li key={index}>{String(item.reference || JSON.stringify(item))}</li>)}</ul>
+                      <p><strong>Conditions</strong></p>
                       <ul>{caseDetail.controlled_exemption.conditions.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>
+                      {caseDetail.controlled_exemption.limitations.length ? <>
+                        <p><strong>Limitations</strong></p>
+                        <ul>{caseDetail.controlled_exemption.limitations.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>
+                      </> : null}
                     </div>
                   </>
                 ) : null}
@@ -892,13 +904,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
                 {canExempt && !["APPROVED", "REJECTED", "CANCELLED"].includes(caseDetail.case.status) ? (
                   <div className="qms-authz-actions">
-                    <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={() => setExemptionOpen((value) => !value)}>
+                    <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={openCaseExemption}>
                       Controlled Exemption / Conditional Authorization
                     </button>
                   </div>
                 ) : null}
 
-                {exemptionOpen && canExempt ? (
+                {exemptionOpen && canExempt && !exemptionAuthorization ? (
                   <div className="qms-authz-workflow">
                     <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
                     <div className="qms-authz-form-grid">
@@ -906,6 +918,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       <label>Effective<input type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
                       <label>Expires<input type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
                       <label className="span-2">Why normal compliance is not currently possible<textarea value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
+                      <label className="span-2">Equivalent evidence, one controlled reference per line<textarea value={exemptionEquivalentEvidence} onChange={(event) => setExemptionEquivalentEvidence(event.target.value)} rows={3} /></label>
+                      <label className="qms-authz-checkbox span-2"><input type="checkbox" checked={exemptionSupervisionRequired} onChange={(event) => setExemptionSupervisionRequired(event.target.checked)} /> Supervision required</label>
+                      {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
                       <label className="span-2">Operating conditions, one per line<textarea value={exemptionConditions} onChange={(event) => setExemptionConditions(event.target.value)} rows={3} /></label>
                       <label className="span-2">Limitations, one per line<textarea value={exemptionLimitations} onChange={(event) => setExemptionLimitations(event.target.value)} rows={3} /></label>
                     </div>
@@ -988,7 +1003,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <article className="qms-authz-card">
           <div className="qms-authz-toolbar">
             <SectionTitle icon={<Settings2 size={19} />} title="Authorization Policy Administration" subtitle="Restricted configuration. Training course recurrence remains owned by Training." />
-            <button type="button" className="qms-authz-button" onClick={openCreateRule}>New authorization type</button>
+            <div className="qms-authz-toolbar__actions">
+              {!rules.some((rule) => rule.is_active) ? <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={() => void createDefaultPolicies()} disabled={busy}>Create default policies</button> : null}
+              <button type="button" className="qms-authz-button" onClick={openCreateRule}>New authorization type</button>
+            </div>
           </div>
           <div className="qms-authz-list">
             {rules.map((rule) => (
@@ -1045,6 +1063,31 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             <label>Review reason<textarea required rows={4} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setReviewOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy}>Record review</button></div>
           </form>
+        </div>
+      ) : null}
+
+      {exemptionOpen && canExempt && exemptionAuthorization ? (
+        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Controlled exemption for active authorization">
+          <div className="qms-authz-modal__panel">
+            <div className="qms-authz-modal__header"><h2>Controlled Exemption / Conditional Authorization</h2><button type="button" onClick={() => { setExemptionOpen(false); setExemptionAuthorization(null); }}><XCircle size={20} /></button></div>
+            <p><strong>{exemptionAuthorization.person || personDetail?.person.name}</strong> · {exemptionAuthorization.authorization}</p>
+            <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
+            <div className="qms-authz-form-grid">
+              <label>Missing criterion<input value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
+              <label>Effective<input type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
+              <label>Expires<input type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
+              <label className="span-2">Why normal compliance is not currently possible<textarea value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
+              <label className="span-2">Equivalent evidence, one controlled reference per line<textarea value={exemptionEquivalentEvidence} onChange={(event) => setExemptionEquivalentEvidence(event.target.value)} rows={3} /></label>
+              <label className="qms-authz-checkbox span-2"><input type="checkbox" checked={exemptionSupervisionRequired} onChange={(event) => setExemptionSupervisionRequired(event.target.checked)} /> Supervision required</label>
+              {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
+              <label className="span-2">Operating conditions, one per line<textarea value={exemptionConditions} onChange={(event) => setExemptionConditions(event.target.value)} rows={3} /></label>
+              <label className="span-2">Limitations, one per line<textarea value={exemptionLimitations} onChange={(event) => setExemptionLimitations(event.target.value)} rows={3} /></label>
+            </div>
+            <div className="qms-authz-actions">
+              <button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => { setExemptionOpen(false); setExemptionAuthorization(null); }}>Cancel</button>
+              <button type="button" className="qms-authz-button" onClick={() => void approveExemption()} disabled={busy}>Approve controlled exemption</button>
+            </div>
+          </div>
         </div>
       ) : null}
 
