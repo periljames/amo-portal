@@ -265,7 +265,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
           <ShieldAlert size={15} />
           <span>
             {configurationGap.reason}{" "}
-            <Link to={peopleSetupPath}>Open People &amp; Privileges</Link>
+            <Link to={peopleSetupPath}>Open People &amp; Authorization Control</Link>
           </span>
         </div>
       ) : null}
@@ -448,7 +448,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
                 Close
               </button>
               <Link to={qmsPeopleWorkspacePath(amoCode, { tab: "privileges" })}>
-                Open People &amp; Privileges
+                Open People &amp; Authorization Control
               </Link>
             </footer>
           </section>
