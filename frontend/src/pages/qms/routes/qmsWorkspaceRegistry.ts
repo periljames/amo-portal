@@ -49,7 +49,7 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "people",
     segment: "people",
-    label: "People & Privileges",
+    label: "People & Authorization Control",
     shortLabel: "People",
     permission: "qms.people.view",
     description: "Quality appointments, authorization cases, competence decisions, periodic reviews and governed authorization history.",
@@ -95,7 +95,7 @@ export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId
   return `${base}?workspace=${encodeSegment(workspace)}`;
 }
 
-/** Deep-link into People & Privileges with optional tab/action/ruleType for setup CTAs. */
+/** Deep-link into People & Authorization Control with optional tab/action/ruleType for governed setup CTAs. */
 export function qmsPeopleWorkspacePath(
   amoCode: string,
   options: { tab?: "overview" | "people" | "cases" | "reviews" | "administration" | "privileges" | "rules" | "reference"; action?: string; ruleType?: string; ruleId?: string } = {},
