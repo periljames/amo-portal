@@ -56,7 +56,7 @@ assertIncludes(missions, "width: 100%;", "Mission creation must fit its workspac
 
 assertIncludes(people, ".qms-authz-grid--split", "People authorization control must retain a two-pane operational workspace");
 assertIncludes(people, ".qms-authz-modal", "Governed authorization actions must remain contextual and explicit");
-assertIncludes(peoplePage, "People &amp; Authorization Control", "People must remain authorization-control focused");
+assertIncludes(peoplePage, "Authorization governance", "People must remain authorization-control focused");
 assertIncludes(peoplePage, "Authorization Cases", "People must expose the governed pre-decision case workflow");
 assertIncludes(peoplePage, "Controlled Exemption / Conditional Authorization", "People must expose only the controlled exception workflow");
 assertIncludes(peoplePage, "Final authorization decision", "People must expose attributable final authorization decisions");
