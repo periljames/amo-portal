@@ -27,6 +27,8 @@ from amodb.apps.quality import audit_source_handoff_router
 from amodb.apps.quality import mission_router
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import people_router
+from amodb.apps.quality import people_authorization_router
+from amodb.apps.quality import audit_assignment_guard
 from amodb.apps.quality import planner_schedule_router
 from amodb.apps.quality import tenant_security
 from amodb.apps.quality.schemas import QualityWorkflowSettingsUpdate
@@ -183,28 +185,22 @@ def test_unscoped_reliability_sources_are_excluded(monkeypatch) -> None:
     assert {item["type"] for item in warnings} == {"TenantIsolationUnavailable"}
 
 
-def test_privilege_decision_lifecycle_is_explicit() -> None:
-    assert people_router._PRIVILEGE_DECISION_ALLOWED_FROM == {
-        "GRANT": {"DRAFT"},
-        "REJECT": {"DRAFT"},
-        "RENEW": {"ACTIVE", "EXPIRED"},
-        "SUSPEND": {"ACTIVE"},
-        "REINSTATE": {"SUSPENDED"},
-        "REVOKE": {"ACTIVE", "SUSPENDED"},
-        "EXPIRE": {"ACTIVE", "SUSPENDED"},
-    }
+def test_authorization_decision_lifecycle_is_explicit_and_case_governed() -> None:
+    source = inspect.getsource(people_authorization_router.authorization_lifecycle_decision)
+    assert '"SUSPEND": {"ACTIVE"}' in source
+    assert '"REVOKE": {"ACTIVE", "SUSPENDED"}' in source
+    assert '"REINSTATE": {"SUSPENDED"}' in source
+    assert '"RENEW": {"ACTIVE", "EXPIRED"}' in source
+    assert "Revoked authorizations cannot be reinstated" in source
+    assert "confirmed" in source
 
 
-def test_decide_privilege_locks_row_without_joined_rule_load() -> None:
-    """Postgres rejects FOR UPDATE on the nullable side of an outer join."""
-    source = inspect.getsource(people_router.decide_privilege)
-    assert "with_for_update()" in source
-    assert "noload(QualityPrivilege.rule)" in source
-    assert "noload(QualityPrivilege.decisions)" in source
-    assert source.index("noload(QualityPrivilege.rule)") < source.index("with_for_update()")
-    # Commit clears transaction-local tenant GUC; refresh must re-bind.
-    assert source.index("db.commit()") < source.rindex("set_postgres_tenant_context(")
-    assert source.rindex("set_postgres_tenant_context(") < source.index("db.refresh(privilege)")
+def test_final_authorization_decision_locks_case_and_uses_governed_case_state() -> None:
+    source = inspect.getsource(people_authorization_router.decide_authorization_case)
+    assert "_case(db, amo_id=ctx.amo_id, case_id=case_id, lock=True)" in source
+    assert 'row.status != "READY_FOR_DECISION"' in source
+    assert "_activate_case_authorization(" in source
+    assert "db.commit()" in source
 
 
 def test_list_rules_flushes_defaults_without_committing_before_query() -> None:
@@ -242,10 +238,10 @@ def test_applied_deferrals_remain_visible_and_schedulable() -> None:
     assert '{"PLANNED", "DEFERRED"}' in schedule_source
 
 
-def test_tenant_join_keys_are_present_on_people_and_planner_queries() -> None:
-    people_source = inspect.getsource(people_router._workload_evidence)
-    assert "QMSPlannerScheduleMetadata.amo_id == quality_models.QMSAuditSchedule.amo_id" in people_source
-    assert "QMSPlannerScheduleMetadata.amo_id == amo_id" in people_source
+def test_tenant_join_keys_are_present_on_assignment_capacity_queries() -> None:
+    assignment_source = inspect.getsource(audit_assignment_guard._capacity_evidence)
+    assert "QMSPlannerScheduleMetadata.amo_id == quality_models.QMSAuditSchedule.amo_id" in assignment_source
+    assert "QMSPlannerScheduleMetadata.amo_id == amo_id" in assignment_source
 
 
 def test_planner_automation_runs_in_tenant_scoped_transactions() -> None:
