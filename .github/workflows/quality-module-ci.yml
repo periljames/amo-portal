@@ -95,6 +95,7 @@ jobs:
           amodb/apps/quality/tests/test_assurance_wiring_contract.py
           amodb/apps/quality/tests/test_assurance_metrics_contract.py
           amodb/apps/quality/tests/test_mission_contract.py
+          amodb/apps/quality/tests/test_people_authorization_control.py
           amodb/apps/quality/tests/test_planner_router.py
           amodb/apps/quality/tests/test_assurance_cockpit_contract.py
 
