@@ -153,9 +153,12 @@ const QualityAuditRegisterPage: React.FC = () => {
     staleTime: 60_000,
   });
 
+  /* The editable follow-up draft mirrors the latest governed workflow settings. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (workflowQuery.data) setFollowUpDraft(draftFromSettings(workflowQuery.data));
   }, [workflowQuery.data]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const saveFollowUp = useMutation({
     mutationFn: async () => {
