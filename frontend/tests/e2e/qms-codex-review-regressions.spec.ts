@@ -75,6 +75,7 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
         can_approve_exemption: canManage,
         can_manage_policy: canManage,
         can_oversight: canManage,
+        self_service_only: !canManage,
       },
       metrics: {
         active_authorizations: 1, suspended_authorizations: 0, expiring_within_60_days: 0,
@@ -86,12 +87,40 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
   if (path.endsWith("/quality/people/authorization-control/people")) {
     return json(route, {
       items: [{
-        key: "auditor-1", name: "Amina Wanjiku", staff_code: "QMS-018",
+        key: "quality-user-a", name: "Amina Wanjiku", staff_code: "QMS-018",
         home_role: "AUDITOR", department: "Quality", workforce_status: "Active",
         authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
         open_cases: 0,
       }],
       total: 1,
+    });
+  }
+  if (path.endsWith("/quality/people/authorization-control/people/quality-user-a")) {
+    return json(route, {
+      person: {
+        name: "Amina Wanjiku", staff_code: "QMS-018", home_role: "AUDITOR",
+        department: "Quality", active: true,
+      },
+      appointments: [{
+        function: "Internal Quality Auditor", status: "ACTIVE",
+        effective_from: "2026-01-01", effective_until: null,
+      }],
+      authorizations: [{
+        key: "priv-hangar-b", authorization: "Auditor", status: "ACTIVE", scope: "Global",
+        effective_from: "2026-01-01", expires_on: "2026-12-31",
+        last_reviewed: "2026-06-01", next_review_due: "2027-06-01", limitations: [],
+        readiness: {
+          authorization: "Auditor", as_of: "2026-09-22", status: "Ready for decision", hard_blockers: [],
+          training: { status: "Current", current: true, developmental_exception: false, courses: [], required: [], missing: [] },
+          development: {
+            observed_audits: 3, target: 3, progress_label: "3 / 3",
+            target_is_hard_gate: false, supervision_required: false, audit_participation: [],
+          },
+          annual_review: null, controlled_exemption: null, affected_assignments: [],
+        },
+      }],
+      cases: [],
+      audit_participation: { items: [], observed_completed: 3, observed_target: 3 },
     });
   }
   if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
@@ -220,12 +249,18 @@ test("People read access does not expose mutation controls to a Quality Auditor"
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "My Authorization", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "People", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Authorization Cases", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reviews", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Authorization record/i })).toBeVisible();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Reviews", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Record review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Record review/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Controlled exemption/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Suspend/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Revoke/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
 });
