@@ -282,7 +282,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.getByRole("heading", { name: "People & Authorization Control", exact: true }), 28);
+  await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
   await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
