@@ -226,6 +226,29 @@ def _developmental(rule: QualityPrivilegeRule) -> bool:
     return rule.privilege_type == "AUDITOR" and _scope_schema(rule).get("supervised_development") is True
 
 
+def _open_case_exists(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    rule: QualityPrivilegeRule,
+) -> bool:
+    query = (
+        db.query(QualityAuthorizationCase.id)
+        .join(QualityPrivilegeRule, QualityPrivilegeRule.id == QualityAuthorizationCase.requested_rule_id)
+        .filter(
+            QualityAuthorizationCase.amo_id == amo_id,
+            QualityAuthorizationCase.user_id == user_id,
+            QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
+        )
+    )
+    if rule.privilege_type in {"AUDITOR", "LEAD_AUDITOR"}:
+        query = query.filter(QualityPrivilegeRule.privilege_type.in_(["AUDITOR", "LEAD_AUDITOR"]))
+    else:
+        query = query.filter(QualityAuthorizationCase.requested_rule_id == rule.id)
+    return query.first() is not None
+
+
 def _authorization_label(rule: QualityPrivilegeRule) -> str:
     if rule.privilege_type == "LEAD_AUDITOR":
         return "Lead Auditor"
@@ -1303,13 +1326,11 @@ def create_authorization_case(
     rule = _rule(db, amo_id=ctx.amo_id, rule_id=payload.requested_rule_id)
     if not rule.is_active:
         raise HTTPException(status_code=409, detail="This Quality authorization type is inactive.")
-    existing_case = db.query(QualityAuthorizationCase.id).filter(
-        QualityAuthorizationCase.amo_id == ctx.amo_id,
-        QualityAuthorizationCase.user_id == payload.user_id,
-        QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
-    ).first()
-    if existing_case:
-        raise HTTPException(status_code=409, detail="This person already has an open Quality authorization case.")
+    if _open_case_exists(db, amo_id=ctx.amo_id, user_id=payload.user_id, rule=rule):
+        raise HTTPException(
+            status_code=409,
+            detail="This person already has an open case for this Quality authorization family.",
+        )
 
     scope_key = str(payload.requested_scope_key or "GLOBAL").strip().upper() or "GLOBAL"
     live_query = (
@@ -1404,13 +1425,8 @@ def create_authorization_cases_batch(
         if user is None:
             skipped.append({"person": "Unavailable person", "reason": "Inactive or unavailable workforce record."})
             continue
-        open_case = db.query(QualityAuthorizationCase.id).filter(
-            QualityAuthorizationCase.amo_id == ctx.amo_id,
-            QualityAuthorizationCase.user_id == user_id,
-            QualityAuthorizationCase.status.in_(MANAGEMENT_CASE_STATUSES),
-        ).first()
-        if open_case:
-            skipped.append({"person": _person_name(user), "reason": "Open authorization case already exists."})
+        if _open_case_exists(db, amo_id=ctx.amo_id, user_id=user_id, rule=rule):
+            skipped.append({"person": _person_name(user), "reason": "Open case already exists for this authorization family."})
             continue
         scope_key = "GLOBAL"
         current_pair = (
