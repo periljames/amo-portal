@@ -656,7 +656,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     staleTime: 3_000,
   });
   const selected =
-    detailQuery.data?.status === "CLOSED" ? null : detailQuery.data;
+    detailQuery.data?.status === "CLOSED" ? undefined : detailQuery.data;
   const optimizer = optimizerQuery.data;
   const readiness = readinessOf(selected, optimizer);
   const matrixPortfolio = useMemo(
