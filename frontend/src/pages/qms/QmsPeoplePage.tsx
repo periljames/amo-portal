@@ -41,6 +41,7 @@ import {
   listQmsAuthorizations,
   listQmsPrivilegeRules,
   prepareQmsAuthorizationCase,
+  revokeQmsControlledExemption,
   submitQmsAuthorizationCase,
   updateQmsPrivilegeRule,
   uploadQmsAuthorizationCaseEvidence,
@@ -488,6 +489,16 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     }
   }
 
+  async function revokeExemption(exemptionId: string) {
+    const reason = window.prompt("Reason for revoking this Controlled Exemption / Conditional Authorization:");
+    if (!reason?.trim()) return;
+    if (!window.confirm("Confirm revocation of this controlled exemption?")) return;
+    await run("Controlled exemption revoked.", () => revokeQmsControlledExemption(amoCode, exemptionId, {
+      reason: reason.trim(),
+      confirmed: true,
+    }));
+  }
+
   function openLifecycle(item: QmsAuthorization, action: "SUSPEND" | "REVOKE" | "REINSTATE" | "RENEW") {
     setLifecycleAuthorization(item);
     setLifecycleDecision(action);
@@ -752,7 +763,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "SUSPEND")}>Suspend</button>
                         <button type="button" className="qms-authz-link qms-authz-link--danger" onClick={() => openLifecycle(item, "REVOKE")}>Revoke</button>
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "RENEW")}>Renew</button>
-                        {canExempt ? <button type="button" className="qms-authz-link" onClick={() => openAuthorizationExemption(item)}>Controlled exemption</button> : null}
+                        {canExempt && item.readiness?.controlled_exemption ? (
+                          <button type="button" className="qms-authz-link qms-authz-link--danger" onClick={() => void revokeExemption(item.readiness!.controlled_exemption!.id)}>Revoke exemption</button>
+                        ) : canExempt ? (
+                          <button type="button" className="qms-authz-link" onClick={() => openAuthorizationExemption(item)}>Controlled exemption</button>
+                        ) : null}
                       </> : null}
                       {canApprove && item.status === "SUSPENDED" ? <>
                         <button type="button" className="qms-authz-link" onClick={() => openLifecycle(item, "REINSTATE")}>Reinstate</button>
@@ -861,6 +876,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                         <p><strong>Limitations</strong></p>
                         <ul>{caseDetail.controlled_exemption.limitations.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>
                       </> : null}
+                      {canExempt && caseDetail.controlled_exemption.status === "ACTIVE" ? (
+                        <button type="button" className="qms-authz-link qms-authz-link--danger" onClick={() => void revokeExemption(caseDetail.controlled_exemption!.id)}>Revoke controlled exemption</button>
+                      ) : null}
                     </div>
                   </>
                 ) : null}
