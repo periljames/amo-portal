@@ -24,11 +24,14 @@ import {
   createQmsAuthorizationCase,
   createQmsAuthorizationCasesBatch,
   createQmsAuthorizationReview,
+  createQmsAuthorizationControlledExemption,
   createQmsCaseControlledExemption,
   createQmsPrivilegeRule,
   decideQmsAuthorizationCase,
   decideQmsAuthorizationLifecycle,
+  downloadQmsAuthorizationEvidence,
   downloadQmsAuthorizationRecord,
+  ensureQmsDefaultPrivilegeRules,
   getQmsAuthorizationCase,
   getQmsAuthorizationOverview,
   getQmsAuthorizationPerson,
@@ -80,7 +83,7 @@ function inOneYear(): string {
 
 function human(value?: string | null): string {
   if (!value) return "Not recorded";
-  return value.replaceAll("_", " ").toLowerCase().replace(/w/g, (char) => char.toUpperCase());
+  return value.replaceAll("_", " ").toLowerCase().replace(/\\b\\w/g, (char) => char.toUpperCase());
 }
 
 function shortDate(value?: string | null): string {
@@ -168,10 +171,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [evidenceSource, setEvidenceSource] = useState("");
 
   const [exemptionOpen, setExemptionOpen] = useState(false);
+  const [exemptionAuthorization, setExemptionAuthorization] = useState<QmsAuthorization | null>(null);
   const [exemptionCriterion, setExemptionCriterion] = useState("training_current_verified");
   const [exemptionReason, setExemptionReason] = useState("");
+  const [exemptionEquivalentEvidence, setExemptionEquivalentEvidence] = useState("");
   const [exemptionConditions, setExemptionConditions] = useState("");
   const [exemptionLimitations, setExemptionLimitations] = useState("");
+  const [exemptionSupervisionRequired, setExemptionSupervisionRequired] = useState(false);
+  const [exemptionSupervisor, setExemptionSupervisor] = useState("");
   const [exemptionEffective, setExemptionEffective] = useState(todayKey());
   const [exemptionExpiry, setExemptionExpiry] = useState(inOneYear());
 
@@ -413,22 +420,72 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     setEvidenceLabel("");
   }
 
+  async function downloadEvidence(evidenceId: string, fallbackName: string) {
+    try {
+      setBusy(true);
+      const { blob, filename } = await downloadQmsAuthorizationEvidence(amoCode, evidenceId);
+      downloadBlob(blob, filename || fallbackName);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resetExemptionForm() {
+    setExemptionCriterion("training_current_verified");
+    setExemptionReason("");
+    setExemptionEquivalentEvidence("");
+    setExemptionConditions("");
+    setExemptionLimitations("");
+    setExemptionSupervisionRequired(false);
+    setExemptionSupervisor("");
+    setExemptionEffective(todayKey());
+    setExemptionExpiry(inOneYear());
+  }
+
+  function openCaseExemption() {
+    setExemptionAuthorization(null);
+    resetExemptionForm();
+    setExemptionOpen(true);
+  }
+
+  function openAuthorizationExemption(item: QmsAuthorization) {
+    setExemptionAuthorization(item);
+    resetExemptionForm();
+    setExemptionOpen(true);
+  }
+
   async function approveExemption() {
-    if (!selectedCaseId || !exemptionReason.trim() || !exemptionConditions.trim()) {
-      setError("Criterion, reason and at least one operating condition are required.");
+    if ((!selectedCaseId && !exemptionAuthorization) || !exemptionReason.trim() || !exemptionEquivalentEvidence.trim() || !exemptionConditions.trim()) {
+      setError("Criterion, reason, equivalent evidence and at least one operating condition are required.");
+      return;
+    }
+    if (exemptionSupervisionRequired && !exemptionSupervisor) {
+      setError("Select a supervisor when supervision is required.");
       return;
     }
     if (!window.confirm("Approve this time-bounded Controlled Exemption / Conditional Authorization?")) return;
-    const ok = await run("Controlled exemption approved.", () => createQmsCaseControlledExemption(amoCode, selectedCaseId, {
+    const payload = {
       criterion: exemptionCriterion,
       reason_normal_compliance_impossible: exemptionReason,
+      equivalent_evidence: exemptionEquivalentEvidence.split("\n").map((value) => value.trim()).filter(Boolean).map((reference) => ({ reference })),
       limitations: exemptionLimitations.split("\n").map((value) => value.trim()).filter(Boolean),
+      supervision_required: exemptionSupervisionRequired,
+      supervisor_user_id: exemptionSupervisionRequired ? exemptionSupervisor : undefined,
       conditions: exemptionConditions.split("\n").map((value) => value.trim()).filter(Boolean),
       effective_from: exemptionEffective,
       expires_on: exemptionExpiry,
       confirmed: true,
-    }));
-    if (ok) setExemptionOpen(false);
+    };
+    const action = exemptionAuthorization
+      ? () => createQmsAuthorizationControlledExemption(amoCode, exemptionAuthorization.key, payload)
+      : () => createQmsCaseControlledExemption(amoCode, selectedCaseId, payload);
+    const ok = await run("Controlled exemption approved.", action);
+    if (ok) {
+      setExemptionOpen(false);
+      setExemptionAuthorization(null);
+    }
   }
 
   function openLifecycle(item: QmsAuthorization, action: "SUSPEND" | "REVOKE" | "REINSTATE" | "RENEW") {
@@ -501,7 +558,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     setRuleCode(rule.privilege_code);
     setRuleType(rule.privilege_type);
     setRuleDescription(rule.description || "");
-    setRuleTraining((rule.required_training_course_codes || []).join(", "));
+    const competence = rule.scope_schema?.qms_competence;
+    const competenceCodes = competence && typeof competence === "object" && Array.isArray((competence as { codes?: unknown[] }).codes)
+      ? (competence as { codes: unknown[] }).codes.map((value) => String(value))
+      : [];
+    setRuleTraining((rule.required_training_course_codes.length ? rule.required_training_course_codes : competenceCodes).join(", "));
     setRuleIndependence(rule.independence_required);
     setRuleDevelopmental(Boolean((rule.scope_schema || {}).supervised_development));
     setRuleOpen(true);
@@ -510,9 +571,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   async function saveRule(event: FormEvent) {
     event.preventDefault();
     const training = ruleTraining.split(",").map((value) => value.trim().toUpperCase()).filter(Boolean);
-    const scope_schema = ruleDevelopmental
-      ? { supervised_development: true, allowed_assignment_roles: ["OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"] }
-      : {};
+    const scope_schema: Record<string, unknown> = editingRule ? { ...(editingRule.scope_schema || {}) } : {};
+    if (ruleDevelopmental) {
+      scope_schema.supervised_development = true;
+      scope_schema.allowed_assignment_roles = ["OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"];
+    } else {
+      delete scope_schema.supervised_development;
+      delete scope_schema.allowed_assignment_roles;
+    }
     if (editingRule) {
       const ok = await run("Authorization policy updated.", () => updateQmsPrivilegeRule(amoCode, editingRule.id, {
         title: ruleTitle,
@@ -540,6 +606,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   async function toggleRule(rule: QmsPrivilegeRule) {
     if (rule.is_active && !window.confirm(`Deactivate ${rule.title}? Live authorizations must already be resolved.`)) return;
     await run("Authorization policy status updated.", () => updateQmsPrivilegeRule(amoCode, rule.id, { is_active: !rule.is_active }));
+  }
+
+  async function createDefaultPolicies() {
+    await run("Default Quality authorization policies are ready.", () => ensureQmsDefaultPrivilegeRules(amoCode));
   }
 
   if (pageLoading && !overview) {
