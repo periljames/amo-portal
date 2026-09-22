@@ -1083,6 +1083,25 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       {decision === "APPROVE" && caseDetail.readiness.development.observed_audits < caseDetail.readiness.development.target && caseDetail.case.case_type === "CHANGE_AUTHORIZATION" ? (
                         <label className="span-2">Basis for approval before development target is complete<textarea value={developmentBasis} onChange={(event) => setDevelopmentBasis(event.target.value)} rows={3} /></label>
                       ) : null}
+                      {caseDetail.evidence.length ? (
+                        <fieldset className="qms-authz-checklist span-2">
+                          <legend>Evidence considered for this decision</legend>
+                          {caseDetail.evidence.map((item) => (
+                            <label key={item.id}>
+                              <input
+                                type="checkbox"
+                                checked={decisionEvidenceIds.includes(item.id)}
+                                onChange={(event) => setDecisionEvidenceIds((current) =>
+                                  event.target.checked
+                                    ? [...current, item.id]
+                                    : current.filter((value) => value !== item.id),
+                                )}
+                              />
+                              <span>{item.label} · {human(item.type)}</span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      ) : <p className="qms-authz-muted span-2">No separately linked case evidence is available; source-backed readiness remains captured in the decision snapshot.</p>}
                     </div>
                     <button type="button" className="qms-authz-button" onClick={() => void makeDecision()} disabled={busy}>Record final decision</button>
                   </div>
@@ -1249,6 +1268,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             <label>Outcome<select value={reviewOutcome} onChange={(event) => setReviewOutcome(event.target.value as typeof reviewOutcome)}><option value="CONTINUE">Continue</option><option value="CONTINUE_WITH_CONDITIONS">Continue with conditions</option><option value="REQUIRES_ACTION">Requires action</option><option value="SUSPEND">Suspend</option><option value="REVOKE">Revoke</option></select></label>
             <label>Next review due<input type="date" value={reviewNextDue} onChange={(event) => setReviewNextDue(event.target.value)} /></label>
             <label>Review reason<textarea required rows={4} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
+            <label>Evidence / controlled references<textarea rows={3} value={reviewEvidenceReferences} onChange={(event) => setReviewEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
+            <label>Review notes<textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setReviewOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy}>Record review</button></div>
           </form>
         </div>
@@ -1299,7 +1320,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             ) : null}
             <label>Effective date<input required type="date" value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} /></label>
             {["RENEW", "REINSTATE"].includes(lifecycleDecision) ? <label>Expires<input type="date" value={lifecycleExpiry} onChange={(event) => setLifecycleExpiry(event.target.value)} /></label> : null}
+            <label>Next review due<input type="date" value={lifecycleReviewDue} onChange={(event) => setLifecycleReviewDue(event.target.value)} /></label>
             <label>Decision reason<textarea required rows={4} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label>
+            <label>Evidence / controlled references<textarea rows={3} value={lifecycleEvidenceReferences} onChange={(event) => setLifecycleEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setLifecycleOpen(false)}>Cancel</button><button className={`qms-authz-button ${lifecycleDecision === "REVOKE" ? "qms-authz-button--danger" : ""}`} disabled={busy}>{human(lifecycleDecision)}</button></div>
           </form>
         </div>
