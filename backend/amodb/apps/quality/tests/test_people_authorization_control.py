@@ -22,7 +22,7 @@ def _routes(router):
 
 
 def test_people_surface_has_one_governed_authorization_lifecycle() -> None:
-    routes = _routes(people_router) | _routes(people_authorization_router)
+    routes = _routes(people_router.router) | _routes(people_authorization_router.router)
     assert ("/people/authorization-control/cases", "POST") in routes
     assert ("/people/authorization-control/cases/{case_id}/submit", "POST") in routes
     assert ("/people/authorization-control/cases/{case_id}/decision", "POST") in routes
@@ -121,7 +121,8 @@ def test_development_target_is_evidence_not_automatic_gate() -> None:
 def test_assignment_guard_keeps_assignment_specific_authority() -> None:
     source = inspect.getsource(audit_assignment_guard.evaluate_auditor_assignment)
     assert "LEAD_AUDITOR" in source
-    assert "OBSERVER_AUDITOR" in inspect.getsource(audit_assignment_guard._privilege_types_for_assignment)
+    assert audit_assignment_guard._privilege_types_for_assignment("OBSERVER_AUDITOR") == ("AUDITOR",)
+    assert audit_assignment_guard._privilege_types_for_assignment("ASSISTANT_AUDITOR") == ("AUDITOR",)
     assert "active_privilege" in source
     assert "scope_authorized" in source
     assert "training_current_verified" in source
