@@ -39,14 +39,16 @@ describe("QMS assurance workspace registry", () => {
     expect(qmsWorkspaceEntryPath("SAF", "intelligence")).toBe("/maintenance/SAF/quality?workspace=intelligence");
   });
 
-  it("builds People deep-links for competence setup CTAs", () => {
+  it("builds People deep-links into governed authorization-control views", () => {
     expect(qmsPeopleWorkspacePath("SAF")).toBe("/maintenance/SAF/quality?workspace=people");
     expect(qmsPeopleWorkspacePath("SAF", { tab: "rules", action: "CREATE_RULE", ruleType: "AUDITOR" })).toBe(
-      "/maintenance/SAF/quality?workspace=people&tab=rules&action=CREATE_RULE&ruleType=AUDITOR",
+      "/maintenance/SAF/quality?workspace=people&tab=administration&action=CREATE_RULE&ruleType=AUDITOR",
     );
     expect(qmsPeopleWorkspacePath("SAF", { tab: "privileges", action: "CREATE", ruleType: "LEAD_AUDITOR" })).toBe(
-      "/maintenance/SAF/quality?workspace=people&tab=privileges&action=CREATE&ruleType=LEAD_AUDITOR",
+      "/maintenance/SAF/quality?workspace=people&tab=people&action=CREATE&ruleType=LEAD_AUDITOR",
     );
+    expect(QMS_WORKSPACES.find((workspace) => workspace.id === "people")?.permission).toBe("qms.people.view");
+    expect(QMS_WORKSPACES.find((workspace) => workspace.id === "people")?.label).toBe("People & Authorization Control");
   });
 
   it("maps legacy QMS modules into their owning workspace instead of new top-level registers", () => {
