@@ -852,7 +852,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 </div>
 
                 <div className="qms-authz-decision-context">
-                  <span><strong>Current authorization:</strong> {String(caseDetail.case.current_authorization.authorization || "None")} {caseDetail.case.current_authorization.status ? \`· \${human(String(caseDetail.case.current_authorization.status))}\` : ""}</span>
+                  <span><strong>Current authorization:</strong> {String(caseDetail.case.current_authorization.authorization || "None")} {caseDetail.case.current_authorization.status ? ` · ${human(String(caseDetail.case.current_authorization.status))}` : ""}</span>
                   <span><strong>Requested authorization:</strong> {String(caseDetail.case.requested_authorization.authorization || caseDetail.case.authorization)} · {String(caseDetail.case.requested_authorization.scope || "Global")}</span>
                 </div>
 
