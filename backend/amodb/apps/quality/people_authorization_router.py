@@ -1318,18 +1318,45 @@ def _ensure_appointment(
     rule: QualityPrivilegeRule,
     effective_from: date,
 ) -> QualityAppointment:
-    appointment = db.query(QualityAppointment).filter(
-        QualityAppointment.amo_id == ctx.amo_id,
-        QualityAppointment.user_id == row.user_id,
-        QualityAppointment.function_code == rule.privilege_type,
-        QualityAppointment.status == "ACTIVE",
-    ).order_by(QualityAppointment.created_at.desc()).first()
+    title = _appointment_title(rule)
+    family_codes = (
+        {"AUDITOR", "LEAD_AUDITOR"}
+        if rule.privilege_type in {"AUDITOR", "LEAD_AUDITOR"}
+        else {rule.privilege_type}
+    )
+    active_rows = (
+        db.query(QualityAppointment)
+        .filter(
+            QualityAppointment.amo_id == ctx.amo_id,
+            QualityAppointment.user_id == row.user_id,
+            QualityAppointment.function_code.in_(family_codes),
+            QualityAppointment.status == "ACTIVE",
+        )
+        .order_by(QualityAppointment.created_at.desc())
+        .all()
+    )
+    appointment = next(
+        (
+            item
+            for item in active_rows
+            if item.function_code == rule.privilege_type and item.title == title
+        ),
+        None,
+    )
+    for item in active_rows:
+        if appointment is not None and item.id == appointment.id:
+            continue
+        item.status = "SUPERSEDED"
+        item.effective_until = effective_from
+        item.updated_by_user_id = ctx.user_id
+        item.updated_at = _utcnow()
+
     if appointment is None:
         appointment = QualityAppointment(
             amo_id=ctx.amo_id,
             user_id=row.user_id,
             function_code=rule.privilege_type,
-            title=_appointment_title(rule),
+            title=title,
             status="ACTIVE",
             effective_from=effective_from,
             source_references=[{"type": "AUTHORIZATION_CASE", "case_id": str(row.id)}],
@@ -1340,7 +1367,6 @@ def _ensure_appointment(
         db.flush()
     row.appointment_id = appointment.id
     return appointment
-
 
 def _activate_case_authorization(
     db: Session,
