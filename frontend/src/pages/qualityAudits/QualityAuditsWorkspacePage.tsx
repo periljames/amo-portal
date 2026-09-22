@@ -393,7 +393,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
   const deleteMutation = useMutation({
     mutationFn: ({ auditId, reason }: { auditId: string; reason?: string }) =>
       qmsDeleteAudit(auditId, reason),
-    onSuccess: (_result, variables) => {
+    onSuccess: () => {
       setDeleteTarget(null);
       setDeleteReason("");
       setDeleteError(null);
@@ -413,6 +413,8 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [deleteMutation.isPending, deleteTarget]);
 
+  /* AG Grid column definitions intentionally depend on stable callback identities. */
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const requestDelete = useCallback((audit: QMSAuditOut) => {
     setDeleteTarget(audit);
     setDeleteReason("");
@@ -625,6 +627,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     },
     [amoCode, editableProgrammes, navigate, pushToast, queryClient],
   );
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   return (
     <QualityAuditsSectionLayout
