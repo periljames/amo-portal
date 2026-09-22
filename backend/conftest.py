@@ -97,6 +97,7 @@ def db_session():
             quality_models.CARResponse.__table__,
             quality_models.CARAttachment.__table__,
             quality_models.QMSNotification.__table__,
+            quality_models.QualityTenantWorkflowSettings.__table__,
             quality_people_models.QualityPrivilegeRule.__table__,
             quality_people_models.QualityPrivilege.__table__,
             quality_people_models.QualityPrivilegeDecision.__table__,
