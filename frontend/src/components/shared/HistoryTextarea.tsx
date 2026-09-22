@@ -32,6 +32,7 @@ export function HistoryTextarea({
         <span>{label}</span>
         {options.length ? (
           <select
+            id={listId}
             aria-label={`Recent ${label}`}
             className="qms-field-with-history__recent"
             defaultValue=""
@@ -54,17 +55,11 @@ export function HistoryTextarea({
       <textarea
         rows={rows}
         required={required}
-        list={listId}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         onBlur={() => onRemember?.(value)}
       />
-      <datalist id={listId}>
-        {options.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
     </label>
   );
 }
