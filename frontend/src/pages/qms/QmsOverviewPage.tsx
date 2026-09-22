@@ -31,6 +31,7 @@ function amoCodeFromPath(pathname: string): string {
 export type AssuranceHubId = "readiness" | "controls" | "evidence" | "intelligence";
 
 /** Continuous Assurance cockpit hubs. Bare `/quality` (no hub) remains Control Room. */
+/* eslint-disable-next-line react-refresh/only-export-components -- route parsing is intentionally exported for contract tests. */
 export function assuranceHub(search: string): AssuranceHubId | null {
   const requested = new URLSearchParams(search).get("hub");
   return requested === "readiness"
