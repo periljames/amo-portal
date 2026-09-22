@@ -475,6 +475,22 @@
   margin: 7px 0;
 }
 
+.qms-authz-decision-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0 10px;
+  color: var(--text-secondary, #5c6975);
+  font-size: .83rem;
+}
+
+.qms-authz-assignment-impact {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--text-secondary, #5c6975);
+  font-size: .82rem;
+}
+
 .qms-authz-timeline {
   display: grid;
   gap: 8px;
