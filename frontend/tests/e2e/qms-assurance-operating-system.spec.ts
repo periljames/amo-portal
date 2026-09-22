@@ -300,8 +300,7 @@ test("Assurance keeps case triage primary in the consolidated finding lifecycle"
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/register", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.locator(".qa-register-grid-page__heading h1"), 17.5);
-  await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
+  await expectFontAtLeast(page.getByRole("heading", { name: "Findings", exact: true }), 17.5);
   // The consolidated register owns the visible heading; the legacy shell subtitle stays suppressed to avoid duplicate chrome.
   await expect(page.getByText(/one lifecycle from audit finding through auditee action/i)).toBeHidden();
   await expect(page.getByText("No findings or corrective actions yet", { exact: true })).toBeVisible();
