@@ -266,8 +266,9 @@ export function normalisePlannerEvent(row: Record<string, unknown>, canManageCal
     "end_time",
     "planned_end_time",
   );
-  // Date-only planned_end/ends_on stay as endDate; bare clocks must not become endDate.
-  const explicitEndDate = dateOnly(text(row, "ends_on")) || dateOnly(text(row, "planned_end"));
+  // Prefer planned_end over ends_on so stale planner metadata cannot inflate a
+  // one-day audit into a multi-day span across day/week/month views.
+  const explicitEndDate = dateOnly(text(row, "planned_end")) || dateOnly(text(row, "ends_on"));
   const durationDays = Number(text(row, "duration_days", "durationDays"));
   const startDate = parseIsoDateKey(date);
   const durationEndDate = !explicitEndDate && startDate && Number.isInteger(durationDays) && durationDays > 1
@@ -354,6 +355,14 @@ export function eventInclusiveEndDate(event: PlannerEvent): string {
   return end && end >= event.date ? end : event.date;
 }
 
+export function isMultiDayPlannerEvent(event: PlannerEvent): boolean {
+  return eventInclusiveEndDate(event) > event.date;
+}
+
+export function plannerEventDurationDays(event: PlannerEvent): number {
+  return eachIsoDateInclusive(event.date, eventInclusiveEndDate(event)).length || 1;
+}
+
 export function eachIsoDateInclusive(start: string, end: string): string[] {
   const first = parseIsoDateKey(start);
   const last = parseIsoDateKey(end);
@@ -388,6 +397,8 @@ export function layoutAllDaySpans(events: PlannerEvent[], dayKeys: string[]): Al
   if (!dayKeys.length) return [];
 
   const spans = events
+    // Only true all-day commitments use this lane. Timed audits (with start/end
+    // clocks) stay on the hour timeline even when they span multiple dates.
     .filter((event) => !event.startTime)
     .map((event) => {
       const inclusiveEnd = eventInclusiveEndDate(event);

@@ -5,12 +5,14 @@ import {
   expandPlannerOccurrences,
   isoDateKey,
   isAuditScheduleTemplate,
+  isMultiDayPlannerEvent,
   layoutAllDaySpans,
   layoutTimedEvents,
   monthGridDays,
   movePlannerEvent,
   normalisePlannerEvent,
   plannerCategory,
+  plannerEventDurationDays,
   plannerNowScrollTop,
   plannerPillCopy,
   plannerTone,
@@ -254,6 +256,46 @@ describe("QMS planner model", () => {
     expect(timed?.endTime).toBe("15:00");
     expect(layoutAllDaySpans([timed!], ["2026-09-23"])).toEqual([]);
     expect(layoutTimedEvents([timed!], 0, 24)).toHaveLength(1);
+  });
+
+  it("ignores stale ends_on that would inflate a one-day audit", () => {
+    const audit = normalisePlannerEvent({
+      id: "audit-1day",
+      module: "audits",
+      entity_type: "audit",
+      entity_id: "audit-1day",
+      event_type: "audit_planned",
+      title: "One-day audit",
+      date: "2026-09-23",
+      planned_end: "2026-09-23",
+      ends_on: "2026-09-24",
+      start_time: "10:00",
+      end_time: "14:00",
+    }, true);
+
+    expect(audit?.endDate).toBe("2026-09-23");
+    expect(isMultiDayPlannerEvent(audit!)).toBe(false);
+    expect(plannerEventDurationDays(audit!)).toBe(1);
+  });
+
+  it("places multi-day timed audits on the hour timeline, not the all-day lane", () => {
+    const audit = normalisePlannerEvent({
+      id: "audit-multi",
+      module: "audits",
+      entity_type: "audit",
+      entity_id: "audit-multi",
+      event_type: "audit_planned",
+      title: "Two-day audit",
+      date: "2026-09-23",
+      planned_end: "2026-09-24",
+      start_time: "09:00",
+      end_time: "17:00",
+    }, true);
+
+    expect(isMultiDayPlannerEvent(audit!)).toBe(true);
+    expect(audit?.startTime).toBe("09:00");
+    expect(layoutAllDaySpans([audit!], ["2026-09-23", "2026-09-24", "2026-09-25"])).toEqual([]);
+    expect(layoutTimedEvents([audit!], 0, 24)).toHaveLength(1);
   });
 
   it("stacks overlapping all-day spans and reuses lanes after a span ends", () => {

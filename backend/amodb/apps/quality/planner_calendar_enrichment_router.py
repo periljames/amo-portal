@@ -135,7 +135,8 @@ def _apply_item_times(
         return
     if starts_at:
         item["starts_at"] = starts_at
-        item["date"] = starts_at[:10]
+        # Keep the source calendar day authoritative; timezone conversion of the
+        # wall clock must not slide a daytime audit onto the neighbouring date.
         item["start_time"] = starts_at[11:16]
     if ends_at:
         item["ends_at"] = ends_at
@@ -158,7 +159,12 @@ def _expand_audit_window_with_meetings(
     *,
     display_timezone,
 ) -> None:
-    """Fold opening/closing debriefs into the single audit bar (one timed block)."""
+    """Fold opening/closing debriefs into the single audit bar (one timed block).
+
+    Planned start/end dates remain the authoritative calendar span. Meetings only
+    contribute clock bounds so a same-day audit cannot inflate into a multi-day bar
+    when meeting timestamps or stale ends_on disagree with planned_end.
+    """
     bounds: list[datetime] = []
     for meeting in meetings:
         if str(meeting.status or "").upper() == "CANCELLED" or meeting.scheduled_start is None:
@@ -176,16 +182,36 @@ def _expand_audit_window_with_meetings(
     last = max(bounds)
     if last < first:
         last = first
+
+    planned_start_text = str(parent.get("planned_start") or parent.get("occurrence_date") or parent.get("date") or "")[:10]
+    planned_end_text = str(parent.get("planned_end") or parent.get("ends_on") or "")[:10]
+    try:
+        planned_start = date.fromisoformat(planned_start_text) if len(planned_start_text) == 10 else None
+    except ValueError:
+        planned_start = None
+    try:
+        planned_end = date.fromisoformat(planned_end_text) if len(planned_end_text) == 10 else None
+    except ValueError:
+        planned_end = None
+    if planned_start is None:
+        planned_start = first.date()
+    if planned_end is None or planned_end < planned_start:
+        planned_end = planned_start
+
     parent["starts_at"] = first.isoformat(timespec="minutes")
     parent["ends_at"] = last.isoformat(timespec="minutes")
     parent["start_time"] = first.strftime("%H:%M")
     parent["end_time"] = last.strftime("%H:%M")
-    parent["date"] = first.date().isoformat()
+    parent["date"] = planned_start.isoformat()
     parent["meeting_count"] = sum(
         1 for meeting in meetings if str(meeting.status or "").upper() != "CANCELLED" and meeting.scheduled_start
     )
-    if parent.get("planned_end") and str(parent.get("planned_end"))[:10] == parent["date"]:
+    if planned_end > planned_start:
+        parent["ends_on"] = planned_end.isoformat()
+        parent["planned_end"] = planned_end.isoformat()
+    else:
         parent.pop("ends_on", None)
+        parent["planned_end"] = planned_start.isoformat()
 
 
 @planner_calendar_enrichment_router.get("/integrations/calendar")
@@ -338,5 +364,19 @@ def qms_planner_calendar_enriched(
                 audit_meetings,
                 display_timezone=effective_timezone.tzinfo,
             )
+
+    # Keep live-audit day spans authoritative from planned_start/planned_end so
+    # stale planner metadata ends_on cannot inflate a one-day audit into two days.
+    for item in items:
+        if item.get("entity_type") != "audit":
+            continue
+        start_text = str(item.get("date") or "")[:10]
+        if len(start_text) != 10:
+            continue
+        planned_end_text = str(item.get("planned_end") or "")[:10]
+        if planned_end_text and planned_end_text > start_text:
+            item["ends_on"] = planned_end_text
+        else:
+            item.pop("ends_on", None)
 
     return payload

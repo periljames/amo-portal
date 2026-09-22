@@ -71,17 +71,18 @@ import {
   DEFAULT_PLANNER_PREFERENCES,
   PLANNER_CATEGORIES,
   addDays,
-  eventInclusiveEndDate,
   eventMatchesSearch,
   groupEventsByDate,
   isoDateKey,
   isAuditScheduleTemplate,
+  isMultiDayPlannerEvent,
   layoutAllDaySpans,
   layoutTimedEvents,
   monthGridDays,
   movePlannerEvent,
   normalisePlannerEvent,
   parseIsoDateKey,
+  plannerEventDurationDays,
   plannerPillCopy,
   requestRange,
   startOfWeek,
@@ -133,6 +134,14 @@ type PlannerUiPreferences = {
 
 type PendingMove = { event: PlannerEvent; targetDate: string };
 type QuickCreateDraft = { kind: CreateKind; title: string; date: string; time: string; durationDays: number; queueItemId: string };
+
+type ScheduleEditDraft = {
+  date: string;
+  durationDays: number;
+  startTime: string;
+  endTime: string;
+};
+
 type QuickCreateOption = { kind: CreateKind; label: string; enabled: boolean; unavailableReason?: string };
 type ScheduleTarget = {
   programmeId: string;
@@ -495,7 +504,7 @@ function MonthView({
       {weeks.map((week) => {
         const weekKeys = week.map(isoDateKey);
         const spans = layoutAllDaySpans(
-          events.filter((event) => eventInclusiveEndDate(event) > event.date),
+          events.filter((event) => !event.startTime && isMultiDayPlannerEvent(event)),
           weekKeys,
         );
         const laneCount = spans.reduce((count, span) => Math.max(count, span.lane + 1), 0);
@@ -510,7 +519,7 @@ function MonthView({
                 const key = isoDateKey(day);
                 const rows = events.filter((event) => (
                   event.date === key
-                  && (eventInclusiveEndDate(event) === event.date || Boolean(event.startTime))
+                  && (event.startTime || !isMultiDayPlannerEvent(event))
                 ));
                 return (
                   <section
@@ -757,7 +766,11 @@ function TimelineView({
       </div>
       {days.map((day) => {
         const key = isoDateKey(day);
-        const timed = layoutTimedEvents((eventsByDate.get(key) || []).filter((event) => event.startTime), hourStart, hourEnd);
+        const timed = layoutTimedEvents(
+          (eventsByDate.get(key) || []).filter((event) => Boolean(event.startTime)),
+          hourStart,
+          hourEnd,
+        );
         return (
           <div
             key={key}
@@ -896,6 +909,8 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   const [conflictPrompt, setConflictPrompt] = useState<PlannerConflictDetail | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<PlannerAvailableSlot | null>(null);
   const [overrideConflicts, setOverrideConflicts] = useState(false);
+  const [scheduleEdit, setScheduleEdit] = useState<ScheduleEditDraft | null>(null);
+  const [scheduleEditBusy, setScheduleEditBusy] = useState(false);
   const [moveReason, setMoveReason] = useState("");
   const [moveAcknowledged, setMoveAcknowledged] = useState(false);
   const [moveBusy, setMoveBusy] = useState(false);
@@ -1106,6 +1121,19 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   const eventsByDate = useMemo(() => groupEventsByDate(filteredEvents), [filteredEvents]);
   const selectedEvent = useMemo(() => events.find((event) => event.id === selectedEventId) || null, [events, selectedEventId]);
   const visibleDays = useMemo(() => visiblePlannerDays(anchor, view === "day" ? 1 : preferences.daySpan, preferences.hideWeekends), [anchor, preferences.daySpan, preferences.hideWeekends, view]);
+
+  useEffect(() => {
+    if (!selectedEvent || (selectedEvent.entityType !== "audit" && selectedEvent.entityType !== "audit_schedule")) {
+      setScheduleEdit(null);
+      return;
+    }
+    setScheduleEdit({
+      date: selectedEvent.date,
+      durationDays: plannerEventDurationDays(selectedEvent),
+      startTime: selectedEvent.startTime || "09:00",
+      endTime: selectedEvent.endTime || "17:00",
+    });
+  }, [selectedEvent]);
   const categoryCounts = useMemo(() => Object.fromEntries(PLANNER_CATEGORIES.map((item) => [item.key, events.filter((event) => event.category === item.key).length])) as Record<PlannerCategory, number>, [events]);
   const overdueCount = useMemo(() => events.filter((event) => event.dueState === "overdue").length, [events]);
   const todayCount = useMemo(() => events.filter((event) => event.date === todayKey).length, [events, todayKey]);
@@ -1117,6 +1145,76 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
     setPreferences((current) => ({ ...current, rightPanelOpen: true }));
   };
 
+  const canEditScheduleWindow = Boolean(
+    selectedEvent?.canReschedule
+    && (selectedEvent.entityType === "audit" || selectedEvent.entityType === "audit_schedule"),
+  );
+
+  const saveScheduleEdit = async () => {
+    if (!selectedEvent || !scheduleEdit || !canEditScheduleWindow) return;
+    if (scheduleEdit.endTime <= scheduleEdit.startTime) {
+      setToast({ tone: "danger", message: "End time must be later than start time." });
+      return;
+    }
+    const unchanged =
+      scheduleEdit.date === selectedEvent.date
+      && scheduleEdit.durationDays === plannerEventDurationDays(selectedEvent)
+      && scheduleEdit.startTime === (selectedEvent.startTime || "09:00")
+      && scheduleEdit.endTime === (selectedEvent.endTime || "17:00");
+    if (unchanged) {
+      setToast({ tone: "info", message: "No schedule changes to save." });
+      return;
+    }
+    setScheduleEditBusy(true);
+    try {
+      const response = await apiRequest<{ new_date?: string; end_date?: string | null }>(qmsPath(amoCode, "/integrations/calendar/reschedule"), {
+        method: "PATCH",
+        timeoutMs: 15000,
+        body: JSON.stringify({
+          event_id: selectedEvent.id,
+          expected_old_date: selectedEvent.date,
+          new_date: scheduleEdit.date,
+          duration_days: scheduleEdit.durationDays,
+          start_time: scheduleEdit.startTime,
+          end_time: scheduleEdit.endTime,
+          reason: "Updated audit schedule window from the Quality planner.",
+        }),
+      });
+      setToast({
+        tone: "success",
+        message: `${eventReference(selectedEvent)} updated to ${response?.new_date || scheduleEdit.date} · ${scheduleEdit.durationDays} day${scheduleEdit.durationDays === 1 ? "" : "s"} · ${scheduleEdit.startTime}–${scheduleEdit.endTime}.`,
+      });
+      void loadPlanner();
+    } catch (editError) {
+      const weekendDetail = parseWeekendConfirmationDetail(editError);
+      if (weekendDetail) {
+        setPendingMove({ event: selectedEvent, targetDate: scheduleEdit.date });
+        setMoveReason("Updated audit schedule window from the Quality planner.");
+        setMoveAcknowledged(true);
+        setWeekendPrompt(weekendDetail);
+        return;
+      }
+      const staleDetail = parseStaleScheduleDetail(editError);
+      if (staleDetail) {
+        await loadPlanner();
+        setToast({ tone: "info", message: "Calendar refreshed to the latest schedule. Review and save again." });
+        return;
+      }
+      const conflictDetail = parseScheduleConflictDetail(editError);
+      if (conflictDetail) {
+        setPendingMove({ event: selectedEvent, targetDate: scheduleEdit.date });
+        setMoveReason("Updated audit schedule window from the Quality planner.");
+        setMoveAcknowledged(true);
+        setConflictPrompt(conflictDetail);
+        setSelectedSlot(conflictDetail.available_slots[0] || null);
+        setToast({ tone: "warning", message: conflictDetail.message });
+        return;
+      }
+      setToast({ tone: "danger", message: friendlyError(editError, "The schedule window could not be updated.") });
+    } finally {
+      setScheduleEditBusy(false);
+    }
+  };
 
   const proposeMove = (event: PlannerEvent, targetDate: string) => {
     if (!event.canReschedule || event.date === targetDate) return;
@@ -1486,6 +1584,55 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
                   {selectedEvent.ownerLabel ? <div><dt><User size={15} /> Owner</dt><dd>{selectedEvent.ownerLabel}</dd></div> : null}
                   {selectedEvent.location ? <div><dt><MapPin size={15} /> Location</dt><dd>{selectedEvent.location}</dd></div> : null}
                 </dl>
+                {canEditScheduleWindow && scheduleEdit ? (
+                  <section className="qms-planner-panel-section qms-planner-schedule-edit">
+                    <h3>Schedule window</h3>
+                    <p>Adjust duration or working hours. Day, week, and month use the same planned span.</p>
+                    <div className="qms-planner-schedule-edit__grid">
+                      <label>
+                        <span>Start date</span>
+                        <input
+                          type="date"
+                          value={scheduleEdit.date}
+                          onChange={(event) => setScheduleEdit((current) => current ? { ...current, date: event.target.value } : current)}
+                          disabled={scheduleEditBusy}
+                        />
+                      </label>
+                      <label>
+                        <span>Duration (days)</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={14}
+                          value={scheduleEdit.durationDays}
+                          onChange={(event) => setScheduleEdit((current) => current ? { ...current, durationDays: Math.max(1, Math.min(14, Number(event.target.value) || 1)) } : current)}
+                          disabled={scheduleEditBusy}
+                        />
+                      </label>
+                      <label>
+                        <span>Start time</span>
+                        <input
+                          type="time"
+                          value={scheduleEdit.startTime}
+                          onChange={(event) => setScheduleEdit((current) => current ? { ...current, startTime: event.target.value } : current)}
+                          disabled={scheduleEditBusy}
+                        />
+                      </label>
+                      <label>
+                        <span>End time</span>
+                        <input
+                          type="time"
+                          value={scheduleEdit.endTime}
+                          onChange={(event) => setScheduleEdit((current) => current ? { ...current, endTime: event.target.value } : current)}
+                          disabled={scheduleEditBusy}
+                        />
+                      </label>
+                    </div>
+                    <Button onClick={() => void saveScheduleEdit()} loading={scheduleEditBusy} disabled={scheduleEditBusy}>
+                      Save schedule window
+                    </Button>
+                  </section>
+                ) : null}
                 <section className="qms-planner-panel-section"><h3>Source record</h3><p>{selectedEvent.module || "QMS"} · {selectedEvent.eventType.replaceAll("_", " ")}</p><small>Event ID: {selectedEvent.id}</small></section>
                 <div className="qms-planner-inspector__actions">
                   {selectedEvent.link ? <Link to={selectedEvent.link}><ExternalLink size={15} /> Open record</Link> : null}

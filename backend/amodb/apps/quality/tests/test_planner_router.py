@@ -96,6 +96,7 @@ def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None
     assert "SCHEDULE_STALE" in source
     assert "SCHEDULE_CONFLICT" in module_source
     assert "_enforce_audit_reschedule_conflicts(" in source
+    assert "payload.duration_days" in source
 
 
 def test_suggest_working_slots_avoids_busy_windows() -> None:
@@ -149,6 +150,8 @@ def test_calendar_audit_schedules_expose_duration_end_and_version() -> None:
     assert 'item["expected_version"] = metadata.version' in enriched_source
     assert "QualityAuditMeeting" in enriched_source
     assert "_expand_audit_window_with_meetings" in enriched_source
+    assert 'item.pop("ends_on", None)' in enriched_source
+    assert "stale planner metadata ends_on" in enriched_source
 
 
 def test_calendar_page_is_stable_and_reports_next_offset() -> None:

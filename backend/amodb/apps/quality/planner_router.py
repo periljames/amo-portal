@@ -54,6 +54,7 @@ class CalendarRescheduleRequest(BaseModel):
         default=None,
         description="Required when the moved occurrence spans Saturday/Sunday.",
     )
+    duration_days: int | None = Field(default=None, ge=1, le=90)
     start_time: time | None = None
     end_time: time | None = None
     allow_conflicts: bool = False
@@ -448,13 +449,21 @@ def qms_planner_reschedule(
             },
         )
 
-    if payload.new_date == old_date and payload.start_time is None and payload.end_time is None:
+    if (
+        payload.new_date == old_date
+        and payload.start_time is None
+        and payload.end_time is None
+        and payload.duration_days is None
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "Choose a different date.", "trace_id": trace_id},
         )
 
-    if old_end is not None:
+    if payload.duration_days is not None:
+        duration_days = max(int(payload.duration_days), 1)
+    elif old_end is not None:
+        # Inclusive calendar days. Same-day audits (end == start) stay duration 1.
         duration_days = max((old_end - old_date).days + 1, 1)
     elif entity_type == "audit_schedule":
         duration_row = db.execute(
@@ -470,6 +479,7 @@ def qms_planner_reschedule(
         ).mappings().first()
         duration_days = int((duration_row or {}).get("duration_days") or 1)
     else:
+        # Live audits with a null planned_end are single-day commitments.
         duration_days = 1
 
     start_date, new_end, resolved_duration = resolve_schedule_window(

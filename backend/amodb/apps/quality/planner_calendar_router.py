@@ -261,6 +261,7 @@ def _qms_planner_calendar(
                         "auditee": row.get("auditee"),
                         "lead_auditor_user_id": row.get("lead_auditor_user_id"),
                         "lead_auditor_name": row.get("lead_auditor_name"),
+                        "planned_start": _as_date(row.get("event_date")),
                         "planned_end": _as_date(row.get("planned_end")),
                         "planned_start_time": start_time,
                         "planned_end_time": end_time,
