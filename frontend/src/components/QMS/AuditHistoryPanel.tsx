@@ -31,8 +31,8 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
       const data = await listAuditEvents({ entityType, entityId, limit });
       setEvents(data);
       setState("ready");
-    } catch (err: any) {
-      setError(err?.message || "Failed to load history.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load history.");
       setState("error");
     }
   };
