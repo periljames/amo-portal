@@ -133,6 +133,11 @@ class ControlledExemptionCreate(BaseModel):
     confirmed: bool = False
 
 
+class ControlledExemptionRevoke(BaseModel):
+    reason: str = Field(min_length=12, max_length=8000)
+    confirmed: bool = False
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1398,6 +1403,7 @@ def _activate_case_authorization(
     scope = dict(row.requested_scope or {})
     if exemption is not None:
         scope["controlled_exemption"] = {
+            "exemption_id": str(exemption.id),
             "criterion": exemption.criterion,
             "conditions": list(exemption.conditions or []),
             "limitations": list(exemption.limitations or []),
@@ -1787,6 +1793,7 @@ def _create_controlled_exemption(
     if privilege is not None:
         scope = dict(privilege.scope or {})
         scope["controlled_exemption"] = {
+            "exemption_id": str(row.id),
             "criterion": row.criterion,
             "conditions": list(row.conditions or []),
             "limitations": list(row.limitations or []),
@@ -1859,6 +1866,64 @@ def create_authorization_controlled_exemption(
     row = _create_controlled_exemption(
         db, ctx=ctx, payload=payload, person_user_id=str(privilege.user_id),
         authorization_type=_authorization_label(rule), privilege=privilege,
+    )
+    db.commit()
+    names = _actor_names(db, amo_id=ctx.amo_id, ids={ctx.user_id, str(row.supervisor_user_id or "")})
+    return {"controlled_exemption": _exemption_dict(row, names)}
+
+
+@router.post("/authorization-control/controlled-exemptions/{exemption_id}/revoke")
+def revoke_controlled_exemption(
+    exemption_id: str,
+    payload: ControlledExemptionRevoke,
+    ctx: TenantContext = Depends(require_quality_write_permission("qms.authorization.exemption.approve")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    if not payload.confirmed:
+        raise HTTPException(status_code=422, detail="Controlled exemption revocation requires explicit confirmation.")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = (
+        db.query(QualityControlledExemption)
+        .filter(
+            QualityControlledExemption.amo_id == ctx.amo_id,
+            QualityControlledExemption.id == exemption_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Controlled exemption not found.")
+    if row.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="Only an active controlled exemption can be revoked.")
+    before = _exemption_dict(row)
+    row.status = "REVOKED"
+    row.revoked_by_user_id = ctx.user_id
+    row.revoked_at = _utcnow()
+    row.revoke_reason = payload.reason.strip()
+    if row.privilege_id:
+        privilege = _privilege(db, amo_id=ctx.amo_id, privilege_id=str(row.privilege_id), lock=True)
+        scope = dict(privilege.scope or {})
+        active_scope = scope.get("controlled_exemption")
+        if isinstance(active_scope, dict):
+            scoped_id = str(active_scope.get("exemption_id") or "")
+            same_legacy_record = (
+                not scoped_id
+                and str(active_scope.get("criterion") or "") == row.criterion
+                and str(active_scope.get("expires_on") or "") == row.expires_on.isoformat()
+            )
+            if scoped_id == str(row.id) or same_legacy_record:
+                scope.pop("controlled_exemption", None)
+                privilege.scope = scope
+                privilege.updated_by_user_id = ctx.user_id
+                privilege.updated_at = _utcnow()
+    _decision_event(
+        db, ctx=ctx,
+        entity_type="qms.authorization.controlled_exemption",
+        entity_id=str(row.id),
+        action="REVOKED",
+        before=before or {},
+        after={"status": row.status, "revoked_at": row.revoked_at.isoformat()},
+        reason=payload.reason,
     )
     db.commit()
     names = _actor_names(db, amo_id=ctx.amo_id, ids={ctx.user_id, str(row.supervisor_user_id or "")})
