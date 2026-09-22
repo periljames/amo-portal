@@ -191,14 +191,19 @@ def main() -> None:
         """)).scalar_one()
         assert fk_delete_rule == "RESTRICT"
 
-        decision_check = connection.execute(text("""
-            SELECT pg_get_constraintdef(c.oid)
-            FROM pg_constraint c
-            JOIN pg_class t ON t.oid=c.conrelid
-            WHERE t.relname='quality_privilege_decisions'
-              AND c.conname='ck_quality_privilege_decision_type'
-        """)).scalar_one()
-        assert "CHANGE" in decision_check
+        decision_checks = [
+            row[0]
+            for row in connection.execute(text("""
+                SELECT pg_get_constraintdef(c.oid)
+                FROM pg_constraint c
+                JOIN pg_class t ON t.oid=c.conrelid
+                WHERE t.relname='quality_privilege_decisions'
+                  AND c.contype='c'
+            """)).all()
+            if "decision_type" in str(row[0]).lower()
+        ]
+        assert len(decision_checks) == 1
+        assert "CHANGE" in decision_checks[0]
 
         capabilities = {
             row[0]
