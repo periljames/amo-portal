@@ -231,7 +231,7 @@ test("QUALITY_OFFICER can work the CAR control loop and prepare authorization ca
     if (path.endsWith("/quality/people/authorization-control/overview")) return json(route, {
       permissions: {
         can_view: true, can_prepare: true, can_approve: false, can_review: false,
-        can_approve_exemption: false, can_manage_policy: false, can_oversight: false,
+        can_approve_exemption: false, can_manage_policy: false, can_oversight: false, self_service_only: false,
       },
       metrics: {
         active_authorizations: 0, suspended_authorizations: 0, expiring_within_60_days: 0,
