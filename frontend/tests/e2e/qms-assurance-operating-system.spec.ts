@@ -130,7 +130,7 @@ async function prepare(page: Page): Promise<void> {
       return json(route, {
         permissions: {
           can_view: true, can_prepare: true, can_approve: true, can_review: true,
-          can_approve_exemption: true, can_manage_policy: true, can_oversight: true,
+          can_approve_exemption: true, can_manage_policy: true, can_oversight: true, self_service_only: false,
         },
         metrics: {
           active_authorizations: 1, suspended_authorizations: 0, expiring_within_60_days: 1,
