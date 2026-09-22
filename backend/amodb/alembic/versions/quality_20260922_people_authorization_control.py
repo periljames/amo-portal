@@ -352,7 +352,7 @@ def upgrade() -> None:
         if decision_type_check:
             _drop_reflected_constraint("quality_privilege_decisions", decision_type_check)
         op.create_check_constraint(
-            op.f("ck_quality_privilege_decision_type"),
+            "ck_quality_privilege_decision_type",
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','CHANGE','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
@@ -387,7 +387,7 @@ def downgrade() -> None:
         if decision_type_check:
             _drop_reflected_constraint("quality_privilege_decisions", decision_type_check)
         op.create_check_constraint(
-            op.f("ck_quality_privilege_decision_type"),
+            "ck_quality_privilege_decision_type",
             "quality_privilege_decisions",
             "decision_type IN ('GRANT','RENEW','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
         )
