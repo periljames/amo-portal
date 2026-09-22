@@ -447,6 +447,28 @@ def _latest_review(db: Session, *, amo_id: str, privilege_id: str | None) -> Qua
     )
 
 
+def _next_review_due(db: Session, *, amo_id: str, privilege_id: str | None) -> date | None:
+    """Return the current governed review due date without inventing a review event."""
+
+    if not privilege_id:
+        return None
+    latest = _latest_review(db, amo_id=amo_id, privilege_id=privilege_id)
+    if latest is not None:
+        return latest.next_review_due
+    approved_case = (
+        db.query(QualityAuthorizationCase)
+        .filter(
+            QualityAuthorizationCase.amo_id == amo_id,
+            QualityAuthorizationCase.current_privilege_id == privilege_id,
+            QualityAuthorizationCase.status == "APPROVED",
+            QualityAuthorizationCase.next_review_due.is_not(None),
+        )
+        .order_by(QualityAuthorizationCase.decided_at.desc())
+        .first()
+    )
+    return approved_case.next_review_due if approved_case else None
+
+
 def _evidence_rows(db: Session, *, amo_id: str, case_id: str | None = None, privilege_id: str | None = None) -> list[QualityAuthorizationEvidence]:
     query = db.query(QualityAuthorizationEvidence).filter(
         QualityAuthorizationEvidence.amo_id == amo_id,
@@ -706,11 +728,13 @@ def authorization_overview(
         QualityControlledExemption.status == "ACTIVE",
         QualityControlledExemption.expires_on >= today,
     ).count()
-    due_reviews = db.query(QualityAuthorizationReview).filter(
-        QualityAuthorizationReview.amo_id == ctx.amo_id,
-        QualityAuthorizationReview.next_review_due.is_not(None),
-        QualityAuthorizationReview.next_review_due <= today,
-    ).count()
+    due_reviews = sum(
+        1
+        for privilege in privileges
+        if privilege.status in {"ACTIVE", "SUSPENDED"}
+        and (due := _next_review_due(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id))) is not None
+        and due <= today
+    )
     status_counts = {"ACTIVE": 0, "SUSPENDED": 0, "REVOKED": 0, "EXPIRED": 0, "DRAFT": 0}
     expiring = 0
     for item in privileges:
@@ -845,7 +869,11 @@ def authorization_person_detail(
             "authorization": _authorization_label(rule),
             "readiness": readiness,
             "last_reviewed": latest_review.last_reviewed.isoformat() if latest_review else None,
-            "next_review_due": latest_review.next_review_due.isoformat() if latest_review and latest_review.next_review_due else None,
+            "next_review_due": (
+                due.isoformat()
+                if (due := _next_review_due(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id)))
+                else None
+            ),
         })
     cases = db.query(QualityAuthorizationCase).filter(
         QualityAuthorizationCase.amo_id == ctx.amo_id,
@@ -1348,26 +1376,23 @@ def _activate_case_authorization(
         expires_on = min(expires_on, exemption.expires_on) if expires_on else exemption.expires_on
 
     if target is None:
-        if current is not None and current.rule_id != rule.id and current.status in {"ACTIVE", "SUSPENDED"}:
-            target = current
-            target.rule_id = rule.id
-            target.privilege_code = rule.privilege_code
-            target.scope_key = scope_key
-        else:
-            target = QualityPrivilege(
-                amo_id=ctx.amo_id,
-                rule_id=rule.id,
-                user_id=row.user_id,
-                privilege_code=rule.privilege_code,
-                scope_key=scope_key,
-                scope=dict(row.requested_scope or {}),
-                limitations=[],
-                status="DRAFT",
-                created_by_user_id=ctx.user_id,
-                updated_by_user_id=ctx.user_id,
-            )
-            db.add(target)
-            db.flush()
+        # Authorization changes create a new governed authorization record.
+        # The previous authorization is retained and explicitly superseded below;
+        # its historical identity is never rewritten into the new rank/type.
+        target = QualityPrivilege(
+            amo_id=ctx.amo_id,
+            rule_id=rule.id,
+            user_id=row.user_id,
+            privilege_code=rule.privilege_code,
+            scope_key=scope_key,
+            scope=dict(row.requested_scope or {}),
+            limitations=[],
+            status="DRAFT",
+            created_by_user_id=ctx.user_id,
+            updated_by_user_id=ctx.user_id,
+        )
+        db.add(target)
+        db.flush()
 
     previous_snapshot = _privilege_snapshot(target, rule)
     scope = dict(row.requested_scope or {})
@@ -1390,10 +1415,10 @@ def _activate_case_authorization(
     target.limitations = list(exemption.limitations or []) if exemption else list(target.limitations or [])
 
     decision_type = (
-        "GRANT" if target.status in {"DRAFT", "REVOKED", "EXPIRED"}
-        else "REINSTATE" if target.status == "SUSPENDED"
+        "CHANGE" if row.case_type == "CHANGE_AUTHORIZATION"
+        else "REINSTATE" if target.status == "SUSPENDED" or row.case_type == "REINSTATEMENT"
         else "RENEW" if row.case_type == "RENEWAL"
-        else "CHANGE"
+        else "GRANT"
     )
     _record_privilege_decision(
         db, ctx=ctx, privilege=target, decision_type=decision_type,
@@ -1729,6 +1754,7 @@ def _create_controlled_exemption(
     existing = db.query(QualityControlledExemption).filter(
         QualityControlledExemption.amo_id == ctx.amo_id,
         QualityControlledExemption.person_user_id == person_user_id,
+        QualityControlledExemption.authorization_type == authorization_type,
         QualityControlledExemption.status == "ACTIVE",
         QualityControlledExemption.expires_on >= date.today(),
     ).all()
@@ -1991,7 +2017,11 @@ def list_authorizations(
             "effective_from": privilege.effective_from.isoformat() if privilege.effective_from else None,
             "expires_on": privilege.expires_on.isoformat() if privilege.expires_on else None,
             "last_reviewed": review.last_reviewed.isoformat() if review else None,
-            "next_review_due": review.next_review_due.isoformat() if review and review.next_review_due else None,
+            "next_review_due": (
+                due.isoformat()
+                if (due := _next_review_due(db, amo_id=ctx.amo_id, privilege_id=str(privilege.id)))
+                else None
+            ),
             "limitations": list(privilege.limitations or []),
         })
     return {"items": items}
