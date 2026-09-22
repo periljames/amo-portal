@@ -24,7 +24,7 @@ from amodb.apps.training.integration import (
 
 from .people_models import QualityPrivilege, QualityPrivilegeDecision, QualityPrivilegeRule
 
-QM_BYPASS_REF_TYPE = "QM_TRAINING_BYPASS"
+LEGACY_QM_EXCEPTION_REF_TYPE = "QM_TRAINING_BYPASS"
 
 DEFAULT_QMS_COMPETENCE_PACKAGE: dict[str, Any] = {
     "codes": [QMS_INIT, QMS_REF, QMS_ADMIN],
@@ -475,8 +475,8 @@ def cap_privilege_expires_on(
     return min(requested, course_cap)
 
 
-def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None = None) -> dict[str, Any] | None:
-    """Return the active time-bounded QM training bypass, if any."""
+def active_controlled_authorization_exception(privilege: QualityPrivilege | None, *, as_of: date | None = None) -> dict[str, Any] | None:
+    """Return an active controlled authorization exception, including retained legacy decisions."""
 
     if privilege is None:
         return None
@@ -515,7 +515,7 @@ def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None =
                 "valid_until": valid_until.isoformat(),
                 "approved_by_user_id": scoped.get("approved_by_user_id"),
                 "approved_at": scoped.get("approved_at"),
-                "source": "privilege_scope",
+                "source": "legacy_privilege_scope",
             }
 
     decisions = list(getattr(privilege, "decisions", None) or [])
@@ -524,7 +524,7 @@ def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None =
         for ref in refs:
             if not isinstance(ref, dict):
                 continue
-            if str(ref.get("type") or "").strip().upper() != QM_BYPASS_REF_TYPE:
+            if str(ref.get("type") or "").strip().upper() != LEGACY_QM_EXCEPTION_REF_TYPE:
                 continue
             valid_until = _parse_date(ref.get("valid_until") or decision.expires_on)
             if valid_until and valid_until >= as_of:
@@ -534,7 +534,7 @@ def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None =
                     "approved_by_user_id": ref.get("approved_by_user_id") or decision.decided_by_user_id,
                     "approved_at": ref.get("approved_at") or (decision.decided_at.isoformat() if decision.decided_at else None),
                     "decision_id": str(decision.id),
-                    "source": "decision_source_references",
+                    "source": "legacy_decision_source_references",
                 }
         snap = decision.eligibility_snapshot if isinstance(decision.eligibility_snapshot, dict) else {}
         bypass = snap.get("qm_training_bypass")
@@ -547,7 +547,7 @@ def active_qm_bypass(privilege: QualityPrivilege | None, *, as_of: date | None =
                     "approved_by_user_id": bypass.get("approved_by_user_id") or decision.decided_by_user_id,
                     "approved_at": bypass.get("approved_at") or (decision.decided_at.isoformat() if decision.decided_at else None),
                     "decision_id": str(decision.id),
-                    "source": "decision_eligibility_snapshot",
+                    "source": "legacy_decision_eligibility_snapshot",
                 }
     return None
 
@@ -564,13 +564,13 @@ def apply_auto_suspend_if_currency_lapsed(
 ) -> QualityPrivilegeDecision | None:
     """Idempotently SUSPEND an ACTIVE privilege when required QMS currency has lapsed.
 
-    Does nothing when a time-bounded QM bypass is active, when the privilege is
+    Does nothing when a governed controlled exception is active, when the privilege is
     not ACTIVE, or when competence does not recommend suspension.
     """
 
     if privilege is None or str(privilege.status or "").upper() != "ACTIVE":
         return None
-    if active_qm_bypass(privilege, as_of=as_of):
+    if active_controlled_authorization_exception(privilege, as_of=as_of):
         return None
     if not competence.get("suspend_recommended"):
         return None
@@ -640,67 +640,6 @@ def apply_auto_suspend_if_currency_lapsed(
     db.add(decision)
     db.flush()
     privilege.status = "SUSPENDED"
-    privilege.latest_decision_id = decision.id
-    privilege.updated_by_user_id = actor_user_id
-    privilege.updated_at = _utcnow()
-    return decision
-
-
-def record_qm_training_bypass(
-    db: Session,
-    *,
-    amo_id: str,
-    privilege: QualityPrivilege,
-    rationale: str,
-    valid_until: date,
-    actor_user_id: str,
-) -> QualityPrivilegeDecision:
-    """Record a time-bounded QM bypass of the training/expiry gate (never permanent).
-
-    Requires an ACTIVE privilege. Writes privilege.scope and an append-only RENEW
-    decision that keeps ACTIVE without altering authorization dates.
-    """
-
-    if str(privilege.status or "").upper() != "ACTIVE":
-        raise ValueError("QM training bypass can only be granted on an ACTIVE authorization.")
-    if valid_until < date.today():
-        raise ValueError("QM bypass valid_until must be today or a future date.")
-    text = rationale.strip()
-    if len(text) < 8:
-        raise ValueError("QM bypass rationale must be at least 8 characters.")
-
-    bypass_payload = {
-        "type": QM_BYPASS_REF_TYPE,
-        "rationale": text,
-        "valid_until": valid_until.isoformat(),
-        "approved_by_user_id": actor_user_id,
-        "approved_at": _utcnow().isoformat(),
-        "gate": "training_current_verified",
-    }
-    scope = dict(privilege.scope or {})
-    scope["qm_training_bypass"] = {
-        "rationale": text,
-        "valid_until": valid_until.isoformat(),
-        "approved_by_user_id": actor_user_id,
-        "approved_at": bypass_payload["approved_at"],
-    }
-    privilege.scope = scope
-
-    decision = QualityPrivilegeDecision(
-        amo_id=amo_id,
-        privilege_id=privilege.id,
-        decision_type="RENEW",
-        resulting_status="ACTIVE",
-        rationale=f"[QM training bypass until {valid_until.isoformat()}] {text}",
-        eligibility_snapshot={"qm_training_bypass": bypass_payload, "gate": "training_current_verified"},
-        source_references=[bypass_payload],
-        effective_from=privilege.effective_from,
-        expires_on=privilege.expires_on,
-        decided_by_user_id=actor_user_id,
-        decided_at=_utcnow(),
-    )
-    db.add(decision)
-    db.flush()
     privilege.latest_decision_id = decision.id
     privilege.updated_by_user_id = actor_user_id
     privilege.updated_at = _utcnow()
