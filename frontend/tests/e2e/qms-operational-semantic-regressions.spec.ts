@@ -94,7 +94,7 @@ test("People authorization cases keep preparation and final decision in the gove
       history: [{ action: "SUBMITTED_FOR_DECISION", from: "UNDER_REVIEW", to: "READY_FOR_DECISION", reason: "Prepared.", actor: "Quality Officer", occurred_at: new Date().toISOString() }],
       permissions: {
         can_view: true, can_prepare: true, can_approve: true, can_review: true,
-        can_approve_exemption: true, can_manage_policy: true, can_oversight: true,
+        can_approve_exemption: true, can_manage_policy: true, can_oversight: true, self_service_only: false,
       },
     });
     if (path.endsWith("/quality/people/authorization-control/cases/auth-case-1/decision") && route.request().method() === "POST") {
