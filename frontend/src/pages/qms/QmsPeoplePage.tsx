@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { getCachedUser } from "../../services/auth";
 import {
   addQmsAuthorizationEvidenceReference,
   createQmsAuthorizationCase,
@@ -198,6 +199,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [ruleDevelopmental, setRuleDevelopmental] = useState(false);
 
   const permissions = overview?.permissions;
+  const actorName = getCachedUser()?.full_name || "Current authorized user";
   const canPrepare = permissions?.can_prepare === true;
   const canApprove = permissions?.can_approve === true;
   const canReview = permissions?.can_review === true;
@@ -828,6 +830,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
                 {exemptionOpen && canExempt ? (
                   <div className="qms-authz-workflow">
+                    <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
                     <div className="qms-authz-form-grid">
                       <label>Missing criterion<input value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
                       <label>Effective<input type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
@@ -843,6 +846,19 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 {canApprove && caseDetail.case.status === "READY_FOR_DECISION" ? (
                   <div className="qms-authz-workflow qms-authz-workflow--decision">
                     <h3>Final authorization decision</h3>
+                    <div className="qms-authz-decision-context">
+                      <span><strong>Decision authority:</strong> {actorName}</span>
+                      <span><strong>Affected future assignments:</strong> {caseDetail.readiness.affected_assignments.length}</span>
+                    </div>
+                    {caseDetail.readiness.affected_assignments.length ? (
+                      <ul className="qms-authz-assignment-impact">
+                        {caseDetail.readiness.affected_assignments.map((item, index) => (
+                          <li key={`${item.reference || item.title}-${index}`}>
+                            {item.reference || "Audit"} · {item.title || "Scheduled audit"} · {item.role || "Assigned role"}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                     <div className="qms-authz-form-grid">
                       <label>Decision<select value={decision} onChange={(event) => setDecision(event.target.value as typeof decision)}>
                         <option value="APPROVE">Approve</option>
@@ -952,6 +968,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Record periodic authorization review">
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitReview(event)}>
             <div className="qms-authz-modal__header"><h2>Record periodic review</h2><button type="button" onClick={() => setReviewOpen(false)}><XCircle size={20} /></button></div>
+            <p><strong>Reviewer:</strong> {actorName}</p>
             <label>Authorization<select required value={reviewAuthorization} onChange={(event) => setReviewAuthorization(event.target.value)}><option value="">Select active authorization</option>{authorizations.filter((item) => ["ACTIVE", "SUSPENDED"].includes(item.status)).map((item) => <option key={item.key} value={item.key}>{item.person} — {item.authorization}</option>)}</select></label>
             <label>Outcome<select value={reviewOutcome} onChange={(event) => setReviewOutcome(event.target.value as typeof reviewOutcome)}><option value="CONTINUE">Continue</option><option value="CONTINUE_WITH_CONDITIONS">Continue with conditions</option><option value="REQUIRES_ACTION">Requires action</option><option value="SUSPEND">Suspend</option><option value="REVOKE">Revoke</option></select></label>
             <label>Next review due<input type="date" value={reviewNextDue} onChange={(event) => setReviewNextDue(event.target.value)} /></label>
@@ -966,6 +983,19 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitLifecycle(event)}>
             <div className="qms-authz-modal__header"><h2>{human(lifecycleDecision)} authorization</h2><button type="button" onClick={() => setLifecycleOpen(false)}><XCircle size={20} /></button></div>
             <p><strong>{lifecycleAuthorization.person}</strong> · {lifecycleAuthorization.authorization}</p>
+            <div className="qms-authz-decision-context">
+              <span><strong>Decision authority:</strong> {actorName}</span>
+              <span><strong>Current status:</strong> {human(lifecycleAuthorization.status)}</span>
+            </div>
+            {lifecycleAuthorization.readiness?.affected_assignments?.length ? (
+              <ul className="qms-authz-assignment-impact">
+                {lifecycleAuthorization.readiness.affected_assignments.map((item, index) => (
+                  <li key={`${item.reference || item.title}-${index}`}>
+                    {item.reference || "Audit"} · {item.title || "Scheduled audit"} · {item.role || "Assigned role"}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <label>Effective date<input required type="date" value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} /></label>
             {["RENEW", "REINSTATE"].includes(lifecycleDecision) ? <label>Expires<input type="date" value={lifecycleExpiry} onChange={(event) => setLifecycleExpiry(event.target.value)} /></label> : null}
             <label>Decision reason<textarea required rows={4} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label>
