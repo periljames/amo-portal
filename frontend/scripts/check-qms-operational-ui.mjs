@@ -65,8 +65,8 @@ assertIncludes(peoplePage, "permissions?.can_prepare", "People must split prepar
 assertIncludes(peoplePage, "permissions?.can_approve", "People must gate final decisions on approval authority");
 assertIncludes(peoplePage, "permissions?.can_manage_policy", "People advanced policy configuration must be restricted");
 assertIncludes(peopleService, '"/people/authorization-control/cases"', "People service must use governed authorization cases");
-assertIncludes(peopleService, '"/lifecycle"', "People service must use governed authorization lifecycle decisions");
-assertIncludes(peopleService, '"/reviews"', "People service must retain governed periodic reviews");
+assertIncludes(peopleService, "/lifecycle", "People service must use governed authorization lifecycle decisions");
+assertIncludes(peopleService, "/reviews", "People service must retain governed periodic reviews");
 assertNotMatch(peopleService, /\/people\/privileges|qm-bypass|auditor-eligibility/, "People service must not retain superseded direct privilege, bypass or assignment-preflight APIs");
 assertNotMatch(peoplePage, /Check audit assignment|Change privilege|QM training bypass|personnel ID/i, "People must not retain superseded assignment, direct-rank or identifier UI");
 
