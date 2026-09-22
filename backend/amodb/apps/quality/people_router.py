@@ -218,7 +218,7 @@ def update_rule(
 @router.get("/independence/policy")
 def independence_policy(
     ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
-    db: Session = Depends(get_write_db),
+    db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return get_independence_policy(db, amo_id=ctx.amo_id)
