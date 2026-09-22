@@ -680,11 +680,14 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   );
   const previewedNotice = noticePreview?.notice || null;
 
+  /* Mirror the saved notice waiver reason into the editable draft when the governed notice changes. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (latestNotice?.exception_reason) {
       setShortNoticeWaiverReason(latestNotice.exception_reason);
     }
   }, [latestNotice?.id, latestNotice?.exception_reason]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const activeNoticePolicy =
     policiesQuery.data?.items.find(
