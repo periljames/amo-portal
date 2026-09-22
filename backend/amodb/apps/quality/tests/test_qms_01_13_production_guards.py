@@ -203,17 +203,15 @@ def test_final_authorization_decision_locks_case_and_uses_governed_case_state() 
     assert "db.commit()" in source
 
 
-def test_list_rules_flushes_defaults_without_committing_before_query() -> None:
-    """RLS tenant GUC is transaction-local; commit before the list query drops it."""
+def test_list_rules_is_side_effect_free_and_default_provisioning_is_restricted() -> None:
     source = inspect.getsource(people_router.list_rules)
-    assert "ensure_default_quality_privilege_rules(" in source
-    assert "db.flush()" in source
-    ensure_idx = source.index("ensure_default_quality_privilege_rules(")
-    flush_idx = source.index("db.flush()")
-    query_idx = source.index("db.query(QualityPrivilegeRule)")
-    commit_idx = source.index("db.commit()")
-    assert ensure_idx < flush_idx < query_idx < commit_idx
-    assert source.index("db.commit()") == source.rindex("db.commit()")
+    assert "ensure_default_quality_privilege_rules(" not in source
+    assert "sync_default_quality_privilege_rule_competence(" not in source
+    assert "db.commit()" not in source
+    ensure_source = inspect.getsource(people_router.ensure_default_rules)
+    assert 'require_quality_write_permission("qms.authorization.policy.manage")' in inspect.getsource(people_router)
+    assert "ensure_default_quality_privilege_rules(" in ensure_source
+    assert "db.commit()" in ensure_source
 
 
 def test_source_handoffs_and_occurrences_use_one_transaction() -> None:
