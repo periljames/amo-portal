@@ -207,6 +207,8 @@ def test_full_audit_governance_contract() -> None:
 def test_new_operating_system_models_are_registered_in_shared_metadata() -> None:
     required_tables = {
         "quality_privilege_rules", "quality_privileges", "quality_privilege_decisions", "quality_independence_declarations",
+        "quality_appointments", "quality_authorization_cases", "quality_authorization_case_events",
+        "quality_authorization_evidence", "quality_authorization_reviews", "quality_controlled_exemptions",
         "quality_assurance_cases", "quality_investigation_entries", "quality_effectiveness_plans", "quality_assurance_case_events",
         "quality_signal_rules", "quality_signal_observations", "quality_requirement_nodes", "quality_requirement_links",
         "quality_audit_preparation_revisions", "quality_audit_preparation_events",
@@ -226,9 +228,11 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
     )
     route_checks = (
-        ("/people/summary", "GET", "people_summary"),
-        ("/people/eligibility", "GET", "get_eligibility"),
-        ("/people/authorization-candidates", "GET", "list_authorization_candidates"),
+        ("/people/rules", "GET", "list_rules"),
+        ("/people/authorization-control/overview", "GET", "authorization_overview"),
+        ("/people/authorization-control/people", "GET", "authorization_people"),
+        ("/people/authorization-control/cases", "GET", "list_authorization_cases"),
+        ("/people/authorization-control/reviews", "GET", "list_authorization_reviews"),
         ("/assurance-cases", "GET", "list_cases"),
         ("/assurance-cases/{case_id}/investigation", "POST", "add_investigation_entry"),
         ("/intelligence/overview", "GET", "intelligence_overview"),
