@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AnalysisCount, AnalysisSnapshot } from "../../../services/qmsAnalysis";
 
+/* eslint-disable-next-line react-refresh/only-export-components -- deterministic calculation exported for tests. */
 export function paretoRows(rows: AnalysisCount[], total: number) {
   let cumulative = 0;
   return [...rows].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).map(row => {
