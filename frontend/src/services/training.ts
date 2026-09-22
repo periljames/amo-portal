@@ -77,6 +77,7 @@ export interface TrainingUserDetailBundle {
   user: import("./adminUsers").AdminUserRead;
   hire_date: string | null;
   status_items: TrainingStatusItem[];
+  courses?: TrainingCourseRead[];
   records: TrainingRecordRead[];
   records_total: number;
   deferrals: TrainingDeferralRequestRead[];

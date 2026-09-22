@@ -142,6 +142,11 @@ def declare_audit_independence(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    """Record an Auditor Impartiality Form for residual cases only.
+
+    Hard independence conflicts (own work / own department) cannot be cleared here.
+    """
+
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     user = db.query(account_models.User).filter(
@@ -153,6 +158,25 @@ def declare_audit_independence(
     if user is None:
         raise HTTPException(status_code=422, detail="Selected person is inactive, belongs to another tenant, or does not exist.")
 
+    from .independence_conflict import evaluate_independence_conflicts, get_independence_policy
+
+    policy = get_independence_policy(db, amo_id=ctx.amo_id)
+    if not policy.get("allow_impartiality_form", True):
+        raise HTTPException(status_code=403, detail="Auditor Impartiality Forms are disabled for this tenant.")
+    assessment = evaluate_independence_conflicts(
+        db,
+        amo_id=ctx.amo_id,
+        user_id=payload.user_id,
+        context_type="AUDIT",
+        context_id=str(audit_id),
+    )
+    hard_codes = {item.get("code") for item in assessment.get("conflicts") or []}
+    if "OWN_WORK" in hard_codes or "OWN_DEPARTMENT" in hard_codes:
+        raise HTTPException(
+            status_code=422,
+            detail="An impartiality form cannot clear a hard independence conflict. Select another auditor or outsource externally.",
+        )
+
     existing = db.query(QualityIndependenceDeclaration).filter(
         QualityIndependenceDeclaration.amo_id == ctx.amo_id,
         QualityIndependenceDeclaration.user_id == payload.user_id,
@@ -160,7 +184,7 @@ def declare_audit_independence(
         QualityIndependenceDeclaration.context_id == str(audit_id),
     ).first()
     if existing:
-        raise HTTPException(status_code=409, detail="An independence declaration already exists for this person and audit. Preserve the historical declaration rather than overwriting it.")
+        raise HTTPException(status_code=409, detail="An impartiality form already exists for this person and audit. Preserve the historical record rather than overwriting it.")
     if payload.declaration == "CONFLICT" and not (payload.relationship_to_subject or "").strip():
         raise HTTPException(status_code=422, detail="A conflict declaration must describe the relationship to the audit subject.")
     row = QualityIndependenceDeclaration(
@@ -171,7 +195,7 @@ def declare_audit_independence(
         declaration=payload.declaration,
         relationship_to_subject=(payload.relationship_to_subject or "").strip() or None,
         rationale=payload.rationale.strip(),
-        source_references=payload.source_references,
+        source_references=payload.source_references or [{"type": "AUDITOR_IMPARTIALITY_FORM"}],
         declared_by_user_id=ctx.user_id,
     )
     db.add(row)
@@ -188,6 +212,7 @@ def declare_audit_independence(
             "user_id": str(payload.user_id),
             "declaration": payload.declaration,
             "relationship_to_subject": row.relationship_to_subject,
+            "form": "AUDITOR_IMPARTIALITY_FORM",
         },
         metadata_json={
             "module": "quality",
@@ -195,6 +220,7 @@ def declare_audit_independence(
             "userId": str(payload.user_id),
             "declaration": payload.declaration,
             "reason": payload.rationale.strip(),
+            "form": "AUDITOR_IMPARTIALITY_FORM",
         },
     )
     db.add(event)

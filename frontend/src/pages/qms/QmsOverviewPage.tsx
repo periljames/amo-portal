@@ -1,15 +1,18 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import { Navigate, useLocation, useParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QmsOperationalControlCentre from "./QmsOperationalControlCentre";
-import { QMS_WORKSPACES, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
+import { QMS_WORKSPACES, qmsWorkspaceEntryPath, type QmsWorkspaceId } from "./routes/qmsWorkspaceRegistry";
+import { qmsPageLoaders } from "../../app/qmsRouteLoaders";
+import { scheduleWorkspaceRoutePreload } from "../../app/routePreload";
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 
-const QualityExcellenceCockpit = lazy(() => import("../../components/QMS/QualityExcellenceCockpit"));
-const QmsIntelligencePage = lazy(() => import("./QmsIntelligencePage"));
-const QmsMissionsPage = lazy(() => import("./QmsMissionsPage"));
-const QmsPeoplePage = lazy(() => import("./QmsPeoplePage"));
+const QualityExcellenceCockpit = lazy(qmsPageLoaders.assuranceHub);
+const QmsIntelligencePage = lazy(qmsPageLoaders.intelligence);
+const QmsMissionsPage = lazy(qmsPageLoaders.missions);
+const QmsPeoplePage = lazy(qmsPageLoaders.people);
 
 function decodeSegment(value: string | undefined): string {
   if (!value) return "";
@@ -25,9 +28,17 @@ function amoCodeFromPath(pathname: string): string {
   return parts[0] === "maintenance" ? decodeSegment(parts[1]) : "";
 }
 
-function assuranceHub(search: string): "controls" | "evidence" | "intelligence" | null {
+export type AssuranceHubId = "readiness" | "controls" | "evidence" | "intelligence";
+
+/** Continuous Assurance cockpit hubs. Bare `/quality` (no hub) remains Control Room. */
+export function assuranceHub(search: string): AssuranceHubId | null {
   const requested = new URLSearchParams(search).get("hub");
-  return requested === "controls" || requested === "evidence" || requested === "intelligence" ? requested : null;
+  return requested === "readiness"
+    || requested === "controls"
+    || requested === "evidence"
+    || requested === "intelligence"
+    ? requested
+    : null;
 }
 
 function requestedWorkspace(search: string): QmsWorkspaceId {
@@ -49,6 +60,9 @@ const QmsOverviewPage: React.FC = () => {
   const hub = assuranceHub(location.search);
   const workspace = requestedWorkspace(location.search);
   const qualityRoot = `/maintenance/${encodeURIComponent(amoCode)}/quality`;
+  useEffect(() => scheduleWorkspaceRoutePreload(QMS_WORKSPACES
+    .filter((item) => hasQmsRolePermission(item.permission))
+    .map((item) => qmsWorkspaceEntryPath(amoCode, item.id))), [amoCode]);
 
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   if (!hasQmsRolePermission("qms.dashboard.view")) {
@@ -69,7 +83,7 @@ const QmsOverviewPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <Suspense fallback={<p role="status">Loading workspace…</p>}>
+      <Suspense fallback={<WorkspaceLoading />}>
       {hub
         ? <QualityExcellenceCockpit amoCode={amoCode} />
         : workspace === "control-room"

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, Download, Eye, FileUp, RefreshCw, Save, Send, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, Download, ExternalLink, Eye, FileUp, RefreshCw, Save, Send, Video, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
@@ -33,7 +33,13 @@ import {
 } from "../../../services/qmsAuditOccurrenceResolver";
 import AuditAssignmentGovernancePanel from "./AuditAssignmentGovernancePanel";
 import { useSavedAuditTeam } from "./useSavedAuditTeam";
-import { meetingTimelineIssue, setupDateLabel, reconcileSetupDraft, normalizeMeetingWindow } from "./auditSetupControls";
+import { meetingTimelineIssue, setupDateLabel, reconcileSetupDraft, normalizeMeetingWindow, normalizePlannedAuditWindow } from "./auditSetupControls";
+import { auditNoticePeriodInsufficient } from "./auditNoticePeriod";
+import {
+  auditMeetingSubject,
+  isTeamsMeetingUrl,
+  teamsCreateMeetingUrl,
+} from "./auditMeetingConnect";
 import AuditNoticePdfPreview from "./AuditNoticePdfPreview";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditSetupIssues, auditSetupReadiness, type AuditSetupFieldId } from "./auditSetupModel";
@@ -78,10 +84,10 @@ const emptyMeeting: MeetingDraft = {
   conferenceUrl: "",
 };
 
-const MODALITY_OPTIONS: Array<{ value: Exclude<MeetingModality, "">; label: string }> = [
-  { value: "PHYSICAL", label: "Physical" },
-  { value: "ONLINE", label: "Online" },
-  { value: "HYBRID", label: "Physical with online streaming" },
+const MODALITY_OPTIONS: Array<{ value: Exclude<MeetingModality, "">; label: string; hint: string }> = [
+  { value: "PHYSICAL", label: "On site", hint: "Room / facility only" },
+  { value: "ONLINE", label: "Teams", hint: "Online meeting link" },
+  { value: "HYBRID", label: "Hybrid", hint: "On site + Teams" },
 ];
 
 const OPENING_MEETING_START = "08:00";
@@ -126,10 +132,12 @@ function inheritedMeetingWindow(
 }
 
 function inferModality(location: string | null | undefined, conferenceUrl: string | null | undefined): MeetingModality {
-  const hasLocation = Boolean((location || "").trim() && (location || "").trim().toLowerCase() !== "online");
+  const locationText = (location || "").trim();
+  const locationKey = locationText.toLowerCase();
+  const hasLocation = Boolean(locationText) && locationKey !== "online" && locationKey !== "teams";
   const hasUrl = Boolean((conferenceUrl || "").trim());
   if (hasLocation && hasUrl) return "HYBRID";
-  if (hasUrl) return "ONLINE";
+  if (hasUrl || locationKey === "online" || locationKey === "teams") return "ONLINE";
   if (hasLocation) return "PHYSICAL";
   return "";
 }
@@ -158,12 +166,18 @@ function meetingDraftFromRow(
     : { start: originalStart, end: originalEnd };
   const matchesDefinition =
     Boolean(inherited.start) && start === inherited.start && (!end || !inherited.end || end === inherited.end);
+  const modality = inferModality(row.location, row.conference_url);
+  const locationText = (row.location || "").trim();
+  const locationKey = locationText.toLowerCase();
   return {
-    modality: inferModality(row.location, row.conference_url),
+    modality,
     customSchedule: !matchesDefinition,
     start,
     end,
-    location: row.location || "",
+    location:
+      modality === "ONLINE" || locationKey === "online" || locationKey === "teams"
+        ? ""
+        : locationText,
     conferenceUrl: row.conference_url || "",
   };
 }
@@ -183,7 +197,7 @@ function meetingReady(
   if (!start || !end) return false;
   if (end < start) return false;
   if ((value.modality === "PHYSICAL" || value.modality === "HYBRID") && !value.location.trim()) return false;
-  if ((value.modality === "ONLINE" || value.modality === "HYBRID") && !value.conferenceUrl.trim()) return false;
+  // Teams/hybrid links can be pasted after the meeting is scheduled.
   return true;
 }
 
@@ -202,6 +216,17 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
     notifyAuditees: audit.notify_auditees !== false,
     reminderIntervalDays: String(audit.reminder_interval_days || 7),
   };
+}
+
+function draftFromAuditReady(audit: QMSAuditOut, nowLocal?: string): SetupDraft {
+  const base = draftFromAudit(audit);
+  const floor = nowLocal || localDateTime(new Date(Date.now() + 60_000).toISOString());
+  const normalized = normalizePlannedAuditWindow(
+    base.plannedStart ? `${base.plannedStart}T${base.plannedStartTime}` : "",
+    base.plannedEnd ? `${base.plannedEnd}T${base.plannedEndTime}` : "",
+    floor,
+  );
+  return { ...base, ...normalized };
 }
 
 function localDateTime(value?: string | null, timeZone?: string): string {
@@ -252,6 +277,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [closingDraft, setClosingDraft] = useState<MeetingDraft>(emptyMeeting);
   const [openTile, setOpenTile] = useState<SetupTileId | null>("definition");
   const [noticeReason, setNoticeReason] = useState("Final audit notice generated for review before controlled email delivery.");
+  const [shortNoticeWaiverReason, setShortNoticeWaiverReason] = useState("");
   const [noticePreview, setNoticePreview] = useState<{ url: string; blob: Blob; filename: string; notice: AuditNotice } | null>(null);
   const [guidedField, setGuidedField] = useState<AuditSetupFieldId | null>(null);
   const guidanceRequestHandled = useRef<string | null>(null);
@@ -375,13 +401,17 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const row = auditQuery.data;
     if (!row) return;
     const frame = window.requestAnimationFrame(() => {
-      const incoming = draftFromAudit(row);
+      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const incoming = draftFromAuditReady(row, now);
       const previous = savedDefinitionRef.current?.id === row.id ? savedDefinitionRef.current.draft : null;
       setDraft((current) => reconcileSetupDraft(current, previous, incoming));
       savedDefinitionRef.current = { id: row.id, draft: incoming };
+      if (JSON.stringify(incoming) !== JSON.stringify(draftFromAudit(row))) {
+        setNotice("Past audit dates were reset to the next available window. Save the definition to keep them.");
+      }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [auditQuery.data]);
+  }, [auditQuery.data, meetingsQuery.data?.timezone_name]);
   useEffect(() => {
     const plannedStart = datePart(auditQuery.data?.planned_start || "");
     const plannedEnd = datePart(auditQuery.data?.planned_end || "");
@@ -410,6 +440,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [auditId, closingMeeting, auditQuery.data?.planned_start, auditQuery.data?.planned_end, auditQuery.data?.planned_start_time, auditQuery.data?.planned_end_time, meetingsQuery.data?.timezone_name]);
 
   // Keep inherited schedules aligned with Definition dates while custom schedule is off.
+  // Snap past inherited opening windows to now so operators never keep impossible times.
   const inheritedPlannedStart = draft?.plannedStart;
   const inheritedPlannedEnd = draft?.plannedEnd;
   const inheritedPlannedStartTime = draft?.plannedStartTime;
@@ -417,41 +448,26 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   useEffect(() => {
     if (inheritedPlannedStart === undefined || inheritedPlannedEnd === undefined || inheritedPlannedStartTime === undefined || inheritedPlannedEndTime === undefined) return;
     const frame = window.requestAnimationFrame(() => {
-      const openingWindow = inheritedMeetingWindow("OPENING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
-      const closingWindow = inheritedMeetingWindow("CLOSING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
-      setOpeningDraft((current) =>
-        current.customSchedule
-          ? current
-          : {
-              ...current,
-              ...openingWindow,
-            },
-      );
-      setClosingDraft((current) =>
-        current.customSchedule
-          ? current
-          : {
-              ...current,
-              ...closingWindow,
-            },
-      );
+      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const openingInherited = inheritedMeetingWindow("OPENING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
+      const closingInherited = inheritedMeetingWindow("CLOSING", inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime);
+      const openingWindow = normalizeMeetingWindow(openingInherited.start, openingInherited.end, now);
+      const closingWindow = normalizeMeetingWindow(closingInherited.start, closingInherited.end, now, closingInherited.start);
+      setOpeningDraft((current) => (current.customSchedule ? current : { ...current, ...openingWindow }));
+      setClosingDraft((current) => (current.customSchedule ? current : { ...current, ...closingWindow }));
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime]);
+  }, [inheritedPlannedStart, inheritedPlannedEnd, inheritedPlannedStartTime, inheritedPlannedEndTime, meetingsQuery.data?.timezone_name]);
 
   const correctDefinitionDates = () => {
     if (!draft) return;
     const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
-    const window = normalizeMeetingWindow(`${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, now);
-    let start = window.start;
-    if (start.slice(11) < "09:00") start = `${start.slice(0, 10)}T09:00`;
-    if (start.slice(11) >= "17:00") start = `${new Date(Date.parse(`${start.slice(0, 10)}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)}T09:00`;
-    let end = window.end;
-    if (end <= start || end.slice(11) <= start.slice(11) || end.slice(11) > "17:00") {
-      end = new Date(Date.parse(`${start}:00Z`) + 30 * 60_000).toISOString().slice(0, 16);
-      if (end.slice(11) > "17:00") end = `${start.slice(0, 10)}T17:00`;
-    }
-    const next = { ...draft, plannedStart: start.slice(0, 10), plannedStartTime: start.slice(11), plannedEnd: end.slice(0, 10), plannedEndTime: end.slice(11) };
+    const normalized = normalizePlannedAuditWindow(
+      `${draft.plannedStart}T${draft.plannedStartTime}`,
+      `${draft.plannedEnd}T${draft.plannedEndTime}`,
+      now,
+    );
+    const next = { ...draft, ...normalized };
     if (JSON.stringify(next) !== JSON.stringify(draft)) {
       setDraft(next);
       setNotice("Dates adjusted to the next available audit time. Save the definition to apply.");
@@ -491,7 +507,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
     },
     onSuccess: async (row) => {
-      setDraft(draftFromAudit(row));
+      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      setDraft(draftFromAuditReady(row, now));
       setLocalError(null);
       setNotice("Definition saved.");
       await refresh();
@@ -508,20 +525,27 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       const end = value.customSchedule ? value.end : inherited.end;
       if (!start) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting start is required.`);
       if (!end) throw new Error(`${type === "OPENING" ? "Opening" : "Closing"} meeting end is required.`);
-      const timelineIssue = meetingTimelineIssue(type, start, end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name));
+      const now = localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
+      const snapped = normalizeMeetingWindow(start, end, now, type === "CLOSING" ? inherited.start : now);
+      const timelineIssue = meetingTimelineIssue(type, snapped.start, snapped.end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, now);
       if (timelineIssue) throw new Error(timelineIssue);
       if ((value.modality === "PHYSICAL" || value.modality === "HYBRID") && !value.location.trim()) {
         throw new Error("Physical location is required for this meeting modality.");
       }
-      if ((value.modality === "ONLINE" || value.modality === "HYBRID") && !value.conferenceUrl.trim()) {
-        throw new Error("Conference URL is required for online or streamed meetings.");
-      }
+      const conferenceUrl = value.conferenceUrl.trim();
+      // Persist an Online/Teams marker so modality survives reload before the join link is pasted.
+      const location =
+        value.modality === "ONLINE"
+          ? conferenceUrl
+            ? null
+            : "Online"
+          : value.location.trim() || null;
       const payload = {
         meeting_type: type,
-        scheduled_start: start,
-        scheduled_end: end,
-        location: value.modality === "ONLINE" ? null : value.location.trim() || null,
-        conference_url: value.modality === "PHYSICAL" ? null : value.conferenceUrl.trim() || null,
+        scheduled_start: snapped.start,
+        scheduled_end: snapped.end,
+        location,
+        conference_url: value.modality === "PHYSICAL" ? null : conferenceUrl || null,
         status: row?.status ?? "PLANNED",
       };
       return row ? updateAuditMeeting(amoCode, auditId, row.id, payload) : createAuditMeeting(amoCode, auditId, payload);
@@ -542,9 +566,12 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const previewNoticeMutation = useMutation({
     mutationFn: async (row: AuditNotice) => {
+      const waiver = shortNoticeWaiverReason.trim();
       const prepared = row.artifact
         ? row
-        : await prepareAuditNoticeDocument(amoCode, auditId, row.id, noticeReason.trim());
+        : await prepareAuditNoticeDocument(amoCode, auditId, row.id, noticeReason.trim(), {
+            shortNoticeWaiverReason: waiver || undefined,
+          });
       const preview = await previewAuditNoticePdf(amoCode, auditId, prepared.id);
       return { row: prepared, ...preview };
     },
@@ -571,6 +598,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         policy_id: policy?.id,
         template_document_id: templateQuery.data?.selected_document_id || undefined,
         notice_date: new Date().toISOString().slice(0, 10),
+        exception_reason: shortNoticeWaiverReason.trim() || undefined,
         reason: noticeReason.trim(),
       });
     },
@@ -608,7 +636,10 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const submitNoticeMutation = useMutation({
-    mutationFn: (row: AuditNotice) => submitAuditNotice(amoCode, auditId, row.id, noticeReason.trim()),
+    mutationFn: (row: AuditNotice) =>
+      submitAuditNotice(amoCode, auditId, row.id, noticeReason.trim(), {
+        shortNoticeWaiverReason: shortNoticeWaiverReason.trim() || undefined,
+      }),
     onSuccess: async (result) => {
       setLocalError(null);
       setNotice(
@@ -649,6 +680,32 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   );
   const previewedNotice = noticePreview?.notice || null;
 
+  useEffect(() => {
+    if (latestNotice?.exception_reason) {
+      setShortNoticeWaiverReason(latestNotice.exception_reason);
+    }
+  }, [latestNotice?.id, latestNotice?.exception_reason]);
+
+  const activeNoticePolicy =
+    policiesQuery.data?.items.find(
+      (item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind,
+    ) || policiesQuery.data?.items[0];
+  const requiredNoticeDays =
+    latestNotice?.required_notice_days ??
+    activeNoticePolicy?.minimum_notice_days ??
+    14;
+  const noticeDateForPeriod =
+    latestNotice?.notice_date || new Date().toISOString().slice(0, 10);
+  const noticePeriodShort = auditNoticePeriodInsufficient({
+    plannedStart: draft?.plannedStart || auditQuery.data?.planned_start,
+    noticeDate: noticeDateForPeriod,
+    requiredNoticeDays,
+  });
+  const shortNoticeWaiverReady =
+    !noticePeriodShort ||
+    shortNoticeWaiverReason.trim().length >= 8 ||
+    Boolean(latestNotice?.exception_reason && latestNotice.exception_reason.trim().length >= 8);
+
   if (auditQuery.isLoading && !auditQuery.data) {
     return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit setup…</section>;
   }
@@ -678,6 +735,72 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const guidedClass = (field: AuditSetupFieldId) => guidedField === field ? "is-guided-required" : undefined;
   const supportingErrorCount = [meetingsQuery.error, noticesQuery.error, policiesQuery.error, templateQuery.error].filter(Boolean).length;
 
+  const scheduleMeetingPair = async (modality: Exclude<MeetingModality, "">) => {
+    if (definitionDirty) {
+      setLocalError("Save the audit definition before scheduling meetings.");
+      return;
+    }
+    const openingInherited = inheritedMeetingWindow(
+      "OPENING",
+      draft.plannedStart,
+      draft.plannedEnd,
+      draft.plannedStartTime,
+      draft.plannedEndTime,
+    );
+    const closingInherited = inheritedMeetingWindow(
+      "CLOSING",
+      draft.plannedStart,
+      draft.plannedEnd,
+      draft.plannedStartTime,
+      draft.plannedEndTime,
+    );
+    const openingValue: MeetingDraft = {
+      modality,
+      customSchedule: false,
+      start: openingInherited.start,
+      end: openingInherited.end,
+      location: modality === "ONLINE" ? "" : openingDraft.location || "",
+      conferenceUrl: modality === "PHYSICAL" ? "" : openingDraft.conferenceUrl || "",
+    };
+    const closingValue: MeetingDraft = {
+      modality,
+      customSchedule: false,
+      start: closingInherited.start,
+      end: closingInherited.end,
+      location: modality === "ONLINE" ? "" : closingDraft.location || "",
+      conferenceUrl: modality === "PHYSICAL" ? "" : closingDraft.conferenceUrl || "",
+    };
+    if (modality !== "ONLINE" && !openingValue.location.trim()) {
+      openingValue.location = "Main base";
+      closingValue.location = openingValue.location;
+    }
+    setOpeningDraft(openingValue);
+    setClosingDraft(closingValue);
+    try {
+      await meetingMutation.mutateAsync({
+        type: "OPENING",
+        row: openingMeeting,
+        value: openingValue,
+      });
+      await meetingMutation.mutateAsync({
+        type: "CLOSING",
+        row: closingMeeting,
+        value: closingValue,
+      });
+      setLocalError(null);
+      setNotice(
+        modality === "ONLINE" || modality === "HYBRID"
+          ? "Opening and closing meetings scheduled. Connect Teams and paste the join links."
+          : "Opening and closing meetings scheduled.",
+      );
+      setOpenTile("meetings");
+    } catch (cause) {
+      setLocalError(
+        cause instanceof Error ? cause.message : "Meetings could not be scheduled.",
+      );
+    }
+  };
+
   const renderMeeting = (
     type: "OPENING" | "CLOSING",
     row: AuditMeeting | null,
@@ -686,58 +809,127 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   ) => {
     const needsLocation = value.modality === "PHYSICAL" || value.modality === "HYBRID";
     const needsUrl = value.modality === "ONLINE" || value.modality === "HYBRID";
-    const inherited = inheritedMeetingWindow(type, draft.plannedStart, draft.plannedEnd, draft.plannedStartTime, draft.plannedEndTime);
-    const timelineIssue = meetingTimelineIssue(type, value.customSchedule ? value.start : inherited.start,
-      value.customSchedule ? value.end : inherited.end, `${draft.plannedStart}T${draft.plannedStartTime}`, `${draft.plannedEnd}T${draft.plannedEndTime}`, localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name));
-    return (
-      <div className="qms-audit-setup-stage__meeting">
-        <strong>{type === "OPENING" ? "Opening" : "Closing"}</strong>
+    const inherited = inheritedMeetingWindow(
+      type,
+      draft.plannedStart,
+      draft.plannedEnd,
+      draft.plannedStartTime,
+      draft.plannedEndTime,
+    );
+    const effectiveStart = value.customSchedule ? value.start : inherited.start;
+    const effectiveEnd = value.customSchedule ? value.end : inherited.end;
+    const timelineIssue = meetingTimelineIssue(
+      type,
+      effectiveStart,
+      effectiveEnd,
+      `${draft.plannedStart}T${draft.plannedStartTime}`,
+      `${draft.plannedEnd}T${draft.plannedEndTime}`,
+      localDateTime(
+        new Date(currentTime + 60_000).toISOString(),
+        meetingsQuery.data?.timezone_name,
+      ),
+    );
+    const teamsSubject = auditMeetingSubject(
+      type,
+      auditQuery.data?.title,
+      auditQuery.data?.audit_ref,
+    );
+    const teamsHref = teamsCreateMeetingUrl({
+      subject: teamsSubject,
+      start: effectiveStart,
+      end: effectiveEnd,
+    });
+    const teamsLinked = isTeamsMeetingUrl(value.conferenceUrl);
+    const canSave =
+      !definitionDirty &&
+      !timelineIssue &&
+      meetingReady(
+        type,
+        value,
+        draft.plannedStart,
+        draft.plannedEnd,
+        draft.plannedStartTime,
+        draft.plannedEndTime,
+      ) &&
+      !meetingMutation.isPending;
 
-        <fieldset className="qms-audit-setup-stage__modality" disabled={!canManage}>
-          <legend>Format</legend>
-          <div className="qms-audit-setup-stage__modality-options">
-            {MODALITY_OPTIONS.map((option) => (
-              <label key={option.value}>
+    return (
+      <div className={`qms-audit-setup-stage__meeting${row ? " is-saved" : ""}`}>
+        <header className="qms-audit-setup-stage__meeting-head">
+          <div>
+            <strong>{type === "OPENING" ? "Opening" : "Closing"}</strong>
+            <small>
+              {row
+                ? row.status.replaceAll("_", " ")
+                : "Not saved"}{" "}
+              · {meetingsQuery.data?.timezone_name || "tenant local time"}
+            </small>
+          </div>
+          {row ? (
+            <span className="qms-audit-setup-stage__meeting-pill is-complete">Saved</span>
+          ) : (
+            <span className="qms-audit-setup-stage__meeting-pill">Draft</span>
+          )}
+        </header>
+
+        <div className="qms-audit-setup-stage__modality-seg" role="group" aria-label={`${type} format`}>
+          {MODALITY_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={value.modality === option.value ? "is-active" : ""}
+              disabled={!canManage}
+              title={option.hint}
+              onClick={() =>
+                setValue((current) => ({
+                  ...current,
+                  modality: option.value,
+                  location: option.value === "ONLINE" ? "" : current.location,
+                  conferenceUrl:
+                    option.value === "PHYSICAL" ? "" : current.conferenceUrl,
+                }))
+              }
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {!value.modality ? (
+          <p className="qms-audit-setup-stage__empty">Choose a format to continue.</p>
+        ) : (
+          <>
+            <div className="qms-audit-setup-stage__schedule-bar">
+              <p className="qms-audit-setup-stage__schedule-inherit">
+                {value.customSchedule ? "Custom schedule" : "From audit dates"}:{" "}
+                <strong>{effectiveStart.replace("T", " ") || "Set audit dates first"}</strong>
+                {effectiveEnd ? (
+                  <>
+                    {" "}
+                    → <strong>{effectiveEnd.replace("T", " ")}</strong>
+                  </>
+                ) : null}
+              </p>
+              <label className="qms-audit-setup-stage__check-row">
                 <input
-                  type="radio"
-                  name={`${type.toLowerCase()}-modality`}
-                  checked={value.modality === option.value}
-                  onChange={() =>
+                  type="checkbox"
+                  disabled={!canManage}
+                  checked={value.customSchedule}
+                  onChange={(event) => {
+                    const customSchedule = event.target.checked;
                     setValue((current) => ({
                       ...current,
-                      modality: option.value,
-                      location: option.value === "ONLINE" ? "" : current.location,
-                      conferenceUrl: option.value === "PHYSICAL" ? "" : current.conferenceUrl,
-                    }))
-                  }
+                      customSchedule,
+                      start: customSchedule
+                        ? current.start || inherited.start
+                        : inherited.start,
+                      end: customSchedule ? current.end || inherited.end : inherited.end,
+                    }));
+                  }}
                 />
-                {option.label}
+                Customize
               </label>
-            ))}
-          </div>
-        </fieldset>
-
-        {!value.modality ? <p className="qms-audit-setup-stage__empty">Select format before scheduling.</p> : null}
-
-        {value.modality ? (
-          <>
-            <label className="qms-audit-setup-stage__check-row">
-              <input
-                type="checkbox"
-                disabled={!canManage}
-                checked={value.customSchedule}
-                onChange={(event) => {
-                  const customSchedule = event.target.checked;
-                  setValue((current) => ({
-                    ...current,
-                    customSchedule,
-                    start: customSchedule ? current.start || inherited.start : inherited.start,
-                    end: customSchedule ? current.end || inherited.end : inherited.end,
-                  }));
-                }}
-              />
-              Use a custom meeting schedule
-            </label>
+            </div>
 
             {value.customSchedule ? (
               <div className="qms-audit-setup-stage__fields">
@@ -745,31 +937,68 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <span>Start</span>
                   <input
                     type="datetime-local"
-                    min={localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name)}
-                    onBlur={() => setValue((current) => ({ ...current, ...normalizeMeetingWindow(current.start, current.end, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name), type === "CLOSING" ? inherited.start : undefined) }))}
+                    min={localDateTime(
+                      new Date(Date.now() + 60_000).toISOString(),
+                      meetingsQuery.data?.timezone_name,
+                    )}
+                    onBlur={() =>
+                      setValue((current) => ({
+                        ...current,
+                        ...normalizeMeetingWindow(
+                          current.start,
+                          current.end,
+                          localDateTime(
+                            new Date(Date.now() + 60_000).toISOString(),
+                            meetingsQuery.data?.timezone_name,
+                          ),
+                          type === "CLOSING" ? inherited.start : undefined,
+                        ),
+                      }))
+                    }
                     disabled={!canManage}
                     value={value.start}
-                    onChange={(event) => setValue((current) => ({ ...current, start: event.target.value }))}
+                    onChange={(event) =>
+                      setValue((current) => ({
+                        ...current,
+                        start: event.target.value,
+                      }))
+                    }
                   />
                 </label>
                 <label>
                   <span>End</span>
                   <input
                     type="datetime-local"
-                    min={localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name)}
-                    onBlur={() => setValue((current) => ({ ...current, ...normalizeMeetingWindow(current.start, current.end, localDateTime(new Date(Date.now() + 60_000).toISOString(), meetingsQuery.data?.timezone_name), type === "CLOSING" ? inherited.start : undefined) }))}
+                    min={localDateTime(
+                      new Date(Date.now() + 60_000).toISOString(),
+                      meetingsQuery.data?.timezone_name,
+                    )}
+                    onBlur={() =>
+                      setValue((current) => ({
+                        ...current,
+                        ...normalizeMeetingWindow(
+                          current.start,
+                          current.end,
+                          localDateTime(
+                            new Date(Date.now() + 60_000).toISOString(),
+                            meetingsQuery.data?.timezone_name,
+                          ),
+                          type === "CLOSING" ? inherited.start : undefined,
+                        ),
+                      }))
+                    }
                     disabled={!canManage}
                     value={value.end}
-                    onChange={(event) => setValue((current) => ({ ...current, end: event.target.value }))}
+                    onChange={(event) =>
+                      setValue((current) => ({
+                        ...current,
+                        end: event.target.value,
+                      }))
+                    }
                   />
                 </label>
               </div>
-            ) : (
-              <p className="qms-audit-setup-stage__schedule-inherit">
-                Suggested from audit dates: <strong>{inherited.start.replace("T", " ") || "Set audit dates first"}</strong>
-                {inherited.end ? <> → <strong>{inherited.end.replace("T", " ")}</strong></> : null}
-              </p>
-            )}
+            ) : null}
 
             <div className="qms-audit-setup-stage__fields">
               {needsLocation ? (
@@ -778,42 +1007,88 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <input
                     disabled={!canManage}
                     value={value.location}
-                    onChange={(event) => setValue((current) => ({ ...current, location: event.target.value }))}
+                    onChange={(event) =>
+                      setValue((current) => ({
+                        ...current,
+                        location: event.target.value,
+                      }))
+                    }
                     placeholder="Room / facility"
                   />
                 </label>
               ) : null}
               {needsUrl ? (
-                <label>
-                  <span>Conference URL</span>
+                <label className="qms-audit-setup-stage__teams-field">
+                  <span>Teams / conference link</span>
                   <input
                     type="url"
                     disabled={!canManage}
                     value={value.conferenceUrl}
-                    onChange={(event) => setValue((current) => ({ ...current, conferenceUrl: event.target.value }))}
-                    placeholder="https://…"
+                    onChange={(event) =>
+                      setValue((current) => ({
+                        ...current,
+                        conferenceUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="Paste Teams join URL"
                   />
+                  <div className="qms-audit-setup-stage__teams-actions">
+                    <a
+                      className="qms-audit-setup-stage__teams-link"
+                      href={teamsHref}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Video size={14} /> Open Teams
+                      <ExternalLink size={13} aria-hidden />
+                    </a>
+                    {teamsLinked ? (
+                      <span className="qms-audit-setup-stage__teams-ok">Teams link ready</span>
+                    ) : (
+                      <small>Create in Teams, then paste the join link here.</small>
+                    )}
+                  </div>
                 </label>
               ) : null}
             </div>
 
-            <small>{row ? `Saved status: ${row.status.replaceAll("_", " ")}` : "Not saved"} · Times in {meetingsQuery.data?.timezone_name || "tenant local time"}</small>
-            {definitionDirty ? <p role="status">Save the audit dates before updating meetings.</p> : null}
-            {timelineIssue ? <p className="qms-occurrence-stage__message is-error" role="alert">{timelineIssue}</p> : null}
+            {definitionDirty ? (
+              <p role="status">Save the audit dates before updating meetings.</p>
+            ) : null}
+            {timelineIssue ? (
+              <p className="qms-occurrence-stage__message is-error" role="alert">
+                {timelineIssue}
+              </p>
+            ) : null}
             {canManage ? (
               <div className="qms-audit-setup-stage__actions">
                 <button
                   type="button"
-                  disabled={definitionDirty || Boolean(timelineIssue) || !meetingReady(type, value, draft.plannedStart, draft.plannedEnd, draft.plannedStartTime, draft.plannedEndTime) || meetingMutation.isPending}
+                  className="is-primary"
+                  disabled={!canSave}
                   onClick={() => meetingMutation.mutate({ type, row, value })}
                 >
-                  <Save size={15} /> {row ? "Update" : "Save"}
+                  <Save size={15} /> {row ? "Update meeting" : "Save meeting"}
                 </button>
-                {row ? <button type="button" disabled={removeMeetingMutation.isPending || meetingMutation.isPending} onClick={() => { if (window.confirm("Delete this meeting?")) removeMeetingMutation.mutate(row); }}>Delete meeting</button> : null}
+                {row ? (
+                  <button
+                    type="button"
+                    disabled={
+                      removeMeetingMutation.isPending || meetingMutation.isPending
+                    }
+                    onClick={() => {
+                      if (window.confirm("Delete this meeting?")) {
+                        removeMeetingMutation.mutate(row);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </>
-        ) : null}
+        )}
       </div>
     );
   };
@@ -843,7 +1118,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span className={`qms-audit-setup-stage__chip${readiness.definitionReady ? "" : " is-warning"}`}>
               Definition {definitionDirty ? "unsaved" : readiness.definitionReady ? "saved" : "incomplete"}
             </span>
-            <span className={`qms-audit-setup-stage__chip${readiness.leadAssigned ? "" : " is-warning"}`}>
+            <span className={`qms-audit-setup-stage__chip${teamDirty || !savedTeam.ready ? " is-warning" : ""}`}>
               Team {teamDirty ? "unsaved" : savedTeam.ready ? "verified" : "needs review"}
             </span>
             <span className="qms-audit-setup-stage__chip">
@@ -881,15 +1156,18 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <div className={`qms-audit-setup-stage__readiness${setupReady ? " is-ready" : ""}`} role="status">
         {setupReady ? <CheckCircle2 size={17} aria-hidden /> : <AlertTriangle size={17} aria-hidden />}
         <div>
-          <strong>{setupReady ? "Required setup is complete" : "Complete setup before Prepare"}</strong>
-          <p>
-            {setupReady
-              ? "The definition is saved and selected auditors pass eligibility and independence checks. Meetings and notice have separate control statuses below."
-              : definitionDirty
+          <strong>{setupReady ? "Setup ready" : "Complete setup before Prepare"}</strong>
+          {!setupReady ? (
+            <p>
+              {definitionDirty
                 ? "Save the audit definition before continuing."
-                : teamDirty ? "Save or discard team changes before continuing."
-                : readiness.issues.length ? readiness.issues.join(" ") : savedTeam.message}
-          </p>
+                : teamDirty
+                  ? "Save or discard team changes before continuing."
+                  : readiness.issues.length
+                    ? readiness.issues.join(" ")
+                    : savedTeam.message || "Finish the required items below."}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -1083,11 +1361,22 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <summary onClick={selectTile("team")}>
             <span className="qms-audit-setup-tile__step" aria-hidden>2</span>
             <span className="qms-audit-setup-tile__title">Audit team</span>
-            <span className={`qms-audit-setup-tile__hint${readiness.leadAssigned ? "" : " is-warning"}`}>
-              {teamDirty ? "Unsaved changes" : savedTeam.message}
+            <span className={`qms-audit-setup-tile__hint${readiness.leadAssigned && (savedTeam.ready || savedTeam.pending) ? "" : " is-warning"}`}>
+              {teamDirty
+                ? "Unsaved changes"
+                : savedTeam.message ||
+                  (readiness.leadAssigned ? "Lead assigned" : "Assign lead")}
             </span>
             <span className={`qms-audit-setup-tile__state${savedTeam.ready && !teamDirty ? " is-complete" : " is-required"}`}>
-              {teamDirty ? "Unsaved" : savedTeam.ready ? "Verified" : savedTeam.pending ? "Checking" : "Review required"}
+              {teamDirty
+                ? "Unsaved"
+                : savedTeam.ready
+                  ? "Verified"
+                  : savedTeam.pending
+                    ? "Checking"
+                    : readiness.leadAssigned
+                      ? "Needs review"
+                      : "Required"}
             </span>
           </summary>
           <div className="qms-audit-setup-tile__body" id="audit-setup-field-leadAuditorUserId">
@@ -1113,9 +1402,33 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             ) : null}
             {meetingsQuery.isPending ? <p className="qms-audit-setup-stage__empty">Loading meetings…</p> : null}
             {!meetingsQuery.isError && !meetingsQuery.isPending ? (
-              <div className="qms-audit-setup-stage__meetings">
-                {renderMeeting("OPENING", openingMeeting, openingDraft, setOpeningDraft)}
-                {renderMeeting("CLOSING", closingMeeting, closingDraft, setClosingDraft)}
+              <div className="qms-audit-setup-stage__meetings-wrap">
+                {canManage ? (
+                  <div className="qms-audit-setup-stage__quick-schedule">
+                    <div>
+                      <strong>Schedule both fast</strong>
+                      <p>Uses audit dates. For Teams, open the meeting and paste the join links below.</p>
+                    </div>
+                    <div className="qms-audit-setup-stage__quick-schedule-actions">
+                      {MODALITY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={definitionDirty || meetingMutation.isPending || !draft.plannedStart || !draft.plannedEnd}
+                          title={option.hint}
+                          onClick={() => void scheduleMeetingPair(option.value)}
+                        >
+                          {option.value === "ONLINE" ? <Video size={14} /> : null}
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="qms-audit-setup-stage__meetings">
+                  {renderMeeting("OPENING", openingMeeting, openingDraft, setOpeningDraft)}
+                  {renderMeeting("CLOSING", closingMeeting, closingDraft, setClosingDraft)}
+                </div>
               </div>
             ) : null}
           </div>
@@ -1214,6 +1527,28 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             ) : null}
             {!noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending ? (
               <>
+                {noticePeriodShort ? (
+                  <div className="qms-audit-setup-stage__supporting-warning" role="status">
+                    <AlertTriangle size={15} aria-hidden />
+                    <div>
+                      <strong>Notice period is short of the configured {requiredNoticeDays}-day lead time.</strong>
+                      <p>
+                        This is not a hard block. Enter a short-notice waiver reason to continue
+                        generating or submitting the notice.
+                      </p>
+                      <label className="qms-audit-setup-stage__waiver">
+                        <span>Short-notice waiver reason</span>
+                        <textarea
+                          rows={2}
+                          value={shortNoticeWaiverReason}
+                          onChange={(event) => setShortNoticeWaiverReason(event.target.value)}
+                          placeholder="Why this notice is issued inside the configured lead time"
+                          disabled={!canManageNotice}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="qms-audit-notice-summary">
                   <div>
                     <strong>{latestNotice?.artifact?.filename || "System-generated controlled PDF"}</strong>
@@ -1228,7 +1563,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       <button
                         type="button"
                         className="is-primary"
-                        disabled={createNoticeMutation.isPending || noticeReason.trim().length < 8}
+                        disabled={
+                          createNoticeMutation.isPending ||
+                          noticeReason.trim().length < 8 ||
+                          !shortNoticeWaiverReady
+                        }
                         onClick={() => createNoticeMutation.mutate()}
                       >
                         <CalendarClock size={15} /> Create notice draft
@@ -1238,7 +1577,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       <button
                         type="button"
                         className="is-primary"
-                        disabled={previewNoticeMutation.isPending || noticeReason.trim().length < 8}
+                        disabled={
+                          previewNoticeMutation.isPending ||
+                          noticeReason.trim().length < 8 ||
+                          !shortNoticeWaiverReady
+                        }
                         onClick={() => previewNoticeMutation.mutate(latestNotice)}
                       >
                         <Eye size={15} /> {latestNotice.artifact ? "View final notice" : "Generate final preview"}
@@ -1330,7 +1673,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <button
                     type="button"
                     className="is-primary"
-                    disabled={submitNoticeMutation.isPending || noticeReason.trim().length < 8}
+                    disabled={
+                      submitNoticeMutation.isPending ||
+                      noticeReason.trim().length < 8 ||
+                      !shortNoticeWaiverReady
+                    }
                     onClick={() => submitNoticeMutation.mutate(previewedNotice)}
                   >
                     <Send size={15} /> Send notice and email

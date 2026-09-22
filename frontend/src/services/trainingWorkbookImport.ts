@@ -68,24 +68,37 @@ export function createTrainingWorkbookImport(
   });
 }
 
-export function getTrainingWorkbookImport(jobId: string): Promise<TrainingWorkbookImportJob> {
-  return apiGet<TrainingWorkbookImportJob>(`/training/workbook-imports/${encodeURIComponent(jobId)}`, { headers: authHeaders() });
+const importRoot = (support = false) => support ? "/platform/training-workbook-imports" : "/training/workbook-imports";
+
+export const openTrainingImportSupport = (jobId: string, reason: string) =>
+  apiPost<TrainingWorkbookImportJob>(`${importRoot(true)}/${encodeURIComponent(jobId)}/open`, { reason }, { headers: authHeaders() });
+export const recheckTrainingImportSupport = (jobId: string) =>
+  apiPost<TrainingWorkbookImportJob>(`${importRoot(true)}/${encodeURIComponent(jobId)}/recheck`, {}, { headers: authHeaders() });
+export const requestTrainingImportRepairAccess = (tenantId: string, jobId: string) =>
+  apiPost(`/platform/tenants/${encodeURIComponent(tenantId)}/support-sessions`, {
+    access_level: "ADMIN", reason: `Resolve training import ${jobId}`, ticket_reference: jobId,
+  }, { headers: authHeaders() });
+
+export function getTrainingWorkbookImport(jobId: string, support = false): Promise<TrainingWorkbookImportJob> {
+  return apiGet<TrainingWorkbookImportJob>(`${importRoot(support)}/${encodeURIComponent(jobId)}`, { headers: authHeaders() });
 }
 
 export function listTrainingWorkbookImportRows(
   jobId: string,
-  options: { sheet?: string; status?: string; reviewOnly?: boolean; q?: string; limit?: number; offset?: number } = {},
+  options: { sheet?: string; status?: string; outcome?: string; reviewOnly?: boolean; q?: string; limit?: number; offset?: number } = {},
+  support = false,
 ): Promise<TrainingWorkbookImportRowPage> {
   const params = new URLSearchParams();
   if (options.sheet) params.set("sheet", options.sheet);
   if (options.status) params.set("status", options.status);
+  if (options.outcome) params.set("outcome", options.outcome);
   if (options.reviewOnly) params.set("review_only", "true");
   if (options.q) params.set("q", options.q);
   if (typeof options.limit === "number") params.set("limit", String(options.limit));
   if (typeof options.offset === "number") params.set("offset", String(options.offset));
   const query = params.toString();
   return apiGet<TrainingWorkbookImportRowPage>(
-    `/training/workbook-imports/${encodeURIComponent(jobId)}/rows${query ? `?${query}` : ""}`,
+    `${importRoot(support)}/${encodeURIComponent(jobId)}/rows${query ? `?${query}` : ""}`,
     { headers: authHeaders() },
   );
 }
@@ -94,17 +107,18 @@ export function commitTrainingWorkbookImport(
   jobId: string,
   decisions: TrainingWorkbookImportDecision[],
   forceReimport = false,
+  support = false,
 ): Promise<TrainingWorkbookImportJob> {
   return apiPost<TrainingWorkbookImportJob>(
-    `/training/workbook-imports/${encodeURIComponent(jobId)}/commit`,
+    `${importRoot(support)}/${encodeURIComponent(jobId)}/commit`,
     { decisions, force_reimport: forceReimport },
     { headers: authHeaders() },
   );
 }
 
-export function cancelTrainingWorkbookImport(jobId: string): Promise<TrainingWorkbookImportJob> {
+export function cancelTrainingWorkbookImport(jobId: string, support = false): Promise<TrainingWorkbookImportJob> {
   return apiPost<TrainingWorkbookImportJob>(
-    `/training/workbook-imports/${encodeURIComponent(jobId)}/cancel`,
+    `${importRoot(support)}/${encodeURIComponent(jobId)}/cancel`,
     {},
     { headers: authHeaders() },
   );

@@ -126,6 +126,19 @@ export function withoutLeadAuditor(
   ];
 }
 
+/** Lead candidates for programme planning. Prefer LEAD_AUDITOR; if none, auditors may lead. */
+export function programmeLeadAuditorOptions<
+  T extends { auditor_roles?: string[] | null },
+>(people: readonly T[]): T[] {
+  const auditors = people.filter(
+    (person) => (person.auditor_roles || []).length > 0,
+  );
+  const leads = auditors.filter((person) =>
+    (person.auditor_roles || []).includes("LEAD_AUDITOR"),
+  );
+  return leads.length ? leads : auditors;
+}
+
 type InitialsPerson = { id: string; fullName: string };
 
 export type AuditorScheduleAllocation = {
@@ -157,6 +170,57 @@ export function aircraftRegistrationSuffix(
     .split(/[-\s]+/)
     .filter(Boolean);
   return segments.at(-1) || null;
+}
+
+/** Pull a compact registration (SLL) from fleet fields or titles like "5Y-SLL". */
+export function resolveAircraftRegistration(
+  item: Pick<AuditProgrammeItem, "title" | "scope" | "audit_type" | "auditable_entity">,
+): string | null {
+  const entity = item.auditable_entity;
+  const fromFleet = aircraftRegistrationSuffix(entity?.aircraft?.tail_number);
+  if (fromFleet) return fromFleet;
+
+  const candidates = [item.title, entity?.display_label, item.scope];
+  for (const raw of candidates) {
+    const text = String(raw || "").trim();
+    if (!text) continue;
+    const full = text.match(/\b([A-Z0-9]{1,3})-([A-Z0-9]{2,4})\b/i);
+    if (full) return aircraftRegistrationSuffix(full[0]);
+  }
+  return null;
+}
+
+export function isAircraftProductSlot(
+  item: Pick<AuditProgrammeItem, "audit_type" | "auditable_entity">,
+): boolean {
+  const entityType = item.auditable_entity?.entity_type || "";
+  return (
+    item.audit_type === "PRODUCT" ||
+    entityType === "AIRCRAFT" ||
+    entityType === "AIRCRAFT_TYPE" ||
+    Boolean(item.auditable_entity?.aircraft?.tail_number)
+  );
+}
+
+/**
+ * Month-cell chip text. Aircraft/product slots show registration (SLL), not day
+ * numbers, so two audits in the same month stay distinguishable.
+ */
+export function programmeMatrixSlotLabel(
+  item: Pick<
+    AuditProgrammeItem,
+    "title" | "scope" | "audit_type" | "auditable_entity"
+  >,
+  dateLabel: string,
+): string {
+  const registration = resolveAircraftRegistration(item);
+  if (registration && isAircraftProductSlot(item)) {
+    return registration;
+  }
+  if (registration && item.auditable_entity?.aircraft) {
+    return registration;
+  }
+  return dateLabel;
 }
 
 export function ordinalDayLabel(label: string): string {

@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from io import BytesIO
 from typing import Any, Literal
+import random
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -131,7 +132,9 @@ class ProgrammeCreate(BaseModel):
     period_start: date
     period_end: date
     owner_user_id: str | None = Field(default=None, max_length=36)
-    copy_previous_year: bool = True
+    copy_previous_year: bool = False
+    rotate_auditors: bool = False
+    apply_hybrid_seed: bool = False
 
     @model_validator(mode="after")
     def valid_period(self):
@@ -139,6 +142,8 @@ class ProgrammeCreate(BaseModel):
             raise ValueError("period_end must be on or after period_start")
         if self.period_start.year != self.programme_year or self.period_end.year != self.programme_year:
             raise ValueError("The programme period must stay within the selected calendar year.")
+        if self.rotate_auditors and not self.copy_previous_year:
+            raise ValueError("Auditor rotation requires carrying forward last year's audits.")
         return self
 
 
@@ -310,8 +315,9 @@ class ProgrammeItemPatch(BaseModel):
     def validate_fixed_date_input(self):
         if self.fixed_dates is not None:
             self.fixed_dates = _normalise_fixed_dates(self.fixed_dates)
-        if self.recurrence == "FIXED_DATES" and self.fixed_dates == []:
-            raise ValueError("Specific-date recurrence requires at least one calendar date.")
+        # Empty FIXED_DATES is allowed when cancelling the requirement (clear last month).
+        if self.recurrence == "FIXED_DATES" and self.fixed_dates == [] and self.state != "CANCELLED":
+            raise ValueError("Specific-date recurrence requires at least one calendar date, or cancel the requirement.")
         return self
 
 
@@ -599,10 +605,10 @@ def _programme_snapshot(programme: QualityAuditProgramme) -> dict[str, Any]:
 
 
 def _programme_readiness(programme: QualityAuditProgramme, *, mandatory_coverage_gaps: int = 0) -> dict[str, Any]:
-    items = list(programme.items or [])
+    items = [item for item in list(programme.items or []) if item.state != "CANCELLED"]
     blockers: list[dict[str, str]] = []
     if not items:
-        blockers.append({"code": "NO_REQUIREMENTS", "message": "The hybrid engine has not produced any governed audit coverage."})
+        blockers.append({"code": "NO_REQUIREMENTS", "message": "Add at least one active audit requirement before approval."})
     if not list(programme.regulatory_basis or []):
         blockers.append({"code": "NO_COMPLIANCE_BASIS", "message": "Add the applicable regulatory, approval, manual or contractual baseline before approval."})
     if not programme.owner_user_id:
@@ -672,7 +678,8 @@ def _programme_dict(programme: QualityAuditProgramme, *, detail: bool = False) -
         "activated_at": programme.activated_at, "closed_at": programme.closed_at,
         "created_at": programme.created_at, "updated_at": programme.updated_at,
         "metrics": {
-            "planned_audit_count": len(items), "completed_audit_count": counts["COMPLETED"],
+            "planned_audit_count": sum(1 for item in items if item.state != "CANCELLED"),
+            "completed_audit_count": counts["COMPLETED"],
             "deferred_audit_count": counts["DEFERRED"], "cancelled_audit_count": counts["CANCELLED"],
             "follow_up_audit_count": counts["FOLLOW_UP_REQUIRED"], "scheduled_audit_count": counts["SCHEDULED"],
             "unscheduled_audit_count": counts["PLANNED"] - auto_scheduled_on_publication,
@@ -1052,7 +1059,17 @@ def _sync_hybrid_recommendations(
 ) -> dict[str, Any]:
     _assert_editable(programme)
     optimizer = _optimizer_payload(db, programme)
-    existing = {str(item.universe_item_id): item for item in list(programme.items or []) if item.state != "CANCELLED"}
+    existing = {
+        str(item.universe_item_id): item
+        for item in list(programme.items or [])
+        if item.state != "CANCELLED"
+    }
+    # Soft-cancelled coverage stays omitted so rebuild does not resurrect removals.
+    omitted_universe_ids = {
+        str(item.universe_item_id)
+        for item in list(programme.items or [])
+        if item.state == "CANCELLED"
+    }
     added = 0
     updated = 0
     now = _utcnow()
@@ -1083,6 +1100,8 @@ def _sync_hybrid_recommendations(
         }
         row = existing.get(universe_id)
         if row is None:
+            if universe_id in omitted_universe_ids:
+                continue
             row = QualityAuditProgrammeItem(
                 amo_id=ctx.amo_id,
                 programme_id=programme.id,
@@ -1174,23 +1193,50 @@ def _date_in_year(value: date | None, year: int) -> date | None:
         return value.replace(year=year, day=28)
 
 
+_CARRY_FORWARD_STATUS_RANK = {
+    "ACTIVE": 0,
+    "APPROVED": 1,
+    "SUPERSEDED": 2,
+    "DRAFT": 3,
+    "UNDER_REVIEW": 4,
+}
+
+
+def _select_carry_forward_source(
+    candidates: list[QualityAuditProgramme],
+) -> QualityAuditProgramme | None:
+    """Prefer published prior-year programmes; still allow draft planning roll-forward."""
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda row: (
+            _CARRY_FORWARD_STATUS_RANK.get(str(row.status or "").upper(), 99),
+            -int(row.revision_no or 0),
+            -(row.updated_at.timestamp() if row.updated_at else 0.0),
+        ),
+    )
+
+
 def _carry_forward_previous_year(
     db: Session,
     *,
     programme: QualityAuditProgramme,
     ctx: TenantContext,
 ) -> int:
-    previous = (
+    candidates = (
         _query(db, ctx.amo_id)
         .options(selectinload(QualityAuditProgramme.items))
         .filter(
             QualityAuditProgramme.programme_year == programme.programme_year - 1,
             QualityAuditProgramme.programme_kind == programme.programme_kind,
-            QualityAuditProgramme.status.in_(("APPROVED", "ACTIVE", "CLOSED", "SUPERSEDED")),
+            QualityAuditProgramme.status.in_(
+                ("ACTIVE", "APPROVED", "SUPERSEDED", "DRAFT", "UNDER_REVIEW"),
+            ),
         )
-        .order_by(QualityAuditProgramme.revision_no.desc(), QualityAuditProgramme.updated_at.desc())
-        .first()
+        .all()
     )
+    previous = _select_carry_forward_source(list(candidates))
     if previous is None:
         return 0
     if not list(programme.objectives or []):
@@ -1202,6 +1248,14 @@ def _carry_forward_previous_year(
     for source in list(previous.items or []):
         if source.state == "CANCELLED":
             continue
+        preserved_basis = [
+            basis
+            for basis in list(source.prioritization_basis or [])
+            if not (
+                isinstance(basis, dict)
+                and str(basis.get("driver") or "").upper() == "HYBRID_ASSURANCE"
+            )
+        ]
         data: dict[str, Any] = {
             "amo_id": ctx.amo_id,
             "programme_id": programme.id,
@@ -1221,6 +1275,8 @@ def _carry_forward_previous_year(
             "default_duration_days": source.default_duration_days,
             "default_location": source.default_location,
             "lead_auditor_user_id": source.lead_auditor_user_id,
+            "observer_auditor_user_id": source.observer_auditor_user_id,
+            "supporting_auditor_user_ids": list(source.supporting_auditor_user_ids or []),
             "auditee_user_id": source.auditee_user_id,
             "notify_auditors": source.notify_auditors,
             "notify_auditees": source.notify_auditees,
@@ -1229,7 +1285,7 @@ def _carry_forward_previous_year(
             "target_end": _date_in_year(source.target_end, programme.programme_year),
             "state": "PLANNED",
             "prioritization_basis": [
-                *list(source.prioritization_basis or []),
+                *preserved_basis,
                 {"driver": "ANNUAL_CARRY_FORWARD", "source_programme_id": str(previous.id)},
             ],
             "created_by_user_id": ctx.user_id,
@@ -1254,6 +1310,194 @@ def _carry_forward_previous_year(
             {"source_programme_id": str(previous.id), "copied_count": copied},
         )
     return copied
+
+
+def _pick_rotated_assignee(
+    *,
+    pool: list[str],
+    exclude: set[str],
+    previous: str | None,
+    load: Counter[str],
+) -> str | None:
+    """Pick a rotated assignee. Returns None when the pool cannot supply a replacement."""
+    candidates = [user_id for user_id in pool if user_id not in exclude]
+    if not candidates:
+        return None
+    preferred = (
+        [user_id for user_id in candidates if user_id != previous]
+        if previous and len(candidates) > 1
+        else list(candidates)
+    )
+    if not preferred:
+        preferred = list(candidates)
+    preferred.sort(key=lambda user_id: (int(load[user_id]), user_id))
+    min_load = int(load[preferred[0]])
+    tied = [user_id for user_id in preferred if int(load[user_id]) == min_load]
+    choice = random.choice(tied)
+    load[choice] += 1
+    return choice
+
+
+def _auditor_assignment_pools(
+    db: Session,
+    *,
+    amo_id: str,
+) -> tuple[list[str], list[str], list[str]]:
+    from .planner_schedule_router import _auditor_roles_by_user
+
+    roles_by_user = _auditor_roles_by_user(db, amo_id=amo_id)
+    lead_pool = sorted(
+        user_id for user_id, roles in roles_by_user.items() if "LEAD_AUDITOR" in roles
+    )
+    observer_pool = sorted(
+        user_id for user_id, roles in roles_by_user.items() if "OBSERVER_AUDITOR" in roles
+    )
+    supporting_pool = sorted(roles_by_user.keys())
+    return lead_pool, observer_pool, supporting_pool
+
+
+def _rotate_carried_auditors(
+    db: Session,
+    *,
+    programme: QualityAuditProgramme,
+    ctx: TenantContext,
+) -> int:
+    """Randomly reassign carried auditor slots from the live privilege pools."""
+    items = [
+        item
+        for item in list(programme.items or [])
+        if str(item.state or "").upper() != "CANCELLED"
+    ]
+    if not items:
+        db.refresh(programme, attribute_names=["items"])
+        items = [
+            item
+            for item in list(programme.items or [])
+            if str(item.state or "").upper() != "CANCELLED"
+        ]
+    if not items:
+        items = (
+            db.query(QualityAuditProgrammeItem)
+            .filter(
+                QualityAuditProgrammeItem.amo_id == ctx.amo_id,
+                QualityAuditProgrammeItem.programme_id == programme.id,
+                QualityAuditProgrammeItem.state != "CANCELLED",
+            )
+            .all()
+        )
+    if not items:
+        return 0
+
+    lead_pool, observer_pool, supporting_pool = _auditor_assignment_pools(
+        db, amo_id=ctx.amo_id
+    )
+    lead_load: Counter[str] = Counter()
+    observer_load: Counter[str] = Counter()
+    supporting_load: Counter[str] = Counter()
+    rotated = 0
+    now = _utcnow()
+
+    for item in items:
+        previous_lead = str(item.lead_auditor_user_id or "").strip() or None
+        previous_observer = str(item.observer_auditor_user_id or "").strip() or None
+        previous_supporting = [
+            str(user_id).strip()
+            for user_id in list(item.supporting_auditor_user_ids or [])
+            if str(user_id).strip()
+        ]
+        auditee = str(item.auditee_user_id or "").strip() or None
+        blocked = {auditee} if auditee else set()
+
+        next_lead = previous_lead
+        if previous_lead:
+            picked = _pick_rotated_assignee(
+                pool=lead_pool,
+                exclude=blocked,
+                previous=previous_lead,
+                load=lead_load,
+            )
+            if picked:
+                next_lead = picked
+
+        next_observer = previous_observer
+        if previous_observer:
+            observer_blocked = set(blocked)
+            if next_lead:
+                observer_blocked.add(next_lead)
+            picked = _pick_rotated_assignee(
+                pool=observer_pool,
+                exclude=observer_blocked,
+                previous=previous_observer,
+                load=observer_load,
+            )
+            if picked:
+                next_observer = picked
+
+        next_supporting = list(previous_supporting)
+        if previous_supporting:
+            supporting_blocked = set(blocked)
+            if next_lead:
+                supporting_blocked.add(next_lead)
+            if next_observer:
+                supporting_blocked.add(next_observer)
+            assigned: list[str] = []
+            for previous in previous_supporting:
+                picked = _pick_rotated_assignee(
+                    pool=supporting_pool,
+                    exclude=supporting_blocked | set(assigned),
+                    previous=previous,
+                    load=supporting_load,
+                )
+                if picked:
+                    assigned.append(picked)
+                    supporting_blocked.add(picked)
+                else:
+                    # Keep prior when pool cannot fill this slot.
+                    if previous not in supporting_blocked and previous not in assigned:
+                        assigned.append(previous)
+                        supporting_blocked.add(previous)
+            next_supporting = _normalise_supporting_auditors(
+                assigned,
+                lead_auditor_user_id=next_lead,
+                observer_auditor_user_id=next_observer,
+            )
+
+        if (
+            next_lead == previous_lead
+            and next_observer == previous_observer
+            and next_supporting == previous_supporting
+        ):
+            continue
+
+        try:
+            _validate_item_auditor_privileges(
+                db,
+                amo_id=ctx.amo_id,
+                lead_user_id=next_lead,
+                observer_user_id=next_observer,
+                supporting_user_ids=next_supporting,
+            )
+        except HTTPException:
+            continue
+
+        item.lead_auditor_user_id = next_lead
+        item.observer_auditor_user_id = next_observer
+        item.supporting_auditor_user_ids = next_supporting
+        item.updated_by_user_id = ctx.user_id
+        item.updated_at = now
+        rotated += 1
+
+    if rotated:
+        _event(
+            db,
+            programme,
+            ctx,
+            "ITEM_UPDATED",
+            f"Rotated auditor assignments on {rotated} carried audit(s) for annual review.",
+            None,
+            {"rotated_count": rotated},
+        )
+    return rotated
 
 
 @router.get("")
@@ -1297,11 +1541,28 @@ def create_programme(payload: ProgrammeCreate,
     )
     db.add(row)
     db.flush()
-    _event(db, row, ctx, "CREATED", "Continuous hybrid audit programme created.", None, _programme_snapshot(row))
+    _event(
+        db,
+        row,
+        ctx,
+        "CREATED",
+        (
+            "Hybrid-seeded audit programme created."
+            if payload.apply_hybrid_seed
+            else "Audit programme draft created."
+        ),
+        None,
+        _programme_snapshot(row),
+    )
     _ensure_standard_audit_areas(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id)
+    copied = 0
     if payload.copy_previous_year:
-        _carry_forward_previous_year(db, programme=row, ctx=ctx)
-    _sync_hybrid_recommendations(db, row, ctx)
+        copied = _carry_forward_previous_year(db, programme=row, ctx=ctx)
+    if payload.rotate_auditors and copied:
+        db.flush()
+        _rotate_carried_auditors(db, programme=row, ctx=ctx)
+    if payload.apply_hybrid_seed:
+        _sync_hybrid_recommendations(db, row, ctx)
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _programme_dict(_load_programme(db, ctx.amo_id, str(row.id)), detail=True)
@@ -1365,8 +1626,11 @@ def _programme_timezone(db: Session, programme: QualityAuditProgramme) -> str:
     return str(getattr(amo, "time_zone", None) or "UTC")
 
 
-def _assert_exportable(programme: QualityAuditProgramme) -> None:
-    if programme.status not in {"APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"}:
+def _assert_exportable(programme: QualityAuditProgramme, *, allow_draft: bool = False) -> None:
+    controlled = {"APPROVED", "ACTIVE", "SUPERSEDED", "CLOSED"}
+    draft_ok = {"DRAFT", "UNDER_REVIEW"}
+    allowed = controlled | (draft_ok if allow_draft else set())
+    if programme.status not in allowed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="The controlled schedule becomes downloadable after Accountable Executive approval.",
@@ -1381,8 +1645,9 @@ def export_programme_pdf(
 ):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     programme = _load_programme(db, ctx.amo_id, programme_id)
-    _assert_exportable(programme)
-    content = audit_programme_pdf(programme, _programme_people(db, programme))
+    _assert_exportable(programme, allow_draft=True)
+    draft = programme.status in {"DRAFT", "UNDER_REVIEW"}
+    content = audit_programme_pdf(programme, _programme_people(db, programme), draft=draft)
     filename = f"{programme.programme_ref.replace('/', '-')}-audit-schedule.pdf"
     return StreamingResponse(
         BytesIO(content),
@@ -1451,16 +1716,21 @@ def patch_programme(programme_id: str, payload: ProgrammePatch,
     row.updated_by_user_id = ctx.user_id
     row.updated_at = _utcnow()
     _event(db, row, ctx, "UPDATED", payload.reason, before, _programme_snapshot(row))
-    _sync_hybrid_recommendations(db, row, ctx)
+    # Do not silently re-seed hybrid coverage on metadata edits — that produced
+    # unexplained audits/scores on draft programmes. Seed only via explicit create
+    # flag or the optimizer rebuild action.
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _programme_dict(_load_programme(db, ctx.amo_id, programme_id), detail=True)
 
 
 _TRANSITIONS: dict[str, set[str]] = {
-    "DRAFT": {"UNDER_REVIEW"}, "UNDER_REVIEW": {"DRAFT", "APPROVED"},
-    "APPROVED": {"ACTIVE", "SUPERSEDED"}, "ACTIVE": {"SUPERSEDED", "CLOSED"},
-    "SUPERSEDED": set(), "CLOSED": set(),
+    "DRAFT": {"UNDER_REVIEW", "CLOSED"},
+    "UNDER_REVIEW": {"DRAFT", "APPROVED"},
+    "APPROVED": {"ACTIVE", "SUPERSEDED"},
+    "ACTIVE": {"SUPERSEDED", "CLOSED"},
+    "SUPERSEDED": set(),
+    "CLOSED": set(),
 }
 _EVENT_BY_TARGET = {"UNDER_REVIEW": "SUBMITTED_FOR_REVIEW", "DRAFT": "RETURNED_TO_DRAFT", "APPROVED": "APPROVED",
                     "ACTIVE": "ACTIVATED", "SUPERSEDED": "SUPERSEDED", "CLOSED": "CLOSED"}
@@ -1724,7 +1994,7 @@ def create_amendment(programme_id: str, payload: ProgrammeAmendment,
         ))
     db.flush()
     _event(db, row, ctx, "AMENDMENT_CREATED", payload.reason, _programme_snapshot(prior), _programme_snapshot(row))
-    _sync_hybrid_recommendations(db, row, ctx)
+    # Do not silently re-seed hybrid coverage on amendments — apply via explicit optimizer rebuild.
     db.commit()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _programme_dict(_load_programme(db, ctx.amo_id, str(row.id)), detail=True)
@@ -1904,6 +2174,48 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
     before = {"title": row.title, "state": row.state, "target_start": str(row.target_start) if row.target_start else None,
               "target_end": str(row.target_end) if row.target_end else None}
     updates = payload.model_dump(exclude_unset=True, exclude={"reason"})
+    # When removing a draft planned audit that still has sibling coverage for the
+    # same area (e.g. two aircraft product audits), delete the row entirely so it
+    # cannot linger. Sole coverage soft-cancels so hybrid rebuild does not resurrect it.
+    if (
+        updates.get("state") == "CANCELLED"
+        and row.state == "PLANNED"
+        and row.schedule_id is None
+    ):
+        reason = str(
+            updates.get("cancellation_reason") or payload.reason or ""
+        ).strip() or "Removed from the draft programme."
+        sibling_count = (
+            db.query(QualityAuditProgrammeItem.id)
+            .filter(
+                QualityAuditProgrammeItem.amo_id == ctx.amo_id,
+                QualityAuditProgrammeItem.programme_id == programme.id,
+                QualityAuditProgrammeItem.universe_item_id == row.universe_item_id,
+                QualityAuditProgrammeItem.id != row.id,
+                QualityAuditProgrammeItem.state != "CANCELLED",
+            )
+            .count()
+        )
+        if sibling_count > 0:
+            title = row.title
+            db.delete(row)
+            _event(
+                db,
+                programme,
+                ctx,
+                "ITEM_UPDATED",
+                reason,
+                before,
+                {"deleted": True, "title": title, "state": "DELETED"},
+            )
+            db.commit()
+            return {
+                "id": str(item_id),
+                "programme_id": str(programme.id),
+                "title": title,
+                "state": "CANCELLED",
+                "deleted": True,
+            }
     updates.pop("audit_type", None)
     if row.universe_item is not None:
         updates["audit_type"] = _audit_type_for_entity(row.universe_item.entity_type)
@@ -1933,7 +2245,9 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
             status_code=status.HTTP_409_CONFLICT,
             detail="Use the governed audit-deferral request, decision and apply workflow.",
         )
-    if candidate_state == "CANCELLED" and not str(updates.get("cancellation_reason", row.cancellation_reason) or "").strip():
+    if candidate_state == "CANCELLED" and not str(
+        updates.get("cancellation_reason", row.cancellation_reason) or payload.reason or ""
+    ).strip():
         raise HTTPException(status_code=422, detail="Cancelling an audit requirement requires a reason.")
     if "state" in updates and candidate_state == "PLANNED":
         updates["cancellation_reason"] = None
@@ -1958,6 +2272,48 @@ def patch_programme_item(programme_id: str, item_id: str, payload: ProgrammeItem
         "default_duration_days": updates.get("default_duration_days", row.default_duration_days),
         "auto_schedule": updates.get("auto_schedule", row.auto_schedule),
     }
+    cancelling = candidate_state == "CANCELLED" or (
+        candidate["recurrence"] == "FIXED_DATES"
+        and "fixed_dates" in updates
+        and not candidate["fixed_dates"]
+    )
+    if cancelling:
+        # Removing the last month / discarding the requirement — skip schedule revalidation.
+        updates["state"] = "CANCELLED"
+        updates["cancellation_reason"] = (
+            str(updates.get("cancellation_reason") or payload.reason or "").strip()
+            or "Removed from the programme schedule."
+        )
+        updates["fixed_dates"] = []
+        updates["auto_schedule"] = False
+        for field, value in updates.items():
+            setattr(row, field, value)
+        row.updated_by_user_id = ctx.user_id
+        row.updated_at = _utcnow()
+        _event(
+            db,
+            programme,
+            ctx,
+            "ITEM_UPDATED",
+            payload.reason,
+            before,
+            {
+                "title": row.title,
+                "state": row.state,
+                "target_start": str(row.target_start) if row.target_start else None,
+                "target_end": str(row.target_end) if row.target_end else None,
+            },
+        )
+        db.commit()
+        set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+        return _item_dict(
+            db.query(QualityAuditProgrammeItem).options(
+                selectinload(QualityAuditProgrammeItem.universe_item)
+            ).filter(
+                QualityAuditProgrammeItem.amo_id == ctx.amo_id,
+                QualityAuditProgrammeItem.id == row.id,
+            ).one()
+        )
     if candidate["recurrence"] == "FIXED_DATES":
         try:
             _validate_default_timing(

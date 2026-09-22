@@ -85,7 +85,7 @@ export function programmePortfolioSummary(
 
 export function programmeStatusHint(status: AuditProgrammeStatus): string | null {
   if (status === "DRAFT") {
-    return "Programmes cannot be deleted. Finish approval or ask Quality to close an unwanted draft.";
+    return "Discard this draft if it was created in error, or finish the audits and submit for Quality review.";
   }
   if (status === "UNDER_REVIEW") {
     return "The submitted revision is frozen. A reviewer must return it to draft before any content changes.";
@@ -94,4 +94,69 @@ export function programmeStatusHint(status: AuditProgrammeStatus): string | null
     return "Published programmes are protected. Create an amendment to change coverage.";
   }
   return null;
+}
+
+const CARRY_FORWARD_SOURCE_STATUSES = new Set<AuditProgrammeStatus>([
+  "ACTIVE",
+  "APPROVED",
+  "SUPERSEDED",
+  "DRAFT",
+  "UNDER_REVIEW",
+]);
+
+/** True when year−1 has a same-kind programme that carry-forward can seed from. */
+export function priorYearCarryForwardAvailable(
+  priorYearProgrammes: Array<Pick<AuditProgramme, "programme_kind" | "status" | "title">>,
+  kind: ProgrammeKind,
+): boolean {
+  return priorYearProgrammes.some((programme) => {
+    if (!CARRY_FORWARD_SOURCE_STATUSES.has(programme.status)) return false;
+    return programmeKindOf(programme) === kind;
+  });
+}
+
+/** Default the create drawer carry-forward checkbox from prior-year coverage. */
+export function defaultCopyPreviousYear(
+  priorYearProgrammes: Array<Pick<AuditProgramme, "programme_kind" | "status" | "title">>,
+  kind: ProgrammeKind,
+): boolean {
+  return priorYearCarryForwardAvailable(priorYearProgrammes, kind);
+}
+
+/** Rotate auditors only makes sense when carrying audits forward. */
+export function defaultRotateAuditors(copyPreviousYear: boolean): boolean {
+  return copyPreviousYear;
+}
+
+export function emptyYearCreateLabel(year: number, priorYear: number, canCarryForward: boolean): string {
+  return canCarryForward ? `Create ${year} from ${priorYear}` : "Create programme";
+}
+
+export function emptyYearCreateHint(year: number, priorYear: number, canCarryForward: boolean): string {
+  if (canCarryForward) {
+    return `Carry forward ${priorYear} audits into a ${year} draft (same months and registrations). Review before you submit.`;
+  }
+  return `Create a draft to plan internal, external, or third-party audits for ${year}.`;
+}
+
+export function carryForwardResultToast(
+  copiedCount: number,
+  year: number,
+  priorYear: number,
+  rotatedAuditors = false,
+): { title: string; message: string; variant: "success" | "warning" } {
+  if (copiedCount > 0) {
+    return {
+      title: `${year} programme created`,
+      message: rotatedAuditors
+        ? `Carried forward ${copiedCount} audit${copiedCount === 1 ? "" : "s"} from ${priorYear} with rotated auditor assignments.`
+        : `Carried forward ${copiedCount} audit${copiedCount === 1 ? "" : "s"} from ${priorYear} for review.`,
+      variant: "success",
+    };
+  }
+  return {
+    title: `${year} programme created`,
+    message: `No ${priorYear} audits were carried forward. Add coverage in this draft, or check that ${priorYear} has a programme of the same type.`,
+    variant: "warning",
+  };
 }

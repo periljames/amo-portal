@@ -64,12 +64,12 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
 
   return (
     <section className="qms-live-audit-focus__evidence" aria-label="Governed evidence">
-      <header><Paperclip size={16} /><div><strong>Governed evidence</strong><small>Immutable file objects · checksum and uploader attribution retained</small></div></header>
+      <header><Paperclip size={16} /><div><strong>Governed evidence</strong><small>Immutable file objects · uploader attribution retained</small></div></header>
       {artifacts.length ? (
         <ul>
           {artifacts.map((artifact) => (
             <li key={artifact.id}>
-              <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")} · SHA {artifact.sha256.slice(0, 12)}…</small></span></div>
+              <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span></div>
               <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id}><Download size={14} /> {downloading === artifact.id ? "Opening…" : "Open"}</button>
             </li>
           ))}

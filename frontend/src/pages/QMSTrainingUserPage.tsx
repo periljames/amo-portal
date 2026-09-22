@@ -1,8 +1,14 @@
-import { Download, Eye, FileImage, FilePlus2, FileText, Pencil, Plus, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import type { ColDef, FirstDataRenderedEvent, GridReadyEvent, GridSizeChangedEvent, ICellRendererParams } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+import { ArrowLeft, CalendarDays, Clock3, FolderOpen, GraduationCap, Package, ShieldCheck, Download, FileImage, FileText, Plus, X } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import QMSLayout from "../components/QMS/QMSLayout";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import Drawer from "../components/shared/Drawer";
 import PersonnelLicencePanel from "../components/training/PersonnelLicencePanel";
+import { getTrainingAccess } from "../services/trainingOperating";
 import TrainingRequirementList from "../components/training/TrainingRequirementList";
 import type { AdminUserRead } from "../services/adminUsers";
 import { getCachedUser, getContext, type PortalUser } from "../services/auth";
@@ -37,9 +43,78 @@ import { canonicalTrainingType, complianceStatusLabel, completedEventStatusWitho
 type LoadState = "idle" | "loading" | "ready" | "error";
 type SortKey = "course" | "completion_date" | "valid_until" | "hours" | "score" | "certificate";
 type SortDirection = "asc" | "desc";
-type PanelKey = "compliance" | "schedule" | "deferrals" | "newRecord";
-type ViewMode = "completed" | "missing";
+type ProfileSection = "courses" | "schedule" | "deferrals" | "licences" | "evidence";
 type RecordConflictKind = "duplicate" | "renewal";
+
+type ScheduleGridRow = {
+  id: string;
+  course: string;
+  session: string;
+  starts: string;
+  status: string;
+  location: string;
+};
+
+type DeferralGridRow = {
+  id: string;
+  course: string;
+  originalDue: string;
+  newDue: string;
+  status: string;
+  reason: string;
+  requested: string;
+};
+
+type EvidenceGridRow = {
+  id: string;
+  filename: string;
+  kind: string;
+  review: string;
+  uploaded: string;
+  isPdf: boolean;
+  file: TrainingFileRead;
+};
+
+const PROFILE_GRID_DEFAULT_COL_DEF: ColDef = {
+  resizable: true,
+  sortable: true,
+  suppressMovable: true,
+  wrapHeaderText: false,
+  autoHeaderHeight: false,
+  flex: 1,
+  minWidth: 96,
+};
+
+const PROFILE_GRID_HEADER_HEIGHT = 36;
+const PROFILE_GRID_ROW_HEIGHT = 46;
+const PROFILE_GRID_AUTO_SIZE = { type: "fitGridWidth" as const, defaultMinWidth: 96 };
+
+function profileGridHostHeight(rowCount: number): number {
+  return Math.max(160, Math.min(420, PROFILE_GRID_HEADER_HEIGHT + Math.max(rowCount, 1) * PROFILE_GRID_ROW_HEIGHT + 8));
+}
+
+function fitProfileGridColumns(api: { sizeColumnsToFit: () => void } | undefined | null): void {
+  if (!api) return;
+  requestAnimationFrame(() => {
+    try {
+      api.sizeColumnsToFit();
+    } catch {
+      /* grid may already be destroyed during tab switch */
+    }
+  });
+}
+
+function onProfileGridReady(event: GridReadyEvent): void {
+  fitProfileGridColumns(event.api);
+}
+
+function onProfileGridFirstData(event: FirstDataRenderedEvent): void {
+  fitProfileGridColumns(event.api);
+}
+
+function onProfileGridSizeChanged(event: GridSizeChangedEvent): void {
+  if (event.clientWidth > 0) fitProfileGridColumns(event.api);
+}
 
 type RecordConflictState = {
   kind: RecordConflictKind;
@@ -132,8 +207,8 @@ function coursePhase(course: TrainingCourseRead | null | undefined): "INITIAL" |
   return "UNKNOWN";
 }
 
-function courseFamilyKey(course: TrainingCourseRead | null | undefined): string {
-  return explicitTrainingRequirementKey(course);
+function courseFamilyKey(course: TrainingCourseRead | null | undefined, courses: TrainingCourseRead[] = []): string {
+  return explicitTrainingRequirementKey(course, courses);
 }
 
 function buildCourseLookup(courses: TrainingCourseRead[]): Map<string, TrainingCourseRead> {
@@ -382,25 +457,15 @@ function TransferProgressButton({
     >
       <span
         className="training-progress-button__fill"
-        style={{ width: `${Math.max(6, Math.min(100, busyState.progress))}%` }}
+        style={{ width: showBusy ? `${Math.max(6, Math.min(100, busyState.progress))}%` : "0%" }}
         aria-hidden="true"
       />
       <span className="training-progress-button__content">
         <span className="training-progress-button__label">{showBusy ? busyState.label : idleLabel}</span>
-        <span className="training-progress-button__value">{showBusy ? formatTransferPercent(busyState.progress) : "Ready"}</span>
+        {showBusy && <span className="training-progress-button__value">{formatTransferPercent(busyState.progress)}</span>}
       </span>
     </button>
   );
-}
-
-function initialPanelState(searchParams: URLSearchParams, canEdit: boolean): Record<PanelKey, boolean> {
-  const tab = searchParams.get("tab");
-  return {
-    compliance: true,
-    schedule: tab === "schedule",
-    deferrals: tab === "deferrals",
-    newRecord: canEdit && tab === "new-record",
-  };
 }
 
 const QMSTrainingUserPage: React.FC = () => {
@@ -413,7 +478,7 @@ const QMSTrainingUserPage: React.FC = () => {
   const department = params.department ?? ctx.department ?? "quality";
   const userId = params.userId ?? params.staffId ?? cachedUser?.id ?? "";
   const isOwnProfile = Boolean(cachedUser && userId === cachedUser.id);
-  const canEdit = Boolean(cachedUser?.capability_codes?.includes("training.people.manage"));
+  const [canEdit, setCanEdit] = useState(false);
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -426,8 +491,15 @@ const QMSTrainingUserPage: React.FC = () => {
   const [deferrals, setDeferrals] = useState<TrainingDeferralRequestRead[]>([]);
   const [files, setFiles] = useState<TrainingFileRead[]>([]);
   const [statusFilter, setStatusFilter] = useState(searchParams.get("filter") || "ALL");
-  const [panelOpen, setPanelOpen] = useState<Record<PanelKey, boolean>>(() => initialPanelState(searchParams, canEdit));
-  const [viewMode, setViewMode] = useState<ViewMode>(searchParams.get("filter") === "NOT_DONE" ? "missing" : "completed");
+  const [activeSection, setActiveSection] = useState<ProfileSection>(() => {
+    const tab = searchParams.get("tab");
+    return tab === "schedule" || tab === "deferrals" || tab === "licences" || tab === "evidence" ? tab : "courses";
+  });
+  const sectionStartRef = useRef<HTMLDivElement>(null);
+  const selectSection = (section: ProfileSection) => {
+    setActiveSection(section);
+    sectionStartRef.current?.scrollIntoView({ block: "nearest" });
+  };
   const [sortKey, setSortKey] = useState<SortKey>("completion_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [exportingEvidence, setExportingEvidence] = useState(false);
@@ -448,14 +520,15 @@ const QMSTrainingUserPage: React.FC = () => {
   const [savingRecord, setSavingRecord] = useState(false);
   const [recordConflict, setRecordConflict] = useState<RecordConflictState | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [recordDrawerOpen, setRecordDrawerOpen] = useState(false);
+  const [actionsDrawerOpen, setActionsDrawerOpen] = useState(false);
+  const [deferralDrawerOpen, setDeferralDrawerOpen] = useState(false);
   const [inlineAttachmentTargetRecordId, setInlineAttachmentTargetRecordId] = useState<string | null>(null);
   const [uploadingInlineAttachment, setUploadingInlineAttachment] = useState(false);
   const [viewerFile, setViewerFile] = useState<TrainingFileRead | null>(null);
   const [viewerBlobUrl, setViewerBlobUrl] = useState<string | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
-  const [viewerScale, setViewerScale] = useState(1);
   const inlineAttachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const recordFormRef = useRef<HTMLDivElement | null>(null);
 
   const [deferralForm, setDeferralForm] = useState({
     coursePk: "",
@@ -476,10 +549,12 @@ const QMSTrainingUserPage: React.FC = () => {
 
     const result = await Promise.allSettled([
       listTrainingCourses({ include_inactive: true, limit: 200 }),
-      getTrainingUserDetailBundle(userId, { recordsLimit: 50, deferralsLimit: 50, filesLimit: 50, eventsLimit: 20 }),
+      getTrainingUserDetailBundle(userId, { recordsLimit: 200, deferralsLimit: 50, filesLimit: 200, eventsLimit: 20 }),
+      getTrainingAccess(),
     ]);
 
-    const [courseResult, bundleResult] = result;
+    const [courseResult, bundleResult, accessResult] = result;
+    setCanEdit(accessResult.status === "fulfilled" && accessResult.value.capabilities.includes("training.people.manage"));
     const bundle = bundleResult.status === "fulfilled" ? bundleResult.value : null;
     const resolvedUser = bundle?.user || (isOwnProfile && cachedUser ? portalUserToAdminUser(cachedUser) : null);
 
@@ -492,7 +567,14 @@ const QMSTrainingUserPage: React.FC = () => {
 
     setUser(resolvedUser);
     setHireDate(bundle.hire_date || null);
-    setCourses(courseResult.status === "fulfilled" ? courseResult.value : []);
+    const listedCourses = courseResult.status === "fulfilled" ? courseResult.value : [];
+    const bundleCourses = Array.isArray(bundle.courses) ? bundle.courses : [];
+    const mergedCourses = new Map<string, TrainingCourseRead>();
+    [...listedCourses, ...bundleCourses].forEach((course) => {
+      const key = String(course.id || course.course_pk || course.course_id || "");
+      if (key) mergedCourses.set(key, course);
+    });
+    setCourses(Array.from(mergedCourses.values()));
     setItems(bundle.status_items || []);
     setRecords(dedupeTrainingRecords(bundle.records || []));
     setDeferrals(bundle.deferrals || []);
@@ -500,7 +582,7 @@ const QMSTrainingUserPage: React.FC = () => {
     setFiles(bundle.files || []);
 
     const errors: string[] = [];
-    [courseResult, bundleResult].forEach((entry) => {
+    [courseResult, bundleResult, accessResult].forEach((entry) => {
       if (entry.status === "rejected") {
         const message = String(entry.reason?.message || "").trim();
         if (message) errors.push(message);
@@ -514,6 +596,12 @@ const QMSTrainingUserPage: React.FC = () => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  useEffect(() => {
+    if (canEdit && searchParams.get("tab") === "new-record") {
+      setRecordDrawerOpen(true);
+    }
+  }, [canEdit, searchParams]);
 
   const startProgressSimulation = (
     setState: React.Dispatch<React.SetStateAction<TransferButtonState>>,
@@ -622,19 +710,19 @@ const QMSTrainingUserPage: React.FC = () => {
       if (!record.completion_date) return;
       const course = resolveCourse(courseLookup, record.course_id);
       if (coursePhase(course) === "INITIAL") {
-        const key = courseFamilyKey(course);
+        const key = courseFamilyKey(course, courses);
         if (key) keys.add(key);
       }
     });
     return keys;
-  }, [courseLookup, records]);
+  }, [courseLookup, courses, records]);
 
   const recordableCourses = useMemo(() => {
     return courses.filter((course) => {
       if (coursePhase(course) !== "RECURRENT") return true;
-      const family = courseFamilyKey(course);
+      const family = courseFamilyKey(course, courses);
       if (!family) return true;
-      const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry) === family);
+      const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry, courses) === family);
       if (!hasInitialCourse) return true;
       return completedInitialFamilyKeys.has(family);
     });
@@ -672,9 +760,9 @@ const QMSTrainingUserPage: React.FC = () => {
   }, [activeRecordsForSelectedCourse, recordForm.completionDate, recordForm.coursePk]);
   const linkedRefresherCourse = useMemo(() => {
     if (coursePhase(selectedCourse) !== "INITIAL") return null;
-    const family = courseFamilyKey(selectedCourse);
+    const family = courseFamilyKey(selectedCourse, courses);
     if (!family) return null;
-    return courses.find((course) => coursePhase(course) === "RECURRENT" && courseFamilyKey(course) === family) || null;
+    return courses.find((course) => coursePhase(course) === "RECURRENT" && courseFamilyKey(course, courses) === family) || null;
   }, [courses, selectedCourse]);
   const selectedCoursePhase = coursePhase(selectedCourse);
   const derivedValidUntil = useMemo(() => {
@@ -719,28 +807,6 @@ const QMSTrainingUserPage: React.FC = () => {
     return rows;
   }, [courseLookup, records, sortDirection, sortKey]);
 
-  const summary = useMemo(() => {
-    return items.reduce(
-      (acc, item) => {
-        const status = effectiveTrainingStatus(item);
-        if (status === "OVERDUE") acc.overdue += 1;
-        if (status === "DUE_SOON") acc.dueSoon += 1;
-        if (status === "OK") acc.ok += 1;
-        if (status === "DEFERRED") acc.deferred += 1;
-        if (status === "SCHEDULED_ONLY") acc.scheduled += 1;
-        if (status === "NOT_DONE") acc.notDone += 1;
-        return acc;
-      },
-      { overdue: 0, dueSoon: 0, ok: 0, deferred: 0, scheduled: 0, notDone: 0 },
-    );
-  }, [items]);
-
-  const compliance = useMemo(() => {
-    const total = items.length;
-    if (total === 0) return 0;
-    return Math.round(((summary.ok || 0) / total) * 100);
-  }, [items.length, summary.ok]);
-
   const nextDue = useMemo(() => {
     const withDue = items
       .filter((item) => Boolean(dueDateForItem(item)))
@@ -763,6 +829,50 @@ const QMSTrainingUserPage: React.FC = () => {
       .sort((a, b) => String(a.starts_on).localeCompare(String(b.starts_on)));
   }, [events, relevantCourseIds]);
 
+  const scheduleRows = useMemo<ScheduleGridRow[]>(() => {
+    return relevantEvents.map((event) => {
+      const course = resolveCourse(courseLookup, event.course_id);
+      return {
+        id: event.id,
+        course: course?.course_name || event.course_id,
+        session: event.title || "-",
+        starts: formatDate(event.starts_on),
+        status: event.status,
+        location: event.location || "-",
+      };
+    });
+  }, [courseLookup, relevantEvents]);
+
+  const deferralRows = useMemo<DeferralGridRow[]>(() => {
+    return deferrals.map((deferral) => {
+      const course = resolveCourse(courseLookup, deferral.course_id);
+      return {
+        id: deferral.id,
+        course: course?.course_name || deferral.course_id,
+        originalDue: formatDate(deferral.original_due_date),
+        newDue: formatDate(deferral.requested_new_due_date),
+        status: deferral.status,
+        reason: deferral.reason_text || deferral.reason_category || "-",
+        requested: formatDateTime(deferral.created_at),
+      };
+    });
+  }, [courseLookup, deferrals]);
+
+  const evidenceRows = useMemo<EvidenceGridRow[]>(() => {
+    return files.map((file) => {
+      const isPdf = (file.content_type || "").toLowerCase().includes("pdf") || file.original_filename.toLowerCase().endsWith(".pdf");
+      return {
+        id: file.id,
+        filename: file.original_filename,
+        kind: file.kind,
+        review: file.review_status,
+        uploaded: formatDateTime(file.uploaded_at),
+        isPdf,
+        file,
+      };
+    });
+  }, [files]);
+
   const visibleCompletedRows = useMemo(() => {
     return sortedRecords.filter((record) => !isHistoricalTrainingRecord(record));
   }, [sortedRecords]);
@@ -780,9 +890,9 @@ const QMSTrainingUserPage: React.FC = () => {
     const base = items.filter((item) => effectiveTrainingStatus(item) === "NOT_DONE").filter((item) => {
       const course = resolveCourse(courseLookup, item.course_id) || courses.find((entry) => entry.course_name === item.course_name) || null;
       if (coursePhase(course) !== "RECURRENT") return true;
-      const family = courseFamilyKey(course);
+      const family = courseFamilyKey(course, courses);
       if (!family) return true;
-      const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry) === family);
+      const hasInitialCourse = courses.some((entry) => coursePhase(entry) === "INITIAL" && courseFamilyKey(entry, courses) === family);
       if (!hasInitialCourse) return true;
       return completedInitialFamilyKeys.has(family);
     });
@@ -825,21 +935,39 @@ const QMSTrainingUserPage: React.FC = () => {
     setRecordAttachmentKind("EVIDENCE");
   };
 
-  const openRecordForm = () => {
-    setPanelOpen((prev) => ({ ...prev, newRecord: true }));
-    window.setTimeout(() => recordFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  const closeRecordDrawer = () => {
+    if (savingRecord) return;
+    setRecordDrawerOpen(false);
+    setRecordConflict(null);
+    resetRecordForm();
+  };
+
+  const openRecordDrawer = () => {
+    setRecordDrawerOpen(true);
+  };
+
+  const openDeferralDrawer = () => {
+    setDeferralDrawerOpen(true);
+  };
+
+  const closeDeferralDrawer = () => {
+    if (savingDeferral) return;
+    setDeferralDrawerOpen(false);
   };
 
   const beginNewRecord = (coursePk?: string) => {
     resetRecordForm();
-    if (coursePk) setRecordForm((prev) => ({ ...prev, coursePk }));
-    openRecordForm();
+    if (coursePk) {
+      setRecordForm((prev) => ({ ...prev, coursePk }));
+      setRecordAttachmentKind("CERTIFICATE");
+    }
+    openRecordDrawer();
   };
 
   const openRecordEditor = (record: TrainingRecordRead) => {
     setEditingRecordId(record.id);
     setRecordForm({
-      coursePk: record.course_id,
+      coursePk: resolveCourse(courseLookup, record.course_pk || record.course_id)?.id || record.course_id,
       completionDate: record.completion_date,
       examScore: record.exam_score == null ? "" : String(record.exam_score),
       certificateReference: record.certificate_reference || "",
@@ -847,7 +975,7 @@ const QMSTrainingUserPage: React.FC = () => {
     });
     setRecordAttachment(null);
     setRecordAttachmentKind("CERTIFICATE");
-    openRecordForm();
+    openRecordDrawer();
   };
 
   const deleteRecord = async (record: TrainingRecordRead) => {
@@ -868,7 +996,6 @@ const QMSTrainingUserPage: React.FC = () => {
       const url = window.URL.createObjectURL(downloaded.blob);
       setViewerFile(file);
       setViewerBlobUrl(url);
-      setViewerScale(1);
     } catch (e: any) {
       setError(e?.message || "Failed to open attachment.");
     } finally {
@@ -880,17 +1007,22 @@ const QMSTrainingUserPage: React.FC = () => {
     if (viewerBlobUrl) window.URL.revokeObjectURL(viewerBlobUrl);
     setViewerBlobUrl(null);
     setViewerFile(null);
-    setViewerScale(1);
     setViewerLoading(false);
   };
 
+  const handleDownloadCertificate = async (file: TrainingFileRead) => {
+    try { saveDownloadedFile(await downloadTrainingFile(file.id)); }
+    catch (e: any) { setError(e?.message || "Failed to download certificate."); }
+  };
+
   const triggerInlineAttachmentUpload = (recordId: string) => {
+    if (!canEdit || uploadingInlineAttachment) return;
     setInlineAttachmentTargetRecordId(recordId);
     inlineAttachmentInputRef.current?.click();
   };
 
   const handleInlineAttachmentChosen = async (file: File | null) => {
-    if (!file || !inlineAttachmentTargetRecordId || !userId) return;
+    if (!canEdit || !file || !inlineAttachmentTargetRecordId || !userId) return;
     const targetRecord = records.find((entry) => entry.id === inlineAttachmentTargetRecordId);
     if (!targetRecord) return;
     try {
@@ -914,6 +1046,7 @@ const QMSTrainingUserPage: React.FC = () => {
   };
 
   const submitRecord = async (confirmRenewal = false) => {
+    if (!canEdit) return;
     if (!recordForm.coursePk || !userId) {
       setError("Select a course before saving a training record.");
       return;
@@ -989,8 +1122,8 @@ const QMSTrainingUserPage: React.FC = () => {
       setRecordConflict(null);
       await load();
       resetRecordForm();
-      setPanelOpen((prev) => ({ ...prev, newRecord: false }));
-      setViewMode("completed");
+      setRecordDrawerOpen(false);
+      setActiveSection("courses");
       setStatusFilter("ALL");
     } catch (e: any) {
       const conflict = trainingApiConflictFromError(e);
@@ -1049,6 +1182,7 @@ const QMSTrainingUserPage: React.FC = () => {
       });
       await load();
       setDeferralForm((prev) => ({ ...prev, requestedNewDueDate: "", reasonText: "" }));
+      setDeferralDrawerOpen(false);
     } catch (e: any) {
       setError(e?.message || "Failed to submit deferral request.");
     } finally {
@@ -1068,6 +1202,106 @@ const QMSTrainingUserPage: React.FC = () => {
     }
   };
 
+  const scheduleColumnDefs: ColDef<ScheduleGridRow>[] = [
+    { headerName: "Course", field: "course", flex: 1.6, minWidth: 160 },
+    { headerName: "Session", field: "session", flex: 1.4, minWidth: 140 },
+    { headerName: "Starts", field: "starts", flex: 0.7, minWidth: 100 },
+    {
+      headerName: "Status",
+      field: "status",
+      flex: 0.8,
+      minWidth: 110,
+      cellRenderer: ({ value }: ICellRendererParams<ScheduleGridRow, string>) => (
+        <span className={statusPillClass(String(value || ""))}>{String(value || "").replaceAll("_", " ")}</span>
+      ),
+    },
+    { headerName: "Location", field: "location", flex: 1, minWidth: 120 },
+  ];
+
+  const deferralColumnDefs: ColDef<DeferralGridRow>[] = (() => {
+    const cols: ColDef<DeferralGridRow>[] = [
+      { headerName: "Course", field: "course", flex: 1.5, minWidth: 150 },
+      { headerName: "Original", field: "originalDue", flex: 0.7, minWidth: 100 },
+      { headerName: "New due", field: "newDue", flex: 0.7, minWidth: 100 },
+      {
+        headerName: "Status",
+        field: "status",
+        flex: 0.7,
+        minWidth: 100,
+        cellRenderer: ({ value }: ICellRendererParams<DeferralGridRow, string>) => (
+          <span className={deferralStatusPill(String(value || ""))}>{String(value || "")}</span>
+        ),
+      },
+      { headerName: "Reason", field: "reason", flex: 1.3, minWidth: 140 },
+      { headerName: "Requested", field: "requested", flex: 0.9, minWidth: 130 },
+    ];
+    if (canEdit) {
+      cols.push({
+        headerName: "Decision",
+        colId: "decision",
+        flex: 1,
+        minWidth: 160,
+        sortable: false,
+        cellRenderer: ({ data }: ICellRendererParams<DeferralGridRow>) => {
+          if (!data || data.status !== "PENDING") return <span className="text-muted">-</span>;
+          return (
+            <div className="training-row-actions">
+              <button type="button" className="secondary-chip-btn" onClick={() => void handleDeferralDecision(data.id, "APPROVED")}>Approve</button>
+              <button type="button" className="secondary-chip-btn" onClick={() => void handleDeferralDecision(data.id, "REJECTED")}>Reject</button>
+            </div>
+          );
+        },
+      });
+    }
+    return cols;
+  })();
+
+  const evidenceColumnDefs: ColDef<EvidenceGridRow>[] = [
+    {
+      headerName: "Filename",
+      field: "filename",
+      flex: 2,
+      minWidth: 180,
+      cellRenderer: ({ data }: ICellRendererParams<EvidenceGridRow>) => {
+        if (!data) return null;
+        return (
+          <button type="button" className="tc-link-button" onClick={() => void openFileViewer(data.file)}>
+            {data.filename}
+          </button>
+        );
+      },
+    },
+    { headerName: "Type", field: "kind", flex: 0.7, minWidth: 100 },
+    {
+      headerName: "Review",
+      field: "review",
+      flex: 0.7,
+      minWidth: 100,
+      cellRenderer: ({ value }: ICellRendererParams<EvidenceGridRow, string>) => (
+        <span className={deferralStatusPill(String(value || ""))}>{String(value || "")}</span>
+      ),
+    },
+    { headerName: "Uploaded", field: "uploaded", flex: 1, minWidth: 140 },
+    {
+      headerName: "Actions",
+      colId: "actions",
+      flex: 0.5,
+      minWidth: 80,
+      maxWidth: 110,
+      sortable: false,
+      cellRenderer: ({ data }: ICellRendererParams<EvidenceGridRow>) => {
+        if (!data) return null;
+        return (
+          <div className="training-row-actions">
+            <button type="button" className="training-file-icon-btn" aria-label={`Open ${data.filename}`} onClick={() => void openFileViewer(data.file)}>
+              {data.isPdf ? <FileText size={16} /> : <FileImage size={16} />}
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -1077,53 +1311,10 @@ const QMSTrainingUserPage: React.FC = () => {
     setSortDirection(key === "completion_date" ? "desc" : "asc");
   };
 
-  const togglePanel = (key: PanelKey) => {
-    setPanelOpen((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const summaryCards = [
-    { key: "overdue", label: "Overdue", value: summary.overdue, pill: "qms-pill qms-pill--danger", helper: "Immediate action needed." },
-    { key: "dueSoon", label: "Due Soon", value: summary.dueSoon, pill: "qms-pill qms-pill--warning", helper: "Track days, then hours on the final day." },
-    { key: "current", label: "Current", value: summary.ok, pill: "qms-pill qms-pill--success", helper: "Accepted as current and in date." },
-    { key: "deferred", label: "Deferred", value: summary.deferred, pill: "qms-pill qms-pill--info", helper: "Extension already on record." },
-    { key: "scheduled", label: "Scheduled", value: summary.scheduled, pill: "qms-pill", helper: "Upcoming session already linked." },
-    { key: "notDone", label: "Not completed", value: summary.notDone, pill: "qms-pill", helper: "No completion captured yet." },
-  ];
-
-  const panelStats = {
-    schedule: relevantEvents.length,
-    deferrals: deferrals.length,
-    newRecord: recentFiles.length,
-  };
-
   return (
-    <QMSLayout
-      amoCode={amoSlug}
-      department={department}
-      title="Training Profile"
-      subtitle="Individual training record, due status, deferrals and evidence"
-      actions={
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="primary-chip-btn" onClick={() => void load()}>
-            Refresh profile
-          </button>
-          <TransferProgressButton
-            variant="secondary-chip-btn"
-            idleLabel="Download training record"
-            busyState={recordTransfer}
-            disabled={exportingRecord || !userId}
-            onClick={handleExportRecord}
-          />
-          <TransferProgressButton
-            variant="secondary-chip-btn"
-            idleLabel="Export evidence pack"
-            busyState={evidenceTransfer}
-            disabled={exportingEvidence || !userId}
-            onClick={handleExportEvidence}
-          />
-        </div>
-      }
-    >
+    <DepartmentLayout amoCode={amoSlug} activeDepartment="training">
+      <div className="qms-shell">
+      <div className="qms-content">
       <div className="training-module training-module--qms training-profile-page">
         {state === "loading" && (
           <div className="card card--info">
@@ -1142,531 +1333,216 @@ const QMSTrainingUserPage: React.FC = () => {
 
         {state === "ready" && user && (
           <section className="training-profile-shell">
-            <div className="qms-card qms-card--hero training-profile-hero">
-              <div className="qms-card__header training-profile-hero__header">
-                <div className="training-profile-identity">
-                  <div className={`training-profile-avatar training-profile-avatar--${profileAvatarVariant(user)}`} aria-hidden="true">
-                    {profileAvatarUrl(user) ? <img src={profileAvatarUrl(user) || ""} alt="" /> : <span>{initialsForUser(user)}</span>}
-                  </div>
-                  <div>
-                    <p className="qms-card__eyebrow">Personnel record</p>
-                    <h3 className="qms-card__title">{user.full_name || "Training profile"}</h3>
-                    <p className="training-profile-identity__hint">Use the photo/initials to confirm the person before recording or reviewing training evidence.</p>
-                  </div>
-                </div>
-                <span className="qms-pill qms-pill--info">Required compliance {compliance}%</span>
-              </div>
+            {error && <div className="card card--error" role="alert"><p>{error}</p></div>}
 
-              <div className="training-profile-hero__meta">
-                <div className="training-profile-hero__meta-card">
-                  <span className="training-profile-hero__label">Role</span>
-                  <strong>{cleanRoleTitle(user)}</strong>
+            <div className="training-profile-hero-card">
+              <div className="training-profile-cover" aria-hidden="true" />
+              <div className="training-profile-identity-block">
+                <div className={`training-profile-avatar training-profile-avatar--${profileAvatarVariant(user)}`} aria-hidden="true">
+                  {profileAvatarUrl(user) ? <img src={profileAvatarUrl(user) || ""} alt="" /> : <span>{initialsForUser(user)}</span>}
                 </div>
-                <div className="training-profile-hero__meta-card">
-                  <span className="training-profile-hero__label">Staff code</span>
-                  <strong>{user.staff_code || "-"}</strong>
-                </div>
-                <div className="training-profile-hero__meta-card">
-                  <span className="training-profile-hero__label">Date hired</span>
-                  <strong>{formatDate(hireDate)}</strong>
-                </div>
-                <div className="training-profile-hero__meta-card">
-                  <span className="training-profile-hero__label">Profile status</span>
-                  <strong>{user.is_active ? "Active" : "Inactive"}</strong>
+                <div className="training-profile-identity-block__main">
+                  <div className="training-profile-identity-block__headline">
+                    <div>
+                      <h2 className="training-profile-identity-block__name">{user.full_name || "Training profile"}</h2>
+                      <p className="training-profile-identity-block__role">{cleanRoleTitle(user)}</p>
+                    </div>
+                  </div>
+                  <dl className="training-profile-identity-meta">
+                    <div>
+                      <dt>Staff code</dt>
+                      <dd>{user.staff_code || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Date hired</dt>
+                      <dd>{formatDate(hireDate)}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{user.is_active ? "Active" : "Inactive"}</dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
-              <PersonnelLicencePanel
-                userId={user.id}
-                fallback={{
-                  authority: user.regulatory_authority,
-                  licenceNumber: user.licence_number,
-                  country: user.licence_state_or_country,
-                  expiresOn: user.licence_expires_on,
-                }}
-              />
             </div>
 
-            <div className="training-profile-toolbar training-profile-toolbar--surface">
-              <div className="training-profile-toolbar__group">
-                <div className="training-profile-toolbar__actions" aria-label="Training profile view">
+            <div ref={sectionStartRef} className="training-profile-nav">
+              <button type="button" className="training-profile-back" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoSlug)}/training/competence/people`)}>
+                <ArrowLeft size={16} /> People
+              </button>
+              <nav aria-label="Training profile sections">
+                {([
+                  { key: "courses", label: "Courses", icon: GraduationCap },
+                  { key: "schedule", label: "Schedule", icon: CalendarDays, count: relevantEvents.length },
+                  { key: "deferrals", label: "Deferrals", icon: Clock3, count: deferrals.length },
+                  { key: "licences", label: "Licences", icon: ShieldCheck },
+                  { key: "evidence", label: "Evidence", icon: FolderOpen, count: files.length },
+                ] as const).map((section) => (
                   <button
+                    key={section.key}
                     type="button"
-                    className={viewMode === "completed" ? "primary-chip-btn" : "secondary-chip-btn"}
-                    onClick={() => {
-                      setViewMode("completed");
-                      if (statusFilter === "NOT_DONE") setStatusFilter("ALL");
-                    }}
+                    aria-current={activeSection === section.key ? "page" : undefined}
+                    onClick={() => selectSection(section.key)}
                   >
-                    Training requirements
+                    <section.icon size={16} />
+                    {section.label}
+                    {"count" in section ? <span>{section.count}</span> : null}
                   </button>
-                  <button
-                    type="button"
-                    className={viewMode === "missing" ? "primary-chip-btn" : "secondary-chip-btn"}
-                    onClick={() => {
-                      setViewMode("missing");
-                      setStatusFilter("NOT_DONE");
-                    }}
-                  >
-                    Missing required courses
-                  </button>
-                </div>
-              </div>
-              <div className="training-profile-toolbar__actions">
-                <button type="button" className="secondary-chip-btn" onClick={() => togglePanel("schedule")}>
-                  {panelOpen.schedule ? "Hide schedule" : "Show schedule"}
-                </button>
-                <button type="button" className="secondary-chip-btn" onClick={() => togglePanel("deferrals")}>
-                  {panelOpen.deferrals ? "Hide deferrals" : "Show deferrals"}
-                </button>
-                {canEdit ? (
-                  <button type="button" className="secondary-chip-btn" onClick={() => togglePanel("newRecord")}>
-                    {panelOpen.newRecord ? "Hide new record" : "Show new record"}
-                  </button>
-                ) : null}
-              </div>
+                ))}
+              </nav>
+              <button
+                type="button"
+                className="training-profile-actions-btn"
+                aria-label="Profile actions"
+                onClick={() => setActionsDrawerOpen(true)}
+              >
+                <Plus size={18} />
+              </button>
             </div>
 
             <div className="training-profile-layout">
-              <aside className="training-profile-sidebar">
-                <div className="qms-card training-profile-sidecard training-profile-collapse-card qms-card--attention">
-                  <button type="button" className="training-collapse-toggle" onClick={() => togglePanel("compliance")}>
-                    <div>
-                      <span className="training-collapse-toggle__eyebrow">Compliance posture</span>
-                      <strong>Keep the control summary together</strong>
-                    </div>
-                    <span className="training-collapse-toggle__meta">{panelOpen.compliance ? "Hide" : "Show"}</span>
-                  </button>
-                  {panelOpen.compliance ? (
-                    <div className="training-collapse-panel">
-                      <div className="training-profile-summary-grid">
-                        {summaryCards.map((card) => (
-                          <div key={card.key} className="training-profile-summary-tile">
-                            <span className={card.pill}>{card.label}: {card.value}</span>
-                            <p className="text-muted">{card.helper}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="qms-list">
-                        <div className="qms-list__item">
-                          <div>
-                            <strong>Next Due</strong>
-                            <span className="qms-list__meta">{nextDue ? `${nextDue.course_name} · ${dueLabel(nextDue)}` : "No due dates available"}</span>
-                          </div>
-                          <span className={`qms-pill ${nextDue ? statusPillClass(effectiveTrainingStatus(nextDue)) : ""}`.trim()}>{nextDue ? dueCountdownLabel(nextDue) : "-"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="qms-card training-profile-sidecard">
-                  <div className="qms-card__header">
-                    <div>
-                      <h3 className="qms-card__title">Quick sections</h3>
-                      <p className="qms-card__subtitle">Open only what you need and keep the page short.</p>
-                    </div>
+              <section
+                hidden={activeSection !== "courses" || !nextDue}
+                className="training-profile-overview"
+                aria-label="Next due training"
+              >
+                {nextDue ? (
+                  <div className="training-profile-next-due">
+                    <span className="training-profile-next-due__label">Next due</span>
+                    <strong className="training-profile-next-due__course">{nextDue.course_name || nextDue.course_id}</strong>
+                    <time className="training-profile-next-due__date" dateTime={dueDateForItem(nextDue) || undefined}>
+                      {formatDate(dueDateForItem(nextDue))}
+                    </time>
                   </div>
-                  <div className="training-quick-links">
-                    <button type="button" className={`training-quick-link ${panelOpen.schedule ? "is-active" : ""}`} onClick={() => togglePanel("schedule")}>
-                      <span>Schedule</span>
-                      <strong>{panelStats.schedule}</strong>
-                    </button>
-                    <button type="button" className={`training-quick-link ${panelOpen.deferrals ? "is-active" : ""}`} onClick={() => togglePanel("deferrals")}>
-                      <span>Deferrals</span>
-                      <strong>{panelStats.deferrals}</strong>
-                    </button>
-                    {canEdit ? (
-                      <button type="button" className={`training-quick-link ${panelOpen.newRecord ? "is-active" : ""}`} onClick={() => togglePanel("newRecord")}>
-                        <span>New record</span>
-                        <strong>{panelStats.newRecord}</strong>
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </aside>
+                ) : null}
+              </section>
 
               <div className="training-profile-main">
-                <div className="qms-card training-profile-logcard training-profile-section-card">
-                  <div className="qms-card__header">
-                    <div>
-                      <h3 className="qms-card__title">{viewMode === "completed" ? "Training requirements" : "Missing required courses"}</h3>
-                      <p className="qms-card__subtitle">
-                        {viewMode === "completed"
-                          ? "Applicable requirements are shown once with Last Completed, Next Due, Scheduled, compliance and evidence. Historical completions remain in each requirement disclosure."
-                          : "This view shows only courses required by the active course matrix for this person."}
-                      </p>
-                    </div>
-                    <div className="training-profile-toolbar__actions">
-                      {canEdit ? (
-                        <button type="button" className="secondary-chip-btn" onClick={() => beginNewRecord()}>
-                          <Plus size={14} /> Record new entry
-                        </button>
-                      ) : null}
-
-                    </div>
-                  </div>
-                  <div className="table-responsive training-table-wrap">
-                    {viewMode === "completed" ? (
-                      <TrainingRequirementList
-                        items={items}
-                        courses={courses}
-                        records={records}
-                        files={files}
-                        canEdit={canEdit}
-                        onEditRecord={openRecordEditor}
-                        onDeleteRecord={(record) => void deleteRecord(record)}
-                        onOpenEvidence={(file) => void openFileViewer(file)}
-                        onUploadEvidence={triggerInlineAttachmentUpload}
-                        onRecordCompletion={(coursePk) => beginNewRecord(coursePk)}
-                      />
-                    ) : (
-                      <table className="table table-striped table-compact training-history-table training-history-table--banded training-history-table--responsive">
-                        <thead>
-                          <tr>
-                            <th>Course</th>
-                            <th>Status</th>
-                            <th>Last Completed</th>
-                            <th>Next Due</th>
-                            <th>Scheduled</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredMissingRows.map((item) => {
-                            const course = resolveCourse(courseLookup, item.course_id) || courses.find((entry) => entry.course_name === item.course_name);
-                            return (
-                              <tr key={item.course_id}>
-                                <td>
-                                  <strong>{item.course_name}</strong>
-                                  <div className="text-muted">{item.course_id}</div>
-                                </td>
-                                <td><span className={statusPillClass(effectiveTrainingStatus(item))}>{statusLabel(effectiveTrainingStatus(item))}</span></td>
-                                <td>{formatDate(item.last_completion_date)}</td>
-                                <td>{dueLabel(item)}</td>
-                                <td>{item.upcoming_event_date ? formatDate(item.upcoming_event_date) : "-"}</td>
-                                <td>
-                                  {canEdit && course ? (
-                                    <button
-                                      type="button"
-                                      className="secondary-chip-btn"
-                                      onClick={() => {
-                                        beginNewRecord(course.id);
-                                      }}
-                                    >
-                                      Add record
-                                    </button>
-                                  ) : "-"}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          {filteredMissingRows.length === 0 && (
-                            <tr>
-                              <td colSpan={6} className="text-muted">No required courses are currently missing for this person.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    )}
+                <div hidden={activeSection !== "courses"} className="qms-card training-profile-logcard training-profile-section-card">
+                  <div className="training-profile-course-list">
+                    <TrainingRequirementList
+                      items={items}
+                      initialFilter={searchParams.get("filter") === "NOT_DONE" ? "incomplete" : "all"}
+                      courses={courses}
+                      records={records}
+                      files={files}
+                      canEdit={canEdit}
+                      busy={uploadingInlineAttachment}
+                      onEditRecord={openRecordEditor}
+                      onDeleteRecord={(record) => void deleteRecord(record)}
+                      onOpenEvidence={(file) => void openFileViewer(file)}
+                      onDownloadEvidence={(file) => void handleDownloadCertificate(file)}
+                      onUploadEvidence={triggerInlineAttachmentUpload}
+                      onRecordCompletion={(coursePk) => beginNewRecord(coursePk)}
+                    />
                   </div>
                 </div>
 
-                <section className="qms-card training-profile-section-card training-profile-collapse-card">
-                  <button type="button" className="training-collapse-toggle" onClick={() => togglePanel("schedule")} aria-expanded={panelOpen.schedule}>
-                    <div>
-                      <span className="training-collapse-toggle__eyebrow">Sessions and linked events</span>
-                      <strong>Schedule</strong>
-                    </div>
-                    <span className="training-collapse-toggle__meta">{panelOpen.schedule ? "Hide" : "Show"} · {panelStats.schedule}</span>
-                  </button>
-                  {panelOpen.schedule ? (
-                    <div className="training-collapse-panel">
-                      <div className="table-responsive training-table-wrap">
-                        <table className="table training-history-table--responsive">
-                          <thead>
-                            <tr>
-                              <th>Course</th>
-                              <th>Session</th>
-                              <th>Starts</th>
-                              <th>Status</th>
-                              <th>Location</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {relevantEvents.map((event) => {
-                              const course = resolveCourse(courseLookup, event.course_id);
-                              return (
-                                <tr key={event.id}>
-                                  <td>{course?.course_name || event.course_id}</td>
-                                  <td>{event.title}</td>
-                                  <td>{formatDate(event.starts_on)}</td>
-                                  <td><span className={statusPillClass(event.status)}>{event.status.replaceAll("_", " ")}</span></td>
-                                  <td>{event.location || "-"}</td>
-                                </tr>
-                              );
-                            })}
-                            {relevantEvents.length === 0 && (
-                              <tr>
-                                <td colSpan={5} className="text-muted">No relevant training sessions are scheduled for this profile.</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="qms-card training-profile-section-card training-profile-collapse-card">
-                  <button type="button" className="training-collapse-toggle" onClick={() => togglePanel("deferrals")} aria-expanded={panelOpen.deferrals}>
-                    <div>
-                      <span className="training-collapse-toggle__eyebrow">Extensions and due-date changes</span>
-                      <strong>Deferrals</strong>
-                    </div>
-                    <span className="training-collapse-toggle__meta">{panelOpen.deferrals ? "Hide" : "Show"} · {panelStats.deferrals}</span>
-                  </button>
-                  {panelOpen.deferrals ? (
-                    <div className="training-collapse-panel training-profile-stack">
-                      <div className="table-responsive training-table-wrap">
-                        <table className="table training-history-table--responsive">
-                          <thead>
-                            <tr>
-                              <th>Course</th>
-                              <th>Original due</th>
-                              <th>Requested due</th>
-                              <th>Status</th>
-                              <th>Reason</th>
-                              <th>Requested</th>
-                              {canEdit ? <th>Decision</th> : null}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {deferrals.map((deferral) => {
-                              const course = resolveCourse(courseLookup, deferral.course_id);
-                              return (
-                                <tr key={deferral.id}>
-                                  <td>{course?.course_name || deferral.course_id}</td>
-                                  <td>{formatDate(deferral.original_due_date)}</td>
-                                  <td>{formatDate(deferral.requested_new_due_date)}</td>
-                                  <td><span className={deferralStatusPill(deferral.status)}>{deferral.status}</span></td>
-                                  <td>{deferral.reason_text || deferral.reason_category}</td>
-                                  <td>{formatDateTime(deferral.created_at)}</td>
-                                  {canEdit ? (
-                                    <td>
-                                      {deferral.status === "PENDING" ? (
-                                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                          <button type="button" className="secondary-chip-btn" onClick={() => void handleDeferralDecision(deferral.id, "APPROVED")}>Approve</button>
-                                          <button type="button" className="secondary-chip-btn" onClick={() => void handleDeferralDecision(deferral.id, "REJECTED")}>Reject</button>
-                                        </div>
-                                      ) : "-"}
-                                    </td>
-                                  ) : null}
-                                </tr>
-                              );
-                            })}
-                            {deferrals.length === 0 && (
-                              <tr>
-                                <td colSpan={canEdit ? 7 : 6} className="text-muted">No deferral requests have been captured for this user.</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="qms-card training-profile-inner-card">
-                        <div className="qms-card__header">
-                          <div>
-                            <h3 className="qms-card__title">Request a deferral</h3>
-                            <p className="qms-card__subtitle">Select the course and requested new due date.</p>
-                          </div>
-                        </div>
-                        <div className="training-profile-form-grid">
-                          <label className="qms-field">
-                            <span>Course</span>
-                            <select value={deferralForm.coursePk} onChange={(e) => setDeferralForm((prev) => ({ ...prev, coursePk: e.target.value }))}>
-                              <option value="">Select course</option>
-                              {courses.map((course) => {
-                                const item = itemByCoursePk.get(course.id);
-                                const due = dueDateForItem(item);
-                                return (
-                                  <option key={course.id} value={course.id}>
-                                    {course.course_id} · {course.course_name}{due ? ` · due ${formatDate(due)}` : ""}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          </label>
-                          <label className="qms-field">
-                            <span>Current due</span>
-                            <input value={deferralForm.coursePk ? dueLabel(itemByCoursePk.get(deferralForm.coursePk)) : "-"} disabled />
-                          </label>
-                          <label className="qms-field">
-                            <span>Requested new due date</span>
-                            <input type="date" value={deferralForm.requestedNewDueDate} onChange={(e) => setDeferralForm((prev) => ({ ...prev, requestedNewDueDate: e.target.value }))} />
-                          </label>
-                          <label className="qms-field">
-                            <span>Reason</span>
-                            <select value={deferralForm.reasonCategory} onChange={(e) => setDeferralForm((prev) => ({ ...prev, reasonCategory: e.target.value as DeferralReasonCategory }))}>
-                              {DEFERRAL_REASON_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
-                            <span>Reason detail</span>
-                            <textarea value={deferralForm.reasonText} onChange={(e) => setDeferralForm((prev) => ({ ...prev, reasonText: e.target.value }))} rows={3} />
-                          </label>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                          <button type="button" className="secondary-chip-btn" onClick={() => void submitDeferral()} disabled={savingDeferral}>
-                            {savingDeferral ? "Submitting..." : "Submit deferral request"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-
-                {canEdit ? (
-                  <section className="qms-card training-profile-section-card training-profile-collapse-card">
-                    <button type="button" className="training-collapse-toggle" onClick={() => togglePanel("newRecord")} aria-expanded={panelOpen.newRecord}>
-                      <div>
-                        <span className="training-collapse-toggle__eyebrow">Completion capture and attachments</span>
-                        <strong>New record</strong>
-                      </div>
-                      <span className="training-collapse-toggle__meta">{panelOpen.newRecord ? "Hide" : "Show"} · {panelStats.newRecord}</span>
-                    </button>
-                    {panelOpen.newRecord ? (
-                      <div className="training-collapse-panel training-profile-split training-profile-split--balanced">
-                        <div ref={recordFormRef} className="qms-card qms-card--wide training-profile-inner-card">
-                          <div className="qms-card__header">
-                            <div>
-                              <h3 className="qms-card__title">{editingRecordId ? "Edit training record" : "Completion and evidence"}</h3>
-                              <p className="qms-card__subtitle">Hours and next due are pulled from the selected course. The certificate rule is enforced here.</p>
-                            </div>
-                            {editingRecordId ? (
-                              <button type="button" className="secondary-chip-btn" onClick={resetRecordForm}>Cancel edit</button>
-                            ) : null}
-                          </div>
-                          <div className="training-profile-form-grid">
-                            <label className="qms-field">
-                              <span>Course</span>
-                              <select value={recordForm.coursePk} onChange={(e) => setRecordForm((prev) => ({ ...prev, coursePk: e.target.value }))}>
-                                <option value="">Select course</option>
-                                {recordableCourses.map((course) => (
-                                  <option key={course.id} value={course.id}>{course.course_id} · {course.course_name}</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="qms-field">
-                              <span>Completion date</span>
-                              <input type="date" value={recordForm.completionDate} onChange={(e) => setRecordForm((prev) => ({ ...prev, completionDate: e.target.value }))} />
-                            </label>
-                            <label className="qms-field">
-                              <span>Hours</span>
-                              <input value={derivedHours ?? "-"} disabled />
-                            </label>
-                            {derivedValidUntil !== "-" ? (
-                              <label className="qms-field">
-                                <span>{derivedDueLabel}</span>
-                                <input value={formatDate(derivedValidUntil)} disabled />
-                              </label>
-                            ) : null}
-                            <label className="qms-field">
-                              <span>Current course status</span>
-                              <input value={selectedCourseStatus ? statusLabel(effectiveTrainingStatus(selectedCourseStatus)) : "-"} disabled />
-                            </label>
-                            <label className="qms-field">
-                              <span>Exam score</span>
-                              <input value={recordForm.examScore} onChange={(e) => setRecordForm((prev) => ({ ...prev, examScore: e.target.value }))} placeholder="Optional" />
-                            </label>
-                            <label className="qms-field">
-                              <span>Certificate reference</span>
-                              <input value={recordForm.certificateReference} onChange={(e) => setRecordForm((prev) => ({ ...prev, certificateReference: e.target.value }))} placeholder="Requires a certificate attachment" />
-                            </label>
-                            <label className="qms-field">
-                              <span>Attachment type</span>
-                              <select value={recordAttachmentKind} onChange={(e) => setRecordAttachmentKind(e.target.value)}>
-                                <option value="EVIDENCE">Evidence</option>
-                                <option value="CERTIFICATE">Certificate</option>
-                                <option value="AMEL">AMEL</option>
-                                <option value="LICENSE">Licence</option>
-                                <option value="OTHER">Other</option>
-                              </select>
-                            </label>
-                            <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
-                              <span>Attachment</span>
-                              <input type="file" onChange={(e) => setRecordAttachment(e.target.files?.[0] || null)} />
-                            </label>
-                            <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
-                              <span>Remarks</span>
-                              <textarea value={recordForm.remarks} onChange={(e) => setRecordForm((prev) => ({ ...prev, remarks: e.target.value }))} rows={3} />
-                            </label>
-                          </div>
-                          <div className="training-profile-form-note">
-                            <span className="qms-pill qms-pill--info">Rule</span>
-                            <p>Hours are read from the selected course. The next due date is calculated from the course recurrence. When a certificate reference is entered, a certificate attachment is mandatory.</p>
-                            {selectedCoursePhase === "INITIAL" && linkedRefresherCourse ? (
-                              <p>Recording this initial course will seed the linked refresher entry automatically using the same completion date and the refresher recurrence.</p>
-                            ) : null}
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                            <button type="button" className="secondary-chip-btn" onClick={() => void submitRecord()} disabled={savingRecord}>
-                              {savingRecord ? "Saving..." : editingRecordId ? "Update training record" : "Save training record"}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="qms-card training-profile-inner-card">
-                          <div className="qms-card__header">
-                            <div>
-                              <h3 className="qms-card__title">Recent attachments</h3>
-                              <p className="qms-card__subtitle">Latest evidence already uploaded for this person.</p>
-                            </div>
-                          </div>
-                          <div className="table-responsive training-table-wrap">
-                            <table className="table training-history-table--responsive">
-                              <thead>
-                                <tr>
-                                  <th>Filename</th>
-                                  <th>Type</th>
-                                  <th>Review</th>
-                                  <th>Uploaded</th>
-                                  <th>Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {recentFiles.map((file) => {
-                                  const isPdf = (file.content_type || "").toLowerCase().includes("pdf") || file.original_filename.toLowerCase().endsWith(".pdf");
-                                  return (
-                                    <tr key={file.id}>
-                                      <td>
-                                        <button type="button" className="tc-link-button" onClick={() => void openFileViewer(file)}>{file.original_filename}</button>
-                                      </td>
-                                      <td>{file.kind}</td>
-                                      <td><span className={deferralStatusPill(file.review_status)}>{file.review_status}</span></td>
-                                      <td>{formatDateTime(file.uploaded_at)}</td>
-                                      <td>
-                                        <div className="training-row-actions">
-                                          <button type="button" className="training-file-icon-btn" onClick={() => void openFileViewer(file)}>{isPdf ? <FileText size={16} /> : <FileImage size={16} />}</button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                                {recentFiles.length === 0 && (
-                                  <tr>
-                                    <td colSpan={5} className="text-muted">No attachments have been uploaded for this profile yet.</td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                <section hidden={activeSection !== "schedule"} className="qms-card training-profile-section-card">
+                  <div className="training-collapse-panel">
+                    {activeSection === "schedule" ? (
+                      <div
+                        className="ag-theme-alpine training-profile-grid"
+                        style={{ height: profileGridHostHeight(scheduleRows.length) }}
+                      >
+                        <AgGridReact<ScheduleGridRow>
+                          rowData={scheduleRows}
+                          columnDefs={scheduleColumnDefs}
+                          defaultColDef={PROFILE_GRID_DEFAULT_COL_DEF}
+                          autoSizeStrategy={PROFILE_GRID_AUTO_SIZE}
+                          getRowId={({ data }) => data.id}
+                          headerHeight={PROFILE_GRID_HEADER_HEIGHT}
+                          rowHeight={PROFILE_GRID_ROW_HEIGHT}
+                          animateRows={false}
+                          suppressCellFocus
+                          onGridReady={onProfileGridReady}
+                          onFirstDataRendered={onProfileGridFirstData}
+                          onGridSizeChanged={onProfileGridSizeChanged}
+                          overlayNoRowsTemplate='<span class="text-muted">No relevant training sessions are scheduled for this profile.</span>'
+                        />
                       </div>
                     ) : null}
-                  </section>
-                ) : null}
+                  </div>
+                </section>
+
+                <section hidden={activeSection !== "deferrals"} className="qms-card training-profile-section-card">
+                  <div className="training-collapse-panel training-profile-stack">
+                    <div className="training-profile-section-toolbar">
+                      <h3 className="training-profile-section-title">Deferral requests</h3>
+                      {canEdit ? (
+                        <button type="button" className="primary-chip-btn" onClick={openDeferralDrawer}>
+                          <Plus size={15} /> Request a deferral
+                        </button>
+                      ) : null}
+                    </div>
+                    {activeSection === "deferrals" ? (
+                      <div
+                        className="ag-theme-alpine training-profile-grid"
+                        style={{ height: profileGridHostHeight(deferralRows.length) }}
+                      >
+                        <AgGridReact<DeferralGridRow>
+                          rowData={deferralRows}
+                          columnDefs={deferralColumnDefs}
+                          defaultColDef={PROFILE_GRID_DEFAULT_COL_DEF}
+                          autoSizeStrategy={PROFILE_GRID_AUTO_SIZE}
+                          getRowId={({ data }) => data.id}
+                          headerHeight={PROFILE_GRID_HEADER_HEIGHT}
+                          rowHeight={PROFILE_GRID_ROW_HEIGHT}
+                          animateRows={false}
+                          suppressCellFocus
+                          onGridReady={onProfileGridReady}
+                          onFirstDataRendered={onProfileGridFirstData}
+                          onGridSizeChanged={onProfileGridSizeChanged}
+                          overlayNoRowsTemplate='<span class="text-muted">No deferral requests have been captured for this user.</span>'
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section hidden={activeSection !== "licences"} className="qms-card training-profile-section-card">
+                  <PersonnelLicencePanel
+                    userId={user.id}
+                    fallback={{
+                      authority: user.regulatory_authority,
+                      licenceNumber: user.licence_number,
+                      country: user.licence_state_or_country,
+                      expiresOn: user.licence_expires_on,
+                    }}
+                  />
+                </section>
+
+                <section hidden={activeSection !== "evidence"} className="qms-card training-profile-section-card">
+                  <div className="qms-card training-profile-inner-card">
+                    <div className="qms-card__header">
+                      <div>
+                        <h3 className="qms-card__title">Evidence</h3>
+                      </div>
+                    </div>
+                    {activeSection === "evidence" ? (
+                      <div
+                        className="ag-theme-alpine training-profile-grid"
+                        style={{ height: profileGridHostHeight(evidenceRows.length) }}
+                      >
+                        <AgGridReact<EvidenceGridRow>
+                          rowData={evidenceRows}
+                          columnDefs={evidenceColumnDefs}
+                          defaultColDef={PROFILE_GRID_DEFAULT_COL_DEF}
+                          autoSizeStrategy={PROFILE_GRID_AUTO_SIZE}
+                          getRowId={({ data }) => data.id}
+                          headerHeight={PROFILE_GRID_HEADER_HEIGHT}
+                          rowHeight={PROFILE_GRID_ROW_HEIGHT}
+                          animateRows={false}
+                          suppressCellFocus
+                          onGridReady={onProfileGridReady}
+                          onFirstDataRendered={onProfileGridFirstData}
+                          onGridSizeChanged={onProfileGridSizeChanged}
+                          overlayNoRowsTemplate='<span class="text-muted">No attachments have been uploaded for this profile yet.</span>'
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
 
                 <input
                   ref={inlineAttachmentInputRef}
@@ -1675,6 +1551,238 @@ const QMSTrainingUserPage: React.FC = () => {
                   style={{ display: "none" }}
                   onChange={(e) => void handleInlineAttachmentChosen(e.target.files?.[0] || null)}
                 />
+
+                <Drawer
+                  title="Profile actions"
+                  isOpen={actionsDrawerOpen}
+                  onClose={() => setActionsDrawerOpen(false)}
+                  panelClassName="training-profile-actions-drawer"
+                >
+                  <ul className="training-profile-actions-list">
+                    {canEdit ? (
+                      <li>
+                        <button
+                          type="button"
+                          className="training-profile-action-row training-profile-action-row--primary"
+                          onClick={() => {
+                            setActionsDrawerOpen(false);
+                            beginNewRecord();
+                          }}
+                        >
+                          <span className="training-profile-action-row__icon" aria-hidden="true">
+                            <Plus size={18} />
+                          </span>
+                          <span className="training-profile-action-row__copy">
+                            <strong>Add training record</strong>
+                            <span>Log a course completion and attach supporting evidence.</span>
+                          </span>
+                        </button>
+                      </li>
+                    ) : null}
+                    <li>
+                      <div className="training-profile-action-row">
+                        <span className="training-profile-action-row__icon" aria-hidden="true">
+                          <FileText size={18} />
+                        </span>
+                        <span className="training-profile-action-row__copy">
+                          <strong>Training profile PDF</strong>
+                          <span>Printable summary of this person's courses, status and history.</span>
+                        </span>
+                        <TransferProgressButton
+                          variant="secondary-chip-btn"
+                          idleLabel="Open PDF"
+                          busyState={recordTransfer}
+                          disabled={exportingRecord || !userId}
+                          onClick={() => void handleExportRecord()}
+                        />
+                      </div>
+                    </li>
+                    <li>
+                      <div className="training-profile-action-row">
+                        <span className="training-profile-action-row__icon" aria-hidden="true">
+                          <Package size={18} />
+                        </span>
+                        <span className="training-profile-action-row__copy">
+                          <strong>Evidence pack</strong>
+                          <span>ZIP download of uploaded certificates and attachments.</span>
+                        </span>
+                        <TransferProgressButton
+                          variant="secondary-chip-btn"
+                          idleLabel="Download"
+                          busyState={evidenceTransfer}
+                          disabled={exportingEvidence || !userId}
+                          onClick={() => void handleExportEvidence()}
+                        />
+                      </div>
+                    </li>
+                  </ul>
+                </Drawer>
+
+                {canEdit ? (
+                  <Drawer
+                    title={editingRecordId ? "Edit training record" : "Completion and evidence"}
+                    isOpen={recordDrawerOpen}
+                    onClose={closeRecordDrawer}
+                    panelClassName="training-profile-form-drawer"
+                    closeDisabled={savingRecord}
+                  >
+                    <div className="training-profile-drawer__body">
+                      <fieldset className="training-profile-drawer__group">
+                        <legend>Course &amp; dates</legend>
+                        <div className="training-profile-form-grid">
+                          <label className="qms-field">
+                            <span>Course</span>
+                            <select value={recordForm.coursePk} onChange={(e) => setRecordForm((prev) => ({ ...prev, coursePk: e.target.value }))}>
+                              <option value="">Select course</option>
+                              {recordableCourses.map((course) => (
+                                <option key={course.id} value={course.id}>{course.course_id} · {course.course_name}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="qms-field">
+                            <span>Completion date</span>
+                            <input type="date" value={recordForm.completionDate} onChange={(e) => setRecordForm((prev) => ({ ...prev, completionDate: e.target.value }))} />
+                          </label>
+                          <label className="qms-field">
+                            <span>Hours</span>
+                            <input value={derivedHours ?? "-"} disabled />
+                          </label>
+                          {derivedValidUntil !== "-" ? (
+                            <label className="qms-field">
+                              <span>{derivedDueLabel}</span>
+                              <input value={formatDate(derivedValidUntil)} disabled />
+                            </label>
+                          ) : null}
+                          <label className="qms-field">
+                            <span>Current course status</span>
+                            <input value={selectedCourseStatus ? statusLabel(effectiveTrainingStatus(selectedCourseStatus)) : "-"} disabled />
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      <fieldset className="training-profile-drawer__group">
+                        <legend>Assessment</legend>
+                        <div className="training-profile-form-grid">
+                          <label className="qms-field">
+                            <span>Exam score</span>
+                            <input value={recordForm.examScore} onChange={(e) => setRecordForm((prev) => ({ ...prev, examScore: e.target.value }))} placeholder="Optional" />
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      <fieldset className="training-profile-drawer__group">
+                        <legend>Certificate &amp; attachment</legend>
+                        <div className="training-profile-form-grid">
+                          <label className="qms-field">
+                            <span>Certificate reference</span>
+                            <input value={recordForm.certificateReference} onChange={(e) => setRecordForm((prev) => ({ ...prev, certificateReference: e.target.value }))} placeholder="Requires a certificate attachment" />
+                          </label>
+                          <label className="qms-field">
+                            <span>Attachment type</span>
+                            <select value={recordAttachmentKind} onChange={(e) => setRecordAttachmentKind(e.target.value)}>
+                              <option value="EVIDENCE">Evidence</option>
+                              <option value="CERTIFICATE">Certificate</option>
+                              <option value="AMEL">AMEL</option>
+                              <option value="LICENSE">Licence</option>
+                              <option value="OTHER">Other</option>
+                            </select>
+                          </label>
+                          <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
+                            <span>Attachment</span>
+                            <input type="file" onChange={(e) => setRecordAttachment(e.target.files?.[0] || null)} />
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      <fieldset className="training-profile-drawer__group">
+                        <legend>Notes</legend>
+                        <div className="training-profile-form-grid">
+                          <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
+                            <span>Remarks</span>
+                            <textarea value={recordForm.remarks} onChange={(e) => setRecordForm((prev) => ({ ...prev, remarks: e.target.value }))} rows={3} />
+                          </label>
+                        </div>
+                        <div className="training-profile-form-note">
+                          {selectedCoursePhase === "INITIAL" && linkedRefresherCourse ? (
+                            <p>Recording this initial course will seed the linked refresher entry automatically using the same completion date and the refresher recurrence.</p>
+                          ) : null}
+                        </div>
+                      </fieldset>
+                    </div>
+                    <div className="training-profile-drawer__footer">
+                      <button type="button" className="secondary-chip-btn" onClick={closeRecordDrawer} disabled={savingRecord}>
+                        Cancel
+                      </button>
+                      <button type="button" className="primary-chip-btn" onClick={() => void submitRecord()} disabled={savingRecord}>
+                        {savingRecord ? "Saving..." : editingRecordId ? "Update training record" : "Save training record"}
+                      </button>
+                    </div>
+                  </Drawer>
+                ) : null}
+
+                <Drawer
+                  title="Request a deferral"
+                  isOpen={deferralDrawerOpen}
+                  onClose={closeDeferralDrawer}
+                  panelClassName="training-profile-form-drawer training-profile-form-drawer--compact"
+                  closeDisabled={savingDeferral}
+                >
+                  <div className="training-profile-drawer__body">
+                    <fieldset className="training-profile-drawer__group">
+                      <legend>Course &amp; dates</legend>
+                      <div className="training-profile-form-grid">
+                        <label className="qms-field">
+                          <span>Course</span>
+                          <select value={deferralForm.coursePk} onChange={(e) => setDeferralForm((prev) => ({ ...prev, coursePk: e.target.value }))}>
+                            <option value="">Select course</option>
+                            {courses.map((course) => {
+                              const item = itemByCoursePk.get(course.id);
+                              const due = dueDateForItem(item);
+                              return (
+                                <option key={course.id} value={course.id}>
+                                  {course.course_id} · {course.course_name}{due ? ` · due ${formatDate(due)}` : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </label>
+                        <label className="qms-field">
+                          <span>Current due</span>
+                          <input value={deferralForm.coursePk ? dueLabel(itemByCoursePk.get(deferralForm.coursePk)) : "-"} disabled />
+                        </label>
+                        <label className="qms-field">
+                          <span>Requested new due date</span>
+                          <input type="date" value={deferralForm.requestedNewDueDate} onChange={(e) => setDeferralForm((prev) => ({ ...prev, requestedNewDueDate: e.target.value }))} />
+                        </label>
+                      </div>
+                    </fieldset>
+                    <fieldset className="training-profile-drawer__group">
+                      <legend>Reason</legend>
+                      <div className="training-profile-form-grid">
+                        <label className="qms-field">
+                          <span>Category</span>
+                          <select value={deferralForm.reasonCategory} onChange={(e) => setDeferralForm((prev) => ({ ...prev, reasonCategory: e.target.value as DeferralReasonCategory }))}>
+                            {DEFERRAL_REASON_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="qms-field" style={{ gridColumn: "1 / -1" }}>
+                          <span>Reason detail</span>
+                          <textarea value={deferralForm.reasonText} onChange={(e) => setDeferralForm((prev) => ({ ...prev, reasonText: e.target.value }))} rows={3} />
+                        </label>
+                      </div>
+                    </fieldset>
+                  </div>
+                  <div className="training-profile-drawer__footer">
+                    <button type="button" className="secondary-chip-btn" onClick={closeDeferralDrawer} disabled={savingDeferral}>
+                      Cancel
+                    </button>
+                    <button type="button" className="primary-chip-btn" onClick={() => void submitDeferral()} disabled={savingDeferral}>
+                      {savingDeferral ? "Submitting..." : "Submit deferral request"}
+                    </button>
+                  </div>
+                </Drawer>
 
                 {recordConflict ? (
                   <div className="training-record-conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="training-record-conflict-title">
@@ -1730,29 +1838,19 @@ const QMSTrainingUserPage: React.FC = () => {
                           <span>{viewerFile.kind}</span>
                         </div>
                         <div className="training-row-actions">
-                          <button type="button" className="training-icon-btn" onClick={() => setViewerScale((prev) => Math.max(0.6, prev - 0.2))}><ZoomOut size={15} /></button>
-                          <button type="button" className="training-icon-btn" onClick={() => setViewerScale(1)}>100%</button>
-                          <button type="button" className="training-icon-btn" onClick={() => setViewerScale((prev) => Math.min(3, prev + 0.2))}><ZoomIn size={15} /></button>
-                          <button type="button" className="training-icon-btn" onClick={() => viewerFile && void openFileViewer(viewerFile)}><Eye size={15} /></button>
                           <button type="button" className="training-icon-btn" onClick={async () => { if (!viewerFile) return; const downloaded = await downloadTrainingFile(viewerFile.id); saveDownloadedFile(downloaded); }}><Download size={15} /></button>
                           <button type="button" className="training-icon-btn" onClick={closeViewer}><X size={15} /></button>
                         </div>
                       </div>
                       <div className="training-file-viewer__body">
                         {viewerLoading ? <p className="text-muted">Loading attachment...</p> : null}
-                        {viewerBlobUrl && ((viewerFile.content_type || '').includes('pdf') || viewerFile.original_filename.toLowerCase().endsWith('.pdf')) ? (
-                          <iframe title={viewerFile.original_filename} src={viewerBlobUrl} style={{ width: '100%', height: '78vh', border: 'none', transform: `scale(${viewerScale})`, transformOrigin: 'top center' }} />
+                        {viewerBlobUrl && ((viewerFile.content_type || "").includes("pdf") || viewerFile.original_filename.toLowerCase().endsWith(".pdf")) ? (
+                          <iframe title={viewerFile.original_filename} src={viewerBlobUrl} style={{ width: "100%", height: "78vh", border: "none" }} />
                         ) : viewerBlobUrl ? (
-                          <img src={viewerBlobUrl} alt={viewerFile.original_filename} style={{ maxWidth: '100%', maxHeight: '78vh', transform: `scale(${viewerScale})`, transformOrigin: 'top center' }} />
+                          <img src={viewerBlobUrl} alt={viewerFile.original_filename} style={{ maxWidth: "100%", maxHeight: "78vh" }} />
                         ) : null}
                       </div>
                     </div>
-                  </div>
-                ) : null}
-
-                {error ? (
-                  <div className="card card--error">
-                    <p>{error}</p>
                   </div>
                 ) : null}
               </div>
@@ -1760,7 +1858,9 @@ const QMSTrainingUserPage: React.FC = () => {
           </section>
         )}
       </div>
-    </QMSLayout>
+      </div>
+      </div>
+    </DepartmentLayout>
   );
 };
 

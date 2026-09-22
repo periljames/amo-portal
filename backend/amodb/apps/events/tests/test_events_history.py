@@ -285,3 +285,37 @@ def test_list_event_history_returns_304_on_matching_etag(db_session):
     )
     assert hasattr(result, "status_code")
     assert result.status_code == 304
+
+
+def test_stream_bootstrap_releases_db_before_keepalive(db_session, monkeypatch):
+    """SSE must not keep a pooled session for the stream lifetime."""
+    amo, user = _create_amo_and_user(db_session, code="SSE01")
+    from amodb.security import create_access_token
+
+    token = create_access_token(data={"sub": str(user.id)})
+    closed = {"count": 0}
+
+    monkeypatch.setattr(events_router, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(events_router, "close_session_safely", lambda _db: closed.__setitem__("count", closed["count"] + 1))
+
+    class _Req:
+        headers = {"authorization": f"Bearer {token}"}
+        query_params = {}
+
+    resolved_user, bootstrap = events_router._prepare_stream_bootstrap(_Req())
+    assert str(resolved_user.id) == str(user.id)
+    assert str(resolved_user.amo_id) == str(amo.id)
+    assert bootstrap == []
+    assert closed["count"] == 1
+
+
+def test_stream_events_does_not_bind_request_scoped_db():
+    """StreamingResponse must not hold Depends(get_db) for the keepalive loop."""
+    import inspect
+
+    params = inspect.signature(events_router.stream_events).parameters
+    assert "db" not in params
+    assert "user" not in params
+    generator_params = inspect.signature(events_router._event_generator).parameters
+    assert "db" not in generator_params
+    assert "bootstrap" in generator_params

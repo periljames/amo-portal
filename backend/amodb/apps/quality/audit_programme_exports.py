@@ -71,8 +71,8 @@ def _team(item: Any, people: Mapping[str, str]) -> str:
     return "\n".join(rows) or "To be assigned"
 
 
-def audit_programme_pdf(programme: Any, people: Mapping[str, str]) -> bytes:
-    """Render the approved programme as a controlled, print-ready schedule."""
+def audit_programme_pdf(programme: Any, people: Mapping[str, str], *, draft: bool = False) -> bytes:
+    """Render the programme as a print-ready schedule (draft watermark when not controlled)."""
     stream = BytesIO()
     styles = getSampleStyleSheet()
     body = ParagraphStyle("ProgrammeBody", parent=styles["BodyText"], fontSize=7.2, leading=9)
@@ -87,9 +87,18 @@ def audit_programme_pdf(programme: Any, people: Mapping[str, str]) -> bytes:
 
     def page(canvas, document) -> None:
         canvas.saveState()
+        if draft:
+            canvas.setFont("Helvetica-Bold", 48)
+            canvas.setFillColor(colors.Color(0.75, 0.2, 0.2, alpha=0.12))
+            canvas.saveState()
+            canvas.translate(150 * mm, 105 * mm)
+            canvas.rotate(28)
+            canvas.drawCentredString(0, 0, "DRAFT")
+            canvas.restoreState()
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(colors.HexColor("#526078"))
-        canvas.drawString(14 * mm, 8 * mm, f"Controlled audit programme · {programme.programme_ref}")
+        label = "Draft audit programme" if draft else "Controlled audit programme"
+        canvas.drawString(14 * mm, 8 * mm, f"{label} · {programme.programme_ref}")
         canvas.drawRightString(283 * mm, 8 * mm, f"Page {document.page}")
         canvas.restoreState()
 
@@ -132,6 +141,8 @@ def audit_programme_pdf(programme: Any, people: Mapping[str, str]) -> bytes:
 
     rows: list[list[Any]] = [["Date / cadence", "Audit area", "Scope & criteria", "Audit team / auditee", "Distribution"]]
     for item in list(getattr(programme, "items", None) or []):
+        if _text(getattr(item, "state", None)).upper() == "CANCELLED":
+            continue
         dates = _item_dates(programme, item)
         date_value = "\n".join(
             start.strftime("%d %b %Y") if start == end else f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}"
@@ -189,6 +200,8 @@ def audit_programme_ics(
         "X-WR-CALDESC:Controlled snapshot. Subscribe to the AMO Portal operations calendar for automatic updates.",
     ]
     for item in list(getattr(programme, "items", None) or []):
+        if _text(getattr(item, "state", None)).upper() == "CANCELLED":
+            continue
         start_time = getattr(item, "default_start_time", None) or time(hour=9)
         end_time = getattr(item, "default_end_time", None) or time(hour=17)
         for index, (start, end) in enumerate(_item_dates(programme, item), start=1):

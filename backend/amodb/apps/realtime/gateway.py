@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 
 import msgpack
 
-from amodb.database import WriteSessionLocal
+from amodb.database import WriteSessionLocal, probe_database
+from amodb.database_resilience import database_circuit, is_database_disconnect
 
 from . import broker_auth, models, production_messaging, realtime_auth, schemas
 
@@ -29,6 +31,8 @@ class RealtimeGateway:
         self._drain_wakeup = threading.Event()
         self._drain_thread: threading.Thread | None = None
         self._flush_lock = threading.Lock()
+        self._db_outage_logged = False
+        self._next_db_retry_at = 0.0
 
     def connect(self) -> None:
         broker_auth.validate_production_config()
@@ -158,6 +162,21 @@ class RealtimeGateway:
             return 0
         published = 0
         try:
+            if not database_circuit.allow_request():
+                now = time.monotonic()
+                if now < self._next_db_retry_at:
+                    return 0
+                if not probe_database():
+                    self._next_db_retry_at = now + max(1.0, float(database_circuit.retry_after_seconds()))
+                    if not self._db_outage_logged:
+                        logger.warning(
+                            "Realtime outbox drain paused while the database is unavailable; will retry after recovery"
+                        )
+                        self._db_outage_logged = True
+                    return 0
+                self._db_outage_logged = False
+                self._next_db_retry_at = 0.0
+
             for _ in range(max(1, min(limit, 1000))):
                 db = WriteSessionLocal()
                 try:
@@ -194,9 +213,20 @@ class RealtimeGateway:
                             extra={"outbox_id": row.id, "topic": row.topic},
                         )
                         break
-                except Exception:
+                except Exception as exc:
                     db.rollback()
-                    logger.exception("Realtime outbox drain failed")
+                    if is_database_disconnect(exc):
+                        database_circuit.mark_failure(exc)
+                        self._next_db_retry_at = time.monotonic() + max(
+                            1.0, float(database_circuit.retry_after_seconds())
+                        )
+                        if not self._db_outage_logged:
+                            logger.warning(
+                                "Realtime outbox drain paused after database disconnect; will retry after recovery"
+                            )
+                            self._db_outage_logged = True
+                    else:
+                        logger.exception("Realtime outbox drain failed")
                     break
                 finally:
                     db.close()

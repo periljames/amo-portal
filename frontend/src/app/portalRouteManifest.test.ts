@@ -243,4 +243,25 @@ describe("portal route manifest", () => {
     expect(items.some((item) => item.id === "training-competence")).toBe(false);
     expect(items.some((item) => item.id === "my-training")).toBe(true);
   });
+
+  it("does not mark Quality Home active when a workspace query is open", async () => {
+    const { isPortalPathActive, portalNavItemHasActiveDescendant } = await import("./portalRouteManifest");
+    const home: PortalNavItem = {
+      id: "home",
+      label: "Home",
+      path: "/maintenance/tenant-a/quality",
+      exact: true,
+    };
+    const quality: PortalNavItem = {
+      id: "department-quality",
+      label: "Quality & Compliance",
+      path: "/maintenance/tenant-a/quality",
+      children: [{ id: "quality-audits", label: "Audits", path: "/maintenance/tenant-a/quality/audits/dashboard" }],
+    };
+    const pathname = "/maintenance/tenant-a/quality";
+    expect(isPortalPathActive(pathname, home)).toBe(true);
+    expect(isPortalPathActive(pathname, home, "?workspace=people")).toBe(false);
+    expect(isPortalPathActive(pathname, quality, "?workspace=people")).toBe(true);
+    expect(portalNavItemHasActiveDescendant(quality, "/maintenance/tenant-a/quality/audits/dashboard")).toBe(true);
+  });
 });

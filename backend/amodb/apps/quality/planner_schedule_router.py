@@ -31,6 +31,7 @@ from .schedule_weekend import annotate_notes_with_weekend_policy, resolve_schedu
 from .router import (
     _advance_schedule_date,
     _audit_metadata,
+    _audit_reference_family_for_amo,
     _deserialize_external_auditees,
     _generate_audit_reference,
     _notify_user,
@@ -445,6 +446,16 @@ def _validate_people(db: Session, *, amo_id: str, user_ids: list[str]) -> dict[s
 
 
 def _auditor_roles_by_user(db: Session, *, amo_id: str) -> dict[str, set[str]]:
+    # Quality privilege tables are RLS-guarded by app.tenant_id. Callers that use
+    # get_db() without set_postgres_tenant_context otherwise see zero grants and
+    # reject valid LEAD_AUDITOR / AUDITOR assignments on create/update.
+    from .tenant_security import _TENANT_CONTEXT_KEY, set_postgres_tenant_context
+
+    existing = db.info.get(_TENANT_CONTEXT_KEY)
+    if not existing or str(existing[0]) != str(amo_id):
+        user_id = str(existing[1]) if existing else "privilege-lookup"
+        set_postgres_tenant_context(db, amo_id=str(amo_id), user_id=user_id)
+
     today = date.today()
     rows = db.query(QualityPrivilege, QualityPrivilegeRule).join(
         QualityPrivilegeRule,
@@ -469,6 +480,10 @@ def _auditor_roles_by_user(db: Session, *, amo_id: str) -> dict[str, set[str]]:
             if str(value).strip()
         }
         roles.update(configured or {"OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"})
+        # Programme planning may assign an AUDITOR as lead when no dedicated
+        # LEAD_AUDITOR privilege exists on that person (lead can also stay empty).
+        if rule.privilege_type == "AUDITOR":
+            roles.add("LEAD_AUDITOR")
     return result
 
 
@@ -548,6 +563,17 @@ def _schedule_user_ids(schedule: models.QMSAuditSchedule, metadata: QMSPlannerSc
     }
 
 
+def _supporting_auditor_ids(audit: models.QMSAudit) -> list[str]:
+    raw = getattr(audit, "supporting_auditor_user_ids", None) or []
+    if isinstance(raw, str):
+        values = _json_list(raw)
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        values = []
+    return [str(value) for value in values if value]
+
+
 def _audit_user_ids(audit: models.QMSAudit, metadata: QMSPlannerScheduleMetadata | None) -> set[str]:
     return {
         str(value)
@@ -556,6 +582,7 @@ def _audit_user_ids(audit: models.QMSAudit, metadata: QMSPlannerScheduleMetadata
             audit.observer_auditor_user_id,
             audit.assistant_auditor_user_id,
             audit.auditee_user_id,
+            *_supporting_auditor_ids(audit),
             *(_json_list(metadata.attendee_user_ids_json) if metadata else []),
         ]
         if value
@@ -659,22 +686,21 @@ def _collect_conflicts(
 
     audit_rows = (
         db.query(models.QMSAudit, QMSPlannerScheduleMetadata)
-        .join(
+        .outerjoin(
             QMSPlannerScheduleMetadata,
             and_(
                 QMSPlannerScheduleMetadata.audit_id == models.QMSAudit.id,
                 QMSPlannerScheduleMetadata.amo_id == models.QMSAudit.amo_id,
+                QMSPlannerScheduleMetadata.lifecycle_status == "ACTIVE",
             ),
         )
         .filter(
             models.QMSAudit.amo_id == amo_id,
-            QMSPlannerScheduleMetadata.amo_id == amo_id,
             models.QMSAudit.deleted_at.is_(None),
             models.QMSAudit.status.notin_([QMSAuditStatus.CLOSED]),
             models.QMSAudit.planned_start.is_not(None),
             models.QMSAudit.planned_start >= window_start,
             models.QMSAudit.planned_start <= window_end,
-            QMSPlannerScheduleMetadata.lifecycle_status == "ACTIVE",
         )
         .limit(1000)
         .all()
@@ -688,9 +714,9 @@ def _collect_conflicts(
             title=f"{audit.audit_ref} · {audit.title}",
             start_date=audit.planned_start,
             end_date=audit.planned_end or audit.planned_start,
-            start_time=metadata.start_time,
-            end_time=metadata.end_time,
-            location=metadata.location,
+            start_time=(metadata.start_time if metadata else None) or audit.planned_start_time,
+            end_time=(metadata.end_time if metadata else None) or audit.planned_end_time,
+            location=(metadata.location if metadata else None) or audit.location,
             user_ids=_audit_user_ids(audit, metadata),
         ))
 
@@ -1035,11 +1061,13 @@ def _materialize_occurrence(
 
     _validate_one_calendar_year(start=occurrence_date, end=planned_end)
     audit_scope_code = schedule.audit_scope_code or _scope_default_code_for_kind(schedule.kind)
+    reference_family = _audit_reference_family_for_amo(db, amo_id=str(schedule.amo_id))
     audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
         db,
         amo_id=str(schedule.amo_id),
         target_date=occurrence_date,
         audit_scope_code=audit_scope_code,
+        reference_family=reference_family,
     )
     audit = models.QMSAudit(
         amo_id=schedule.amo_id,
@@ -1048,7 +1076,7 @@ def _materialize_occurrence(
         audit_ref=audit_ref,
         audit_scope_id=schedule.audit_scope_id,
         audit_scope_code=audit_scope_code,
-        reference_family="QAR",
+        reference_family=reference_family,
         unit_code=unit_code,
         ref_year=ref_year,
         ref_sequence=ref_sequence,

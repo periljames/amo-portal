@@ -11,6 +11,36 @@ import type { PersonComplianceRow } from "../../types/trainingOperating";
 type Props = { canManage: boolean; onOpenImport: () => void };
 
 const PAGE_SIZE = 50;
+const OBLIGATION_STATUSES = new Set(["CURRENT", "OVERDUE", "INCOMPLETE", "DUE_SOON", "MISSING"]);
+
+function summarizeObligationRequirements(raw: unknown): string {
+  const items = Array.isArray(raw) ? raw : [];
+  if (!items.length) return "No linked requirement";
+  const scopes = Array.from(new Set(items.map((entry) => {
+    if (!entry || typeof entry !== "object") return "UNKNOWN";
+    return String((entry as { scope?: unknown }).scope || "UNKNOWN").trim().toUpperCase() || "UNKNOWN";
+  })));
+  const countLabel = items.length === 1 ? "1 requirement" : `${items.length} requirements`;
+  return `${scopes.join(" · ")} · ${countLabel}`;
+}
+
+function obligationStatus(item: Record<string, unknown>): string {
+  const raw = String(item.status || "").trim().toUpperCase();
+  if (OBLIGATION_STATUSES.has(raw)) return raw;
+  if (!item.record_id) return "MISSING";
+  const expiry = String(item.expiry_date || "").trim();
+  if (expiry) {
+    const due = Date.parse(expiry);
+    if (Number.isFinite(due)) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (due < today.getTime()) return "OVERDUE";
+      const leadMs = 45 * 24 * 60 * 60 * 1000;
+      if (due - today.getTime() <= leadMs) return "DUE_SOON";
+    }
+  }
+  return "CURRENT";
+}
 
 const TrainingPeopleWorkspace: React.FC<Props> = ({ canManage, onOpenImport }) => {
   const navigate = useNavigate();
@@ -70,7 +100,29 @@ const TrainingPeopleWorkspace: React.FC<Props> = ({ canManage, onOpenImport }) =
         <footer className="tos-pagination"><span>{people.data.total ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, people.data.total)} of ${people.data.total}` : "0 people"}</span><div><button aria-label="Previous page" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}><ChevronLeft size={17} /></button><button aria-label="Next page" disabled={!people.data.has_more} onClick={() => setOffset(offset + PAGE_SIZE)}><ChevronRight size={17} /></button></div></footer>
       </> : null}
     </section>
-    <Drawer title={selected ? `${selected.full_name} · training dossier` : "Training dossier"} isOpen={Boolean(selected)} onClose={() => setSelected(null)} panelClassName="training-form-drawer"><div className="tos-drawer-form">{selected ? <><section className="tos-metric-strip"><article><span>Outstanding</span><strong>{selected.outstanding}</strong></article><article><span>Overdue</span><strong>{selected.overdue}</strong></article><article><span>Due soon</span><strong>{selected.due_soon}</strong></article><article><span>Never</span><strong>{selected.never_completed}</strong></article></section><div className="tos-inline-proof"><UserRound size={17} /><span>{selected.staff_code || "No staff code"} · {selected.position_title || "No position"}</span><strong>{selected.next_action}</strong></div><div className="tos-list">{(selected.provenance.obligations || []).map((item, index) => <div key={String(item.course_id || index)}><div><strong>{String(item.course_code || "COURSE")} · {String(item.course_name || "Unnamed course")}</strong><small>Completion {String(item.completion_date || "never")} · expiry {String(item.expiry_date || "not set")}</small><small>Source: {JSON.stringify(item.requirements || [])}</small></div><span className="tos-pill tos-pill--ok">{item.record_id ? "RECORDED" : "MISSING"}</span></div>)}</div></> : null}</div></Drawer>
+    <Drawer title={selected ? `${selected.full_name} · training dossier` : "Training dossier"} isOpen={Boolean(selected)} onClose={() => setSelected(null)} panelClassName="training-form-drawer">
+      <div className="tos-drawer-form">{selected ? <>
+        <section className="tos-metric-strip">
+          <article><span>Outstanding</span><strong>{selected.outstanding}</strong></article>
+          <article><span>Overdue</span><strong>{selected.overdue}</strong></article>
+          <article><span>Due soon</span><strong>{selected.due_soon}</strong></article>
+          <article><span>Never</span><strong>{selected.never_completed}</strong></article>
+        </section>
+        <div className="tos-inline-proof"><UserRound size={17} /><span>{selected.staff_code || "No staff code"} · {selected.position_title || "No position"}</span><strong>{selected.next_action}</strong></div>
+        <div className="tos-actions"><button type="button" onClick={() => openRecord(selected)}>Open full training profile</button></div>
+        <div className="tos-list">{(selected.provenance.obligations || []).map((item, index) => {
+          const status = obligationStatus(item);
+          return <div key={String(item.course_id || index)}>
+            <div>
+              <strong>{String(item.course_code || "COURSE")} · {String(item.course_name || "Unnamed course")}</strong>
+              <small>Completion {String(item.completion_date || "never")} · expiry {String(item.expiry_date || "not set")}</small>
+              <small>Source: {summarizeObligationRequirements(item.requirements)}</small>
+            </div>
+            <span className={`tos-pill is-${status.toLowerCase()}`}>{status.replaceAll("_", " ")}</span>
+          </div>;
+        })}</div>
+      </> : null}</div>
+    </Drawer>
   </div>;
 };
 

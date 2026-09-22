@@ -4,7 +4,13 @@ import type { AuditProgramme } from "../../services/qmsAuditProgramme";
 import {
   availableProgrammeKinds,
   canCreateAnotherProgramme,
+  carryForwardResultToast,
+  defaultCopyPreviousYear,
+  defaultRotateAuditors,
+  emptyYearCreateHint,
+  emptyYearCreateLabel,
   headProgrammesForYear,
+  priorYearCarryForwardAvailable,
   programmeDisplayLabel,
   programmeKindOf,
   programmeKindTitle,
@@ -72,6 +78,19 @@ describe("qmsAuditProgrammeDisplay", () => {
     expect(canCreateAnotherProgramme(rows)).toBe(true);
   });
 
+  it("frees the year after a draft is discarded (CLOSED)", () => {
+    const rows = [
+      programme({
+        programme_series: "AP-2027-I",
+        title: "Internal Audits (2027)",
+        programme_year: 2027,
+        status: "CLOSED",
+      }),
+    ];
+    expect(availableProgrammeKinds(rows)).toEqual(["INTERNAL", "EXTERNAL", "THIRD_PARTY"]);
+    expect(canCreateAnotherProgramme(rows)).toBe(true);
+  });
+
   it("summarizes portfolio cards without repeating period dates", () => {
     expect(
       programmePortfolioSummary({ metrics: { planned_audit_count: 3 } as AuditProgramme["metrics"] }, 2),
@@ -79,5 +98,34 @@ describe("qmsAuditProgrammeDisplay", () => {
     expect(programmePortfolioSummary({ metrics: { planned_audit_count: 1 } as AuditProgramme["metrics"] })).toBe(
       "1 audit",
     );
+  });
+
+  it("defaults carry-forward when the prior year has the same programme kind", () => {
+    const prior = [
+      programme({
+        programme_series: "AP-2026-I",
+        title: "Internal Audits (2026)",
+        programme_year: 2026,
+        programme_kind: "INTERNAL",
+        status: "DRAFT",
+      }),
+    ];
+    expect(priorYearCarryForwardAvailable(prior, "INTERNAL")).toBe(true);
+    expect(defaultCopyPreviousYear(prior, "INTERNAL")).toBe(true);
+    expect(defaultRotateAuditors(true)).toBe(true);
+    expect(defaultRotateAuditors(false)).toBe(false);
+    expect(priorYearCarryForwardAvailable(prior, "EXTERNAL")).toBe(false);
+    expect(defaultCopyPreviousYear(prior, "EXTERNAL")).toBe(false);
+    expect(emptyYearCreateLabel(2027, 2026, true)).toBe("Create 2027 from 2026");
+    expect(emptyYearCreateHint(2027, 2026, true)).toContain("Carry forward 2026");
+    expect(carryForwardResultToast(4, 2027, 2026)).toEqual({
+      title: "2027 programme created",
+      message: "Carried forward 4 audits from 2026 for review.",
+      variant: "success",
+    });
+    expect(carryForwardResultToast(4, 2027, 2026, true).message).toContain(
+      "rotated auditor",
+    );
+    expect(carryForwardResultToast(0, 2027, 2026).variant).toBe("warning");
   });
 });

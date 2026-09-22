@@ -1,14 +1,15 @@
 import React, { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import QualityAuditPlanScheduleBasePage from "./QualityAuditPlanScheduleBasePage";
+import QualityAuditPlanScheduleBasePage, {
+  CREATE_RECURRENCE_TEMPLATE_LABEL,
+} from "./QualityAuditPlanScheduleBasePage";
 
 const PLANNER_SOURCE = "planner";
 const HANDOFF_STATE_KEY = "planner_handoff";
 const HANDOFF_OPENED = "opened";
-const CREATE_BUTTON_LABEL = "Create schedule";
 
 function isCreateScheduleButton(element: HTMLButtonElement): boolean {
-  return element.textContent?.replace(/\s+/g, " ").trim() === CREATE_BUTTON_LABEL;
+  return element.textContent?.replace(/\s+/g, " ").trim() === CREATE_RECURRENCE_TEMPLATE_LABEL;
 }
 
 /**

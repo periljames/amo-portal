@@ -121,6 +121,13 @@ export function createChecklistTemplate(amoCode: string, payload: { template_cod
   return apiRequest<ChecklistTemplate>(qmsPath(amoCode, "/audit-checklist-templates"), json("POST", payload));
 }
 
+export function retireChecklistTemplate(amoCode: string, templateId: string) {
+  return apiRequest<{ id: string; status: string }>(
+    qmsPath(amoCode, `/audit-checklist-templates/${encodeURIComponent(templateId)}`),
+    { method: "DELETE", timeoutMs: 15_000 },
+  );
+}
+
 export function createChecklistRevision(amoCode: string, templateId: string, payload: { reason: string; items: ChecklistTemplateItem[]; source_references?: Array<Record<string, unknown> | string> }) {
   return apiRequest<ChecklistTemplateRevision>(qmsPath(amoCode, `/audit-checklist-templates/${encodeURIComponent(templateId)}/revisions`), json("POST", payload));
 }

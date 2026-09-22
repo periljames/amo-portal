@@ -48,6 +48,18 @@ export type AllDaySpanLayout = {
 
 export const PLANNER_HOUR_HEIGHT = 64;
 
+/** Place “now” about one-third down the visible canvas, clamped to scroll bounds. */
+export function plannerNowScrollTop(input: {
+  nowTopPx: number;
+  stickyOffsetPx: number;
+  viewportHeight: number;
+  maxScrollTop: number;
+}): number {
+  const focusY = Math.max(0, input.stickyOffsetPx) + Math.max(0, input.nowTopPx);
+  const ideal = focusY - Math.max(80, input.viewportHeight * 0.33);
+  return Math.max(0, Math.min(ideal, Math.max(0, input.maxScrollTop)));
+}
+
 export type PlannerPreferences = {
   leftRailOpen: boolean;
   inspectorOpen: boolean;
@@ -216,8 +228,16 @@ export function plannerEventCanReschedule(row: Record<string, unknown>, canManag
 }
 
 function parseTime(value: string): string | null {
-  const match = value.match(/(?:T|\s)(\d{2}:\d{2})/);
-  return match ? match[1] : null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const isoMatch = trimmed.match(/(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/);
+  if (isoMatch) return isoMatch[1];
+  const bareMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/i);
+  if (!bareMatch) return null;
+  const hour = Number(bareMatch[1]);
+  const minute = Number(bareMatch[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function dateOnly(value: unknown): string | null {
@@ -230,14 +250,31 @@ export function normalisePlannerEvent(row: Record<string, unknown>, canManageCal
   const date = dateOnly(text(row, "date"));
   if (!date) return null;
   const title = text(row, "title", "course_name", "audit_ref", "car_number") || "QMS item";
-  const startRaw = text(row, "starts_at", "start_at", "planned_start", "starts_on");
-  const endRaw = text(row, "ends_at", "end_at", "planned_end", "ends_on");
-  const explicitEndDate = dateOnly(text(row, "ends_on", "planned_end"));
+  const startRaw = text(
+    row,
+    "starts_at",
+    "start_at",
+    "start_time",
+    "planned_start_time",
+    "planned_start",
+    "starts_on",
+  );
+  const endRaw = text(
+    row,
+    "ends_at",
+    "end_at",
+    "end_time",
+    "planned_end_time",
+  );
+  // Date-only planned_end/ends_on stay as endDate; bare clocks must not become endDate.
+  const explicitEndDate = dateOnly(text(row, "ends_on")) || dateOnly(text(row, "planned_end"));
   const durationDays = Number(text(row, "duration_days", "durationDays"));
   const startDate = parseIsoDateKey(date);
   const durationEndDate = !explicitEndDate && startDate && Number.isInteger(durationDays) && durationDays > 1
     ? isoDateKey(addDays(startDate, durationDays - 1))
     : null;
+  const startTime = parseTime(startRaw);
+  const endTime = parseTime(endRaw);
   return {
     id: text(row, "id") || `${text(row, "module")}:${text(row, "entity_type")}:${text(row, "entity_id")}:${text(row, "event_type")}`,
     module: text(row, "module"),
@@ -247,8 +284,8 @@ export function normalisePlannerEvent(row: Record<string, unknown>, canManageCal
     title,
     date,
     endDate: explicitEndDate || durationEndDate,
-    startTime: parseTime(startRaw),
-    endTime: parseTime(endRaw),
+    startTime,
+    endTime,
     link: text(row, "link") || null,
     dueState: text(row, "due_state") || null,
     status: text(row, "status") || null,
@@ -279,6 +316,22 @@ export function plannerPillCopy(event: PlannerEvent): PlannerPillCopy {
     return "";
   };
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (event.entityType === "audit_meeting") {
+    const meetingType = sourceText("meeting_type").replace(/_/g, " ").toLowerCase();
+    const meetingLabel = meetingType
+      ? `${meetingType.charAt(0).toUpperCase()}${meetingType.slice(1)} meeting`
+      : "Audit meeting";
+    const reference = sourceText("audit_ref") || "Audit";
+    const leadCandidate = sourceText("lead_auditor_name") || String(event.ownerLabel || "").trim();
+    const location = sourceText("location");
+    return {
+      title: meetingLabel,
+      reference,
+      lead: leadCandidate && !uuidPattern.test(leadCandidate)
+        ? leadCandidate
+        : (location || "Meeting"),
+    };
+  }
   const scheduleTemplate = isAuditScheduleTemplate(event);
   const kindOrRef = sourceText("schedule_ref", "kind", "audit_ref");
   const reference = scheduleTemplate

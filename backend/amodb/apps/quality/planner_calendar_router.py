@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-import time
+from datetime import date, datetime, time, timedelta
+import time as time_module
 import uuid
 from typing import Any
 
@@ -28,6 +28,31 @@ from .tenant_timezone import resolve_tenant_timezone
 
 
 _VALID_SOURCES = {"all", "audits", "cars", "training", "month", "week", "list", "agenda", "year"}
+
+
+def _as_clock(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%H:%M")
+    if isinstance(value, time):
+        return value.strftime("%H:%M")
+    text = str(value).strip()
+    if not text:
+        return None
+    match = text.split("T")[-1] if "T" in text else text
+    match = match.split("+")[0].split("Z")[0].strip()
+    parts = match.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _active_training_lifecycle_sql(db: Session) -> str:
@@ -63,7 +88,7 @@ def _qms_planner_calendar(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     trace_id = uuid.uuid4().hex[:12]
-    started = time.perf_counter()
+    started = time_module.perf_counter()
 
     # Reject a fully specified invalid range before touching tenant/database
     # state. Apart from preserving the public validation contract, this avoids
@@ -196,7 +221,8 @@ def _qms_planner_calendar(
                            NULLIF(TRIM(CONCAT_WS(' ', lead_user.first_name, lead_user.last_name)), ''),
                            lead_user.email
                        ) AS lead_auditor_name,
-                       audits.planned_start AS event_date, audits.planned_end
+                       audits.planned_start AS event_date, audits.planned_end,
+                       audits.planned_start_time, audits.planned_end_time
                 FROM qms_audits audits
                 LEFT JOIN users lead_user
                   ON lead_user.id = audits.lead_auditor_user_id
@@ -213,6 +239,8 @@ def _qms_planner_calendar(
         )
         for row in audit_rows:
             title = f"{row.get('audit_ref') or 'Audit'} · {row.get('title') or 'Planned audit'}"
+            start_time = _as_clock(row.get("planned_start_time"))
+            end_time = _as_clock(row.get("planned_end_time"))
             events.append(
                 _calendar_event_row(
                     module="audits",
@@ -234,6 +262,10 @@ def _qms_planner_calendar(
                         "lead_auditor_user_id": row.get("lead_auditor_user_id"),
                         "lead_auditor_name": row.get("lead_auditor_name"),
                         "planned_end": _as_date(row.get("planned_end")),
+                        "planned_start_time": start_time,
+                        "planned_end_time": end_time,
+                        "start_time": start_time,
+                        "end_time": end_time,
                     },
                 )
             )
@@ -411,7 +443,7 @@ def _qms_planner_calendar(
         offset=bounded_offset,
         limit=bounded_limit,
     )
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    elapsed_ms = round((time_module.perf_counter() - started) * 1000, 2)
     warning_messages = [item for item in [tenant_timezone.warning] if item]
     if source_errors:
         warning_messages.append("Some calendar sources failed. See source_errors.")

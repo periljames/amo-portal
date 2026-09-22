@@ -222,7 +222,7 @@ export function readinessOf(
   programme?: AuditProgramme,
   optimizer?: AuditProgrammeOptimizer,
 ): AuditProgrammeReadiness {
-  const items = programme?.items || [];
+  const items = (programme?.items || []).filter((item) => item.state !== "CANCELLED");
   const server = programme?.readiness;
   const blockers = server
     ? [...server.blockers]
@@ -231,7 +231,7 @@ export function readinessOf(
     if (!items.length)
       blockers.push({
         code: "NO_REQUIREMENTS",
-        message: "No governed audit coverage is defined yet.",
+        message: "Add at least one active audit requirement before approval.",
       });
     if (!programme?.regulatory_basis?.length)
       blockers.push({
@@ -522,6 +522,8 @@ export function createAuditProgramme(
     period_start: string;
     period_end: string;
     copy_previous_year?: boolean;
+    rotate_auditors?: boolean;
+    apply_hybrid_seed?: boolean;
   },
 ): Promise<AuditProgramme> {
   return apiRequest(

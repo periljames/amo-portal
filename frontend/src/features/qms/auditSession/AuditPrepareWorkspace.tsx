@@ -615,7 +615,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               {bindings.map((binding) => (
                 <article key={binding.id}>
                   <ClipboardList size={16} aria-hidden />
-                  <div><strong>{binding.template_code} · Rev {binding.revision_no}</strong><small>{binding.application_reason} · SHA {binding.content_sha256.slice(0, 12)}…</small></div>
+                  <div><strong>{binding.template_code} · Rev {binding.revision_no}</strong><small>{binding.application_reason}</small></div>
                 </article>
               ))}
             </div>

@@ -1,0 +1,6 @@
+.workspace-loading { display: flex; flex: 1; flex-direction: column; gap: 1rem; min-width: 0; min-height: 20rem; padding: clamp(.75rem, 2vw, 1.5rem); }
+.workspace-loading__title, .workspace-loading__toolbar, .workspace-loading__body { border: 1px solid var(--border-subtle); border-radius: var(--r-md, .5rem); background: var(--surface-elevated); }
+.workspace-loading__title { width: min(24rem, 70%); height: 2.5rem; }
+.workspace-loading__toolbar { height: 3rem; }
+.workspace-loading__body { flex: 1; padding: 1rem; }
+.workspace-loading__body > div { height: 2.75rem; border-bottom: 1px solid var(--border-subtle); }

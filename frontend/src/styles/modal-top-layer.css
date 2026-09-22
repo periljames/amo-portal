@@ -25,6 +25,22 @@ body.portal-modal-layer-active {
   padding: 0 !important;
 }
 
+/* Portal nav is a side panel. Never let top-layer host CSS stretch it full-bleed. */
+.tenant-shell__sidebar.portal-modal-top-layer,
+.tenant-shell__sidebar.portal-modal-top-layer--host,
+.tenant-shell__sidebar.portal-modal-fallback-host {
+  inset: 0 auto 0 0 !important;
+  width: var(--tenant-sidebar-total-width, var(--tenant-sidebar-width, 284px)) !important;
+  min-width: var(--tenant-sidebar-total-width, var(--tenant-sidebar-width, 284px)) !important;
+  max-width: var(--tenant-sidebar-total-width, var(--tenant-sidebar-width, 284px)) !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
+}
+
 /* A route-local dialog surface is centred independently of route geometry. */
 .portal-modal-top-layer--surface {
   position: fixed !important;

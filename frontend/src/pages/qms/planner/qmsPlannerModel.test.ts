@@ -11,6 +11,7 @@ import {
   movePlannerEvent,
   normalisePlannerEvent,
   plannerCategory,
+  plannerNowScrollTop,
   plannerPillCopy,
   plannerTone,
   requestRange,
@@ -23,6 +24,27 @@ describe("QMS planner model", () => {
   it("opens the unscheduled rail by default", () => {
     expect(DEFAULT_PLANNER_PREFERENCES.leftRailOpen).toBe(true);
     expect(DEFAULT_PLANNER_PREFERENCES.inspectorOpen).toBe(false);
+  });
+
+  it("centers the now line in the visible canvas", () => {
+    expect(plannerNowScrollTop({
+      nowTopPx: 640,
+      stickyOffsetPx: 120,
+      viewportHeight: 600,
+      maxScrollTop: 2000,
+    })).toBe(562);
+    expect(plannerNowScrollTop({
+      nowTopPx: 0,
+      stickyOffsetPx: 0,
+      viewportHeight: 600,
+      maxScrollTop: 100,
+    })).toBe(0);
+    expect(plannerNowScrollTop({
+      nowTopPx: 5000,
+      stickyOffsetPx: 0,
+      viewportHeight: 400,
+      maxScrollTop: 800,
+    })).toBe(800);
   });
 
   it("builds a complete Monday-to-Sunday month grid", () => {
@@ -211,6 +233,27 @@ describe("QMS planner model", () => {
     );
 
     expect(layouts).toEqual([{ event: span, startIndex: 1, endIndex: 3, lane: 0 }]);
+  });
+
+  it("keeps timed audits out of the all-day lane", () => {
+    const timed = normalisePlannerEvent({
+      id: "audit-timed",
+      module: "audits",
+      entity_type: "audit",
+      entity_id: "audit-timed",
+      event_type: "audit_planned",
+      title: "Timed audit",
+      date: "2026-09-23",
+      planned_end: "2026-09-23",
+      starts_at: "2026-09-23T09:00:00+00:00",
+      ends_at: "2026-09-23T15:00:00+00:00",
+      meeting_count: 2,
+    }, true);
+
+    expect(timed?.startTime).toBe("09:00");
+    expect(timed?.endTime).toBe("15:00");
+    expect(layoutAllDaySpans([timed!], ["2026-09-23"])).toEqual([]);
+    expect(layoutTimedEvents([timed!], 0, 24)).toHaveLength(1);
   });
 
   it("stacks overlapping all-day spans and reuses lanes after a span ends", () => {

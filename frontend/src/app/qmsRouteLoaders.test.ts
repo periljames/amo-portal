@@ -10,6 +10,10 @@ describe("QMS navigation preload coverage", () => {
   });
   it.each([
     ["/maintenance/tenant/quality", "overview"],
+    ["/maintenance/tenant/quality?workspace=people", "people"],
+    ["/maintenance/tenant/quality?workspace=missions&tab=active", "missions"],
+    ["/maintenance/tenant/quality?workspace=intelligence", "intelligence"],
+    ["/maintenance/tenant/quality?hub=readiness", "assuranceHub"],
     ["/maintenance/tenant/quality/calendar/week", "planner"],
     ["/maintenance/tenant/quality/audits/audit-1/setup", "setup"],
     ["/maintenance/tenant/quality/audits/audit-1/follow-up", "followUp"],

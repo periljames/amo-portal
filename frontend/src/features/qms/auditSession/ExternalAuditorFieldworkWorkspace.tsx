@@ -237,7 +237,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       if (!current) throw new Error("The selected checklist item is no longer assigned to this external auditor.");
       const result = await uploadExternalAuditorEvidence(fresh, current, evidenceFile, evidenceDescription);
       setEvidenceFile(null); setEvidenceDescription("");
-      setNotice(`Governed evidence uploaded · ${result.artifact.filename} · SHA ${result.artifact.sha256.slice(0, 12)}… · checklist v${result.committed_version}.`);
+      setNotice(`Governed evidence uploaded · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "External evidence upload failed.");
@@ -291,8 +291,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
             <button type="button" className="qms-external-auditor-fieldwork__save" disabled={!model.can_execute_checklist || saving} onClick={() => void save(selected, selected.canonical_response_status)}><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
 
             {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
-              <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · immutable checksum and participant attribution retained</small></div></header>
-              {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB · ` : ""}{artifact.sha256 ? `SHA ${artifact.sha256.slice(0, 12)}…` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
+              <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · participant attribution retained</small></div></header>
+              {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
               <label><span>File</span><input type="file" accept={EVIDENCE_ACCEPT} disabled={uploading} onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} /></label>
               <label><span>Evidence context</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="What this evidence demonstrates" /></label>
               <button type="button" disabled={!evidenceFile || uploading || (typeof navigator !== "undefined" && !navigator.onLine)} onClick={() => void uploadEvidence()}><FileUp size={15} /> {uploading ? "Uploading…" : "Attach governed evidence"}</button>

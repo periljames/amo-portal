@@ -62,7 +62,7 @@ const QualityFindingDetailPage: React.FC = () => {
           className="qa-finding-detail__back"
           onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings`)}
         >
-          <ArrowLeft size={15} /> Findings & Actions
+          <ArrowLeft size={15} /> Findings
         </button>
 
         {detailQuery.isLoading ? (
@@ -79,7 +79,7 @@ const QualityFindingDetailPage: React.FC = () => {
               <strong>Finding could not be loaded</strong>
               <p>
                 {/uuid_parsing|valid UUID/i.test(detailQuery.error instanceof Error ? detailQuery.error.message : "")
-                  ? "This finding link is invalid. Open Findings & Actions and select a finding from the register."
+                  ? "This finding link is invalid. Open Findings and select a finding from the register."
                   : detailQuery.error instanceof Error
                     ? detailQuery.error.message
                     : "The request failed."}

@@ -321,17 +321,54 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
           nodes: [
             { id: "control:control-1", kind: "control", label: "145.A.65-C01 · Independent quality audit programme", framework: "KCAR PART 145", process_area: "Quality assurance", criticality: "CRITICAL", status: "ACTIVE", approval_status: approvalStatus, version_no: 1 },
             { id: "source:DOCUMENT:doc-1", kind: "evidence", type: "DOCUMENT", label: "MOE 3.2 Quality audit procedure", status: "VERIFIED", route: "/maintenance/tenant-a/quality/documents/library/doc-1", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null },
+            { id: "source:DOCUMENT:doc-pending", kind: "evidence", type: "DOCUMENT", label: "Audit programme evidence pack", status: "LINKED", route: "/maintenance/tenant-a/quality/documents/library/doc-pending", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null },
           ],
-          edges: [{ id: "edge-1", from: "control:control-1", to: "source:DOCUMENT:doc-1", relationship: "IMPLEMENTS", status: "VERIFIED", valid_until: null, source_route: "/maintenance/tenant-a/quality/documents/library/doc-1", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null }],
-          summary: { controls: 1, evidence_records: 1, relationships: 1, controls_without_evidence: 0, invalid_relationships: 0, verified_relationships: 1 },
+          edges: [
+            { id: "edge-1", from: "control:control-1", to: "source:DOCUMENT:doc-1", relationship: "IMPLEMENTS", status: "VERIFIED", valid_until: null, source_route: "/maintenance/tenant-a/quality/documents/library/doc-1", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null },
+            { id: "edge-linked", from: "control:control-1", to: "source:DOCUMENT:doc-pending", relationship: "EVIDENCES", status: "LINKED", valid_until: null, source_route: "/maintenance/tenant-a/quality/documents/library/doc-pending", last_synced_at: "2026-08-04T04:00:00Z", invalidation_reason: null },
+          ],
+          summary: { controls: 1, evidence_records: 2, relationships: 2, controls_without_evidence: 0, invalid_relationships: 0, verified_relationships: 1 },
           as_of: "2026-08-04T04:00:00Z",
         }),
       });
       return;
     }
 
+    if (path.includes("/quality/excellence/evidence/") && request.method() === "PATCH") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "edge-linked",
+          control_id: "control-1",
+          source_type: "DOCUMENT",
+          source_id: "doc-pending",
+          source_table: "qms_documents",
+          source_route: "/maintenance/tenant-a/quality/documents/library/doc-pending",
+          source_label: "Audit programme evidence pack",
+          source_snapshot: {},
+          relationship: "EVIDENCES",
+          label: "Audit programme evidence pack",
+          evidence_status: "VERIFIED",
+          valid_until: null,
+          notes: null,
+          verified_at: "2026-08-04T04:00:00Z",
+          source_verified_at: "2026-08-04T04:00:00Z",
+          last_synced_at: "2026-08-04T04:00:00Z",
+          invalidated_at: null,
+          invalidation_reason: null,
+          created_at: "2026-08-04T04:00:00Z",
+        }),
+      });
+      return;
+    }
+
     if (path.endsWith("/quality/excellence/events")) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }], total: 1 }) });
+      const status = url.searchParams.get("processing_status");
+      const items = status === "ERROR"
+        ? []
+        : [{ id: "event-1", source_table: "qms_documents", source_type: "DOCUMENT", source_id: "doc-1", event_type: "UPDATE", changed_fields: ["title"], processing_status: "PENDING", processing_error: null, actor_user_id: "quality-user-a", occurred_at: "2026-08-04T04:00:00Z", processed_at: null }];
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items, total: items.length }) });
       return;
     }
 
@@ -365,7 +402,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
     }
 
     if (path.endsWith("/quality/excellence/reconcile") && request.method() === "POST") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ reviewed: 1, changed: 1, rejected: 0, events_processed: 1, errors: [], as_of: "2026-08-04T04:00:00Z" }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ reviewed: 1, changed: 1, rejected: 0, events_processed: 1, remaining_events: 0, errors: [], as_of: "2026-08-04T04:00:00Z" }) });
       return;
     }
 
@@ -406,6 +443,12 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
   await expect(controlRoom.getByText("Base maintenance audit")).toBeVisible();
   await expect(controlRoom.getByText("CAR closure on time")).toBeVisible();
 
+  await expect(controlRoom.getByRole("link", { name: "Continuous assurance" })).toHaveAttribute(
+    "href",
+    "/maintenance/tenant-a/quality?hub=readiness",
+  );
+  await expect(controlRoom.getByRole("navigation", { name: "Continuous assurance" })).toHaveCount(0);
+
   const contextBar = page.locator(".quality-context-bar");
   for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
@@ -418,6 +461,45 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
   await expect(page).toHaveURL(/\?workspace=assurance$/);
   await expect(page.getByRole("heading", { name: "Cases, investigation & effectiveness" })).toBeVisible();
   await expect(page.getByText(/source audit, CAR, supplier or maintenance records/i)).toBeVisible();
+});
+
+test("Control Room Continuous assurance opens the cockpit and returns cleanly", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await prepare(page);
+  await page.goto("/maintenance/tenant-a/quality", { waitUntil: "domcontentloaded" });
+
+  await page.getByRole("link", { name: "Continuous assurance" }).click();
+  await expect(page).toHaveURL(/\/quality\?hub=readiness$/);
+  await expect(page.getByRole("heading", { name: "Controls, evidence and readiness" })).toBeVisible();
+  await expect(page.getByText("Current assurance posture")).toBeVisible();
+
+  await page.getByRole("navigation", { name: "Continuous assurance views" }).getByRole("button", { name: "Evidence" }).click();
+  await expect(page).toHaveURL(/\/quality\?hub=evidence$/);
+  await expect(page.getByRole("navigation", { name: "Continuous assurance views" }).getByRole("button", { name: "Evidence" })).toHaveClass(/is-active/);
+
+  await page.getByRole("link", { name: "Back to Control Room" }).click();
+  await expect(page).toHaveURL(/\/quality$/);
+  await expect(page.getByRole("heading", { name: "Control Room" })).toBeVisible();
+});
+
+test("Evidence hub surfaces pending approvals and linked evidence for review", async ({ page }) => {
+  await prepare(page, "QUALITY_MANAGER");
+  await page.goto("/maintenance/tenant-a/quality?hub=evidence", { waitUntil: "domcontentloaded" });
+
+  await expect(page.getByRole("heading", { name: "Records awaiting decision" })).toBeVisible();
+  const queue = page.getByRole("region", { name: "Records awaiting review" });
+  await expect(queue.getByText("2 items need a decision")).toBeVisible();
+  await expect(queue.getByText("Independent quality audit programme")).toBeVisible();
+  await expect(queue.getByRole("button", { name: "Approve" })).toBeVisible();
+  await expect(queue.getByText("Audit programme evidence pack")).toBeVisible();
+  await expect(queue.getByRole("button", { name: "Verify" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authoritative evidence catalogue" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Pending source changes" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply all source changes" })).toBeVisible();
+  await expect(page.getByText("Recent source events")).toHaveCount(0);
+
+  await queue.getByRole("button", { name: "Verify" }).first().click();
+  await expect(page.getByText(/Evidence relationship verified/)).toBeVisible();
 });
 
 test("Quality management selects and links a validated tenant source record", async ({ page }) => {

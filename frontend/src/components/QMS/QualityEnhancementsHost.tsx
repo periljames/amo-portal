@@ -26,7 +26,6 @@ const AuditClosingNarrativePanel = lazy(() => import("../../features/qms/auditSe
 const AuditClosingWorkspace = lazy(() => import("../../features/qms/auditSession/AuditClosingWorkspace"));
 const AuditFollowUpWorkspace = lazy(() => import("../../features/qms/auditSession/AuditFollowUpWorkspace"));
 const AuditArchiveWorkspace = lazy(() => import("../../features/qms/auditSession/AuditArchiveWorkspace"));
-const QualityChecklistTemplateHost = lazy(() => import("./QualityChecklistTemplateHost"));
 const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
 const QualityAuditGovernancePanelHost = lazy(() => import("./QualityAuditGovernancePanelHost"));
 const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
@@ -162,7 +161,6 @@ const QualityEnhancementsHost: React.FC = () => {
   const route = useAuditRoute();
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
   const canonicalOccurrence = Boolean(route && auditSessionStage);
-  const checklistLibraryRoute = /^\/maintenance\/[^/]+\/quality\/audits\/checklists\/?$/i.test(location.pathname);
 
   useEffect(() => {
     document.documentElement.classList.toggle("quality-audit-canonical-occurrence", canonicalOccurrence);
@@ -181,8 +179,7 @@ const QualityEnhancementsHost: React.FC = () => {
       <QualityAuditHandoffHost amoCode={amoCode} />
       <QualityEffectivenessResponseHost amoCode={amoCode} />
       <QualityPlannerStrategicHost amoCode={amoCode} />
-      {/* Custom occurrence FAB removed from programme workspace — see QualityProgrammeOccurrenceHost */}
-      {!checklistLibraryRoute ? <QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} /> : null}
+      {/* Checklist library is owned by QmsCanonicalPage on /audits/checklists; Prepare owns bind. */}
     </Suspense> : null}
 
     {route && auditSessionStage ? (

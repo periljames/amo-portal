@@ -13,6 +13,10 @@ export type QmsPrivilegeRule = {
   scope_schema: Record<string, unknown>;
   is_active: boolean;
   updated_at: string;
+  active_holders?: number;
+  live_holders?: number;
+  total_holders?: number;
+  can_delete?: boolean;
 };
 
 export type QmsPrivilegeDecision = {
@@ -63,6 +67,34 @@ export type QmsPeopleSummary = {
   expiring_within_60_days: number;
   suspended_privileges: number;
   independence_exceptions: number;
+  lead_auditors?: number;
+  auditors?: number;
+  observers?: number;
+  inspectors?: number;
+  reviewers?: number;
+};
+
+export type QmsPersonAuditParticipationItem = {
+  audit_id: string;
+  audit_ref: string;
+  title: string;
+  status: string;
+  roles: Array<"LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR" | string>;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  actual_end?: string | null;
+  has_issued_report: boolean;
+  issued_revision_id?: string | null;
+  issued_revision_no?: number | null;
+  issued_filename?: string | null;
+  issued_at?: string | null;
+};
+
+export type QmsCompetenceCourseStatus = {
+  course_code: string;
+  status: "current" | "expired" | "missing" | "pending" | "none" | "pending_or_inactive" | string;
+  valid_until?: string | null;
+  record_id?: string | null;
 };
 
 export type QmsEligibility = {
@@ -75,12 +107,48 @@ export type QmsEligibility = {
     required: string[];
     satisfied: string[];
     missing: string[];
+    expired?: string[];
     records: Array<Record<string, unknown>>;
+    expired_records?: Array<Record<string, unknown>>;
+    tracked_records?: Array<Record<string, unknown>>;
     passed: boolean;
+    currency_passed?: boolean;
+    admin?: {
+      status: string;
+      course_code?: string;
+      record?: Record<string, unknown> | null;
+    };
+    admin_lapsed?: boolean;
+    qm_bypass?: QmsQmTrainingBypass | null;
+    competence_package?: Record<string, unknown> | null;
   };
+  qm_bypass?: QmsQmTrainingBypass | null;
+  auto_suspended?: boolean;
   independence: Record<string, unknown>;
   workload: Record<string, unknown>;
   active_privilege?: Record<string, unknown> | null;
+};
+
+export type QmsQmTrainingBypass = {
+  rationale: string;
+  valid_until: string;
+  approved_by_user_id?: string | null;
+  approved_at?: string | null;
+  source?: string;
+};
+
+export type QmsCertificateCandidate = {
+  record_id: string;
+  course_code: string;
+  course_name?: string | null;
+  completion_date?: string | null;
+  valid_until?: string | null;
+  verification_status?: string | null;
+  has_file: boolean;
+  file_id?: string | null;
+  original_filename?: string | null;
+  has_certificate_issue?: boolean;
+  certificate_number?: string | null;
 };
 
 export type QmsAuditorAssignmentRole = "LEAD_AUDITOR" | "OBSERVER_AUDITOR" | "ASSISTANT_AUDITOR";
@@ -104,7 +172,16 @@ export type QmsAuditorAssignmentAssessment = {
     passed: boolean;
   };
   capacity: Record<string, unknown> & { passed?: boolean };
-  independence: Record<string, unknown> & { passed?: boolean; pending?: boolean; message?: string };
+  independence: Record<string, unknown> & {
+    passed?: boolean;
+    pending?: boolean;
+    message?: string | null;
+    conflicts?: QmsIndependenceConflict[];
+    remediations?: QmsIndependenceRemediation[];
+    notes?: string[];
+    hard_conflict_count?: number;
+    enforced?: boolean;
+  };
   eligible: boolean;
 };
 
@@ -128,6 +205,42 @@ function jsonOptions(method: string, body: unknown): RequestInit {
 
 export function getQmsPeopleSummary(amoCode: string, signal?: AbortSignal): Promise<QmsPeopleSummary> {
   return apiRequest<QmsPeopleSummary>(qmsPath(amoCode, "/people/summary"), { timeoutMs: 15_000, cacheTtlMs: 5_000, signal });
+}
+
+export type QmsAuthorizationCandidate = {
+  id: string;
+  staff_code?: string | null;
+  full_name: string;
+  email?: string | null;
+  role?: string | null;
+  department_id?: string | null;
+  match_reasons: string[];
+  matched_course_codes: string[];
+  valid_until?: string | null;
+};
+
+export type QmsAuthorizationCandidatesResponse = {
+  rule_id: string;
+  privilege_code: string;
+  title: string;
+  match_mode: "any_of" | "all_of" | "none" | string;
+  training_codes: string[];
+  items: QmsAuthorizationCandidate[];
+  total: number;
+};
+
+export function listQmsAuthorizationCandidates(
+  amoCode: string,
+  options: { ruleId: string; search?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<QmsAuthorizationCandidatesResponse> {
+  const params = new URLSearchParams({ rule_id: options.ruleId });
+  if (options.search?.trim()) params.set("search", options.search.trim());
+  if (options.limit) params.set("limit", String(options.limit));
+  return apiRequest<QmsAuthorizationCandidatesResponse>(
+    qmsPath(amoCode, `/people/authorization-candidates?${params.toString()}`),
+    { timeoutMs: 10_000, cacheTtlMs: 4_000, signal },
+  );
 }
 
 export function listQmsPrivilegeRules(
@@ -173,6 +286,28 @@ export function updateQmsPrivilegeRule(
   return apiRequest<QmsPrivilegeRule>(qmsPath(amoCode, `/people/rules/${encodeURIComponent(ruleId)}`), jsonOptions("PATCH", payload));
 }
 
+export function deleteQmsPrivilegeRule(amoCode: string, ruleId: string, options: { purgeRetired?: boolean } = {}): Promise<void> {
+  const params = new URLSearchParams();
+  if (options.purgeRetired === false) params.set("purge_retired", "false");
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiRequest<void>(qmsPath(amoCode, `/people/rules/${encodeURIComponent(ruleId)}${suffix}`), { method: "DELETE" });
+}
+
+export function getQmsPersonAuditParticipation(
+  amoCode: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<{ items: QmsPersonAuditParticipationItem[]; person_user_id?: string }> {
+  return apiRequest<{ items: QmsPersonAuditParticipationItem[]; person_user_id?: string }>(
+    qmsPath(amoCode, `/people/${encodeURIComponent(userId)}/audit-participation`),
+    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+  );
+}
+
+export function downloadQmsPersonAuditIssuedReport(amoCode: string, userId: string, auditId: string) {
+  return apiBlob(qmsPath(amoCode, `/people/${encodeURIComponent(userId)}/audit-participation/${encodeURIComponent(auditId)}/issued-report`));
+}
+
 export type QmsIndependenceDeclaration = {
   id: string;
   user_id: string;
@@ -185,6 +320,95 @@ export type QmsIndependenceDeclaration = {
   declared_by_user_id?: string | null;
   declared_at: string;
 };
+
+export type QmsIndependenceRule = {
+  code: string;
+  title: string;
+  standard: string;
+  summary: string;
+};
+
+export type QmsIndependenceRemediation = {
+  code: string;
+  label: string;
+  detail: string;
+};
+
+export type QmsIndependenceConflict = {
+  code: string;
+  severity: "hard" | "warning" | string;
+  title: string;
+  message: string;
+};
+
+export type QmsIndependencePolicy = {
+  enforced: boolean;
+  allow_impartiality_form: boolean;
+  rules: QmsIndependenceRule[];
+  remediations: QmsIndependenceRemediation[];
+  editable_by: string;
+};
+
+export type QmsIndependenceAssessment = {
+  required: boolean;
+  enforced: boolean;
+  passed: boolean;
+  pending: boolean;
+  conflicts: QmsIndependenceConflict[];
+  hard_conflict_count: number;
+  remediations: QmsIndependenceRemediation[];
+  notes: string[];
+  work_order_module_connected?: boolean;
+  auditor?: Record<string, unknown> | null;
+  context?: Record<string, unknown>;
+  impartiality_form?: {
+    declaration?: string;
+    rationale?: string;
+    declared_at?: string | null;
+    relationship_to_subject?: string | null;
+  } | null;
+  policy?: {
+    enforced: boolean;
+    allow_impartiality_form: boolean;
+    editable_by: string;
+  };
+  message?: string | null;
+};
+
+export function getQmsIndependencePolicy(amoCode: string, signal?: AbortSignal): Promise<QmsIndependencePolicy> {
+  return apiRequest<QmsIndependencePolicy>(qmsPath(amoCode, "/people/independence/policy"), {
+    timeoutMs: 15_000,
+    cacheTtlMs: 10_000,
+    signal,
+  });
+}
+
+export function updateQmsIndependencePolicy(
+  amoCode: string,
+  payload: { enforced?: boolean; allow_impartiality_form?: boolean },
+): Promise<QmsIndependencePolicy> {
+  return apiRequest<QmsIndependencePolicy>(qmsPath(amoCode, "/people/independence/policy"), jsonOptions("PATCH", payload));
+}
+
+export function assessQmsIndependence(
+  amoCode: string,
+  input: {
+    userId: string;
+    contextType?: string;
+    contextId?: string;
+    assignmentScopeKey?: string;
+  },
+  signal?: AbortSignal,
+): Promise<QmsIndependenceAssessment> {
+  const params = new URLSearchParams({ user_id: input.userId });
+  if (input.contextType) params.set("context_type", input.contextType);
+  if (input.contextId) params.set("context_id", input.contextId);
+  if (input.assignmentScopeKey) params.set("assignment_scope_key", input.assignmentScopeKey);
+  return apiRequest<QmsIndependenceAssessment>(
+    qmsPath(amoCode, `/people/independence/assessment?${params.toString()}`),
+    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+  );
+}
 
 export function listQmsIndependenceDeclarations(
   amoCode: string,
@@ -235,6 +459,41 @@ export function decideQmsPrivilege(
   );
 }
 
+const ELIGIBILITY_MEMORY_TTL_MS = 45_000;
+const eligibilityMemory = new Map<string, { at: number; data: QmsEligibility }>();
+
+function eligibilityMemoryKey(amoCode: string, userId: string, privilegeCode: string): string {
+  return `${amoCode.trim().toUpperCase()}::${userId}::${privilegeCode.trim().toUpperCase()}`;
+}
+
+export function peekQmsEligibility(
+  amoCode: string,
+  userId: string,
+  privilegeCode: string,
+): QmsEligibility | null {
+  const entry = eligibilityMemory.get(eligibilityMemoryKey(amoCode, userId, privilegeCode));
+  if (!entry) return null;
+  if (Date.now() - entry.at > ELIGIBILITY_MEMORY_TTL_MS) {
+    eligibilityMemory.delete(eligibilityMemoryKey(amoCode, userId, privilegeCode));
+    return null;
+  }
+  return entry.data;
+}
+
+export function invalidateQmsEligibilityMemory(amoCode?: string, userId?: string): void {
+  if (!amoCode && !userId) {
+    eligibilityMemory.clear();
+    return;
+  }
+  const amo = amoCode?.trim().toUpperCase();
+  const prefix = amo ? `${amo}::` : "";
+  for (const key of [...eligibilityMemory.keys()]) {
+    if (amo && !key.startsWith(prefix)) continue;
+    if (userId && !key.includes(`::${userId}::`)) continue;
+    eligibilityMemory.delete(key);
+  }
+}
+
 export function getQmsEligibility(
   amoCode: string,
   input: { userId: string; privilegeCode: string; asOf?: string; contextType?: string; contextId?: string },
@@ -244,7 +503,16 @@ export function getQmsEligibility(
   if (input.asOf) params.set("as_of", input.asOf);
   if (input.contextType) params.set("context_type", input.contextType);
   if (input.contextId) params.set("context_id", input.contextId);
-  return apiRequest<QmsEligibility>(qmsPath(amoCode, `/people/eligibility?${params.toString()}`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  const key = eligibilityMemoryKey(amoCode, input.userId, input.privilegeCode);
+  return apiRequest<QmsEligibility>(qmsPath(amoCode, `/people/eligibility?${params.toString()}`), {
+    timeoutMs: 15_000,
+    // Display pills are safe to cache briefly; mutations invalidate explicitly.
+    cacheTtlMs: ELIGIBILITY_MEMORY_TTL_MS,
+    signal,
+  }).then((data) => {
+    eligibilityMemory.set(key, { at: Date.now(), data });
+    return data;
+  });
 }
 
 export function preflightQmsAuditorAssignment(
@@ -279,4 +547,42 @@ export function declareQmsIndependence(
   },
 ): Promise<Record<string, unknown>> {
   return apiRequest<Record<string, unknown>>(qmsPath(amoCode, "/people/independence"), jsonOptions("POST", payload));
+}
+
+export function createQmsQmTrainingBypass(
+  amoCode: string,
+  privilegeId: string,
+  payload: { rationale: string; valid_until: string },
+): Promise<{ privilege: QmsPrivilege; decision: QmsPrivilegeDecision; bypass: QmsQmTrainingBypass | null }> {
+  return apiRequest<{ privilege: QmsPrivilege; decision: QmsPrivilegeDecision; bypass: QmsQmTrainingBypass | null }>(
+    qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}/qm-bypass`),
+    jsonOptions("POST", payload),
+  );
+}
+
+export function listQmsPrivilegeCertificates(
+  amoCode: string,
+  privilegeId: string,
+  signal?: AbortSignal,
+): Promise<{ items: QmsCertificateCandidate[]; preferred?: QmsCertificateCandidate | null; privilege_id: string }> {
+  return apiRequest<{ items: QmsCertificateCandidate[]; preferred?: QmsCertificateCandidate | null; privilege_id: string }>(
+    qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}/qms-certificates`),
+    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+  );
+}
+
+export function uploadQmsAuthorizationEvidence(
+  amoCode: string,
+  privilegeId: string,
+  input: { file: File; course_code?: string; completion_date?: string; valid_until?: string },
+): Promise<Record<string, unknown>> {
+  const body = new FormData();
+  body.append("file", input.file);
+  body.append("course_code", input.course_code || "QMS-INIT");
+  if (input.completion_date) body.append("completion_date", input.completion_date);
+  if (input.valid_until) body.append("valid_until", input.valid_until);
+  return apiRequest<Record<string, unknown>>(
+    qmsPath(amoCode, `/people/privileges/${encodeURIComponent(privilegeId)}/authorization-evidence`),
+    { method: "POST", body },
+  );
 }

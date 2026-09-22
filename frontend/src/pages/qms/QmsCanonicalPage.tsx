@@ -100,7 +100,7 @@ function QmsCanonicalContent(): React.ReactElement {
   if (/\/quality\/audits\/checklists\/?$/i.test(location.pathname)) {
     return assuranceWorkspace(
       "Audit checklists",
-      "Controlled checklist library for audit preparation and fieldwork.",
+      "Controlled DMS checklists and structured fieldwork templates. Bind during Prepare.",
       <QualityChecklistTemplateHost amoCode={decodeURIComponent(amoCode)} />
     );
   }

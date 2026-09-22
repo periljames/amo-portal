@@ -142,6 +142,12 @@ export interface QMSAuditScopeOut {
   created_by_user_id?: string | null;
   created_at: string;
   updated_at: string;
+  /** Audits issued this calendar year for the tenant family + scope unit. */
+  issued_this_year?: number;
+  /** Next sequence that would be reserved for this scope this year. */
+  next_sequence?: number;
+  /** Last reserved sequence from the reference counter (0 if unused). */
+  last_value?: number;
 }
 
 export interface QMSAuditScheduleOut {
@@ -1110,6 +1116,7 @@ export interface QMSPersonOption {
   email: string | null;
   role: string | null;
   department_id: string | null;
+  department_name?: string | null;
   position_title: string | null;
   staff_code?: string | null;
   avatar_url?: string | null;
@@ -2544,6 +2551,41 @@ export async function qmsGetAuditorStats(
   userId: string,
 ): Promise<AuditorStatsOut> {
   return fetchJson<AuditorStatsOut>(`/quality/auditors/${userId}/stats`);
+}
+
+export type QualityWorkflowSettingsOut = {
+  id: string;
+  amo_id: string;
+  report_due_days: number;
+  report_reminder_days: number[];
+  car_reminder_percentages: number[];
+  final_reminder_days_before_due: number;
+  auto_escalation_enabled: boolean;
+  auto_escalation_locked: boolean;
+  audit_reference_family: string;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QualityWorkflowSettingsUpdate = {
+  report_due_days?: number;
+  report_reminder_days?: number[];
+  car_reminder_percentages?: number[];
+  final_reminder_days_before_due?: number;
+  auto_escalation_enabled?: boolean;
+  audit_reference_family?: string;
+};
+
+export async function qmsGetWorkflowSettings(): Promise<QualityWorkflowSettingsOut> {
+  return fetchJson<QualityWorkflowSettingsOut>("/quality/workflow/settings");
+}
+
+export async function qmsUpdateWorkflowSettings(
+  payload: QualityWorkflowSettingsUpdate,
+): Promise<QualityWorkflowSettingsOut> {
+  return sendJson<QualityWorkflowSettingsOut>("/quality/workflow/settings", "PATCH", payload);
 }
 
 export async function downloadAuditEvidencePack(

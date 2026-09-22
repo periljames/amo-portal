@@ -460,12 +460,15 @@ export default function PublicationsReaderPage() {
     window.localStorage.setItem(localPositionKey(tenant, manualId, revId), JSON.stringify(value));
     if (positionTimerRef.current) window.clearTimeout(positionTimerRef.current);
     positionTimerRef.current = window.setTimeout(() => {
-      void updatePublicationReaderPosition(tenant, manualId, revId, {
+        void updatePublicationReaderPosition(tenant, manualId, revId, {
         page_number: value.page,
         zoom_percent: value.zoom,
         anchor_slug: value.anchor || undefined,
-        section_id: next.sectionId,
-      });
+          section_id: next.sectionId,
+        }).catch(() => {
+          // The position is already saved on this device. A background sync
+          // failure must not interrupt reading or become an unhandled rejection.
+        });
     }, 750);
   }, [activeSection, currentPdfPage, manualId, revId, tenant, zoomPercent]);
 

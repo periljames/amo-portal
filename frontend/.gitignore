@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Generated test output; test source and fixtures remain versioned.
+/test-results*/
+/playwright-report/
+/blob-report/
+/coverage/
+/playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

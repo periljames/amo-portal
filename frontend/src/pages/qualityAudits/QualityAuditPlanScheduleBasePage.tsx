@@ -38,7 +38,6 @@ import {
   qmsCreateAuditSchedule,
   qmsDeleteAudit,
   qmsDeleteAuditSchedule,
-  qmsListAuditPersonnelOptions,
   qmsListAuditScopes,
   qmsListAllAudits,
   qmsListAuditSchedules,
@@ -52,6 +51,7 @@ import {
   type QMSExternalAuditeeContact,
   type QMSPersonOption,
 } from "../../services/qms";
+import { getPlannerScheduleOptions } from "../../services/qmsAuditProgramme";
 
 type PlannerView = "list" | "table";
 type PlannedRecordFilter = "all" | "needsAssignment" | "scheduled" | "dueSoon" | "deferred";
@@ -128,15 +128,18 @@ type PlannedAuditFormState = {
 };
 
 const frequencies: QMSAuditScheduleFrequency[] = ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"];
+/** Visible create CTA — keep in sync with QualityAuditPlanSchedulePage handoff matcher. */
+export const CREATE_RECURRENCE_TEMPLATE_LABEL = "New recurrence template";
+const SCHEDULE_WORKSPACE_TITLE = "Schedules & runs";
 const auditKinds: Array<{ value: AuditKind; label: string; helper: string }> = [
   { value: "INTERNAL", label: "Internal", helper: "Use internal personnel records for auditee and audit team selection." },
   { value: "EXTERNAL", label: "External", helper: "Capture named external auditees, their roles, and contact details." },
   { value: "THIRD_PARTY", label: "Third party", helper: "Use named external auditees for regulatory, customer, or certification audits." },
 ];
 const drawerTabs: Array<{ id: DrawerTab; label: string; helper: string }> = [
-  { id: "overview", label: "Overview", helper: "Audit identity, scope, window, and cadence" },
-  { id: "participants", label: "Participants", helper: "Internal team or external auditee contacts" },
-  { id: "review", label: "Review", helper: "Lifecycle summary, notices, and confirmation" },
+  { id: "overview", label: "Basics", helper: "Title, scope, type, and cadence" },
+  { id: "participants", label: "People", helper: "Lead auditor and auditee contacts" },
+  { id: "review", label: "Confirm", helper: "Notices and save" },
 ];
 
 const defaultExternalAuditee = (): QMSExternalAuditeeContact => ({
@@ -330,7 +333,7 @@ function personSearchLabel(person: QMSPersonOption | null | undefined): string {
 
 function personSearchMeta(person: QMSPersonOption | null | undefined): string {
   if (!person) return "";
-  return [person.position_title, person.staff_code].filter(Boolean).join(" · ");
+  return [person.position_title, person.department_name, person.staff_code].filter(Boolean).join(" · ");
 }
 
 function matchesPerson(person: QMSPersonOption, rawQuery: string): boolean {
@@ -342,6 +345,7 @@ function matchesPerson(person: QMSPersonOption, rawQuery: string): boolean {
     person.email || "",
     person.id,
     person.position_title || "",
+    person.department_name || "",
   ]
     .join(" ")
     .toLowerCase();
@@ -489,6 +493,20 @@ function scheduleToForm(schedule: QMSAuditScheduleOut): ScheduleFormState {
   };
 }
 
+const SCHEDULE_DATE_MIN = () => new Date().toISOString().slice(0, 10);
+const SCHEDULE_DATE_MAX = () => {
+  const max = new Date();
+  max.setFullYear(max.getFullYear() + 2);
+  return max.toISOString().slice(0, 10);
+};
+const MAX_DURATION_DAYS = 90;
+
+function isWeekendIso(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T12:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
 const PersonLookupField: React.FC<{
   label: string;
   value: string;
@@ -496,12 +514,41 @@ const PersonLookupField: React.FC<{
   options: QMSPersonOption[];
   placeholder: string;
   helper?: string;
+  emptyHint?: string;
   onQueryChange: (value: string) => void;
   onSelect: (personId: string) => void;
-}> = ({ label, value, query, options, placeholder, helper, onQueryChange, onSelect }) => {
+  onClear?: () => void;
+}> = ({
+  label,
+  value,
+  query,
+  options,
+  placeholder,
+  helper,
+  emptyHint,
+  onQueryChange,
+  onSelect,
+  onClear,
+}) => {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const filtered = useMemo(() => options.filter((person) => matchesPerson(person, query)).slice(0, 8), [options, query]);
+  const filtered = useMemo(() => {
+    const trimmed = query.trim();
+    const matched = trimmed
+      ? options.filter((person) => matchesPerson(person, trimmed))
+      : options;
+    return matched.slice(0, 24);
+  }, [options, query]);
+  const selected = useMemo(
+    () => options.find((person) => person.id === value) || null,
+    [options, value],
+  );
+  const resolvedEmptyHint = useMemo(() => {
+    if (emptyHint) return emptyHint;
+    if (!options.length) return "No eligible people are available yet.";
+    if (query.trim()) return `No matches for “${query.trim()}”.`;
+    return "No matching internal user found.";
+  }, [emptyHint, options.length, query]);
 
   useEffect(() => {
     const handleDown = (event: MouseEvent) => {
@@ -517,26 +564,52 @@ const PersonLookupField: React.FC<{
   return (
     <div className="profile-inline-field planner-person-field" ref={wrapperRef}>
       <span>{label}</span>
-      <input
-        className="input"
-        value={query}
-        onFocus={() => setOpen(true)}
-        onChange={(e) => {
-          setOpen(true);
-          onQueryChange(e.target.value);
-        }}
-        placeholder={placeholder}
-      />
-      <input type="hidden" value={value} readOnly />
-      {helper ? <small className="planner-field-help">{helper}</small> : null}
-      {open && query.trim() ? (
+      <div className="planner-person-field__control">
+        <input
+          className="input"
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setOpen(true);
+            onQueryChange(e.target.value);
+          }}
+          placeholder={placeholder}
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={open}
+        />
+        {value && onClear ? (
+          <button
+            type="button"
+            className="planner-person-field__clear"
+            aria-label={`Clear ${label}`}
+            onClick={() => {
+              onClear();
+              setOpen(false);
+            }}
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+      {selected ? (
+        <small className="planner-field-help">
+          Selected: {selected.full_name}
+          {selected.department_name ? ` · ${selected.department_name}` : ""}
+          {selected.email ? ` · ${selected.email}` : ""}
+          {selected.staff_code ? ` · ${selected.staff_code}` : ""}
+        </small>
+      ) : helper ? (
+        <small className="planner-field-help">{helper}</small>
+      ) : null}
+      {open ? (
         <div className="planner-person-picker" role="listbox" aria-label={label}>
           {filtered.length ? (
             filtered.map((person) => (
               <button
                 key={person.id}
                 type="button"
-                className="planner-person-picker__item"
+                className={`planner-person-picker__item${person.id === value ? " is-selected" : ""}`}
                 onClick={() => {
                   onSelect(person.id);
                   setOpen(false);
@@ -547,7 +620,9 @@ const PersonLookupField: React.FC<{
               </button>
             ))
           ) : (
-            <div className="planner-person-picker__empty">No matching internal user found.</div>
+            <div className="planner-person-picker__empty">
+              {resolvedEmptyHint}
+            </div>
           )}
         </div>
       ) : null}
@@ -625,12 +700,11 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     staleTime: 30_000,
   });
 
-  const personnelQuery = useQuery({
-    queryKey: ["qms-audit-personnel-options", amoCode],
-    queryFn: () => qmsListAuditPersonnelOptions(amoCode, { limit: 100 }),
-    staleTime: 5 * 60_000,
+  const scheduleOptionsQuery = useQuery({
+    queryKey: ["qms-planner-schedule-options", amoCode],
+    queryFn: ({ signal }) => getPlannerScheduleOptions(amoCode, signal),
+    staleTime: 60_000,
   });
-
   const auditScopesQuery = useQuery({
     queryKey: ["qms-audit-scopes", amoCode, { active: true }],
     queryFn: () => qmsListAuditScopes({ active: true }),
@@ -642,13 +716,93 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     () => uniqueById(plannedAuditsQuery.data ?? []),
     [plannedAuditsQuery.data],
   );
-  const personnelOptions = useMemo(() => personnelQuery.data ?? [], [personnelQuery.data]);
+  const peopleOptions = useMemo<QMSPersonOption[]>(
+    () =>
+      [...(scheduleOptionsQuery.data?.people ?? [])]
+        .map((person) => ({
+          id: person.id,
+          full_name: person.full_name,
+          email: person.email ?? null,
+          role: person.role ?? null,
+          department_id: null,
+          department_name: person.department_name ?? null,
+          position_title: null,
+          staff_code: null,
+          auditor_roles: person.auditor_roles || [],
+        }))
+        .sort((left, right) => left.full_name.localeCompare(right.full_name)),
+    [scheduleOptionsQuery.data?.people],
+  );
+  const auditorOptions = useMemo(
+    () => peopleOptions.filter((person) => (person.auditor_roles || []).length > 0),
+    [peopleOptions],
+  );
+  const leadAuditorOptions = useMemo(
+    () =>
+      auditorOptions.filter((person) =>
+        (person.auditor_roles || []).includes("LEAD_AUDITOR"),
+      ),
+    [auditorOptions],
+  );
   const auditScopes = useMemo(() => auditScopesQuery.data ?? [], [auditScopesQuery.data]);
   const peopleById = useMemo(() => {
     const next = new Map<string, QMSPersonOption>();
-    personnelOptions.forEach((person) => next.set(person.id, person));
+    peopleOptions.forEach((person) => next.set(person.id, person));
     return next;
-  }, [personnelOptions]);
+  }, [peopleOptions]);
+  const scheduleOptionsLoading = scheduleOptionsQuery.isLoading;
+  const scheduleDateMin = useMemo(() => SCHEDULE_DATE_MIN(), []);
+  const scheduleDateMax = useMemo(() => SCHEDULE_DATE_MAX(), []);
+
+  useEffect(() => {
+    if (!peopleById.size) return;
+    const hydrate = (
+      ids: Record<PersonSearchField, string>,
+      setSearch: React.Dispatch<React.SetStateAction<Record<PersonSearchField, string>>>,
+    ) => {
+      setSearch((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        (Object.keys(ids) as PersonSearchField[]).forEach((field) => {
+          const personId = ids[field];
+          if (!personId || prev[field].trim()) return;
+          const label = personSearchLabel(peopleById.get(personId) || null);
+          if (!label) return;
+          next[field] = label;
+          changed = true;
+        });
+        return changed ? next : prev;
+      });
+    };
+    hydrate(
+      {
+        auditee_user_id: form.auditee_user_id,
+        lead_auditor_user_id: form.lead_auditor_user_id,
+        observer_auditor_user_id: form.observer_auditor_user_id,
+        assistant_auditor_user_id: form.assistant_auditor_user_id,
+      },
+      setPersonSearch,
+    );
+    hydrate(
+      {
+        auditee_user_id: auditForm.auditee_user_id,
+        lead_auditor_user_id: auditForm.lead_auditor_user_id,
+        observer_auditor_user_id: auditForm.observer_auditor_user_id,
+        assistant_auditor_user_id: auditForm.assistant_auditor_user_id,
+      },
+      setAuditPersonSearch,
+    );
+  }, [
+    auditForm.assistant_auditor_user_id,
+    auditForm.auditee_user_id,
+    auditForm.lead_auditor_user_id,
+    auditForm.observer_auditor_user_id,
+    form.assistant_auditor_user_id,
+    form.auditee_user_id,
+    form.lead_auditor_user_id,
+    form.observer_auditor_user_id,
+    peopleById,
+  ]);
   const scopeByCode = useMemo(() => {
     const next = new Map<string, QMSAuditScopeOut>();
     auditScopes.forEach((scope) => next.set(scope.code, scope));
@@ -894,8 +1048,20 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const updatePersonLookup = (field: PersonSearchField, rawValue: string) => {
     setPersonSearch((prev) => ({ ...prev, [field]: rawValue }));
-    const exact = findExactPerson(personnelOptions, rawValue);
+    const exact = findExactPerson(optionsForField(field), rawValue);
     if (exact) applyPerson(field, exact.id);
+  };
+
+  const clearPerson = (field: PersonSearchField) => {
+    setForm((prev) => {
+      const next: ScheduleFormState = { ...prev, [field]: "" } as ScheduleFormState;
+      if (field === "auditee_user_id") {
+        next.auditee = "";
+        next.auditee_email = "";
+      }
+      return next;
+    });
+    setPersonSearch((prev) => ({ ...prev, [field]: "" }));
   };
 
   const applyAuditPerson = (field: PersonSearchField, personId: string) => {
@@ -913,8 +1079,20 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const updateAuditPersonLookup = (field: PersonSearchField, rawValue: string) => {
     setAuditPersonSearch((prev) => ({ ...prev, [field]: rawValue }));
-    const exact = findExactPerson(personnelOptions, rawValue);
+    const exact = findExactPerson(optionsForField(field), rawValue);
     if (exact) applyAuditPerson(field, exact.id);
+  };
+
+  const clearAuditPerson = (field: PersonSearchField) => {
+    setAuditForm((prev) => {
+      const next: PlannedAuditFormState = { ...prev, [field]: "" } as PlannedAuditFormState;
+      if (field === "auditee_user_id") {
+        next.auditee = "";
+        next.auditee_email = "";
+      }
+      return next;
+    });
+    setAuditPersonSearch((prev) => ({ ...prev, [field]: "" }));
   };
 
   const beginEditAudit = (audit: QMSAuditOut) => {
@@ -946,7 +1124,23 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     if (!auditForm.title.trim()) return "Audit title is required.";
     if (!auditForm.audit_scope_code) return "Select the audit scope before saving.";
     if (!auditForm.planned_start) return "Planned start date is required.";
-    if (auditForm.planned_end && auditForm.planned_start && auditForm.planned_end < auditForm.planned_start) return "Planned end date cannot be before the start date.";
+    if (auditForm.planned_start < scheduleDateMin) {
+      return `Planned start cannot be in the past (earliest ${scheduleDateMin}).`;
+    }
+    if (auditForm.planned_start > scheduleDateMax) {
+      return `Planned start cannot be more than two years ahead (latest ${scheduleDateMax}).`;
+    }
+    if (auditForm.planned_end) {
+      if (auditForm.planned_end < auditForm.planned_start) {
+        return "Planned end date cannot be before the start date.";
+      }
+      if (auditForm.planned_end > scheduleDateMax) {
+        return `Planned end cannot be more than two years ahead (latest ${scheduleDateMax}).`;
+      }
+    }
+    if (auditForm.kind === "INTERNAL" && !auditForm.auditee_user_id) {
+      return "Select an internal auditee representative from the people directory.";
+    }
     return null;
   };
 
@@ -955,6 +1149,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     setError(null);
     setDrawerTab("overview");
     setDrawerOpen(true);
+    setPersonSearch({
+      auditee_user_id: personSearchLabel(peopleById.get(form.auditee_user_id) || null),
+      lead_auditor_user_id: personSearchLabel(peopleById.get(form.lead_auditor_user_id) || null),
+      observer_auditor_user_id: personSearchLabel(peopleById.get(form.observer_auditor_user_id) || null),
+      assistant_auditor_user_id: personSearchLabel(peopleById.get(form.assistant_auditor_user_id) || null),
+    });
   };
 
   const discardDraft = () => {
@@ -989,14 +1189,20 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     if (!form.title.trim()) return "Audit title is required.";
     if (!form.audit_scope_code) return "Select the audit scope before saving.";
     if (!form.next_due_date) return "Next due date is required.";
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = scheduleDateMin;
     if (form.next_due_date < todayIso) {
       return `The schedule start date cannot be in the past (today is ${todayIso}). Choose today or a future date.`;
     }
+    if (form.next_due_date > scheduleDateMax) {
+      return `The schedule start date cannot be more than two years ahead (latest ${scheduleDateMax}).`;
+    }
     if (!Number.isFinite(duration) || duration < 1) return "Enter a valid duration in days.";
+    if (duration > MAX_DURATION_DAYS) {
+      return `Duration cannot exceed ${MAX_DURATION_DAYS} days.`;
+    }
     if (!form.lead_auditor_user_id) return "Assign a lead auditor before saving the schedule.";
-    if (form.kind === "INTERNAL" && !form.auditee_user_id && !form.auditee_email.trim()) {
-      return "Select an internal auditee or provide an auditee contact email.";
+    if (form.kind === "INTERNAL" && !form.auditee_user_id) {
+      return "Select an internal auditee representative from the people directory.";
     }
     if (form.kind !== "INTERNAL") {
       return validateExternalAuditees(form.external_auditees);
@@ -1012,8 +1218,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       const payload = { ...formToPayload(form), weekend_policy: resolvedPolicy };
       if (!resolvedPolicy) {
         const confirmationMessage = editingScheduleId
-          ? `Confirm rescheduling or updating this audit. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`
-          : `Confirm creation of this audit schedule. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`;
+          ? `Confirm updating this recurrence template. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared for the selected recipients.`
+          : `Confirm saving this off-programme recurrence template. It will not appear as an Audit Programme line. Run it later to mint a live audit. Notices${payload.notify_auditors || payload.notify_auditees ? " will" : " will not"} be prepared.`;
         if (!window.confirm(confirmationMessage)) {
           throw new Error("Schedule confirmation cancelled.");
         }
@@ -1032,8 +1238,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       pushToast({
         title: wasEditing ? "Schedule updated" : "Schedule created",
         message: wasEditing
-          ? "The schedule, notice plan, and participant selection have been updated."
-          : "The schedule is now live in the planner and ready to run into an audit.",
+          ? "The recurrence template and participant selection have been updated."
+          : "Recurrence template saved. Use Run when due to create a live planned audit — it was not added to Audit Programme.",
         variant: "success",
         sound: true,
       });
@@ -1505,22 +1711,27 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   );
 
   const lifecycleSummaryItems = [
-    { label: "1. Schedule", detail: "Define type, scope, criteria, participants, and due window." },
-    { label: "2. Notify", detail: "Confirm whether auditors and auditees should receive notices and reminders." },
-    { label: "3. Run", detail: "Issue the schedule into a live audit workspace when ready to execute." },
-    { label: "4. Record", detail: "Capture checklist evidence, findings, CARs, and responses until verification." },
-    { label: "5. Close", detail: "Upload report, verify closure conditions, and retain the audit evidence pack." },
+    { label: "1. Plan", detail: "Start in Audit Programme — the governed annual plan of what must be audited." },
+    { label: "2. Date it", detail: "From a programme requirement, Schedule on Calendar (authoritative path)." },
+    { label: "3. Run", detail: "When due, Run the template to mint one live planned audit — frequency alone does not auto-create a year of audits." },
+    { label: "4. Execute", detail: "Work the audit in Audits (checklist, findings, CARs)." },
+    { label: "5. Close", detail: "Issue the report and close the record." },
   ];
+  const programmeHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/program`;
 
   return (
     <QualityAuditsSectionLayout
-      title="Planner & schedules"
-      subtitle="Create recurring schedules and planned audits here; use the calendar to browse and reschedule dated work."
+      title={SCHEDULE_WORKSPACE_TITLE}
+      subtitle="Manage recurrence templates and Run them into live planned audits. The governed annual plan lives under Audit Programme — not on this page."
       toolbar={
         <div className="planner-toolbar-actions">
+          <Button variant="secondary" size="sm" onClick={() => navigate(programmeHref)}>
+            <ClipboardList size={15} />
+            Audit Programme
+          </Button>
           <Button variant="secondary" size="sm" onClick={() => navigate(plannerV2Href)}>
             <ExternalLink size={15} />
-            Open Planner
+            Open calendar
           </Button>
           <Button variant="secondary" size="sm" onClick={reopenGuide}>
             <HelpCircle size={15} />
@@ -1538,12 +1749,15 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           <SectionCard variant="subtle" className="planner-guide-card planner-guide-card--attention">
             <div className="planner-guide-card__header">
               <div>
-                <p className="planner-guide-card__eyebrow"><HelpCircle size={15} /> First-time guide</p>
-                <h3 className="planner-guide-card__title">Start here: build the audit from schedule to closure</h3>
-                <p className="planner-guide-card__copy">Use the buttons below to jump directly to the next action. The guide stays available on the right after you dismiss it.</p>
+                <p className="planner-guide-card__eyebrow"><HelpCircle size={15} /> Where to start</p>
+                <h3 className="planner-guide-card__title">Audit Programme owns the plan — this page runs and tracks templates</h3>
+                <p className="planner-guide-card__copy">
+                  For the year plan, open Audit Programme. Use this page to Run due work into a live audit, or to add an off-programme recurrence template when something is not on the approved plan.
+                </p>
               </div>
               <div className="planner-guide-card__actions">
-                <Button variant="secondary" size="sm" onClick={() => setGuideOpen(true)}>Open guide drawer</Button>
+                <Button size="sm" onClick={() => navigate(programmeHref)}>Go to Audit Programme</Button>
+                <Button variant="secondary" size="sm" onClick={() => setGuideOpen(true)}>Open guide</Button>
                 <Button variant="ghost" size="sm" onClick={dismissGuide}>Minimise</Button>
               </div>
             </div>
@@ -1553,7 +1767,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                   key={item.label}
                   type="button"
                   className="planner-guide-card__step planner-guide-card__step--button"
-                  onClick={() => guideAction(index === 0 ? "create" : index === 1 ? "participants" : index === 2 ? "review" : index === 3 ? "list" : "calendar")}
+                  onClick={() => {
+                    if (index === 0) navigate(programmeHref);
+                    else if (index === 1) navigate(programmeHref);
+                    else if (index === 2) guideAction("list");
+                    else if (index === 3) navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/workspace`);
+                    else guideAction("calendar");
+                  }}
                 >
                   <strong>{item.label}</strong>
                   <span>{item.detail}</span>
@@ -1563,7 +1783,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             </div>
           </SectionCard>
         ) : (
-          <button type="button" className="planner-help-fab" onClick={reopenGuide} aria-label="Open audit planner guide">
+          <button type="button" className="planner-help-fab" onClick={reopenGuide} aria-label="Open schedules guide">
             <HelpCircle size={18} />
             <span>Guide</span>
           </button>
@@ -1574,12 +1794,15 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               <Button size="sm" onClick={openCreateDrawer}>
                 <Plus size={15} />
-                Create schedule
+                {CREATE_RECURRENCE_TEMPLATE_LABEL}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => navigate(programmeHref)}>
+                Audit Programme
               </Button>
               <Button size="sm" variant="secondary" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/scopes`)}>
                 Audit scopes
               </Button>
-              <span className="planner-inline-note">Scopes drive references such as QAR/AC/26/001 and are tenant-specific.</span>
+              <span className="planner-inline-note">Off-programme templates only — they are not added to the Audit Programme plan.</span>
             </div>
             <div className="portal-view-switcher">
               {plannerViewOptions().map((option) => {
@@ -1608,26 +1831,26 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
         <SectionCard
             title="Planned audit records"
-            subtitle="These are the live audit records already created from the schedule/programme. Assign the lead auditor here, push dates forward, open the workspace, or delete the record."
-            eyebrow="Audit records"
+            subtitle="Live audits already created by Run (or near-due automation). Open the workspace from here to execute fieldwork."
+            eyebrow="Ready to execute"
           >
             {plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading planned audit records…</p> : null}
             {!plannedAuditsQuery.isLoading && !plannedAudits.length ? (
-              <EmptyState title="No planned audit records found" description="Run a schedule into a live audit or create a new audit record to populate this list." />
+              <EmptyState title="No planned audit records yet" description="Run a recurrence template when it is due, or schedule a requirement from Audit Programme." />
             ) : null}
             {!plannedAuditsQuery.isLoading && plannedAudits.length ? (view === "table" ? renderPlannedAuditsTable() : renderPlannedAuditsList()) : null}
           </SectionCard>
 
         <SectionCard
-          title={view === "list" ? "Recurring schedule programme" : "Recurring schedule register"}
-          subtitle="Schedules are programme templates. Use Run to create a live planned audit record above. Browse and reschedule dates in Planner V2."
-          eyebrow="Schedule templates"
+          title="Recurrence templates"
+          subtitle="Each row is one template with a next due date and frequency. Frequency advances the next due after each Run — it does not pre-create a full year of audits. These templates are not Audit Programme line items."
+          eyebrow="Off-programme / ad-hoc"
         >
-          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading schedules…</p> : null}
+          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading templates…</p> : null}
           {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && !schedules.length && !plannedAudits.length ? (
             <EmptyState
-              title="No schedules found"
-              description="Create a schedule template here, then open Planner V2 to browse the calendar."
+              title="No recurrence templates yet"
+              description="Prefer Audit Programme for the year plan. Add a template here only for off-programme or ad-hoc recurring work, then Run when due."
             />
           ) : null}
           {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && (schedules.length || plannedAudits.length)
@@ -1638,19 +1861,39 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         </SectionCard>
       </div>
 
-      <Drawer title="Audit planner guide" isOpen={guideOpen} onClose={() => setGuideOpen(false)} side="right" panelClassName="drawer-panel--planner-guide">
+      <Drawer title="How planning works" isOpen={guideOpen} onClose={() => setGuideOpen(false)} side="right" panelClassName="drawer-panel--planner-guide">
         <div className="planner-guide-drawer">
-          <p className="planner-guide-drawer__lead">Follow these steps in order. Each action opens the exact workspace you need, so the guide remains useful even after the first visit.</p>
+          <p className="planner-guide-drawer__lead">
+            Audit Programme = the approved year plan. This page = templates you Run into individual audits. The calendar browses dated work.
+          </p>
           <div className="planner-guide-drawer__steps">
-            <button type="button" onClick={() => guideAction("create")}><strong>1. Create or continue schedule</strong><span>Open the schedule drawer and define title, type, due date, scope and criteria.</span></button>
-            <button type="button" onClick={() => guideAction("participants")}><strong>2. Assign people</strong><span>Set lead auditor, observer, assistant and internal or external auditees.</span></button>
-            <button type="button" onClick={() => guideAction("review")}><strong>3. Review notices</strong><span>Check recipients, reminder interval and whether notices should be sent.</span></button>
-            <button type="button" onClick={() => guideAction("calendar")}><strong>4. Check the calendar</strong><span>Open Planner V2 to confirm spacing and upcoming workload.</span></button>
-            <button type="button" onClick={() => guideAction("list")}><strong>5. Run or edit saved items</strong><span>Use the schedule action buttons to run, edit or delete saved audit schedules.</span></button>
+            <button type="button" onClick={() => { setGuideOpen(false); navigate(programmeHref); }}>
+              <strong>1. Build the Audit Programme</strong>
+              <span>Add audit areas and months for the year, then approve the revision.</span>
+            </button>
+            <button type="button" onClick={() => { setGuideOpen(false); navigate(programmeHref); }}>
+              <strong>2. Schedule a programme requirement</strong>
+              <span>Use Schedule on Calendar from a planned requirement — that is the governed path onto the calendar.</span>
+            </button>
+            <button type="button" onClick={() => guideAction("list")}>
+              <strong>3. Run when due</strong>
+              <span>Run creates one live planned audit and advances next due by the frequency (annual, quarterly, etc.).</span>
+            </button>
+            <button type="button" onClick={() => guideAction("create")}>
+              <strong>4. Optional: off-programme template</strong>
+              <span>Only if work is not on the approved programme — does not write back into Audit Programme.</span>
+            </button>
+            <button type="button" onClick={() => guideAction("calendar")}>
+              <strong>5. Check the calendar</strong>
+              <span>Browse and reschedule dated commitments in the calendar view.</span>
+            </button>
           </div>
           <div className="planner-guide-drawer__footer">
-            <Button onClick={() => guideAction("create")}><Plus size={15} /> Create schedule</Button>
-            <Button variant="secondary" onClick={dismissGuide}>Keep as right-side guide</Button>
+            <Button onClick={() => { setGuideOpen(false); navigate(programmeHref); }}>Open Audit Programme</Button>
+            <Button variant="secondary" onClick={() => guideAction("create")}>
+              <Plus size={15} /> {CREATE_RECURRENCE_TEMPLATE_LABEL}
+            </Button>
+            <Button variant="ghost" onClick={dismissGuide}>Keep as side guide</Button>
           </div>
         </div>
       </Drawer>
@@ -1688,12 +1931,38 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
               <label className="profile-inline-field">
                 <span>Planned start</span>
-                <input className="input" type="date" value={auditForm.planned_start} onChange={(e) => setAuditForm((prev) => ({ ...prev, planned_start: e.target.value }))} />
+                <input
+                  className="input"
+                  type="date"
+                  min={scheduleDateMin}
+                  max={scheduleDateMax}
+                  value={auditForm.planned_start}
+                  onChange={(e) =>
+                    setAuditForm((prev) => ({
+                      ...prev,
+                      planned_start: e.target.value,
+                      planned_end:
+                        prev.planned_end && prev.planned_end < e.target.value
+                          ? e.target.value
+                          : prev.planned_end,
+                    }))
+                  }
+                />
+                {isWeekendIso(auditForm.planned_start) ? (
+                  <small className="planner-field-help">Weekend date — confirm weekend policy when saving if prompted.</small>
+                ) : null}
               </label>
 
               <label className="profile-inline-field">
                 <span>Planned end</span>
-                <input className="input" type="date" value={auditForm.planned_end} onChange={(e) => setAuditForm((prev) => ({ ...prev, planned_end: e.target.value }))} />
+                <input
+                  className="input"
+                  type="date"
+                  min={auditForm.planned_start || scheduleDateMin}
+                  max={scheduleDateMax}
+                  value={auditForm.planned_end}
+                  onChange={(e) => setAuditForm((prev) => ({ ...prev, planned_end: e.target.value }))}
+                />
               </label>
 
               <label className="profile-inline-field">
@@ -1705,38 +1974,63 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 label="Lead auditor"
                 value={auditForm.lead_auditor_user_id}
                 query={auditPersonSearch.lead_auditor_user_id}
-                options={personnelOptions}
-                placeholder="Search by name or staff code"
-                helper="Required before fieldwork can be started from the list."
+                options={leadAuditorOptions}
+                placeholder="Search lead auditor by name or staff code"
+                helper={
+                  scheduleOptionsLoading
+                    ? "Loading auditors…"
+                    : leadAuditorOptions.length
+                      ? `${leadAuditorOptions.length} lead-auditor privilege holder(s) available.`
+                      : "No LEAD_AUDITOR privilege holders yet — grant LEAD_AUDITOR in People."
+                }
+                emptyHint={
+                  leadAuditorOptions.length
+                    ? undefined
+                    : "No LEAD_AUDITOR privilege holders. Grant LEAD_AUDITOR in People first."
+                }
                 onQueryChange={(value) => updateAuditPersonLookup("lead_auditor_user_id", value)}
                 onSelect={(personId) => applyAuditPerson("lead_auditor_user_id", personId)}
+                onClear={() => clearAuditPerson("lead_auditor_user_id")}
               />
               <PersonLookupField
                 label="Observer auditor"
                 value={auditForm.observer_auditor_user_id}
                 query={auditPersonSearch.observer_auditor_user_id}
-                options={personnelOptions}
-                placeholder="Optional"
+                options={auditorOptions}
+                placeholder="Optional observer"
                 onQueryChange={(value) => updateAuditPersonLookup("observer_auditor_user_id", value)}
                 onSelect={(personId) => applyAuditPerson("observer_auditor_user_id", personId)}
+                onClear={() => clearAuditPerson("observer_auditor_user_id")}
               />
               <PersonLookupField
                 label="Assistant auditor"
                 value={auditForm.assistant_auditor_user_id}
                 query={auditPersonSearch.assistant_auditor_user_id}
-                options={personnelOptions}
-                placeholder="Optional"
+                options={auditorOptions}
+                placeholder="Optional assistant"
                 onQueryChange={(value) => updateAuditPersonLookup("assistant_auditor_user_id", value)}
                 onSelect={(personId) => applyAuditPerson("assistant_auditor_user_id", personId)}
+                onClear={() => clearAuditPerson("assistant_auditor_user_id")}
               />
               <PersonLookupField
                 label="Auditee representative"
                 value={auditForm.auditee_user_id}
                 query={auditPersonSearch.auditee_user_id}
-                options={personnelOptions}
-                placeholder="Internal auditee, if applicable"
+                options={peopleOptions}
+                placeholder="Search any active internal user"
+                helper={
+                  scheduleOptionsLoading
+                    ? "Loading people…"
+                    : `${peopleOptions.length} active users — department heads and process owners, not only auditors.`
+                }
+                emptyHint={
+                  peopleOptions.length
+                    ? undefined
+                    : "No active users available. Confirm workforce users are active for this AMO."
+                }
                 onQueryChange={(value) => updateAuditPersonLookup("auditee_user_id", value)}
                 onSelect={(personId) => applyAuditPerson("auditee_user_id", personId)}
+                onClear={() => clearAuditPerson("auditee_user_id")}
               />
 
               <label className="profile-inline-field">
@@ -1779,7 +2073,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       </Drawer>
 
       <Drawer
-        title={editingScheduleId ? "Edit audit schedule" : "Create audit schedule"}
+        title={editingScheduleId ? "Edit recurrence template" : "New recurrence template"}
         isOpen={drawerOpen}
         onClose={() => {
           setDrawerTab("overview");
@@ -1791,7 +2085,14 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         <div className="planner-drawer-layout">
           <div className="planner-drawer-layout__body">
             <div className="planner-drawer-layout__intro">
-              <p className="planner-inline-note">Draft changes are staged automatically for the current user and AMO. Confirmatory prompts appear when you save or reschedule.</p>
+              <div className="planner-review-card planner-review-card--muted">
+                <strong>Off-programme template</strong>
+                <span>
+                  This does <em>not</em> add a line to Audit Programme. Prefer Audit Programme → Schedule on Calendar for the year plan.
+                  Frequency only sets how far next due moves after each Run — it does not auto-generate every quarter/year at save.
+                </span>
+              </div>
+              <p className="planner-inline-note">Draft changes are staged automatically for the current user and AMO.</p>
               {previewSchedule ? (
                 <div className="planner-preview-card">
                   <p className="planner-preview-card__eyebrow">{previewSchedule.preview_label || "Live preview"}</p>
@@ -1803,7 +2104,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               ) : null}
             </div>
 
-            <div className="planner-drawer-tabs" role="tablist" aria-label="Audit schedule form sections">
+            <div className="planner-drawer-tabs" role="tablist" aria-label="Recurrence template form sections">
               {drawerTabs.map((tab) => (
                 <button key={tab.id} type="button" role="tab" aria-selected={drawerTab === tab.id} className={`planner-drawer-tabs__item${drawerTab === tab.id ? " is-active" : ""}`} onClick={() => setDrawerTab(tab.id)}>
                   <strong>{tab.label}</strong>
@@ -1844,6 +2145,9 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                   <select className="input" value={form.frequency} onChange={(e) => setField("frequency", e.target.value as QMSAuditScheduleFrequency)}>
                     {frequencies.map((freq) => <option key={freq} value={freq}>{formatFrequencyLabel(freq)}</option>)}
                   </select>
+                  <small className="planner-field-help">
+                    Cadence after each Run (e.g. annual moves next due +1 year). Does not auto-create all future audits when you save.
+                  </small>
                 </label>
 
                 <label className="profile-inline-field">
@@ -1851,20 +2155,65 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                   <input
                     className="input"
                     type="date"
-                    min={new Date().toISOString().slice(0, 10)}
+                    min={scheduleDateMin}
+                    max={scheduleDateMax}
                     value={form.next_due_date}
                     onChange={(e) => setField("next_due_date", e.target.value)}
                   />
+                  {isWeekendIso(form.next_due_date) ? (
+                    <small className="planner-field-help">
+                      Weekend date — you may be asked to include or skip weekends when saving.
+                    </small>
+                  ) : (
+                    <small className="planner-field-help">
+                      Allowed range: {formatDate(scheduleDateMin)} → {formatDate(scheduleDateMax)}
+                    </small>
+                  )}
                 </label>
 
                 <label className="profile-inline-field">
                   <span>Duration in days</span>
-                  <input className="input" type="number" min={1} value={form.duration_days} onChange={(e) => setField("duration_days", e.target.value)} />
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={MAX_DURATION_DAYS}
+                    step={1}
+                    inputMode="numeric"
+                    value={form.duration_days}
+                    onChange={(e) => setField("duration_days", e.target.value)}
+                    onBlur={() => {
+                      const raw = Number(form.duration_days);
+                      if (!Number.isFinite(raw) || raw < 1) {
+                        setField("duration_days", "1");
+                        return;
+                      }
+                      setField("duration_days", String(Math.min(MAX_DURATION_DAYS, Math.round(raw))));
+                    }}
+                  />
+                  <small className="planner-field-help">1–{MAX_DURATION_DAYS} working-day span for the occurrence window.</small>
                 </label>
 
                 <label className="profile-inline-field">
                   <span>Reminder interval (days)</span>
-                  <input className="input" type="number" min={1} max={60} value={form.reminder_interval_days} onChange={(e) => setField("reminder_interval_days", e.target.value)} />
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={60}
+                    step={1}
+                    inputMode="numeric"
+                    value={form.reminder_interval_days}
+                    onChange={(e) => setField("reminder_interval_days", e.target.value)}
+                    onBlur={() => {
+                      const raw = Number(form.reminder_interval_days);
+                      if (!Number.isFinite(raw) || raw < 1) {
+                        setField("reminder_interval_days", "1");
+                        return;
+                      }
+                      setField("reminder_interval_days", String(Math.min(60, Math.round(raw))));
+                    }}
+                  />
                 </label>
 
                 <label className="profile-inline-field planner-form-span-2">
@@ -1890,29 +2239,43 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                   label="Lead auditor"
                   value={form.lead_auditor_user_id}
                   query={personSearch.lead_auditor_user_id}
-                  options={personnelOptions}
-                  placeholder="Search by name or staff code"
-                  helper="Suggestions only show the person name, but search still matches user ID, email, and staff code."
+                  options={leadAuditorOptions}
+                  placeholder="Search lead auditor by name or staff code"
+                  helper={
+                    scheduleOptionsLoading
+                      ? "Loading auditors…"
+                      : leadAuditorOptions.length
+                        ? `${leadAuditorOptions.length} lead-auditor privilege holder(s). Only LEAD_AUDITOR appears here.`
+                        : "No LEAD_AUDITOR privilege holders yet — grant LEAD_AUDITOR in People."
+                  }
+                  emptyHint={
+                    leadAuditorOptions.length
+                      ? undefined
+                      : "No LEAD_AUDITOR privilege holders. Grant LEAD_AUDITOR in People first."
+                  }
                   onQueryChange={(value) => updatePersonLookup("lead_auditor_user_id", value)}
                   onSelect={(personId) => applyPerson("lead_auditor_user_id", personId)}
+                  onClear={() => clearPerson("lead_auditor_user_id")}
                 />
                 <PersonLookupField
                   label="Observer auditor"
                   value={form.observer_auditor_user_id}
                   query={personSearch.observer_auditor_user_id}
-                  options={personnelOptions}
-                  placeholder="Optional"
+                  options={auditorOptions}
+                  placeholder="Optional observer"
                   onQueryChange={(value) => updatePersonLookup("observer_auditor_user_id", value)}
                   onSelect={(personId) => applyPerson("observer_auditor_user_id", personId)}
+                  onClear={() => clearPerson("observer_auditor_user_id")}
                 />
                 <PersonLookupField
                   label="Assistant auditor"
                   value={form.assistant_auditor_user_id}
                   query={personSearch.assistant_auditor_user_id}
-                  options={personnelOptions}
-                  placeholder="Optional"
+                  options={auditorOptions}
+                  placeholder="Optional assistant"
                   onQueryChange={(value) => updatePersonLookup("assistant_auditor_user_id", value)}
                   onSelect={(personId) => applyPerson("assistant_auditor_user_id", personId)}
+                  onClear={() => clearPerson("assistant_auditor_user_id")}
                 />
 
                 {form.kind === "INTERNAL" ? (
@@ -1921,15 +2284,25 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                       label="Auditee representative"
                       value={form.auditee_user_id}
                       query={personSearch.auditee_user_id}
-                      options={personnelOptions}
-                      placeholder="Search internal auditee"
-                      helper="Select an internal auditee. The visible suggestion is just the name, while matching still works with user ID or staff code."
+                      options={peopleOptions}
+                      placeholder="Search any active internal user"
+                      helper={
+                        scheduleOptionsLoading
+                          ? "Loading people…"
+                          : `${peopleOptions.length} active users — department heads and process owners, not only auditors. Selecting fills name and email.`
+                      }
+                      emptyHint={
+                        peopleOptions.length
+                          ? undefined
+                          : "No active users available. Confirm workforce users are active for this AMO."
+                      }
                       onQueryChange={(value) => updatePersonLookup("auditee_user_id", value)}
                       onSelect={(personId) => applyPerson("auditee_user_id", personId)}
+                      onClear={() => clearPerson("auditee_user_id")}
                     />
                     <label className="profile-inline-field">
                       <span>Auditee email</span>
-                      <input className="input" type="email" value={form.auditee_email} onChange={(e) => setField("auditee_email", e.target.value)} placeholder="name@example.com" />
+                      <input className="input" type="email" value={form.auditee_email} onChange={(e) => setField("auditee_email", e.target.value)} placeholder="Filled from the selected person" readOnly={Boolean(form.auditee_user_id && form.auditee_email)} />
                     </label>
                     <label className="profile-inline-field planner-form-span-2">
                       <span>Auditee label</span>
@@ -1988,7 +2361,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
                 <label className="planner-checkbox-field">
                   <input type="checkbox" checked={form.is_active} onChange={(e) => setField("is_active", e.target.checked)} />
-                  <span>Schedule active</span>
+                  <span>Template active (inactive templates are not Run)</span>
                 </label>
               </div>
             ) : null}
@@ -1996,7 +2369,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             {drawerTab === "review" ? (
               <div className="planner-review-grid">
                 <div className="planner-review-card">
-                  <strong>Advanced audit summary</strong>
+                  <strong>Template summary</strong>
                   <dl className="planner-review-list">
                     <div><dt>Audit</dt><dd>{form.title.trim() || "Title pending"}</dd></div>
                     <div><dt>Type</dt><dd>{formatKindLabel(form.kind)}</dd></div>
@@ -2035,13 +2408,22 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
                 <div className="planner-review-card planner-review-card--muted">
                   <strong>What happens next</strong>
-                  <span>Save the schedule first. When you run it, the audit is created with its participant set, notice preferences, reminder interval, and execution window carried into the live workspace.</span>
+                  <span>
+                    Saving stores the template only. When you Run it, one planned audit is created and next due advances by the frequency.
+                    For the approved year plan, use Audit Programme instead.
+                  </span>
                 </div>
               </div>
             ) : null}
 
-            {personnelQuery.isLoading ? <p className="planner-inline-note">Loading personnel options…</p> : null}
-            {personnelQuery.isError ? <p className="planner-form-error">Personnel options could not be loaded. You can still type free text for auditee details.</p> : null}
+            {scheduleOptionsLoading ? (
+              <p className="planner-inline-note">Loading participant directories…</p>
+            ) : null}
+            {scheduleOptionsQuery.isError ? (
+              <p className="planner-form-error">
+                Participant directories could not be loaded. Refresh and try again.
+              </p>
+            ) : null}
             {error ? <p className="planner-form-error">{error}</p> : null}
           </div>
 
@@ -2060,7 +2442,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               ) : null}
               <Button onClick={() => saveSchedule.mutate(weekendPolicy)} loading={saveSchedule.isPending}>
                 <Plus size={16} />
-                {editingScheduleId ? "Save changes" : "Save schedule"}
+                {editingScheduleId ? "Save changes" : "Save template"}
               </Button>
             </div>
           </div>

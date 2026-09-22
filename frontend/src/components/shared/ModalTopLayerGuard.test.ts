@@ -25,8 +25,18 @@ describe("portal-wide modal top layer", () => {
   it("keeps full-height fixed edge drawers as layout hosts instead of centring them", () => {
     expect(guard).toContain("coversViewportHeight");
     expect(guard).toContain("touchesViewportEdge");
-    expect(guard).toContain('const edgeDrawer = position === "fixed" && coversViewportHeight && touchesViewportEdge');
-    expect(guard).toContain("coversViewport || edgeDrawer");
+    expect(guard).toContain("edgeDrawer");
+    expect(guard).toContain("bounds.width < viewportWidth * 0.88");
+    expect(guard).toContain("isPortalShellNavigation");
+    expect(guard).toContain("tenant-shell__sidebar");
+  });
+
+  it("never promotes the portal navigation side panel into full-bleed top-layer host layout", () => {
+    expect(guard).toContain("isPortalShellNavigation(element)");
+    expect(guard).toContain("if (isPortalShellNavigation(element)) return false");
+    expect(guard).toContain("else if (!edgeDrawer) host.classList.add(HOST_CLASS)");
+    expect(guardCss).toContain(".tenant-shell__sidebar.portal-modal-top-layer--host");
+    expect(guardCss).toContain("inset: 0 auto 0 0 !important");
   });
 
   it("mounts the guard in both portal entry paths", () => {

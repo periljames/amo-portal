@@ -4,8 +4,6 @@ import { useLocation } from "react-router-dom";
 
 import { ModalTopLayerGuard } from "../shared/ModalTopLayerGuard";
 import QmsCommandPalette from "./QmsCommandPalette";
-import QmsOfflineStatus from "./QmsOfflineStatus";
-import "../../styles/qms-offline-status.css";
 
 const QualityEnhancementsHost = lazy(
   () => import("./QualityEnhancementsHost"),
@@ -25,7 +23,6 @@ const QualityEnhancementsRouteGate: React.FC = () => {
     <>
       <ModalTopLayerGuard />
       {commandPaletteRelevant ? <QmsCommandPalette /> : null}
-      {commandPaletteRelevant ? <QmsOfflineStatus /> : null}
       {relevant ? (
         <Suspense fallback={null}>
           <QualityEnhancementsHost />

@@ -1,0 +1,135 @@
+/* QMS + DMS layout ownership.
+ * The tenant workspace owns 100dvh; its main owns page scrolling. Chrome takes
+ * its natural height, and content grows into the remainder without vh offsets.
+ * Only bounded widgets (PDF, virtual grids) own an additional scroll viewport.
+ * Keep geometry here; feature styles own colours, typography and composition.
+ */
+.tenant-shell:is([data-workspace-module="quality"], [data-workspace-module="document-control"], [data-workspace-module="manuals"]) .tenant-shell__main {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenant-shell:is([data-workspace-module="quality"], [data-workspace-module="document-control"], [data-workspace-module="manuals"]) .tenant-shell__content {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tenant-shell[data-workspace-module] :is(.quality-context-bar-host, .tenant-shell__status-banner) {
+  flex: 0 0 auto;
+}
+
+.tenant-shell:is([data-workspace-module="quality"], [data-workspace-module="document-control"], [data-workspace-module="manuals"]) .tenant-shell__content > :not([hidden], [role="dialog"]) {
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+.tenant-shell[data-workspace-module] :is(.qms-shell, .dc-workspace, .manuals-page-shell, .qms-audit-occurrence-mount, .qms-audit-occurrence-shell) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+}
+
+.tenant-shell[data-workspace-module] :is(.qms-content, .audit-shell-content, .dc-workspace__content, .qms-audit-occurrence-shell__body) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tenant-shell[data-workspace-module] :is(.qms-content, .audit-shell-content, .dc-workspace__content, .qms-audit-occurrence-shell__body) > :only-child {
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+.tenant-shell[data-workspace-module="quality"] :is(.qa-workspace-shell, .qa-workspace-main, .qms-assurance-room) {
+  min-height: 0;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-main {
+  overflow: visible;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-main > * {
+  min-height: 0;
+}
+
+/* Calendar owns its scrollport — do not let the tenant main absorb week/day overflow. */
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) .tenant-shell__main {
+  overflow: hidden;
+}
+
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) .tenant-shell__content,
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) .tenant-shell__content > :not([hidden], [role="dialog"]),
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) :is(.qms-shell, .qms-content, .audit-shell-content),
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) .audit-shell-content > :only-child,
+.tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) :is(.qa-workspace-shell, .qa-workspace-main) {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--calendar-focus {
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--calendar-focus .qa-workspace-main {
+  overflow: hidden;
+  height: 100%;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--calendar-focus .qa-workspace-main > * {
+  height: 100%;
+  max-height: 100%;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--calendar-focus :is(.qms-modern-planner-v2, .qms-modern-planner) {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.tenant-shell[data-workspace-module="quality"] :is(.qms-register-page, .qms-register-workspace) {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-workspace {
+  flex: 1 0 auto;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-workspace > :is(.qms-register-empty, .qms-register-loading, .qms-register-error) {
+  flex: 1 0 auto;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-workspace .qms-workspace-grid {
+  flex: 1 0 20rem;
+  height: auto;
+  min-height: 20rem;
+}
+
+/* The measured PDF viewport already ends at the window edge. Outer page
+ * padding otherwise adds a second scrollbar below the document viewport. */
+.tenant-shell[data-workspace-module="document-control"] .tenant-shell__content:has(> .publication-reader-page) {
+  padding: 0;
+}
+
+.tenant-shell[data-workspace-module="document-control"] .publication-reader-page {
+  min-height: 0;
+  min-width: 0;
+}
+
+@media print {
+  .tenant-shell[data-workspace-module] .tenant-shell__workspace {
+    height: auto;
+    overflow: visible;
+  }
+}

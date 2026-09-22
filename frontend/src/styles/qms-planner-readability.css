@@ -29,7 +29,7 @@
 .qms-modern-planner-v2 .qms-planner-toolbar__search span,
 .qms-modern-planner-v2 .qms-planner-toolbar__search-placeholder {
   font-size: .82rem;
-  color: color-mix(in srgb, var(--text-secondary, #64748b) 55%, transparent);
+  color: var(--planner-muted, var(--text-secondary, #64748b));
 }
 .qms-modern-planner-v2 kbd { min-height: 1.45rem; font-size: .71rem; }
 
@@ -174,4 +174,114 @@
 @media (max-width: 1080px) {
   .qms-modern-planner-v2.has-left-rail.has-context { grid-template-columns: var(--planner-rail-width) minmax(0, 1fr); grid-template-areas: "toolbar toolbar" "rail canvas"; }
   .qms-modern-planner-v2.has-left-rail.has-context .qms-planner-inspector:not(.is-event) { display: none; }
+}
+
+/* Dark: replace slate hardcodes / transparent mixes that wash meta copy. */
+html[data-color-scheme="dark"] .qms-modern-planner-v2,
+body[data-color-scheme="dark"] .qms-modern-planner-v2,
+[data-theme="dark"] .qms-modern-planner-v2,
+.dark .qms-modern-planner-v2 {
+  --planner-muted: var(--text-secondary, rgba(255, 255, 255, 0.84));
+  color: var(--text-primary, rgba(255, 255, 255, 0.96));
+}
+
+html[data-color-scheme="dark"] .qms-modern-planner-v2 :is(
+  .qms-planner-title span,
+  .qms-planner-toolbar__search svg,
+  .qms-planner-mini__weekdays span,
+  .qms-planner-rail-section > header,
+  .qms-planner-focus-list button strong,
+  .qms-planner-source-dot,
+  .qms-planner-source-dot--other,
+  .qms-planner-rail-section--settings label,
+  .qms-planner-loading,
+  .qms-planner-empty,
+  .qms-planner-month__day > header span,
+  .qms-planner-month__add,
+  .qms-planner-month__more,
+  .qms-planner-timeline__more,
+  .qms-planner-timeline__times small,
+  .qms-planner-agenda > section > header span,
+  .qms-planner-agenda__row,
+  .qms-planner-agenda__row--default,
+  .qms-planner-agenda__row > span:nth-child(3),
+  .qms-planner-agenda__row > span:nth-child(2) small,
+  .qms-planner-inspector > header span,
+  .qms-planner-inspector > header button,
+  .qms-planner-inspector__title p,
+  .qms-planner-inspector dt,
+  .qms-planner-panel-section h3,
+  .qms-planner-panel-section p,
+  .qms-planner-panel-section small,
+  .qms-planner-readonly,
+  .qms-planner-welcome p
+),
+body[data-color-scheme="dark"] .qms-modern-planner-v2 :is(
+  .qms-planner-title span,
+  .qms-planner-toolbar__search svg,
+  .qms-planner-mini__weekdays span,
+  .qms-planner-rail-section > header,
+  .qms-planner-focus-list button strong,
+  .qms-planner-source-dot,
+  .qms-planner-source-dot--other,
+  .qms-planner-rail-section--settings label,
+  .qms-planner-loading,
+  .qms-planner-empty,
+  .qms-planner-month__day > header span,
+  .qms-planner-month__add,
+  .qms-planner-month__more,
+  .qms-planner-timeline__more,
+  .qms-planner-timeline__times small,
+  .qms-planner-agenda > section > header span,
+  .qms-planner-agenda__row,
+  .qms-planner-agenda__row--default,
+  .qms-planner-agenda__row > span:nth-child(3),
+  .qms-planner-agenda__row > span:nth-child(2) small,
+  .qms-planner-inspector > header span,
+  .qms-planner-inspector > header button,
+  .qms-planner-inspector__title p,
+  .qms-planner-inspector dt,
+  .qms-planner-panel-section h3,
+  .qms-planner-panel-section p,
+  .qms-planner-panel-section small,
+  .qms-planner-readonly,
+  .qms-planner-welcome p
+) {
+  color: var(--planner-muted, var(--text-secondary, rgba(255, 255, 255, 0.84)));
+  opacity: 1;
+}
+
+html[data-color-scheme="dark"] .qms-modern-planner-v2 .qms-planner-mini__days button.is-muted,
+body[data-color-scheme="dark"] .qms-modern-planner-v2 .qms-planner-mini__days button.is-muted {
+  color: var(--text-muted, rgba(255, 255, 255, 0.68));
+  opacity: 1;
+}
+
+/* Timeline axis + day heads: primary ink — secondary still reads soft at ~11px. */
+html[data-color-scheme="dark"] .qms-modern-planner-v2 :is(
+  .qms-planner-timeline__times b,
+  .qms-planner-timeline__day-head span,
+  .qms-planner-timeline__day-head strong,
+  .qms-planner-timeline__day-head button,
+  .qms-planner-timeline__all-day-label,
+  .qms-planner-timeline__corner strong,
+  .qms-planner-timeline__corner small
+),
+body[data-color-scheme="dark"] .qms-modern-planner-v2 :is(
+  .qms-planner-timeline__times b,
+  .qms-planner-timeline__day-head span,
+  .qms-planner-timeline__day-head strong,
+  .qms-planner-timeline__day-head button,
+  .qms-planner-timeline__all-day-label,
+  .qms-planner-timeline__corner strong,
+  .qms-planner-timeline__corner small
+) {
+  color: rgba(255, 255, 255, 0.96) !important;
+  opacity: 1;
+}
+
+html[data-color-scheme="dark"] .qms-modern-planner-v2 .qms-planner-timeline__times b,
+body[data-color-scheme="dark"] .qms-modern-planner-v2 .qms-planner-timeline__times b {
+  font-size: 0.72rem;
+  font-weight: 650;
 }

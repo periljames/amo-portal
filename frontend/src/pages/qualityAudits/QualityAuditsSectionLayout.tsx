@@ -105,7 +105,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         className={`qa-workspace-rail__tab qa-workspace-rail__tab--label-only${link.active ? " qa-workspace-rail__tab--active" : ""}`}
         onClick={() => navigate(link.href)}
       >
-        <Icon size={17} aria-hidden />
+        <Icon size={16} aria-hidden />
         <span>
           <strong>{link.label}</strong>
         </span>
@@ -134,7 +134,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       subtitle={subtitle}
       breadcrumbs={[
         { label: "QMS", onClick: () => navigate(qualityBase) },
-        { label: "Audit Assurance", onClick: () => navigate(auditsBase) },
+        { label: "Assurance", onClick: () => navigate(auditsBase) },
         { label: title },
       ]}
       toolbar={calendarFocusMode ? undefined : mergedToolbar}
@@ -167,15 +167,15 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
 
       <div className={`qms-surface-root qa-workspace-shell${calendarFocusMode ? " qa-workspace-shell--calendar-focus" : ""}`}>
         {!calendarFocusMode ? (
-          <aside className="qa-workspace-rail" aria-label="Audit Assurance pages">
+          <aside className="qa-workspace-rail" aria-label="Assurance pages">
             <div className="qa-workspace-rail__heading">
-              <span>Audit Assurance</span>
+              <span>Assurance</span>
             </div>
             {NAV_GROUPS.map(renderRailGroup)}
           </aside>
         ) : null}
 
-        <section className="qa-workspace-main" data-assurance-workspace-section={activeId} aria-label="Current Audit Assurance workspace">
+        <section className="qa-workspace-main" data-assurance-workspace-section={activeId} aria-label="Current Assurance workspace">
           {children}
         </section>
       </div>

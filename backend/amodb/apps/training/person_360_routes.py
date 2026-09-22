@@ -36,6 +36,14 @@ def _is_training_editor(router_module, user: account_models.User) -> bool:
     return bool(helper and helper(user))
 
 
+def _can_view_other_training_records(router_module, user: account_models.User) -> bool:
+    helper = getattr(router_module, "_can_view_other_training_records", None)
+    if helper:
+        return bool(helper(user))
+    # Fallback: editors and tenant-wide people viewers can open any person 360.
+    return _is_training_editor(router_module, user)
+
+
 def _assert_person_scope(
     router_module,
     *,
@@ -44,15 +52,11 @@ def _assert_person_scope(
 ) -> None:
     if str(person.id) == str(current_user.id):
         return
-    if _is_training_editor(router_module, current_user):
-        return
-    current_department = str(getattr(current_user, "department_id", None) or "")
-    person_department = str(getattr(person, "department_id", None) or "")
-    if current_department and current_department == person_department:
+    if _can_view_other_training_records(router_module, current_user):
         return
     raise HTTPException(
         status_code=403,
-        detail="Person 360 is limited to your department unless you hold tenant-wide Training management authority.",
+        detail="Person 360 is limited to your own training record unless you hold tenant-wide Training people visibility.",
     )
 
 
@@ -91,7 +95,7 @@ def install_training_person_360_routes(router_module) -> None:
         evaluation = compliance.evaluate_user_training_policy(
             db,
             person,
-            required_only=False,
+            required_only=True,
             today=date.today(),
         )
         requirements = [

@@ -79,10 +79,10 @@ const App: React.FC = () => {
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
       if (!(target instanceof Element)) return;
-      const anchor = target.closest<HTMLAnchorElement>("a[href]");
-      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const anchor = target.closest<HTMLElement>("a[href], [data-preload-route]");
+      if (!anchor || anchor.getAttribute("target") === "_blank" || anchor.hasAttribute("download")) return;
       try {
-        const url = new URL(anchor.href, window.location.origin);
+        const url = new URL(anchor.dataset.preloadRoute || anchor.getAttribute("href") || "", window.location.origin);
         if (url.origin !== window.location.origin) return;
         void preloadRoute(`${url.pathname}${url.search}`).catch(() => undefined);
       } catch {

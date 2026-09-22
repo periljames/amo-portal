@@ -13,6 +13,7 @@ import { ToastProvider } from "./components/feedback/ToastProvider";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
+import { registerPortalQueryClient } from "./services/portalQueryClient";
 import {
   flushPendingSessionRevocation,
   hasRecoverableSession,
@@ -115,6 +116,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+registerPortalQueryClient(queryClient);
 
 let observedTenantScope = currentOfflineScope();
 
@@ -252,6 +255,12 @@ async function configurePortalServiceWorker(): Promise<void> {
 
   activateWaitingWorker();
   await registration.update().catch(() => undefined);
+  // Logos, manifests, and shell HTML should be warm before the first login paint.
+  await navigator.serviceWorker.ready
+    .then((ready) => {
+      ready.active?.postMessage({ type: "PRECACHE_STATIC_SHELL" });
+    })
+    .catch(() => undefined);
 }
 
 if (typeof window !== "undefined") {

@@ -178,7 +178,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
                           : current.evidenceArtifactIds.filter((id) => id !== artifact.id),
                       } : current)} />
                       <FileCheck2 size={14} />
-                      <span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")} · SHA {artifact.sha256.slice(0, 12)}…</small></span>
+                      <span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span>
                     </label>
                   ))}
                 </fieldset>

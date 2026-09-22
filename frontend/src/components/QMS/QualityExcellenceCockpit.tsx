@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -36,6 +36,7 @@ import { SourceHealthNotice } from "./SourceHealthNotice";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import {
   createAssuranceControl,
+  decideAssuranceEvidence,
   decideControlApproval,
   decideQualityInsight,
   getAssuranceControls,
@@ -181,14 +182,14 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   const [testForm, setTestForm] = useState(DEFAULT_TEST);
 
   const overviewQuery = useQuery({
-    queryKey: ["qms-excellence-overview", amoCode],
+    queryKey: ["qms-excellence-overview", amoCode.trim().toLowerCase()],
     queryFn: () => getQualityExcellenceOverview(amoCode),
     staleTime: 10_000,
     refetchOnWindowFocus: true,
   });
 
   const controlsQuery = useQuery({
-    queryKey: ["qms-excellence-controls", amoCode, actorView],
+    queryKey: ["qms-excellence-controls", amoCode.trim().toLowerCase(), actorView],
     queryFn: () => getAssuranceControls(amoCode, actorView),
     staleTime: 12_000,
   });
@@ -215,8 +216,15 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   });
 
   const eventsQuery = useQuery({
-    queryKey: ["qms-excellence-events", amoCode],
-    queryFn: () => getAssuranceEvents(amoCode),
+    queryKey: ["qms-excellence-events", amoCode, "pending"],
+    queryFn: () => getAssuranceEvents(amoCode, { processingStatus: "PENDING", limit: 50 }),
+    enabled: view === "evidence",
+    staleTime: 5_000,
+  });
+
+  const eventErrorsQuery = useQuery({
+    queryKey: ["qms-excellence-events", amoCode, "error"],
+    queryFn: () => getAssuranceEvents(amoCode, { processingStatus: "ERROR", limit: 20 }),
     enabled: view === "evidence",
     staleTime: 5_000,
   });
@@ -278,6 +286,20 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
     onError: (error) => setFeedback(errorMessage(error, "The control approval decision could not be recorded.")),
   });
 
+  const evidenceDecisionMutation = useMutation({
+    mutationFn: ({ evidenceId, status }: { evidenceId: string; status: EvidenceStatus }) =>
+      decideAssuranceEvidence(amoCode, evidenceId, status),
+    onSuccess: async (_, variables) => {
+      setFeedback(
+        variables.status === "VERIFIED"
+          ? "Evidence relationship verified against the tenant source record."
+          : `Evidence relationship marked ${variables.status.replaceAll("_", " ").toLowerCase()}.`,
+      );
+      await invalidateAssurance();
+    },
+    onError: (error) => setFeedback(errorMessage(error, "The evidence decision could not be recorded.")),
+  });
+
   const evidenceMutation = useMutation({
     mutationFn: () => {
       if (!selectedControl || !selectedSource) throw new Error("Select a control and an authoritative source record.");
@@ -331,7 +353,16 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
   const reconcileMutation = useMutation({
     mutationFn: () => reconcileAssuranceEvidence(amoCode),
     onSuccess: async (result) => {
-      setFeedback(`${result.reviewed} evidence relationships reviewed; ${result.changed} updated and ${result.events_processed} source events reconciled.`);
+      const remaining = Number(result.remaining_events || 0);
+      if (remaining > 0) {
+        setFeedback(
+          `Reconciled ${result.events_processed.toLocaleString()} source events and reviewed ${result.reviewed.toLocaleString()} evidence links, but ${remaining.toLocaleString()} source events remain. Retry Apply all source changes.`,
+        );
+      } else {
+        setFeedback(
+          `${result.events_processed.toLocaleString()} source event${result.events_processed === 1 ? "" : "s"} applied; ${result.reviewed.toLocaleString()} evidence relationship${result.reviewed === 1 ? "" : "s"} reviewed (${result.changed.toLocaleString()} updated).`,
+        );
+      }
       await invalidateAssurance();
     },
     onError: (error) => setFeedback(errorMessage(error, "Evidence reconciliation failed.")),
@@ -355,8 +386,10 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
     onError: (error) => setFeedback(errorMessage(error, "The intelligence decision could not be recorded.")),
   });
 
+  const controlRoomPath = `/maintenance/${encodeURIComponent(amoCode)}/quality`;
+
   const setView = (next: HubView) => {
-    navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality${next === "readiness" ? "" : `?hub=${next}`}`);
+    navigate(`${controlRoomPath}?hub=${next}`);
     setDrawerMode(null);
     setSelectedControl(null);
   };
@@ -384,31 +417,80 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
     [insightsQuery.data?.items],
   );
 
+  const pendingControlApprovals = useMemo(
+    () => (controlsQuery.data?.items || []).filter((control) => control.approval_status === "PENDING_APPROVAL"),
+    [controlsQuery.data?.items],
+  );
+
+  const evidenceAwaitingReview = useMemo(
+    () => (graphQuery.data?.edges || []).filter((edge) => edge.status === "LINKED"),
+    [graphQuery.data?.edges],
+  );
+
+  const evidenceNeedingAttention = useMemo(
+    () => (graphQuery.data?.edges || []).filter((edge) => edge.status === "EXPIRED" || edge.status === "REJECTED"),
+    [graphQuery.data?.edges],
+  );
+
+  const unsupportedControlNodes = useMemo(() => {
+    const current = graphQuery.data;
+    if (!current) return [];
+    const evidenced = new Set(current.edges.map((edge) => edge.from));
+    return current.nodes.filter((node) => node.kind === "control" && !evidenced.has(node.id));
+  }, [graphQuery.data]);
+
+  const reviewQueueCount =
+    pendingControlApprovals.length
+    + evidenceAwaitingReview.length
+    + evidenceNeedingAttention.length
+    + unsupportedControlNodes.length;
+
+  const pendingSourceChanges = useMemo(() => {
+    const pending = eventsQuery.data?.items || [];
+    const errored = eventErrorsQuery.data?.items || [];
+    return [...errored, ...pending].slice(0, 8);
+  }, [eventErrorsQuery.data?.items, eventsQuery.data?.items]);
+
+  const pendingSourceChangeCount =
+    (eventsQuery.data?.total ?? eventsQuery.data?.items.length ?? 0)
+    + (eventErrorsQuery.data?.total ?? eventErrorsQuery.data?.items.length ?? 0);
+
   const overview = overviewQuery.data;
   const graph = graphQuery.data;
   const catalogue = sourceCatalogQuery.data?.items || [];
   const sourceItems = sourceSearchQuery.data?.items || [];
   const activeSource = catalogue.find((item) => item.source_type === sourceType);
 
+  const resolveEdgeEnds = (edge: NonNullable<typeof graph>["edges"][number]) => {
+    const control = graph?.nodes.find((node) => node.id === edge.from);
+    const source = graph?.nodes.find((node) => node.id === edge.to);
+    return { control, source };
+  };
+
+  const controlFromEdge = (edgeFrom: string): AssuranceControl | undefined => {
+    const id = edgeFrom.startsWith("control:") ? edgeFrom.slice("control:".length) : edgeFrom;
+    return (controlsQuery.data?.items || []).find((control) => control.id === id);
+  };
+
   return (
-    <main className="qew-page" aria-label="Quality continuous assurance control centre">
+    <main className="qew-page" aria-label="Continuous assurance">
       <header className="qew-header">
         <div className="qew-header__identity">
           <p><ShieldCheck size={16} /> Continuous assurance</p>
-          <h1>Quality Control Centre</h1>
-          <span>Live control health across audits, CAPA, documents, competence, suppliers, calibration, risk, change and authority commitments.</span>
+          <h1>Controls, evidence and readiness</h1>
+          <span>Versioned controls linked to authoritative tenant evidence.</span>
         </div>
         <div className="qew-header__actions">
           <span className="qew-freshness"><Activity size={14} /> {overview ? `Updated ${formatDateTime(overview.as_of)}` : "Loading live sources"}</span>
+          <Link to={controlRoomPath}>Back to Control Room</Link>
           <button type="button" onClick={() => void invalidateAssurance()}><RefreshCw size={16} /> Refresh</button>
-          <button type="button" className="is-primary" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`)}><Plus size={16} /> Schedule audit</button>
         </div>
       </header>
 
-      <nav className="qew-tabs" aria-label="Quality Control Centre views">
+      <nav className="qew-tabs" aria-label="Continuous assurance views">
         <button type="button" className={view === "readiness" ? "is-active" : ""} onClick={() => setView("readiness")}><Activity size={16} /> Readiness</button>
         <button type="button" className={view === "controls" ? "is-active" : ""} onClick={() => setView("controls")}><Target size={16} /> Controls</button>
-        <button type="button" className={view === "evidence" ? "is-active" : ""} onClick={() => setView("evidence")}><GitBranch size={16} /> Evidence & events</button>
+        <button type="button" className={view === "evidence" ? "is-active" : ""} onClick={() => setView("evidence")}><GitBranch size={16} /> Evidence</button>
         <button type="button" className={view === "intelligence" ? "is-active" : ""} onClick={() => setView("intelligence")}><BrainCircuit size={16} /> Intelligence</button>
       </nav>
 
@@ -542,7 +624,12 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
             ? <button type="button" onClick={() => openDrawer("test", control)}><TestTube2 size={14} /> Test</button>
             : <span className="qew-control-table__test-guard"><LockKeyhole size={13} /> Approve before testing</span>}
                     {control.approval_status === "DRAFT" || control.approval_status === "REJECTED" ? <button type="button" onClick={() => approvalMutation.mutate({ control, status: "PENDING_APPROVAL" })}>Submit</button> : null}
-                    {control.approval_status === "PENDING_APPROVAL" ? <button type="button" className="is-primary" onClick={() => approvalMutation.mutate({ control, status: "APPROVED" })}><Check size={14} /> Approve</button> : null}
+                    {control.approval_status === "PENDING_APPROVAL" ? (
+                      <>
+                        <button type="button" className="is-primary" onClick={() => approvalMutation.mutate({ control, status: "APPROVED" })}><Check size={14} /> Approve</button>
+                        <button type="button" onClick={() => approvalMutation.mutate({ control, status: "REJECTED" })}>Reject</button>
+                      </>
+                    ) : null}
                   </> : null}
                 </div>
               </article>
@@ -554,54 +641,255 @@ const QualityExcellenceCockpit: React.FC<{ amoCode: string }> = ({ amoCode }) =>
       {view === "evidence" ? (
         <section className="qew-evidence">
           <div className="qew-section-heading">
-            <div><p>Evidence provenance</p><h2>Validated evidence graph</h2><span>Every relationship resolves to an authoritative tenant record and refreshes when that source changes.</span></div>
-            {canManage ? <button type="button" className="is-primary" onClick={() => reconcileMutation.mutate()} disabled={reconcileMutation.isPending}><RefreshCw size={15} className={reconcileMutation.isPending ? "is-spinning" : ""} /> Reconcile now</button> : null}
-          </div>
-          <div className="qew-summary-strip">
-            <article><Target size={18} /><span><strong>{graph?.summary.controls || 0}</strong><small>Controls</small></span></article>
-            <article><Link2 size={18} /><span><strong>{graph?.summary.relationships || 0}</strong><small>Relationships</small></span></article>
-            <article><BadgeCheck size={18} /><span><strong>{graph?.summary.verified_relationships || 0}</strong><small>Verified</small></span></article>
-            <article><ShieldAlert size={18} /><span><strong>{graph?.summary.invalid_relationships || 0}</strong><small>Invalid</small></span></article>
-            <article><AlertTriangle size={18} /><span><strong>{graph?.summary.controls_without_evidence || 0}</strong><small>Unsupported controls</small></span></article>
+            <div>
+              <p>Evidence review</p>
+              <h2>Records awaiting decision</h2>
+              <span>Verify linked sources, clear pending control approvals, and fix broken evidence — without hunting through catalogues.</span>
+            </div>
+            {canManage ? (
+              <button type="button" onClick={() => reconcileMutation.mutate()} disabled={reconcileMutation.isPending}>
+                <RefreshCw size={15} className={reconcileMutation.isPending ? "is-spinning" : ""} /> Reconcile sources
+              </button>
+            ) : null}
           </div>
 
-          <section className="qew-panel">
-            <header><div><p>Connected sources</p><h2>Authoritative evidence catalogue</h2></div><span>{catalogue.filter((item) => item.available).length}/{catalogue.length} available</span></header>
-            <div className="qew-source-catalogue">
-              {catalogue.map((item) => <article key={item.source_type} className={item.available ? "" : "is-unavailable"}><span>{item.label}</span><strong>{item.source_type.replaceAll("_", " ")}</strong><small>{item.description}</small><em>{item.available ? "Connected" : "Source unavailable"}</em></article>)}
+          <div className="qew-summary-strip qew-summary-strip--compact" aria-label="Evidence posture">
+            <article className={reviewQueueCount ? "is-attention" : ""}>
+              <ClipboardCheck size={18} />
+              <span><strong>{reviewQueueCount}</strong><small>Awaiting review</small></span>
+            </article>
+            <article>
+              <BadgeCheck size={18} />
+              <span><strong>{graph?.summary.verified_relationships || 0}</strong><small>Verified</small></span>
+            </article>
+            <article>
+              <ShieldAlert size={18} />
+              <span><strong>{graph?.summary.invalid_relationships || 0}</strong><small>Invalid</small></span>
+            </article>
+          </div>
+
+          <section className="qew-panel qew-review-queue" aria-label="Records awaiting review">
+            <header>
+              <div>
+                <p>Decision queue</p>
+                <h2>{reviewQueueCount ? `${reviewQueueCount} item${reviewQueueCount === 1 ? "" : "s"} need a decision` : "Nothing waiting for review"}</h2>
+              </div>
+              {reviewQueueCount ? <FileCheck2 size={20} /> : <CheckCircle2 size={20} />}
+            </header>
+
+            {graphQuery.isLoading || controlsQuery.isLoading ? (
+              <div className="qew-loading"><LoaderCircle size={18} className="is-spinning" /> Loading review queue…</div>
+            ) : null}
+
+            <div className="qew-review-queue__list">
+              {pendingControlApprovals.map((control) => (
+                <article key={`approval:${control.id}`} className="qew-review-queue__item">
+                  <div>
+                    <small>Control approval</small>
+                    <strong>{control.control_code} · {control.title}</strong>
+                    <span>{control.framework}{control.clause_reference ? ` · ${control.clause_reference}` : ""} · {control.verified_evidence_count}/{control.evidence_count} verified evidence</span>
+                  </div>
+                  <div className="qew-review-queue__actions">
+                    <StatusBadge status={control.approval_status || "PENDING_APPROVAL"} />
+                    {canManage ? (
+                      <>
+                        <button type="button" className="is-primary" disabled={approvalMutation.isPending} onClick={() => approvalMutation.mutate({ control, status: "APPROVED" })}>
+                          <Check size={14} /> Approve
+                        </button>
+                        <button type="button" disabled={approvalMutation.isPending} onClick={() => approvalMutation.mutate({ control, status: "REJECTED" })}>Reject</button>
+                        <button type="button" onClick={() => openDrawer("evidence", control)}><Link2 size={14} /> Evidence</button>
+                      </>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+
+              {evidenceAwaitingReview.map((edge) => {
+                const { control, source } = resolveEdgeEnds(edge);
+                const linkedControl = controlFromEdge(edge.from);
+                return (
+                  <article key={`linked:${edge.id}`} className="qew-review-queue__item">
+                    <div>
+                      <small>Evidence verification</small>
+                      <strong>{source?.label || edge.to}</strong>
+                      <span>{control?.label || edge.from} · {edge.relationship.replaceAll("_", " ")}</span>
+                    </div>
+                    <div className="qew-review-queue__actions">
+                      <StatusBadge status={edge.status} />
+                      {edge.source_route ? <button type="button" onClick={() => navigate(edge.source_route || "")}><ExternalLink size={13} /> Open source</button> : null}
+                      {canManage ? (
+                        <>
+                          <button type="button" className="is-primary" disabled={evidenceDecisionMutation.isPending} onClick={() => evidenceDecisionMutation.mutate({ evidenceId: edge.id, status: "VERIFIED" })}>
+                            <Check size={14} /> Verify
+                          </button>
+                          <button type="button" disabled={evidenceDecisionMutation.isPending} onClick={() => evidenceDecisionMutation.mutate({ evidenceId: edge.id, status: "REJECTED" })}>Reject</button>
+                          {linkedControl ? <button type="button" onClick={() => openDrawer("evidence", linkedControl)}><Link2 size={14} /> Relink</button> : null}
+                        </>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+
+              {evidenceNeedingAttention.map((edge) => {
+                const { control, source } = resolveEdgeEnds(edge);
+                const linkedControl = controlFromEdge(edge.from);
+                return (
+                  <article key={`broken:${edge.id}`} className="qew-review-queue__item is-attention">
+                    <div>
+                      <small>Broken evidence</small>
+                      <strong>{source?.label || edge.to}</strong>
+                      <span>{control?.label || edge.from} · {edge.invalidation_reason || edge.status.replaceAll("_", " ")}</span>
+                    </div>
+                    <div className="qew-review-queue__actions">
+                      <StatusBadge status={edge.status} />
+                      {edge.source_route ? <button type="button" onClick={() => navigate(edge.source_route || "")}><ExternalLink size={13} /> Open source</button> : null}
+                      {canManage && linkedControl ? <button type="button" className="is-primary" onClick={() => openDrawer("evidence", linkedControl)}><Link2 size={14} /> Relink</button> : null}
+                    </div>
+                  </article>
+                );
+              })}
+
+              {unsupportedControlNodes.map((node) => {
+                const linkedControl = controlFromEdge(node.id);
+                return (
+                  <article key={`unsupported:${node.id}`} className="qew-review-queue__item">
+                    <div>
+                      <small>Unsupported control</small>
+                      <strong>{node.label}</strong>
+                      <span>No authoritative evidence linked yet</span>
+                    </div>
+                    <div className="qew-review-queue__actions">
+                      <StatusBadge status="UNSUPPORTED" />
+                      {canManage && linkedControl ? (
+                        <button type="button" className="is-primary" onClick={() => openDrawer("evidence", linkedControl)}><Link2 size={14} /> Link evidence</button>
+                      ) : (
+                        <button type="button" onClick={() => setView("controls")}>Open controls</button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+
+              {!graphQuery.isLoading && !controlsQuery.isLoading && !reviewQueueCount ? (
+                <div className="qew-empty">
+                  <CheckCircle2 size={24} />
+                  <strong>Review queue clear</strong>
+                  <span>Linked evidence is verified and no controls are waiting for approval.</span>
+                </div>
+              ) : null}
             </div>
           </section>
 
-          <div className="qew-two-column qew-two-column--evidence">
-            <section className="qew-panel">
-              <header><div><p>Relationships</p><h2>Control-to-source traceability</h2></div><GitBranch size={20} /></header>
-              {graphQuery.isLoading ? <div className="qew-loading"><LoaderCircle size={18} className="is-spinning" /> Loading evidence relationships…</div> : null}
-              <div className="qew-evidence-list">
-                {graph?.edges.map((edge) => {
-                  const control = graph.nodes.find((node) => node.id === edge.from);
-                  const source = graph.nodes.find((node) => node.id === edge.to);
-                  return (
-                    <article key={edge.id}>
-                      <div><span>{control?.label || edge.from}</span><strong>{edge.relationship.replaceAll("_", " ")}</strong><span>{source?.label || edge.to}</span></div>
-                      <div><StatusBadge status={edge.status} /><small>Synced {formatDateTime(edge.last_synced_at)}</small>{edge.source_route ? <button type="button" onClick={() => navigate(edge.source_route || "")}><ExternalLink size={13} /> Open source</button> : null}</div>
-                      {edge.invalidation_reason ? <p><AlertTriangle size={14} /> {edge.invalidation_reason}</p> : null}
-                    </article>
-                  );
-                })}
-                {!graphQuery.isLoading && !graph?.edges.length ? <div className="qew-empty"><Link2 size={24} /><strong>No evidence relationships</strong><span>Open a control and select an authoritative source record.</span></div> : null}
+          {pendingSourceChangeCount > 0 ? (
+            <section className="qew-sync-banner" aria-label="Pending source changes">
+              <div className="qew-sync-banner__copy">
+                <p>Source sync</p>
+                <strong>
+                  {pendingSourceChangeCount} source change{pendingSourceChangeCount === 1 ? "" : "s"} waiting to apply
+                </strong>
+                <span>Linked evidence stays stale until these source updates are applied in one batch.</span>
+                <ul className="qew-sync-banner__list">
+                  {pendingSourceChanges.map((event) => {
+                    const action = event.event_type === "INSERT" ? "Added" : event.event_type === "DELETE" ? "Removed" : "Updated";
+                    const detail = event.processing_error
+                      || (event.changed_fields.length ? event.changed_fields.slice(0, 3).join(", ") : "record lifecycle");
+                    return (
+                      <li key={event.id}>
+                        <span>{action}</span>
+                        <strong>{labelFromKey(event.source_type)}</strong>
+                        <small>{detail}</small>
+                        <time dateTime={event.occurred_at || undefined}>{formatDateTime(event.occurred_at)}</time>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {pendingSourceChangeCount > pendingSourceChanges.length ? (
+                  <small className="qew-sync-banner__more">
+                    +{pendingSourceChangeCount - pendingSourceChanges.length} more included in the batch
+                  </small>
+                ) : null}
               </div>
+              {canManage ? (
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={reconcileMutation.isPending}
+                  onClick={() => reconcileMutation.mutate()}
+                >
+                  <RefreshCw size={15} className={reconcileMutation.isPending ? "is-spinning" : ""} />
+                  Apply all source changes
+                </button>
+              ) : (
+                <span className="qew-readonly"><LockKeyhole size={13} /> Waiting for Quality management</span>
+              )}
             </section>
+          ) : null}
 
-            <section className="qew-panel">
-              <header><div><p>Assurance event stream</p><h2>Recent authoritative changes</h2></div><Activity size={20} /></header>
-              <div className="qew-event-list">
-                {eventsQuery.data?.items.slice(0, 20).map((event) => (
-                  <article key={event.id}><span className={`qew-event-type qew-event-type--${event.event_type.toLowerCase()}`}>{event.event_type}</span><div><strong>{event.source_type.replaceAll("_", " ")}</strong><small>{event.source_id} · {event.changed_fields.length ? event.changed_fields.join(", ") : "record lifecycle"}</small></div><StatusBadge status={event.processing_status} /><time>{formatDateTime(event.occurred_at)}</time></article>
-                ))}
-                {!eventsQuery.isLoading && !eventsQuery.data?.items.length ? <div className="qew-empty"><Activity size={23} /><strong>No assurance events yet</strong><span>Changes to connected QMS records will appear here automatically.</span></div> : null}
-              </div>
-            </section>
-          </div>
+          <details className="qew-disclosure" open={!reviewQueueCount && Boolean(graph?.edges.length)}>
+            <summary>
+              <GitBranch size={16} /> All evidence relationships
+              <span>{graph?.edges.length || 0}</span>
+            </summary>
+            {graphQuery.isLoading ? <div className="qew-loading"><LoaderCircle size={18} className="is-spinning" /> Loading evidence relationships…</div> : null}
+            <div className="qew-evidence-list">
+              {graph?.edges.map((edge) => {
+                const { control, source } = resolveEdgeEnds(edge);
+                const linkedControl = controlFromEdge(edge.from);
+                const needsDecision = edge.status === "LINKED";
+                return (
+                  <article key={edge.id}>
+                    <div>
+                      <span>{control?.label || edge.from}</span>
+                      <strong>{edge.relationship.replaceAll("_", " ")}</strong>
+                      <span>{source?.label || edge.to}</span>
+                    </div>
+                    <div>
+                      <StatusBadge status={edge.status} />
+                      <small>Synced {formatDateTime(edge.last_synced_at)}</small>
+                      {edge.source_route ? <button type="button" onClick={() => navigate(edge.source_route || "")}><ExternalLink size={13} /> Open source</button> : null}
+                      {canManage && needsDecision ? (
+                        <>
+                          <button type="button" className="is-primary" disabled={evidenceDecisionMutation.isPending} onClick={() => evidenceDecisionMutation.mutate({ evidenceId: edge.id, status: "VERIFIED" })}>
+                            <Check size={13} /> Verify
+                          </button>
+                          <button type="button" disabled={evidenceDecisionMutation.isPending} onClick={() => evidenceDecisionMutation.mutate({ evidenceId: edge.id, status: "REJECTED" })}>Reject</button>
+                        </>
+                      ) : null}
+                      {canManage && (edge.status === "EXPIRED" || edge.status === "REJECTED") && linkedControl ? (
+                        <button type="button" onClick={() => openDrawer("evidence", linkedControl)}><Link2 size={13} /> Relink</button>
+                      ) : null}
+                    </div>
+                    {edge.invalidation_reason ? <p><AlertTriangle size={14} /> {edge.invalidation_reason}</p> : null}
+                  </article>
+                );
+              })}
+              {!graphQuery.isLoading && !graph?.edges.length ? (
+                <div className="qew-empty">
+                  <Link2 size={24} />
+                  <strong>No evidence relationships</strong>
+                  <span>Open a control and select an authoritative source record.</span>
+                </div>
+              ) : null}
+            </div>
+          </details>
+
+          <details className="qew-disclosure">
+            <summary>
+              <GitBranch size={16} /> Connected source types
+              <span>{catalogue.filter((item) => item.available).length}/{catalogue.length}</span>
+            </summary>
+            <div className="qew-source-catalogue">
+              {catalogue.map((item) => (
+                <article key={item.source_type} className={item.available ? "" : "is-unavailable"}>
+                  <span>{item.label}</span>
+                  <strong>{item.source_type.replaceAll("_", " ")}</strong>
+                  <small>{item.description}</small>
+                  <em>{item.available ? "Connected" : "Source unavailable"}</em>
+                </article>
+              ))}
+            </div>
+          </details>
         </section>
       ) : null}
 

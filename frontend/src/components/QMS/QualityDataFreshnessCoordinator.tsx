@@ -6,9 +6,9 @@ import { auditSessionStageFromPath } from "../../features/qms/auditSession/audit
 import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
 
-const ACTIVE_REFRESH_INTERVAL_MS = 45_000;
-const FOCUS_REFRESH_THRESHOLD_MS = 15_000;
-const MUTATION_REFRESH_DELAYS_MS = [1_200, 4_500] as const;
+const ACTIVE_REFRESH_INTERVAL_MS = 120_000;
+const FOCUS_REFRESH_THRESHOLD_MS = 30_000;
+const MUTATION_REFRESH_DELAYS_MS = [1_800, 6_000] as const;
 const MUTATION_ACTION_PATTERN = /\b(save|create|update|submit|approve|issue|run|schedule|reschedule|delete|restore|close|reopen|verify|complete|publish|assign)\b/i;
 
 function isQualityPath(pathname: string): boolean {
@@ -176,7 +176,6 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
           if (eventAuditId && !currentMarkers.has(eventAuditId)) return;
           void invalidateOccurrence(currentMarkers);
         }
-        window.dispatchEvent(new CustomEvent("amo:qms:realtime", { detail: event.data }));
       },
     });
     return () => {
@@ -188,7 +187,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
   useEffect(() => {
     if (!qualityActive) return;
 
-    const refresh = (force = false, includeAllActive = false) => {
+    const refresh = (force = false, includeAllActive = false, clickCanonical = false) => {
       const now = Date.now();
       if (!force && now - lastRefreshAt.current < FOCUS_REFRESH_THRESHOLD_MS) return;
       lastRefreshAt.current = now;
@@ -201,6 +200,10 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
         void invalidateActiveQuality();
       }
 
+      // Only click the page Refresh control for explicit user/realtime refresh.
+      // Interval and focus paths already invalidate React Query; a second click
+      // re-issues the same fan-out and exhausted the API DB pool on page open.
+      if (!clickCanonical) return;
       window.requestAnimationFrame(() => {
         const button = canonicalRefreshButton();
         if (!button || button.disabled || button.getAttribute("aria-busy") === "true") return;
@@ -236,7 +239,7 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       if (document.visibilityState === "visible") refresh(false);
     };
     const onExplicitRefresh = () => {
-      refresh(true, !auditOccurrenceActive);
+      refresh(true, !auditOccurrenceActive, true);
       const amoCode = qualityAmoCode(location.pathname);
       if (!amoCode || auditOccurrenceActive) return;
       void apiRequest<Record<string, unknown>>(qmsPath(amoCode, "/dashboard-lite"), {
@@ -253,12 +256,14 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       MUTATION_REFRESH_DELAYS_MS.forEach((delay) => scheduleRefresh(delay));
     };
 
+    // Defer the first background refresh so the page's own mount queries finish
+    // before we invalidate them again.
     const initialTimer = window.setTimeout(() => {
       if (navigator.onLine) void replayAndRefresh();
       else refresh(true);
-    }, 900);
+    }, 2_500);
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible" && navigator.onLine) refresh(true);
+      if (document.visibilityState === "visible" && navigator.onLine) refresh(false);
     }, ACTIVE_REFRESH_INTERVAL_MS);
 
     window.addEventListener("focus", onFocus);

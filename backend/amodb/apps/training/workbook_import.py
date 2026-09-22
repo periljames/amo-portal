@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from sqlalchemy import func, or_
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, lazyload
 
 from ...database import SessionLocal
 from ...user_id import generate_user_id
@@ -59,8 +59,9 @@ def _positive_int_env(name: str, default: int) -> int:
         return default
 
 
-PREVIEW_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_PREVIEW_PROGRESS_BATCH", 40)
-COMMIT_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_COMMIT_PROGRESS_BATCH", 25)
+PREVIEW_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_PREVIEW_PROGRESS_BATCH", 200)
+COMMIT_PROGRESS_BATCH = _positive_int_env("TRAINING_WORKBOOK_COMMIT_PROGRESS_BATCH", 250)
+COMMIT_PROGRESS_MIN_INTERVAL_S = float(os.getenv("TRAINING_WORKBOOK_COMMIT_PROGRESS_MIN_INTERVAL_S", "2.5") or "2.5")
 LICENCE_CATEGORY_MAX_CHARS = _positive_int_env("TRAINING_LICENCE_CATEGORY_MAX_CHARS", 32767)
 
 
@@ -234,15 +235,26 @@ def _set_job_progress(
     if processed_delta:
         job.processed_rows += processed_delta
     job.updated_at = utcnow()
+    # Keep row validation in-memory between publish checkpoints. Flushing every
+    # row forced SQLAlchemy to re-emit the growing pending row set and dominated
+    # preview time on ~2k-row Training sheets.
+    should_publish = (
+        processed_delta <= 0
+        or job.processed_rows % PREVIEW_PROGRESS_BATCH == 0
+        or job.processed_rows >= job.total_rows
+    )
+    if not should_publish:
+        return
     db.add(job)
-    should_publish = job.processed_rows % PREVIEW_PROGRESS_BATCH == 0 or job.processed_rows >= job.total_rows
-    if should_publish:
-        db.commit()
-        db.refresh(job)
-        if job.cancel_requested:
-            raise RuntimeError("IMPORT_CANCELLED")
-    else:
-        db.flush()
+    db.commit()
+    cancelled = (
+        db.query(TrainingWorkbookImportJob.cancel_requested)
+        .filter(TrainingWorkbookImportJob.id == job.id)
+        .scalar()
+    )
+    if cancelled:
+        job.cancel_requested = True
+        raise RuntimeError("IMPORT_CANCELLED")
 
 
 def _row(
@@ -343,6 +355,22 @@ def _person_payload(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _group_code_from_category(category: Optional[str]) -> Optional[str]:
+    cleaned = clean(category)
+    if not cleaned:
+        return None
+    code = re.sub(r"[^A-Za-z0-9]+", "_", cleaned).strip("_").upper()
+    return code[:64] or None
+
+
+def _course_kind_from_status(status: str) -> training_models.TrainingKind:
+    if status == "Initial":
+        return training_models.TrainingKind.INITIAL
+    if status == "Recurrent":
+        return training_models.TrainingKind.RECURRENT
+    return training_models.TrainingKind.OTHER
+
+
 def _course_payload(raw: dict[str, Any], *, default_frequency_months: Optional[int] = None) -> dict[str, Any]:
     course_id = upper(raw.get("CourseID"))
     name = clean(raw.get("CourseName"))
@@ -359,12 +387,22 @@ def _course_payload(raw: dict[str, Any], *, default_frequency_months: Optional[i
         months = int(float(frequency))
         if months < 0:
             raise ValueError("FrequencyMonths cannot be negative")
+    category = clean(raw.get("Category"))
+    prerequisite = upper(
+        raw.get("PrerequisiteCourseID")
+        or raw.get("Prerequisite")
+        or raw.get("InitialCourseID")
+        or raw.get("Initial CourseID")
+    )
     return {
         "course_id": course_id,
         "course_name": name,
         "frequency_months": months,
         "status": canonical,
-        "category_raw": clean(raw.get("Category")),
+        "kind": _course_kind_from_status(canonical).value,
+        "category_raw": category,
+        "group_code": _group_code_from_category(category),
+        "prerequisite_course_id": prerequisite or None,
         "is_mandatory": bool_value(raw.get("Mandatory")),
         "scope": clean(raw.get("Scope")),
         "regulatory_reference": clean(raw.get("Reference")),
@@ -403,8 +441,8 @@ def _role_from_position(position: Optional[str]) -> account_models.AccountRole:
 
 
 def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]]) -> None:
-    profiles = db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all()
-    users = db.query(account_models.User).filter(account_models.User.amo_id == job.amo_id).all()
+    profiles = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all()
+    users = db.query(account_models.User).options(lazyload("*")).filter(account_models.User.amo_id == job.amo_id).all()
     by_person = {upper(item.person_id): item for item in profiles}
     by_profile_email = {(item.email or "").lower(): item for item in profiles if item.email}
     by_staff = {upper(item.staff_code): item for item in users}
@@ -499,7 +537,7 @@ def _preview_people(db: Session, job: TrainingWorkbookImportJob, sheet: Training
 
 
 def _preview_courses(db: Session, job: TrainingWorkbookImportJob, sheet: TrainingWorkbookImportSheet, rows: list[dict[str, Any]], *, default_frequency_months: Optional[int] = None) -> None:
-    existing = {upper(item.course_id): item for item in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all()}
+    existing = {upper(item.course_id): item for item in db.query(training_models.TrainingCourse).options(lazyload("*")).filter(training_models.TrainingCourse.amo_id == job.amo_id).all()}
     seen: set[str] = set()
     mapping = {"course_name": "course_name", "frequency_months": "frequency_months", "status": "status", "category_raw": "category_raw", "is_mandatory": "is_mandatory", "scope": "scope", "regulatory_reference": "regulatory_reference", "is_active": "is_active"}
     for raw in rows:
@@ -529,22 +567,20 @@ def _preview_training(
     workbook_people: set[str],
     workbook_courses: set[str],
 ) -> None:
-    users = db.query(account_models.User).filter(
+    users = db.query(account_models.User).options(lazyload("*")).filter(
         account_models.User.amo_id == job.amo_id,
         account_models.User.is_system_account.is_(False),
     ).all()
-    courses = db.query(training_models.TrainingCourse).filter(
+    courses = db.query(training_models.TrainingCourse).options(lazyload("*")).filter(
         training_models.TrainingCourse.amo_id == job.amo_id,
     ).all()
     by_staff, by_user_id, by_name = records_import._index_users(users)
     by_code, by_course_name = records_import._index_courses(courses)
-    existing = {
-        (str(item.user_id), str(item.course_id), item.completion_date): item
-        for item in db.query(training_models.TrainingRecord)
-        .filter(training_models.TrainingRecord.amo_id == job.amo_id)
-        .all()
-    }
+
+    staged: list[tuple[dict[str, Any], Any, Any, Any, Any]] = []
     seen: set[tuple[str, str, date]] = set()
+    affected_pairs: set[tuple[str, str]] = set()
+
     for raw in rows:
         row_number = int(raw["row_number"])
         try:
@@ -584,6 +620,7 @@ def _preview_training(
                     issue_message="PersonID is not present in the People sheet or the AMO personnel register.",
                 )
                 _counter(sheet, "SKIP", failed=True)
+                staged.append((raw, item, None, None, None))
             elif course is None and not course_resolves_from_workbook:
                 item = _row(
                     job_id=job.id,
@@ -599,6 +636,7 @@ def _preview_training(
                     issue_message="CourseID is not present in the Courses sheet or the AMO course catalogue.",
                 )
                 _counter(sheet, "SKIP", failed=True)
+                staged.append((raw, item, None, None, None))
             elif person_resolves_from_workbook or course_resolves_from_workbook:
                 dependencies = []
                 if person_resolves_from_workbook:
@@ -619,23 +657,12 @@ def _preview_training(
                     issue_message=f"Will resolve after accepted {' and '.join(dependencies)} rows are committed.",
                 )
                 _counter(sheet, "CREATE")
+                staged.append((raw, item, None, None, None))
             else:
-                current = existing.get((str(user.id), str(course.id), parsed.completion_date))
-                action = "CREATE" if current is None else "UPDATE"
-                item = _row(
-                    job_id=job.id,
-                    sheet="Training",
-                    row_number=row_number,
-                    entity_type="TRAINING_RECORD",
-                    source_key=source_key,
-                    label=f"{getattr(user, 'full_name', parsed.person_id)} · {course.course_name}",
-                    action=action,
-                    payload=payload,
-                )
-                _counter(sheet, action)
-            db.add(item)
+                affected_pairs.add((str(user.id), str(course.id)))
+                staged.append((raw, None, user, course, parsed))
         except Exception as exc:
-            db.add(_row(
+            item = _row(
                 job_id=job.id,
                 sheet="Training",
                 row_number=row_number,
@@ -647,14 +674,65 @@ def _preview_training(
                 payload=raw,
                 issue_code="INVALID_TRAINING_RECORD",
                 issue_message=str(exc),
-            ))
+            )
             _counter(sheet, "SKIP", failed=True)
+            staged.append((raw, item, None, None, None))
+
+    existing: dict[tuple[str, str, date], Any] = {}
+    if affected_pairs:
+        affected_user_ids = sorted({user_id for user_id, _ in affected_pairs})
+        affected_course_ids = sorted({course_id for _, course_id in affected_pairs})
+        for item in (
+            db.query(training_models.TrainingRecord).options(lazyload("*"))
+            .filter(
+                training_models.TrainingRecord.amo_id == job.amo_id,
+                training_models.TrainingRecord.user_id.in_(affected_user_ids),
+                training_models.TrainingRecord.course_id.in_(affected_course_ids),
+            )
+            .all()
+        ):
+            pair = (str(item.user_id), str(item.course_id))
+            if pair not in affected_pairs:
+                continue
+            existing[(str(item.user_id), str(item.course_id), item.completion_date)] = item
+
+    for raw, prepared, user, course, parsed in staged:
+        row_number = int(raw["row_number"])
+        if prepared is not None:
+            item = prepared
+        else:
+            source_key = f"{parsed.person_id}:{parsed.course_id}:{parsed.completion_date.isoformat()}"
+            payload = {
+                "RecordID": parsed.legacy_record_id,
+                "PersonID": parsed.person_id,
+                "PersonName": parsed.person_name,
+                "CourseID": parsed.course_id,
+                "CourseName": parsed.course_name,
+                "LastTrainingDate": parsed.completion_date,
+                "NextDueDate": parsed.next_due_date,
+                "DaysToDue": parsed.days_to_due,
+                "Status": parsed.source_status,
+            }
+            current = existing.get((str(user.id), str(course.id), parsed.completion_date))
+            action = "CREATE" if current is None else "UPDATE"
+            item = _row(
+                job_id=job.id,
+                sheet="Training",
+                row_number=row_number,
+                entity_type="TRAINING_RECORD",
+                source_key=source_key,
+                label=f"{getattr(user, 'full_name', parsed.person_id)} · {course.course_name}",
+                action=action,
+                payload=payload,
+            )
+            _counter(sheet, action)
+        db.add(item)
         _set_job_progress(
             db,
             job,
             stage="MATCHING",
             sheet="Training",
-            label=f"{clean(raw.get('PersonName')) or clean(raw.get('PersonID')) or 'Training row'} · {clean(raw.get('CourseID')) or ''}",
+            label=item.display_label or f"Training row {row_number}",
             processed_delta=1,
         )
 
@@ -804,9 +882,9 @@ def process_workbook_preview(job_id: str) -> None:
         workbook_courses = {upper(item.get("CourseID")) for item in course_rows if upper(item.get("CourseID"))}
         workbook_people = {upper(item.get("PersonID")) for item in people_rows if upper(item.get("PersonID"))}
         known_courses = set(workbook_courses)
-        known_courses.update(upper(item.course_id) for item in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == job.amo_id).all())
+        known_courses.update(upper(item.course_id) for item in db.query(training_models.TrainingCourse).options(lazyload("*")).filter(training_models.TrainingCourse.amo_id == job.amo_id).all())
         known_people = set(workbook_people)
-        known_people.update(upper(item.person_id) for item in db.query(account_models.PersonnelProfile).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all())
+        known_people.update(upper(item.person_id) for item in db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(account_models.PersonnelProfile.amo_id == job.amo_id).all())
         role_rows = rows_by_sheet.get("tblRoleGroups", [])
         known_groups = {upper(item.get("RoleGroup")) for item in role_rows if upper(item.get("RoleGroup"))}
         known_groups.update(upper(item.code) for item in db.query(TrainingRoleGroup).filter(TrainingRoleGroup.amo_id == job.amo_id).all())
@@ -889,21 +967,33 @@ def _upsert_course(
     actor_user_id: Optional[str],
     *,
     courses_by_code: Optional[dict[str, training_models.TrainingCourse]] = None,
+    flush: bool = True,
 ) -> training_models.TrainingCourse:
     code = upper(payload["course_id"])
     course = courses_by_code.get(code) if courses_by_code is not None else None
     if course is None and courses_by_code is None:
-        course = db.query(training_models.TrainingCourse).filter(
+        course = db.query(training_models.TrainingCourse).options(lazyload("*")).filter(
             training_models.TrainingCourse.amo_id == amo_id,
             training_models.TrainingCourse.course_id == payload["course_id"],
         ).first()
     if course is None:
-        course = training_models.TrainingCourse(amo_id=amo_id, course_id=payload["course_id"], created_by_user_id=actor_user_id)
+        course = training_models.TrainingCourse(id=generate_user_id(), amo_id=amo_id, course_id=payload["course_id"], created_by_user_id=actor_user_id)
         db.add(course)
     course.course_name = payload["course_name"]
     course.frequency_months = payload.get("frequency_months")
     course.status = payload.get("status") or "One_Off"
+    kind_value = str(payload.get("kind") or _course_kind_from_status(str(course.status)).value)
+    try:
+        course.kind = training_models.TrainingKind(kind_value)
+    except ValueError:
+        course.kind = _course_kind_from_status(str(course.status))
     course.category_raw = payload.get("category_raw")
+    group_code = payload.get("group_code") or _group_code_from_category(payload.get("category_raw"))
+    if group_code:
+        course.group_code = group_code
+    prerequisite = upper(payload.get("prerequisite_course_id"))
+    if prerequisite:
+        course.prerequisite_course_id = prerequisite
     course.is_mandatory = bool(payload.get("is_mandatory"))
     course.scope = payload.get("scope")
     course.regulatory_reference = payload.get("regulatory_reference")
@@ -912,18 +1002,67 @@ def _upsert_course(
     )
     course.is_active = payload.get("is_active", True)
     course.updated_by_user_id = actor_user_id
-    db.flush()
+    if flush:
+        db.flush()
     if courses_by_code is not None:
         courses_by_code[code] = course
     return course
 
 
+def _reconcile_imported_course_links(courses_by_code: dict[str, training_models.TrainingCourse]) -> None:
+    """Write explicit Initial↔Recurrent links from Category / declared prerequisites.
+
+    Does not infer families from CourseID suffixes. A Recurrent course receives a
+    prerequisite only when its Category/group contains exactly one Initial course.
+    """
+
+    by_group: dict[str, list[training_models.TrainingCourse]] = {}
+    for course in courses_by_code.values():
+        status = str(course.status or "").strip()
+        if status == "Initial":
+            course.kind = training_models.TrainingKind.INITIAL
+        elif status == "Recurrent":
+            if course.kind not in {
+                training_models.TrainingKind.RECURRENT,
+                training_models.TrainingKind.REFRESHER,
+                training_models.TrainingKind.CONTINUATION,
+            }:
+                course.kind = training_models.TrainingKind.RECURRENT
+        if not course.group_code and course.category_raw:
+            course.group_code = _group_code_from_category(course.category_raw)
+        group = str(course.group_code or "").strip().casefold()
+        if group:
+            by_group.setdefault(group, []).append(course)
+
+    for members in by_group.values():
+        initials = [
+            course for course in members
+            if course.kind == training_models.TrainingKind.INITIAL or str(course.status or "").strip() == "Initial"
+        ]
+        recurrents = [
+            course for course in members
+            if course.kind in {
+                training_models.TrainingKind.RECURRENT,
+                training_models.TrainingKind.REFRESHER,
+                training_models.TrainingKind.CONTINUATION,
+            } or str(course.status or "").strip() == "Recurrent"
+        ]
+        if len(initials) != 1:
+            continue
+        initial_code = str(initials[0].course_id or "").strip().upper()
+        if not initial_code:
+            continue
+        for recurrent in recurrents:
+            if not recurrent.prerequisite_course_id:
+                recurrent.prerequisite_course_id = initial_code
+
+
 def _build_personnel_commit_indexes(db: Session, amo_id: str) -> PersonnelCommitIndexes:
-    profiles = db.query(account_models.PersonnelProfile).filter(
+    profiles = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(
         account_models.PersonnelProfile.amo_id == amo_id,
     ).all()
-    users = db.query(account_models.User).filter(account_models.User.amo_id == amo_id).all()
-    departments = db.query(account_models.Department).filter(
+    users = db.query(account_models.User).options(lazyload("*")).filter(account_models.User.amo_id == amo_id).all()
+    departments = db.query(account_models.Department).options(lazyload("*")).filter(
         account_models.Department.amo_id == amo_id,
         account_models.Department.is_active.is_(True),
     ).all()
@@ -963,7 +1102,7 @@ def _department_id(
     normalized = value.strip().lower()
     if indexes is not None:
         return indexes.department_ids_by_token.get(normalized)
-    items = db.query(account_models.Department).filter(account_models.Department.amo_id == amo_id, account_models.Department.is_active.is_(True)).all()
+    items = db.query(account_models.Department).options(lazyload("*")).filter(account_models.Department.amo_id == amo_id, account_models.Department.is_active.is_(True)).all()
     for item in items:
         if str(item.code or "").strip().lower() == normalized or str(item.name or "").strip().lower() == normalized:
             return str(item.id)
@@ -1050,17 +1189,17 @@ def _upsert_person(
         profile_by_email = indexes.profiles_by_email.get(email_key) if email_key else None
         existing_staff_user = indexes.users_by_staff.get(person_id)
     else:
-        profile_by_person = db.query(account_models.PersonnelProfile).filter(
+        profile_by_person = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(
             account_models.PersonnelProfile.amo_id == job.amo_id,
             account_models.PersonnelProfile.person_id == person_id,
         ).first()
         profile_by_email = None
         if email_key:
-            profile_by_email = db.query(account_models.PersonnelProfile).filter(
+            profile_by_email = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(
                 account_models.PersonnelProfile.amo_id == job.amo_id,
                 func.lower(account_models.PersonnelProfile.email) == email_key,
             ).first()
-        existing_staff_user = db.query(account_models.User).filter(
+        existing_staff_user = db.query(account_models.User).options(lazyload("*")).filter(
             account_models.User.amo_id == job.amo_id,
             account_models.User.staff_code == person_id,
         ).first()
@@ -1068,6 +1207,7 @@ def _upsert_person(
     is_new = profile is None
     if profile is None:
         profile = account_models.PersonnelProfile(
+            id=generate_user_id(),
             amo_id=job.amo_id,
             person_id=person_id,
             first_name=payload["first_name"],
@@ -1135,7 +1275,7 @@ def _upsert_person(
         if indexes is not None:
             existing_email_user = indexes.users_by_email.get(selected_email_key)
         else:
-            existing_email_user = db.query(account_models.User).filter(
+            existing_email_user = db.query(account_models.User).options(lazyload("*")).filter(
                 account_models.User.amo_id == job.amo_id,
                 func.lower(account_models.User.email) == selected_email_key,
             ).first()
@@ -1275,15 +1415,26 @@ def _upsert_person(
     )
 
 
-def _progress_callback(job_id: str, base_processed: int, attempt_token: str) -> Callable[[int, int, str], None]:
+def _progress_callback(
+    progress_db: Session,
+    job_id: str,
+    base_processed: int,
+    attempt_token: str,
+) -> Callable[[int, int, str], None]:
     last_published = 0
+    last_published_at = perf_counter()
+    min_interval = max(0.5, COMMIT_PROGRESS_MIN_INTERVAL_S)
+    owns_session = False
 
     def callback(processed: int, total: int, label: str) -> None:
-        nonlocal last_published
-        if processed < total and processed - last_published < COMMIT_PROGRESS_BATCH:
+        nonlocal last_published, last_published_at
+        elapsed = perf_counter() - last_published_at
+        batch_ready = processed - last_published >= COMMIT_PROGRESS_BATCH
+        time_ready = elapsed >= min_interval
+        if processed < total and not (batch_ready or time_ready):
             return
         last_published = processed
-        progress_db = SessionLocal()
+        last_published_at = perf_counter()
         try:
             _commit_progress(
                 progress_db,
@@ -1294,8 +1445,15 @@ def _progress_callback(job_id: str, base_processed: int, attempt_token: str) -> 
                 "Training",
                 label,
             )
-        finally:
+        except Exception:
+            progress_db.rollback()
+            raise
+
+    def close() -> None:
+        if owns_session:
             progress_db.close()
+
+    callback.close = close  # type: ignore[attr-defined]
     return callback
 
 
@@ -1307,7 +1465,7 @@ def _materialize_mandatory_catalogue_requirements(db: Session, job: TrainingWork
     ).first()
     if existing:
         return
-    courses = db.query(training_models.TrainingCourse).filter(
+    courses = db.query(training_models.TrainingCourse).options(lazyload("*")).filter(
         training_models.TrainingCourse.amo_id == job.amo_id,
         training_models.TrainingCourse.is_active.is_(True),
         training_models.TrainingCourse.is_mandatory.is_(True),
@@ -1333,20 +1491,20 @@ def _refresh_identity_review_options(
     payload = dict(row.payload_json or {})
     person_id = upper(payload.get("person_id"))
     email = str(payload.get("email") or "").strip().lower()
-    profile_by_person = db.query(account_models.PersonnelProfile).filter(
+    profile_by_person = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(
         account_models.PersonnelProfile.amo_id == job.amo_id,
         account_models.PersonnelProfile.person_id == person_id,
     ).first()
     profile_by_email = None
     if email:
-        profile_by_email = db.query(account_models.PersonnelProfile).filter(
+        profile_by_email = db.query(account_models.PersonnelProfile).options(lazyload("*")).filter(
             account_models.PersonnelProfile.amo_id == job.amo_id,
             func.lower(account_models.PersonnelProfile.email) == email,
         ).first()
     identity_filters = [account_models.User.staff_code == person_id]
     if email:
         identity_filters.append(func.lower(account_models.User.email) == email)
-    user = db.query(account_models.User).filter(
+    user = db.query(account_models.User).options(lazyload("*")).filter(
         account_models.User.amo_id == job.amo_id,
         or_(*identity_filters),
     ).first()
@@ -1442,7 +1600,7 @@ def commit_workbook_import(
             # Course catalogue first so matrix and history can resolve CourseID.
             courses = {
                 upper(item.course_id): item
-                for item in work_db.query(training_models.TrainingCourse).filter(
+                for item in work_db.query(training_models.TrainingCourse).options(lazyload("*")).filter(
                     training_models.TrainingCourse.amo_id == job.amo_id,
                 ).all()
             }
@@ -1456,12 +1614,16 @@ def commit_workbook_import(
                     dict(item.payload_json or {}),
                     job.actor_user_id,
                     courses_by_code=courses,
+                    flush=False,
                 )
                 item.committed_entity_id = entity.id
                 total_processed += 1
                 if total_processed % COMMIT_PROGRESS_BATCH == 0:
                     _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSES", "Courses", item.display_label)
 
+            work_db.flush()
+            _reconcile_imported_course_links(courses)
+            work_db.flush()
             # Personnel + explicit access decisions + multi-authority licences.
             _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PEOPLE", "People", None)
             personnel_indexes = _build_personnel_commit_indexes(work_db, job.amo_id)
@@ -1529,18 +1691,18 @@ def commit_workbook_import(
                 code = upper(payload.get("code"))
                 group = groups.get(code)
                 if group is None:
-                    group = TrainingRoleGroup(amo_id=job.amo_id, code=code)
+                    group = TrainingRoleGroup(id=generate_user_id(), amo_id=job.amo_id, code=code)
                     work_db.add(group)
                 group.description = payload.get("description")
                 group.is_active = True
                 group.source_job_id = job.id
-                work_db.flush()
                 groups[code] = group
                 item.committed_entity_id = group.id
                 total_processed += 1
                 if total_processed % COMMIT_PROGRESS_BATCH == 0:
                     _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_ROLE_GROUPS", "tblRoleGroups", item.display_label)
 
+            work_db.flush()
             _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PERSON_ROLES", "tblPersonRoles", None)
             profiles = personnel_indexes.profiles_by_person
             users = personnel_indexes.users_by_staff
@@ -1565,7 +1727,7 @@ def commit_workbook_import(
                 assignment_key = (upper(profile.person_id), str(group.id))
                 assignment = assignments.get(assignment_key)
                 if assignment is None:
-                    assignment = TrainingPersonRole(amo_id=job.amo_id, person_id=profile.person_id, role_group_id=group.id)
+                    assignment = TrainingPersonRole(id=generate_user_id(), amo_id=job.amo_id, person_id=profile.person_id, role_group_id=group.id)
                     work_db.add(assignment)
                     assignments[assignment_key] = assignment
                 assignment.personnel_profile_id = profile.id
@@ -1575,12 +1737,12 @@ def commit_workbook_import(
                 assignment.notes = payload.get("notes")
                 assignment.is_active = bool(payload.get("is_active", True))
                 assignment.source_job_id = job.id
-                work_db.flush()
                 item.committed_entity_id = assignment.id
                 total_processed += 1
                 if total_processed % COMMIT_PROGRESS_BATCH == 0:
                     _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_PERSON_ROLES", "tblPersonRoles", item.display_label)
 
+            work_db.flush()
             _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSE_MATRIX", "tblCourseMatrix", None)
             rules = {
                 (str(item.course_id), str(item.role_group_id), upper(item.requirement_type) or "GENERAL"): item
@@ -1588,6 +1750,7 @@ def commit_workbook_import(
                     TrainingCourseRoleRule.amo_id == job.amo_id,
                 ).all()
             }
+            all_group_course_ids: set[str] = set()
             for item in rows_by_sheet.get("tblCourseMatrix", []):
                 if item.status == "FAILED":
                     total_processed += 1
@@ -1604,49 +1767,51 @@ def commit_workbook_import(
                 rule_key = (str(course.id), str(group.id), requirement_type)
                 rule = rules.get(rule_key)
                 if rule is None:
-                    rule = TrainingCourseRoleRule(amo_id=job.amo_id, course_id=course.id, role_group_id=group.id, requirement_type=requirement_type)
+                    rule = TrainingCourseRoleRule(id=generate_user_id(), amo_id=job.amo_id, course_id=course.id, role_group_id=group.id, requirement_type=requirement_type)
                     work_db.add(rule)
                     rules[rule_key] = rule
                 rule.is_required = bool(payload.get("is_required", True))
                 rule.notes = payload.get("notes")
                 rule.is_active = True
                 rule.source_job_id = job.id
-                work_db.flush()
                 item.committed_entity_id = rule.id
-                # Keep the canonical ALL requirement in exact sync for existing
-                # consumers, including deactivation when a later matrix makes
-                # the course optional.
                 if group.code == "ALL":
-                    if bool(payload.get("is_required", True)):
-                        _materialize_mandatory_catalogue_requirements(work_db, job)
-                    canonical = work_db.query(training_models.TrainingRequirement).filter(
-                        training_models.TrainingRequirement.amo_id == job.amo_id,
-                        training_models.TrainingRequirement.course_id == course.id,
-                        training_models.TrainingRequirement.scope == training_models.TrainingRequirementScope.ALL,
-                    ).first()
-                    any_required = work_db.query(TrainingCourseRoleRule.id).filter(
-                        TrainingCourseRoleRule.amo_id == job.amo_id,
-                        TrainingCourseRoleRule.course_id == course.id,
-                        TrainingCourseRoleRule.role_group_id == group.id,
-                        TrainingCourseRoleRule.is_active.is_(True),
-                        TrainingCourseRoleRule.is_required.is_(True),
-                    ).first() is not None
-                    if canonical is None and any_required:
-                        canonical = training_models.TrainingRequirement(
-                            amo_id=job.amo_id,
-                            course_id=course.id,
-                            scope=training_models.TrainingRequirementScope.ALL,
-                            is_mandatory=True,
-                            is_active=True,
-                            created_by_user_id=job.actor_user_id,
-                        )
-                        work_db.add(canonical)
-                    elif canonical is not None:
-                        canonical.is_mandatory = any_required
-                        canonical.is_active = any_required
+                    all_group_course_ids.add(str(course.id))
                 total_processed += 1
                 if total_processed % COMMIT_PROGRESS_BATCH == 0:
                     _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_COURSE_MATRIX", "tblCourseMatrix", item.display_label)
+
+            # Reconcile each affected ALL course once, after every rule is staged.
+            work_db.flush()
+            if all_group_course_ids:
+                all_group_id = str(groups["ALL"].id)
+                required_ids = {
+                    str(rule.course_id) for rule in rules.values()
+                    if str(rule.role_group_id) == all_group_id and rule.is_active and rule.is_required
+                }
+                if required_ids & all_group_course_ids:
+                    _materialize_mandatory_catalogue_requirements(work_db, job)
+                canonical_by_course = {
+                    str(row.course_id): row
+                    for row in work_db.query(training_models.TrainingRequirement).options(lazyload("*")).filter(
+                        training_models.TrainingRequirement.amo_id == job.amo_id,
+                        training_models.TrainingRequirement.scope == training_models.TrainingRequirementScope.ALL,
+                        training_models.TrainingRequirement.course_id.in_(all_group_course_ids),
+                    ).all()
+                }
+                for course_id in all_group_course_ids:
+                    canonical = canonical_by_course.get(course_id)
+                    required = course_id in required_ids
+                    if canonical is None and required:
+                        work_db.add(training_models.TrainingRequirement(
+                            amo_id=job.amo_id, course_id=course_id,
+                            scope=training_models.TrainingRequirementScope.ALL,
+                            is_mandatory=True, is_active=True, created_by_user_id=job.actor_user_id,
+                        ))
+                    elif canonical is not None:
+                        canonical.is_mandatory = required
+                        canonical.is_active = required
+                work_db.flush()
 
             _commit_progress(progress_db, job.id, expected_token, total_processed, "COMMITTING_TRAINING", "Training", None)
             training_payloads = []
@@ -1658,15 +1823,21 @@ def commit_workbook_import(
                 training_payloads.append({"row_number": item.source_row, **dict(item.payload_json or {})})
                 training_rows.append(item)
             if training_payloads:
-                result = records_import.import_training_records_rows(
-                    work_db,
-                    amo_id=job.amo_id,
-                    rows=training_payloads,
-                    dry_run=False,
-                    actor_user_id=job.actor_user_id,
-                    manage_transaction=False,
-                    progress_callback=_progress_callback(job.id, total_processed, expected_token),
-                )
+                training_progress = _progress_callback(progress_db, job.id, total_processed, expected_token)
+                try:
+                    result = records_import.import_training_records_rows(
+                        work_db,
+                        amo_id=job.amo_id,
+                        rows=training_payloads,
+                        dry_run=False,
+                        actor_user_id=job.actor_user_id,
+                        manage_transaction=False,
+                        progress_callback=training_progress,
+                    )
+                finally:
+                    close = getattr(training_progress, "close", None)
+                    if callable(close):
+                        close()
                 preview_by_row = {entry.row_number: entry for entry in result.preview_rows}
                 for item in training_rows:
                     preview = preview_by_row.get(item.source_row)
@@ -1743,7 +1914,7 @@ def commit_workbook_import(
 
             if inspect(work_db.get_bind()).has_table("training_plans"):
                 with work_db.begin():
-                    actor = work_db.query(account_models.User).filter(
+                    actor = work_db.query(account_models.User).options(lazyload("*")).filter(
                         account_models.User.id == job.actor_user_id,
                         account_models.User.amo_id == job.amo_id,
                     ).first()
@@ -1758,12 +1929,16 @@ def commit_workbook_import(
             plan_sync = {"action": "FAILED", "message": str(plan_exc)}
 
         job = _require_commit_lease(progress_db, job.id, expected_token)
-        committed_rows = progress_db.query(TrainingWorkbookImportRow).filter(TrainingWorkbookImportRow.job_id == job.id).all()
-        job.created_count = sum(1 for item in committed_rows if item.status == "COMMITTED" and item.proposed_action == "CREATE")
-        job.updated_count = sum(1 for item in committed_rows if item.status == "COMMITTED" and item.proposed_action == "UPDATE")
-        job.unchanged_count = sum(1 for item in committed_rows if item.status == "COMMITTED" and item.proposed_action == "UNCHANGED")
-        job.skipped_count = sum(1 for item in committed_rows if item.status == "SKIPPED")
-        job.failed_count = sum(1 for item in committed_rows if item.status == "FAILED")
+        # Prefer in-memory row outcomes over a full re-read; the bulk update above
+        # already persisted the same objects used for these reconciliation totals.
+        def _committed_status(item: TrainingWorkbookImportRow) -> str:
+            return item.status if item.status in {"FAILED", "SKIPPED"} else "COMMITTED"
+
+        job.created_count = sum(1 for item in rows if _committed_status(item) == "COMMITTED" and item.proposed_action == "CREATE")
+        job.updated_count = sum(1 for item in rows if _committed_status(item) == "COMMITTED" and item.proposed_action == "UPDATE")
+        job.unchanged_count = sum(1 for item in rows if _committed_status(item) == "COMMITTED" and item.proposed_action == "UNCHANGED")
+        job.skipped_count = sum(1 for item in rows if item.status == "SKIPPED")
+        job.failed_count = sum(1 for item in rows if item.status == "FAILED")
         job.review_count = 0
         job.processed_rows = job.total_rows
         job.status = "COMPLETED"
@@ -1857,8 +2032,11 @@ def commit_workbook_import(
 
 
 def _require_commit_lease(db: Session, job_id: str, attempt_token: str) -> TrainingWorkbookImportJob:
-    db.expire_all()
     job = db.get(TrainingWorkbookImportJob, job_id)
+    if job is not None:
+        # Refresh only the lease row. expire_all() previously forced every
+        # progress checkpoint to reload unrelated identity-map state.
+        db.refresh(job)
     if (
         not job
         or job.status != "COMMITTING"

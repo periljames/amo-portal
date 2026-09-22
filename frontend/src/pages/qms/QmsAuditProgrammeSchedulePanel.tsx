@@ -332,7 +332,13 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
 
   const programmeHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/audits/program`;
   const calendarHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`;
-  const people = optionsQuery.data?.people || [];
+  const people = useMemo(
+    () =>
+      [...(optionsQuery.data?.people || [])].sort((left, right) =>
+        left.full_name.localeCompare(right.full_name),
+      ),
+    [optionsQuery.data?.people],
+  );
   const locations = optionsQuery.data?.locations || [];
   const auditorOptions = people.filter((person) => (person.auditor_roles || []).length > 0);
   const leadAuditorOptions = auditorOptions.filter((person) =>
@@ -605,6 +611,17 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
                     }))
                   }
                 />
+                <small>
+                  {/^\d{4}-\d{2}-\d{2}$/.test(form.next_due_date) &&
+                  [0, 6].includes(new Date(`${form.next_due_date}T12:00:00`).getDay())
+                    ? "Weekend date — you will be asked to include or skip weekends on save. "
+                    : ""}
+                  Bounded to the programme period
+                  {item.target_start || item.target_end
+                    ? " and this requirement’s target window"
+                    : ""}
+                  .
+                </small>
               </label>
               <label htmlFor="programme-schedule-frequency">
                 <span>Frequency</span>
@@ -622,14 +639,23 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
                   type="time"
                   min="09:00"
                   max="17:00"
+                  step={300}
                   value={form.start_time}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      start_time: event.target.value,
-                    }))
+                    setForm((current) => {
+                      const start_time = event.target.value;
+                      return {
+                        ...current,
+                        start_time,
+                        end_time:
+                          current.end_time && current.end_time <= start_time
+                            ? ""
+                            : current.end_time,
+                      };
+                    })
                   }
                 />
+                <small>Business hours 09:00–17:00.</small>
               </label>
               <label htmlFor="programme-schedule-end">
                 <span>End time</span>
@@ -637,8 +663,9 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
                   id="programme-schedule-end"
                   required
                   type="time"
-                  min="09:00"
+                  min={form.start_time > "09:00" ? form.start_time : "09:00"}
                   max="17:00"
+                  step={300}
                   value={form.end_time}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -647,6 +674,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
                     }))
                   }
                 />
+                <small>Must be after start time and no later than 17:00.</small>
               </label>
               <ProgrammeLocationSelect
                 id="programme-schedule-location"
@@ -666,23 +694,39 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
                   value={form.auditee_user_id}
                   onChange={(event) => {
                     const auditeeUserId = event.target.value;
-                    const auditee =
-                      people.find((person) => person.id === auditeeUserId)
-                        ?.full_name || form.auditee;
+                    const selected =
+                      people.find((person) => person.id === auditeeUserId) ||
+                      null;
                     setForm((current) => ({
                       ...current,
                       auditee_user_id: auditeeUserId,
-                      auditee,
+                      auditee:
+                        selected?.full_name ||
+                        item.auditable_entity?.display_label ||
+                        current.auditee,
                     }));
                   }}
                 >
-                  <option value="">Use audit area owner</option>
+                  <option value="">
+                    {item.auditable_entity?.display_label
+                      ? `Use area label · ${item.auditable_entity.display_label}`
+                      : "Use audit area owner"}
+                  </option>
                   {people.map((person) => (
                     <option key={person.id} value={person.id}>
                       {person.full_name}
+                      {person.department_name
+                        ? ` · ${person.department_name}`
+                        : ""}
+                      {person.email ? ` · ${person.email}` : ""}
                     </option>
                   ))}
                 </select>
+                <small>
+                  {optionsQuery.isLoading
+                    ? "Loading tenant people…"
+                    : `${people.length} active users available — not limited to auditors.`}
+                </small>
               </label>
               <label htmlFor="programme-schedule-lead">
                 <span>Lead auditor</span>

@@ -86,8 +86,73 @@ def test_courses_sheet_accepts_tracker_course_type_and_recurrent_frequency():
 
     assert payload["course_id"] == "HF-REF"
     assert payload["status"] == "Recurrent"
+    assert payload["kind"] == "RECURRENT"
+    assert payload["group_code"] == "HUMAN_FACTORS"
     assert payload["frequency_months"] == 24
     assert payload["is_mandatory"] is True
+
+
+def test_courses_sheet_keeps_explicit_prerequisite_and_skips_suffix_guessing():
+    payload = _course_payload(
+        {
+            "CourseID": "SMS-REF",
+            "CourseName": "SMS Refresher",
+            "CourseType": "Recurrent",
+            "Category": "SMS",
+            "PrerequisiteCourseID": "SMS-INIT",
+            "Mandatory": "Yes",
+        }
+    )
+    assert payload["prerequisite_course_id"] == "SMS-INIT"
+    assert payload["group_code"] == "SMS"
+    assert payload["kind"] == "RECURRENT"
+
+
+def test_category_group_links_unique_initial_to_recurrent_without_suffix_inference():
+    from amodb.apps.training.workbook_import import _reconcile_imported_course_links
+
+    initial = training_models.TrainingCourse(
+        id="a",
+        amo_id="amo-1",
+        course_id="HF-INIT",
+        course_name="Human Factors Initial",
+        status="Initial",
+        kind=training_models.TrainingKind.OTHER,
+        category_raw="Human Factors",
+        group_code="HUMAN_FACTORS",
+    )
+    recurrent = training_models.TrainingCourse(
+        id="b",
+        amo_id="amo-1",
+        course_id="HF-REF",
+        course_name="Human Factors Recurrent",
+        status="Recurrent",
+        kind=training_models.TrainingKind.OTHER,
+        category_raw="Human Factors",
+        group_code="HUMAN_FACTORS",
+        prerequisite_course_id=None,
+    )
+    unrelated = training_models.TrainingCourse(
+        id="c",
+        amo_id="amo-1",
+        course_id="SMS-REF",
+        course_name="SMS Recurrent",
+        status="Recurrent",
+        kind=training_models.TrainingKind.OTHER,
+        category_raw="SMS",
+        group_code="SMS",
+        prerequisite_course_id=None,
+    )
+    _reconcile_imported_course_links({
+        "HF-INIT": initial,
+        "HF-REF": recurrent,
+        "SMS-REF": unrelated,
+    })
+    assert initial.kind == training_models.TrainingKind.INITIAL
+    assert recurrent.kind == training_models.TrainingKind.RECURRENT
+    assert recurrent.prerequisite_course_id == "HF-INIT"
+    assert unrelated.prerequisite_course_id is None
+
 
 
 def test_identity_races_have_a_dedicated_review_signal():

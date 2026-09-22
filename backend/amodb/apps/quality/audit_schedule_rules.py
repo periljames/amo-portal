@@ -15,6 +15,74 @@ DEFAULT_START_TIME = BUSINESS_OPEN
 DEFAULT_END_TIME = BUSINESS_CLOSE
 
 
+def _as_minutes(value: time) -> int:
+    return value.hour * 60 + value.minute
+
+
+def _from_minutes(value: int) -> time:
+    hour, minute = divmod(max(0, value), 60)
+    return time(hour=min(hour, 23), minute=min(minute, 59))
+
+
+def suggest_working_slots(
+    *,
+    duration_minutes: int,
+    busy: list[tuple[time, time]] | None = None,
+    open_time: time = BUSINESS_OPEN,
+    close_time: time = BUSINESS_CLOSE,
+    step_minutes: int = 30,
+    limit: int = 6,
+) -> list[dict[str, str]]:
+    """Return free [start, end) windows inside working hours that fit duration_minutes."""
+    if duration_minutes <= 0:
+        return []
+    open_m = _as_minutes(open_time)
+    close_m = _as_minutes(close_time)
+    if close_m <= open_m or duration_minutes > (close_m - open_m):
+        return []
+
+    blocked: list[tuple[int, int]] = []
+    for start, end in busy or []:
+        start_m = max(open_m, _as_minutes(start))
+        end_m = min(close_m, _as_minutes(end))
+        if end_m > start_m:
+            blocked.append((start_m, end_m))
+    blocked.sort()
+    merged: list[tuple[int, int]] = []
+    for start_m, end_m in blocked:
+        if not merged or start_m > merged[-1][1]:
+            merged.append((start_m, end_m))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end_m))
+
+    free: list[tuple[int, int]] = []
+    cursor = open_m
+    for start_m, end_m in merged:
+        if start_m > cursor:
+            free.append((cursor, start_m))
+        cursor = max(cursor, end_m)
+    if cursor < close_m:
+        free.append((cursor, close_m))
+
+    suggestions: list[dict[str, str]] = []
+    step = max(5, step_minutes)
+    for free_start, free_end in free:
+        slot_start = free_start
+        while slot_start + duration_minutes <= free_end and len(suggestions) < limit:
+            slot_end = slot_start + duration_minutes
+            start_clock = _from_minutes(slot_start)
+            end_clock = _from_minutes(slot_end)
+            suggestions.append(
+                {
+                    "start_time": start_clock.strftime("%H:%M"),
+                    "end_time": end_clock.strftime("%H:%M"),
+                    "label": f"{start_clock.strftime('%H:%M')} – {end_clock.strftime('%H:%M')}",
+                }
+            )
+            slot_start += step
+    return suggestions
+
+
 def time_text(value: time | None) -> str | None:
     return value.strftime("%H:%M") if value is not None else None
 

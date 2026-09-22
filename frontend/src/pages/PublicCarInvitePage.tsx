@@ -38,6 +38,7 @@ import {
   type CARStatus,
 } from "../services/qms";
 import { getApiBaseUrl } from "../services/config";
+import { personDisplay } from "../utils/personDisplay";
 import "../styles/car-invite.css";
 
 const MAX_RESPONSE_CHARS = 8000;
@@ -468,7 +469,7 @@ const SubmissionPreview: React.FC<{
   const invite = entry.invite;
   if (!invite) return null;
   const rows: Array<[string, string]> = [
-    ["Submitted by", `${entry.form.submitted_by_name} <${entry.form.submitted_by_email}>`],
+    ["Submitted by", `${personDisplay(entry.form.submitted_by_name)} <${entry.form.submitted_by_email}>`],
     ["Immediate containment", entry.form.containment_action || "Not stated"],
     ["Root cause", entry.form.root_cause],
     ["Corrective action", entry.form.corrective_action],
@@ -940,7 +941,7 @@ const PublicCarInvitePage: React.FC = () => {
   const renderStageSummary = (entry: InviteEntry, stepId: InviteStepId): string => {
     switch (stepId) {
       case "identity":
-        return entry.form.submitted_by_name ? `${entry.form.submitted_by_name} • ${entry.form.submitted_by_email || "email pending"}` : "Responder details pending";
+        return entry.form.submitted_by_name ? `${personDisplay(entry.form.submitted_by_name)} • ${entry.form.submitted_by_email || "email pending"}` : "Responder details pending";
       case "containment":
         return entry.form.containment_action || "Immediate containment pending";
       case "analysis":
@@ -1039,7 +1040,7 @@ const PublicCarInvitePage: React.FC = () => {
                         <dl>
                           <div><dt>Finding ref</dt><dd>{invite.finding_ref || "N/A"}</dd></div>
                           <div><dt>Audit</dt><dd>{invite.audit_title || invite.audit_ref || "N/A"}</dd></div>
-                          <div><dt>Auditee</dt><dd>{invite.auditee || "N/A"}</dd></div>
+                          <div><dt>Auditee</dt><dd>{personDisplay(invite.auditee, "N/A")}</dd></div>
                         </dl>
                       </section>
 
@@ -1239,7 +1240,7 @@ const PublicCarInvitePage: React.FC = () => {
                                 {active && step.id === "review" && (
                                   <div className="car-invite-stage__body">
                                     <div className="car-invite-review-grid">
-                                      <div><span>Responder</span><strong>{entry.form.submitted_by_name || "Pending"}</strong></div>
+                                      <div><span>Responder</span><strong>{personDisplay(entry.form.submitted_by_name, "Pending")}</strong></div>
                                       <div><span>Containment</span><strong>{entry.form.containment_action || "Pending"}</strong></div>
                                       <div><span>Root cause</span><strong>{entry.form.root_cause || "Pending"}</strong></div>
                                       <div><span>Corrective action</span><strong>{entry.form.corrective_action || "Pending"}</strong></div>

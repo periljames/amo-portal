@@ -21,13 +21,14 @@ body:not([data-color-scheme="light"]) {
   --menu-surface: rgba(38, 40, 44, 0.88);
 
   --text-primary: rgba(255, 255, 255, 0.96);
-  --text-secondary: rgba(255, 255, 255, 0.72);
-  --text-muted: rgba(255, 255, 255, 0.52);
+  /* Secondary/muted must stay readable on charcoal — 0.72/0.52 washed labels portal-wide. */
+  --text-secondary: rgba(255, 255, 255, 0.84);
+  --text-muted: rgba(255, 255, 255, 0.68);
 
   --input-bg: rgba(255, 255, 255, 0.045);
   --input-bg-focus: rgba(255, 255, 255, 0.07);
   --input-border: rgba(255, 255, 255, 0.11);
-  --input-placeholder: rgba(255, 255, 255, 0.48);
+  --input-placeholder: rgba(255, 255, 255, 0.62);
 
   --surface-hover: rgba(255, 255, 255, 0.065);
   --surface-active: rgba(255, 255, 255, 0.095);
@@ -603,4 +604,28 @@ body[data-color-scheme="light"] :where(
   body :where(.admin-card, .qms-card, .training-card, .dashboard-card, .cockpit-card, .wr-setup-card, .wr-capacity-card, .wr-command-link) {
     transition: none;
   }
+}
+
+/* Audit programme workflow: replace light-only slate/ink hardcodes in dark. */
+body:not([data-color-scheme="light"]) :where(
+  .qms-audit-programme-flow__approval-route small,
+  .qms-audit-programme-flow__approval-route p,
+  .qms-audit-programme-flow__approval-route article > b,
+  .qms-audit-programme-flow__detail-toolbar > div:first-child > small,
+  .qms-audit-programme-flow__approval-copy p,
+  .qms-audit-programme-flow__role-boundary
+) {
+  color: var(--text-secondary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-audit-programme-flow__approval-route strong,
+  .qms-audit-programme-flow__approval-copy strong,
+  .qms-audit-programme-flow__role-boundary strong
+) {
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) .quality-context-tab small {
+  color: var(--text-secondary);
 }

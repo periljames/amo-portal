@@ -11,7 +11,7 @@
   --qms-success: #137333;
   box-sizing: border-box;
   width: min(100%, 1680px);
-  min-height: calc(100vh - 132px);
+  min-height: 0;
   margin: 0 auto;
   padding: 20px;
   color: var(--qms-text);

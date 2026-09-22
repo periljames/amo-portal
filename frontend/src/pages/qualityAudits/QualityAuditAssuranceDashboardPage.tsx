@@ -262,7 +262,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Audit Assurance"
+      title="Assurance"
       subtitle="Live assurance health, delivery, exposure and corrective-action control."
       toolbar={toolbar}
     >

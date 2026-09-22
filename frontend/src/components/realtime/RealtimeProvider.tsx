@@ -9,6 +9,7 @@ import { playNotificationChirp, pushDesktopNotification } from "../../services/n
 import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
 import type { BrokerState } from "../../services/realtime/types";
+import { publishQmsRealtimeEvent, publishQmsRealtimeState } from "../../services/qmsAuditRealtime";
 import { RealtimeContext } from "./realtimeContext";
 import { isRealtimeEnabled } from "../../utils/featureFlags";
 import {
@@ -105,8 +106,24 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const lastPortalActivityRef = useRef(Date.now());
   const presenceStateRef = useRef<"online" | "away">("online");
   const presenceAuthRejectedRef = useRef(false);
+  const qmsInvalidateTimerRef = useRef<number | null>(null);
 
   const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
+
+  const scheduleQmsInvalidate = useCallback(() => {
+    if (qmsInvalidateTimerRef.current != null) return;
+    qmsInvalidateTimerRef.current = window.setTimeout(() => {
+      qmsInvalidateTimerRef.current = null;
+      clearQmsApiResponseCache();
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          const marker = query.queryKey.map((part) => String(part)).join(":").toLowerCase();
+          return ["qms", "quality", "audit", "finding", "car", "training"].some((value) => marker.includes(value));
+        },
+        refetchType: "active",
+      });
+    }, 1_200);
+  }, [queryClient]);
 
   const serverNow = useCallback(() => {
     if (frozenClockRef.current !== null) return new Date(frozenClockRef.current);
@@ -179,33 +196,41 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     queryClient.invalidateQueries({ queryKey: ["activity-history", ctx.amoCode || "unknown", ctx.department || "quality"] });
     const invalidatesQms = /qms|quality|audit|finding|car|capa|training/i.test(`${event.type} ${event.entityType} ${event.action}`);
     if (invalidatesQms) {
-      clearQmsApiResponseCache();
-      queryClient.invalidateQueries({ queryKey: ["qms"] });
-      queryClient.invalidateQueries({ queryKey: ["quality"] });
-      queryClient.invalidateQueries({ queryKey: ["training"] });
+      // Bridge to Quality audit workspaces so they do not open a second /api/events stream.
+      publishQmsRealtimeEvent({ id: event.id, event: event.type, data: event });
+      // Audit occurrence pages scope their own invalidation via the bridge. Elsewhere,
+      // debounce one active refetch instead of immediate triple invalidation.
+      const onAuditOccurrence = /\/(?:quality|qms)\/audits\/[^/]+\/(?:setup|prepare|live|closing|follow-up|archive)/i.test(
+        window.location.pathname,
+      );
+      if (!onAuditOccurrence) scheduleQmsInvalidate();
     }
-  }, [ctx.amoCode, ctx.department, lastEventKey, queryClient]);
+  }, [ctx.amoCode, ctx.department, lastEventKey, queryClient, scheduleQmsInvalidate]);
 
   const connectSse = useCallback(() => {
     controllerRef.current?.abort();
     if (isPlatformUser || isLoginSurface()) {
       setStatus("offline");
       setBrokerState("offline");
+      publishQmsRealtimeState("offline");
       return;
     }
     const token = getToken();
     if (!token) {
       setStatus("offline");
+      publishQmsRealtimeState("offline");
       return;
     }
     if (!isPortalReady()) {
       setStatus("offline");
       setIsOnline(false);
+      publishQmsRealtimeState("offline");
       return;
     }
 
     const persisted = typeof window !== "undefined" ? window.localStorage.getItem(lastEventKey) : null;
     setStatus("syncing");
+    publishQmsRealtimeState("reconnecting");
     const controller = new AbortController();
     controllerRef.current = controller;
 
@@ -224,6 +249,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         retryCount.current = 0;
         setStatus("live");
+        publishQmsRealtimeState("connected");
         setIsOnline(true);
         setLastUpdated(serverNow());
         setStaleSeconds(0);
@@ -242,6 +268,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const parsedBlock = parseSseBlock(block);
             if (parsedBlock?.event === "reset") {
               window.localStorage.removeItem(lastEventKey);
+              let resetPayload: unknown = { type: "reset" };
+              try { resetPayload = JSON.parse(parsedBlock.data); } catch { /* keep default */ }
+              publishQmsRealtimeEvent({ event: "reset", data: resetPayload });
             } else if (parsedBlock) {
               try { handleEvent(JSON.parse(parsedBlock.data), parsedBlock.id); } catch { /* noop */ }
             }
@@ -251,16 +280,22 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         if (!controller.signal.aborted) {
           setStatus("offline");
+          publishQmsRealtimeState("reconnecting");
           reconnectTimer.current = window.setTimeout(() => connectRef.current(), 1500);
         }
       } catch (err) {
         if (controller.signal.aborted) return;
         setStatus("offline");
+        publishQmsRealtimeState("reconnecting");
         if (err instanceof RealtimeHttpError && (err.status === 401 || err.status === 403)) {
+          publishQmsRealtimeState("offline");
           reconnectTimer.current = window.setTimeout(() => connectRef.current(), 30_000);
           return;
         }
-        if (!isPortalReady()) return;
+        if (!isPortalReady()) {
+          publishQmsRealtimeState("offline");
+          return;
+        }
         const retryDelay = Math.min(15000, 2000 * 2 ** retryCount.current);
         retryCount.current += 1;
         reconnectTimer.current = window.setTimeout(() => connectRef.current(), retryDelay);
@@ -383,6 +418,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       controllerRef.current?.abort();
       mqttRef.current?.disconnect();
       if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+      if (qmsInvalidateTimerRef.current != null) {
+        window.clearTimeout(qmsInvalidateTimerRef.current);
+        qmsInvalidateTimerRef.current = null;
+      }
     };
   }, [connectSse, isPlatformUser, serverNow, syncServerTime]);
 

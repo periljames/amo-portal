@@ -182,9 +182,9 @@ export function isPortalReady(): boolean {
 
 /**
  * Protected writes may wait briefly for recovery before deciding whether they
- * can run. Ordinary reads never call this path. If another tab owns a stale
- * leader lease, force a local lightweight liveness probe rather than waiting
- * for that lease to expire.
+ * can run. Ordinary application traffic no longer blocks on this path — shared
+ * RECOVERING is advisory and writes proceed against the live endpoint.
+ * Prefer probePortalReadiness() in the background instead of awaiting here.
  */
 export async function waitForPortalReadiness(timeoutMs = 2_000): Promise<PortalConnectivitySnapshot> {
   if (snapshot.state !== "RECOVERING") return snapshot;

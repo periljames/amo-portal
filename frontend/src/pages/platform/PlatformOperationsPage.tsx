@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import TrainingImportSupport from "./components/TrainingImportSupport";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -687,6 +688,7 @@ export default function PlatformOperationsPage() {
       </>}
 
       {section === "Jobs" && <section className="platform-card"><h2>Durable operations jobs</h2><p>Side effects execute only from the lease-fenced worker. High-risk jobs require a different platform superuser to approve them.</p><Table headers={["Command", "Risk", "State", "Tenant", "Dry run", "Attempts", "Created", "Action"]} rows={jobItems.map((item: any) => [item.command_name, <StatusBadge value={item.risk_level} />, <StatusBadge value={item.status} />, item.tenant_id || "Platform", item.dry_run ? "Yes" : "No", number(item.attempt_count), displayDate(item.created_at), item.status === "NEEDS_APPROVAL" ? <button className="platform-btn" onClick={() => void approveJob(item.id)}>Approve</button> : "—"]) } /></section>}
+      {section === "Jobs" ? <TrainingImportSupport /> : null}
     </PlatformShell>
   );
 }

@@ -12,6 +12,7 @@
 .qms-audit-session,
 .qms-audit-session-rail,
 .qms-occurrence-stage,
+.qms-audit-setup-stage,
 .qms-assurance-room,
 .qms-register,
 .qms-register-page,
@@ -73,6 +74,7 @@ html[data-color-scheme="dark"] .qms-audit-archive,
 html[data-color-scheme="dark"] .qms-audit-session,
 html[data-color-scheme="dark"] .qms-audit-session-rail,
 html[data-color-scheme="dark"] .qms-occurrence-stage,
+html[data-color-scheme="dark"] .qms-audit-setup-stage,
 html[data-color-scheme="dark"] .qms-assurance-room,
 html[data-color-scheme="dark"] .qms-register,
 html[data-color-scheme="dark"] .qms-register-page,
@@ -98,6 +100,7 @@ body[data-color-scheme="dark"] .qms-audit-archive,
 body[data-color-scheme="dark"] .qms-audit-session,
 body[data-color-scheme="dark"] .qms-audit-session-rail,
 body[data-color-scheme="dark"] .qms-occurrence-stage,
+body[data-color-scheme="dark"] .qms-audit-setup-stage,
 body[data-color-scheme="dark"] .qms-assurance-room,
 body[data-color-scheme="dark"] .qms-register,
 body[data-color-scheme="dark"] .qms-register-page,
@@ -116,10 +119,12 @@ body[data-color-scheme="dark"] .qms-assurance-cases,
 [data-theme="dark"] .qms-live-audit-focus,
 [data-theme="dark"] .qms-audit-session-rail,
 [data-theme="dark"] .qms-occurrence-stage,
+[data-theme="dark"] .qms-audit-setup-stage,
 .dark .qms-surface-root,
 .dark .qms-live-audit-focus,
 .dark .qms-audit-session-rail,
 .dark .qms-occurrence-stage,
+.dark .qms-audit-setup-stage,
 .dark .qms-missions,
 .dark .qms-mission-detail,
 .dark .qms-people,
@@ -129,14 +134,16 @@ body[data-color-scheme="dark"] .qms-assurance-cases,
   --qms-panel: var(--surface-elevated, #1c1f24);
   --qms-line: color-mix(in srgb, var(--surface-border, rgba(255, 255, 255, 0.12)) 88%, transparent);
   --qms-line-soft: color-mix(in srgb, var(--surface-border, rgba(255, 255, 255, 0.12)) 52%, transparent);
-  --qms-muted: color-mix(in srgb, var(--text-primary, #f8fafc) 58%, var(--text-secondary, #94a3b8));
+  /* Solid secondary — do not dilute primary into slate (washes meta/labels). */
+  --qms-muted: var(--text-secondary, rgba(255, 255, 255, 0.84));
   --qms-hover: color-mix(in srgb, var(--accent-primary, #4f8cff) 10%, transparent);
   --qms-selected: color-mix(in srgb, var(--accent-primary, #4f8cff) 16%, var(--surface-elevated, #1c1f24));
   --qms-text: var(--text-primary, #f8fafc);
-  --qms-text-soft: color-mix(in srgb, var(--text-primary, #f8fafc) 78%, var(--text-secondary, #94a3b8));
-  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #f8fafc) 90%, var(--text-secondary, #94a3b8));
+  --qms-text-soft: color-mix(in srgb, var(--text-primary, #f8fafc) 88%, var(--text-secondary, rgba(255, 255, 255, 0.84)));
+  --qms-nav-idle: color-mix(in srgb, var(--text-primary, #f8fafc) 94%, var(--text-secondary, rgba(255, 255, 255, 0.84)));
   --qms-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   --surface-subtle: color-mix(in srgb, var(--qms-page) 55%, var(--qms-panel));
+  --text-muted: var(--qms-muted);
 }
 
 /* Hierarchy helpers — match calendar title/meta rhythm */

@@ -283,6 +283,10 @@ class QMSAuditScopeOut(BaseModel):
     created_by_user_id: Optional[str]
     created_at: datetime
     updated_at: datetime
+    # Current-year reference counter usage (tenant family + scope unit).
+    issued_this_year: int = 0
+    next_sequence: int = 1
+    last_value: int = 0
 
 
 class QMSAuditCreate(BaseModel):
@@ -857,6 +861,7 @@ class QualityWorkflowSettingsOut(BaseModel):
     final_reminder_days_before_due: int
     auto_escalation_enabled: bool
     auto_escalation_locked: bool
+    audit_reference_family: str = "QAR"
     created_by_user_id: Optional[str] = None
     updated_by_user_id: Optional[str] = None
     created_at: datetime
@@ -865,6 +870,7 @@ class QualityWorkflowSettingsOut(BaseModel):
 
 WorkflowReminderDay = Annotated[int, Field(ge=0, le=60)]
 WorkflowReminderPercentage = Annotated[int, Field(gt=0, lt=100)]
+AuditReferenceFamily = Annotated[str, Field(min_length=2, max_length=16, pattern=r"^[A-Za-z0-9]+$")]
 
 
 class QualityWorkflowSettingsUpdate(BaseModel):
@@ -873,6 +879,7 @@ class QualityWorkflowSettingsUpdate(BaseModel):
     car_reminder_percentages: Optional[List[WorkflowReminderPercentage]] = Field(default=None, min_length=1, max_length=10)
     final_reminder_days_before_due: Optional[int] = Field(default=None, ge=0, le=30)
     auto_escalation_enabled: Optional[bool] = None
+    audit_reference_family: Optional[AuditReferenceFamily] = None
 
 
 class QualityDocumentRequestCreate(BaseModel):
@@ -1353,6 +1360,7 @@ class QMSPersonOptionOut(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     department_id: Optional[str] = None
+    department_name: Optional[str] = None
     position_title: Optional[str] = None
     avatar_url: Optional[str] = None
     auditor_roles: List[str] = Field(default_factory=list)

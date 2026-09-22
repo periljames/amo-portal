@@ -39,4 +39,18 @@ def test_database_probe_is_single_flight() -> None:
 
 def test_disconnect_classifier_ignores_business_errors() -> None:
     assert is_database_disconnect(RuntimeError("SSL connection has been closed unexpectedly")) is True
+    assert is_database_disconnect(RuntimeError("timeout expired")) is True
+    assert is_database_disconnect(RuntimeError('connection to server at "megatron" (100.95.25.50), port 5432 failed: timeout expired')) is True
     assert is_database_disconnect(RuntimeError("duplicate key violates unique constraint")) is False
+
+
+def test_interactive_wake_clears_probe_backoff() -> None:
+    circuit = DatabaseCircuitBreaker()
+    threshold = int(circuit.snapshot()["failure_threshold"])
+    for _ in range(threshold):
+        circuit.mark_failure("timeout expired")
+    assert circuit.allow_request() is False
+    assert circuit.retry_after_seconds() >= 1
+    assert circuit.request_wake_probe() is True
+    assert circuit.begin_probe(force=False) is True
+    circuit.end_probe()

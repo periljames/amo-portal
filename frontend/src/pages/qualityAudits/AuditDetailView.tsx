@@ -29,6 +29,9 @@ import { computeReadiness } from "./readiness";
 import { getDueMessage } from "./dueStatus";
 import FindingDrawer from "./FindingDrawer";
 import { selectRelevantDueAudit } from "../../utils/auditDate";
+import { auditNavigationHref } from "./auditNavigation";
+import { auditSessionPath } from "../../features/qms/auditSession/auditSessionRoutes";
+import { toAuditReferenceSlug } from "../../utils/auditSlug";
 
 type Props = {
   amoCode: string;
@@ -500,7 +503,17 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
             </div>
             <div className="qms-audit-detail__prep-meta">Steps Complete: {Math.round(((readiness?.score ?? 0) / 100) * 5)} of 5</div>
             <small>{readiness?.label ?? "Loading"}</small>
-            <button type="button" className="btn qms-audit-detail__prep-cta">Start Preparation Steps</button>
+            <button
+              type="button"
+              className="btn qms-audit-detail__prep-cta"
+              disabled={!upcomingAudit}
+              onClick={() => {
+                if (!upcomingAudit) return;
+                navigate(auditNavigationHref(amoCode, upcomingAudit));
+              }}
+            >
+              Start Preparation Steps
+            </button>
           </article>
 
           <article className="qms-card qms-audit-detail__kpi-card qms-audit-detail__team-card">
@@ -603,7 +616,23 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
         ) : activeTab === "checklists" ? (
           <div style={{ marginTop: 12 }}>
             <p><strong>{upcomingAudit?.checklist_file_ref ? "Checklist attached" : "No checklist attached yet"}</strong></p>
-            {upcomingAudit ? <button type="button" className="secondary-chip-btn" onClick={() => navigate(`${baseQmsPath}/audits/${upcomingAudit.id}/setup`)}>Open Setup</button> : null}
+            {upcomingAudit ? (
+              <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() =>
+                  navigate(
+                    auditSessionPath(
+                      amoCode,
+                      toAuditReferenceSlug(upcomingAudit.audit_ref || upcomingAudit.id),
+                      "setup",
+                    ),
+                  )
+                }
+              >
+                Open Setup
+              </button>
+            ) : null}
           </div>
         ) : (
           <div style={{ marginTop: 12 }}>

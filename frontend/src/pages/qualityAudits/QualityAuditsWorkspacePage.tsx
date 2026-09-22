@@ -461,8 +461,10 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         field: "audit_ref",
         colId: "audit",
         pinned: "left",
-        minWidth: 200,
-        flex: 1.4,
+        minWidth: 220,
+        flex: 1.5,
+        wrapText: true,
+        autoHeight: true,
         cellRenderer: AuditIdentityCell,
         comparator: (_a, _b, nodeA, nodeB) =>
           (nodeA?.data?.audit_ref || "").localeCompare(
@@ -628,51 +630,51 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     <QualityAuditsSectionLayout
       title="Audits"
       subtitle="Create, conduct, and close scheduled audits or unscheduled surveillance."
-      toolbar={
-        <ResponsiveSegmentedControl
-          label="Audit workspace view"
-          value={view}
-          onChange={setView}
-          compactIconsOnMobile
-          options={[
-            {
-              value: "all",
-              label: "ALL AUDITS",
-              shortLabel: "All",
-              icon: ListChecks,
-            },
-            {
-              value: "mine",
-              label: "MY AUDITS",
-              shortLabel: "Mine",
-              icon: CircleUserRound,
-            },
-            {
-              value: "upcoming",
-              label: "UPCOMING",
-              shortLabel: "Upcoming",
-              icon: CalendarClock,
-            },
-            {
-              value: "active",
-              label: "ACTIVE",
-              shortLabel: "Active",
-              icon: Activity,
-            },
-            {
-              value: "completed",
-              label: "COMPLETED",
-              shortLabel: "Completed",
-              icon: CheckCircle2,
-            },
-          ]}
-        />
-      }
     >
       <section
         className="qa-audits-list qa-audits-list--register"
         aria-live="polite"
       >
+        <div className="qa-audits-list__view-bar">
+          <ResponsiveSegmentedControl
+            label="Audit workspace view"
+            value={view}
+            onChange={setView}
+            compactIconsOnMobile
+            options={[
+              {
+                value: "all",
+                label: "ALL AUDITS",
+                shortLabel: "All",
+                icon: ListChecks,
+              },
+              {
+                value: "mine",
+                label: "MY AUDITS",
+                shortLabel: "Mine",
+                icon: CircleUserRound,
+              },
+              {
+                value: "upcoming",
+                label: "UPCOMING",
+                shortLabel: "Upcoming",
+                icon: CalendarClock,
+              },
+              {
+                value: "active",
+                label: "ACTIVE",
+                shortLabel: "Active",
+                icon: Activity,
+              },
+              {
+                value: "completed",
+                label: "COMPLETED",
+                shortLabel: "Completed",
+                icon: CheckCircle2,
+              },
+            ]}
+          />
+        </div>
         <header className="qa-audits-list__toolbar">
           <label className="qa-audits-list__search" aria-label="Search audits">
             <Search size={15} aria-hidden />
@@ -687,11 +689,33 @@ const QualityAuditsWorkspacePage: React.FC = () => {
               placeholder="Search audits"
             />
           </label>
-          <label>Sort <select value={sort} onChange={(event) => patchParams({ sort: event.target.value, page: null })}>
-            <option value="planned_start">Scheduled date</option><option value="actual_end">Completion date</option>
-            <option value="audit_ref">Reference</option><option value="title">Title</option><option value="created_at">Created</option>
-          </select></label>
-          <label>Order <select value={direction} onChange={(event) => patchParams({ direction: event.target.value, page: null })}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+          <label className="qa-audits-list__filter">
+            Sort
+            <select
+              value={sort}
+              onChange={(event) =>
+                patchParams({ sort: event.target.value, page: null })
+              }
+            >
+              <option value="planned_start">Scheduled date</option>
+              <option value="actual_end">Completion date</option>
+              <option value="audit_ref">Reference</option>
+              <option value="title">Title</option>
+              <option value="created_at">Created</option>
+            </select>
+          </label>
+          <label className="qa-audits-list__filter">
+            Order
+            <select
+              value={direction}
+              onChange={(event) =>
+                patchParams({ direction: event.target.value, page: null })
+              }
+            >
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label>
           {canCreateAudit ? (
             <div
               className="qa-audits-list__create-actions"
@@ -734,8 +758,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
             columnDefs={columnDefs}
             defaultColDef={{ ...defaultColDef, sortable: false }}
             getRowId={(row) => row.data.id}
-            rowHeight={40}
-            headerHeight={36}
+            headerHeight={38}
             animateRows={false}
             suppressCellFocus
             onRowClicked={onRowClicked}
@@ -747,11 +770,43 @@ const QualityAuditsWorkspacePage: React.FC = () => {
             containerStyle={{ width: "100%", height: "100%" }}
           />
         </div>
-        <nav aria-label="Audit result pages">
-          <span>{auditsQuery.data?.total ?? "…"} results · Page {safePage}</span>
-          <button type="button" disabled={safePage <= 1 || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage - 1) })}>Previous</button>
-          <button type="button" disabled={!auditsQuery.data || safePage * pageSize >= auditsQuery.data.total || auditsQuery.isFetching} onClick={() => patchParams({ page: String(safePage + 1) })}>Next</button>
-          <label>Results per page <select value={pageSize} onChange={(event) => patchParams({ pageSize: event.target.value, page: null })}>{WORKSPACE_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
+        <nav className="qa-audits-list__pager" aria-label="Audit result pages">
+          <span className="qa-audits-list__pager-meta">
+            {auditsQuery.data?.total ?? 0} results Â· Page {safePage}
+          </span>
+          <button
+            type="button"
+            disabled={safePage <= 1 || auditsQuery.isFetching}
+            onClick={() => patchParams({ page: String(safePage - 1) })}
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={
+              !auditsQuery.data ||
+              safePage * pageSize >= auditsQuery.data.total ||
+              auditsQuery.isFetching
+            }
+            onClick={() => patchParams({ page: String(safePage + 1) })}
+          >
+            Next
+          </button>
+          <label className="qa-audits-list__filter">
+            Results per page
+            <select
+              value={pageSize}
+              onChange={(event) =>
+                patchParams({ pageSize: event.target.value, page: null })
+              }
+            >
+              {WORKSPACE_PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
         </nav>
       </section>
       {launchMode && launchAuditsQuery.isLoading ? <p role="status">Loading existing audits...</p> : null}

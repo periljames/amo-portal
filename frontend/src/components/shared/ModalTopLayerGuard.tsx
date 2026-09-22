@@ -18,7 +18,14 @@ type PopoverElement = HTMLElement & {
 type ManagedDialog = {
   host: PopoverElement;
   surface: boolean;
+  /** Side/edge drawers keep intrinsic width; do not apply full-bleed host layout. */
+  edgeDrawer: boolean;
 };
+
+/** Portal shell navigation is aria-modal when unpinned, but it is a side panel — never a top-layer host. */
+function isPortalShellNavigation(element: HTMLElement): boolean {
+  return element.classList.contains("tenant-shell__sidebar");
+}
 
 function isNativeModalDialog(element: HTMLElement): boolean {
   if (typeof HTMLDialogElement === "undefined" || !(element instanceof HTMLDialogElement)) return false;
@@ -31,6 +38,7 @@ function isNativeModalDialog(element: HTMLElement): boolean {
 
 function isVisibleModal(element: HTMLElement): boolean {
   if (!element.isConnected || isNativeModalDialog(element)) return false;
+  if (isPortalShellNavigation(element)) return false;
 
   let current: HTMLElement | null = element;
   while (current && current !== document.body) {
@@ -50,20 +58,30 @@ function selectTopLayerHost(dialog: HTMLElement): ManagedDialog {
   let current: HTMLElement | null = dialog;
 
   while (current && current !== document.body && current !== document.documentElement) {
+    // Never promote the tenant shell nav: HOST CSS uses inset:0 and stretches it full-bleed.
+    if (isPortalShellNavigation(current)) {
+      current = current.parentElement;
+      continue;
+    }
+
     const bounds = current.getBoundingClientRect();
     const position = window.getComputedStyle(current).position;
     const coversViewport = bounds.width >= viewportWidth * 0.88
       && bounds.height >= viewportHeight * 0.88;
     const coversViewportHeight = bounds.height >= viewportHeight * 0.88;
     const touchesViewportEdge = bounds.left <= 1 || bounds.right >= viewportWidth - 1;
-    const edgeDrawer = position === "fixed" && coversViewportHeight && touchesViewportEdge;
-    if ((position === "fixed" || position === "absolute") && (coversViewport || edgeDrawer)) {
-      return { host: current as PopoverElement, surface: false };
+    const edgeDrawer = position === "fixed" && coversViewportHeight && touchesViewportEdge
+      && bounds.width < viewportWidth * 0.88;
+    if ((position === "fixed" || position === "absolute") && coversViewport) {
+      return { host: current as PopoverElement, surface: false, edgeDrawer: false };
+    }
+    if ((position === "fixed" || position === "absolute") && edgeDrawer) {
+      return { host: current as PopoverElement, surface: false, edgeDrawer: true };
     }
     current = current.parentElement;
   }
 
-  return { host: dialog as PopoverElement, surface: true };
+  return { host: dialog as PopoverElement, surface: true, edgeDrawer: false };
 }
 
 function isPopoverOpen(element: HTMLElement): boolean {
@@ -125,8 +143,12 @@ export function ModalTopLayerGuard() {
       addFallbackAncestors(host);
     };
 
-    const promoteHost = ({ host, surface }: ManagedDialog) => {
-      host.classList.add(TOP_LAYER_CLASS, surface ? SURFACE_CLASS : HOST_CLASS);
+    const promoteHost = ({ host, surface, edgeDrawer }: ManagedDialog) => {
+      // Edge drawers only need stacking promotion. Full-bleed HOST layout (inset:0)
+      // would stretch a side panel across the viewport.
+      host.classList.add(TOP_LAYER_CLASS);
+      if (surface) host.classList.add(SURFACE_CLASS);
+      else if (!edgeDrawer) host.classList.add(HOST_CLASS);
       host.dataset.portalModalLayer = "true";
 
       if (typeof host.showPopover !== "function") {
@@ -192,7 +214,12 @@ export function ModalTopLayerGuard() {
         if (!isVisibleModal(dialog)) continue;
         const selection = selectTopLayerHost(dialog);
         const current = managedDialogs.get(dialog);
-        if (current && current.host === selection.host && current.surface === selection.surface) {
+        if (
+          current
+          && current.host === selection.host
+          && current.surface === selection.surface
+          && current.edgeDrawer === selection.edgeDrawer
+        ) {
           if (typeof current.host.showPopover === "function" && !isPopoverOpen(current.host)) {
             try {
               current.host.showPopover();

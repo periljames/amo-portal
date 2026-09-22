@@ -75,6 +75,7 @@ from .apps.quality.planner_schedule_router import (
     stop_quality_planner_scheduler,
 )
 from .apps.platform.router import router as platform_router
+from .apps.training.workbook_support_router import router as training_workbook_support_router
 from .apps.ai.router import router as ai_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
@@ -415,6 +416,15 @@ def _database_unavailable_response() -> JSONResponse:
 
 
 _CIRCUIT_BYPASS_PATHS = frozenset({"/", "/health", "/healthz", "/livez", "/readyz", "/time"})
+_WAKE_PATH_PREFIXES = ("/auth/",)
+
+
+def _is_interactive_wake_path(path: str) -> bool:
+    """Login and session recovery should force a DB wake probe while offline."""
+    if path in _CIRCUIT_BYPASS_PATHS:
+        return False
+    return any(path.startswith(prefix) for prefix in _WAKE_PATH_PREFIXES)
+
 
 @app.middleware("http")
 async def meter_api_calls(request: Request, call_next):
@@ -425,7 +435,15 @@ async def meter_api_calls(request: Request, call_next):
     tenant_id = _tenant_from_token_for_metrics(request)
     try:
         if request.url.path not in _CIRCUIT_BYPASS_PATHS and not database_circuit.allow_request():
-            response = _database_unavailable_response()
+            # Sleep during outages, but wake immediately on login/auth so the
+            # portal does not require a manual API restart after megatron returns.
+            wake = _is_interactive_wake_path(request.url.path)
+            if wake:
+                database_circuit.request_wake_probe()
+            if probe_database(force=wake):
+                response = await call_next(request)
+            else:
+                response = _database_unavailable_response()
         else:
             response = await call_next(request)
         status_code = getattr(response, "status_code", 200)
@@ -441,6 +459,10 @@ async def meter_api_calls(request: Request, call_next):
         status_code = 503
         if database_circuit.mark_failure(exc):
             logger.warning("Database circuit opened; API requests will fail fast until readiness recovers")
+            try:
+                dispose_engines()
+            except Exception:
+                logger.debug("Engine dispose after OperationalError failed", exc_info=True)
         response = _database_unavailable_response()
     except DBAPIError as exc:
         # Constraint and validation failures are application errors. Only an
@@ -451,6 +473,10 @@ async def meter_api_calls(request: Request, call_next):
         status_code = 503
         if database_circuit.mark_failure(exc):
             logger.warning("Database circuit opened after an invalidated connection")
+            try:
+                dispose_engines()
+            except Exception:
+                logger.debug("Engine dispose after invalidated connection failed", exc_info=True)
         response = _database_unavailable_response()
     except RuntimeError as exc:
         if "No response returned" in str(exc):
@@ -674,6 +700,7 @@ apply_module_access_boundary(aerodoc_router, "documents")
 
 app.include_router(accounts_public_router)
 app.include_router(platform_router)
+app.include_router(training_workbook_support_router)
 app.include_router(ai_router)
 app.include_router(foundations_router)
 app.include_router(rostering_router, dependencies=[Depends(require_module_access("rostering"))])

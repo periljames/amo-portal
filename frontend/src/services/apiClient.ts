@@ -52,9 +52,32 @@ const DEFAULT_GET_CACHE_TTL_MS = 15_000;
 const DEFAULT_STALE_OFFLINE_MS = 15 * 60_000;
 const DEFAULT_DIRECT_DEV_BACKEND = "http://127.0.0.1:8080";
 const PERSISTED_CACHE_PREFIX = "amo_api_cache_v2:";
+/** Cap parallel portal API calls so one page open cannot exhaust the backend DB pool. */
+const MAX_PARALLEL_API_REQUESTS = 6;
 const responseCache = new Map<string, CacheEntry>();
 const inFlightGets = new Map<string, Promise<unknown>>();
 let observedScope = "";
+let activeApiRequests = 0;
+const apiRequestWaiters: Array<() => void> = [];
+
+function acquireApiSlot(): Promise<void> {
+  if (activeApiRequests < MAX_PARALLEL_API_REQUESTS) {
+    activeApiRequests += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    apiRequestWaiters.push(() => {
+      activeApiRequests += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseApiSlot(): void {
+  activeApiRequests = Math.max(0, activeApiRequests - 1);
+  const next = apiRequestWaiters.shift();
+  if (next) next();
+}
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException
@@ -329,67 +352,72 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }
 
   const requestPromise = (async () => {
-    let lastError: unknown;
-    for (let index = 0; index < urls.length; index += 1) {
-      const url = urls[index];
-      try {
-        const { response, body: responseBody } = await fetchOnce<T>(
-          url,
-          { ...rest, method, body, headers: finalHeaders },
-          timeoutMs,
-          signal,
-          {
-            cache: canUseCache,
-            cacheTtlMs: effectiveCacheTtlMs,
-            allowStaleFallback: offline?.allowStaleFallback !== false,
-            queueMutation: offline?.queueMutation === true,
-            entityType: offline?.entityType,
-            entityId: offline?.entityId,
-            idempotencyKey: offline?.idempotencyKey,
-          },
-        );
-
-        if (!response.ok) {
-          const detail = errorMessageFromBody(response, responseBody);
-          if (response.status === 401) handleAuthFailure("expired");
-          throw new ApiClientError(
-            response.status,
-            detail,
-            responseBody,
-            isProxyTransportFailureResponse(response),
+    await acquireApiSlot();
+    try {
+      let lastError: unknown;
+      for (let index = 0; index < urls.length; index += 1) {
+        const url = urls[index];
+        try {
+          const { response, body: responseBody } = await fetchOnce<T>(
+            url,
+            { ...rest, method, body, headers: finalHeaders },
+            timeoutMs,
+            signal,
+            {
+              cache: canUseCache,
+              cacheTtlMs: effectiveCacheTtlMs,
+              allowStaleFallback: offline?.allowStaleFallback !== false,
+              queueMutation: offline?.queueMutation === true,
+              entityType: offline?.entityType,
+              entityId: offline?.entityId,
+              idempotencyKey: offline?.idempotencyKey,
+            },
           );
-        }
 
-        if (canUseCache && effectiveCacheTtlMs > 0) {
-          const now = Date.now();
-          const entry: CacheEntry = {
-            scope,
-            freshUntil: now + effectiveCacheTtlMs,
-            staleUntil: now + effectiveStaleMs,
-            value: responseBody,
-          };
-          responseCache.set(cacheKey, entry);
-          if (persistCache) writePersistedCache(cacheKey, entry);
-        } else if (method !== "GET") {
-          clearApiResponseCache();
+          if (!response.ok) {
+            const detail = errorMessageFromBody(response, responseBody);
+            if (response.status === 401) handleAuthFailure("expired");
+            throw new ApiClientError(
+              response.status,
+              detail,
+              responseBody,
+              isProxyTransportFailureResponse(response),
+            );
+          }
+
+          if (canUseCache && effectiveCacheTtlMs > 0) {
+            const now = Date.now();
+            const entry: CacheEntry = {
+              scope,
+              freshUntil: now + effectiveCacheTtlMs,
+              staleUntil: now + effectiveStaleMs,
+              value: responseBody,
+            };
+            responseCache.set(cacheKey, entry);
+            if (persistCache) writePersistedCache(cacheKey, entry);
+          } else if (method !== "GET") {
+            clearApiResponseCache();
+          }
+          return responseBody as T;
+        } catch (error) {
+          lastError = error;
+          const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
+          if (canTryNext) {
+            console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
+            continue;
+          }
+          if (offline?.allowStaleFallback !== false && staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
+            console.warn("[apiClient] serving tenant-scoped stale response after network failure", { path, error });
+            return staleEntry.value as T;
+          }
+          throw error;
         }
-        return responseBody as T;
-      } catch (error) {
-        lastError = error;
-        const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
-        if (canTryNext) {
-          console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
-          continue;
-        }
-        if (offline?.allowStaleFallback !== false && staleEntry && isRetryableNetworkError(error) && staleEntry.scope === currentApiCacheScope()) {
-          console.warn("[apiClient] serving tenant-scoped stale response after network failure", { path, error });
-          return staleEntry.value as T;
-        }
-        throw error;
       }
+      if (offline?.allowStaleFallback !== false && staleEntry && staleEntry.scope === currentApiCacheScope()) return staleEntry.value as T;
+      throw lastError instanceof Error ? lastError : new Error("Request failed.");
+    } finally {
+      releaseApiSlot();
     }
-    if (offline?.allowStaleFallback !== false && staleEntry && staleEntry.scope === currentApiCacheScope()) return staleEntry.value as T;
-    throw lastError instanceof Error ? lastError : new Error("Request failed.");
   })().finally(() => {
     if (canUseCache) inFlightGets.delete(cacheKey);
   });

@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CalendarDays,
+  Download,
   Info,
   Pencil,
   Plus,
@@ -22,13 +23,19 @@ import type {
   AuditUniverseItem,
 } from "../../services/qmsAuditProgramme";
 import {
-  aircraftRegistrationSuffix,
   findAuditorScheduleCollisions,
-  ordinalDayLabel,
+  programmeMatrixSlotLabel,
+  resolveAircraftRegistration,
   uniqueAuditorInitials,
   type AuditorScheduleAllocation,
   type AuditorScheduleCollision,
 } from "./qmsAuditProgrammePlanning";
+import {
+  buildProgrammeMatrixRows,
+  primaryProgrammeItem,
+  rowHasProgrammeItems,
+  type ProgrammeMatrixRow,
+} from "./qmsAuditProgrammeMatrixModel";
 
 const MONTHS = Array.from({ length: 12 }, (_, month) => ({
   month: month + 1,
@@ -36,12 +43,7 @@ const MONTHS = Array.from({ length: 12 }, (_, month) => ({
   long: new Date(2000, month, 1).toLocaleString(undefined, { month: "long" }),
 }));
 
-type MatrixRow = {
-  id: string;
-  area: AuditUniverseItem;
-  item?: AuditProgrammeItem;
-  scheduleLink?: AuditProgrammeScheduleLink;
-};
+type MatrixRow = ProgrammeMatrixRow;
 
 type MatrixView = "all" | "programme";
 export type AuditKindView = "INTERNAL" | "EXTERNAL" | "BOTH";
@@ -84,13 +86,16 @@ type Props = {
   calendarHref: string;
   onEditProgramme?: () => void;
   onNewProgramme?: () => void;
+  onDiscardProgramme?: () => void;
+  onDownloadPdf?: () => void;
+  downloadBusy?: boolean;
   onAddAudit: () => void;
   onAddCoverageArea: () => void;
   onAddAreaMonth: (area: AuditUniverseItem, month: number) => void;
   onEditMonth: (item: AuditProgrammeItem, month: number) => void;
   onViewItem: (item: AuditProgrammeItem) => void;
+  onViewArea: (items: AuditProgrammeItem[], areaLabel: string) => void;
   onEditItem: (item: AuditProgrammeItem) => void;
-  onRemoveItem: (item: AuditProgrammeItem) => void;
   onScheduleItem: (item: AuditProgrammeItem) => void;
 };
 
@@ -102,8 +107,8 @@ type MatrixActions = Pick<
   | "onAddAreaMonth"
   | "onEditMonth"
   | "onViewItem"
+  | "onViewArea"
   | "onEditItem"
-  | "onRemoveItem"
   | "onScheduleItem"
 >;
 
@@ -132,7 +137,7 @@ function auditorAssignments(
   );
 }
 
-function AuditTeamInitials({
+function AuditLeadInitials({
   item,
   auditorNames,
   auditorInitials,
@@ -141,7 +146,33 @@ function AuditTeamInitials({
   auditorNames: ReadonlyMap<string, string>;
   auditorInitials: ReadonlyMap<string, string>;
 }) {
-  const assignments = auditorAssignments(item);
+  const leadId = item.lead_auditor_user_id;
+  if (!leadId) return null;
+  const fullName = auditorNames.get(leadId) || "Lead auditor";
+  const initials = auditorInitials.get(leadId) || "??";
+  return (
+    <span
+      className="qms-programme-matrix__assignees"
+      aria-label={`Lead auditor ${fullName}`}
+    >
+      <b title={`${fullName} · Lead auditor`}>({initials})</b>
+    </span>
+  );
+}
+
+/** Observer + supporting only — lead is shown per slot chip. */
+function AuditTeamRestInitials({
+  item,
+  auditorNames,
+  auditorInitials,
+}: {
+  item: AuditProgrammeItem;
+  auditorNames: ReadonlyMap<string, string>;
+  auditorInitials: ReadonlyMap<string, string>;
+}) {
+  const assignments = auditorAssignments(item).filter(
+    (assignment) => assignment.role !== "lead",
+  );
   if (!assignments.length) return null;
   return (
     <span
@@ -152,13 +183,7 @@ function AuditTeamInitials({
         const fullName = auditorNames.get(assignment.id) || "Assigned user";
         const initials = auditorInitials.get(assignment.id) || "??";
         const label = `(${initials})`;
-        const title = `${fullName} · ${assignment.role === "lead" ? "Lead auditor" : assignment.role === "observer" ? "Observer" : "Auditor"}`;
-        if (assignment.role === "lead")
-          return (
-            <b key={`${assignment.role}:${assignment.id}`} title={title}>
-              {label}
-            </b>
-          );
+        const title = `${fullName} · ${assignment.role === "observer" ? "Observer" : "Auditor"}`;
         if (assignment.role === "observer")
           return (
             <em key={`${assignment.role}:${assignment.id}`} title={title}>
@@ -284,6 +309,19 @@ function entriesForMonth(
   return [];
 }
 
+function slotsForMonth(
+  row: MatrixRow,
+  month: number,
+  year: number,
+  linksByItem: ReadonlyMap<string, AuditProgrammeScheduleLink>,
+): Array<{ item: AuditProgrammeItem; entry: MonthEntry }> {
+  return row.items.flatMap((item) =>
+    entriesForMonth(item, month, year, linksByItem.get(item.id)).map(
+      (entry) => ({ item, entry }),
+    ),
+  );
+}
+
 function kindMatches(view: AuditKindView, kind?: string | null): boolean {
   if (view === "BOTH") return true;
   if (view === "INTERNAL") return kind === "INTERNAL";
@@ -315,10 +353,17 @@ function itemAllocations(
 }
 
 function slotLabel(item: AuditProgrammeItem, label: string): string {
-  const tail = aircraftRegistrationSuffix(
-    item.auditable_entity?.aircraft?.tail_number,
-  );
-  return tail ? `${tail} ${ordinalDayLabel(label)}` : label;
+  return programmeMatrixSlotLabel(item, label);
+}
+
+function slotTitle(item: AuditProgrammeItem, entry: MonthEntry): string {
+  const identity =
+    resolveAircraftRegistration(item) || item.title || "Planned audit";
+  const when = dateRangeLabel(entry.startDate, entry.endDate);
+  const weekendNote = entry.adjusted
+    ? " · Weekend moved to next working day"
+    : "";
+  return `${identity} · ${when}${weekendNote}`;
 }
 
 function dateRangeLabel(startDate: string, endDate: string): string {
@@ -331,63 +376,6 @@ function dateRangeLabel(startDate: string, endDate: string): string {
   return startDate === endDate
     ? format(startDate)
     : `${format(startDate)} – ${format(endDate)}`;
-}
-
-function buildRows(
-  items: AuditProgrammeItem[],
-  coverageAreas: AuditUniverseItem[],
-  linksByItem: ReadonlyMap<string, AuditProgrammeScheduleLink>,
-): MatrixRow[] {
-  const linked = new Map<string, AuditProgrammeItem[]>();
-  items.forEach((item) => {
-    const entries = linked.get(item.universe_item_id) || [];
-    entries.push(item);
-    linked.set(item.universe_item_id, entries);
-  });
-
-  const rows: MatrixRow[] = [];
-  coverageAreas
-    .filter((area) => area.active)
-    .sort((left, right) =>
-      left.display_label.localeCompare(right.display_label),
-    )
-    .forEach((area) => {
-      const areaItems = linked.get(area.id) || [];
-      if (!areaItems.length) rows.push({ id: `area-${area.id}`, area });
-      areaItems.forEach((item) =>
-        rows.push({
-          id: `item-${item.id}`,
-          area,
-          item,
-          scheduleLink: linksByItem.get(item.id),
-        }),
-      );
-      linked.delete(area.id);
-    });
-
-  linked.forEach((areaItems) => {
-    areaItems.forEach((item) => {
-      const area = item.auditable_entity || {
-        id: item.universe_item_id,
-        entity_type: "OTHER",
-        display_label: "Unlinked audit area",
-        source_owner_module: "AUDIT_PROGRAMME",
-        source_type: "OTHER",
-        source_id: item.universe_item_id,
-        risk_classification: "MEDIUM",
-        regulatory_criticality: "MEDIUM",
-        mandatory_surveillance: false,
-        active: true,
-      };
-      rows.push({
-        id: `item-${item.id}`,
-        area,
-        item,
-        scheduleLink: linksByItem.get(item.id),
-      });
-    });
-  });
-  return rows;
 }
 
 const QmsAuditProgrammeMatrix: React.FC<Props> = ({
@@ -413,13 +401,16 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
   calendarHref,
   onEditProgramme,
   onNewProgramme,
+  onDiscardProgramme,
+  onDownloadPdf,
+  downloadBusy = false,
   onAddAudit,
   onAddCoverageArea,
   onAddAreaMonth,
   onEditMonth,
   onViewItem,
+  onViewArea,
   onEditItem,
-  onRemoveItem,
   onScheduleItem,
 }) => {
   const [search, setSearch] = useState("");
@@ -447,13 +438,14 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
     [auditKindView, coverageAreas],
   );
   const allRows = useMemo(
-    () => buildRows(visibleItems, visibleCoverageAreas, linksByItem),
-    [linksByItem, visibleCoverageAreas, visibleItems],
+    () => buildProgrammeMatrixRows(visibleItems, visibleCoverageAreas),
+    [visibleCoverageAreas, visibleItems],
   );
   const programmeRows = useMemo(
-    () => allRows.filter((row) => Boolean(row.item)),
+    () => allRows.filter((row) => rowHasProgrammeItems(row)),
     [allRows],
   );
+  const plannedAuditCount = visibleItems.length;
   const publishedDates = useMemo(
     () =>
       scheduleLinks.reduce(
@@ -475,8 +467,8 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
         row.area.display_label,
         row.area.entity_type,
         row.area.risk_classification,
-        row.item?.title,
-        row.item?.audit_type,
+        ...row.items.map((item) => item.title),
+        ...row.items.map((item) => item.audit_type),
       ].some((value) =>
         String(value || "")
           .toLowerCase()
@@ -509,8 +501,8 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
     onAddAreaMonth,
     onEditMonth,
     onViewItem,
+    onViewArea,
     onEditItem,
-    onRemoveItem,
     onScheduleItem,
   });
   useEffect(() => {
@@ -521,8 +513,8 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
       onAddAreaMonth,
       onEditMonth,
       onViewItem,
+      onViewArea,
       onEditItem,
-      onRemoveItem,
       onScheduleItem,
     };
   }, [
@@ -532,8 +524,8 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
     onAddAreaMonth,
     onEditItem,
     onEditMonth,
-    onRemoveItem,
     onScheduleItem,
+    onViewArea,
     onViewItem,
   ]);
 
@@ -547,81 +539,98 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
       minWidth: 220,
       maxWidth: 300,
       sortable: true,
+      wrapText: true,
+      autoHeight: true,
+      cellClass: "qms-programme-matrix__area-cell",
       valueGetter: ({ data }) => data?.area.display_label || "",
       cellRenderer: ({ data }: ICellRendererParams<MatrixRow>) => {
         if (!data) return null;
         const actions = actionsRef.current;
-        const rowEditable = Boolean(
-          data.item && actions.editableProgrammeIds.has(data.item.programme_id),
+        const primary = primaryProgrammeItem(data);
+        const areaItems = data.items;
+        const rowEditable = areaItems.some((item) =>
+          actions.editableProgrammeIds.has(item.programme_id),
         );
-        const areaIdentity = (
-          <>
-            <strong>{data.area.display_label}</strong>
-            {data.item ? <small>{data.item.title}</small> : null}
-          </>
+        const openArea = () =>
+          actions.onViewArea(areaItems, data.area.display_label);
+        const openPrimaryEdit = () => {
+          if (!primary) return;
+          if (areaItems.length > 1) openArea();
+          else actions.onEditItem(primary);
+        };
+        const areaLabel = (
+          <strong>{data.area.display_label}</strong>
         );
         return (
           <div className="qms-programme-matrix__area">
-            {data.item ? (
+            {areaItems.length ? (
               <button
                 type="button"
                 className="qms-programme-matrix__area-name"
-                onClick={() => actions.onViewItem(data.item!)}
-                title={`Open ${data.item.title}`}
+                onClick={openArea}
+                title={
+                  areaItems.length > 1
+                    ? `View ${areaItems.length} audits in ${data.area.display_label}`
+                    : `Open ${primary?.title || data.area.display_label}`
+                }
               >
-                {areaIdentity}
+                {areaLabel}
               </button>
             ) : (
               <span
                 className="qms-programme-matrix__area-name"
                 title={data.area.display_label}
               >
-                {areaIdentity}
+                {areaLabel}
               </span>
             )}
             <span className="qms-programme-matrix__row-actions">
-              {data.item ? (
+              {areaItems.length ? (
                 <button
                   type="button"
-                  title="View audit"
-                  aria-label={`View ${data.item.title}`}
-                  onClick={() => actions.onViewItem(data.item!)}
+                  title={
+                    areaItems.length > 1
+                      ? `View ${areaItems.length} audits`
+                      : "View audit"
+                  }
+                  aria-label={
+                    areaItems.length > 1
+                      ? `View ${areaItems.length} audits in ${data.area.display_label}`
+                      : `View ${primary?.title || data.area.display_label}`
+                  }
+                  onClick={openArea}
                 >
                   <Info size={14} />
                 </button>
               ) : null}
-              {data.item && rowEditable ? (
+              {primary && rowEditable ? (
                 <button
                   type="button"
-                  title="Edit audit"
-                  aria-label={`Edit ${data.item.title}`}
-                  onClick={() => actions.onEditItem(data.item!)}
+                  title={
+                    areaItems.length > 1 ? "Choose audit to edit" : "Edit audit"
+                  }
+                  aria-label={
+                    areaItems.length > 1
+                      ? `Choose an audit to edit in ${data.area.display_label}`
+                      : `Edit ${primary.title}`
+                  }
+                  onClick={openPrimaryEdit}
                 >
                   <Pencil size={14} />
                 </button>
               ) : null}
-              {data.item &&
+              {primary &&
+              areaItems.length === 1 &&
               actions.canSchedule &&
-              data.item.state === "PLANNED" &&
-              data.item.recurrence !== "FIXED_DATES" ? (
+              primary.state === "PLANNED" &&
+              primary.recurrence !== "FIXED_DATES" ? (
                 <button
                   type="button"
                   title="Schedule audit"
-                  aria-label={`Schedule ${data.item.title}`}
-                  onClick={() => actions.onScheduleItem(data.item!)}
+                  aria-label={`Schedule ${primary.title}`}
+                  onClick={() => actions.onScheduleItem(primary)}
                 >
                   <CalendarClock size={14} />
-                </button>
-              ) : null}
-              {data.item && rowEditable ? (
-                <button
-                  type="button"
-                  className="is-danger"
-                  title="Remove audit"
-                  aria-label={`Remove ${data.item.title}`}
-                  onClick={() => actions.onRemoveItem(data.item!)}
-                >
-                  <Trash2 size={14} />
                 </button>
               ) : null}
             </span>
@@ -643,95 +652,113 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
         cellRenderer: ({ data }: ICellRendererParams<MatrixRow>) => {
           if (!data) return null;
           const actions = actionsRef.current;
-          const rowEditable = Boolean(
-            data.item &&
-            actions.editableProgrammeIds.has(data.item.programme_id),
+          const slots = slotsForMonth(
+            data,
+            month,
+            programme.programme_year,
+            linksByItem,
           );
-          const entries = data.item
-            ? entriesForMonth(
-                data.item,
-                month,
-                programme.programme_year,
-                data.scheduleLink,
-              )
-            : [];
-          const slotCollisions = data.item
-            ? entries.flatMap(
-                (entry) =>
-                  collisionsByAllocation.get(`${data.item!.id}:${entry.key}`) ||
-                  [],
-              )
-            : [];
-          const label = data.item
-            ? `${data.item.title}, ${long} ${programme.programme_year}`
-            : `Add ${data.area.display_label} audit in ${long} ${programme.programme_year}`;
-          const onClick = () => {
-            if (!data.item) {
-              if (actions.editable) actions.onAddAreaMonth(data.area, month);
-              return;
-            }
-            if (rowEditable) actions.onEditMonth(data.item, month);
-            else actions.onViewItem(data.item);
+          const focusItem = slots[0]?.item;
+          const canPlanEmpty =
+            actions.editable &&
+            (data.items.length === 0 ||
+              data.items.some((item) =>
+                actions.editableProgrammeIds.has(item.programme_id),
+              ) ||
+              actions.editable);
+          const slotCollisions = slots.flatMap(
+            (slot) =>
+              collisionsByAllocation.get(`${slot.item.id}:${slot.entry.key}`) ||
+              [],
+          );
+          const openSlot = (item: AuditProgrammeItem) => {
+            const slotEditable = actions.editableProgrammeIds.has(
+              item.programme_id,
+            );
+            if (slotEditable) actions.onEditMonth(item, month);
+            else actions.onViewItem(item);
           };
+          const emptyLabel = `Add ${data.area.display_label} audit in ${long} ${programme.programme_year}`;
           return (
             <div className="qms-programme-matrix__slot">
-              <button
-                type="button"
-                className={`qms-programme-matrix__month${entries.length ? " has-plan" : ""}${entries.some((entry) => entry.scheduled) ? " is-scheduled" : ""}${slotCollisions.length ? " has-collision" : ""}`}
-                aria-label={label}
-                onClick={onClick}
-                title={
-                  rowEditable
-                    ? `${label}. Click to add or edit this month.`
-                    : data.item
-                      ? `${label}. Click to view.`
-                      : label
-                }
-              >
-                {entries.length ? (
-                  <>
-                    {entries.slice(0, 2).map((entry) => (
-                      <span
-                        key={entry.key}
-                        className={entry.adjusted ? "is-adjusted" : ""}
+              {slots.length ? (
+                <div
+                  className={`qms-programme-matrix__month has-plan${slots.some((slot) => slot.entry.scheduled) ? " is-scheduled" : ""}${slotCollisions.length ? " has-collision" : ""}`}
+                >
+                  {slots.slice(0, 2).map((slot) => {
+                    const slotEditable = actions.editableProgrammeIds.has(
+                      slot.item.programme_id,
+                    );
+                    return (
+                      <button
+                        key={`${slot.item.id}:${slot.entry.key}`}
+                        type="button"
+                        className={`qms-programme-matrix__chip${slot.entry.adjusted ? " is-adjusted" : ""}`}
+                        title={slotTitle(slot.item, slot.entry)}
+                        aria-label={`${slotTitle(slot.item, slot.entry)}. ${slotEditable ? "Click to edit dates." : "Click to view."}`}
+                        onClick={() => openSlot(slot.item)}
                       >
                         <strong>
-                          {data.item
-                            ? slotLabel(data.item, entry.label)
-                            : entry.label}
+                          {slotLabel(slot.item, slot.entry.label)}
                         </strong>
-                      </span>
-                    ))}
-                    {data.item ? (
-                      <AuditTeamInitials
-                        item={data.item}
-                        auditorNames={auditorNames}
-                        auditorInitials={auditorInitials}
-                      />
-                    ) : null}
-                  </>
-                ) : actions.editable ? (
+                        <AuditLeadInitials
+                          item={slot.item}
+                          auditorNames={auditorNames}
+                          auditorInitials={auditorInitials}
+                        />
+                      </button>
+                    );
+                  })}
+                  {slots.length === 1 && focusItem ? (
+                    <AuditTeamRestInitials
+                      item={focusItem}
+                      auditorNames={auditorNames}
+                      auditorInitials={auditorInitials}
+                    />
+                  ) : null}
+                  {slots.length > 2 ? (
+                    <button
+                      type="button"
+                      className="qms-programme-matrix__more"
+                      title={`View all ${slots.length} audits in ${long}`}
+                      aria-label={`View all ${slots.length} audits for ${data.area.display_label} in ${long}`}
+                      onClick={() =>
+                        actions.onViewArea(
+                          slots.map((slot) => slot.item),
+                          `${data.area.display_label} · ${long}`,
+                        )
+                      }
+                    >
+                      +{slots.length - 2}
+                    </button>
+                  ) : null}
+                </div>
+              ) : canPlanEmpty ? (
+                <button
+                  type="button"
+                  className="qms-programme-matrix__month"
+                  aria-label={emptyLabel}
+                  onClick={() => actions.onAddAreaMonth(data.area, month)}
+                  title={`${emptyLabel}. Click to add.`}
+                >
                   <span className="qms-programme-matrix__add">
                     <Plus size={14} aria-hidden />
                   </span>
-                ) : (
+                </button>
+              ) : (
+                <div className="qms-programme-matrix__month">
                   <span className="qms-programme-matrix__empty">—</span>
-                )}
-                {entries.length > 2 ? (
-                  <b className="qms-programme-matrix__more">
-                    +{entries.length - 2}
-                  </b>
-                ) : null}
-              </button>
-              {data.item && slotCollisions.length ? (
+                </div>
+              )}
+              {focusItem && slotCollisions.length ? (
                 <button
                   type="button"
                   className="qms-programme-matrix__collision"
-                  aria-label={`Resolve ${slotCollisions.length} scheduling conflict${slotCollisions.length === 1 ? "" : "s"} for ${data.item.title}`}
+                  aria-label={`Resolve ${slotCollisions.length} scheduling conflict${slotCollisions.length === 1 ? "" : "s"} for ${focusItem.title}`}
                   title="Auditor scheduling conflict"
                   onClick={() =>
                     setCollisionFocus({
-                      item: data.item!,
+                      item: focusItem,
                       month,
                       collisions: slotCollisions,
                     })
@@ -750,6 +777,7 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
     auditorInitials,
     auditorNames,
     collisionsByAllocation,
+    linksByItem,
     programme.programme_year,
   ]);
 
@@ -824,6 +852,29 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
               onClick={onEditProgramme}
             >
               <Pencil size={15} />
+            </button>
+          ) : null}
+          {onDownloadPdf ? (
+            <button
+              type="button"
+              className="is-icon"
+              title="Download programme PDF"
+              aria-label="Download programme PDF"
+              onClick={onDownloadPdf}
+              disabled={downloadBusy}
+            >
+              <Download size={15} />
+            </button>
+          ) : null}
+          {onDiscardProgramme ? (
+            <button
+              type="button"
+              className="is-icon is-danger"
+              title="Discard draft programme"
+              aria-label="Discard draft programme"
+              onClick={onDiscardProgramme}
+            >
+              <Trash2 size={15} />
             </button>
           ) : null}
           <button
@@ -908,9 +959,10 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
           </button>
         </div>
         <p aria-live="polite">
-          <strong>{programmeRows.length}</strong> planned audits{" "}
-          <span aria-hidden>·</span> <strong>{publishedDates}</strong> calendar
-          dates
+          <strong>{plannedAuditCount}</strong> planned audits{" "}
+          <span aria-hidden>·</span> <strong>{programmeRows.length}</strong>{" "}
+          audit areas <span aria-hidden>·</span>{" "}
+          <strong>{publishedDates}</strong> calendar dates
         </p>
       </div>
 
@@ -921,8 +973,8 @@ const QmsAuditProgrammeMatrix: React.FC<Props> = ({
           columnDefs={columns}
           defaultColDef={MATRIX_DEFAULT_COL_DEF}
           getRowId={getMatrixRowId}
-          rowHeight={54}
-          headerHeight={38}
+          rowHeight={64}
+          headerHeight={40}
           animateRows={false}
           loading={loading}
           overlayNoRowsTemplate={

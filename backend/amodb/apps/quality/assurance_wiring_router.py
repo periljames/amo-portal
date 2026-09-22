@@ -770,28 +770,80 @@ def _reconcile_row(db: Session, ctx: TenantContext, row: QualityAssuranceEvidenc
 
 @router.post("/reconcile")
 def reconcile_assurance(
-    limit: int = Query(default=500, ge=1, le=2000),
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    """Apply every pending/errored source event and refresh all evidence links.
+
+    Events are cleared with a single bulk UPDATE so large import backlogs
+    (thousands of TRAINING updates) finish in one request. Evidence links are
+    walked in keyset batches so memory and lock time stay bounded.
+    """
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    rows = db.query(QualityAssuranceEvidenceLink).filter(QualityAssuranceEvidenceLink.amo_id == ctx.amo_id).order_by(QualityAssuranceEvidenceLink.updated_at.asc()).limit(limit).all()
+    now = _now()
+    reviewed = 0
     changed = 0
     rejected = 0
     errors: list[dict[str, str]] = []
-    for row in rows:
-        was_changed, error = _reconcile_row(db, ctx, row)
-        changed += int(was_changed)
-        rejected += int(row.evidence_status == "REJECTED")
-        if error:
-            errors.append({"evidence_id": row.id, "message": error})
-    events = db.query(QualityAssuranceEvent).filter(QualityAssuranceEvent.amo_id == ctx.amo_id, QualityAssuranceEvent.processing_status == "PENDING").order_by(QualityAssuranceEvent.occurred_at.asc()).limit(limit).all()
-    for event in events:
-        event.processing_status = "PROCESSED"
-        event.processed_at = _now()
-        event.processing_error = None
+    evidence_batch_size = 250
+    last_evidence_id = ""
+
+    while True:
+        rows = (
+            db.query(QualityAssuranceEvidenceLink)
+            .filter(
+                QualityAssuranceEvidenceLink.amo_id == ctx.amo_id,
+                QualityAssuranceEvidenceLink.id > last_evidence_id,
+            )
+            .order_by(QualityAssuranceEvidenceLink.id.asc())
+            .limit(evidence_batch_size)
+            .all()
+        )
+        if not rows:
+            break
+        for row in rows:
+            was_changed, error = _reconcile_row(db, ctx, row)
+            reviewed += 1
+            changed += int(was_changed)
+            rejected += int(row.evidence_status == "REJECTED")
+            if error and len(errors) < 50:
+                errors.append({"evidence_id": row.id, "message": error})
+        last_evidence_id = rows[-1].id
+        db.flush()
+
+    events_processed = (
+        db.query(QualityAssuranceEvent)
+        .filter(
+            QualityAssuranceEvent.amo_id == ctx.amo_id,
+            QualityAssuranceEvent.processing_status.in_(("PENDING", "ERROR")),
+        )
+        .update(
+            {
+                QualityAssuranceEvent.processing_status: "PROCESSED",
+                QualityAssuranceEvent.processed_at: now,
+                QualityAssuranceEvent.processing_error: None,
+            },
+            synchronize_session=False,
+        )
+    )
     db.commit()
-    return {"reviewed": len(rows), "changed": changed, "rejected": rejected, "events_processed": len(events), "errors": errors[:50], "as_of": _now().isoformat()}
+    remaining_events = (
+        db.query(QualityAssuranceEvent)
+        .filter(
+            QualityAssuranceEvent.amo_id == ctx.amo_id,
+            QualityAssuranceEvent.processing_status.in_(("PENDING", "ERROR")),
+        )
+        .count()
+    )
+    return {
+        "reviewed": reviewed,
+        "changed": changed,
+        "rejected": rejected,
+        "events_processed": int(events_processed or 0),
+        "remaining_events": int(remaining_events or 0),
+        "errors": errors,
+        "as_of": now.isoformat(),
+    }
 
 
 @router.get("/events")

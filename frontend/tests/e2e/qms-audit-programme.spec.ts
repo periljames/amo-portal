@@ -502,7 +502,7 @@ test("programme schedule deep-link stays inside Audit Assurance chrome", async (
     { waitUntil: "domcontentloaded" },
   );
 
-  await expect(page.getByLabel("Audit Assurance sections")).toBeVisible();
+  await expect(page.getByLabel("Assurance pages")).toBeVisible();
   await expect(page.getByRole("tab", { name: /Programme/i })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");

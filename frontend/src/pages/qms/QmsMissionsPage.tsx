@@ -175,7 +175,7 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
   const selectedMissionId = searchParams.get("missionId");
 
   const listQuery = useQuery({
-    queryKey: ["qms-missions", amoCode, statusFilter, offset],
+    queryKey: ["qms-missions", amoCode.trim().toLowerCase(), statusFilter, offset],
     queryFn: ({ signal }) => listQmsMissions(amoCode, { status: statusFilter || undefined, limit: 25, offset }, signal),
     staleTime: 10_000,
     enabled: !selectedMissionId,
@@ -184,7 +184,7 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
   const createMutation = useMutation({
     mutationFn: (payload: QmsMissionCreate) => createQmsMission(amoCode, payload),
     onSuccess: async (mission) => {
-      await queryClient.invalidateQueries({ queryKey: ["qms-missions", amoCode] });
+      await queryClient.invalidateQueries({ queryKey: ["qms-missions", amoCode.trim().toLowerCase()] });
       setShowCreate(false);
       setTitle("");
       setDescription("");

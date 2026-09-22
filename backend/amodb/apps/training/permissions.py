@@ -253,14 +253,15 @@ def training_capabilities_for(db: Session, *, user: account_models.User) -> set[
     if db.get_bind().dialect.name == "postgresql":
         db.execute(text("SELECT set_config('app.tenant_id', :amo_id, true)"), {"amo_id": amo_id})
         db.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": str(user.id)})
-    # The effective primary tenant access profile is the sole database-backed
-    # role assignment. Legacy Training-specific roles may remain as historical
-    # rows, but they cannot silently preserve authority after a profile change.
-    return {
+    # Prefer database-backed profile bindings. Role compatibility defaults fill
+    # gaps so Quality / regulated personas can still track personnel training
+    # while tenant profiles finish seeding fine-grained training.* capabilities.
+    profile_codes = {
         code
         for code in access_control.capability_codes_for_user(db, user=user)
         if code in ALL_TRAINING_CAPABILITIES
     }
+    return profile_codes | default_training_capabilities(user)
 
 
 def has_training_capability(

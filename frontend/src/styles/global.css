@@ -5867,6 +5867,29 @@ body[data-color-scheme="dark"] [class*="subtitle"] {
   position: relative;
 }
 
+.planner-person-field__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.planner-person-field__clear {
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 88%, var(--surface) 12%);
+  color: var(--text-secondary);
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.planner-person-field__clear:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border) 72%);
+}
+
 .planner-field-help {
   display: block;
   margin-top: 0.35rem;
@@ -5902,6 +5925,7 @@ body[data-color-scheme="dark"] [class*="subtitle"] {
   color: var(--text-primary);
 }
 
+.planner-person-picker__item.is-selected,
 .planner-person-picker__item:hover {
   border-color: color-mix(in srgb, var(--accent-primary) 28%, var(--border) 72%);
   background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface) 92%);

@@ -19,6 +19,7 @@ from .planner_router import planner_router
 from .planner_schedule_router import planner_schedule_router
 from .planner_strategic_router import router as planner_strategic_router
 from .provider_governance_router import provider_governance_router
+from .analysis_router import router as analysis_router
 
 
 def _route_endpoint(route_item):
@@ -88,6 +89,7 @@ def _install_specialist_routes(api_router: APIRouter) -> None:
         planner_schedule_router,
         planner_strategic_router,
         provider_governance_router,
+        analysis_router,
     ):
         _insert_before_catchalls(
             api_router,

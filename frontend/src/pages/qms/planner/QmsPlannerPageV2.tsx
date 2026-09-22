@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -57,6 +57,12 @@ import {
   type WeekendPolicy,
 } from "../../../features/qms/scheduleWeekend";
 import {
+  parseScheduleConflictDetail,
+  parseStaleScheduleDetail,
+  type PlannerAvailableSlot,
+  type PlannerConflictDetail,
+} from "./plannerReschedule";
+import {
   plannerClockAt,
   plannerTimezoneLabel,
   plannerTimezoneOffsetMinutes,
@@ -81,6 +87,7 @@ import {
   startOfWeek,
   visiblePlannerDays,
   PLANNER_HOUR_HEIGHT,
+  plannerNowScrollTop,
   type PlannerCategory,
   type PlannerEvent,
   type PlannerOccurrence,
@@ -109,7 +116,7 @@ type PlannerCapabilities = {
 type FocusMode = "all" | "mine" | "overdue" | "today" | "week" | "unassigned";
 type TimeFormat = "12h" | "24h";
 type CreateKind = "audit" | "car" | "training" | "review";
-type ToastState = { tone: "success" | "danger" | "info"; message: string } | null;
+type ToastState = { tone: "success" | "danger" | "info" | "warning"; message: string } | null;
 
 type PlannerUiPreferences = {
   leftRailOpen: boolean;
@@ -143,8 +150,8 @@ const DEFAULT_UI: PlannerUiPreferences = {
   rightPanelOpen: false,
   showUtc: false,
   timeFormat: "12h",
-  hourStart: 5,
-  hourEnd: 23,
+  hourStart: 0,
+  hourEnd: 24,
 };
 
 const HOUR_HEIGHT = PLANNER_HOUR_HEIGHT;
@@ -223,8 +230,19 @@ function loadUiPreferences(key: string): PlannerUiPreferences {
         const normalized = raw === 5 ? 7 : raw;
         return Math.max(1, Math.min(9, normalized));
       })(),
-      hourStart: Math.max(0, Math.min(20, Number(stored.hourStart ?? DEFAULT_UI.hourStart))),
-      hourEnd: Math.max(4, Math.min(24, Number(stored.hourEnd ?? DEFAULT_UI.hourEnd))),
+      // Legacy default clipped the day to 05:00–23:00; show a full 24h canvas.
+      hourStart: (() => {
+        const raw = Number(stored.hourStart ?? DEFAULT_UI.hourStart);
+        const end = Number(stored.hourEnd ?? DEFAULT_UI.hourEnd);
+        const normalized = raw === 5 && (end === 23 || Number.isNaN(end)) ? 0 : raw;
+        return Math.max(0, Math.min(20, normalized));
+      })(),
+      hourEnd: (() => {
+        const start = Number(stored.hourStart ?? DEFAULT_UI.hourStart);
+        const raw = Number(stored.hourEnd ?? DEFAULT_UI.hourEnd);
+        const normalized = start === 5 && raw === 23 ? 24 : raw;
+        return Math.max(4, Math.min(24, normalized));
+      })(),
       hiddenCategories: Array.isArray(stored.hiddenCategories)
         ? stored.hiddenCategories.filter((value): value is PlannerCategory => PLANNER_CATEGORIES.some((item) => item.key === value))
         : [],
@@ -432,10 +450,14 @@ function PlannerEventCard({
           </>
         )}
       </span>
-      {!auditCopy ? <span className="qms-planner-event__meta">
-        {event.startTime ? <time>{formatTime(event.startTime, timeFormat)}</time> : null}
-        {occurrence && (occurrence.spanRole === "middle" || occurrence.spanRole === "end") ? <small>continues</small> : null}
-      </span> : null}
+      {/* Week/day hour scale already encodes time; only month compact chips need a clock label. */}
+      {compact && event.startTime ? (
+        <span className="qms-planner-event__meta">
+          <time>{formatTime(event.startTime, timeFormat)}</time>
+        </span>
+      ) : occurrence && (occurrence.spanRole === "middle" || occurrence.spanRole === "end") ? (
+        <span className="qms-planner-event__meta"><small>continues</small></span>
+      ) : null}
     </button>
   );
 }
@@ -590,6 +612,8 @@ function TimelineView({
   onDropEvent: (eventId: string, targetDate: string) => void;
   onKeyboardMove: (event: PlannerEvent, days: number) => void;
 }): React.ReactElement {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const scrolledKeyRef = useRef<string | null>(null);
   const nowInstant = new Date();
   const now = plannerClockAt(nowInstant, timeZone);
   const today = now.dateKey;
@@ -599,8 +623,60 @@ function TimelineView({
   const nowMinutes = (now.hour - hourStart) * 60 + now.minute;
   const nowTop = Math.max(0, Math.min(height, (nowMinutes / 60) * HOUR_HEIGHT));
   const dayKeys = days.map(isoDateKey);
+  const dayKeysSignature = dayKeys.join("|");
   const allDaySpans = layoutAllDaySpans(events, dayKeys);
   const allDayLaneCount = allDaySpans.reduce((count, span) => Math.max(count, span.lane + 1), 0);
+  const showNow = dayKeys.includes(today) && now.hour >= hourStart && now.hour <= hourEnd;
+
+  useLayoutEffect(() => {
+    if (!showNow) return;
+    const root = rootRef.current;
+    if (!root) return;
+
+    const resolveScroller = (): HTMLElement | null => {
+      const canvas = root.closest(".qms-planner-canvas") as HTMLElement | null;
+      if (canvas && canvas.scrollHeight > canvas.clientHeight + 1) return canvas;
+      let node: HTMLElement | null = root.parentElement;
+      while (node) {
+        const style = window.getComputedStyle(node);
+        const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+        if (canScrollY) return node;
+        node = node.parentElement;
+      }
+      return canvas;
+    };
+
+    const applyScroll = () => {
+      const scroller = resolveScroller();
+      if (!scroller) return false;
+      const scrollKey = `${dayKeysSignature}:${hourStart}:${hourEnd}:${today}:${Math.round(scroller.clientHeight)}`;
+      if (scrolledKeyRef.current === scrollKey) return true;
+      const times = root.querySelector(".qms-planner-timeline__times") as HTMLElement | null;
+      const timedOffsetPx = times ? times.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop : 0;
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (maxScrollTop < 1) return false;
+      scrolledKeyRef.current = scrollKey;
+      scroller.scrollTop = plannerNowScrollTop({
+        nowTopPx: nowTop,
+        stickyOffsetPx: timedOffsetPx,
+        viewportHeight: scroller.clientHeight,
+        maxScrollTop,
+      });
+      return true;
+    };
+
+    if (applyScroll()) return;
+    const raf = window.requestAnimationFrame(() => {
+      applyScroll();
+    });
+    const timer = window.setTimeout(() => {
+      applyScroll();
+    }, 120);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [dayKeysSignature, hourEnd, hourStart, nowTop, showNow, today]);
 
   const createFromPointer = (event: React.MouseEvent<HTMLDivElement>, date: string) => {
     if (event.target !== event.currentTarget) return;
@@ -614,7 +690,7 @@ function TimelineView({
   };
 
   return (
-    <div className="qms-planner-timeline" style={{ "--planner-days": days.length, "--planner-hour-height": `${HOUR_HEIGHT}px` } as React.CSSProperties}>
+    <div ref={rootRef} className="qms-planner-timeline" style={{ "--planner-days": days.length, "--planner-hour-height": `${HOUR_HEIGHT}px` } as React.CSSProperties}>
       <div className="qms-planner-timeline__corner"><strong>{days.length === 1 ? timeZoneLabel : "Week"}</strong>{days.length === 1 && showUtc ? <small>UTC below</small> : null}</div>
       {days.map((day) => {
         const key = isoDateKey(day);
@@ -695,8 +771,13 @@ function TimelineView({
               if (eventId) onDropEvent(eventId, key);
             }}
           >
-            {hours.map((hour) => <React.Fragment key={hour}><span className="qms-planner-timeline__hour-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT}px` }} /><span className="qms-planner-timeline__half-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT + HOUR_HEIGHT / 2}px` }} /></React.Fragment>)}
-            {key === today && now.hour >= hourStart && now.hour <= hourEnd ? <span className="qms-planner-timeline__now" style={{ top: `${nowTop}px` }}><i>{formatTime(`${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}`, timeFormat)}</i></span> : null}
+            {hours.map((hour) => (
+              <React.Fragment key={hour}>
+                <span className="qms-planner-timeline__hour-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT}px` }} />
+                {hour < hourEnd ? <span className="qms-planner-timeline__half-line" style={{ top: `${(hour - hourStart) * HOUR_HEIGHT + HOUR_HEIGHT / 2}px` }} /> : null}
+              </React.Fragment>
+            ))}
+            {showNow && key === today ? <span className="qms-planner-timeline__now" style={{ top: `${nowTop}px` }}><i>{formatTime(`${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}`, timeFormat)}</i></span> : null}
             {timed.map(({ event: row, topPx, heightPx, columnIndex, columnCount }) => {
               const gutter = 4;
               return (
@@ -794,6 +875,10 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   // v4: left rail open by default (unscheduled queue visible); Mon–Sun week prefs.
   const storageKey = `amoportal:qms-planner-v4:${amoCode}`;
   const [preferences, setPreferences] = useState<PlannerUiPreferences>(() => loadUiPreferences(storageKey));
+  // Week/day timeline always renders a full 24h canvas. Persisted hour windows
+  // previously clipped the grid to ~05–23 so it fit the viewport with nothing to scroll.
+  const timelineHourStart = 0;
+  const timelineHourEnd = 24;
   const [events, setEvents] = useState<PlannerEvent[]>([]);
   const [capabilities, setCapabilities] = useState<PlannerCapabilities>({ can_reschedule: false, can_create_audit: false, can_manage_training: false });
   const [loading, setLoading] = useState(true);
@@ -808,6 +893,9 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [weekendPrompt, setWeekendPrompt] = useState<WeekendConfirmationDetail | null>(null);
   const [weekendPolicy, setWeekendPolicy] = useState<WeekendPolicy | null>(null);
+  const [conflictPrompt, setConflictPrompt] = useState<PlannerConflictDetail | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<PlannerAvailableSlot | null>(null);
+  const [overrideConflicts, setOverrideConflicts] = useState(false);
   const [moveReason, setMoveReason] = useState("");
   const [moveAcknowledged, setMoveAcknowledged] = useState(false);
   const [moveBusy, setMoveBusy] = useState(false);
@@ -833,14 +921,18 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
           ? "Planner updated"
           : toast.tone === "danger"
             ? "Planner action failed"
-            : "Planner information",
+            : toast.tone === "warning"
+              ? "Schedule conflict"
+              : "Planner information",
       message: toast.message,
       variant:
         toast.tone === "danger"
           ? "error"
           : toast.tone === "success"
             ? "success"
-            : "info",
+            : toast.tone === "warning"
+              ? "warning"
+              : "info",
       dedupeKey: `qms-planner:${toast.tone}:${toast.message}`,
     });
   }, [pushToast]);
@@ -858,6 +950,12 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   }, []);
 
   useEffect(() => saveUiPreferences(storageKey, preferences), [preferences, storageKey]);
+  useEffect(() => {
+    setPreferences((current) => {
+      if (current.hourStart === 0 && current.hourEnd === 24) return current;
+      return { ...current, hourStart: 0, hourEnd: 24 };
+    });
+  }, [storageKey]);
   useEffect(() => {
     const timer = window.setInterval(() => setClockInstant(new Date()), CLOCK_REFRESH_MS);
     return () => window.clearInterval(timer);
@@ -1027,39 +1125,97 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
     setMoveAcknowledged(false);
     setWeekendPrompt(null);
     setWeekendPolicy(null);
+    setConflictPrompt(null);
+    setSelectedSlot(null);
+    setOverrideConflicts(false);
   };
 
-  const confirmMove = async (policy: WeekendPolicy | null = weekendPolicy) => {
+  const confirmMove = async (
+    policy: WeekendPolicy | null = weekendPolicy,
+    options?: {
+      slot?: PlannerAvailableSlot | null;
+      allowConflicts?: boolean;
+      expectedOldDate?: string;
+    },
+  ) => {
     if (!pendingMove || moveReason.trim().length < 8 || !moveAcknowledged) return;
     setMoveBusy(true);
     const previousEvents = events;
+    const slot = options?.slot === undefined ? selectedSlot : options.slot;
+    const allowConflicts = options?.allowConflicts ?? overrideConflicts;
+    let expectedOldDate = options?.expectedOldDate || pendingMove.event.date;
+    let attempt = 0;
     setEvents((current) => current.map((event) => event.id === pendingMove.event.id ? movePlannerEvent(event, pendingMove.targetDate) : event));
     try {
-      const response = await apiRequest<{ new_date?: string }>(qmsPath(amoCode, "/integrations/calendar/reschedule"), {
-        method: "PATCH",
-        timeoutMs: 15000,
-        body: JSON.stringify({
-          event_id: pendingMove.event.id,
-          expected_old_date: pendingMove.event.date,
-          new_date: pendingMove.targetDate,
-          reason: moveReason.trim(),
-          weekend_policy: policy || undefined,
-        }),
-      });
-      const landedOn = response?.new_date || pendingMove.targetDate;
-      setToast({ tone: "success", message: `${eventReference(pendingMove.event)} moved to ${landedOn}.` });
-      setPendingMove(null);
-      setWeekendPrompt(null);
-      setWeekendPolicy(null);
-      void loadPlanner();
-    } catch (moveError) {
-      setEvents(previousEvents);
-      const weekendDetail = parseWeekendConfirmationDetail(moveError);
-      if (weekendDetail) {
-        setWeekendPrompt(weekendDetail);
-        return;
+      while (attempt < 2) {
+        attempt += 1;
+        try {
+          const response = await apiRequest<{ new_date?: string; start_time?: string | null; end_time?: string | null }>(qmsPath(amoCode, "/integrations/calendar/reschedule"), {
+            method: "PATCH",
+            timeoutMs: 15000,
+            body: JSON.stringify({
+              event_id: pendingMove.event.id,
+              expected_old_date: expectedOldDate,
+              new_date: pendingMove.targetDate,
+              reason: moveReason.trim(),
+              weekend_policy: policy || undefined,
+              start_time: slot?.start_time || undefined,
+              end_time: slot?.end_time || undefined,
+              allow_conflicts: allowConflicts || undefined,
+              conflict_override_reason: allowConflicts ? moveReason.trim() : undefined,
+            }),
+          });
+          const landedOn = response?.new_date || pendingMove.targetDate;
+          const slotLabel = slot ? ` (${slot.label})` : "";
+          setToast({ tone: "success", message: `${eventReference(pendingMove.event)} moved to ${landedOn}${slotLabel}.` });
+          setPendingMove(null);
+          setWeekendPrompt(null);
+          setWeekendPolicy(null);
+          setConflictPrompt(null);
+          setSelectedSlot(null);
+          setOverrideConflicts(false);
+          void loadPlanner();
+          return;
+        } catch (moveError) {
+          const weekendDetail = parseWeekendConfirmationDetail(moveError);
+          if (weekendDetail) {
+            setEvents(previousEvents);
+            setWeekendPrompt(weekendDetail);
+            return;
+          }
+          const staleDetail = parseStaleScheduleDetail(moveError);
+          if (staleDetail && attempt === 1 && staleDetail.current_date !== pendingMove.targetDate) {
+            await loadPlanner();
+            expectedOldDate = staleDetail.current_date;
+            setPendingMove((current) => (
+              current
+                ? { ...current, event: { ...current.event, date: staleDetail.current_date } }
+                : current
+            ));
+            continue;
+          }
+          setEvents(previousEvents);
+          if (staleDetail) {
+            await loadPlanner();
+            setPendingMove((current) => (
+              current
+                ? { ...current, event: { ...current.event, date: staleDetail.current_date } }
+                : current
+            ));
+            setToast({ tone: "info", message: "Calendar refreshed to the latest schedule. Confirm the move again." });
+            return;
+          }
+          const conflictDetail = parseScheduleConflictDetail(moveError);
+          if (conflictDetail) {
+            setConflictPrompt(conflictDetail);
+            setSelectedSlot(conflictDetail.available_slots[0] || null);
+            setToast({ tone: "warning", message: conflictDetail.message });
+            return;
+          }
+          setToast({ tone: "danger", message: friendlyError(moveError, "The schedule change was rejected and reverted.") });
+          return;
+        }
       }
-      setToast({ tone: "danger", message: friendlyError(moveError, "The schedule change was rejected and reverted.") });
     } finally {
       setMoveBusy(false);
     }
@@ -1308,7 +1464,7 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
           {!loading && !error ? (
             <>
               {view === "month" ? <MonthView anchor={anchor} events={filteredEvents} selectedEventId={selectedEventId} timeFormat={preferences.timeFormat} timeZone={tenantTimeZone} onSelectDate={(key) => { setSelectedDate(key); setDateParam(key); }} onCreate={(date) => openQuickCreate(date)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
-              {view === "week" || view === "day" ? <TimelineView days={visibleDays} events={filteredEvents} eventsByDate={eventsByDate} selectedEventId={selectedEventId} hourStart={preferences.hourStart} hourEnd={preferences.hourEnd} timeFormat={preferences.timeFormat} timeZone={tenantTimeZone} timeZoneLabel={tenantTimeZoneLabel} showUtc={preferences.showUtc} onCreate={(date, time) => openQuickCreate(date, time)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
+              {view === "week" || view === "day" ? <TimelineView days={visibleDays} events={filteredEvents} eventsByDate={eventsByDate} selectedEventId={selectedEventId} hourStart={timelineHourStart} hourEnd={timelineHourEnd} timeFormat={preferences.timeFormat} timeZone={tenantTimeZone} timeZoneLabel={tenantTimeZoneLabel} showUtc={preferences.showUtc} onCreate={(date, time) => openQuickCreate(date, time)} onSelectEvent={selectEvent} onDropEvent={(eventId, date) => { const row = events.find((event) => event.id === eventId); if (row) proposeMove(row, date); }} onKeyboardMove={(row, days) => { const parsed = parseIsoDateKey(row.date); if (parsed) proposeMove(row, isoDateKey(addDays(parsed, days))); }} /> : null}
               {view === "agenda" ? <AgendaView events={filteredEvents} selectedEventId={selectedEventId} timeFormat={preferences.timeFormat} onSelect={selectEvent} /> : null}
             </>
           ) : null}
@@ -1535,9 +1691,68 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
               <div className="qms-planner-move-summary"><span><small>From</small><strong>{pendingMove.event.date}</strong></span><ChevronRight size={18} /><span><small>To</small><strong>{pendingMove.targetDate}</strong></span></div>
               {pendingMove.targetDate === pendingMove.event.date ? <label className="qms-planner-modal__field"><span>New date</span><input type="date" value={pendingMove.targetDate} onChange={(event) => setPendingMove((current) => current ? { ...current, targetDate: event.target.value } : current)} /></label> : null}
               {sameOwnerConflicts.length ? <div className="qms-planner-conflict"><AlertTriangle size={16} /><span>{sameOwnerConflicts.length} item{sameOwnerConflicts.length === 1 ? "" : "s"} already use the same owner on the target date.</span></div> : null}
+              {conflictPrompt ? (
+                <div className="qms-planner-conflict qms-planner-conflict--blocking">
+                  <AlertTriangle size={16} />
+                  <div>
+                    <strong>{conflictPrompt.message}</strong>
+                    <ul>
+                      {conflictPrompt.conflicts.slice(0, 4).map((item) => (
+                        <li key={`${item.subject_type}:${item.subject_id}`}>
+                          {item.title}
+                          {item.start_time && item.end_time ? ` · ${String(item.start_time).slice(0, 5)}–${String(item.end_time).slice(0, 5)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                    {conflictPrompt.available_slots.length ? (
+                      <div className="qms-planner-slot-options" role="group" aria-label="Available working-hours slots">
+                        {conflictPrompt.available_slots.map((slot) => (
+                          <button
+                            key={`${slot.start_time}-${slot.end_time}`}
+                            type="button"
+                            className={selectedSlot?.start_time === slot.start_time && selectedSlot?.end_time === slot.end_time ? "is-selected" : undefined}
+                            onClick={() => { setSelectedSlot(slot); setOverrideConflicts(false); }}
+                            disabled={moveBusy}
+                          >
+                            {slot.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>No free working-hours slots (09:00–17:00) fit this duration on the target day.</p>
+                    )}
+                    <label className="qms-planner-modal__ack">
+                      <input
+                        type="checkbox"
+                        checked={overrideConflicts}
+                        onChange={(event) => {
+                          setOverrideConflicts(event.target.checked);
+                          if (event.target.checked) setSelectedSlot(null);
+                        }}
+                        disabled={moveBusy}
+                      />
+                      <span>Override and keep the proposed time despite the team overlap (uses the reason below).</span>
+                    </label>
+                  </div>
+                </div>
+              ) : null}
               <label className="qms-planner-modal__field"><span>Reason for schedule change</span><textarea rows={4} value={moveReason} onChange={(event) => setMoveReason(event.target.value)} placeholder="Explain the operational or compliance reason. Minimum 8 characters." /></label>
               <label className="qms-planner-modal__ack"><input type="checkbox" checked={moveAcknowledged} onChange={(event) => setMoveAcknowledged(event.target.checked)} /><span>I reviewed the affected date, ownership, and linked workflow before moving this commitment.</span></label>
-              <footer><Button variant="secondary" onClick={() => setPendingMove(null)} disabled={moveBusy}>Cancel</Button><Button onClick={() => void confirmMove()} loading={moveBusy} disabled={moveReason.trim().length < 8 || !moveAcknowledged || pendingMove.targetDate === pendingMove.event.date}>Confirm move</Button></footer>
+              <footer>
+                <Button variant="secondary" onClick={() => { setPendingMove(null); setConflictPrompt(null); }} disabled={moveBusy}>Cancel</Button>
+                <Button
+                  onClick={() => void confirmMove()}
+                  loading={moveBusy}
+                  disabled={
+                    moveReason.trim().length < 8
+                    || !moveAcknowledged
+                    || pendingMove.targetDate === pendingMove.event.date
+                    || (Boolean(conflictPrompt) && !overrideConflicts && !selectedSlot)
+                  }
+                >
+                  {conflictPrompt ? (overrideConflicts ? "Override and move" : "Move to selected slot") : "Confirm move"}
+                </Button>
+              </footer>
             </section>
           </div>
         ) : null}

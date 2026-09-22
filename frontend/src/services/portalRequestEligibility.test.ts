@@ -25,12 +25,17 @@ describe("portal request network eligibility", () => {
     },
   );
 
-  it.each(["OFFLINE", "RECOVERING", "SESSION_EXPIRED"] as const)(
+  it.each(["OFFLINE", "SESSION_EXPIRED"] as const)(
     "blocks mutations while shared connectivity is %s",
     (state) => {
       expect(isPortalRequestNetworkEligible("PATCH", state, true)).toBe(false);
     },
   );
+
+  it("allows mutations during advisory RECOVERING when the browser is online", () => {
+    expect(isPortalRequestNetworkEligible("PATCH", "RECOVERING", true)).toBe(true);
+    expect(isPortalRequestNetworkEligible("DELETE", "RECOVERING", true)).toBe(true);
+  });
 
   it("allows mutations when the portal is ONLINE", () => {
     expect(isPortalRequestNetworkEligible("PATCH", "ONLINE", true)).toBe(true);

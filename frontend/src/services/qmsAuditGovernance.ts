@@ -255,10 +255,14 @@ export function prepareAuditNoticeDocument(
   auditId: string,
   noticeId: string,
   reason: string,
+  options?: { shortNoticeWaiverReason?: string },
 ) {
   return apiRequest<AuditNotice>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/prepare-document`),
-    json("POST", { reason }),
+    json("POST", {
+      reason,
+      short_notice_waiver_reason: options?.shortNoticeWaiverReason || undefined,
+    }),
   );
 }
 
@@ -274,9 +278,13 @@ export function submitAuditNotice(
   auditId: string,
   noticeId: string,
   reason: string,
+  options?: { shortNoticeWaiverReason?: string },
 ) {
   return apiRequest<AuditNoticeSubmitResult>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/submit`),
-    json("POST", { reason }),
+    json("POST", {
+      reason,
+      short_notice_waiver_reason: options?.shortNoticeWaiverReason || undefined,
+    }),
   );
 }

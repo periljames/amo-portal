@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import models as audit_models
-from amodb.database import get_db
+from amodb.database import SessionLocal, close_session_safely, get_db
 from amodb.security import JWT_ALGORITHM, SECRET_KEY, get_user_by_id
 from .broker import EventEnvelope, broker, format_sse, keepalive_message
 
@@ -76,10 +76,7 @@ def _get_user_from_token(token: str, db: Session) -> account_models.User:
     return user
 
 
-def get_current_active_user_from_transport(
-    request: Request,
-    db: Session = Depends(get_db),
-) -> account_models.User:
+def _bearer_token_from_request(request: Request) -> str:
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     token = None
     if auth_header and auth_header.lower().startswith("bearer "):
@@ -88,7 +85,14 @@ def get_current_active_user_from_transport(
         token = request.query_params.get("token")
     if not token:
         raise _credentials_exception()
-    return _get_user_from_token(token, db)
+    return token
+
+
+def get_current_active_user_from_transport(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> account_models.User:
+    return _get_user_from_token(_bearer_token_from_request(request), db)
 
 
 def _event_to_row(event: audit_models.AuditEvent) -> ActivityEventRead:
@@ -173,15 +177,18 @@ def _replay_events_since(
     return [_audit_row_to_envelope(row) for row in rows], False
 
 
-async def _event_generator(
-    request: Request,
-    user: account_models.User,
-    db: Session,
-) -> AsyncGenerator[str, None]:
-    q = broker.subscribe()
+def _prepare_stream_bootstrap(request: Request) -> tuple[account_models.User, list[str]]:
+    """Authenticate and optionally replay history, then release the DB connection.
+
+    The SSE keepalive loop must not hold a pooled session for the stream lifetime;
+    that previously reserved one (or two) write connections per open tab forever.
+    """
+    db = SessionLocal()
     try:
-        last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
+        user = _get_user_from_token(_bearer_token_from_request(request), db)
         effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+        last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
+        bootstrap: list[str] = []
         if last_event_id:
             replay, requires_reset = _replay_events_since(
                 db,
@@ -189,13 +196,36 @@ async def _event_generator(
                 last_event_id=last_event_id,
             )
             if requires_reset:
-                yield format_sse(
-                    json.dumps({"type": "reset", "reason": "last_event_id_out_of_window", "lastEventId": last_event_id}),
-                    event="reset",
+                bootstrap.append(
+                    format_sse(
+                        json.dumps(
+                            {
+                                "type": "reset",
+                                "reason": "last_event_id_out_of_window",
+                                "lastEventId": last_event_id,
+                            }
+                        ),
+                        event="reset",
+                    )
                 )
             else:
                 for event in replay:
-                    yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+                    bootstrap.append(format_sse(event.to_json(), event=event.type, event_id=event.id))
+        return user, bootstrap
+    finally:
+        close_session_safely(db)
+
+
+async def _event_generator(
+    request: Request,
+    user: account_models.User,
+    bootstrap: list[str],
+) -> AsyncGenerator[str, None]:
+    for chunk in bootstrap:
+        yield chunk
+    q = broker.subscribe()
+    try:
+        effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
         while True:
             if await request.is_disconnected():
                 break
@@ -211,13 +241,10 @@ async def _event_generator(
 
 
 @router.get("/events")
-async def stream_events(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user_from_transport),
-) -> StreamingResponse:
+async def stream_events(request: Request) -> StreamingResponse:
+    user, bootstrap = _prepare_stream_bootstrap(request)
     return StreamingResponse(
-        _event_generator(request, user, db),
+        _event_generator(request, user, bootstrap),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

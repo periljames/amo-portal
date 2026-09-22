@@ -33,7 +33,7 @@ This audit is based on runtime imports, router registration, models, service cal
 | `/maintenance/:amoCode/document-control/library/:docId` | `DocumentControlRecordEntryPage` → controller governance detail or reader redirect | `GET /doc-control/workspace/t/{tenant}/documents/{manual_id}/governance`; ordinary reader still resolves an immutable read target |
 | `/maintenance/:amoCode/document-control/structure` | `DocumentControlStructurePage` | Existing knowledge tree and reconciliation routes |
 | `/maintenance/:amoCode/document-control/records` | `DocumentControlRecordsPage` | Existing generated-record routes |
-| `/maintenance/:amoCode/publications/:manualId/rev/:revisionId/read` | Publications reader / `PdfReaderCoreV3` path | Existing reader bootstrap, source and progress routes |
+| `/maintenance/:amoCode/publications/:manualId/rev/:revisionId/read` | Publications reader / `PdfReaderCore` path | Existing reader bootstrap, source and progress routes |
 
 ## Capability matrix
 
@@ -51,7 +51,7 @@ This audit is based on runtime imports, router registration, models, service cal
 | Backfill | Hierarchy reconcile and revision reindex exist individually | No governed reconciliation control | Knowledge services/jobs | Controller only | Reconcile/reindex tests | Partially wired | Add idempotent run/items, dry run, selected documents, resume, retry and reconciliation evidence. |
 | Library scalability | Existing corrected workspace library access-filters before pagination but offers limited filters | Existing table is bounded but lacks governance columns | `Manual`, profile, revisions | Access filtered | Workspace library tests | Partially wired | Add URL-backed governance filters, stable sort, page sizes 25–250 and sticky bounded table. |
 | Dashboard actionability | Existing dashboard covers lifecycle workload | Mostly lifecycle KPIs | Lifecycle tables | Controller | Existing dashboard tests | Partially wired | Add work queues for unresolved ownership/relationships, failed indexing, orphaned structure and superseded references. |
-| Reader TOC/zoom stability | One-shot navigation, physical page authority and virtualized rendering are in merged reader work | `PdfReaderCoreV3` | Reader state/progress | Revision read access | `publications-reader-stability.spec.ts` | Implemented but exact-head revalidation required | Do not create a parallel engine. Retain existing reader and add governed entry/deep links. |
+| Reader TOC/zoom stability | One-shot navigation, physical page authority and virtualized rendering are in merged reader work | `PdfReaderCore` | Reader state/progress | Revision read access | `publications-reader-stability.spec.ts` | Implemented but exact-head revalidation required | Do not create a parallel engine. Retain existing reader and add governed entry/deep links. |
 | Reader mode | Existing reader-mode enter/exit and `Esc` test | Implemented | UI state | Reader access | Existing Playwright | Implemented but exact-head revalidation required | No architecture change. |
 | Audit mode | No complete evidence tray integrated with canonical annotations | Fragmentary audit links | QMS/audit models plus reader | Audit permissions | No complete E2E | Missing | Target architecture defined; not claimed complete in this PR. |
 | Compare mode | Revision diff data exists; complete synchronized immutable viewer not demonstrated | Separate diff page exists | `RevisionDiffIndex`, revisions | Publication access | Partial | Partially wired | Target architecture defined; not claimed complete in this PR. |
@@ -65,7 +65,7 @@ This audit is based on runtime imports, router registration, models, service cal
 2. `DocumentationReference` is an exact extracted occurrence, not a universal relation table. Expanding it to audits, findings, training and work orders would overload its purpose.
 3. The old controller detail page aggregates lifecycle entities but does not aggregate knowledge, hierarchy, indexing or granular responsibility. It remains in the tree for compatibility but is no longer the canonical controller detail export in this branch.
 4. Open draft reader PRs #467 and #469 are stale and must not be merged or used as a base.
-5. Reader work must continue through the current `PdfReaderCoreV3` path. A second reader engine would reintroduce source duplication and navigation authority conflicts.
+5. Reader work must continue through the current `PdfReaderCore` path. A second reader engine would reintroduce source duplication and navigation authority conflicts.
 
 ## Risk classification
 

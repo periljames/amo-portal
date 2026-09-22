@@ -502,7 +502,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <div><dt>Requirement</dt><dd>{selected.requirement_ref || selectedSource?.requirement_ref || "—"}</dd></div>
                 <div><dt>Regulatory source</dt><dd>{selectedSource?.regulatory_source_ref || "—"}</dd></div>
                 <div><dt>Manual source</dt><dd>{selectedSource?.manual_source_ref || "—"}</dd></div>
-                <div><dt>Frozen checklist</dt><dd>{selectedSource ? `${selectedSource.templateCode} Rev ${selectedSource.revisionNo} · SHA ${selectedSource.contentSha256.slice(0, 12)}…` : "No governed binding lineage"}</dd></div>
+                <div><dt>Frozen checklist</dt><dd>{selectedSource ? `${selectedSource.templateCode} Rev ${selectedSource.revisionNo}` : "No governed binding lineage"}</dd></div>
                 <div><dt>Current</dt><dd>{statusLabel(selected.canonical_response_status)} · v{selected.entity_version}</dd></div>
               </dl>
               <section className="qms-live-audit-focus__expected-evidence" aria-label="Expected evidence">

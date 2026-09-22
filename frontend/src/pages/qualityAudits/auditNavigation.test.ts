@@ -21,13 +21,13 @@ function audit(partial: Partial<QMSAuditOut> = {}): QMSAuditOut {
 describe("auditNavigationHref", () => {
   it("opens the current lifecycle stage using a slugged audit reference", () => {
     expect(auditNavigationHref("safarilink", audit())).toBe(
-      "/maintenance/safarilink/quality/audits/QAR-AC-26-001/prepare",
+      "/maintenance/safarilink/quality/audits/qar-ac-26-001/prepare",
     );
   });
 
   it("routes incomplete setup audits to setup", () => {
     expect(
       auditNavigationHref("safarilink", audit({ lead_auditor_user_id: null })),
-    ).toBe("/maintenance/safarilink/quality/audits/QAR-AC-26-001/setup");
+    ).toBe("/maintenance/safarilink/quality/audits/qar-ac-26-001/setup");
   });
 });

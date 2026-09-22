@@ -2,6 +2,10 @@
 export const qmsPageLoaders = {
   canonical: () => import("../pages/qms/QmsCanonicalPage"),
   overview: () => import("../pages/qms/QmsOverviewPage"),
+  people: () => import("../pages/qms/QmsPeoplePage"),
+  missions: () => import("../pages/qms/QmsMissionsPage"),
+  intelligence: () => import("../pages/qms/QmsIntelligencePage"),
+  assuranceHub: () => import("../components/QMS/QualityExcellenceCockpit"),
   checklist: () => import("../components/QMS/QualityChecklistTemplateHost"),
   cars: () => import("../pages/QualityCarsPage"),
   programmeSchedule: () => import("../pages/qms/QmsAuditProgrammeSchedulePage"),
@@ -23,7 +27,13 @@ export const qmsPageLoaders = {
 export function qmsRouteLoaderKey(path: string): keyof typeof qmsPageLoaders | null {
   const pathname = path.split(/[?#]/)[0];
   if (!/\/quality(?:\/|$)|\/qms(?:\/|$)/i.test(pathname)) return null;
-  if (/\/quality\/?$/i.test(pathname)) return "overview";
+  if (/\/quality\/?$/i.test(pathname)) {
+    const query = new URLSearchParams(path.split("?")[1]?.split("#")[0] || "");
+    if (query.has("hub")) return "assuranceHub";
+    const workspace = query.get("workspace");
+    if (workspace === "people" || workspace === "missions" || workspace === "intelligence") return workspace;
+    return "overview";
+  }
   const stage = /\/audits\/[^/]+\/(setup|prepare|live|closing|follow-up|archive)\/?$/i.exec(pathname)?.[1]?.toLowerCase();
   if (stage) return stage === "follow-up" ? "followUp" : stage as "setup" | "prepare" | "live" | "closing" | "archive";
   if (/\/calendar(?:\/|$)/i.test(pathname)) return "planner";

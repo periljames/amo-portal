@@ -784,6 +784,31 @@ def get_checklist_template(
     return _template_dict(row, include_revisions=True)
 
 
+@router.delete("/audit-checklist-templates/{template_id}")
+def retire_checklist_template(
+    template_id: str,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Soft-delete a structured checklist template by setting status to RETIRED."""
+    assert_quality_permission(db, ctx, "qms.audit.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(QualityAuditChecklistTemplate).filter(
+        QualityAuditChecklistTemplate.amo_id == ctx.amo_id,
+        QualityAuditChecklistTemplate.id == template_id,
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Audit checklist template not found.")
+    if row.status == "RETIRED":
+        raise HTTPException(status_code=409, detail="This checklist template is already retired.")
+    row.status = "RETIRED"
+    row.updated_by_user_id = ctx.user_id
+    row.updated_at = _utcnow()
+    db.commit()
+    db.refresh(row)
+    return {"id": str(row.id), "status": row.status}
+
+
 @router.post("/audit-checklist-templates/{template_id}/revisions", status_code=status.HTTP_201_CREATED)
 def create_checklist_revision(
     template_id: str,

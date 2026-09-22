@@ -5,6 +5,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 
 TRAINING_ROOT = Path(__file__).resolve().parents[1]
@@ -22,12 +23,19 @@ def source(name: str) -> str:
 
 class TrainingOperatingSystemScenarioTests(unittest.TestCase):
     def test_01_admin_can_open_full_training_os(self):
-        text = source("permissions.py")
-        self.assertIn("_AMO_ADMIN_CONTROL", text)
-        self.assertIn("is_amo_admin", text)
-        admin_block = text.split("_AMO_ADMIN_CONTROL =", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("TrainingCapability.PLAN_APPROVE.value", admin_block)
-        self.assertIn("TrainingCapability.CERTIFICATE_ISSUE.value", admin_block)
+        from amodb.apps.training.permissions import (
+            ALL_TRAINING_CAPABILITIES, training_capabilities_for,
+        )
+
+        for role, admin_flag in (("AMO_ADMIN", False), ("USER", True)):
+            with self.subTest(role=role, admin_flag=admin_flag):
+                user = SimpleNamespace(
+                    id="admin", amo_id="amo", role=role, is_amo_admin=admin_flag,
+                    is_active=True, is_superuser=False, is_system_account=False,
+                )
+                self.assertEqual(
+                    training_capabilities_for(None, user=user), ALL_TRAINING_CAPABILITIES,
+                )
 
     def test_02_training_department_is_not_qms_elevated(self):
         text = source("permissions.py")

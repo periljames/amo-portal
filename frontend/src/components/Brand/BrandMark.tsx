@@ -44,6 +44,9 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           src={resolvedLogo}
           alt={`${displayName} logo`}
           className="brand-mark__logo"
+          decoding="async"
+          fetchPriority="high"
+          loading="eager"
           onError={() => setLogoFailed(true)}
         />
       ) : (

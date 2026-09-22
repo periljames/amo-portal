@@ -89,6 +89,14 @@ class DatabaseCircuitBreaker:
                 self._next_probe_at = now_mono + self._delay()
             return transitioned
 
+    def request_wake_probe(self) -> bool:
+        """Allow an interactive request (login) to bypass backoff and probe now."""
+        with self._lock:
+            if self._state == "online":
+                return False
+            self._next_probe_at = 0.0
+            return True
+
     def mark_success(self) -> bool:
         """Close the circuit and return True only for an outage recovery."""
         now_epoch = time.time()
@@ -148,7 +156,9 @@ def is_database_disconnect(error: BaseException) -> bool:
     return any(
         fragment in message
         for fragment in (
+            "timeout expired",
             "connection timed out",
+            "connection timeout",
             "connection refused",
             "connection reset",
             "connection is closed",
@@ -156,9 +166,13 @@ def is_database_disconnect(error: BaseException) -> bool:
             "server closed the connection",
             "ssl connection has been closed",
             "could not connect to server",
+            "connection to server at",
             "no connection to the server",
             "terminating connection",
             "database system is starting up",
             "database system is in recovery mode",
+            "network is unreachable",
+            "name or service not known",
+            "could not translate host name",
         )
     )

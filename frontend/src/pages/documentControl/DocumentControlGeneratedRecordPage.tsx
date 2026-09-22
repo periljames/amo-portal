@@ -97,10 +97,14 @@ export default function DocumentControlGeneratedRecordPage() {
         <div><span>Integrity</span><DocumentControlStatus status={record.integrity.status} kind={record.integrity.status === "VERIFIED" ? "success" : "danger"} /></div>
       </section>
 
-      <DocumentControlSection title="Auditable artifact" description="The stored PDF is checksum-verified against the immutable record identity.">
+      <DocumentControlSection title="Auditable artifact" description="The stored PDF is retained with the immutable record identity.">
         <div className="dc-record-detail__artifact">
           <FileCheck2 size={28} />
-          <div><strong>{record.artifact_filename}</strong><span>{displayBytes(record.integrity.size_bytes)} · SHA-256 {record.artifact_sha256}</span><small>Expected {record.integrity.expected_sha256 || "—"}<br />Actual {record.integrity.actual_sha256 || "—"}</small></div>
+          <div>
+            <strong>{record.artifact_filename}</strong>
+            <span>{displayBytes(record.integrity.size_bytes)}</span>
+            <small>{record.integrity.status === "VERIFIED" ? "Verified" : record.integrity.status}</small>
+          </div>
           <a className="dc-button" href={record.download_url} target="_blank" rel="noreferrer"><Download size={14} /> Open / download PDF</a>
         </div>
       </DocumentControlSection>
@@ -109,9 +113,8 @@ export default function DocumentControlGeneratedRecordPage() {
         <dl className="dc-record-detail__lineage">
           <div><dt>Template</dt><dd>{record.template ? `${record.template.code} · ${record.template.title} · ${record.template.manual_type}` : record.template_manual_id}</dd></div>
           <div><dt>Record series</dt><dd>{record.record_series ? `${record.record_series.code} · ${record.record_series.title}` : record.record_series_node_id || "Not assigned"}</dd></div>
-          <div><dt>Submitted by</dt><dd>{record.submitted_by_user_id || "Not recorded"}</dd></div>
-          <div><dt>Reviewed by</dt><dd>{record.reviewed_by_user_id ? `${record.reviewed_by_user_id} · ${displayDate(record.reviewed_at)}` : "Not reviewed"}</dd></div>
-          <div><dt>Source context</dt><dd><pre>{JSON.stringify(record.source_context || {}, null, 2)}</pre></dd></div>
+          <div><dt>Submitted by</dt><dd>{record.submitted_by_user_id ? "Recorded" : "Not recorded"}</dd></div>
+          <div><dt>Reviewed by</dt><dd>{record.reviewed_by_user_id ? `Reviewed · ${displayDate(record.reviewed_at)}` : "Not reviewed"}</dd></div>
         </dl>
       </DocumentControlSection>
 

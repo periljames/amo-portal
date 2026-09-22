@@ -743,6 +743,14 @@ class TrainingStatusItem(BaseModel):
     course_id: str
     course_name: str
     frequency_months: Optional[int]
+    course_pk: Optional[str] = Field(
+        None,
+        description="TrainingCourse database id. Prefer this over course_id when joining records.",
+    )
+    is_mandatory: Optional[bool] = None
+    group_code: Optional[str] = None
+    prerequisite_course_id: Optional[str] = None
+    kind: Optional[str] = None
 
     last_completion_date: Optional[date] = None
     valid_until: Optional[date] = None
@@ -800,6 +808,10 @@ class TrainingUserDetailBundleRead(BaseModel):
     user: TrainingUserProfileLiteRead
     hire_date: Optional[date] = None
     status_items: List[TrainingStatusItem] = Field(default_factory=list)
+    courses: List[TrainingCourseRead] = Field(
+        default_factory=list,
+        description="Courses required for this person plus any courses referenced by their records.",
+    )
     records: List[TrainingRecordRead] = Field(default_factory=list)
     records_total: int = 0
     deferrals: List[TrainingDeferralRequestRead] = Field(default_factory=list)

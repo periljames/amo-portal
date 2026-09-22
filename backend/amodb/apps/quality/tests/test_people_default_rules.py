@@ -18,6 +18,12 @@ def test_default_quality_privilege_rules_cover_lead_observer_trainee_and_auditor
     observer = next(row for row in DEFAULT_QUALITY_PRIVILEGE_RULES if row["privilege_code"] == "OBSERVER_TRAINEE_GLOBAL")
     assert observer["scope_schema"]["supervised_development"] is True
     assert set(observer["scope_schema"]["allowed_assignment_roles"]) == {"OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"}
+    lead = next(row for row in DEFAULT_QUALITY_PRIVILEGE_RULES if row["privilege_code"] == "LEAD_AUDITOR_GLOBAL")
+    auditor = next(row for row in DEFAULT_QUALITY_PRIVILEGE_RULES if row["privilege_code"] == "AUDITOR_GLOBAL")
+    assert lead["scope_schema"]["qms_competence"]["codes"] == ["QMS-INIT", "QMS-REF", "QMS-ADMIN"]
+    assert lead["scope_schema"]["qms_competence"]["join"] == "AND"
+    assert auditor["scope_schema"]["qms_competence"]["expression"] == "QMS-INIT AND QMS-REF AND QMS-ADMIN"
+    assert lead["required_training_course_codes"] == []
 
 
 def test_ensure_default_quality_privilege_rules_creates_missing_rows() -> None:

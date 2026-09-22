@@ -1056,11 +1056,20 @@ async function serverLogoutBestEffort(reason: "manual" | "idle"): Promise<void> 
   await flushPendingServerLogout();
 }
 
-/** Revoke a refresh cookie left pending by an offline sign-out. */
+const logoutBackoff = new AuthRecoveryBackoff();
+let pendingLogoutRequest: Promise<boolean> | null = null;
+
+/** Revoke once per recovery attempt, even when many readiness events arrive. */
 export async function flushPendingServerLogout(): Promise<boolean> {
-  if (!localStorage.getItem(PENDING_SERVER_LOGOUT_KEY)) return true;
-  try {
-    const response = await fetchWithTimeout(`${getApiBaseUrl()}/auth/logout-session`, {
+  if (!localStorage.getItem(PENDING_SERVER_LOGOUT_KEY)) {
+    logoutBackoff.reset();
+    return true;
+  }
+  if (pendingLogoutRequest) return pendingLogoutRequest;
+  if (Date.now() < logoutBackoff.retryAt) return false;
+  pendingLogoutRequest = (async () => {
+    try {
+      const response = await fetchWithTimeout(`${getApiBaseUrl()}/auth/logout-session`, {
       method: "POST",
       headers: {
         "X-AMO-Silent-Error": "1",
@@ -1068,14 +1077,20 @@ export async function flushPendingServerLogout(): Promise<boolean> {
       timeoutMs: 5000,
       credentials: "include",
     });
-    if (!response.ok) return false;
-    localStorage.removeItem(PENDING_SERVER_LOGOUT_KEY);
-    return true;
-  } catch {
-    // Local logout remains authoritative for this device. The persisted flag
-    // prevents refresh recovery and is drained when readiness returns.
-    return false;
-  }
+      if (!response.ok) {
+        logoutBackoff.defer(response);
+        return false;
+      }
+      localStorage.removeItem(PENDING_SERVER_LOGOUT_KEY);
+      logoutBackoff.reset();
+      return true;
+    } catch {
+      // Preserve the revocation marker; network failure never revives a session.
+      logoutBackoff.defer();
+      return false;
+    }
+  })().finally(() => { pendingLogoutRequest = null; });
+  return pendingLogoutRequest;
 }
 
 // Compatibility name retained for existing portal bootstrap imports.

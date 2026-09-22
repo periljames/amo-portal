@@ -1,5 +1,5 @@
 /*
- * The Quality Control Centre now owns the QMS root route directly.
+ * Continuous assurance views on the Quality root route (?hub=…).
  *
  * Keep this compatibility stylesheet intentionally free of global hide rules.
  * The previous overlay implementation used `html.quality-excellence-active` to

@@ -1036,6 +1036,7 @@ class QualityTenantWorkflowSettings(Base):
     final_reminder_days_before_due = Column(Integer, nullable=False, default=2)
     auto_escalation_enabled = Column(Boolean, nullable=False, default=True, index=True)
     auto_escalation_locked = Column(Boolean, nullable=False, default=True)
+    audit_reference_family = Column(String(16), nullable=False, default="QAR")
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     updated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

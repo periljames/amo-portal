@@ -109,13 +109,17 @@ export default function QmsCalendarSyncDialog({ open, onClose }: Props) {
 
   const revoke = async () => {
     if (!window.confirm("Revoke the calendar URL? Connected calendar apps will stop receiving updates immediately.")) return;
+    const previousLink = queryClient.getQueryData(ROSTER_CALENDAR_LINK_QUERY_KEY);
+    const previousStatus = queryClient.getQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY);
     setBusy("revoke");
     setError(null);
+    queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
     try {
       await revokeCalendarSubscription();
-      queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
-      await refresh();
+      void refresh();
     } catch (reason) {
+      if (previousLink !== undefined) queryClient.setQueryData(ROSTER_CALENDAR_LINK_QUERY_KEY, previousLink);
+      if (previousStatus !== undefined) queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, previousStatus);
       setError(messageOf(reason));
     } finally {
       setBusy(null);

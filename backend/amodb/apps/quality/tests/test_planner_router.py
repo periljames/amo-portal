@@ -79,7 +79,10 @@ def test_only_authoritative_active_schedule_sources_are_mutable() -> None:
 
 
 def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None:
+    import amodb.apps.quality.planner_router as planner_module
+
     source = inspect.getsource(qms_planner_reschedule)
+    module_source = inspect.getsource(planner_module)
     assert source.count("active_predicate") >= 3
     assert "This schedule is no longer active" in source
     assert "left the active calendar" in source
@@ -89,7 +92,25 @@ def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None
     assert source.index("_log_qms_activity(") < source.index("db.commit()")
     assert '"reason": payload.reason.strip()' in source
     assert '"trace_id": trace_id' in source
+    assert "_shift_audit_meetings(" in source
+    assert "SCHEDULE_STALE" in source
+    assert "SCHEDULE_CONFLICT" in module_source
+    assert "_enforce_audit_reschedule_conflicts(" in source
 
+
+def test_suggest_working_slots_avoids_busy_windows() -> None:
+    from datetime import time
+
+    from amodb.apps.quality.audit_schedule_rules import suggest_working_slots
+
+    slots = suggest_working_slots(
+        duration_minutes=120,
+        busy=[(time(13, 0), time(17, 0))],
+    )
+    assert slots
+    assert all(slot["end_time"] <= "13:00" or slot["start_time"] >= "17:00" for slot in slots)
+    assert slots[0]["start_time"] == "09:00"
+    assert slots[0]["end_time"] == "11:00"
 
 def test_training_projection_selects_only_latest_active_record(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -118,12 +139,16 @@ def test_calendar_audit_schedules_expose_duration_end_and_version() -> None:
     assert "schedules.duration_days" in source
     assert "AS ends_on" in source
     assert "metadata.version AS schedule_version" in source
+    assert "audits.planned_start_time" in source
+    assert "audits.planned_end_time" in source
     assert '"expected_version": row.get("schedule_version")' in source
 
     enriched_source = inspect.getsource(qms_planner_calendar_enriched)
     assert 'item["ends_on"] = metadata.end_date.isoformat()' in enriched_source
     assert 'item["schedule_version"] = metadata.version' in enriched_source
     assert 'item["expected_version"] = metadata.version' in enriched_source
+    assert "QualityAuditMeeting" in enriched_source
+    assert "_expand_audit_window_with_meetings" in enriched_source
 
 
 def test_calendar_page_is_stable_and_reports_next_offset() -> None:

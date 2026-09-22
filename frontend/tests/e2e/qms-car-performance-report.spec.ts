@@ -167,17 +167,27 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/maintenance/tenant-a/quality/reports/car-performance", { waitUntil: "domcontentloaded" });
 
-  // Assert the report's operational content rather than duplicating shell copy.
-  await expect(page.getByRole("heading", { name: "QPI and workload", exact: true })).toBeVisible();
-  await expect(page.getByText(/QMSM 2\.5 QPI 3 target: at least 80%/)).toBeVisible();
-  await expect(page.getByText("QPI target below requirement")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workload", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Analysis metric")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Chart type" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Bar" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Donut" }).click();
+  await expect(page.getByRole("button", { name: "Donut" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Bar" }).click();
+  await expect(page.getByRole("button", { name: "Bar" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Analysis metric").selectOption("qpi");
+  await expect(page.getByRole("heading", { name: "QPI vs target", exact: true })).toBeVisible();
+  await expect(page.getByText(/QPI 3 below target/)).toBeVisible();
   await expect(page.getByText("50.0%").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export CSV" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Print report" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Registers" }).click();
+  await expect(page.getByRole("heading", { name: "Department performance" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open QMS-CAR-001" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open QMS-CAR-002" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open QMS-CAR-003" })).toBeVisible();
-  const departmentSection = page.getByRole("heading", { name: "Department performance" }).locator("xpath=ancestor::section[1]");
+  const departmentSection = page.getByRole("heading", { name: "Department performance" }).locator("xpath=ancestor::article[1]");
   await expect(departmentSection.getByText("Engineering", { exact: true })).toBeVisible();
   await expect(departmentSection.getByText("Quality", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Export CSV" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Print report" })).toBeVisible();
 });

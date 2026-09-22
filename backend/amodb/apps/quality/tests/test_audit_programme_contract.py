@@ -21,14 +21,19 @@ from amodb.apps.quality.audit_programme_router import (
     ProgrammeItemPatch,
     ProgrammeQualityReview,
     _TRANSITIONS,
+    _apply_fixed_date_window,
     _assert_editable,
     _assert_exportable,
+    _carry_forward_previous_year,
     _load_programme,
     _audit_type_for_entity,
     _normalise_supporting_auditors,
+    _pick_rotated_assignee,
     _programme_kind_title,
     _programme_readiness,
     _recurrence_for_interval,
+    _select_carry_forward_source,
+    _sync_hybrid_recommendations,
     _validate_item_window,
     _working_day_count,
     patch_programme_item,
@@ -224,7 +229,7 @@ def test_audit_programme_models_are_registered_in_shared_metadata() -> None:
 
 def test_programme_lifecycle_is_explicit_and_terminal_history_is_immutable() -> None:
     assert _TRANSITIONS == {
-        "DRAFT": {"UNDER_REVIEW"},
+        "DRAFT": {"UNDER_REVIEW", "CLOSED"},
         "UNDER_REVIEW": {"DRAFT", "APPROVED"},
         "APPROVED": {"ACTIVE", "SUPERSEDED"},
         "ACTIVE": {"SUPERSEDED", "CLOSED"},
@@ -245,6 +250,7 @@ def test_quality_review_and_controlled_export_contracts_are_explicit() -> None:
     with pytest.raises(HTTPException) as draft:
         _assert_exportable(SimpleNamespace(status="DRAFT"))
     assert draft.value.status_code == 409
+    _assert_exportable(SimpleNamespace(status="DRAFT"), allow_draft=True)
     _assert_exportable(SimpleNamespace(status="APPROVED"))
 
 
@@ -257,6 +263,15 @@ def test_fixed_date_validation_belongs_to_item_patch_not_quality_review() -> Non
             fixed_dates=[],
             reason="Add another month",
         )
+    cancelled = ProgrammeItemPatch(
+        recurrence="FIXED_DATES",
+        fixed_dates=[],
+        state="CANCELLED",
+        cancellation_reason="Removed from this month",
+        reason="Clear last scheduled month",
+    )
+    assert cancelled.state == "CANCELLED"
+    assert cancelled.fixed_dates == []
 
 
 def test_programme_item_writes_lock_only_the_item_table() -> None:
@@ -418,3 +433,114 @@ def test_schedule_frequency_is_derived_from_governed_recurrence() -> None:
     with pytest.raises(HTTPException) as exc:
         _expected_frequency(SimpleNamespace(recurrence="RISK_TRIGGERED"))
     assert exc.value.status_code == 409
+
+
+def test_carry_forward_prefers_published_prior_year_then_draft() -> None:
+    draft = SimpleNamespace(status="DRAFT", revision_no=2, updated_at=None)
+    approved = SimpleNamespace(status="APPROVED", revision_no=1, updated_at=None)
+    active = SimpleNamespace(status="ACTIVE", revision_no=1, updated_at=None)
+    assert _select_carry_forward_source([draft, approved]).status == "APPROVED"
+    assert _select_carry_forward_source([draft, active, approved]).status == "ACTIVE"
+    assert _select_carry_forward_source([draft]).status == "DRAFT"
+    assert _select_carry_forward_source([]) is None
+
+
+def test_fixed_dates_remap_onto_new_programme_year() -> None:
+    programme = SimpleNamespace(
+        programme_year=2027,
+        period_start=date(2027, 1, 1),
+        period_end=date(2027, 12, 31),
+    )
+    values = {
+        "recurrence": "FIXED_DATES",
+        "fixed_dates": ["02-11", "02-15"],
+        "default_duration_days": 1,
+    }
+    _apply_fixed_date_window(programme, values)
+    assert values["fixed_dates"] == ["02-11", "02-15"]
+    assert values["target_start"].year == 2027
+    assert values["target_end"].year == 2027
+    assert values["auto_schedule"] is True
+
+
+def test_draft_item_cancel_deletes_sibling_coverage_and_hybrid_omits_cancelled() -> None:
+    patch_source = inspect.getsource(patch_programme_item)
+    sync_source = inspect.getsource(_sync_hybrid_recommendations)
+    assert "sibling_count" in patch_source
+    assert "db.delete(row)" in patch_source
+    assert "omitted_universe_ids" in sync_source
+    assert "if universe_id in omitted_universe_ids:" in sync_source
+
+
+def test_carry_forward_copies_observer_and_supporting_auditors() -> None:
+    source = inspect.getsource(_carry_forward_previous_year)
+    assert "observer_auditor_user_id" in source
+    assert "supporting_auditor_user_ids" in source
+    assert '"DRAFT"' in source or "'DRAFT'" in source
+    assert "_select_carry_forward_source" in source
+
+
+def test_programme_create_requires_carry_forward_for_auditor_rotation() -> None:
+    with pytest.raises(ValidationError):
+        ProgrammeCreate(
+            programme_year=2027,
+            period_start=date(2027, 1, 1),
+            period_end=date(2027, 12, 31),
+            copy_previous_year=False,
+            rotate_auditors=True,
+        )
+    payload = ProgrammeCreate(
+        programme_year=2027,
+        period_start=date(2027, 1, 1),
+        period_end=date(2027, 12, 31),
+        copy_previous_year=True,
+        rotate_auditors=True,
+    )
+    assert payload.rotate_auditors is True
+
+
+def test_pick_rotated_assignee_prefers_different_person_and_excludes_blocked() -> None:
+    from collections import Counter
+
+    load: Counter[str] = Counter()
+    choice = _pick_rotated_assignee(
+        pool=["lead-a", "lead-b"],
+        exclude={"auditee-1"},
+        previous="lead-a",
+        load=load,
+    )
+    assert choice == "lead-b"
+    assert load["lead-b"] == 1
+
+    assert (
+        _pick_rotated_assignee(
+            pool=["lead-a"],
+            exclude={"auditee-1"},
+            previous="lead-a",
+            load=Counter(),
+        )
+        == "lead-a"
+    )
+    assert (
+        _pick_rotated_assignee(
+            pool=["lead-a", "lead-b"],
+            exclude={"lead-a", "lead-b"},
+            previous="lead-a",
+            load=Counter(),
+        )
+        is None
+    )
+
+
+def test_create_programme_wires_auditor_rotation_after_carry_forward() -> None:
+    create_source = inspect.getsource(
+        next(
+            route.endpoint
+            for route in audit_programme_router.routes
+            if str(route.path) == "/audit-programmes"
+            and "POST" in (getattr(route, "methods", None) or set())
+        )
+    )
+    assert "rotate_auditors" in create_source
+    assert "_rotate_carried_auditors" in create_source
+    assert "copied" in create_source

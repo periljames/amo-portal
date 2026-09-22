@@ -51,7 +51,9 @@ if WRITE_DB_URL.startswith("sqlite") and not _sqlite_allowed_for_tests(WRITE_DB_
 EXTERNAL_POOLER = _env_bool("DB_EXTERNAL_POOLER", False)
 POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
 MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
-POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "5"))
+# Wait for a free connection under brief fan-out instead of failing interactive
+# requests with HTTP 503 after five seconds. Workers override this lower.
+POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "20"))
 POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE_SEC", "1800"))
 STATEMENT_TIMEOUT_MS = max(1000, min(600000, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000") or "30000")))
 IDLE_IN_TRANSACTION_TIMEOUT_MS = max(5000, min(1800000, int(os.getenv("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "60000") or "60000")))
@@ -131,7 +133,15 @@ def _install_disconnect_tracking(current_engine) -> None:
     def _track_disconnect(context) -> None:
         error = context.original_exception or context.sqlalchemy_exception
         if context.is_disconnect or is_database_disconnect(error):
-            database_circuit.mark_failure(error)
+            if database_circuit.mark_failure(error):
+                # Drop pooled sockets so the next wake probe opens fresh TCP.
+                try:
+                    dispose_engines()
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Engine dispose after circuit open failed",
+                        exc_info=True,
+                    )
 
 
 _install_disconnect_tracking(write_engine)
@@ -263,12 +273,23 @@ def get_write_db():
         close_session_safely(db)
 
 
-def get_read_db():
+def _get_read_db_separate():
     db = ReadSessionLocal()
     try:
         yield db
     finally:
         close_session_safely(db)
+
+
+# FastAPI caches dependencies by callable identity. When read and write share one
+# engine (the common local/single-DB deployment), exposing two generators would
+# check out two pooled connections for every authenticated request (auth + route,
+# and often a third for Quality tenant resolution). Alias so one request holds
+# one session. Separate READ_DB_URL keeps an independent read-only session path.
+if read_engine is write_engine:
+    get_read_db = get_write_db
+else:
+    get_read_db = _get_read_db_separate
 
 
 engine = write_engine

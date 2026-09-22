@@ -8,7 +8,6 @@ import React, {
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
-  Bell,
   BookOpen,
   CalendarDays,
   ChevronDown,
@@ -46,6 +45,7 @@ import {
   buildPortalNavigation,
   flattenPortalNavigation,
   isPortalPathActive,
+  portalNavItemHasActiveDescendant,
   type PortalNavGroup,
   type PortalNavIcon,
   type PortalNavItem,
@@ -81,6 +81,7 @@ type AccentId = "tenant" | "blue" | "teal" | "green" | "amber" | "violet";
 type NavBranchProps = {
   item: PortalNavItem;
   pathname: string;
+  search: string;
   level: 0 | 1 | 2;
   expanded: Set<string>;
   favourites: Set<string>;
@@ -185,6 +186,7 @@ function leafItems(groups: PortalNavGroup[]): PortalNavItem[] {
 function NavBranch({
   item,
   pathname,
+  search,
   level,
   expanded,
   favourites,
@@ -192,21 +194,34 @@ function NavBranch({
   onFavourite,
   onNavigate,
 }: NavBranchProps): React.ReactElement {
-  const active = isPortalPathActive(pathname, item);
-  const childActive = item.children?.some((child) => isPortalPathActive(pathname, child)) ?? false;
-  const open = expanded.has(item.id) || childActive;
+  const active = isPortalPathActive(pathname, item, search);
+  const isLeaf = !item.children?.length;
+  const workspaceOpen = Boolean(
+    new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("workspace"),
+  );
+  // Query workspaces live under Quality pathname with no sidebar leaf — still mark the department.
+  const queryWorkspaceChild =
+    !isLeaf
+    && active
+    && workspaceOpen
+    && /\/quality$/i.test((item.path.split("?")[0] || "").replace(/\/$/, ""));
+  const childActive =
+    portalNavItemHasActiveDescendant(item, pathname, search) || queryWorkspaceChild;
+  // Expand state is user/auto driven — do not force-open when a descendant is active,
+  // or Collapse becomes a no-op on first-child routes.
+  const open = !item.children?.length ? false : expanded.has(item.id);
   const Icon = level === 0 && item.icon ? ICONS[item.icon] : null;
   const nextLevel = Math.min(2, level + 1) as 0 | 1 | 2;
-  const isLeaf = !item.children?.length;
 
   return (
     <div className={`tenant-nav__branch tenant-nav__branch--level-${level}`}>
-      <div className={`tenant-nav__row${active ? " is-active" : ""}${childActive ? " has-active-child" : ""}${isLeaf ? " is-leaf" : ""}`}>
+      <div className={`tenant-nav__row${active && isLeaf ? " is-active" : ""}${childActive ? " has-active-child" : ""}${isLeaf ? " is-leaf" : ""}`}>
         <button
           type="button"
           className="tenant-nav__link"
+          data-preload-route={item.path}
           onClick={() => onNavigate(item.path)}
-          aria-current={active ? "page" : undefined}
+          aria-current={active && isLeaf ? "page" : undefined}
           title={item.label}
         >
           {Icon ? <Icon size={17} strokeWidth={2} aria-hidden="true" /> : <span className="tenant-nav__rail" aria-hidden="true" />}
@@ -242,6 +257,7 @@ function NavBranch({
               key={child.id}
               item={child}
               pathname={pathname}
+              search={search}
               level={nextLevel}
               expanded={expanded}
               favourites={favourites}
@@ -259,6 +275,7 @@ function NavBranch({
 function NavigationGroups({
   groups,
   pathname,
+  search,
   expanded,
   favourites,
   onToggle,
@@ -267,6 +284,7 @@ function NavigationGroups({
 }: {
   groups: PortalNavGroup[];
   pathname: string;
+  search: string;
   expanded: Set<string>;
   favourites: Set<string>;
   onToggle: (id: string) => void;
@@ -284,6 +302,7 @@ function NavigationGroups({
                 key={item.id}
                 item={item}
                 pathname={pathname}
+                search={search}
                 level={0}
                 expanded={expanded}
                 favourites={favourites}
@@ -367,12 +386,17 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     () => leaves.filter((item) => favourites.has(item.id)),
     [favourites, leaves],
   );
-  const recentItems = useMemo(
-    () => recentPaths
+  const recentItems = useMemo(() => {
+    const pinnedLeafPaths = new Set(
+      navigation
+        .filter((group) => group.id !== "favourites" && group.id !== "recent")
+        .flatMap((group) => leafItems([group]).map((item) => item.path)),
+    );
+    return recentPaths
       .map((path) => leaves.find((item) => item.path === path))
-      .filter((item): item is PortalNavItem => Boolean(item)),
-    [leaves, recentPaths],
-  );
+      .filter((item): item is PortalNavItem => Boolean(item))
+      .filter((item) => !pinnedLeafPaths.has(item.path));
+  }, [leaves, navigation, recentPaths]);
 
   const visibleNavigation = useMemo<PortalNavGroup[]>(() => {
     if (searchQuery.trim()) {
@@ -415,11 +439,11 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
   useEffect(() => {
     const best = [...leaves]
-      .filter((item) => isPortalPathActive(location.pathname, item))
+      .filter((item) => isPortalPathActive(location.pathname, item, location.search))
       .sort((left, right) => right.path.length - left.path.length)[0];
     if (!best) return;
     setRecentPaths((previous) => [best.path, ...previous.filter((path) => path !== best.path)].slice(0, MAX_RECENT));
-  }, [leaves, location.pathname]);
+  }, [leaves, location.pathname, location.search]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -479,15 +503,24 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
   useEffect(() => {
     const activeIds = new Set<string>();
+    const workspaceOpen = Boolean(
+      new URLSearchParams(location.search.startsWith("?") ? location.search.slice(1) : location.search).get("workspace"),
+    );
     const walk = (items: PortalNavItem[]) => {
       for (const item of items) {
-        if (item.children?.some((child) => isPortalPathActive(location.pathname, child))) activeIds.add(item.id);
+        const path = (item.path.split("?")[0] || "").replace(/\/$/, "");
+        if (
+          portalNavItemHasActiveDescendant(item, location.pathname, location.search)
+          || (workspaceOpen && item.children?.length && /\/quality$/i.test(path) && isPortalPathActive(location.pathname, item, location.search))
+        ) {
+          activeIds.add(item.id);
+        }
         if (item.children) walk(item.children);
       }
     };
     navigation.forEach((group) => walk(group.items));
     if (activeIds.size) setExpanded((previous) => new Set([...previous, ...activeIds]));
-  }, [location.pathname, navigation]);
+  }, [location.pathname, location.search, navigation]);
 
   const navigateFromDrawer = useCallback((path: string) => {
     navigate(path);
@@ -558,6 +591,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
         {(brand) => (
           <div
             className={`tenant-shell${pinned ? " tenant-shell--pinned" : ""}${drawerVisible ? " tenant-shell--drawer-open" : ""}`}
+            data-workspace-module={activeDepartment}
             style={shellStyle}
           >
             {!pinned && drawerOpen ? (
@@ -608,6 +642,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               <NavigationGroups
                 groups={visibleNavigation}
                 pathname={location.pathname}
+                search={location.search}
                 expanded={expanded}
                 favourites={favourites}
                 onToggle={toggleExpanded}
@@ -634,7 +669,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
                 <div className="tenant-shell__topbar-actions">
                   <LiveStatusIndicator compact />
-                  <button type="button" className="tenant-shell__icon-button" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Notifications and assigned work" title="Notifications and assigned work"><Bell size={17} /></button>
+                  <button type="button" className="tenant-shell__icon-button" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Assigned work" title="Assigned work"><ClipboardCheck size={17} /></button>
                   <div className="tenant-shell__profile" ref={profileRef}>
                     <button type="button" className="tenant-shell__profile-trigger" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-haspopup="menu">
                       <span className="tenant-shell__avatar">

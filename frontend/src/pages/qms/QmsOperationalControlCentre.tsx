@@ -41,7 +41,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
   );
 
   const dashboardQuery = useQuery({
-    queryKey: ["qms-operational-dashboard-v2", amoCode],
+    queryKey: ["qms-operational-dashboard-v2", amoCode.trim().toLowerCase()],
     queryFn: ({ signal }) => getQmsOperationalDashboard(amoCode, signal),
     staleTime: 20_000,
     refetchOnWindowFocus: true,
@@ -63,7 +63,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
   const hasControlHealthIssue = sourceStatus !== "healthy" || unassignedCount > 0 || deterioratingKpis > 0;
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms-operational-dashboard-v2", amoCode] });
+    await queryClient.invalidateQueries({ queryKey: ["qms-operational-dashboard-v2", amoCode.trim().toLowerCase()] });
   };
 
   return (
@@ -82,6 +82,9 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
           <button type="button" className="qms-assurance-room__button" onClick={() => void refresh()} disabled={dashboardQuery.isFetching}>
             <RefreshCw size={15} className={dashboardQuery.isFetching ? "is-spinning" : ""} aria-hidden="true" /> Refresh
           </button>
+          <Link className="qms-assurance-room__button" to={routes.continuousAssurance}>
+            Continuous assurance
+          </Link>
           <Link className="qms-assurance-room__button is-primary" to={routes.calendar}>
             <CalendarClock size={15} aria-hidden="true" /> Planner
           </Link>

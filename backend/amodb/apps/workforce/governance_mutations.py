@@ -93,14 +93,14 @@ def _contract_on(db: Session, *, amo_id: str, user_id: str, on_date: date):
         models.EmploymentContract.user_id == user_id,
         models.EmploymentContract.effective_from <= on_date,
         or_(models.EmploymentContract.effective_to.is_(None), models.EmploymentContract.effective_to >= on_date),
-    ).order_by(models.EmploymentContract.effective_from.desc(), models.EmploymentContract.id.desc()).with_for_update().first()
+    ).order_by(models.EmploymentContract.effective_from.desc(), models.EmploymentContract.id.desc()).with_for_update(of=models.EmploymentContract).first()
     if effective is not None:
         return effective
     return db.query(models.EmploymentContract).filter(
         models.EmploymentContract.amo_id == amo_id,
         models.EmploymentContract.user_id == user_id,
         models.EmploymentContract.effective_from > on_date,
-    ).order_by(models.EmploymentContract.effective_from.asc(), models.EmploymentContract.id.asc()).with_for_update().first()
+    ).order_by(models.EmploymentContract.effective_from.asc(), models.EmploymentContract.id.asc()).with_for_update(of=models.EmploymentContract).first()
 
 
 def _contract_values(contract) -> dict[str, Any]:

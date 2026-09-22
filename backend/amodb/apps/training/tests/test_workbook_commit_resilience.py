@@ -66,11 +66,42 @@ class WorkbookCommitResilienceTests(unittest.TestCase):
         self.assertIn("id=generate_user_id()", create_path)
         self.assertNotIn("db.flush()", create_path)
 
+    def test_training_preview_loads_only_affected_record_pairs(self) -> None:
+        importer = source("workbook_import.py")
+        preview = importer.split("def _preview_training(", 1)[1].split("def _preview_role_groups(", 1)[0]
+        self.assertIn("affected_pairs", preview)
+        self.assertIn("TrainingRecord.user_id.in_(affected_user_ids)", preview)
+        self.assertIn("TrainingRecord.course_id.in_(affected_course_ids)", preview)
+        self.assertNotIn(".filter(training_models.TrainingRecord.amo_id == job.amo_id)\n        .all()", preview)
+
+    def test_preview_progress_avoids_per_row_flush(self) -> None:
+        importer = source("workbook_import.py")
+        progress = importer.split("def _set_job_progress(", 1)[1].split("def _row(", 1)[0]
+        self.assertIn("should_publish", progress)
+        self.assertNotIn("db.flush()", progress)
+        self.assertIn("PREVIEW_PROGRESS_BATCH", progress)
+
     def test_progress_is_batched_and_summary_reports_created_accounts(self) -> None:
         importer = source("workbook_import.py")
         self.assertIn("COMMIT_PROGRESS_BATCH", importer)
+        self.assertIn("PREVIEW_PROGRESS_BATCH", importer)
+        self.assertIn("COMMIT_PROGRESS_MIN_INTERVAL_S", importer)
         self.assertIn('"portal_accounts_created": accounts_created', importer)
         self.assertIn('"elapsed_ms"', importer)
+        self.assertIn("getattr(training_progress, \"close\", None)", importer)
+        self.assertIn("_progress_callback(progress_db, job.id, total_processed, expected_token)", importer)
+        lease = importer.split("def _require_commit_lease", 1)[1].split("def _commit_progress", 1)[0]
+        self.assertIn("db.refresh(job)", lease)
+        self.assertNotIn("db.expire_all()", lease)
+
+    def test_training_commit_uses_lightweight_preview_on_write(self) -> None:
+        records = source("records_import.py")
+        self.assertIn("lightweight_preview = not dry_run", records)
+        self.assertIn("processed_index % 250 == 0", records)
+        lightweight = records.split("if lightweight_preview:", 1)[1].split("else:", 1)[0]
+        self.assertIn("course_name=parsed.course_name", lightweight)
+        # matched_course_name=None is allowed; course_name itself must stay a str.
+        self.assertNotIn("\n                    course_name=None,", lightweight)
 
     def test_commit_workers_are_fenced_by_a_durable_attempt_token(self) -> None:
         importer = source("workbook_import.py")
@@ -93,6 +124,9 @@ class WorkbookCommitResilienceTests(unittest.TestCase):
         finalization = importer.split("# Persist all row outcomes", 1)[1].split("# Keep the current-year", 1)[0]
         self.assertIn("bulk_update_mappings", finalization)
         self.assertNotIn("progress_db.get(TrainingWorkbookImportRow", finalization)
+        completion = importer.split("Prefer in-memory row outcomes", 1)[1].split("except WorkbookCommitLeaseLost", 1)[0]
+        self.assertIn("_committed_status", completion)
+        self.assertNotIn("committed_rows = progress_db.query(TrainingWorkbookImportRow)", completion)
 
     def test_database_restart_is_reported_as_retryable_service_unavailable(self) -> None:
         main = (TRAINING_DIR.parents[1] / "main.py").read_text(encoding="utf-8")

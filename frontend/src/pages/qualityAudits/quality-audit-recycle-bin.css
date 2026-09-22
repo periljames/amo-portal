@@ -1,7 +1,10 @@
 .qa-bin-page {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 0.75rem;
-  min-height: 0;
+  min-height: 100%;
+  height: auto;
 }
 
 .qa-bin-summary {
@@ -147,9 +150,32 @@
 }
 
 .qa-bin-grid {
-  height: clamp(24rem, calc(100vh - 23rem), 47rem);
-  min-height: 24rem;
+  background: var(--qms-panel, #fff);
+  border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.4));
+  border-radius: 0.9rem;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 20rem;
+  overflow: hidden;
   width: 100%;
+}
+
+.qa-bin-grid > div {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.qa-bin-grid.ag-theme-alpine {
+  --ag-background-color: var(--qms-panel, #fff);
+  --ag-foreground-color: var(--qms-text, #0f172a);
+  --ag-header-background-color: var(--qms-page, #f8fafc);
+  --ag-header-foreground-color: var(--qms-muted, #64748b);
+  --ag-border-color: var(--qms-line-soft, #e2e8f0);
+  --ag-row-border-color: var(--qms-line-soft, #e2e8f0);
+  --ag-row-hover-color: color-mix(in srgb, var(--accent-primary, #0f9890) 7%, var(--qms-panel, #fff));
 }
 
 .qa-bin-grid .ag-root-wrapper {
@@ -180,15 +206,18 @@
 
 .qa-bin-record strong {
   color: var(--accent-primary, #1d4ed8);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .qa-bin-record span,
 .qa-bin-retention span {
   color: var(--qms-muted, #64748b);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .qa-bin-type {
@@ -402,4 +431,43 @@
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+html[data-color-scheme="dark"] .qa-bin-summary article,
+body[data-color-scheme="dark"] .qa-bin-summary article,
+[data-theme="dark"] .qa-bin-summary article {
+  background: var(--qms-panel) !important;
+  border-color: var(--qms-line) !important;
+}
+
+html[data-color-scheme="dark"] .qa-bin-grid,
+body[data-color-scheme="dark"] .qa-bin-grid,
+[data-theme="dark"] .qa-bin-grid {
+  background: var(--qms-panel) !important;
+  border-color: var(--qms-line) !important;
+}
+
+html[data-color-scheme="dark"] .qa-bin-grid.ag-theme-alpine,
+body[data-color-scheme="dark"] .qa-bin-grid.ag-theme-alpine,
+[data-theme="dark"] .qa-bin-grid.ag-theme-alpine {
+  --ag-background-color: var(--qms-panel);
+  --ag-foreground-color: var(--qms-text);
+  --ag-header-background-color: var(--qms-page);
+  --ag-header-foreground-color: var(--qms-muted);
+  --ag-border-color: var(--qms-line-soft);
+  --ag-row-border-color: var(--qms-line-soft);
+  --ag-row-hover-color: color-mix(in srgb, var(--accent-primary, #4f8cff) 14%, var(--qms-panel));
+  background: var(--qms-panel) !important;
+}
+
+html[data-color-scheme="dark"] .qa-bin-record strong,
+body[data-color-scheme="dark"] .qa-bin-record strong {
+  color: color-mix(in srgb, var(--accent-primary, #4f8cff) 88%, #fff) !important;
+}
+
+html[data-color-scheme="dark"] .qa-bin-record span,
+html[data-color-scheme="dark"] .qa-bin-retention span,
+body[data-color-scheme="dark"] .qa-bin-record span,
+body[data-color-scheme="dark"] .qa-bin-retention span {
+  color: var(--qms-muted) !important;
 }

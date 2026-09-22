@@ -27,11 +27,14 @@ export type QmsOverviewRoutes = {
   training: string;
   overdueTraining: string;
   reports: string;
+  /** Single entry into Continuous Assurance (Readiness / Controls / Evidence / Intelligence live inside). */
+  continuousAssurance: string;
 };
 
 export function buildQmsOverviewRoutes(amoCode: string): QmsOverviewRoutes {
+  const root = qmsBasePath(amoCode);
   return {
-    root: qmsBasePath(amoCode),
+    root,
     myWork: qmsModulePath(amoCode, "inbox", "assigned-to-me"),
     calendar: qmsModulePath(amoCode, "calendar", "week"),
     audits: qmsModulePath(amoCode, "audits", "dashboard"),
@@ -43,6 +46,7 @@ export function buildQmsOverviewRoutes(amoCode: string): QmsOverviewRoutes {
     training: qmsTrainingPath(amoCode, "dashboard"),
     overdueTraining: qmsTrainingPath(amoCode, "overdue"),
     reports: qmsModulePath(amoCode, "reports", "executive-dashboard"),
+    continuousAssurance: `${root}?hub=readiness`,
   };
 }
 

@@ -39,10 +39,16 @@ describe("API client latency retry policy", () => {
     expect(apiClientSource).toContain("isProxyTransportFailureResponse(response)");
   });
 
-  it("does not gate ordinary GET/navigation requests behind connectivity recovery", () => {
+  it("bounds parallel API requests to protect the backend DB pool", () => {
+    expect(apiClientSource).toContain("MAX_PARALLEL_API_REQUESTS = 6");
+    expect(apiClientSource).toContain("acquireApiSlot");
+    expect(apiClientSource).toContain("releaseApiSlot");
+  });
+
+  it("does not gate ordinary GET/navigation or writes behind connectivity recovery", () => {
     expect(offlineHttpSource).toContain('if (connectivityState === "RECOVERING") {');
-    expect(offlineHttpSource).toContain("if (isGet) void probePortalReadiness();");
-    expect(offlineHttpSource).toContain("else await waitForPortalReadiness();");
+    expect(offlineHttpSource).toContain("void probePortalReadiness();");
+    expect(offlineHttpSource).not.toContain("else await waitForPortalReadiness();");
     expect(offlineHttpSource).toContain("return isPortalRequestNetworkEligible(");
     expect(offlineHttpSource).not.toContain('if (getPortalConnectivity().state === "RECOVERING") {\n    await waitForPortalReadiness();');
   });

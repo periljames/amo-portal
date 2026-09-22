@@ -17,7 +17,7 @@ import {
 
 import { qmsBasePath, qmsModulePath, qmsRecordPath, qmsRouteWorkspace, QMS_ROUTE_REGISTRY, AUDIT_ASSURANCE_DESTINATIONS } from "../../pages/qms/routes/qmsRouteRegistry";
 import { hasQmsRolePermission } from "../../app/routeGuards";
-import { qmsWorkspaceNavigationItems, type QmsWorkspaceId } from "../../pages/qms/routes/qmsWorkspaceRegistry";
+import { qmsWorkspaceNavigationItems, QMS_WORKSPACES, type QmsWorkspaceId } from "../../pages/qms/routes/qmsWorkspaceRegistry";
 
 type ContextTab = {
   id: string;
@@ -63,7 +63,8 @@ function parseQualityRoute(pathname: string): QualityRoute | null {
 }
 
 function moduleTitle(segment: string | undefined): string {
-  return QMS_ROUTE_REGISTRY.find((module) => module.segment === segment)?.label || "Quality Control Room";
+  if (!segment) return "Control Room";
+  return QMS_ROUTE_REGISTRY.find((module) => module.segment === segment)?.label || "Control Room";
 }
 
 function pathMatches(current: string, target: string): boolean {
@@ -107,6 +108,25 @@ function topLevelTabs(route: QualityRoute): ContextTab[] {
     activePrefixes: workspace.activePrefixes.map((prefix) => `${base}/${prefix}`),
     excludePrefixes: workspace.id === "intelligence" ? [`${base}/reports/car-performance`] : undefined,
   }));
+}
+
+function activeWorkspaceId(
+  route: QualityRoute,
+  pathname: string,
+  search: string,
+): QmsWorkspaceId | null {
+  const tabs = topLevelTabs(route);
+  const active = tabs.find((tab) => tabIsActive(tab, pathname, search));
+  return (active?.id as QmsWorkspaceId | undefined) || null;
+}
+
+function workspaceTitle(workspace: QmsWorkspaceId | null, moduleSegment: string | undefined): string {
+  if (workspace) {
+    const definition = QMS_WORKSPACES.find((item) => item.id === workspace);
+    if (definition) return definition.label;
+  }
+  if (moduleSegment === "calendar") return "Planner";
+  return moduleTitle(moduleSegment);
 }
 
 /**
@@ -227,14 +247,9 @@ const QualityContextTabs: React.FC = () => {
     ? "Audits"
     : isCarRecord
       ? `CAR ${safeRecordKey}`
-      : isAssuranceHub
-        ? "Assurance"
-        : moduleSegment === "calendar"
-          ? "Calendar"
-          : isAuditAssuranceSurface && moduleSegment === "audits"
-            ? "Audits"
-            : moduleTitle(moduleSegment);
+      : workspaceTitle(activeWorkspaceId(route, location.pathname, location.search), moduleSegment);
 
+  const currentWorkspace = activeWorkspaceId(route, location.pathname, location.search);
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
   const primaryAction = isAuditRecord
     ? { label: "Audits overview", path: `${route.basePath}/audits/dashboard`, icon: ClipboardCheck }
@@ -260,6 +275,7 @@ const QualityContextTabs: React.FC = () => {
           type="button"
           className={active ? "is-active" : ""}
           aria-current={active ? "page" : undefined}
+          data-preload-route={tab.path}
           onClick={() => navigate(tab.path)}
         >
           {Icon ? <Icon size={15} aria-hidden="true" /> : null}
@@ -268,8 +284,12 @@ const QualityContextTabs: React.FC = () => {
       );
     });
 
-  const calendarSurface = moduleSegment === "calendar";
-  const IdentityMark = calendarSurface ? CalendarDays : ShieldCheck;
+  const calendarSurface = moduleSegment === "calendar" || currentWorkspace === "planner";
+  const IdentityMark = currentWorkspace
+    ? WORKSPACE_ICONS[currentWorkspace]
+    : calendarSurface
+      ? CalendarDays
+      : ShieldCheck;
 
   return createPortal(
     <section className="quality-context-bar" aria-label="Quality Assurance workspace navigation">
@@ -278,7 +298,7 @@ const QualityContextTabs: React.FC = () => {
           <IdentityMark size={17} aria-hidden="true" />
         </span>
         <span>
-          <small>{calendarSurface ? "Quality" : "Quality assurance"}</small>
+          <small>{calendarSurface || currentWorkspace === "assurance" ? "Quality" : "Quality assurance"}</small>
           {isAuditRecord ? (
             <span className="quality-context-bar__title">{title}</span>
           ) : (

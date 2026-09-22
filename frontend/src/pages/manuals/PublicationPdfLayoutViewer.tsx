@@ -373,7 +373,7 @@ export default function PublicationPdfLayoutViewer({
         const viewportTop = visualViewport?.offsetTop || 0;
         const viewportBottom = viewportTop + (visualViewport?.height || window.innerHeight);
         const rootTop = Math.max(viewportTop, root.getBoundingClientRect().top);
-        const available = Math.max(280, Math.floor(viewportBottom - rootTop));
+        const available = Math.max(0, Math.floor(viewportBottom - rootTop));
         root.style.setProperty("--publication-reader-available-height", `${available}px`);
       });
     };
@@ -384,13 +384,13 @@ export default function PublicationPdfLayoutViewer({
       : new ResizeObserver(measureAvailableHeight);
     if (root.parentElement) observer?.observe(root.parentElement);
     window.addEventListener("resize", measureAvailableHeight, { passive: true });
-    window.addEventListener("scroll", measureAvailableHeight, { passive: true });
+    window.addEventListener("scroll", measureAvailableHeight, { passive: true, capture: true });
     window.visualViewport?.addEventListener("resize", measureAvailableHeight);
     window.visualViewport?.addEventListener("scroll", measureAvailableHeight);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measureAvailableHeight);
-      window.removeEventListener("scroll", measureAvailableHeight);
+      window.removeEventListener("scroll", measureAvailableHeight, true);
       window.visualViewport?.removeEventListener("resize", measureAvailableHeight);
       window.visualViewport?.removeEventListener("scroll", measureAvailableHeight);
       if (frame !== null) window.cancelAnimationFrame(frame);

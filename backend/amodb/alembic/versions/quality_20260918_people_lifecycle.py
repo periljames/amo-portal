@@ -14,13 +14,35 @@ def upgrade():
         op.execute(sa.text('DROP FUNCTION IF EXISTS prevent_quality_privilege_decisions_mutation()'))
         op.execute(sa.text("""INSERT INTO auth_role_capability_bindings
             (id, role_id, capability_id, constraints_json, created_at)
-            SELECT md5(r.id || ':qms.training.manage'), r.id, c.id, '{}', NOW()
+            SELECT md5(r.id || ':' || 'qms.training.manage'), r.id, c.id, '{}', NOW()
             FROM auth_role_definitions r CROSS JOIN auth_capability_definitions c
             WHERE r.base_role_key = 'QUALITY_OFFICER' AND c.code = 'qms.training.manage'
             AND EXISTS (SELECT 1 FROM auth_role_capability_bindings b
                 JOIN auth_capability_definitions existing ON existing.id = b.capability_id
                 WHERE b.role_id = r.id AND existing.code = 'qms.audit.manage')
             ON CONFLICT (role_id, capability_id) DO NOTHING"""))
+        # Development cleanup: keep one live auditor rank per person/scope; revoke extras.
+        op.execute(sa.text("""
+            WITH ranked AS (
+              SELECT p.id, p.amo_id, p.user_id, p.scope_key,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY p.amo_id, p.user_id, p.scope_key
+                       ORDER BY
+                         CASE WHEN r.privilege_type = 'LEAD_AUDITOR' THEN 0
+                              WHEN COALESCE((r.scope_schema->>'supervised_development')::boolean, false) THEN 2
+                              ELSE 1 END,
+                         p.updated_at DESC NULLS LAST
+                     ) AS keep_rank
+              FROM quality_privileges p
+              JOIN quality_privilege_rules r ON r.id = p.rule_id AND r.amo_id = p.amo_id
+              WHERE p.status IN ('ACTIVE', 'SUSPENDED')
+                AND r.privilege_type IN ('AUDITOR', 'LEAD_AUDITOR')
+            )
+            UPDATE quality_privileges p
+            SET status = 'REVOKED', updated_at = NOW()
+            FROM ranked
+            WHERE p.id = ranked.id AND ranked.keep_rank > 1
+        """))
 
 
 def downgrade():

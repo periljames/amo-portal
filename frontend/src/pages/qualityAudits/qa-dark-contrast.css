@@ -5,9 +5,9 @@ html[data-color-scheme="dark"],
 body[data-color-scheme="dark"],
 [data-theme="dark"],
 .dark {
-  --qa-ink: rgba(255, 255, 255, 0.94);
-  --qa-ink-muted: rgba(255, 255, 255, 0.72);
-  --qa-ink-soft: rgba(255, 255, 255, 0.84);
+  --qa-ink: rgba(255, 255, 255, 0.96);
+  --qa-ink-muted: rgba(255, 255, 255, 0.84);
+  --qa-ink-soft: rgba(255, 255, 255, 0.9);
   --qa-chip: #22252b;
   --qa-chip-raised: #2a2e36;
   --qa-chip-border: rgba(255, 255, 255, 0.14);

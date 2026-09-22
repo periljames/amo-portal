@@ -96,7 +96,7 @@ def _pool_status(db: Session) -> dict[str, Any]:
         "dialect": engine.dialect.name,
         "configured_pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
         "configured_max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "20")),
-        "configured_pool_timeout_seconds": int(os.getenv("DB_POOL_TIMEOUT", "5")),
+        "configured_pool_timeout_seconds": int(os.getenv("DB_POOL_TIMEOUT", "20")),
     }
     for name in ("size", "checkedin", "checkedout", "overflow"):
         method = getattr(pool, name, None)
@@ -220,8 +220,11 @@ def integration_health(
     oldest_age = queue.get("oldest_pending_age_seconds")
     if isinstance(oldest_age, int) and oldest_age > 60:
         warnings.append(f"Oldest queued job has waited {oldest_age} seconds.")
-    if int(pool.get("configured_pool_timeout_seconds") or 0) > 5:
-        warnings.append("Database pool timeout exceeds the interactive target of five seconds.")
+    pool_timeout = int(pool.get("configured_pool_timeout_seconds") or 0)
+    if 0 < pool_timeout < 10:
+        warnings.append(
+            "Database pool timeout is below 10 seconds; brief page-load concurrency can return HTTP 503."
+        )
 
     training_enabled = modules["by_module"].get("training", {}).get("ENABLED", 0) + modules["by_module"].get("training", {}).get("TRIAL", 0)
     quality_enabled = modules["by_module"].get("quality", {}).get("ENABLED", 0) + modules["by_module"].get("quality", {}).get("TRIAL", 0)

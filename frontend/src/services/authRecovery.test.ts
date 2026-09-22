@@ -26,6 +26,29 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("session recovery", () => {
+  it("coalesces pending logout retries and respects the server cooldown", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let finish!: (response: Response) => void;
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    vi.stubGlobal("fetch", fetch);
+    localStorage.setItem("amo_pending_server_logout", "idle");
+    const auth = await import("./auth");
+    const requests = Array.from({ length: 1000 }, () => auth.flushPendingServerLogout());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    finish(new Response(null, { status: 429, headers: { "Retry-After": "60" } }));
+    expect((await Promise.all(requests)).every((value) => value === false)).toBe(true);
+    await auth.flushPendingServerLogout();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("amo_pending_server_logout")).toBe("idle");
+    now += 61_001;
+    const retry = auth.flushPendingServerLogout();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    finish(new Response(null, { status: 204 }));
+    expect(await retry).toBe(true);
+    expect(localStorage.getItem("amo_pending_server_logout")).toBeNull();
+  });
+
   it("uses Web Locks and installs the fresh token after a successful refresh", async () => {
     const request = vi.fn(async (_name: string, callback: () => Promise<unknown>) => callback());
     vi.stubGlobal("navigator", { locks: { request } });

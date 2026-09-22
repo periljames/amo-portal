@@ -22,6 +22,13 @@ describe("training presentation semantics", () => {
     expect(explicitTrainingRequirementKey({ id: "b", course_id: "HF-REF" })).toBe("course:b");
   });
 
+  it("groups an initial course when a recurrent declares it as prerequisite", () => {
+    const initial = { id: "a", course_id: "SMS-INIT", kind: "INITIAL" };
+    const recurrent = { id: "b", course_id: "SMS-REF", kind: "REFRESHER", prerequisite_course_id: "SMS-INIT" };
+    expect(explicitTrainingRequirementKey(initial, [initial, recurrent])).toBe("prerequisite:sms-init");
+    expect(explicitTrainingRequirementKey(recurrent, [initial, recurrent])).toBe("prerequisite:sms-init");
+  });
+
   it("uses explicit group and prerequisite relationships", () => {
     expect(explicitTrainingRequirementKey({ id: "a", group_code: "HF" })).toBe("group:hf");
     expect(explicitTrainingRequirementKey({ id: "b", prerequisite_course_id: "SMS-INIT" })).toBe("prerequisite:sms-init");

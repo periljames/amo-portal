@@ -403,33 +403,63 @@ def write_tenant_context(
 
 
 def require_quality_permission(permission: str) -> Callable[[TenantContext, account_models.User, Session], TenantContext]:
+    """Gate a Quality route on a permission using the shared read tenant session.
+
+    Prefer this for GET/list routes. Mutation routes should use
+    ``require_quality_write_permission`` so authz and the handler share the
+    writer session (one pool checkout when engines are split).
+    """
+
     def dependency(
         ctx: TenantContext = Depends(resolve_tenant_context),
         current_user: account_models.User = Depends(get_current_active_user),
         db: Session = Depends(get_read_db),
     ) -> TenantContext:
-        if not ctx.is_superuser and is_tenant_admin(current_user, ctx.amo_id):
-            return ctx
-        if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
-            if not ctx.is_superuser and _has_role_permission(current_user, permission):
-                return ctx
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
-        if ctx.is_superuser:
-            if _support_level_allows(ctx.support_access_level, permission):
-                return ctx
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Support session does not allow '{permission}'.")
-        if is_tenant_admin(current_user) and _has_role_permission(current_user, permission):
-            return ctx
-        capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
-        if capability_result is True:
-            return ctx
-        if capability_result is False:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
-        if _has_role_permission(current_user, permission):
-            return ctx
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
+        return _enforce_quality_permission(ctx=ctx, current_user=current_user, db=db, permission=permission)
 
     return dependency
+
+
+def require_quality_write_permission(permission: str) -> Callable[[TenantContext, account_models.User, Session], TenantContext]:
+    """Gate a Quality mutation on a permission using the writer tenant session."""
+
+    def dependency(
+        ctx: TenantContext = Depends(write_tenant_context),
+        current_user: account_models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_write_db),
+    ) -> TenantContext:
+        return _enforce_quality_permission(ctx=ctx, current_user=current_user, db=db, permission=permission)
+
+    return dependency
+
+
+def _enforce_quality_permission(
+    *,
+    ctx: TenantContext,
+    current_user: account_models.User,
+    db: Session,
+    permission: str,
+) -> TenantContext:
+    if not ctx.is_superuser and is_tenant_admin(current_user, ctx.amo_id):
+        return ctx
+    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
+        if not ctx.is_superuser and _has_role_permission(current_user, permission):
+            return ctx
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
+    if ctx.is_superuser:
+        if _support_level_allows(ctx.support_access_level, permission):
+            return ctx
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Support session does not allow '{permission}'.")
+    if is_tenant_admin(current_user) and _has_role_permission(current_user, permission):
+        return ctx
+    capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
+    if capability_result is True:
+        return ctx
+    if capability_result is False:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
+    if _has_role_permission(current_user, permission):
+        return ctx
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
 
 
 def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> bool:

@@ -422,8 +422,35 @@ export function flattenPortalNavigation(groups: PortalNavGroup[]): PortalNavItem
   return result;
 }
 
-export function isPortalPathActive(pathname: string, item: PortalNavItem): boolean {
-  const path = item.path.replace(/\/$/, "") || "/";
+export function isPortalPathActive(
+  pathname: string,
+  item: PortalNavItem,
+  search: string = "",
+): boolean {
+  const path = (item.path.split("?")[0] || "/").replace(/\/$/, "") || "/";
   const current = pathname.replace(/\/$/, "") || "/";
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const workspace = (params.get("workspace") || "").trim().toLowerCase();
+
+  // Query workspaces (People / Missions / Intelligence) share the Quality pathname with
+  // Control Room Home — exact Home must not steal aria-current while a workspace is open.
+  if (item.exact && workspace && /\/quality$/i.test(path) && current === path) {
+    return false;
+  }
+
   return item.exact ? current === path : current === path || current.startsWith(`${path}/`);
+}
+
+/** True when this item or any nested descendant matches the current location. */
+export function portalNavItemHasActiveDescendant(
+  item: PortalNavItem,
+  pathname: string,
+  search: string = "",
+): boolean {
+  if (!item.children?.length) return false;
+  return item.children.some(
+    (child) =>
+      isPortalPathActive(pathname, child, search)
+      || portalNavItemHasActiveDescendant(child, pathname, search),
+  );
 }

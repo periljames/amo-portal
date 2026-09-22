@@ -17,6 +17,7 @@ describe("QMS overview decision model", () => {
     expect(routes.calendar).toContain("/quality/calendar/week");
     expect(routes.overdueCars).toContain("/quality/cars/overdue");
     expect(routes.training).toContain("/training/competence/dashboard");
+    expect(routes.continuousAssurance).toBe("/maintenance/Safari%20Link%2FAMO/quality?hub=readiness");
     expect(Object.values(routes).some((route) => route.includes("/qms"))).toBe(false);
   });
 

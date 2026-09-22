@@ -181,9 +181,14 @@ def _sheet_read(item: TrainingWorkbookImportSheet) -> WorkbookImportSheetRead:
 
 
 def _job_read(db: Session, job: TrainingWorkbookImportJob) -> TrainingWorkbookImportJobRead:
+    # Portal UI only needs operational worksheets. Derived/mapped Excel views are
+    # retained for audit in summary counts but omitted from the interactive sheet list.
     sheets = (
         db.query(TrainingWorkbookImportSheet)
-        .filter(TrainingWorkbookImportSheet.job_id == job.id)
+        .filter(
+            TrainingWorkbookImportSheet.job_id == job.id,
+            TrainingWorkbookImportSheet.is_operational.is_(True),
+        )
         .order_by(TrainingWorkbookImportSheet.display_order.asc())
         .all()
     )
@@ -371,6 +376,7 @@ def list_workbook_import_rows(
     job_id: str,
     sheet: Optional[str] = None,
     row_status: Optional[str] = Query(default=None, alias="status"),
+    outcome: Optional[str] = None,
     review_only: bool = False,
     q: Optional[str] = None,
     limit: int = Query(default=80, ge=1, le=250),
@@ -379,6 +385,12 @@ def list_workbook_import_rows(
     current_user: account_models.User = Depends(_editor),
 ) -> WorkbookImportRowPage:
     job = _job_for_user(db, current_user, job_id)
+    return _rows_page(db, job, sheet=sheet, row_status=row_status, outcome=outcome,
+                      review_only=review_only, q=q, limit=limit, offset=offset)
+
+
+def _rows_page(db, job, *, sheet=None, row_status=None, outcome=None,
+               review_only=False, q=None, limit=80, offset=0):
     query = db.query(TrainingWorkbookImportRow).filter(TrainingWorkbookImportRow.job_id == job.id)
     if sheet:
         query = query.filter(TrainingWorkbookImportRow.sheet_name == sheet)
@@ -386,9 +398,29 @@ def list_workbook_import_rows(
         query = query.filter(TrainingWorkbookImportRow.status == row_status.upper())
     if review_only:
         query = query.filter(TrainingWorkbookImportRow.decision_required.is_(True))
+    if outcome:
+        category = outcome.upper()
+        if category in {"CREATE", "UPDATE", "UNCHANGED"}:
+            query = query.filter(TrainingWorkbookImportRow.proposed_action == category)
+            if job.status == "COMPLETED":
+                query = query.filter(TrainingWorkbookImportRow.status == "COMMITTED")
+            else:
+                query = query.filter(TrainingWorkbookImportRow.status.notin_(["FAILED", "SKIPPED"]))
+        elif category == "REVIEW":
+            # Include decided rows so support/operators can still see the full review set.
+            query = query.filter(TrainingWorkbookImportRow.decision_required.is_(True))
+        elif category in {"FAILED", "SKIPPED"}:
+            query = query.filter(TrainingWorkbookImportRow.status == category)
+        else:
+            raise HTTPException(status_code=422, detail="Unknown import outcome.")
     if q and q.strip():
         term = f"%{q.strip()}%"
-        query = query.filter(or_(TrainingWorkbookImportRow.display_label.ilike(term), TrainingWorkbookImportRow.source_key.ilike(term), TrainingWorkbookImportRow.issue_message.ilike(term)))
+        query = query.filter(or_(
+            TrainingWorkbookImportRow.display_label.ilike(term),
+            TrainingWorkbookImportRow.source_key.ilike(term),
+            TrainingWorkbookImportRow.issue_code.ilike(term),
+            TrainingWorkbookImportRow.issue_message.ilike(term),
+        ))
     total = query.count()
     rows = query.order_by(TrainingWorkbookImportRow.sheet_name.asc(), TrainingWorkbookImportRow.source_row.asc()).offset(offset).limit(limit).all()
     return WorkbookImportRowPage(
@@ -428,6 +460,14 @@ def commit_import(
     current_user: account_models.User = Depends(_editor),
 ) -> TrainingWorkbookImportJobRead:
     job = _job_for_user(db, current_user, job_id)
+    return _queue_commit(db, job, payload, background_tasks, current_user.id)
+
+
+def _queue_commit(db, job, payload, background_tasks, actor_user_id):
+    # Serialize review/queue transitions; two clicks must not replace a live lease.
+    job = db.query(TrainingWorkbookImportJob).filter(
+        TrainingWorkbookImportJob.id == job.id,
+    ).populate_existing().with_for_update(of=TrainingWorkbookImportJob).one()
     if job.status not in {"PREVIEW_READY", "REVIEW_REQUIRED", "FAILED"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Import is currently {job.status.lower()} and cannot be committed.")
     rows_by_id = {
@@ -447,8 +487,7 @@ def commit_import(
         row.decision = selected
         row.updated_at = utcnow()
         db.add(row)
-    db.commit()
-
+    db.flush()
     unresolved = db.query(TrainingWorkbookImportRow).filter(
         TrainingWorkbookImportRow.job_id == job.id,
         TrainingWorkbookImportRow.decision_required.is_(True),
@@ -460,7 +499,7 @@ def commit_import(
     attempt_token = new_commit_attempt_token()
     job.status = "QUEUED_COMMIT"
     job.stage = "QUEUED_COMMIT"
-    job.actor_user_id = current_user.id
+    job.actor_user_id = actor_user_id
     job.completed_at = None
     job.error_message = None
     job.cancel_requested = False

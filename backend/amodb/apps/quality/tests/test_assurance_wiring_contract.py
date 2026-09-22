@@ -126,6 +126,19 @@ def test_wired_models_are_registered_in_shared_metadata() -> None:
     assert "quality_intelligence_reviews" in Base.metadata.tables
 
 
+def test_reconcile_applies_all_pending_and_error_events_without_row_cap() -> None:
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "assurance_wiring_router.py").read_text(encoding="utf-8")
+    reconcile = source.split("def reconcile_assurance(", 1)[1].split("\n@router.", 1)[0]
+    assert "limit: int = Query" not in reconcile
+    assert 'processing_status.in_(("PENDING", "ERROR"))' in reconcile
+    assert "synchronize_session=False" in reconcile
+    assert "remaining_events" in reconcile
+    assert "evidence_batch_size" in reconcile
+    assert ".limit(limit)" not in reconcile
+
+
 def test_cross_module_readiness_is_bounded_and_pressure_sensitive() -> None:
     clean = {
         "active_documents": 30,

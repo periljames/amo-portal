@@ -6,6 +6,9 @@ import {
   auditTypeForEntity,
   findAuditorScheduleCollisions,
   ordinalDayLabel,
+  programmeLeadAuditorOptions,
+  programmeMatrixSlotLabel,
+  resolveAircraftRegistration,
   suggestedLocationCode,
   uniqueAuditorInitials,
   withoutLeadAuditor,
@@ -24,6 +27,26 @@ describe("audit programme planning rules", () => {
     expect(workingDayCount("2026-09-08", "2026-09-09")).toBe(2);
     expect(workingDayCount("2026-09-11", "2026-09-14")).toBe(2);
     expect(workingDayCount("2026-09-12", "2026-09-12")).toBe(1);
+  });
+
+  it("prefers lead auditors and falls back to auditors when none exist", () => {
+    const people = [
+      { id: "a", auditor_roles: ["AUDITOR"] },
+      { id: "b", auditor_roles: ["LEAD_AUDITOR"] },
+      { id: "c", auditor_roles: [] },
+    ];
+    expect(programmeLeadAuditorOptions(people).map((row) => row.id)).toEqual([
+      "b",
+    ]);
+    expect(
+      programmeLeadAuditorOptions([
+        { id: "a", auditor_roles: ["AUDITOR"] },
+        { id: "c", auditor_roles: ["OBSERVER_AUDITOR"] },
+      ]).map((row) => row.id),
+    ).toEqual(["a", "c"]);
+    expect(programmeLeadAuditorOptions([{ id: "c", auditor_roles: [] }])).toEqual(
+      [],
+    );
   });
 
   it("preserves an existing one-time audit when another month is selected", () => {
@@ -136,6 +159,53 @@ describe("audit programme planning rules", () => {
     expect(aircraftRegistrationSuffix(" 5y sln ")).toBe("SLN");
     expect(ordinalDayLabel("1–2")).toBe("1st–2nd");
     expect(ordinalDayLabel("11→13")).toBe("11th→13th");
+  });
+
+  it("shows aircraft registration on product matrix chips instead of dates", () => {
+    expect(
+      resolveAircraftRegistration({
+        title: "5Y-SLL",
+        scope: null,
+        audit_type: "PRODUCT",
+        auditable_entity: {
+          entity_type: "AIRCRAFT_TYPE",
+          display_label: "Aircraft / product audits",
+          aircraft: { tail_number: null },
+        } as never,
+      }),
+    ).toBe("SLL");
+
+    expect(
+      programmeMatrixSlotLabel(
+        {
+          title: "5Y-SLE",
+          scope: null,
+          audit_type: "PRODUCT",
+          auditable_entity: {
+            entity_type: "AIRCRAFT_TYPE",
+            display_label: "Aircraft / product audits",
+            aircraft: null,
+          } as never,
+        },
+        "15-16",
+      ),
+    ).toBe("SLE");
+
+    expect(
+      programmeMatrixSlotLabel(
+        {
+          title: "Hangar audit",
+          scope: null,
+          audit_type: "FACILITY",
+          auditable_entity: {
+            entity_type: "FACILITY",
+            display_label: "Hangar",
+            aircraft: null,
+          } as never,
+        },
+        "8-9",
+      ),
+    ).toBe("8-9");
   });
 
   it("finds overlapping internal and external auditor allocations", () => {

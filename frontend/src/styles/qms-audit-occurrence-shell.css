@@ -2,7 +2,7 @@
 .qms-audit-occurrence-mount {
   min-width: 0;
   width: 100%;
-  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  min-height: 0;
   background: color-mix(in srgb, var(--qms-page, #eef3f7) 88%, #dce5ec);
 }
 
@@ -12,7 +12,7 @@
   gap: 0;
   min-width: 0;
   width: min(100%, 92rem);
-  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  min-height: 0;
   margin-inline: auto;
   border-inline: 1px solid var(--qms-line, #d0d8e1);
   background: var(--qms-page, var(--surface-secondary, #f4f7fa));
@@ -63,7 +63,7 @@ html.quality-audit-canonical-occurrence .tenant-shell__content {
 }
 
 html.quality-audit-canonical-occurrence .qms-shell {
-  min-height: calc(100vh - var(--tenant-header-height, 56px));
+  min-height: 0;
   width: 100%;
   max-width: none;
   margin: 0;

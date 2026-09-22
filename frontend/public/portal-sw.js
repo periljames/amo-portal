@@ -8,17 +8,18 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v8";
+const VERSION = "v10";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
-const SHELL_URLS = ["/", "/portal.webmanifest"];
+const SHELL_URLS = ["/", "/portal.webmanifest", "/login-illustration-placeholder.svg", "/vite.svg"];
 // Production releases contain hundreds of lazy route chunks. Fetching every
 // manifest entry with one Promise.all can exhaust Chromium/socket resources and
 // can compete with the login/API traffic that the live portal actually needs.
 // Keep release warming bounded while preserving the same offline cache coverage.
 const PRECACHE_CONCURRENCY = 4;
 let qmsWarmup = null;
+let staticShellWarmup = null;
 
 async function precacheQms() {
   if (qmsWarmup) return qmsWarmup;
@@ -106,6 +107,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
+  if (event.data?.type === "PRECACHE_STATIC_SHELL") event.waitUntil(precacheStaticShell().catch(() => undefined));
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "PRECACHE_RELEASE") {
     event.waitUntil(precacheRelease().catch(() => undefined));
@@ -141,6 +143,7 @@ function isApiRequest(url) {
 
 function isStaticAsset(request, url) {
   if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/pdfjs/")) return true;
+  if (/\.(?:svg|png|jpe?g|webp|gif|ico|woff2?)$/i.test(url.pathname)) return true;
   return [
     "/vite.svg",
     "/login-illustration-placeholder.svg",
@@ -149,37 +152,92 @@ function isStaticAsset(request, url) {
   ].includes(url.pathname);
 }
 
-async function networkFirstNavigation(request, preloadResponsePromise, event) {
+async function matchShell(cache, request) {
+  return (await cache.match(request)) || (await cache.match("/"));
+}
+
+async function cachedShellNavigation(request, preloadResponsePromise, event) {
   const cache = await caches.open(SHELL_CACHE);
-  const fallback = (await cache.match(request)) || (await cache.match("/"));
+  const fallback = await matchShell(cache, request);
   const network = (async () => {
     try {
       const preloaded = preloadResponsePromise ? await preloadResponsePromise : null;
       const response = preloaded || await fetch(request);
-      if (response.ok && (response.headers.get("Content-Type") || "").includes("text/html")) await cache.put("/", response.clone());
-      if (response.status >= 500 && fallback) return fallback.clone();
+      if (response.ok && (response.headers.get("Content-Type") || "").includes("text/html")) {
+        await cache.put("/", response.clone());
+      }
+      // Re-match from cache instead of cloning the already-returned fallback —
+      // the caller may have already consumed that Response body.
+      if (response.status >= 500) {
+        const cached = await matchShell(cache, request);
+        if (cached) return cached;
+      }
       return response;
-    } catch { return fallback ? fallback.clone() : Response.error(); }
+    } catch {
+      return (await matchShell(cache, request)) || Response.error();
+    }
   })();
   if (!fallback) return network;
   // Weak connectivity must not strand an already-cached workspace on a blank
   // navigation. Keep the refresh alive after delivering the offline shell.
-  event.waitUntil(network.then(() => undefined));
-  let timer;
-  try {
-    return await Promise.race([network, new Promise((resolve) => {
-      timer = setTimeout(() => resolve(fallback.clone()), 2500);
-    })]);
-  } finally { clearTimeout(timer); }
+  event.waitUntil(network.then(() => undefined, () => undefined));
+  return fallback;
 }
 
 async function cacheFirstAsset(request) {
   const cache = await caches.open(ASSET_CACHE);
   const cached = await cache.match(request);
-  if (cached) return cached;
-  const response = await fetch(request);
-  if (response.ok) await cache.put(request, response.clone());
-  return response;
+  const networkPromise = fetch(request)
+    .then(async (response) => {
+      if (response.ok) await cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+  if (cached) {
+    // Logos and headers should paint instantly from cache while refreshing quietly.
+    void networkPromise;
+    return cached;
+  }
+  return (await networkPromise) || Response.error();
+}
+
+function looksLikeCachedStatic(url) {
+  return typeof url === "string"
+    && (
+      url.startsWith("/assets/")
+      || url.startsWith("/pdfjs/")
+      || /\.(?:svg|png|jpe?g|webp|gif|ico|woff2?)$/i.test(url)
+      || [
+        "/vite.svg",
+        "/login-illustration-placeholder.svg",
+        "/portal.webmanifest",
+        "/manuals-reader.webmanifest",
+      ].includes(url)
+    );
+}
+
+async function precacheStaticShell() {
+  if (staticShellWarmup) return staticShellWarmup;
+  staticShellWarmup = (async () => {
+    const [shellCache, assetCache] = await Promise.all([
+      caches.open(SHELL_CACHE),
+      caches.open(ASSET_CACHE),
+    ]);
+    const urls = [...SHELL_URLS];
+    try {
+      const response = await fetch("/portal-precache.json", { cache: "no-store" });
+      if (response.ok) {
+        const manifest = await response.json();
+        for (const url of [...(manifest.urls || []), ...(manifest.staticUrls || [])]) {
+          if (looksLikeCachedStatic(url)) urls.push(url);
+        }
+      }
+    } catch {
+      // Keep the minimal shell warm even when the manifest is briefly unavailable.
+    }
+    await precacheWithBoundedConcurrency([...new Set(urls)].slice(0, 40), shellCache, assetCache, 3);
+  })().finally(() => { staticShellWarmup = null; });
+  return staticShellWarmup;
 }
 
 self.addEventListener("fetch", (event) => {
@@ -190,7 +248,7 @@ self.addEventListener("fetch", (event) => {
   if (isApiRequest(url)) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirstNavigation(request, event.preloadResponse, event));
+    event.respondWith(cachedShellNavigation(request, event.preloadResponse, event));
     return;
   }
   if (isStaticAsset(request, url)) {

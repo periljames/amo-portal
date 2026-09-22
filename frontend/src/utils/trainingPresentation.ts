@@ -39,12 +39,27 @@ export function trainingTypeLabel(course: TrainingCoursePresentationInput | null
   return "—";
 }
 
-export function explicitTrainingRequirementKey(course: TrainingCoursePresentationInput | null | undefined): string {
+export function explicitTrainingRequirementKey(
+  course: TrainingCoursePresentationInput | null | undefined,
+  courses: Iterable<TrainingCoursePresentationInput> = [],
+): string {
   if (!course) return "";
   const groupCode = String(course.group_code || "").trim();
   if (groupCode) return `group:${groupCode.toLocaleLowerCase()}`;
+
   const prerequisite = String(course.prerequisite_course_id || "").trim();
   if (prerequisite) return `prerequisite:${prerequisite.toLocaleLowerCase()}`;
+
+  const aliases = new Set(
+    [course.id, course.course_id]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLocaleLowerCase()),
+  );
+  for (const candidate of courses) {
+    const declared = String(candidate.prerequisite_course_id || "").trim().toLocaleLowerCase();
+    if (declared && aliases.has(declared)) return `prerequisite:${declared}`;
+  }
+
   return `course:${String(course.id || course.course_id || "unknown")}`;
 }
 

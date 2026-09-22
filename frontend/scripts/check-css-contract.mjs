@@ -35,6 +35,7 @@ const requiredOrder = [
   "./foundations/appearance.css",
   "./qms-usability-enhancements.css",
   "./qms/calendar.css",
+  "./components/governed-workspace-layout.css",
 ];
 let previous = -1;
 for (const required of requiredOrder) {
@@ -45,8 +46,8 @@ for (const required of requiredOrder) {
 }
 
 const manifestImports = [...index.matchAll(/@import\s+["']([^"']+)["']/g)].map((match) => match[1]);
-if (manifestImports.at(-1) !== "./qms/calendar.css") {
-  fail(`styles/index.css must load ./qms/calendar.css last; found ${manifestImports.at(-1) || "no imports"}`);
+if (manifestImports.at(-1) !== "./components/governed-workspace-layout.css") {
+  fail(`styles/index.css must load ./components/governed-workspace-layout.css last; found ${manifestImports.at(-1) || "no imports"}`);
 }
 
 function cssFiles(directory) {

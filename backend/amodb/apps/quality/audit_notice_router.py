@@ -106,6 +106,7 @@ class NoticeTransition(BaseModel):
 
 class NoticeSubmit(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
+    short_notice_waiver_reason: str | None = Field(default=None, max_length=4000)
 
 
 class NoticeTemplateUpdate(BaseModel):
@@ -316,32 +317,105 @@ def _policy_values(policy: QualityAuditNoticePolicy | None) -> dict[str, Any]:
     }
 
 
+def _notice_period_latest_permitted(
+    *,
+    planned_start: date,
+    required_notice_days: int,
+) -> date:
+    return planned_start - timedelta(days=max(int(required_notice_days or 0), 0))
+
+
+def _notice_period_is_sufficient(
+    *,
+    planned_start: date | None,
+    notice_date: date,
+    required_notice_days: int,
+) -> bool:
+    if planned_start is None:
+        return False
+    return notice_date <= _notice_period_latest_permitted(
+        planned_start=planned_start,
+        required_notice_days=required_notice_days,
+    )
+
+
 def _validate_notice_period(audit: models.QMSAudit, notice: QualityAuditNotice, policy: QualityAuditNoticePolicy | None) -> None:
     settings = _policy_values(policy)
+    waiver_reason = (notice.exception_reason or "").strip()
     if notice.exception_type:
-        allowed = settings["emergency_exception_allowed"] if notice.exception_type == "EMERGENCY" else settings["unannounced_exception_allowed"]
+        allowed = (
+            settings["emergency_exception_allowed"]
+            if notice.exception_type == "EMERGENCY"
+            else settings["unannounced_exception_allowed"]
+        )
         if not allowed:
-            raise HTTPException(status_code=409, detail=f"The active notice policy does not permit {notice.exception_type.lower()} exceptions.")
-        if len((notice.exception_reason or "").strip()) < 8:
-            raise HTTPException(status_code=409, detail="A governed notice exception requires an attributable reason.")
+            raise HTTPException(
+                status_code=409,
+                detail=f"The active notice policy does not permit {notice.exception_type.lower()} exceptions.",
+            )
+        if len(waiver_reason) < 8:
+            raise HTTPException(
+                status_code=409,
+                detail="A governed notice exception requires an attributable reason.",
+            )
         if audit.planned_start and notice.notice_date > audit.planned_start:
-            raise HTTPException(status_code=409, detail="Notice date cannot be after the planned audit start date.")
+            raise HTTPException(
+                status_code=409,
+                detail="Notice date cannot be after the planned audit start date.",
+            )
         return
     if audit.planned_start is None:
-        raise HTTPException(status_code=409, detail="Audit planned start date is required before a notice can be approved.")
-    latest_permitted = audit.planned_start - timedelta(days=notice.required_notice_days)
-    if notice.notice_date > latest_permitted:
         raise HTTPException(
             status_code=409,
-            detail={
-                "message": "Configured audit notice period is insufficient.",
-                "required_notice_days": notice.required_notice_days,
-                "notice_date": notice.notice_date.isoformat(),
-                "planned_start": audit.planned_start.isoformat(),
-                "latest_permitted_notice_date": latest_permitted.isoformat(),
-                "required_action": "Move the audit, issue the notice earlier, or record an authorized emergency/unannounced exception.",
-            },
+            detail="Audit planned start date is required before a notice can be approved.",
         )
+    if _notice_period_is_sufficient(
+        planned_start=audit.planned_start,
+        notice_date=notice.notice_date,
+        required_notice_days=notice.required_notice_days,
+    ):
+        return
+    # Soft gate: short notice is allowed with an attributable waiver reason.
+    if len(waiver_reason) >= 8:
+        if notice.notice_date > audit.planned_start:
+            raise HTTPException(
+                status_code=409,
+                detail="Notice date cannot be after the planned audit start date.",
+            )
+        return
+    latest_permitted = _notice_period_latest_permitted(
+        planned_start=audit.planned_start,
+        required_notice_days=notice.required_notice_days,
+    )
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "NOTICE_PERIOD_WAIVER_REQUIRED",
+            "message": "Configured audit notice period is insufficient.",
+            "required_notice_days": notice.required_notice_days,
+            "notice_date": notice.notice_date.isoformat(),
+            "planned_start": audit.planned_start.isoformat(),
+            "latest_permitted_notice_date": latest_permitted.isoformat(),
+            "required_action": (
+                "Provide a short-notice waiver reason to continue, move the audit, "
+                "or issue the notice earlier."
+            ),
+        },
+    )
+
+
+def _apply_short_notice_waiver(notice: QualityAuditNotice, waiver_reason: str | None) -> None:
+    reason = (waiver_reason or "").strip()
+    if not reason:
+        return
+    if len(reason) < 8:
+        raise HTTPException(
+            status_code=409,
+            detail="Short-notice waiver requires a reason of at least 8 characters.",
+        )
+    notice.exception_reason = reason
+    # Keep type null so the waiver is reason-attributed and not blocked by
+    # emergency/unannounced policy flags. Typed exceptions remain available.
 
 
 def _default_subject(audit: models.QMSAudit) -> str:
@@ -1234,6 +1308,7 @@ def prepare_audit_notice_document(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.artifact is not None:
         return _notice_dict(row)
+    _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _prepare_notice_document(
         db,
         request=request,
@@ -1307,6 +1382,7 @@ def submit_and_deliver_audit_notice(
         )
 
     policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=row.policy_id) if row.policy_id else None
+    _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _validate_notice_period(audit, row, policy)
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == ctx.amo_id).one()
     zone = _timezone_for_amo(amo)

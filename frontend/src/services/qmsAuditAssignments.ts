@@ -11,6 +11,21 @@ export type AuditAssignmentIndependence = {
   rationale?: string | null;
   declared_at?: string | null;
   message?: string | null;
+  enforced?: boolean;
+  hard_conflict_count?: number;
+  work_order_module_connected?: boolean;
+  conflicts?: Array<{
+    code: string;
+    severity?: string;
+    title?: string;
+    message?: string;
+  }>;
+  remediations?: Array<{
+    code: string;
+    label: string;
+    detail?: string;
+  }>;
+  notes?: string[];
 };
 
 export type AuditAssignmentAssessment = {

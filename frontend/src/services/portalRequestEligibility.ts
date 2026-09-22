@@ -9,10 +9,9 @@ import type { PortalConnectivityState } from "./portalConnectivity";
  * stale (for example, a liveness probe may fail while an application route is
  * already recoverable).
  *
- * DEGRADED still means the API is reachable, so mutations must be allowed to
- * reach their authoritative endpoint and receive the real response. OFFLINE and
- * RECOVERING remain protected; RECOVERING mutations are handled by the caller's
- * readiness wait/reprobe path before this predicate is evaluated again.
+ * DEGRADED and RECOVERING are also advisory for mutations when the browser
+ * itself reports online: writes must not be serialized behind a health-probe
+ * round trip. OFFLINE and SESSION_EXPIRED remain hard blocks.
  */
 export function isPortalRequestNetworkEligible(
   method: string,
@@ -21,5 +20,5 @@ export function isPortalRequestNetworkEligible(
 ): boolean {
   if (!browserOnline || state === "SESSION_EXPIRED") return false;
   if (method.toUpperCase() === "GET") return true;
-  return state === "ONLINE" || state === "DEGRADED";
+  return state === "ONLINE" || state === "DEGRADED" || state === "RECOVERING";
 }

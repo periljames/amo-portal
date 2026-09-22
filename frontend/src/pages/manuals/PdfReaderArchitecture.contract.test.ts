@@ -10,8 +10,6 @@ const navigator = readFileSync(new URL("./PdfReaderCoreV5.tsx", import.meta.url)
 const layoutViewer = readFileSync(new URL("./PublicationPdfLayoutViewer.tsx", import.meta.url), "utf-8");
 const navigatorStyles = readFileSync(new URL("./pdfReaderNavigatorV5.css", import.meta.url), "utf-8");
 const serviceWorker = readFileSync(new URL("../../../public/portal-sw.js", import.meta.url), "utf-8");
-const legacyV2 = readFileSync(new URL("./PdfReaderCoreV2.tsx", import.meta.url), "utf-8");
-const legacyV3 = readFileSync(new URL("./PdfReaderCoreV3.tsx", import.meta.url), "utf-8");
 
 describe("controlled PDF reader architecture", () => {
   it("measures the real viewport before rendering pages and sizes mixed pages independently", () => {
@@ -23,6 +21,8 @@ describe("controlled PDF reader architecture", () => {
     expect(reader).toContain("pageWidthFor(page)");
     expect(reader).toContain('"--pdfv3-page-ratio": String(ratio)');
     expect(layoutViewer).toContain("window.visualViewport");
+    expect(layoutViewer).not.toContain("Math.max(280");
+    expect(layoutViewer).toContain("passive: true, capture: true");
     expect(layoutViewer).toContain('root.getBoundingClientRect().top');
     expect(layoutViewer).toContain('root.style.setProperty("--publication-reader-available-height"');
     expect(navigatorStyles).toContain("height: var(--publication-reader-available-height");
@@ -58,7 +58,7 @@ describe("controlled PDF reader architecture", () => {
     expect(sourceCache).toContain("navigator.storage.persist()");
     expect(sourceCache).toContain("removeLegacyPlaintextCache");
     expect(serviceWorker).toContain("Controlled document responses remain network-only in this worker");
-    expect(serviceWorker).toContain('VERSION = "v7"');
+    expect(serviceWorker).toMatch(/const VERSION = "v\d+"/);
     expect(publications).toContain("readPersistedPublicationBootstrap");
     expect(publications).toContain("writeApiCache(key, payload, READER_CACHE_MAX_AGE_MS)");
     expect(publications).not.toContain("window.localStorage.setItem(readerCacheKey");
@@ -68,10 +68,4 @@ describe("controlled PDF reader architecture", () => {
     expect(navigator).toContain("navigator.onLine !== false");
   });
 
-  it("routes legacy reader imports to the single active renderer", () => {
-    expect(legacyV2).toContain('from "./PdfReaderCoreV4"');
-    expect(legacyV3).toContain('from "./PdfReaderCoreV4"');
-    expect(legacyV2.split("\n").length).toBeLessThan(20);
-    expect(legacyV3.split("\n").length).toBeLessThan(20);
-  });
 });

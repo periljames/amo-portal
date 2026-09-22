@@ -150,6 +150,10 @@ describe("Quality workflow integrity and public CAR UI contracts", () => {
     new URL("../components/QMS/QualityEnhancementsHost.tsx", import.meta.url),
     "utf8",
   );
+  const canonicalPageSource = readFileSync(
+    new URL("../pages/qms/QmsCanonicalPage.tsx", import.meta.url),
+    "utf8",
+  );
   const routeGateSource = readFileSync(
     new URL("../components/QMS/QualityEnhancementsRouteGate.tsx", import.meta.url),
     "utf8",
@@ -176,7 +180,8 @@ describe("Quality workflow integrity and public CAR UI contracts", () => {
     expect(routeGateSource).toContain("<ModalTopLayerGuard />");
     expect(routeGateSource).not.toContain("QualityChecklistPdfFormEditorHost");
     expect(enhancementsHostSource).not.toContain('activeTab={auditSessionStage === "prepare" ? "checklist" : null}');
-    expect(enhancementsHostSource).toContain("<QualityChecklistTemplateHost amoCode={amoCode} auditKey={route?.auditKey} />");
+    expect(enhancementsHostSource).not.toContain("QualityChecklistTemplateHost");
+    expect(canonicalPageSource).toContain("QualityChecklistTemplateHost");
   });
 
   it("keeps the public CAR workflow usable at normal browser zoom", () => {

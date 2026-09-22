@@ -9,6 +9,7 @@ import {
   CalendarCheck2,
   CalendarClock,
   CheckCircle2,
+  ChevronRight,
   Download,
   FileCheck2,
   Info,
@@ -30,6 +31,12 @@ import { hasQmsRolePermission } from "../../app/routeGuards";
 import { useToast } from "../../components/feedback/ToastProvider";
 import QmsCalendarSyncDialog from "../../components/QMS/QmsCalendarSyncDialog";
 import Drawer from "../../components/shared/Drawer";
+import { HistoryTextarea } from "../../components/shared/HistoryTextarea";
+import {
+  fieldHistoryAreaFromEntity,
+  historyEntriesFromValue,
+  useTextFieldHistory,
+} from "../../hooks/useTextFieldHistory";
 import { getCachedUser } from "../../services/auth";
 import {
   addAuditProgrammeItem,
@@ -81,6 +88,8 @@ import {
   auditMonthPlanningMode,
   auditTypeForEntity,
   auditTypeLabel,
+  programmeLeadAuditorOptions,
+  resolveAircraftRegistration,
   suggestedLocationCode,
   withoutLeadAuditor,
   workingDayCount,
@@ -89,7 +98,13 @@ import {
   PROGRAMME_KINDS,
   availableProgrammeKinds,
   canCreateAnotherProgramme,
+  carryForwardResultToast,
+  defaultCopyPreviousYear,
+  defaultRotateAuditors,
+  emptyYearCreateHint,
+  emptyYearCreateLabel,
   headProgrammesForYear,
+  priorYearCarryForwardAvailable,
   programmeDisplayLabel,
   programmeKindOf,
   programmeKindTitle,
@@ -100,6 +115,8 @@ import "../../styles/qms-audit-programme.css";
 import "../../styles/qms-audit-programme-workflow.css";
 import "../../styles/qms-audit-programme-polish.css";
 import "../../styles/qms-assurance-cta-hierarchy.css";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
 
 const RECURRENCES: Array<{ value: AuditProgrammeRecurrence; label: string }> = [
   { value: "FIXED_DATES", label: "Specific dates each year" },
@@ -184,6 +201,67 @@ function dateLabel(value?: string | null): string {
         month: "short",
         year: "numeric",
       });
+}
+
+function programmeItemIdentity(item: AuditProgrammeItem): string {
+  return resolveAircraftRegistration(item) || item.title || "Planned audit";
+}
+
+function programmeItemWindowLabel(
+  item: AuditProgrammeItem,
+  year: number,
+): string {
+  if (item.recurrence === "FIXED_DATES" && item.fixed_dates?.length) {
+    return item.fixed_dates
+      .map((value) => fixedDateLabel(value, year))
+      .join(" · ");
+  }
+  if (item.target_start) {
+    return item.target_end && item.target_end !== item.target_start
+      ? `${dateLabel(item.target_start)} → ${dateLabel(item.target_end)}`
+      : dateLabel(item.target_start);
+  }
+  return human(item.recurrence || "PLANNED");
+}
+
+function programmeItemPrimaryMonth(item: AuditProgrammeItem): number {
+  if (item.fixed_dates?.length) {
+    const month = Number(String(item.fixed_dates[0]).slice(0, 2));
+    if (month >= 1 && month <= 12) return month;
+  }
+  if (item.target_start) {
+    const month = Number(String(item.target_start).slice(5, 7));
+    if (month >= 1 && month <= 12) return month;
+  }
+  return 0;
+}
+
+function groupAreaAuditsByMonth(
+  items: readonly AuditProgrammeItem[],
+): Array<{ month: number; label: string; items: AuditProgrammeItem[] }> {
+  const buckets = new Map<number, AuditProgrammeItem[]>();
+  for (const item of items) {
+    const month = programmeItemPrimaryMonth(item);
+    const bucket = buckets.get(month);
+    if (bucket) bucket.push(item);
+    else buckets.set(month, [item]);
+  }
+  return Array.from(buckets.entries())
+    .sort(([left], [right]) => {
+      if (left === 0) return 1;
+      if (right === 0) return -1;
+      return left - right;
+    })
+    .map(([month, monthItems]) => ({
+      month,
+      label:
+        month >= 1 && month <= 12
+          ? new Date(2000, month - 1, 1).toLocaleString(undefined, {
+              month: "long",
+            })
+          : "Unscheduled",
+      items: monthItems,
+    }));
 }
 
 function normalizeAssuranceModel(value?: string | null): AuditAssuranceModel {
@@ -396,6 +474,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
+  const objectivesHistory = useTextFieldHistory(amoCode, "programme-objectives", {
+    areaScope: "PROGRAMME",
+  });
+  const basisHistory = useTextFieldHistory(amoCode, "programme-regulatory-basis", {
+    areaScope: "PROGRAMME",
+  });
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("programme"));
@@ -413,6 +497,10 @@ const QmsAuditProgrammePageV2: React.FC = () => {
   const [requirementFocus, setRequirementFocus] =
     useState<AuditProgrammeItem | null>(null);
   const [requirementEditMode, setRequirementEditMode] = useState(false);
+  const [areaAuditsFocus, setAreaAuditsFocus] = useState<{
+    areaLabel: string;
+    items: AuditProgrammeItem[];
+  } | null>(null);
   const [showUniverseCreate, setShowUniverseCreate] = useState(false);
   const [universeFocus, setUniverseFocus] = useState<AuditUniverseItem | null>(
     null,
@@ -431,6 +519,8 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     useState<CalendarMonthTarget | null>(null);
   const [actionReason, setActionReason] = useState("");
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [discardReason, setDiscardReason] = useState("");
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState<"pdf" | "ics" | null>(null);
   const [calendarSyncOpen, setCalendarSyncOpen] = useState(false);
   const [editReason, setEditReason] = useState("");
@@ -442,12 +532,18 @@ const QmsAuditProgrammePageV2: React.FC = () => {
   const plannerHref = `/maintenance/${encodeURIComponent(amoCode)}/quality/calendar/week`;
 
   const programmesQuery = useQuery({
-    queryKey: ["qms-audit-programmes", amoCode, year],
+    queryKey: ["qms-audit-programmes", amoCode.trim().toLowerCase(), year],
     queryFn: ({ signal }) => listAuditProgrammes(amoCode, year, signal),
     staleTime: 5_000,
   });
+  const priorYearQuery = useQuery({
+    queryKey: ["qms-audit-programmes", amoCode.trim().toLowerCase(), year - 1],
+    queryFn: ({ signal }) => listAuditProgrammes(amoCode, year - 1, signal),
+    enabled: canManage,
+    staleTime: 30_000,
+  });
   const universeQuery = useQuery({
-    queryKey: ["qms-audit-universe", amoCode],
+    queryKey: ["qms-audit-universe", amoCode.trim().toLowerCase()],
     queryFn: ({ signal }) => listAuditUniverse(amoCode, signal),
     staleTime: 10_000,
   });
@@ -465,7 +561,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     staleTime: 30_000,
   });
   const queueQuery = useQuery({
-    queryKey: ["qms-audit-programme-scheduling-queue", amoCode],
+    queryKey: ["qms-audit-programme-scheduling-queue", amoCode.trim().toLowerCase()],
     queryFn: ({ signal }) => listAuditProgrammeSchedulingQueue(amoCode, signal),
     enabled: canManage,
     staleTime: 5_000,
@@ -474,10 +570,29 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     () => programmesQuery.data?.items || [],
     [programmesQuery.data?.items],
   );
+  const priorYearProgrammes = useMemo(
+    () => priorYearQuery.data?.items || [],
+    [priorYearQuery.data?.items],
+  );
+  const priorYear = year - 1;
+  const canCarryForwardDefaultKind = useMemo(() => {
+    const kind = availableProgrammeKinds(programmes)[0] || "INTERNAL";
+    return priorYearCarryForwardAvailable(priorYearProgrammes, kind);
+  }, [priorYearProgrammes, programmes]);
   const visibleProgrammes = useMemo(
     () => headProgrammesForYear(programmes),
     [programmes],
   );
+  useEffect(() => {
+    if (!selectedId) return;
+    if (visibleProgrammes.some((programme) => programme.id === selectedId)) return;
+    setSelectedId(null);
+    const next = new URLSearchParams(searchParams);
+    if (next.has("programme")) {
+      next.delete("programme");
+      setSearchParams(next, { replace: true });
+    }
+  }, [selectedId, visibleProgrammes, searchParams, setSearchParams]);
   const matrixPortfolioQuery = useQuery({
     queryKey: [
       "qms-audit-programme-matrix-portfolio",
@@ -540,7 +655,8 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     enabled: Boolean(selectedProgrammeId),
     staleTime: 3_000,
   });
-  const selected = detailQuery.data;
+  const selected =
+    detailQuery.data?.status === "CLOSED" ? null : detailQuery.data;
   const optimizer = optimizerQuery.data;
   const readiness = readinessOf(selected, optimizer);
   const matrixPortfolio = useMemo(
@@ -594,10 +710,11 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     title: programmeKindTitle("INTERNAL", currentYear),
     period_start: `${currentYear}-01-01`,
     period_end: `${currentYear}-12-31`,
-    objectives:
-      "Maintain compliance while increasing surveillance where risk or performance evidence warrants it.",
+    objectives: "Plan and complete the year's assurance audits.",
     regulatory_basis: "",
-    copy_previous_year: true,
+    copy_previous_year: false,
+    rotate_auditors: false,
+    apply_hybrid_seed: false,
   });
   const [itemForm, setItemForm] = useState({
     universe_item_id: "",
@@ -707,6 +824,75 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     notify_auditees: true,
   });
 
+  const addItemAreaType = useMemo(() => {
+    const universeId = itemForm.universe_item_id;
+    if (!universeId) return null;
+    return (
+      (universeQuery.data?.items || []).find((item) => item.id === universeId)
+        ?.entity_type || null
+    );
+  }, [itemForm.universe_item_id, universeQuery.data?.items]);
+
+  const editItemAreaType =
+    requirementFocus?.auditable_entity?.entity_type || null;
+
+  const areaFieldSeeds = useMemo(() => {
+    const collect = (entityType: string | null, field: "purpose" | "scope" | "criteria") => {
+      if (!entityType) return [] as string[];
+      const lines: string[] = [];
+      for (const item of selected?.items || []) {
+        if ((item.auditable_entity?.entity_type || "") !== entityType) continue;
+        if (field === "purpose") {
+          lines.push(...historyEntriesFromValue(item.purpose || ""));
+        } else if (field === "scope") {
+          lines.push(...historyEntriesFromValue(item.scope || ""));
+        } else {
+          lines.push(...historyEntriesFromValue(linesOf(item.criteria)));
+        }
+      }
+      return lines;
+    };
+    return {
+      addPurpose: collect(addItemAreaType, "purpose"),
+      addScope: collect(addItemAreaType, "scope"),
+      addCriteria: collect(addItemAreaType, "criteria"),
+      editPurpose: collect(editItemAreaType, "purpose"),
+      editScope: collect(editItemAreaType, "scope"),
+      editCriteria: collect(editItemAreaType, "criteria"),
+    };
+  }, [addItemAreaType, editItemAreaType, selected?.items]);
+
+  const purposeHistoryAdd = useTextFieldHistory(amoCode, "audit-purpose", {
+    areaScope: fieldHistoryAreaFromEntity(addItemAreaType),
+    enabled: Boolean(addItemAreaType),
+    areaSeeds: areaFieldSeeds.addPurpose,
+  });
+  const scopeHistoryAdd = useTextFieldHistory(amoCode, "audit-scope", {
+    areaScope: fieldHistoryAreaFromEntity(addItemAreaType),
+    enabled: Boolean(addItemAreaType),
+    areaSeeds: areaFieldSeeds.addScope,
+  });
+  const criteriaHistoryAdd = useTextFieldHistory(amoCode, "audit-criteria", {
+    areaScope: fieldHistoryAreaFromEntity(addItemAreaType),
+    enabled: Boolean(addItemAreaType),
+    areaSeeds: areaFieldSeeds.addCriteria,
+  });
+  const purposeHistoryEdit = useTextFieldHistory(amoCode, "audit-purpose", {
+    areaScope: fieldHistoryAreaFromEntity(editItemAreaType),
+    enabled: Boolean(editItemAreaType),
+    areaSeeds: areaFieldSeeds.editPurpose,
+  });
+  const scopeHistoryEdit = useTextFieldHistory(amoCode, "audit-scope", {
+    areaScope: fieldHistoryAreaFromEntity(editItemAreaType),
+    enabled: Boolean(editItemAreaType),
+    areaSeeds: areaFieldSeeds.editScope,
+  });
+  const criteriaHistoryEdit = useTextFieldHistory(amoCode, "audit-criteria", {
+    areaScope: fieldHistoryAreaFromEntity(editItemAreaType),
+    enabled: Boolean(editItemAreaType),
+    areaSeeds: areaFieldSeeds.editCriteria,
+  });
+
   const openProgrammeEdit = (programme: AuditProgramme) => {
     setEditProgrammeForm({
       title: programme.title,
@@ -719,15 +905,22 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     setShowProgrammeEdit(true);
   };
 
-  const openProgrammeCreate = () => {
-    const nextKind = creatableKinds[0] || "INTERNAL";
-    setProgrammeForm((current) => ({
-      ...current,
-      programme_kind: nextKind,
-      title: programmeKindTitle(nextKind, year),
+  const openProgrammeCreate = (options?: { copyPreviousYear?: boolean }) => {
+    const programme_kind = creatableKinds[0] || "INTERNAL";
+    const copy_previous_year =
+      options?.copyPreviousYear ??
+      defaultCopyPreviousYear(priorYearProgrammes, programme_kind);
+    setProgrammeForm({
+      programme_kind,
+      title: programmeKindTitle(programme_kind, year),
       period_start: `${year}-01-01`,
       period_end: `${year}-12-31`,
-    }));
+      objectives: "Plan and complete the year's assurance audits.",
+      regulatory_basis: "",
+      copy_previous_year,
+      rotate_auditors: defaultRotateAuditors(copy_previous_year),
+      apply_hybrid_seed: false,
+    });
     setShowCreate(true);
   };
 
@@ -751,6 +944,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
 
   const openRequirementDrawer = (item: AuditProgrammeItem, edit: boolean) => {
     setCancelItemTarget(null);
+    setAreaAuditsFocus(null);
     setRequirementFocus(item);
     setRequirementEditMode(edit);
     setEditItemForm({
@@ -785,6 +979,15 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       notify_auditees: item.notify_auditees !== false,
     });
     setEditReason("");
+  };
+
+  const openRemoveAudit = (item: AuditProgrammeItem) => {
+    setCalendarMonthTarget(null);
+    setRequirementFocus(null);
+    setRequirementEditMode(false);
+    setAreaAuditsFocus(null);
+    setCancelItemTarget(item);
+    setCancelItemReason("Removed from draft programme");
   };
 
   const openCalendarMonth = (item: AuditProgrammeItem, month: number) => {
@@ -911,7 +1114,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
         queryKey: ["qms-audit-programme-optimizer", amoCode, id],
       }),
       queryClient.invalidateQueries({
-        queryKey: ["qms-audit-programme-scheduling-queue", amoCode],
+        queryKey: ["qms-audit-programme-scheduling-queue", amoCode.trim().toLowerCase()],
       }),
       queryClient.invalidateQueries({
         queryKey: ["qms-audit-programme-schedule-links", amoCode, id],
@@ -939,12 +1142,40 @@ const QmsAuditProgrammePageV2: React.FC = () => {
         period_start: programmeForm.period_start,
         period_end: programmeForm.period_end,
         copy_previous_year: programmeForm.copy_previous_year,
+        rotate_auditors:
+          programmeForm.copy_previous_year && programmeForm.rotate_auditors,
+        apply_hybrid_seed: programmeForm.apply_hybrid_seed,
       }),
     onSuccess: async (programme) => {
+      const carried = programmeForm.copy_previous_year;
+      const rotated =
+        programmeForm.copy_previous_year && programmeForm.rotate_auditors;
+      const copiedCount = programme.items?.length ?? 0;
+      objectivesHistory.remember(programmeForm.objectives);
+      basisHistory.remember(programmeForm.regulatory_basis);
       setSelectedId(programme.id);
       setShowCreate(false);
       setWorkspaceTab("requirements");
       await invalidateProgramme(programme.id);
+      if (carried) {
+        const toast = carryForwardResultToast(
+          copiedCount,
+          year,
+          priorYear,
+          rotated,
+        );
+        pushToast({
+          ...toast,
+          dedupeKey: `audit-programme-create:${programme.id}`,
+        });
+      } else {
+        pushToast({
+          title: `${year} programme created`,
+          message: "Blank draft ready — add audits from the programme matrix.",
+          variant: "success",
+          dedupeKey: `audit-programme-create:${programme.id}`,
+        });
+      }
     },
   });
 
@@ -965,6 +1196,8 @@ const QmsAuditProgrammePageV2: React.FC = () => {
         reason: editReason.trim(),
       }),
     onSuccess: async (programme) => {
+      objectivesHistory.remember(editProgrammeForm.objectives);
+      basisHistory.remember(editProgrammeForm.regulatory_basis);
       setShowProgrammeEdit(false);
       setEditReason("");
       queryClient.setQueryData(
@@ -1022,13 +1255,15 @@ const QmsAuditProgrammePageV2: React.FC = () => {
         },
       ),
     onSuccess: async (item) => {
+      purposeHistoryEdit.remember(editItemForm.purpose);
+      scopeHistoryEdit.remember(editItemForm.scope);
+      criteriaHistoryEdit.remember(editItemForm.criteria);
       setRequirementFocus(null);
       setRequirementEditMode(false);
       setEditReason("");
       await invalidateProgramme(item.programme_id);
     },
   });
-
   const calendarMonthMutation = useMutation({
     mutationFn: () => {
       if (!calendarMonthTarget)
@@ -1047,8 +1282,13 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       const fixedDates = [
         ...new Set([...datesOutsideMonth, ...datesInMonth]),
       ].sort();
-      if (!fixedDates.length)
-        throw new Error("At least one programme date is required.");
+      if (!fixedDates.length) {
+        return updateAuditProgrammeItem(amoCode, item.programme_id, item.id, {
+          state: "CANCELLED",
+          cancellation_reason: `Removed from ${monthLabel} schedule`,
+          reason: `Clear ${monthLabel} audit from the programme`,
+        });
+      }
       if (mode === "create") {
         return addAuditProgrammeItem(amoCode, item.programme_id, {
           universe_item_id: item.universe_item_id,
@@ -1120,13 +1360,20 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     },
     onSuccess: async (item) => {
       const created = calendarMonthTarget?.mode === "create";
+      const removed = item.state === "CANCELLED";
       setCalendarMonthTarget(null);
       await invalidateProgramme(item.programme_id);
       pushToast({
-        title: created ? "Additional audit created" : "Audit dates updated",
+        title: created
+          ? "Additional audit created"
+          : removed
+            ? "Month audit removed"
+            : "Audit dates updated",
         message: created
           ? "The existing audit was preserved and the additional month now has its own governed requirement."
-          : "The audit series now includes the saved dates.",
+          : removed
+            ? "That month’s scheduled audit was removed from the draft programme."
+            : "The audit series now includes the saved dates.",
         variant: "success",
         dedupeKey: `audit-programme-month:${item.id}`,
       });
@@ -1137,15 +1384,22 @@ const QmsAuditProgrammePageV2: React.FC = () => {
     mutationFn: (item: AuditProgrammeItem) =>
       updateAuditProgrammeItem(amoCode, item.programme_id, item.id, {
         state: "CANCELLED",
-        cancellation_reason: cancelItemReason.trim(),
-        reason: cancelItemReason.trim(),
+        cancellation_reason: cancelItemReason.trim() || "Removed from draft programme",
+        reason: cancelItemReason.trim() || "Removed from draft programme",
       }),
     onSuccess: async (item) => {
       setRequirementFocus(null);
       setRequirementEditMode(false);
+      setAreaAuditsFocus(null);
       setCancelItemTarget(null);
       setCancelItemReason("");
       await invalidateProgramme(item.programme_id);
+      pushToast({
+        title: "Audit removed",
+        message: `${item.title} was removed from this draft programme.`,
+        variant: "success",
+        dedupeKey: `audit-programme-remove:${item.id}`,
+      });
     },
   });
 
@@ -1203,15 +1457,23 @@ const QmsAuditProgrammePageV2: React.FC = () => {
   });
 
   const transitionMutation = useMutation({
-    mutationFn: (target: AuditProgrammeStatus) =>
+    mutationFn: ({
+      target,
+      reason,
+    }: {
+      target: AuditProgrammeStatus;
+      reason: string;
+    }) =>
       transitionAuditProgramme(
         amoCode,
         selectedProgrammeId as string,
         target,
-        actionReason.trim(),
+        reason.trim(),
       ),
     onSuccess: async (programme) => {
       setActionReason("");
+      setDiscardReason("");
+      setShowDiscardConfirm(false);
       setActionFeedback(
         programme.status === "UNDER_REVIEW"
           ? "Submitted. The Quality Manager has been notified and the revision is now frozen."
@@ -1221,8 +1483,46 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               ? "Published. Fixed-date schedules were generated and the audit team and auditees were notified according to each requirement."
               : programme.status === "DRAFT"
                 ? "Returned to draft for correction. The programme owner has been notified."
-                : `Programme moved to ${human(programme.status)}.`,
+                : programme.status === "CLOSED"
+                  ? "Draft programme discarded and closed."
+                  : `Programme moved to ${human(programme.status)}.`,
       );
+      if (programme.status === "CLOSED") {
+        const closedId = programme.id;
+        setSelectedId(null);
+        setShowProgrammeDetail(false);
+        setWorkspaceTab("requirements");
+        const next = new URLSearchParams(searchParams);
+        next.delete("programme");
+        next.delete("tab");
+        setSearchParams(next, { replace: true });
+        queryClient.removeQueries({
+          queryKey: ["qms-audit-programme", amoCode, closedId],
+        });
+        queryClient.removeQueries({
+          queryKey: ["qms-audit-programme-optimizer", amoCode, closedId],
+        });
+        queryClient.setQueryData<AuditProgrammeList>(
+          ["qms-audit-programmes", amoCode, year],
+          (current) =>
+            current
+              ? {
+                  ...current,
+                  items: current.items.map((item) =>
+                    item.id === closedId ? programme : item,
+                  ),
+                }
+              : current,
+        );
+        await invalidateProgramme(closedId);
+        pushToast({
+          title: "Draft discarded",
+          message: "The year is free to create a new programme.",
+          variant: "success",
+          dedupeKey: `audit-programme-discard:${closedId}`,
+        });
+        return;
+      }
       queryClient.setQueryData(
         ["qms-audit-programme", amoCode, programme.id],
         programme,
@@ -1327,6 +1627,9 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       });
     },
     onSuccess: async () => {
+      purposeHistoryAdd.remember(itemForm.purpose);
+      scopeHistoryAdd.remember(itemForm.scope);
+      criteriaHistoryAdd.remember(itemForm.criteria);
       setShowRequirement(false);
       setItemForm((current) => ({
         ...current,
@@ -1398,14 +1701,8 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       });
       setItemForm((current) => ({ ...current, universe_item_id: item.id }));
       setShowUniverseCreate(false);
-      if (
-        selectedProgrammeId &&
-        selected &&
-        selected.status === "DRAFT"
-      ) {
-        await rebuildAuditProgrammeOptimizer(amoCode, selectedProgrammeId);
-        await invalidateProgramme();
-      }
+      // Do not auto-rebuild the hybrid optimizer here — that silently seeded
+      // unexplained audits into blank drafts. User can run Rebuild recommendations explicitly.
     },
   });
 
@@ -1422,9 +1719,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
   const people = peopleQuery.data?.people || [];
   const locations = peopleQuery.data?.locations || [];
   const auditorOptions = people.filter((person) => (person.auditor_roles || []).length > 0);
-  const leadAuditorOptions = auditorOptions.filter((person) =>
-    (person.auditor_roles || []).includes("LEAD_AUDITOR"),
-  );
+  const leadAuditorOptions = programmeLeadAuditorOptions(people);
+  const leadOptionsAreFallbackAuditors =
+    leadAuditorOptions.length > 0 &&
+    !leadAuditorOptions.some((person) =>
+      (person.auditor_roles || []).includes("LEAD_AUDITOR"),
+    );
   const auditorNames = useMemo(
     () =>
       new Map(
@@ -1492,7 +1792,9 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       );
       setActionFeedback(
         format === "pdf"
-          ? "Controlled print schedule downloaded."
+          ? programmeIsControlled(selected)
+            ? "Controlled programme PDF downloaded."
+            : "Draft programme PDF downloaded."
           : "Calendar snapshot downloaded. Use Sync calendar for automatic updates.",
       );
     } catch (reason) {
@@ -1644,17 +1946,25 @@ const QmsAuditProgrammePageV2: React.FC = () => {
           <div>
             <strong>No programme for {year}</strong>
             <p>
-              Create a draft to plan internal, external, or third-party audits
-              for this year.
+              {emptyYearCreateHint(year, priorYear, canCarryForwardDefaultKind)}
             </p>
           </div>
           {allowCreateProgramme ? (
             <button
               type="button"
               className="is-primary"
-              onClick={openProgrammeCreate}
+              onClick={() =>
+                openProgrammeCreate({
+                  copyPreviousYear: canCarryForwardDefaultKind,
+                })
+              }
             >
-              <Plus size={15} /> Create programme
+              <Plus size={15} />{" "}
+              {emptyYearCreateLabel(
+                year,
+                priorYear,
+                canCarryForwardDefaultKind,
+              )}
             </button>
           ) : canManage ? (
             <small>
@@ -1863,15 +2173,15 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                       <small>Three governed roles, one frozen revision, then controlled distribution.</small>
                     </div>
                     <div className="qms-audit-programme-flow__detail-actions">
+                      {selected && canExport ? (
+                        <button type="button" className="is-secondary" disabled={Boolean(downloadBusy)} onClick={() => void downloadSchedule("pdf")}>
+                          <Download size={14} /> {downloadBusy === "pdf" ? "Preparing…" : programmeIsControlled(selected) ? "Download PDF" : "Download draft PDF"}
+                        </button>
+                      ) : null}
                       {selected && programmeIsControlled(selected) && canExport ? (
-                        <>
-                          <button type="button" className="is-secondary" disabled={Boolean(downloadBusy)} onClick={() => void downloadSchedule("pdf")}>
-                            <Download size={14} /> {downloadBusy === "pdf" ? "Preparing…" : "Print PDF"}
-                          </button>
-                          <button type="button" className="is-secondary" disabled={Boolean(downloadBusy)} onClick={() => void downloadSchedule("ics")}>
-                            <Download size={14} /> Calendar snapshot
-                          </button>
-                        </>
+                        <button type="button" className="is-secondary" disabled={Boolean(downloadBusy)} onClick={() => void downloadSchedule("ics")}>
+                          <Download size={14} /> Calendar snapshot
+                        </button>
                       ) : null}
                       <button type="button" className="is-secondary" onClick={() => setCalendarSyncOpen(true)}>
                         <CalendarCheck2 size={14} /> Sync calendar
@@ -1946,6 +2256,20 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                       onNewProgramme={
                         allowCreateProgramme ? openProgrammeCreate : undefined
                       }
+                      onDiscardProgramme={
+                        canManage && selected.status === "DRAFT"
+                          ? () => {
+                              setDiscardReason("");
+                              setShowDiscardConfirm(true);
+                            }
+                          : undefined
+                      }
+                      onDownloadPdf={
+                        canExport
+                          ? () => void downloadSchedule("pdf")
+                          : undefined
+                      }
+                      downloadBusy={Boolean(downloadBusy)}
                       onAddAudit={() => setShowRequirement(true)}
                       onAddCoverageArea={openUniverseCreate}
                       onAddAreaMonth={startAuditFromMatrix}
@@ -1957,13 +2281,26 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                         setSelectedId(item.programme_id);
                         openRequirementDrawer(item, false);
                       }}
+                      onViewArea={(items, areaLabel) => {
+                        const unique = Array.from(
+                          new Map(items.map((item) => [item.id, item])).values(),
+                        );
+                        if (unique.length === 1) {
+                          setSelectedId(unique[0].programme_id);
+                          openRequirementDrawer(unique[0], false);
+                          return;
+                        }
+                        setSelectedId(unique[0]?.programme_id || selectedId);
+                        setRequirementFocus(null);
+                        setRequirementEditMode(false);
+                        setAreaAuditsFocus({
+                          areaLabel,
+                          items: unique,
+                        });
+                      }}
                       onEditItem={(item) => {
                         setSelectedId(item.programme_id);
                         openRequirementDrawer(item, true);
-                      }}
-                      onRemoveItem={(item) => {
-                        setCancelItemTarget(item);
-                        setCancelItemReason("");
                       }}
                       onScheduleItem={(item) =>
                         openSchedule(item.programme_id, item.id)
@@ -2189,14 +2526,33 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                           />
 
                           {approvalStage === "PREPARATION" && canManage ? (
-                            <button
-                              type="button"
-                              className="is-primary"
-                              disabled={!readiness.ready_for_approval || actionReason.trim().length < 3 || transitionMutation.isPending}
-                              onClick={() => transitionMutation.mutate("UNDER_REVIEW")}
-                            >
-                              <Send size={14} /> Submit for Quality review <ArrowRight size={14} />
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="is-primary"
+                                disabled={!readiness.ready_for_approval || actionReason.trim().length < 3 || transitionMutation.isPending}
+                                onClick={() =>
+                                  transitionMutation.mutate({
+                                    target: "UNDER_REVIEW",
+                                    reason: actionReason,
+                                  })
+                                }
+                              >
+                                <Send size={14} /> Submit for Quality review <ArrowRight size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="is-danger"
+                                disabled={transitionMutation.isPending}
+                                onClick={() => {
+                                  setDiscardReason(actionReason.trim() || "");
+                                  setShowDiscardConfirm(true);
+                                }}
+                                title="Close and discard this draft programme for the year"
+                              >
+                                <Trash2 size={14} /> Discard draft
+                              </button>
+                            </>
                           ) : null}
 
                           {approvalStage === "QUALITY_REVIEW" && canQualityReview ? (
@@ -2232,7 +2588,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                                 type="button"
                                 className="is-secondary"
                                 disabled={actionReason.trim().length < 3 || transitionMutation.isPending}
-                                onClick={() => transitionMutation.mutate("DRAFT")}
+                                onClick={() =>
+                                  transitionMutation.mutate({
+                                    target: "DRAFT",
+                                    reason: actionReason,
+                                  })
+                                }
                               >
                                 Return for changes
                               </button>
@@ -2240,7 +2601,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                                 type="button"
                                 className="is-primary"
                                 disabled={!readiness.ready_for_approval || actionReason.trim().length < 3 || transitionMutation.isPending}
-                                onClick={() => transitionMutation.mutate("APPROVED")}
+                                onClick={() =>
+                                  transitionMutation.mutate({
+                                    target: "APPROVED",
+                                    reason: actionReason,
+                                  })
+                                }
                               >
                                 <FileCheck2 size={14} /> Give final approval <ArrowRight size={14} />
                               </button>
@@ -2252,7 +2618,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                               type="button"
                               className="is-primary"
                               disabled={actionReason.trim().length < 3 || transitionMutation.isPending}
-                              onClick={() => transitionMutation.mutate("ACTIVE")}
+                              onClick={() =>
+                                transitionMutation.mutate({
+                                  target: "ACTIVE",
+                                  reason: actionReason,
+                                })
+                              }
                             >
                               <CalendarCheck2 size={14} /> Publish, schedule & notify <ArrowRight size={14} />
                             </button>
@@ -2318,6 +2689,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
         {calendarMonthTarget ? (
           <form
             className="qms-audit-programme__form"
+            noValidate={calendarMonthForm.dates.length === 0}
             onSubmit={(event) => {
               event.preventDefault();
               calendarMonthMutation.mutate();
@@ -2452,7 +2824,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   type="time"
                   min="09:00"
                   max="17:00"
-                  required
+                  required={calendarMonthForm.dates.length > 0}
                   value={calendarMonthForm.default_start_time}
                   onChange={(event) =>
                     setCalendarMonthForm((current) => ({
@@ -2468,7 +2840,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   type="time"
                   min="09:00"
                   max="17:00"
-                  required
+                  required={calendarMonthForm.dates.length > 0}
                   value={calendarMonthForm.default_end_time}
                   onChange={(event) =>
                     setCalendarMonthForm((current) => ({
@@ -2488,14 +2860,16 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                     default_location,
                   }))
                 }
-                required={["FACILITY", "STATION"].includes(
-                  calendarMonthTarget.item.auditable_entity?.entity_type || "",
-                )}
+                required={
+                  calendarMonthForm.dates.length > 0 &&
+                  ["FACILITY", "STATION"].includes(
+                    calendarMonthTarget.item.auditable_entity?.entity_type || "",
+                  )
+                }
               />
               <label>
                 <span>Lead auditor</span>
                 <select
-                  required
                   value={calendarMonthForm.lead_auditor_user_id}
                   onChange={(event) =>
                     setCalendarMonthForm((current) => ({
@@ -2513,13 +2887,19 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                     }))
                   }
                 >
-                  <option value="">Select lead auditor</option>
+                  <option value="">Assign later</option>
                   {leadAuditorOptions.map((person) => (
                     <option key={person.id} value={person.id}>
                       {person.full_name}
                     </option>
                   ))}
                 </select>
+                {leadOptionsAreFallbackAuditors ? (
+                  <small>
+                    No lead-auditor privilege holders — auditors may lead this
+                    planned audit.
+                  </small>
+                ) : null}
               </label>
               <ProgrammeObserverSelect
                 id="programme-month-observer"
@@ -2610,29 +2990,52 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               >
                 Cancel
               </button>
+              {calendarMonthTarget.mode === "update" &&
+              canManage &&
+              editableProgrammeIds.has(
+                calendarMonthTarget.item.programme_id,
+              ) ? (
+                <button
+                  type="button"
+                  className="is-danger"
+                  disabled={calendarMonthMutation.isPending}
+                  onClick={() => openRemoveAudit(calendarMonthTarget.item)}
+                >
+                  <Trash2 size={14} /> Delete audit
+                </button>
+              ) : null}
               <button
-                type="submit"
-                className="is-primary"
+                type={calendarMonthForm.dates.length ? "submit" : "button"}
+                className={
+                  calendarMonthForm.dates.length ? "is-primary" : "is-danger"
+                }
                 disabled={
                   calendarMonthMutation.isPending ||
                   (calendarMonthTarget.mode === "create"
                     ? !calendarMonthForm.dates.length
-                    : !calendarMonthForm.dates.length &&
-                      !(calendarMonthTarget.item.fixed_dates || []).some(
-                        (value) =>
-                          Number(value.slice(0, 2)) !==
-                          calendarMonthTarget.month,
-                      )) ||
-                  !calendarMonthForm.dates.every(Boolean) ||
-                  !calendarMonthForm.lead_auditor_user_id ||
-                  calendarMonthForm.default_start_time >=
-                    calendarMonthForm.default_end_time
+                    : false) ||
+                  (calendarMonthForm.dates.length > 0 &&
+                    !calendarMonthForm.dates.every(Boolean)) ||
+                  (calendarMonthForm.dates.length > 0 &&
+                    calendarMonthForm.default_start_time >=
+                      calendarMonthForm.default_end_time)
+                }
+                onClick={
+                  calendarMonthForm.dates.length
+                    ? undefined
+                    : () => calendarMonthMutation.mutate()
                 }
               >
-                <CalendarClock size={14} />{" "}
+                {calendarMonthForm.dates.length ? (
+                  <CalendarClock size={14} />
+                ) : (
+                  <Trash2 size={14} />
+                )}{" "}
                 {calendarMonthTarget.mode === "create"
                   ? "Create additional audit"
-                  : `Save ${new Date(2000, calendarMonthTarget.month - 1, 1).toLocaleString(undefined, { month: "long" })} dates`}
+                  : calendarMonthForm.dates.length
+                    ? `Save ${new Date(2000, calendarMonthTarget.month - 1, 1).toLocaleString(undefined, { month: "long" })} dates`
+                    : `Remove ${new Date(2000, calendarMonthTarget.month - 1, 1).toLocaleString(undefined, { month: "long" })} dates`}
               </button>
             </div>
           </form>
@@ -2654,21 +3057,23 @@ const QmsAuditProgrammePageV2: React.FC = () => {
           }}
         >
           <div className="qms-audit-programme-drawer__body">
-            <p className="qms-audit-programme-flow__drawer-note">
-              One programme per type for {year}. Period defaults to the full
-              calendar year.
-            </p>
             <label className="is-wide">
-              <span>Programme type</span>
+              <span>Type</span>
               <select
                 required
                 value={programmeForm.programme_kind}
                 onChange={(event) => {
                   const programme_kind = event.target.value as ProgrammeKind;
+                  const copy_previous_year = defaultCopyPreviousYear(
+                    priorYearProgrammes,
+                    programme_kind,
+                  );
                   setProgrammeForm((current) => ({
                     ...current,
                     programme_kind,
                     title: programmeKindTitle(programme_kind, year),
+                    copy_previous_year,
+                    rotate_auditors: defaultRotateAuditors(copy_previous_year),
                   }));
                 }}
               >
@@ -2682,7 +3087,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               </select>
             </label>
             <p className="qms-audit-programme-flow__drawer-note is-compact">
-              Title: <strong>{programmeForm.title}</strong> ·{" "}
+              <strong>{programmeForm.title}</strong> ·{" "}
               {dateLabel(programmeForm.period_start)} →{" "}
               {dateLabel(programmeForm.period_end)}
             </p>
@@ -2690,44 +3095,85 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               <input
                 type="checkbox"
                 checked={programmeForm.copy_previous_year}
+                onChange={(event) => {
+                  const copy_previous_year = event.target.checked;
+                  setProgrammeForm((current) => ({
+                    ...current,
+                    copy_previous_year,
+                    rotate_auditors: defaultRotateAuditors(copy_previous_year),
+                  }));
+                }}
+              />
+              <span>Carry forward from {priorYear}</span>
+            </label>
+            <label className="is-wide is-checkbox">
+              <input
+                type="checkbox"
+                checked={
+                  programmeForm.copy_previous_year &&
+                  programmeForm.rotate_auditors
+                }
+                disabled={!programmeForm.copy_previous_year}
                 onChange={(event) =>
                   setProgrammeForm((current) => ({
                     ...current,
-                    copy_previous_year: event.target.checked,
+                    rotate_auditors: event.target.checked,
                   }))
                 }
               />
-              <span>Carry forward last year’s audits for review</span>
+              <span>Rotate auditors</span>
             </label>
-            <label className="is-wide">
-              <span>Programme objectives · one per line</span>
-              <textarea
-                rows={3}
-                value={programmeForm.objectives}
+            {programmeForm.copy_previous_year &&
+            !priorYearCarryForwardAvailable(
+              priorYearProgrammes,
+              programmeForm.programme_kind,
+            ) ? (
+              <p className="qms-audit-programme-flow__drawer-note is-compact">
+                No {priorYear} programme of this type yet.
+              </p>
+            ) : null}
+            <label className="is-wide is-checkbox">
+              <input
+                type="checkbox"
+                checked={programmeForm.apply_hybrid_seed}
                 onChange={(event) =>
                   setProgrammeForm((current) => ({
                     ...current,
-                    objectives: event.target.value,
+                    apply_hybrid_seed: event.target.checked,
                   }))
                 }
               />
+              <span>Hybrid seed</span>
             </label>
-            <label className="is-wide">
-              <span>
-                Compliance baseline · one governing reference per line
-              </span>
-              <textarea
-                rows={4}
-                value={programmeForm.regulatory_basis}
-                onChange={(event) =>
-                  setProgrammeForm((current) => ({
-                    ...current,
-                    regulatory_basis: event.target.value,
-                  }))
-                }
-                placeholder="KCAR / approval condition / MPM / QMSM / IOSA / ISO / customer or contractual requirement"
-              />
-            </label>
+            <HistoryTextarea
+              label="Objectives"
+              rows={3}
+              value={programmeForm.objectives}
+              options={objectivesHistory.options}
+              listId={`${objectivesHistory.listId}-create`}
+              onRemember={objectivesHistory.remember}
+              onChange={(objectives) =>
+                setProgrammeForm((current) => ({
+                  ...current,
+                  objectives,
+                }))
+              }
+            />
+            <HistoryTextarea
+              label="Compliance baseline"
+              rows={3}
+              placeholder="KCAR / MPM / QMSM / contractual requirement"
+              value={programmeForm.regulatory_basis}
+              options={basisHistory.options}
+              listId={`${basisHistory.listId}-create`}
+              onRemember={basisHistory.remember}
+              onChange={(regulatory_basis) =>
+                setProgrammeForm((current) => ({
+                  ...current,
+                  regulatory_basis,
+                }))
+              }
+            />
           </div>
           <div className="qms-audit-programme-drawer__footer">
             <button
@@ -2843,47 +3289,41 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 }
               />
             </label>
-            <label className="is-wide">
-              <span>Purpose / reason for this audit</span>
-              <textarea
-                rows={2}
-                value={itemForm.purpose}
-                onChange={(event) =>
-                  setItemForm((current) => ({
-                    ...current,
-                    purpose: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="is-wide">
-              <span>Scope</span>
-              <textarea
-                required
-                rows={3}
-                value={itemForm.scope}
-                onChange={(event) =>
-                  setItemForm((current) => ({
-                    ...current,
-                    scope: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="is-wide">
-              <span>Audit criteria · one reference per line</span>
-              <textarea
-                required
-                rows={3}
-                value={itemForm.criteria}
-                onChange={(event) =>
-                  setItemForm((current) => ({
-                    ...current,
-                    criteria: event.target.value,
-                  }))
-                }
-              />
-            </label>
+            <HistoryTextarea
+              label="Purpose"
+              rows={2}
+              value={itemForm.purpose}
+              options={purposeHistoryAdd.options}
+              listId={`${purposeHistoryAdd.listId}-add`}
+              onRemember={purposeHistoryAdd.remember}
+              onChange={(purpose) =>
+                setItemForm((current) => ({ ...current, purpose }))
+              }
+            />
+            <HistoryTextarea
+              label="Scope"
+              rows={3}
+              required
+              value={itemForm.scope}
+              options={scopeHistoryAdd.options}
+              listId={`${scopeHistoryAdd.listId}-add`}
+              onRemember={scopeHistoryAdd.remember}
+              onChange={(scope) =>
+                setItemForm((current) => ({ ...current, scope }))
+              }
+            />
+            <HistoryTextarea
+              label="Criteria"
+              rows={3}
+              required
+              value={itemForm.criteria}
+              options={criteriaHistoryAdd.options}
+              listId={`${criteriaHistoryAdd.listId}-add`}
+              onRemember={criteriaHistoryAdd.remember}
+              onChange={(criteria) =>
+                setItemForm((current) => ({ ...current, criteria }))
+              }
+            />
             {itemForm.recurrence === "FIXED_DATES" ? (
               <fieldset className="is-wide qms-programme-date-pattern">
                 <legend>Dates each calendar year</legend>
@@ -3025,7 +3465,6 @@ const QmsAuditProgrammePageV2: React.FC = () => {
             <label>
               <span>Lead auditor</span>
               <select
-                required={itemForm.recurrence === "FIXED_DATES"}
                 value={itemForm.lead_auditor_user_id}
                 onChange={(event) =>
                   setItemForm((current) => ({
@@ -3050,6 +3489,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   </option>
                 ))}
               </select>
+              {leadOptionsAreFallbackAuditors ? (
+                <small>
+                  No lead-auditor privilege holders — auditors may lead this
+                  planned audit.
+                </small>
+              ) : null}
             </label>
             <ProgrammeObserverSelect
               id="programme-item-observer"
@@ -3129,8 +3574,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               disabled={
                 itemMutation.isPending ||
                 (itemForm.recurrence === "FIXED_DATES" &&
-                  (!itemForm.fixed_dates.some(Boolean) ||
-                    !itemForm.lead_auditor_user_id))
+                  !itemForm.fixed_dates.some(Boolean))
               }
             >
               Add to programme
@@ -3399,12 +3843,15 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   Optional detail for quality managers. Day-to-day work is
                   adding audits and scheduling them in Calendar.
                 </p>
+
                 <section
-                  className="qms-audit-programme-flow__basis qms-audit-programme-flow__basis--compact"
+                  className="qms-programme-info-overview"
                   aria-label="Assurance methodology"
                 >
-                  <div className="is-risk">
-                    <span>Methodology</span>
+                  <div className="qms-programme-info-overview__strategy">
+                    <span className="qms-programme-info-overview__label">
+                      Methodology
+                    </span>
                     <strong>
                       {methodologyLabel(selectedModel)}
                       {selected.continuous_monitoring_enabled
@@ -3412,40 +3859,32 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                         : ""}
                     </strong>
                     <div
-                      className="qms-audit-programme-flow__method-pillars"
-                      aria-label="Programme strategy"
+                      className="qms-programme-info-overview__weights"
+                      aria-label="Score weights"
                     >
-                      {METHODOLOGY_PILLARS.map((pillar) => {
+                      {METHODOLOGY_PILLARS.filter(
+                        (pillar) => pillar.id !== "HYBRID",
+                      ).map((pillar) => {
                         const weight =
                           pillar.id === "COMPLIANCE"
                             ? optimizer?.weights?.compliance
                             : pillar.id === "RISK"
                               ? optimizer?.weights?.risk
-                              : pillar.id === "PERFORMANCE"
-                                ? optimizer?.weights?.performance
-                                : null;
-                        const active = selectedModel === pillar.id;
+                              : optimizer?.weights?.performance;
                         return (
-                          <span
-                            key={pillar.id}
-                            className={active ? "is-active" : ""}
-                          >
-                            <b>{pillar.label}</b>
-                            <small>
-                              {pillar.id === "HYBRID"
-                                ? active
-                                  ? "Active programme strategy"
-                                  : pillar.hint
-                                : typeof weight === "number"
-                                  ? `${Math.round(weight * 100)}%`
-                                  : pillar.hint}
-                            </small>
-                          </span>
+                          <div key={pillar.id}>
+                            <span>{pillar.label}</span>
+                            <strong>
+                              {typeof weight === "number"
+                                ? `${Math.round(weight * 100)}%`
+                                : "—"}
+                            </strong>
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                  <dl>
+                  <dl className="qms-programme-info-overview__stats">
                     <div>
                       <dt>Audits</dt>
                       <dd>{readiness.requirement_count}</dd>
@@ -3466,18 +3905,19 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 </section>
 
                 <section
-                  className="qms-audit-programme-flow__queue qms-audit-programme-flow__queue--compact"
+                  className="qms-programme-info-optimizer"
                   aria-label="Hybrid assurance optimizer"
                 >
                   <header>
                     <div>
                       <strong>
-                        <BrainCircuit size={15} /> Assurance optimizer
+                        <BrainCircuit size={15} aria-hidden /> Assurance
+                        optimizer
                       </strong>
-                      <small>
+                      <p>
                         Compliance, risk, and performance scoring used to
                         recommend coverage.
-                      </small>
+                      </p>
                     </div>
                     {canManage ? (
                       <button
@@ -3486,7 +3926,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                         disabled={optimizerMutation.isPending}
                         onClick={() => optimizerMutation.mutate()}
                       >
-                        <RefreshCw size={14} /> Recalculate
+                        <RefreshCw size={14} aria-hidden /> Recalculate
                       </button>
                     ) : null}
                   </header>
@@ -3496,45 +3936,45 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                     </p>
                   ) : optimizer ? (
                     <>
-                      <div className="qms-audit-programme-flow__optimizer-summary">
-                        <span>
-                          <small>Compliance</small>
+                      <div className="qms-programme-info-optimizer__summary">
+                        <div>
+                          <span>Compliance</span>
                           <strong>
                             {Math.round(
                               (optimizer.weights?.compliance || 0) * 100,
                             )}
                             %
                           </strong>
-                        </span>
-                        <span>
-                          <small>Risk</small>
+                        </div>
+                        <div>
+                          <span>Risk</span>
                           <strong>
                             {Math.round((optimizer.weights?.risk || 0) * 100)}%
                           </strong>
-                        </span>
-                        <span>
-                          <small>Performance</small>
+                        </div>
+                        <div>
+                          <span>Performance</span>
                           <strong>
                             {Math.round(
                               (optimizer.weights?.performance || 0) * 100,
                             )}
                             %
                           </strong>
-                        </span>
-                        <span>
-                          <small>Coverage gaps</small>
+                        </div>
+                        <div>
+                          <span>Coverage gaps</span>
                           <strong>
                             {optimizer.summary?.coverage_gaps || 0}
                           </strong>
-                        </span>
+                        </div>
                       </div>
                       {optimizer.governance?.message ? (
-                        <p className="qms-audit-programme-flow__optimizer-note">
-                          <ShieldCheck size={14} />{" "}
+                        <p className="qms-programme-info-optimizer__note">
+                          <ShieldCheck size={14} aria-hidden />{" "}
                           {optimizer.governance.message}
                         </p>
                       ) : null}
-                      <div className="qms-audit-programme-flow__optimizer-list">
+                      <ul className="qms-programme-info-optimizer__list">
                         {(optimizer.recommendations || [])
                           .filter(
                             (entry) =>
@@ -3543,50 +3983,48 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                           )
                           .slice(0, 12)
                           .map((entry) => (
-                            <article key={entry.universe_item_id}>
-                              <span>
-                                <b>{entry.priority_score}</b>
-                                <small>{human(entry.priority_band)}</small>
-                              </span>
-                              <div>
+                            <li key={entry.universe_item_id}>
+                              <div className="qms-programme-info-optimizer__score">
+                                <strong>{entry.priority_score}</strong>
+                                <span>{human(entry.priority_band)}</span>
+                              </div>
+                              <div className="qms-programme-info-optimizer__main">
                                 <strong title={entry.auditable_entity}>
                                   {entry.auditable_entity}
                                 </strong>
-                                <small>
+                                <p>
                                   Compliance {entry.components.compliance} ·
                                   Risk {entry.components.risk} · Performance{" "}
                                   {entry.components.performance}
-                                </small>
-                                <small>
                                   {entry.signals.repeat_findings
-                                    ? `${entry.signals.repeat_findings} repeat finding signal(s) · `
+                                    ? ` · ${entry.signals.repeat_findings} repeat finding(s)`
                                     : ""}
                                   {entry.signals.open_findings
-                                    ? `${entry.signals.open_findings} open finding(s) · `
+                                    ? ` · ${entry.signals.open_findings} open finding(s)`
                                     : ""}
-                                  recommended every{" "}
-                                  {entry.recommended_interval_days} days
-                                </small>
+                                  {" · "}
+                                  every {entry.recommended_interval_days} days
+                                </p>
                               </div>
-                              <span>
+                              <div className="qms-programme-info-optimizer__status">
                                 {entry.in_programme ? (
-                                  <b className="qms-chip qms-chip--good">
+                                  <span className="qms-chip qms-chip--good">
                                     Covered
-                                  </b>
+                                  </span>
                                 ) : entry.requires_amendment ? (
-                                  <b className="qms-chip qms-chip--warn">
+                                  <span className="qms-chip qms-chip--warn">
                                     Amend
-                                  </b>
+                                  </span>
                                 ) : (
-                                  <b className="qms-chip">Recommended</b>
+                                  <span className="qms-chip">Recommended</span>
                                 )}
-                                <small>
+                                <span>
                                   Due {dateLabel(entry.next_recommended_due)}
-                                </small>
-                              </span>
-                            </article>
+                                </span>
+                              </div>
+                            </li>
                           ))}
-                      </div>
+                      </ul>
                     </>
                   ) : (
                     <p className="qms-audit-programme-flow__empty">
@@ -3610,6 +4048,69 @@ const QmsAuditProgrammePageV2: React.FC = () => {
       </Drawer>
 
       <Drawer
+        title="Discard draft programme"
+        isOpen={showDiscardConfirm}
+        onClose={() => {
+          setShowDiscardConfirm(false);
+          setDiscardReason("");
+        }}
+        side="right"
+        panelClassName="qms-audit-programme-drawer"
+      >
+        <form
+          className="qms-audit-programme__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (discardReason.trim().length < 3) return;
+            transitionMutation.mutate({
+              target: "CLOSED",
+              reason: discardReason,
+            });
+          }}
+        >
+          <div className="qms-audit-programme-drawer__body">
+            <p className="qms-audit-programme-flow__drawer-note">
+              This closes the draft for {year}
+              {selected ? ` · ${programmeDisplayLabel(selected)}` : ""}. You can
+              create a fresh programme for the same year afterwards.
+            </p>
+            <label className="is-wide">
+              <span>Reason for discarding</span>
+              <textarea
+                required
+                minLength={3}
+                rows={3}
+                value={discardReason}
+                onChange={(event) => setDiscardReason(event.target.value)}
+                placeholder="Why this draft should be closed"
+              />
+            </label>
+          </div>
+          <div className="qms-audit-programme-drawer__footer">
+            <button
+              type="button"
+              className="is-secondary"
+              onClick={() => {
+                setShowDiscardConfirm(false);
+                setDiscardReason("");
+              }}
+            >
+              Keep draft
+            </button>
+            <button
+              type="submit"
+              className="is-danger"
+              disabled={
+                discardReason.trim().length < 3 || transitionMutation.isPending
+              }
+            >
+              <Trash2 size={14} /> Discard draft
+            </button>
+          </div>
+        </form>
+      </Drawer>
+
+      <Drawer
         title="Remove audit"
         isOpen={Boolean(cancelItemTarget)}
         onClose={() => {
@@ -3628,18 +4129,17 @@ const QmsAuditProgrammePageV2: React.FC = () => {
             }}
           >
             <div className="qms-audit-programme-drawer__body">
-              <p className="qms-audit-programme-flow__drawer-note">
-                Removes <strong>{cancelItemTarget.title}</strong> from this
-                programme revision. A reason is required.
+              <p className="qms-audit-programme-flow__drawer-note is-compact">
+                Remove <strong>{cancelItemTarget.title}</strong> from this draft.
               </p>
               <label className="is-wide">
-                <span>Reason for removal</span>
+                <span>Reason</span>
                 <input
                   required
                   minLength={3}
                   value={cancelItemReason}
                   onChange={(event) => setCancelItemReason(event.target.value)}
-                  placeholder="Why this audit is no longer required"
+                  placeholder="Why this audit is removed"
                 />
               </label>
             </div>
@@ -3652,7 +4152,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   setCancelItemReason("");
                 }}
               >
-                Keep audit
+                Keep
               </button>
               <button
                 type="submit"
@@ -3662,7 +4162,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   cancelItemReason.trim().length < 3
                 }
               >
-                <Trash2 size={14} /> Remove audit
+                <Trash2 size={14} /> Delete audit
               </button>
             </div>
           </form>
@@ -3732,6 +4232,19 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               >
                 Close
               </button>
+              {canManage && selected.status === "DRAFT" ? (
+                <button
+                  type="button"
+                  className="is-danger"
+                  onClick={() => {
+                    setShowProgrammeDetail(false);
+                    setDiscardReason("");
+                    setShowDiscardConfirm(true);
+                  }}
+                >
+                  <Trash2 size={14} /> Discard draft
+                </button>
+              ) : null}
               {canManage && programmeEditable(selected.status) ? (
                 <button
                   type="button"
@@ -3809,32 +4322,34 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 }
               />
             </label>
-            <label className="is-wide">
-              <span>Objectives · one per line</span>
-              <textarea
-                rows={4}
-                value={editProgrammeForm.objectives}
-                onChange={(event) =>
-                  setEditProgrammeForm((current) => ({
-                    ...current,
-                    objectives: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="is-wide">
-              <span>Regulatory basis · one per line</span>
-              <textarea
-                rows={3}
-                value={editProgrammeForm.regulatory_basis}
-                onChange={(event) =>
-                  setEditProgrammeForm((current) => ({
-                    ...current,
-                    regulatory_basis: event.target.value,
-                  }))
-                }
-              />
-            </label>
+            <HistoryTextarea
+              label="Objectives"
+              rows={3}
+              value={editProgrammeForm.objectives}
+              options={objectivesHistory.options}
+              listId={`${objectivesHistory.listId}-edit`}
+              onRemember={objectivesHistory.remember}
+              onChange={(objectives) =>
+                setEditProgrammeForm((current) => ({
+                  ...current,
+                  objectives,
+                }))
+              }
+            />
+            <HistoryTextarea
+              label="Compliance baseline"
+              rows={3}
+              value={editProgrammeForm.regulatory_basis}
+              options={basisHistory.options}
+              listId={`${basisHistory.listId}-edit`}
+              onRemember={basisHistory.remember}
+              onChange={(regulatory_basis) =>
+                setEditProgrammeForm((current) => ({
+                  ...current,
+                  regulatory_basis,
+                }))
+              }
+            />
             <label className="is-wide">
               <span>Change reason</span>
               <input
@@ -3842,7 +4357,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 minLength={3}
                 value={editReason}
                 onChange={(event) => setEditReason(event.target.value)}
-                placeholder="Why this programme revision is being updated"
+                placeholder="Why this revision is changing"
               />
             </label>
           </div>
@@ -3866,6 +4381,129 @@ const QmsAuditProgrammePageV2: React.FC = () => {
             </button>
           </div>
         </form>
+      </Drawer>
+
+      <Drawer
+        title={
+          areaAuditsFocus
+            ? `${areaAuditsFocus.areaLabel} · ${areaAuditsFocus.items.length} audits`
+            : "Area audits"
+        }
+        isOpen={Boolean(areaAuditsFocus)}
+        onClose={() => setAreaAuditsFocus(null)}
+        side="right"
+        panelClassName="qms-audit-programme-drawer"
+      >
+        {areaAuditsFocus ? (
+          <>
+            <div className="qms-audit-programme-drawer__body">
+              <p className="qms-audit-programme-flow__drawer-note is-compact">
+                {areaAuditsFocus.items.length} planned audits · expand a month,
+                then open an audit.
+              </p>
+              <div className="qms-programme-area-audit-list">
+                {groupAreaAuditsByMonth(areaAuditsFocus.items).map(
+                  (group, index) => (
+                    <details
+                      key={`${group.month}:${group.label}`}
+                      className="qms-programme-area-month"
+                      open={index === 0}
+                    >
+                      <summary>
+                        <span>
+                          <strong>{group.label}</strong>
+                          <small>
+                            {group.items.length} audit
+                            {group.items.length === 1 ? "" : "s"}
+                          </small>
+                        </span>
+                        <ChevronRight size={15} aria-hidden />
+                      </summary>
+                      <ul className="qms-programme-area-month__tiles">
+                        {group.items.map((item) => {
+                          const itemEditable =
+                            canManage &&
+                            editableProgrammeIds.has(item.programme_id);
+                          const identity = programmeItemIdentity(item);
+                          return (
+                            <li key={item.id}>
+                              <button
+                                type="button"
+                                className="qms-programme-area-tile__main"
+                                onClick={() => {
+                                  setSelectedId(item.programme_id);
+                                  openRequirementDrawer(item, false);
+                                }}
+                                title={`Open ${identity}`}
+                              >
+                                <strong>{identity}</strong>
+                                <small>
+                                  {programmeItemWindowLabel(
+                                    item,
+                                    selected?.programme_year || year,
+                                  )}
+                                  {item.state ? ` · ${human(item.state)}` : ""}
+                                </small>
+                              </button>
+                              <div className="qms-programme-area-tile__actions">
+                                <button
+                                  type="button"
+                                  className="is-icon"
+                                  title={`View ${identity}`}
+                                  aria-label={`View ${identity}`}
+                                  onClick={() => {
+                                    setSelectedId(item.programme_id);
+                                    openRequirementDrawer(item, false);
+                                  }}
+                                >
+                                  <Info size={14} />
+                                </button>
+                                {itemEditable ? (
+                                  <button
+                                    type="button"
+                                    className="is-icon"
+                                    title={`Edit ${identity}`}
+                                    aria-label={`Edit ${identity}`}
+                                    onClick={() => {
+                                      setSelectedId(item.programme_id);
+                                      openRequirementDrawer(item, true);
+                                    }}
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                ) : null}
+                                {itemEditable ? (
+                                  <button
+                                    type="button"
+                                    className="is-icon is-danger"
+                                    title={`Delete ${identity}`}
+                                    aria-label={`Delete ${identity}`}
+                                    onClick={() => openRemoveAudit(item)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </details>
+                  ),
+                )}
+              </div>
+            </div>
+            <div className="qms-audit-programme-drawer__footer">
+              <button
+                type="button"
+                className="is-secondary"
+                onClick={() => setAreaAuditsFocus(null)}
+              >
+                Close
+              </button>
+            </div>
+          </>
+        ) : null}
       </Drawer>
 
       <Drawer
@@ -3983,6 +4621,16 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               editableProgrammeIds.has(requirementFocus.programme_id) ? (
                 <button
                   type="button"
+                  className="is-danger"
+                  onClick={() => openRemoveAudit(requirementFocus)}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              ) : null}
+              {canManage &&
+              editableProgrammeIds.has(requirementFocus.programme_id) ? (
+                <button
+                  type="button"
                   className="is-primary"
                   onClick={() => openRequirementDrawer(requirementFocus, true)}
                 >
@@ -4015,47 +4663,40 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   }
                 />
               </label>
-              <label className="is-wide">
-                <span>Purpose</span>
-                <textarea
-                  rows={2}
-                  value={editItemForm.purpose}
-                  onChange={(event) =>
-                    setEditItemForm((current) => ({
-                      ...current,
-                      purpose: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="is-wide">
-                <span>Scope</span>
-                <textarea
-                  required
-                  minLength={3}
-                  rows={3}
-                  value={editItemForm.scope}
-                  onChange={(event) =>
-                    setEditItemForm((current) => ({
-                      ...current,
-                      scope: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="is-wide">
-                <span>Criteria · one per line</span>
-                <textarea
-                  rows={3}
-                  value={editItemForm.criteria}
-                  onChange={(event) =>
-                    setEditItemForm((current) => ({
-                      ...current,
-                      criteria: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+              <HistoryTextarea
+                label="Purpose"
+                rows={2}
+                value={editItemForm.purpose}
+                options={purposeHistoryEdit.options}
+                listId={`${purposeHistoryEdit.listId}-edit`}
+                onRemember={purposeHistoryEdit.remember}
+                onChange={(purpose) =>
+                  setEditItemForm((current) => ({ ...current, purpose }))
+                }
+              />
+              <HistoryTextarea
+                label="Scope"
+                rows={3}
+                required
+                value={editItemForm.scope}
+                options={scopeHistoryEdit.options}
+                listId={`${scopeHistoryEdit.listId}-edit`}
+                onRemember={scopeHistoryEdit.remember}
+                onChange={(scope) =>
+                  setEditItemForm((current) => ({ ...current, scope }))
+                }
+              />
+              <HistoryTextarea
+                label="Criteria"
+                rows={3}
+                value={editItemForm.criteria}
+                options={criteriaHistoryEdit.options}
+                listId={`${criteriaHistoryEdit.listId}-edit`}
+                onRemember={criteriaHistoryEdit.remember}
+                onChange={(criteria) =>
+                  setEditItemForm((current) => ({ ...current, criteria }))
+                }
+              />
               <label>
                 <span>Frequency</span>
                 <select
@@ -4226,7 +4867,6 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               <label>
                 <span>Lead auditor</span>
                 <select
-                  required={editItemForm.recurrence === "FIXED_DATES"}
                   value={editItemForm.lead_auditor_user_id}
                   onChange={(event) =>
                     setEditItemForm((current) => ({
@@ -4251,6 +4891,12 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {leadOptionsAreFallbackAuditors ? (
+                  <small>
+                    No lead-auditor privilege holders — auditors may lead this
+                    planned audit.
+                  </small>
+                ) : null}
               </label>
               <ProgrammeObserverSelect
                 id="programme-edit-observer"
@@ -4325,6 +4971,17 @@ const QmsAuditProgrammePageV2: React.FC = () => {
               >
                 Cancel
               </button>
+              {canManage &&
+              editableProgrammeIds.has(requirementFocus.programme_id) ? (
+                <button
+                  type="button"
+                  className="is-danger"
+                  disabled={updateItemMutation.isPending}
+                  onClick={() => openRemoveAudit(requirementFocus)}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              ) : null}
               <button
                 type="submit"
                 className="is-primary"

@@ -202,7 +202,7 @@ def _services(base_env: Mapping[str, str], include_frontend: bool) -> list[Servi
 
     api_pool = base_env.get("PORTAL_DB_POOL_SIZE", base_env.get("DB_POOL_SIZE", "20"))
     api_overflow = base_env.get("PORTAL_DB_MAX_OVERFLOW", base_env.get("DB_MAX_OVERFLOW", "10"))
-    api_timeout = base_env.get("PORTAL_DB_POOL_TIMEOUT", base_env.get("DB_POOL_TIMEOUT", "5"))
+    api_timeout = base_env.get("PORTAL_DB_POOL_TIMEOUT", base_env.get("DB_POOL_TIMEOUT", "20"))
 
     services = [
         Service(

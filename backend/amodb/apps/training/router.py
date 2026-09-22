@@ -66,7 +66,12 @@ from . import compliance as training_compliance
 from . import record_lifecycle as training_record_lifecycle
 from . import role_targeting as training_role_targeting
 from . import operating_service as training_operating_service
-from .permissions import TrainingCapability, default_training_capabilities, has_training_capability
+from .permissions import (
+    ALL_TRAINING_CAPABILITIES,
+    TrainingCapability,
+    default_training_capabilities,
+    has_training_capability,
+)
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 from .records_import import import_training_records_rows, parse_training_records_sheet
@@ -1729,9 +1734,56 @@ def _require_training_editor(
     )
 
 
+def _training_capability_codes(user: accounts_models.User) -> set[str]:
+    """Resolve Training capability codes for request-scoped user objects.
+
+    ``attach_user_access`` intentionally omits temporary admin authority from
+    ``capability_codes``. Role compatibility defaults and tenant-admin standing
+    must still unlock Quality / AMO Admin personnel-tracking reads.
+    """
+
+    from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
+    if is_tenant_admin(user):
+        return set(ALL_TRAINING_CAPABILITIES)
+    codes = set(getattr(user, "capability_codes", ()) or ())
+    return codes | default_training_capabilities(user)
+
+
 def _is_training_editor(user: accounts_models.User) -> bool:
-    return TrainingCapability.COURSE_MANAGE.value in set(
-        getattr(user, "capability_codes", ()) or ()
+    codes = _training_capability_codes(user)
+    return (
+        TrainingCapability.COURSE_MANAGE.value in codes
+        or TrainingCapability.PEOPLE_MANAGE.value in codes
+    )
+
+
+def _can_view_other_training_records(user: accounts_models.User) -> bool:
+    """Tenant-wide personnel training visibility (not self-only)."""
+
+    if _is_training_editor(user):
+        return True
+    codes = _training_capability_codes(user)
+    return (
+        TrainingCapability.PEOPLE_VIEW.value in codes
+        or TrainingCapability.VIEW.value in codes
+    )
+
+
+def _require_can_view_other_training_records(
+    current_user: accounts_models.User = Depends(get_current_active_user),
+) -> accounts_models.User:
+    """Read gate for tenant-wide Training personnel records (Quality / AMO Admin / people viewers)."""
+    if getattr(current_user, "is_system_account", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System/service accounts cannot inspect training records.",
+        )
+    if _can_view_other_training_records(current_user):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="The training.people.view capability is required to inspect other personnel training records.",
     )
 
 
@@ -3963,8 +4015,8 @@ def get_training_user_detail_bundle(
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
     _ensure_training_catalog_schema_compat(db)
-    can_edit = _is_training_editor(current_user)
-    target_user_id = user_id if can_edit else current_user.id
+    can_view_others = _can_view_other_training_records(current_user)
+    target_user_id = user_id if can_view_others else current_user.id
     user = (
         db.query(accounts_models.User)
         .filter(accounts_models.User.id == target_user_id, accounts_models.User.amo_id == current_user.amo_id)
@@ -3986,6 +4038,7 @@ def get_training_user_detail_bundle(
     hire_date = profile_row.hire_date if profile_row is not None else None
 
     status_items = training_compliance.evaluate_user_training_policy(db, user, required_only=True).items
+    profile_courses = training_compliance.get_courses_for_user(db, user, required_only=True)
 
     record_query = (
         db.query(training_models.TrainingRecord)
@@ -4044,6 +4097,17 @@ def get_training_user_detail_bundle(
     files = file_query.order_by(training_models.TrainingFile.uploaded_at.desc()).limit(files_limit).all()
 
     relevant_course_ids = list({str(r.course_id) for r in records if getattr(r, "course_id", None)})
+    profile_course_ids = {str(course.id) for course in profile_courses}
+    missing_record_course_ids = [course_id for course_id in relevant_course_ids if course_id not in profile_course_ids]
+    if missing_record_course_ids:
+        profile_courses = list(profile_courses) + (
+            db.query(training_models.TrainingCourse)
+            .filter(
+                training_models.TrainingCourse.amo_id == current_user.amo_id,
+                training_models.TrainingCourse.id.in_(missing_record_course_ids),
+            )
+            .all()
+        )
     event_query = db.query(training_models.TrainingEvent).filter(training_models.TrainingEvent.amo_id == current_user.amo_id)
     if relevant_course_ids:
         event_query = event_query.filter(training_models.TrainingEvent.course_id.in_(relevant_course_ids))
@@ -4055,6 +4119,7 @@ def get_training_user_detail_bundle(
         user=_training_user_profile_to_read(user, hire_date=hire_date),
         hire_date=hire_date,
         status_items=status_items,
+        courses=profile_courses,
         records=[_record_to_read(r) for r in records],
         records_total=records_total,
         deferrals=[_deferral_to_read(d) for d in deferrals],
@@ -4074,7 +4139,7 @@ def get_training_user_detail_bundle(
 def list_training_records_by_users(
     payload: training_schemas.TrainingRecordsByUsersRequest,
     db: Session = Depends(get_read_db),
-    current_user: accounts_models.User = Depends(_require_training_editor),
+    current_user: accounts_models.User = Depends(_require_can_view_other_training_records),
 ):
     _ensure_training_catalog_schema_compat(db)
     user_ids = [str(user_id).strip() for user_id in payload.user_ids if str(user_id).strip()]
@@ -4150,10 +4215,10 @@ def list_training_records(
     limit, offset = _normalize_pagination(limit, offset)
     _ensure_training_catalog_schema_compat(db)
 
-    is_editor = _is_training_editor(current_user)
+    can_view_others = _can_view_other_training_records(current_user)
 
-    # Non-editors are restricted to their own records
-    if not is_editor:
+    # Self-service users are restricted to their own records
+    if not can_view_others:
         user_id = current_user.id
 
     def _fetch_records():
@@ -5960,7 +6025,7 @@ def warm_training_user_record_pdf(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    if current_user.id != user_id and not _is_training_editor(current_user):
+    if current_user.id != user_id and not _can_view_other_training_records(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to prepare training records")
 
     # Avoid repeatedly rebuilding the expensive export context while a worker is
@@ -5988,7 +6053,7 @@ def export_training_user_record_pdf(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    if current_user.id != user_id and not _is_training_editor(current_user):
+    if current_user.id != user_id and not _can_view_other_training_records(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training records")
 
     context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
@@ -6018,7 +6083,7 @@ def preview_training_user_record_pdf(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    if current_user.id != user_id and not _is_training_editor(current_user):
+    if current_user.id != user_id and not _can_view_other_training_records(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to preview training records")
     context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
     user = context["user"]
@@ -6054,7 +6119,7 @@ def export_training_user_evidence_pack(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    if current_user.id != user_id and not _is_training_editor(current_user):
+    if current_user.id != user_id and not _can_view_other_training_records(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training packs")
     return build_evidence_pack(
         "training_user",
@@ -6417,7 +6482,7 @@ def download_certificate_artifact(
     )
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found.")
-    if current_user.id != record.user_id and not _is_training_editor(current_user):
+    if current_user.id != record.user_id and not _can_view_other_training_records(current_user):
         raise HTTPException(status_code=403, detail="Insufficient privileges to download this certificate.")
 
     issue = db.query(training_models.TrainingCertificateIssue).filter(

@@ -64,7 +64,7 @@ export const QMS_AUDIT_DESTINATIONS: readonly QmsRegisteredDestination[] = [
   // Single sidebar entry into the workspace — section nav lives on the Assurance rail.
   {
     id: "audit-assurance-hub",
-    label: "Audit Assurance",
+    label: "Assurance",
     moduleId: "audits",
     view: "dashboard",
     keywords: "assurance overview programme register planner schedules scopes checklists evidence",
@@ -354,7 +354,7 @@ function createPanel(
     },
     {
       id: "quick-audits",
-      label: "Audit Assurance",
+      label: "Assurance",
       path: qmsModulePath(amoCode, "audits", "dashboard"),
       activeMode: "prefix",
       matchPrefixes: [`${basePath}/audits`],
@@ -381,7 +381,7 @@ function createPanel(
   const auditLinks = QMS_AUDIT_DESTINATIONS.map((destination) => registeredDestinationLink(amoCode, destination));
   sections.append(createSection(
     "audits",
-    "Audit Assurance",
+    "Assurance",
     "Programme → schedules & scopes → execute → follow-up",
     auditLinks,
     pathname,

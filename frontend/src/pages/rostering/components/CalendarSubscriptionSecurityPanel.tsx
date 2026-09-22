@@ -60,21 +60,24 @@ export function CalendarSubscriptionSecurityPanel() {
 
   const revoke = async () => {
     if (!window.confirm("Revoke this calendar subscription? External calendar apps using the current URL will stop receiving roster updates.")) return;
+    const previousLink = latestLink;
+    const previousStatus = query.data;
     setBusy("revoke");
     setError(null);
+    setLatestLink(null);
+    queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, {
+      ...query.data,
+      active: false,
+      refresh_interval_minutes: query.data?.refresh_interval_minutes ?? 60,
+      includes: query.data?.includes ?? [],
+    });
+    queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
     try {
       await revokeCalendarSubscription();
-      setLatestLink(null);
-      await queryClient.cancelQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
-      queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, {
-        ...query.data,
-        active: false,
-        refresh_interval_minutes: query.data?.refresh_interval_minutes ?? 60,
-        includes: query.data?.includes ?? [],
-      });
-      queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
-      await queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
+      void queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
     } catch (cause) {
+      setLatestLink(previousLink);
+      if (previousStatus) queryClient.setQueryData(ROSTER_CALENDAR_STATUS_QUERY_KEY, previousStatus);
       setError(errorMessage(cause));
     } finally {
       setBusy(null);

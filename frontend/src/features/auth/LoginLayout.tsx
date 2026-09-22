@@ -1,21 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, ArrowLeft, ArrowRight } from "lucide-react";
-import {
-  LiquidGlassButton,
-  LiquidGlassContainer,
-  LiquidGlassLink,
-} from "@tinymomentum/liquid-glass-react";
-import {
-  illustrationFramePreset,
-  primaryButtonPreset,
-  socialButtonPreset,
-} from "../../ui/liquidGlass/presets";
+import { Eye, EyeOff } from "lucide-react";
+import { LiquidGlassContainer } from "@tinymomentum/liquid-glass-react";
+import { socialButtonPreset } from "../../ui/liquidGlass/presets";
+import type { DeparturePhase, DepartureProgress } from "../../services/loginDepartureWarmup";
 import styles from "./login.module.css";
 
 const DESKTOP_BTN_H = 56;
 const MOBILE_BTN_H = 52;
-const RECOVERY_LINK_W = 136;
-const RECOVERY_LINK_H = 28;
 const DESKTOP_SOCIAL_BTN = 52;
 const PHONE_SOCIAL_BTN = 48;
 const XS_SOCIAL_BTN = 44;
@@ -34,6 +25,8 @@ type LoginLayoutProps = {
   noticeMsg?: string | null;
   loading: boolean;
   loadingContext: boolean;
+  departure?: DepartureProgress | null;
+  takeoffNonce?: number;
   socialAvailability: Record<SocialProvider, boolean>;
   illustrationSrc: string;
   onIdentifierChange: (value: string) => void;
@@ -58,27 +51,6 @@ type GlassIconButtonProps = {
   children: React.ReactNode;
 };
 
-function useElementWidth<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [width, setWidth] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!ref.current) return;
-    const node = ref.current;
-    const update = () => {
-      const next = Math.max(0, Math.round(node.getBoundingClientRect().width));
-      setWidth(next || null);
-    };
-
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  return { ref, width };
-}
-
 function useResponsiveLoginSizing() {
   const [viewportWidth, setViewportWidth] = useState<number>(() =>
     typeof window !== "undefined" ? window.innerWidth : 1280
@@ -94,7 +66,7 @@ function useResponsiveLoginSizing() {
 
   const buttonHeight = viewportWidth <= 640 ? MOBILE_BTN_H : DESKTOP_BTN_H;
   const socialButtonSize = viewportWidth <= 400 ? XS_SOCIAL_BTN : viewportWidth <= 640 ? PHONE_SOCIAL_BTN : DESKTOP_SOCIAL_BTN;
-  return { buttonHeight, socialButtonSize, viewportWidth };
+  return { buttonHeight, socialButtonSize };
 }
 
 const GlassIconButton: React.FC<GlassIconButtonProps> = ({
@@ -165,6 +137,8 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   noticeMsg,
   loading,
   loadingContext,
+  departure = null,
+  takeoffNonce = 0,
   socialAvailability,
   illustrationSrc,
   onIdentifierChange,
@@ -177,12 +151,21 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   onSocialLogin,
   onDemoQuickAccess,
 }) => {
-  const { ref: submitWrapRef, width: submitWrapWidth } = useElementWidth<HTMLDivElement>();
-  const { ref: illustrationWrapRef, width: illustrationWidth } = useElementWidth<HTMLDivElement>();
-  const { buttonHeight, socialButtonSize, viewportWidth } = useResponsiveLoginSizing();
-  const submitButtonWidth = submitWrapWidth ?? Math.min(420, Math.max(220, Math.round(viewportWidth * 0.82)));
+  const { buttonHeight, socialButtonSize } = useResponsiveLoginSizing();
   const enabledSocialProviders = (Object.keys(SOCIAL_META) as SocialProvider[]).filter((provider) => socialAvailability[provider]);
+  const hasAlert = Boolean(noticeMsg || errorMsg);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const departing = Boolean(departure?.active);
+  const departurePhase = (departure?.phase ?? "idle") as DeparturePhase;
+  const submitLabel = showPasswordField
+    ? (departing ? (departure?.label || "Departing") : (loading ? "Signing In..." : "Sign In"))
+    : (loadingContext ? "Checking..." : "Continue");
 
+  useEffect(() => {
+    const node = shellRef.current;
+    if (!node) return;
+    node.classList.add(styles.shellEnter);
+  }, []);
   return (
     <div className={styles.pageBg}>
       <div className={styles.bgOrbs} aria-hidden="true">
@@ -192,140 +175,195 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
       </div>
 
       <div className={styles.viewportContent}>
-        <div className={styles.shell}>
+        <div className={styles.shell} ref={shellRef}>
           <div className={styles.shellSurface}>
             <div className={styles.shellInnerGrid}>
-            <section className={styles.left}>
-              <h1 className={styles.title}>{title}</h1>
-              <p className={styles.subtitle}>{subtitle}</p>
+              <section className={styles.left}>
+                <header className={styles.header}>
+                  <h1 className={styles.title}>{title}</h1>
+                  <p className={styles.subtitle}>{subtitle}</p>
+                </header>
 
-              <form className={styles.form} onSubmit={onSubmit} noValidate>
-                {noticeMsg ? <p className={styles.authNotice} role="status">{noticeMsg}</p> : null}
-                {errorMsg ? <p className={styles.error}>{errorMsg}</p> : null}
+                <form className={styles.form} onSubmit={onSubmit} noValidate autoComplete="on">
+                  <div
+                    className={styles.alertSlot}
+                    data-has-alert={hasAlert ? "true" : "false"}
+                    aria-live="polite"
+                  >
+                    <div className={styles.alertSlotInner}>
+                      {noticeMsg ? <p className={styles.authNotice} role="status">{noticeMsg}</p> : null}
+                      {errorMsg ? <p className={styles.error}>{errorMsg}</p> : null}
+                    </div>
+                  </div>
 
-                <label htmlFor="identifier" className={styles.label}>Email</label>
-                <input
-                  id="identifier"
-                  className={styles.input}
-                  type="email"
-                  autoComplete="username"
-                  placeholder="Email"
-                  value={identifier}
-                  onChange={(event) => onIdentifierChange(event.target.value)}
-                  required
-                />
+                  <label htmlFor="identifier" className={styles.label}>Email</label>
+                  <input
+                    id="identifier"
+                    name="username"
+                    className={styles.input}
+                    type="email"
+                    autoComplete="username"
+                    inputMode="email"
+                    placeholder="Email"
+                    value={identifier}
+                    onChange={(event) => onIdentifierChange(event.target.value)}
+                    required
+                  />
 
-                {showPasswordField ? (
-                  <>
-                    <label htmlFor="password" className={styles.label}>Password</label>
+                  <div
+                    className={styles.passwordStage}
+                    data-ready={showPasswordField ? "true" : "false"}
+                    // Keep the field in the accessibility tree for password managers even when visually staged.
+                    aria-hidden={false}
+                  >
+                    <label htmlFor="password" className={styles.label}>
+                      Password
+                    </label>
                     <div className={styles.passwordWrap}>
                       <input
                         id="password"
+                        name="password"
                         className={styles.passwordInput}
                         type={showPassword ? "text" : "password"}
                         autoComplete="current-password"
                         placeholder="Password"
                         value={password}
                         onChange={(event) => onPasswordChange(event.target.value)}
-                        required
+                        onInput={(event) => onPasswordChange((event.target as HTMLInputElement).value)}
+                        required={showPasswordField}
+                        tabIndex={showPasswordField ? 0 : -1}
+                        // Must stay enabled so browsers can autofill saved passwords on the identify step.
+                        disabled={false}
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
                       />
-                      <button type="button" className={styles.eyeBtn} aria-label="Toggle password visibility" onClick={onTogglePassword}>
-                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      <button
+                        type="button"
+                        className={styles.eyeBtn}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        aria-pressed={showPassword}
+                        title={showPassword ? "Hide password" : "Show password"}
+                        tabIndex={showPasswordField ? 0 : -1}
+                        disabled={!showPasswordField}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={onTogglePassword}
+                      >
+                        <Eye className={showPassword ? styles.eyeIconHidden : undefined} size={18} aria-hidden="true" />
+                        <EyeOff className={showPassword ? undefined : styles.eyeIconHidden} size={18} aria-hidden="true" />
                       </button>
                     </div>
-
                     <div className={styles.recoveryRow}>
-                      <LiquidGlassLink
-                        {...socialButtonPreset}
-                        width={RECOVERY_LINK_W}
-                        height={RECOVERY_LINK_H}
-                        borderRadius={10}
-                        href="#"
+                      <button
+                        type="button"
                         className={styles.recoveryLink}
-                        onClick={(event) => {
-                          event.preventDefault();
+                        tabIndex={showPasswordField ? 0 : -1}
+                        disabled={!showPasswordField}
+                        onClick={() => {
+                          if (!showPasswordField) return;
                           onForgotPassword();
                         }}
                       >
                         Recovery Password
-                      </LiquidGlassLink>
+                      </button>
                     </div>
-                  </>
-                ) : null}
+                  </div>
 
-                <div className={styles.submitButtonWrap} ref={submitWrapRef}>
-                  <LiquidGlassButton
-                    {...primaryButtonPreset}
-                    width={submitButtonWidth}
-                    height={buttonHeight}
-                    borderRadius={12}
+                  <button
                     type="submit"
-                    className={styles.submitButton}
-                    disabled={loading || loadingContext}
+                    className={`${styles.submitButton} ${departing ? styles.submitButtonDeparting : ""}`}
+                    data-takeoff={departing ? "running" : "idle"}
+                    data-phase={departurePhase}
+                    style={{ height: buttonHeight }}
+                    disabled={loading || loadingContext || departing}
+                    aria-busy={departing || loading || loadingContext}
+                    aria-live="polite"
                   >
-                    {showPasswordField ? (loading ? "Signing In..." : "Sign In") : (loadingContext ? "Checking..." : "Continue")}
-                  </LiquidGlassButton>
-                </div>
+                    <span className={styles.takeoffTrack} aria-hidden="true" key={departing ? `takeoff-${takeoffNonce}` : "idle"}>
+                      <span className={styles.takeoffGlow} />
+                      <span className={styles.takeoffFill} />
+                      <span className={styles.takeoffRunway} />
+                      <span className={styles.takeoffVapor} />
+                      <span className={styles.takeoffPlane}>
+                        <svg viewBox="0 0 24 24" width="22" height="22" focusable="false" aria-hidden="true">
+                          <path
+                            fill="currentColor"
+                            stroke="rgba(48, 24, 36, 0.45)"
+                            strokeWidth="0.6"
+                            paintOrder="stroke fill"
+                            d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"
+                          />
+                        </svg>
+                      </span>
+                    </span>
+                    <span className={styles.submitButtonLabel}>{submitLabel}</span>
+                  </button>
 
-                {enabledSocialProviders.length > 0 ? (
-                  <>
-                    <div className={styles.dividerRow}>
-                      <span className={styles.dividerLine} />
-                      <span className={styles.dividerText}>Or continue with</span>
-                      <span className={styles.dividerLine} />
+                  {enabledSocialProviders.length > 0 ? (
+                    <>
+                      <div className={styles.dividerRow}>
+                        <span className={styles.dividerLine} />
+                        <span className={styles.dividerText}>Or continue with</span>
+                        <span className={styles.dividerLine} />
+                      </div>
+
+                      <div className={styles.socialRow}>
+                        {enabledSocialProviders.map((provider) => (
+                          <GlassIconButton
+                            key={provider}
+                            size={socialButtonSize}
+                            radius={SOCIAL_RADIUS}
+                            className={provider === "apple" ? styles.socialButtonActive : ""}
+                            title={SOCIAL_META[provider].label}
+                            ariaLabel={SOCIAL_META[provider].label}
+                            onClick={() => onSocialLogin(provider)}
+                            disabled={loading || loadingContext}
+                          >
+                            {SOCIAL_META[provider].icon}
+                          </GlassIconButton>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+
+                  {(onSwitchAccount || onFindAmo || onDemoQuickAccess) ? (
+                    <div className={styles.switchRow}>
+                      {onSwitchAccount ? (
+                        <button type="button" className={styles.switchBtn} onClick={onSwitchAccount}>
+                          Use a different account
+                        </button>
+                      ) : <span />}
+                      {onFindAmo ? (
+                        <button type="button" className={styles.switchBtn} onClick={onFindAmo}>
+                          Find your AMO
+                        </button>
+                      ) : null}
+                      {onDemoQuickAccess ? (
+                        <button type="button" className={styles.switchBtn} onClick={onDemoQuickAccess}>
+                          Use Demo Access
+                        </button>
+                      ) : null}
                     </div>
+                  ) : null}
+                </form>
+              </section>
 
-                    <div className={styles.socialRow}>
-                      {enabledSocialProviders.map((provider) => (
-                        <GlassIconButton
-                          key={provider}
-                          size={socialButtonSize}
-                          radius={SOCIAL_RADIUS}
-                          className={provider === "apple" ? styles.socialButtonActive : ""}
-                          title={SOCIAL_META[provider].label}
-                          ariaLabel={SOCIAL_META[provider].label}
-                          onClick={() => onSocialLogin(provider)}
-                          disabled={loading || loadingContext}
-                        >
-                          {SOCIAL_META[provider].icon}
-                        </GlassIconButton>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <p className={styles.authNotice}>Password login is active. Social sign-in buttons are hidden until an OAuth provider is configured.</p>
-                )}
-
-                {(onSwitchAccount || onFindAmo || onDemoQuickAccess) ? (
-                  <div className={styles.switchRow}>
-                    {onSwitchAccount ? <button type="button" className={styles.switchBtn} onClick={onSwitchAccount}>Use a different account</button> : <span />}
-                    {onFindAmo ? <button type="button" className={styles.switchBtn} onClick={onFindAmo}>Find your AMO</button> : null}
-                    {onDemoQuickAccess ? <button type="button" className={styles.switchBtn} onClick={onDemoQuickAccess}>Use Demo Access</button> : null}
-                  </div>
-                ) : null}
-              </form>
-            </section>
-
-            <aside className={styles.right} ref={illustrationWrapRef}>
-              <LiquidGlassContainer
-                {...illustrationFramePreset}
-                className={styles.illustrationFrame}
-                width={illustrationWidth ?? Math.min(520, Math.max(260, Math.round(viewportWidth * 0.84)))}
-              >
-                <img src={illustrationSrc} alt="Winter landscape illustration" className={styles.illustration} />
-                <div className={styles.illustrationOverlay}>
-                  <p className={styles.overlayText}>Controlled access for AMO quality, maintenance, records, and platform administration.</p>
-                  <div className={styles.overlayControls}>
-                    <button type="button" className={styles.circleBtn} aria-label="Previous">
-                      <ArrowLeft size={18} />
-                    </button>
-                    <button type="button" className={styles.circleBtn} aria-label="Next">
-                      <ArrowRight size={18} />
-                    </button>
-                  </div>
-                </div>
-              </LiquidGlassContainer>
-            </aside>
+              <aside className={styles.right}>
+                <figure className={styles.illustrationFrame}>
+                  <img
+                    src={illustrationSrc}
+                    alt=""
+                    className={styles.illustration}
+                    decoding="async"
+                    fetchPriority="high"
+                  />
+                  <figcaption className={styles.illustrationOverlay}>
+                    <p className={styles.overlayText}>
+                      Controlled access for AMO quality, maintenance, records, and platform administration.
+                    </p>
+                  </figcaption>
+                </figure>
+              </aside>
             </div>
           </div>
         </div>

@@ -46,16 +46,52 @@
 }
 
 .qa-workspace-shell {
+  --qa-assurance-rail-sticky-top: 3.05rem;
   align-items: start;
   display: grid;
-  gap: 0.65rem;
-  grid-template-columns: minmax(11.5rem, 13rem) minmax(0, 1fr);
+  flex: 1 1 auto;
+  gap: 0.6rem;
+  grid-template-columns: minmax(11.25rem, 12.5rem) minmax(0, 1fr);
+  min-height: 0;
   width: 100%;
 }
 
 .qa-workspace-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   width: 100%;
+}
+
+.qa-workspace-main > * {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.qa-workspace-main > .page,
+.qa-workspace-main > .qms-car-performance-report,
+.qa-workspace-main > .qms-audit-programme {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
+/* Programme must fill the flex main column — auto margins + max-width collapse width. */
+.qa-workspace-main > .qms-audit-programme {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.qa-workspace-main > .qms-car-performance-report,
+.qa-workspace-main > .page.qms-car-performance-report {
+  gap: 0.35rem;
 }
 
 .qa-workspace-rail {
@@ -66,14 +102,23 @@
   box-shadow: var(--qms-shadow, 0 1px 2px color-mix(in srgb, #0f172a 6%, transparent));
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  max-height: calc(100vh - 5.5rem);
+  gap: 0.4rem;
+  max-height: calc(
+    100dvh
+    - var(--tenant-topbar-height, 54px)
+    - var(--qa-assurance-rail-sticky-top, 3.05rem)
+    - 0.7rem
+  );
+  min-height: 0;
   overflow: auto;
-  padding: 0.45rem;
+  overscroll-behavior: contain;
+  padding: 0.4rem;
   position: sticky;
-  top: 0.55rem;
+  top: var(--qa-assurance-rail-sticky-top, 3.05rem);
+  z-index: 12;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  scrollbar-width: thin;
 }
 
 .qa-workspace-rail__heading {
@@ -81,7 +126,7 @@
   border-bottom: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.3));
   display: flex;
   justify-content: space-between;
-  padding: 0.1rem 0.25rem 0.4rem;
+  padding: 0.08rem 0.25rem 0.35rem;
 }
 
 .qa-workspace-rail__heading > span {
@@ -116,15 +161,15 @@
 .qa-workspace-rail__group {
   display: flex;
   flex-direction: column;
-  gap: 0.22rem;
+  gap: 0.14rem;
 }
 
 .qa-workspace-rail__group-label {
   color: var(--qms-muted, #94a3b8);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 850;
-  letter-spacing: 0.09em;
-  padding: 0 0.35rem 0.12rem;
+  letter-spacing: 0.08em;
+  padding: 0.22rem 0.35rem 0.08rem;
   text-transform: uppercase;
 }
 
@@ -132,13 +177,14 @@
   align-items: flex-start;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 0.65rem;
+  border-radius: 0.55rem;
   color: var(--qms-text-soft, #475569);
   cursor: pointer;
   display: flex;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  min-height: 2.05rem;
   min-width: 0;
-  padding: 0.45rem 0.5rem;
+  padding: 0.38rem 0.45rem;
   text-align: left;
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
   width: 100%;
@@ -146,21 +192,23 @@
 
 .qa-workspace-rail__tab > svg {
   flex: 0 0 auto;
-  margin-top: 0.08rem;
+  margin-top: 0.04rem;
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .qa-workspace-rail__tab > span {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 0.12rem;
+  gap: 0.08rem;
   min-width: 0;
 }
 
 .qa-workspace-rail__tab strong {
   color: inherit;
-  font-size: 0.76rem;
-  font-weight: 800;
+  font-size: 0.74rem;
+  font-weight: 780;
   line-height: 1.2;
 }
 
@@ -174,7 +222,7 @@
   background: var(--qms-hover, color-mix(in srgb, var(--accent-primary, #2563eb) 6%, transparent));
   border-color: var(--qms-line-soft, rgba(148, 163, 184, 0.38));
   color: var(--qms-text, #0f172a);
-  transform: translateX(1px);
+  transform: none;
 }
 
 .qa-workspace-rail__tab:focus-visible {
@@ -186,6 +234,7 @@
   background: var(--qms-selected, color-mix(in srgb, var(--accent-primary, #2563eb) 11%, var(--qms-panel, #fff)));
   border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 38%, var(--qms-line));
   color: var(--accent-primary, #1d4ed8);
+  box-shadow: inset 2px 0 0 currentColor;
 }
 
 .qa-workspace-rail__tab--active small {
@@ -468,7 +517,7 @@
 
 @media (max-width: 1280px) {
   .qa-workspace-shell:not(.qa-workspace-shell--planner) {
-    grid-template-columns: minmax(10.5rem, 11.75rem) minmax(0, 1fr);
+    grid-template-columns: minmax(10rem, 11.25rem) minmax(0, 1fr);
   }
 
   .qa-workspace-shell:not(.qa-workspace-shell--planner) .qa-workspace-rail__tab small {
@@ -478,7 +527,7 @@
 
 @media (max-width: 1100px) {
   .qa-workspace-shell:not(.qa-workspace-shell--planner) {
-    grid-template-columns: minmax(9.5rem, 10.75rem) minmax(0, 1fr);
+    grid-template-columns: minmax(9.25rem, 10.5rem) minmax(0, 1fr);
   }
 
   .qa-workspace-rail__tab small {
@@ -492,6 +541,10 @@
     gap: 0.3rem;
     position: relative;
     z-index: 2;
+  }
+
+  .qa-workspace-mobile-tabs select {
+    min-height: 2.75rem;
   }
 
   .qa-workspace-shell {
@@ -823,16 +876,26 @@ body[data-color-scheme="dark"] .qms-pill--warn,
 
 /* Calendar focus: reclaim vertical chrome under Quality tabs */
 .qa-workspace-shell--calendar-focus {
-  min-height: calc(100dvh - var(--tenant-topbar-height, 54px) - 3.25rem);
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
 }
 .qa-workspace-shell--calendar-focus .qa-workspace-main {
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
   padding: 0;
+}
+.qa-workspace-shell--calendar-focus .qa-workspace-main > * {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
 }
 .qa-workspace-shell--calendar-focus .qms-modern-planner-v2,
 .qa-workspace-shell--calendar-focus .qms-modern-planner {
   height: 100%;
-  min-height: calc(100dvh - var(--tenant-topbar-height, 54px) - 3.4rem);
+  max-height: 100%;
+  min-height: 0;
 }
 
 /* --- AA rail tab contrast (idle must not wash out on dark panels) --- */

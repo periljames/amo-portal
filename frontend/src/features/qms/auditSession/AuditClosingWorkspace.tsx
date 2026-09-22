@@ -173,7 +173,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
     onSuccess: async (result) => {
       setLocalError(null);
-      setNotice("Accountable Executive attestation recorded against the exact issued report checksum.");
+      setNotice("Accountable Executive attestation recorded against the issued report.");
       queryClient.setQueryData(["qms-authority-attestation", amoCode, auditId], result);
       await authorityQuery.refetch();
     },
@@ -289,7 +289,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     try {
       const token = await createAuditVerificationToken(amoCode, auditId, { assuranceArtifactId: currentAssuranceArtifact?.id || null });
       setVerificationUrl(new URL(token.verification_url, window.location.origin).toString());
-      setNotice("A purpose-bound verification link was created. The raw token is shown only in this response and stored hashed by the server.");
+      setNotice("A purpose-bound verification link was created. Share it only with intended recipients.");
     } catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Verification link creation failed."); }
     finally { setCeremonyBusy(null); }
   };
@@ -370,7 +370,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> R{activeRevision.revision_no} is approved.</div> : null}
         </section>
         <section className={closingCardClass(4)} aria-current={activeClosingStep === 4 ? "step" : undefined}>
-          <header><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision/hash. Password re-auth is not treated as equivalent evidence.</small></div></header>
+          <header><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision. Password re-auth is not treated as equivalent evidence.</small></div></header>
           {lockedReason(4) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(4)}</div> : null}
           {!isWebAuthnSupported() || !isSecureContextAvailable() ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> This browser/origin does not currently expose a secure WebAuthn context.</div> : null}
           {!passkeys.length ? <div className="qms-audit-closing__passkey-setup"><label><span>Passkey label</span><input value={passkeyNickname} onChange={(event) => setPasskeyNickname(event.target.value)} maxLength={80} /></label><button type="button" disabled={!canGovern || ceremonyBusy !== null} onClick={() => void registerPasskey()}><KeyRound size={15} /> {ceremonyBusy === "register" ? "Registering…" : "Register passkey"}</button></div> : <p>{passkeys.length} active passkey{passkeys.length === 1 ? "" : "s"} registered for this Quality user.</p>}
@@ -378,7 +378,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {currentSignature ? <dl className="qms-audit-closing__artifact"><div><dt>Method</dt><dd>{currentSignature.method}</dd></div><div><dt>Signed</dt><dd>{currentSignature.signed_at ? new Date(currentSignature.signed_at).toLocaleString() : "—"}</dd></div></dl> : null}
         </section>
         <section className={closingCardClass(5)} aria-current={activeClosingStep === 5 ? "step" : undefined}>
-          <header><FileCheck2 size={19} /><div><h3>5 · Issue immutable report</h3><small>The server refuses ISSUE unless current passkey evidence matches the exact approved revision/hash and is newer than the approval state.</small></div></header>
+          <header><FileCheck2 size={19} /><div><h3>5 · Issue immutable report</h3><small>The server refuses ISSUE unless current passkey evidence matches the exact approved revision and is newer than the approval state.</small></div></header>
           {lockedReason(5) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(5)}</div> : null}
           {activeRevision?.status === "APPROVED" ? (
             <div className="qms-audit-closing__actions">
@@ -396,7 +396,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </div>
         </section>
         <section className={closingCardClass(7)} aria-current={activeClosingStep === 7 ? "step" : undefined}>
-          <header><Stamp size={19} /><div><h3>7 · Policy-controlled assurance output and verification</h3><small>Certificate/approval output is generated only when policy requires it. Verification tokens are high-entropy and stored only as hashes.</small></div></header>
+          <header><Stamp size={19} /><div><h3>7 · Policy-controlled assurance output and verification</h3><small>Certificate/approval output is generated only when policy requires it. Verification links are purpose-bound and time-limited.</small></div></header>
           {lockedReason(7) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(7)}</div> : null}
           <p>Output policy: <strong>{policy?.artifact_policy || "Not configured"}</strong>{policy?.rationale ? ` · ${policy.rationale}` : ""}</p>
           <div className="qms-audit-closing__actions">
@@ -415,7 +415,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             .qms-authority-pack-cover textarea,
             .qms-authority-pack-cover label { display: none !important; }
           }`}</style>
-          <header><Printer size={19} /><div><h3>8 · Authority submission</h3><small>The pack binds the issued PDF, Accountable Executive attestation, integrity hashes, and the public verification path.</small></div></header>
+          <header><Printer size={19} /><div><h3>8 · Authority submission</h3><small>The pack binds the issued PDF, Accountable Executive attestation, and the public verification path.</small></div></header>
           <dl className="qms-audit-closing__artifact">
             <div><dt>Audit</dt><dd>{composition.audit.audit_ref}</dd></div>
             <div><dt>Revision</dt><dd>R{issuedRevision.revision_no} · ISSUED</dd></div>

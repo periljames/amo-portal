@@ -17,10 +17,10 @@ import {
 import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 
 describe("QMS sidebar navigation", () => {
-  it("exposes Audit Assurance as a single sidebar hub (rail owns section destinations)", () => {
+  it("exposes Assurance as a single sidebar hub (rail owns section destinations)", () => {
     expect(QMS_AUDIT_DESTINATIONS.map((item) => item.view)).toEqual(["dashboard"]);
     expect(QMS_AUDIT_DESTINATIONS).toHaveLength(1);
-    expect(QMS_AUDIT_DESTINATIONS[0]?.label).toBe("Audit Assurance");
+    expect(QMS_AUDIT_DESTINATIONS[0]?.label).toBe("Assurance");
     expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-schedule")).toBe(false);
     expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-plan")).toBe(false);
     expect(QMS_AUDIT_DESTINATIONS.some((item) => item.id === "audit-programme")).toBe(false);

@@ -1,11 +1,11 @@
-import { getToken } from "./auth";
-import { getApiBaseUrl } from "./config";
-
 export type QmsAuditRealtimeEvent = {
   id?: string;
   event: string;
   data: unknown;
 };
+
+export const QMS_REALTIME_EVENT = "amo:qms:realtime";
+export const QMS_REALTIME_STATE_EVENT = "amo:qms:realtime-state";
 
 export function parseQmsSseBlock(block: string): QmsAuditRealtimeEvent | null {
   let event = "message";
@@ -32,73 +32,38 @@ type StreamHandlers = {
   onState?: (state: "connected" | "reconnecting" | "offline") => void;
 };
 
-function abortDelay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    const timer = window.setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => { window.clearTimeout(timer); resolve(); }, { once: true });
-  });
-}
-
+/**
+ * Subscribe to Quality realtime via the shell RealtimeProvider bridge.
+ * Does not open a second `/api/events` SSE — that previously doubled the
+ * long-held DB session cost per audit tab.
+ */
 export function startQmsAuditRealtimeStream(handlers: StreamHandlers): () => void {
-  const controller = new AbortController();
-  let lastEventId = "";
-
-  const run = async () => {
-    let attempt = 0;
-    while (!controller.signal.aborted) {
-      const token = getToken();
-      if (!token) {
-        handlers.onState?.("offline");
-        return;
-      }
-      try {
-        handlers.onState?.(attempt ? "reconnecting" : "connected");
-        const response = await fetch(`${getApiBaseUrl()}/api/events`, {
-          headers: {
-            Accept: "text/event-stream",
-            Authorization: `Bearer ${token}`,
-            ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
-          },
-          cache: "no-store",
-          credentials: "include",
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) throw new Error(`QMS event stream failed with status ${response.status}.`);
-        handlers.onState?.("connected");
-        attempt = 0;
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (!controller.signal.aborted) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary >= 0) {
-            const block = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            const parsed = parseQmsSseBlock(block);
-            if (parsed) {
-              if (parsed.id) lastEventId = parsed.id;
-              if (parsed.event !== "heartbeat") handlers.onEvent(parsed);
-            }
-            boundary = buffer.indexOf("\n\n");
-          }
-        }
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        console.warn("[qms-realtime] audit event stream disconnected", error);
-      }
-      attempt += 1;
-      handlers.onState?.("reconnecting");
-      await abortDelay(Math.min(15_000, 750 * 2 ** Math.min(attempt, 4)), controller.signal);
+  handlers.onState?.("connected");
+  const onBridge = (raw: Event) => {
+    const detail = (raw as CustomEvent<QmsAuditRealtimeEvent>).detail;
+    if (!detail || typeof detail !== "object") return;
+    if (detail.event === "heartbeat") return;
+    handlers.onEvent(detail);
+  };
+  const onState = (raw: Event) => {
+    const state = (raw as CustomEvent<"connected" | "reconnecting" | "offline">).detail;
+    if (state === "connected" || state === "reconnecting" || state === "offline") {
+      handlers.onState?.(state);
     }
   };
-
-  void run();
+  window.addEventListener(QMS_REALTIME_EVENT, onBridge as EventListener);
+  window.addEventListener(QMS_REALTIME_STATE_EVENT, onState as EventListener);
   return () => {
-    controller.abort();
+    window.removeEventListener(QMS_REALTIME_EVENT, onBridge as EventListener);
+    window.removeEventListener(QMS_REALTIME_STATE_EVENT, onState as EventListener);
     handlers.onState?.("offline");
   };
+}
+
+export function publishQmsRealtimeEvent(event: QmsAuditRealtimeEvent): void {
+  window.dispatchEvent(new CustomEvent(QMS_REALTIME_EVENT, { detail: event }));
+}
+
+export function publishQmsRealtimeState(state: "connected" | "reconnecting" | "offline"): void {
+  window.dispatchEvent(new CustomEvent(QMS_REALTIME_STATE_EVENT, { detail: state }));
 }

@@ -15,7 +15,6 @@ import {
   notePortalResponse,
   probePortalReadiness,
   recommendedRequestTimeoutMs,
-  waitForPortalReadiness,
 } from "./portalConnectivity";
 import { isPortalRequestNetworkEligible } from "./portalRequestEligibility";
 
@@ -260,10 +259,10 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const connectivityState = getPortalConnectivity().state;
 
   if (connectivityState === "RECOVERING") {
-    // Navigation/read requests are never blocked by the control-plane probe.
-    // Probe concurrently so the shared status can converge in the background.
-    if (isGet) void probePortalReadiness();
-    else await waitForPortalReadiness();
+    // Shared RECOVERING is advisory. Never serialize navigation or writes
+    // behind a health-probe round trip — probe in the background and let the
+    // real request succeed, queue, or fail on its own transport outcome.
+    void probePortalReadiness();
   }
 
   // apiClient's alternate backend is an absolute URL. If the primary route

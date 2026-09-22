@@ -100,14 +100,21 @@ body[data-color-scheme="dark"] .quality-context-bar,
   color: var(--qms-assurance-text);
 }
 
+.qms-audit-programme,
+.qms-audit-programme-flow,
+.qms-programme-matrix {
+  background: var(--qms-page, transparent);
+  color: var(--qms-text, var(--text-primary, #172033));
+}
+
 /* ---------------------------------------------------------------------------
    3) Dark semantic chips / pastels → charcoal tints
    --------------------------------------------------------------------------- */
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases),
-[data-theme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence),
-.dark :is(.qms-missions, .qms-people, .qms-intelligence) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+[data-theme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
+.dark :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
   --qms-danger-chip-bg: #3a2226;
   --qms-danger-chip-ink: #fecaca;
   --qms-warn-chip-bg: #3a3120;
@@ -216,14 +223,38 @@ body[data-color-scheme="dark"] .qms-people th,
 body[data-color-scheme="dark"] .qms-people__gate-grid > span,
 body[data-color-scheme="dark"] .qms-people__context-card {
   background: var(--qms-people-surface-soft, #1a1d22) !important;
-  color: var(--qms-people-muted, rgba(255, 255, 255, 0.72)) !important;
+  color: var(--qms-people-muted, var(--text-secondary, rgba(255, 255, 255, 0.84))) !important;
 }
 
-html[data-color-scheme="dark"] .qms-people button:not(.is-primary),
-body[data-color-scheme="dark"] .qms-people button:not(.is-primary) {
+html[data-color-scheme="dark"] .qms-people button:not(.is-primary):not(.is-danger):not(.is-warning),
+body[data-color-scheme="dark"] .qms-people button:not(.is-primary):not(.is-danger):not(.is-warning) {
   background: var(--qms-people-surface, #22252b) !important;
   border-color: var(--qms-people-border, rgba(255, 255, 255, 0.14)) !important;
   color: var(--qms-people-text, rgba(255, 255, 255, 0.94)) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people button.is-danger,
+body[data-color-scheme="dark"] .qms-people button.is-danger {
+  background: color-mix(in srgb, var(--qms-people-danger, #f87171) 14%, var(--qms-people-surface, #22252b)) !important;
+  border-color: color-mix(in srgb, var(--qms-people-danger, #f87171) 55%, transparent) !important;
+  color: var(--qms-people-danger, #f87171) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people button.is-danger svg,
+body[data-color-scheme="dark"] .qms-people button.is-danger svg {
+  color: inherit !important;
+}
+
+html[data-color-scheme="dark"] .qms-people button.is-warning,
+body[data-color-scheme="dark"] .qms-people button.is-warning {
+  background: color-mix(in srgb, var(--qms-people-warning, #fbbf24) 14%, var(--qms-people-surface, #22252b)) !important;
+  border-color: color-mix(in srgb, var(--qms-people-warning, #fbbf24) 55%, transparent) !important;
+  color: var(--qms-people-warning, #fbbf24) !important;
+}
+
+html[data-color-scheme="dark"] .qms-people button.is-warning svg,
+body[data-color-scheme="dark"] .qms-people button.is-warning svg {
+  color: inherit !important;
 }
 
 html[data-color-scheme="dark"] .qms-people__drawer,
@@ -293,8 +324,8 @@ body[data-color-scheme="dark"] .qms-intelligence__targeted-list article {
 }
 
 /* Shared form controls */
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases) :is(input, select, textarea),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases) :is(input, select, textarea) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
   background: #1a1d22 !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: rgba(255, 255, 255, 0.94) !important;

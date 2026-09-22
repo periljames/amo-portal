@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, Iterable, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, lazyload
 
 from ...user_id import generate_user_id
 from ..accounts import models as accounts_models
@@ -336,7 +336,7 @@ def _stage_record_lifecycle(
 ) -> tuple[Dict[str, str], Optional[models.TrainingRecord]]:
     if preloaded_rows is None:
         rows = (
-            db.query(models.TrainingRecord)
+            db.query(models.TrainingRecord).options(lazyload("*"))
             .filter(
                 models.TrainingRecord.amo_id == amo_id,
                 models.TrainingRecord.user_id == str(user.id),
@@ -450,11 +450,11 @@ def import_training_records_rows(
         parsed_rows.append(parsed)
 
     users = (
-        db.query(accounts_models.User)
+        db.query(accounts_models.User).options(lazyload("*"))
         .filter(accounts_models.User.amo_id == amo_id, accounts_models.User.is_system_account.is_(False))
         .all()
     )
-    courses = db.query(models.TrainingCourse).filter(models.TrainingCourse.amo_id == amo_id).all()
+    courses = db.query(models.TrainingCourse).options(lazyload("*")).filter(models.TrainingCourse.amo_id == amo_id).all()
 
     by_staff, by_user_id, by_name = _index_users(users)
     by_course_code, by_course_name = _index_courses(courses)
@@ -547,7 +547,7 @@ def import_training_records_rows(
         affected_user_ids = sorted({user_id for user_id, _ in affected_exact_pairs})
         affected_course_ids = sorted({course_id for _, course_id in affected_exact_pairs})
         existing_records = (
-            db.query(models.TrainingRecord)
+            db.query(models.TrainingRecord).options(lazyload("*"))
             .filter(
                 models.TrainingRecord.amo_id == amo_id,
                 models.TrainingRecord.user_id.in_(affected_user_ids),
@@ -568,9 +568,16 @@ def import_training_records_rows(
 
     lifecycle_status_by_id: Dict[str, str] = {}
     now = datetime.now(timezone.utc)
+    # Workbook commit only needs action/entity ids from preview rows. Building
+    # full pydantic previews for every Training row was a large CPU cost on
+    # multi-thousand imports.
+    lightweight_preview = not dry_run
 
     for processed_index, (parsed, user, course) in enumerate(matched_pairs, start=1):
-        if progress_callback:
+        if progress_callback and (
+            processed_index == len(matched_pairs)
+            or processed_index % 250 == 0
+        ):
             progress_callback(
                 processed_index,
                 len(matched_pairs),
@@ -648,29 +655,56 @@ def import_training_records_rows(
             else:
                 unchanged_rows += 1
 
-        preview_rows.append(
-            schemas.TrainingRecordImportRowPreview(
-                row_number=parsed.row_number,
-                legacy_record_id=parsed.legacy_record_id,
-                person_id=parsed.person_id,
-                person_name=parsed.person_name,
-                course_id=parsed.course_id,
-                course_name=parsed.course_name,
-                completion_date=parsed.completion_date,
-                next_due_date=target_valid_until,
-                days_to_due=parsed.days_to_due,
-                source_status=parsed.source_status,
-                action=action,
-                matched_user_id=str(user.id),
-                matched_user_name=getattr(user, "full_name", None),
-                matched_user_active=bool(getattr(user, "is_active", False)),
-                matched_course_pk=str(course.id),
-                matched_course_name=course.course_name,
-                existing_record_id=existing.id if existing is not None else None,
-                changes=changes,
-                reason="Matched inactive/dormant user; record will be retained without alerting." if not bool(getattr(user, "is_active", False)) else None,
+        if lightweight_preview:
+            # Keep schema-required string fields populated — omitting display-only
+            # match metadata is fine, but course_name must remain a str.
+            preview_rows.append(
+                schemas.TrainingRecordImportRowPreview(
+                    row_number=parsed.row_number,
+                    legacy_record_id=parsed.legacy_record_id,
+                    person_id=parsed.person_id,
+                    person_name=None,
+                    course_id=parsed.course_id,
+                    course_name=parsed.course_name,
+                    completion_date=parsed.completion_date,
+                    next_due_date=None,
+                    days_to_due=None,
+                    source_status=parsed.source_status,
+                    action=action,
+                    matched_user_id=str(user.id),
+                    matched_user_name=None,
+                    matched_user_active=None,
+                    matched_course_pk=str(course.id),
+                    matched_course_name=None,
+                    existing_record_id=existing.id if existing is not None else None,
+                    changes=[],
+                    reason=None,
+                )
             )
-        )
+        else:
+            preview_rows.append(
+                schemas.TrainingRecordImportRowPreview(
+                    row_number=parsed.row_number,
+                    legacy_record_id=parsed.legacy_record_id,
+                    person_id=parsed.person_id,
+                    person_name=parsed.person_name,
+                    course_id=parsed.course_id,
+                    course_name=parsed.course_name,
+                    completion_date=parsed.completion_date,
+                    next_due_date=target_valid_until,
+                    days_to_due=parsed.days_to_due,
+                    source_status=parsed.source_status,
+                    action=action,
+                    matched_user_id=str(user.id),
+                    matched_user_name=getattr(user, "full_name", None),
+                    matched_user_active=bool(getattr(user, "is_active", False)),
+                    matched_course_pk=str(course.id),
+                    matched_course_name=course.course_name,
+                    existing_record_id=existing.id if existing is not None else None,
+                    changes=changes,
+                    reason="Matched inactive/dormant user; record will be retained without alerting." if not bool(getattr(user, "is_active", False)) else None,
+                )
+            )
 
     if not dry_run:
         db.flush()

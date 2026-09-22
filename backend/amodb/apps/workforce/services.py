@@ -507,7 +507,7 @@ def sync_contract_start_from_hire_date(
     ).order_by(
         models.EmploymentContract.effective_from.asc(),
         models.EmploymentContract.id.asc(),
-    ).with_for_update().first()
+    ).with_for_update(of=models.EmploymentContract).first()
     if row is None or row.effective_from == hire_date:
         return row
 
@@ -582,7 +582,7 @@ def create_reemployment_contract(
     ).order_by(
         models.EmploymentContract.effective_from.desc(),
         models.EmploymentContract.id.desc(),
-    ).with_for_update().first()
+    ).with_for_update(of=models.EmploymentContract).first()
     if latest is None:
         return None
     if latest.effective_from == effective_from:

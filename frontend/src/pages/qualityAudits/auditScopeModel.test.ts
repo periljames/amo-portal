@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { PortalUser } from "../../services/auth";
 import {
+  auditReferenceFamilyValidationError,
+  auditScopeUsageLabel,
   auditScopeValidationError,
   canManageAuditScopes,
   emptyAuditScopeForm,
+  formatAuditReferenceExample,
+  normalizeAuditReferenceFamily,
 } from "./auditScopeModel";
 
 function user(role: PortalUser["role"], overrides: Partial<PortalUser> = {}): PortalUser {
@@ -35,5 +39,14 @@ describe("audit scope governance", () => {
     expect(auditScopeValidationError({ ...valid, code: "A" })).toContain("2–16");
     expect(auditScopeValidationError({ ...valid, code: "A-C" })).toContain("2–16");
     expect(auditScopeValidationError({ ...valid, sortOrder: "10000" })).toContain("0 to 9999");
+  });
+
+  it("normalises and validates the tenant reference family prefix", () => {
+    expect(normalizeAuditReferenceFamily(" qar ")).toBe("QAR");
+    expect(normalizeAuditReferenceFamily("qa-r!")).toBe("QAR");
+    expect(auditReferenceFamilyValidationError("Q")).toContain("2–16");
+    expect(auditReferenceFamilyValidationError("QAR")).toBeNull();
+    expect(formatAuditReferenceExample("qar", "mo", 2026, 12)).toBe("QAR/MO/26/012");
+    expect(auditScopeUsageLabel({ issued_this_year: 3, next_sequence: 4 })).toBe("3 issued · next 004");
   });
 });

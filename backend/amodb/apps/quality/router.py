@@ -753,11 +753,109 @@ def _settings_out(settings: models.QualityTenantWorkflowSettings) -> QualityWork
         final_reminder_days_before_due=settings.final_reminder_days_before_due,
         auto_escalation_enabled=settings.auto_escalation_enabled,
         auto_escalation_locked=settings.auto_escalation_locked,
+        audit_reference_family=_normalize_audit_reference_family(
+            getattr(settings, "audit_reference_family", None)
+        ),
         created_by_user_id=settings.created_by_user_id,
         updated_by_user_id=settings.updated_by_user_id,
         created_at=settings.created_at,
         updated_at=settings.updated_at,
     )
+
+
+def _normalize_audit_reference_family(value: Optional[str]) -> str:
+    family = re.sub(r"[^A-Za-z0-9]", "", (value or "QAR").strip().upper())
+    if len(family) < 2 or len(family) > 16:
+        raise HTTPException(
+            status_code=400,
+            detail="Audit reference family must be 2–16 letters or numbers",
+        )
+    return family
+
+
+def _audit_reference_family_for_amo(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: Optional[str] = None,
+) -> str:
+    settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=actor_user_id)
+    return _normalize_audit_reference_family(getattr(settings, "audit_reference_family", None))
+
+
+def _scope_out(
+    scope: models.QMSAuditScope,
+    *,
+    issued_this_year: int = 0,
+    next_sequence: int = 1,
+    last_value: int = 0,
+) -> QMSAuditScopeOut:
+    return QMSAuditScopeOut(
+        id=scope.id,
+        amo_id=scope.amo_id,
+        code=scope.code,
+        name=scope.name,
+        description=scope.description,
+        party_level=scope.party_level,
+        default_kind=scope.default_kind,
+        is_active=scope.is_active,
+        is_system_default=scope.is_system_default,
+        sort_order=scope.sort_order,
+        created_by_user_id=scope.created_by_user_id,
+        created_at=scope.created_at,
+        updated_at=scope.updated_at,
+        issued_this_year=int(issued_this_year or 0),
+        next_sequence=max(1, int(next_sequence or 1)),
+        last_value=max(0, int(last_value or 0)),
+    )
+
+
+def _scope_usage_by_code(
+    db: Session,
+    *,
+    amo_id: str,
+    reference_family: str,
+    ref_year: int,
+    scope_codes: List[str],
+) -> dict[str, tuple[int, int, int]]:
+    """Return code -> (issued_this_year, next_sequence, last_value)."""
+    if not scope_codes:
+        return {}
+    counters = (
+        db.query(models.QMSAuditReferenceCounter)
+        .filter(
+            models.QMSAuditReferenceCounter.amo_id == amo_id,
+            models.QMSAuditReferenceCounter.reference_family == reference_family,
+            models.QMSAuditReferenceCounter.ref_year == ref_year,
+            models.QMSAuditReferenceCounter.unit_code.in_(scope_codes),
+        )
+        .all()
+    )
+    last_by_code = {str(row.unit_code).upper(): int(row.last_value or 0) for row in counters}
+    issued_rows = (
+        db.query(models.QMSAudit.audit_scope_code, func.count(models.QMSAudit.id))
+        .filter(
+            models.QMSAudit.amo_id == amo_id,
+            models.QMSAudit.deleted_at.is_(None),
+            models.QMSAudit.reference_family == reference_family,
+            models.QMSAudit.ref_year == ref_year,
+            models.QMSAudit.audit_scope_code.in_(scope_codes),
+        )
+        .group_by(models.QMSAudit.audit_scope_code)
+        .all()
+    )
+    issued_by_code = {
+        str(code or "").upper(): int(count or 0)
+        for code, count in issued_rows
+        if code
+    }
+    usage: dict[str, tuple[int, int, int]] = {}
+    for code in scope_codes:
+        key = str(code).upper()
+        last_value = last_by_code.get(key, 0)
+        issued = issued_by_code.get(key, last_value)
+        usage[key] = (issued, last_value + 1, last_value)
+    return usage
 
 
 def _get_or_create_workflow_settings(
@@ -1803,6 +1901,8 @@ def update_quality_workflow_settings(
         settings.final_reminder_days_before_due = int(data["final_reminder_days_before_due"])
     if "auto_escalation_enabled" in data and data["auto_escalation_enabled"] is not None:
         settings.auto_escalation_enabled = bool(data["auto_escalation_enabled"])
+    if "audit_reference_family" in data and data["audit_reference_family"] is not None:
+        settings.audit_reference_family = _normalize_audit_reference_family(data["audit_reference_family"])
     settings.updated_by_user_id = current_user.id
     audit_services.log_event(
         db,
@@ -2970,7 +3070,25 @@ def list_audit_scopes(
     query = db.query(models.QMSAuditScope).filter(models.QMSAuditScope.amo_id == amo_id)
     if active is not None:
         query = query.filter(models.QMSAuditScope.is_active == active)
-    return query.order_by(models.QMSAuditScope.sort_order.asc(), models.QMSAuditScope.code.asc()).all()
+    scopes = query.order_by(models.QMSAuditScope.sort_order.asc(), models.QMSAuditScope.code.asc()).all()
+    family = _audit_reference_family_for_amo(db, amo_id=str(amo_id), actor_user_id=current_user.id)
+    ref_year = date.today().year % 100
+    usage = _scope_usage_by_code(
+        db,
+        amo_id=str(amo_id),
+        reference_family=family,
+        ref_year=ref_year,
+        scope_codes=[str(scope.code) for scope in scopes],
+    )
+    return [
+        _scope_out(
+            scope,
+            issued_this_year=usage.get(str(scope.code).upper(), (0, 1, 0))[0],
+            next_sequence=usage.get(str(scope.code).upper(), (0, 1, 0))[1],
+            last_value=usage.get(str(scope.code).upper(), (0, 1, 0))[2],
+        )
+        for scope in scopes
+    ]
 
 
 @router.post("/audits/scopes", response_model=QMSAuditScopeOut, status_code=status.HTTP_201_CREATED)
@@ -3005,7 +3123,15 @@ def create_audit_scope(
     audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms_audit_scope", entity_id=str(scope.id), action="create", after={"code": scope.code, "name": scope.name, "party_level": scope.party_level}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
     db.refresh(scope)
-    return scope
+    family = _audit_reference_family_for_amo(db, amo_id=str(amo_id), actor_user_id=current_user.id)
+    usage = _scope_usage_by_code(
+        db,
+        amo_id=str(amo_id),
+        reference_family=family,
+        ref_year=date.today().year % 100,
+        scope_codes=[str(scope.code)],
+    ).get(str(scope.code).upper(), (0, 1, 0))
+    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 @router.patch("/audits/scopes/{scope_id}", response_model=QMSAuditScopeOut)
@@ -3047,7 +3173,15 @@ def update_audit_scope(
     audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms_audit_scope", entity_id=str(scope.id), action="update", before=before, after={"code": scope.code, "name": scope.name, "party_level": scope.party_level, "default_kind": getattr(scope.default_kind, "value", scope.default_kind), "is_active": scope.is_active}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=True)
     db.commit()
     db.refresh(scope)
-    return scope
+    family = _audit_reference_family_for_amo(db, amo_id=str(amo_id), actor_user_id=current_user.id)
+    usage = _scope_usage_by_code(
+        db,
+        amo_id=str(amo_id),
+        reference_family=family,
+        ref_year=date.today().year % 100,
+        scope_codes=[str(scope.code)],
+    ).get(str(scope.code).upper(), (0, 1, 0))
+    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 # -----------------------------
@@ -3062,6 +3196,7 @@ def create_audit(
 ):
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=scoped_amo_id, user_id=str(current_user.id))
     supporting_auditor_user_ids = _normalise_supporting_auditor_ids(
         payload.supporting_auditor_user_ids,
         lead_user_id=payload.lead_auditor_user_id,
@@ -3092,11 +3227,15 @@ def create_audit(
         audit_scope_code=payload.audit_scope_code,
         kind=payload.kind,
     )
+    reference_family = _audit_reference_family_for_amo(
+        db, amo_id=str(scoped_amo_id), actor_user_id=current_user.id
+    )
     audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
         db,
         amo_id=scoped_amo_id,
         target_date=payload.planned_start,
         audit_scope_code=audit_scope.code,
+        reference_family=reference_family,
     )
     external_auditees = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in (payload.external_auditees or [])]
     external_auditee_name, external_auditee_email = _external_auditee_summary(external_auditees)
@@ -3109,7 +3248,7 @@ def create_audit(
         audit_ref=audit_ref,
         audit_scope_id=audit_scope.id,
         audit_scope_code=audit_scope.code,
-        reference_family="QAR",
+        reference_family=reference_family,
         unit_code=unit_code,
         ref_year=ref_year,
         ref_sequence=ref_sequence,
@@ -3291,9 +3430,14 @@ def list_audit_personnel_options(
     amo_id = _current_amo_id(current_user)
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO context is required")
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=str(current_user.id))
 
     qs = (
-        db.query(account_models.User)
+        db.query(account_models.User, account_models.Department.name)
+        .outerjoin(
+            account_models.Department,
+            account_models.Department.id == account_models.User.department_id,
+        )
         .filter(account_models.User.amo_id == amo_id)
         .filter(account_models.User.is_active.is_(True))
     )
@@ -3306,6 +3450,7 @@ def list_audit_personnel_options(
                 account_models.User.last_name.ilike(pattern),
                 account_models.User.email.ilike(pattern),
                 account_models.User.staff_code.ilike(pattern),
+                account_models.Department.name.ilike(pattern),
                 cast(account_models.User.id, String).ilike(pattern),
             )
         )
@@ -3316,7 +3461,7 @@ def list_audit_personnel_options(
         if not auditor_roles:
             return []
         qs = qs.filter(cast(account_models.User.id, String).in_(list(auditor_roles)))
-    users = (
+    rows = (
         qs.order_by(
             func.coalesce(account_models.User.full_name, ""),
             func.coalesce(account_models.User.first_name, ""),
@@ -3328,7 +3473,7 @@ def list_audit_personnel_options(
     )
 
     results: list[QMSPersonOptionOut] = []
-    for user in users:
+    for user, department_name in rows:
         roles = sorted(auditor_roles.get(str(user.id), set()))
         if auditors_only and not roles:
             continue
@@ -3343,6 +3488,7 @@ def list_audit_personnel_options(
                 email=getattr(user, "email", None),
                 role=str(role_value) if role_value else None,
                 department_id=getattr(user, "department_id", None),
+                department_name=department_name,
                 position_title=getattr(user, "position_title", None),
                 auditor_roles=roles,
             )
@@ -3359,6 +3505,7 @@ def create_audit_schedule(
 ):
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=scoped_amo_id, user_id=str(current_user.id))
     _validate_audit_team_members(
         db,
         amo_id=scoped_amo_id,
@@ -3452,6 +3599,7 @@ def update_audit_schedule(
 ):
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
+    set_postgres_tenant_context(db, amo_id=scoped_amo_id, user_id=str(current_user.id))
     schedule = (
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
@@ -3760,11 +3908,15 @@ def run_audit_schedule(
     planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
     _validate_one_calendar_year(start=planned_start, end=planned_end)
     audit_scope_code = schedule.audit_scope_code or _scope_default_code_for_kind(schedule.kind)
+    reference_family = _audit_reference_family_for_amo(
+        db, amo_id=str(scoped_amo_id), actor_user_id=current_user.id
+    )
     audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
         db,
         amo_id=scoped_amo_id,
         target_date=planned_start,
         audit_scope_code=audit_scope_code,
+        reference_family=reference_family,
     )
     audit = models.QMSAudit(
         amo_id=scoped_amo_id,
@@ -3773,7 +3925,7 @@ def run_audit_schedule(
         audit_ref=audit_ref,
         audit_scope_id=schedule.audit_scope_id,
         audit_scope_code=audit_scope_code,
-        reference_family="QAR",
+        reference_family=reference_family,
         unit_code=unit_code,
         ref_year=ref_year,
         ref_sequence=ref_sequence,
@@ -4676,13 +4828,18 @@ def update_audit(
         audit.planned_end_time = prospective_end_time
 
     if reference_needs_regeneration and _external_audit_is_editable(audit.kind):
+        reference_family = _audit_reference_family_for_amo(
+            db, amo_id=str(audit.amo_id), actor_user_id=current_user.id
+        )
         audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
             db,
             amo_id=audit.amo_id,
             target_date=audit.planned_start,
             audit_scope_code=audit.audit_scope_code or _scope_default_code_for_kind(audit.kind),
+            reference_family=reference_family,
         )
         audit.audit_ref = audit_ref
+        audit.reference_family = reference_family
         audit.unit_code = unit_code
         audit.ref_year = ref_year
         audit.ref_sequence = ref_sequence

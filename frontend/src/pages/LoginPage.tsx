@@ -14,8 +14,15 @@ import {
   type PortalUser,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
-import { preloadWorkspaceForUser } from "../services/routePreloader";
+import { preloadAfterLoginContext } from "../services/routePreloader";
+import {
+  runLoginDepartureWarmup,
+  type DepartureProgress,
+} from "../services/loginDepartureWarmup";
+import { rememberLoginHome } from "../services/loginHomeHint";
+import { beginControlRoomPrefetch } from "../services/loginLandingPrefetch";
 import { resolvePostLoginReturnTarget } from "../app/loginRedirect";
+import { flushSync } from "react-dom";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
@@ -69,6 +76,26 @@ function isPlatformUser(u: PortalUser | null): boolean {
   return !!u?.is_superuser || u?.role === "SUPERUSER";
 }
 
+function resolveAuthenticatedLandingPath(options: {
+  user: PortalUser | null;
+  slug: string;
+  fromState?: string;
+}): { path: string; requiresOnboarding: boolean } {
+  const { user, slug, fromState } = options;
+  if (user?.must_change_password) {
+    return { path: `/maintenance/${slug}/onboarding/setup`, requiresOnboarding: true };
+  }
+  const ctx = getContext();
+  const platformUser = isPlatformUser(user);
+  const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser, user, slug);
+  if (returnTarget) return { path: returnTarget, requiresOnboarding: false };
+  if (platformUser) return { path: "/platform/control", requiresOnboarding: false };
+  return {
+    path: getFirstAccessibleModuleRoute(slug, user, ctx.department),
+    requiresOnboarding: false,
+  };
+}
+
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -84,6 +111,8 @@ const LoginPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [loadingContext, setLoadingContext] = useState(false);
+  const [departure, setDeparture] = useState<DepartureProgress | null>(null);
+  const [takeoffNonce, setTakeoffNonce] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loginContext, setLoginContext] = useState<LoginContextResponse | null>(
     amoCode
@@ -97,6 +126,7 @@ const LoginPage: React.FC = () => {
   );
   const [step, setStep] = useState<LoginStep>(amoCode ? "password" : "identify");
   const redirectedRef = useRef(false);
+  const earlyPreloadStarted = useRef(false);
 
   const navigationState = location.state as { from?: string; sessionReason?: string } | null;
   const fromState = navigationState?.from;
@@ -107,6 +137,13 @@ const LoginPage: React.FC = () => {
       : null;
 
   const effectiveAmoSlug = useMemo(() => loginContext?.login_slug ?? "", [loginContext?.login_slug]);
+
+  // Tenant-URL login skips email identify — still warm the portal while they type the password.
+  useEffect(() => {
+    if (!loginContext || earlyPreloadStarted.current) return;
+    earlyPreloadStarted.current = true;
+    preloadAfterLoginContext(loginContext);
+  }, [loginContext]);
 
   useEffect(() => {
     const token = getToken();
@@ -164,7 +201,15 @@ const LoginPage: React.FC = () => {
       setLoadingContext(true);
       const context = await getLoginContext(trimmedIdentifier);
       setLoginContext(context);
+      // Browser autofill may populate the password input without firing React onChange.
+      const autofilledPassword = (document.getElementById("password") as HTMLInputElement | null)?.value || "";
+      if (autofilledPassword && autofilledPassword !== password) {
+        setPassword(autofilledPassword);
+      }
       setStep("password");
+      setShowPassword(false);
+      earlyPreloadStarted.current = true;
+      preloadAfterLoginContext(context);
     } catch (err: unknown) {
       console.error("Login context error:", err);
       setErrorMsg(err instanceof Error ? err.message : "Could not find your account.");
@@ -196,33 +241,51 @@ const LoginPage: React.FC = () => {
       return;
     }
 
+    const takeoffStartedAt = performance.now();
     try {
-      setLoading(true);
+      // Paint takeoff immediately — don't wait for the auth round-trip.
+      flushSync(() => {
+        setLoading(true);
+        setTakeoffNonce((value) => value + 1);
+        setDeparture({ active: true, phase: "taxi", label: "Cleared for departure" });
+      });
       const slugToUse = effectiveAmoSlug.trim();
+      window.setTimeout(() => {
+        setDeparture((current) => current?.active
+          ? { active: true, phase: "roll", label: "Takeoff roll" }
+          : current);
+      }, 220);
       const auth = await login(slugToUse, trimmedIdentifier, password);
-      preloadWorkspaceForUser(auth.user, slugToUse);
-
-      const requiresOnboarding = !!auth.user?.must_change_password;
-      if (requiresOnboarding && !redirectedRef.current) {
-        redirectedRef.current = true;
-        navigate(`/maintenance/${slugToUse}/onboarding/setup`, { replace: true });
-        return;
-      }
-      const ctx = getContext();
       const signedInUser = auth.user || getCachedUser();
-      const platformUser = isPlatformUser(signedInUser);
-      const returnTarget = resolvePostLoginReturnTarget(fromState, platformUser, signedInUser, slugToUse);
-      if (returnTarget) {
-        navigate(returnTarget, { replace: true });
-        return;
+      const landing = resolveAuthenticatedLandingPath({
+        user: signedInUser,
+        slug: slugToUse,
+        fromState,
+      });
+      if (landing.requiresOnboarding && !redirectedRef.current) {
+        redirectedRef.current = true;
       }
-      if (platformUser) {
-        navigate("/platform/control", { replace: true });
-        return;
-      }
-      navigate(getFirstAccessibleModuleRoute(slugToUse, signedInUser, ctx.department), { replace: true });
+      // Start Control Room data the instant the JWT exists — before chunk fan-out.
+      const controlRoomWarm = beginControlRoomPrefetch({
+        user: auth.user,
+        amoSlug: slugToUse,
+        homePath: landing.path,
+      });
+      await runLoginDepartureWarmup({
+        user: auth.user,
+        amoSlug: slugToUse,
+        landingPath: landing.path,
+        onProgress: setDeparture,
+        takeoffStartedAt,
+      });
+      await controlRoomWarm;
+
+      rememberLoginHome(slugToUse, landing.path);
+      navigate(landing.path, { replace: true });
     } catch (err: unknown) {
       console.error("Login error:", err);
+      // Abort takeoff immediately on auth failure — no artificial runway wait.
+      setDeparture(null);
       const msg = err instanceof Error ? err.message.toLowerCase() : "";
       if (msg.includes("locked")) {
         setErrorMsg("Your account is locked due to repeated failed attempts. Contact Quality or IT support.");
@@ -240,6 +303,7 @@ const LoginPage: React.FC = () => {
 
   const resetContext = () => {
     if (amoCode) return;
+    earlyPreloadStarted.current = false;
     setLoginContext(null);
     setStep("identify");
     setPassword("");
@@ -258,16 +322,19 @@ const LoginPage: React.FC = () => {
   };
 
   const handleDemoQuickAccess = () => {
-    setLoginContext({
+    const demoContext: LoginContextResponse = {
       login_slug: DEMO_AMO_SLUG,
       amo_code: "DEMO",
       amo_name: "Demo AMO",
       is_platform: false,
-    });
+    };
+    earlyPreloadStarted.current = true;
+    setLoginContext(demoContext);
     setIdentifier(DEMO_LOGIN_EMAIL);
     setPassword(DEMO_LOGIN_PASSWORD);
     setStep("password");
     setErrorMsg(null);
+    preloadAfterLoginContext(demoContext);
   };
 
   const illustrationSrc =
@@ -289,6 +356,8 @@ const LoginPage: React.FC = () => {
       noticeMsg={sessionNotice}
       loading={loading}
       loadingContext={loadingContext}
+      departure={departure}
+      takeoffNonce={takeoffNonce}
       socialAvailability={{
         google: !!SOCIAL_AUTH_CONFIG.google.url,
         apple: !!SOCIAL_AUTH_CONFIG.apple.url,
@@ -312,5 +381,3 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
-
-

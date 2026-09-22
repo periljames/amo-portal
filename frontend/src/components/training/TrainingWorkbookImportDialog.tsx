@@ -11,20 +11,22 @@ import {
   KeyRound,
   LoaderCircle,
   RefreshCw,
-  Search,
-  ShieldCheck,
+  Copy,
   UploadCloud,
   UserPlus,
   Wifi,
   XCircle,
 } from "lucide-react";
 import Drawer from "../shared/Drawer";
+import TrainingImportRowsPanel, { type ImportOutcome } from "./TrainingImportRowsPanel";
 import {
   cancelTrainingWorkbookImport,
   commitTrainingWorkbookImport,
   createTrainingWorkbookImport,
   getTrainingWorkbookImport,
   listTrainingWorkbookImportRows,
+  recheckTrainingImportSupport,
+  requestTrainingImportRepairAccess,
   type WorkbookUploadProgress,
 } from "../../services/trainingWorkbookImport";
 import type {
@@ -34,9 +36,12 @@ import type {
 } from "../../types/trainingWorkbookImport";
 import { buildCanonicalRoute } from "../../app/canonicalRoutes";
 import { getContext } from "../../services/auth";
+import { copyTextToClipboard } from "../../utils/clipboard";
 import "../../styles/training-workbook-import.css";
 
 interface Props {
+  initialJob?: TrainingWorkbookImportJob;
+  support?: boolean;
   isOpen: boolean;
   onClose: () => void;
   onCompleted?: (job: TrainingWorkbookImportJob) => void | Promise<void>;
@@ -64,19 +69,6 @@ function humanize(value: string | null | undefined): string {
     .replaceAll("_", " ")
     .toLowerCase()
     .replace(/(^|\s)\S/g, (match) => match.toUpperCase());
-}
-
-function decisionLabel(value: string): string {
-  const labels: Record<string, string> = {
-    CREATE_ACCOUNT: "Create inactive account for approval and onboarding",
-    LINK_EXISTING_ACCOUNT: "Link the existing portal account to this personnel profile",
-    PROFILE_ONLY: "Accept personnel record without portal access",
-    SKIP: "Do not import this row",
-    KEEP_EXISTING_EMAIL: "Keep existing email and update other fields",
-    USE_IMPORTED_EMAIL: "Use workbook email",
-    RETRY_AFTER_PERSON_IMPORT: "Retry after accepted People rows are created",
-  };
-  return labels[value] || humanize(value);
 }
 
 function stageLabel(job: TrainingWorkbookImportJob | null): string {
@@ -170,22 +162,30 @@ function statusTone(status: string): string {
   return "info";
 }
 
+function withOperationalSheets(job: TrainingWorkbookImportJob): TrainingWorkbookImportJob {
+  return {
+    ...job,
+    sheets: job.sheets.filter((sheet) => sheet.is_operational),
+  };
+}
+
 async function loadAllImportRows(
   jobId: string,
   options: { reviewOnly?: boolean; status?: string },
+  support = false,
 ): Promise<TrainingWorkbookImportRow[]> {
   const limit = 250;
   const items: TrainingWorkbookImportRow[] = [];
   let offset = 0;
   while (true) {
-    const page = await listTrainingWorkbookImportRows(jobId, { ...options, limit, offset });
+    const page = await listTrainingWorkbookImportRows(jobId, { ...options, limit, offset }, support);
     items.push(...page.items);
     offset += page.items.length;
     if (offset >= page.total || page.items.length === 0) return items;
   }
 }
 
-const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onCompleted }) => {
+const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onCompleted, initialJob, support = false }) => {
   const navigate = useNavigate();
   const amoCode = getContext().amoCode || "UNKNOWN";
   const [file, setFile] = useState<File | null>(null);
@@ -194,10 +194,15 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   const [uploading, setUploading] = useState(false);
   const [activity, setActivity] = useState<ImportActivity[]>([]);
   const [reviewRows, setReviewRows] = useState<TrainingWorkbookImportRow[]>([]);
-  const [issueRows, setIssueRows] = useState<TrainingWorkbookImportRow[]>([]);
+  const [outcome, setOutcome] = useState<ImportOutcome | null>(null);
+  const [lookupId, setLookupId] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [rowsLoading, setRowsLoading] = useState(false);
+  const [reviewLoaded, setReviewLoaded] = useState(false);
+  const [supportNotice, setSupportNotice] = useState("");
+  const [scrollToken, setScrollToken] = useState(0);
+  const canManage = !support || job?.summary?.support_can_manage === true;
   const [decisions, setDecisions] = useState<Record<string, string>>({});
-  const [query, setQuery] = useState("");
-  const [selectedSheet, setSelectedSheet] = useState("ALL");
   const [error, setError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [forceReimport, setForceReimport] = useState(false);
@@ -207,8 +212,11 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   const [clockNow, setClockNow] = useState(() => Date.now());
   const completionNotifiedRef = useRef<string | null>(null);
   const activityKeyRef = useRef<string | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
+  const reviewScrollKeyRef = useRef<string | null>(null);
 
   const busy = uploading || committing || Boolean(job && ACTIVE_STATUSES.has(job.status));
+  const displayJob = useMemo(() => (job ? withOperationalSheets(job) : null), [job]);
   const processed = job?.processed_rows || 0;
   const total = job?.total_rows || 0;
   const processingPercent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : uploadProgress?.percent ? Math.round(uploadProgress.percent) : 0;
@@ -221,7 +229,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   const nonLoginIdentitiesCreated = summaryNumber(job, "non_login_identities_created");
   const commitElapsedMs = summaryNumber(job, "elapsed_ms");
   const automaticRecoveryAttempts = rootSummaryNumber(job, "automatic_recovery_attempts");
-  const previewCompleted = Boolean(job && job.sheets.length > 0 && job.total_rows > 0);
+  const previewCompleted = Boolean(job && job.sheets.some((sheet) => sheet.is_operational) && job.total_rows > 0);
   const isRetryableFailure = job?.status === "FAILED" && previewCompleted;
   const isReviewReady = job?.status === "PREVIEW_READY" || job?.status === "REVIEW_REQUIRED" || isRetryableFailure;
   const unresolvedDecisions = reviewRows.filter((row) => row.decision_required && !decisions[row.id]).length;
@@ -231,36 +239,37 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   );
   const createdAccountOutcomeCount = Math.max(portalAccountsCreated, createdAccountRows.length);
 
-  const filteredReviewRows = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return reviewRows.filter((row) => {
-      if (selectedSheet !== "ALL" && row.sheet_name !== selectedSheet) return false;
-      if (!needle) return true;
-      return [row.display_label, row.source_key, row.issue_message, row.sheet_name]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(needle));
-    });
-  }, [query, reviewRows, selectedSheet]);
+  const selectOutcome = (next: ImportOutcome) => {
+    setOutcome(next);
+    setScrollToken((value) => value + 1);
+  };
 
   const reset = () => {
+    setCopied(false);
+    setReviewLoaded(false);
     setFile(null);
     setJob(null);
     setUploadProgress(null);
     setUploading(false);
     setActivity([]);
     setReviewRows([]);
-    setIssueRows([]);
+    setOutcome(null);
     setDecisions({});
-    setQuery("");
-    setSelectedSheet("ALL");
     setError(null);
     setCommitting(false);
     setForceReimport(false);
     setLastServerCheckAt(null);
     setPollRecovery(null);
     setPollNonce(0);
+    setScrollToken(0);
+    setSupportNotice("");
     completionNotifiedRef.current = null;
     activityKeyRef.current = null;
+    reviewScrollKeyRef.current = null;
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = null;
+    }
   };
 
   const openCreatedAccount = (row: TrainingWorkbookImportRow) => {
@@ -274,6 +283,34 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   }, [isOpen]);
 
   useEffect(() => {
+    if (isOpen && initialJob) setJob(initialJob);
+  }, [isOpen, initialJob]);
+
+  const openJob = async () => {
+    setError(null);
+    setUploading(true);
+    try {
+      setJob(await getTrainingWorkbookImport(lookupId.trim(), support));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Job not found.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const copyJobId = async () => {
+    if (!job) return;
+    const ok = await copyTextToClipboard(job.id);
+    if (!ok) {
+      setError("Clipboard access was unavailable. Select the job reference and copy it manually.");
+      return;
+    }
+    setCopied(true);
+    if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  useEffect(() => {
     if (!job || !ACTIVE_STATUSES.has(job.status)) return;
     let stopped = false;
     let timer: number | null = null;
@@ -282,7 +319,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
       let continuePolling = true;
       let nextDelay = document.visibilityState === "hidden" ? 2_500 : 900;
       try {
-        const next = await getTrainingWorkbookImport(job.id);
+        const next = await getTrainingWorkbookImport(job.id, support);
         if (stopped) return;
         consecutiveFailures = 0;
         setPollRecovery(null);
@@ -322,26 +359,33 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
       stopped = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [job?.id, job?.status, pollNonce]);
+  }, [job?.id, job?.status, pollNonce, support]);
 
   useEffect(() => {
     if (!job || !ACTIVE_STATUSES.has(job.status)) return;
     const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [job?.id, job?.status]);
+  }, [job?.id, job?.status, support]);
 
   useEffect(() => {
     if (!job || !["PREVIEW_READY", "REVIEW_REQUIRED", "COMPLETED", "FAILED"].includes(job.status)) return;
     let active = true;
+    setRowsLoading(true);
+    setReviewLoaded(false);
     const loadRows = async () => {
       try {
-        const [allReviewRows, allIssueRows] = await Promise.all([
-          loadAllImportRows(job.id, { reviewOnly: true }),
-          loadAllImportRows(job.id, { status: "FAILED" }),
-        ]);
+        const allReviewRows = await loadAllImportRows(job.id, { reviewOnly: true }, support);
         if (!active) return;
         setReviewRows(allReviewRows);
-        setIssueRows(allIssueRows);
+        setReviewLoaded(true);
+        const nextOutcome: ImportOutcome =
+          job.review_count > 0 && job.status !== "COMPLETED"
+            ? "REVIEW"
+            : job.failed_count > 0
+              ? "FAILED"
+              : "UPDATE";
+        setOutcome(nextOutcome);
+        setScrollToken((value) => value + 1);
         setDecisions((current) => {
           const next = { ...current };
           allReviewRows.forEach((row) => {
@@ -351,13 +395,25 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
         });
       } catch (loadError) {
         if (active) setError(loadError instanceof Error ? loadError.message : "Could not load import review rows.");
+      } finally {
+        if (active) setRowsLoading(false);
       }
     };
     void loadRows();
     return () => {
       active = false;
     };
-  }, [job?.id, job?.status]);
+  }, [job?.id, job?.status, support]);
+
+  useEffect(() => {
+    if (!job || !reviewLoaded || busy) return;
+    if (job.status !== "REVIEW_REQUIRED" && !(job.status === "PREVIEW_READY" && job.review_count > 0)) return;
+    const key = `${job.id}:${job.status}:review`;
+    if (reviewScrollKeyRef.current === key) return;
+    reviewScrollKeyRef.current = key;
+    setOutcome("REVIEW");
+    setScrollToken((value) => value + 1);
+  }, [job, reviewLoaded, busy]);
 
   useEffect(() => {
     if (!job || job.status !== "COMPLETED" || completionNotifiedRef.current === job.id) return;
@@ -378,7 +434,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
     setLastServerCheckAt(null);
     activityKeyRef.current = null;
     setReviewRows([]);
-    setIssueRows([]);
+    setOutcome(null);
     setDecisions({});
     try {
       const created = await createTrainingWorkbookImport(file, {
@@ -395,15 +451,17 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
 
   const commit = async () => {
     if (!job) return;
+    if (!canManage || !reviewLoaded || rowsLoading) return;
     if (unresolvedDecisions > 0) {
       setError(`Resolve ${unresolvedDecisions} personnel or conflict decision(s) before importing.`);
+      selectOutcome("REVIEW");
       return;
     }
     setCommitting(true);
     setError(null);
     try {
       const payload: TrainingWorkbookImportDecision[] = Object.entries(decisions).map(([row_id, decision]) => ({ row_id, decision }));
-      const next = await commitTrainingWorkbookImport(job.id, payload, forceReimport);
+      const next = await commitTrainingWorkbookImport(job.id, payload, forceReimport, support);
       setJob(next);
     } catch (commitError) {
       setError(commitError instanceof Error ? commitError.message : "The controlled import could not start.");
@@ -415,9 +473,27 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
   const cancel = async () => {
     if (!job) return;
     try {
-      setJob(await cancelTrainingWorkbookImport(job.id));
+      setJob(await cancelTrainingWorkbookImport(job.id, support));
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : "Could not cancel the import.");
+    }
+  };
+
+  const supportAction = async (action: "request" | "refresh" | "recheck") => {
+    if (!job) return;
+    setCommitting(true);
+    setError(null);
+    try {
+      if (action === "request") {
+        await requestTrainingImportRepairAccess(job.amo_id, job.id);
+        setSupportNotice("Repair access requested. A tenant administrator must approve the ADMIN support session; then refresh access.");
+      } else {
+        setJob(action === "recheck" ? await recheckTrainingImportSupport(job.id) : await getTrainingWorkbookImport(job.id, true));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Support action failed.");
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -437,32 +513,93 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
       <div className="training-import-shell">
         {!job ? (
           <section className="training-import-upload">
-            <div className="training-import-upload__icon"><FileSpreadsheet size={30} /></div>
-            <div>
-              <h4>Bring the complete tracker into the portal</h4>
-              <p>Courses, People, Training, role groups, person roles and the course matrix are inspected together. Derived Excel dashboards are mapped to live portal views rather than copied as duplicate data.</p>
-            </div>
-            <label className="training-import-dropzone">
-              <UploadCloud size={22} />
-              <span>{file ? file.name : "Choose Training_Tracker_DB_v2.xlsm or another compatible workbook"}</span>
-              <small>{file ? formatBytes(file.size) : "Excel .xlsx or .xlsm · maximum 40 MB"}</small>
-              <input
-                type="file"
-                accept=".xlsx,.xlsm,.xltx,.xltm"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
-                disabled={uploading}
-              />
-            </label>
-            {uploadProgress ? (
-              <div className="training-import-progress training-import-progress--upload">
-                <div className="training-import-progress__bar"><span style={{ width: `${Math.round(uploadProgress.percent || 0)}%` }} /></div>
-                <strong>{Math.round(uploadProgress.percent || 0)}%</strong>
-                <span>{formatBytes(uploadProgress.loadedBytes)}{uploadProgress.totalBytes ? ` of ${formatBytes(uploadProgress.totalBytes)}` : ""} transferred</span>
+            {support ? (
+              <div>
+                <h4>Support job lookup</h4>
+                <p>Use the platform Training import support form to open a job by reference. That creates the read-only support session required before rows and decisions can load.</p>
               </div>
-            ) : null}
+            ) : (
+              <>
+                <div className="training-import-job-lookup">
+                  <label htmlFor="training-import-reference">Open an existing job</label>
+                  <input
+                    id="training-import-reference"
+                    placeholder="Paste job reference"
+                    value={lookupId}
+                    onChange={(event) => setLookupId(event.target.value)}
+                  />
+                  <button type="button" className="secondary-chip-btn" disabled={!lookupId.trim() || uploading} onClick={() => void openJob()}>
+                    Open job
+                  </button>
+                </div>
+                <div className="training-import-upload__icon">
+                  <FileSpreadsheet size={30} />
+                </div>
+                <div>
+                  <h4>Bring the complete tracker into the portal</h4>
+                  <p>Courses, People, Training, role groups, person roles and the course matrix are inspected together. Derived Excel dashboards stay as live portal views and are not copied as duplicate worksheets.</p>
+                </div>
+                <label className="training-import-dropzone">
+                  <UploadCloud size={22} />
+                  <span>{file ? file.name : "Choose Training_Tracker_DB_v2.xlsm or another compatible workbook"}</span>
+                  <small>{file ? formatBytes(file.size) : "Excel .xlsx or .xlsm · maximum 40 MB"}</small>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xlsm,.xltx,.xltm"
+                    onChange={(event) => setFile(event.target.files?.[0] || null)}
+                    disabled={uploading}
+                  />
+                </label>
+                {uploadProgress ? (
+                  <div className="training-import-progress training-import-progress--upload">
+                    <div className="training-import-progress__bar">
+                      <span style={{ width: `${Math.round(uploadProgress.percent || 0)}%` }} />
+                    </div>
+                    <strong>{Math.round(uploadProgress.percent || 0)}%</strong>
+                    <span>
+                      {formatBytes(uploadProgress.loadedBytes)}
+                      {uploadProgress.totalBytes ? ` of ${formatBytes(uploadProgress.totalBytes)}` : ""} transferred
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
         ) : (
           <>
+            <div className="training-import-reference">
+              <span>Job reference</span>
+              <button type="button" className="secondary-chip-btn training-import-reference__copy" onClick={() => void copyJobId()} title="Copy job reference">
+                <Copy size={14} /> {job.id}
+              </button>
+              <span role="status">{copied ? "Copied" : "Click to copy"}</span>
+            </div>
+            {support ? (
+              <div className="training-import-alert training-import-alert--warning">
+                <div>
+                  <strong>{canManage ? "Approved support access" : "Read-only support"}</strong>
+                  <p>
+                    Tenant: {job.amo_id}. {canManage ? "Review decisions, retry interrupted imports, or recheck after catalogue corrections. Source errors require a corrected workbook." : "Request tenant approval to make repairs."}
+                  </p>
+                  {supportNotice ? <p role="status">{supportNotice}</p> : null}
+                  <div className="training-import-pagination">
+                    {!canManage ? (
+                      <button type="button" className="secondary-chip-btn" disabled={busy || Boolean(supportNotice)} onClick={() => void supportAction("request")}>
+                        Request repair access
+                      </button>
+                    ) : null}
+                    <button type="button" className="secondary-chip-btn" disabled={busy} onClick={() => void supportAction("refresh")}>
+                      Refresh access
+                    </button>
+                    {canManage && ["COMPLETED", "FAILED", "CANCELLED"].includes(job.status) ? (
+                      <button type="button" className="secondary-chip-btn" disabled={busy} onClick={() => void supportAction("recheck")}>
+                        Recheck retained workbook
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <section className={`training-import-status training-import-status--${statusTone(job.status)}`}>
               <div className="training-import-orbit" style={{ "--import-progress": `${processingPercent * 3.6}deg` } as React.CSSProperties}>
                 {job.status === "COMPLETED" ? <CheckCircle2 size={30} /> : job.status === "FAILED" ? <XCircle size={30} /> : <LoaderCircle size={30} />}
@@ -473,25 +610,34 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
                 <p>{job.current_sheet ? `${job.current_sheet}${job.current_record_label ? ` · ${job.current_record_label}` : ""}` : "Workbook control job is ready."}</p>
                 {ACTIVE_STATUSES.has(job.status) ? (
                   <div className="training-import-status__telemetry" aria-label="Live import telemetry">
-                    <span><Activity size={14} /> {stagePosition(job.stage)}</span>
-                    <span className={workerCheckpointStale ? "is-stale" : ""}><Clock3 size={14} /> Worker checkpoint {ageLabel(workerCheckpointAge)}</span>
-                    <span><Wifi size={14} /> Server checked {lastServerCheckAt ? ageLabel(serverCheckAge) : "waiting"}</span>
+                    <span>
+                      <Activity size={14} /> {stagePosition(job.stage)}
+                    </span>
+                    <span className={workerCheckpointStale ? "is-stale" : ""}>
+                      <Clock3 size={14} /> Worker checkpoint {ageLabel(workerCheckpointAge)}
+                    </span>
+                    <span>
+                      <Wifi size={14} /> Server checked {lastServerCheckAt ? ageLabel(serverCheckAge) : "waiting"}
+                    </span>
                   </div>
                 ) : null}
               </div>
               <div className="training-import-status__count">
                 <strong>{processingPercent}%</strong>
-                <span>{processed.toLocaleString()} of {total.toLocaleString()} rows</span>
+                <span>
+                  {processed.toLocaleString()} of {total.toLocaleString()} rows
+                </span>
               </div>
-              <div className="training-import-progress__bar training-import-progress__bar--wide"><span style={{ width: `${processingPercent}%` }} /></div>
+              <div className="training-import-progress__bar training-import-progress__bar--wide">
+                <span style={{ width: `${processingPercent}%` }} />
+              </div>
             </section>
 
             {pollRecovery ? (
               <div className="training-import-alert training-import-alert--warning training-import-alert--recovering">
                 <AlertTriangle size={18} />
                 <span>
-                  The status server is temporarily unavailable. Progress has not been guessed or discarded;
-                  automatic check {retryDelayLabel(pollRecovery.retryAt - clockNow)} (attempt {pollRecovery.failures + 1}).
+                  The status server is temporarily unavailable. Progress has not been guessed or discarded; automatic check {retryDelayLabel(pollRecovery.retryAt - clockNow)} (attempt {pollRecovery.failures + 1}).
                   <small>{pollRecovery.message}</small>
                 </span>
                 <button
@@ -511,8 +657,7 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
               <div className="training-import-alert training-import-alert--warning">
                 <AlertTriangle size={18} />
                 <span>
-                  No new worker checkpoint has been published for {ageLabel(workerCheckpointAge).replace(" ago", "")}.
-                  The server keeps checking and automatically renews an orphaned commit lease after the recovery threshold—no re-upload is required.
+                  No new worker checkpoint has been published for {ageLabel(workerCheckpointAge).replace(" ago", "")}. The server keeps checking and automatically renews an orphaned commit lease after the recovery threshold—no re-upload is required.
                   {automaticRecoveryAttempts > 0 ? ` Recovery attempt ${automaticRecoveryAttempts} is active.` : ""}
                 </span>
               </div>
@@ -526,43 +671,89 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
             ) : null}
 
             {isRetryableFailure && job.error_message ? (
-              <div className="training-import-alert training-import-alert--danger">
-                <AlertTriangle size={18} />
-                <span>The reviewed commit failed and can be retried. {job.error_message}</span>
+              <div className="training-import-alert training-import-alert--danger" role="alert">
+                <AlertTriangle size={18} aria-hidden />
+                <div className="training-import-alert__copy">
+                  <strong>Reviewed commit failed — retry available</strong>
+                  <span>{job.error_message}</span>
+                </div>
               </div>
             ) : null}
 
-            <section className="training-import-metrics" aria-label="Import reconciliation">
-              {[
-                ["Create", job.created_count],
-                ["Update", job.updated_count],
-                ["Unchanged", job.unchanged_count],
-                ["Review", job.review_count],
-                ["Skipped", job.skipped_count],
-                ["Failed", job.failed_count],
-              ].map(([label, value]) => (
-                <div key={String(label)}><span>{label}</span><strong>{Number(value).toLocaleString()}</strong></div>
+            <section className="training-import-metrics" role="tablist" aria-label="Import reconciliation">
+              {(
+                [
+                  ["Create", job.created_count],
+                  ["Update", job.updated_count],
+                  ["Unchanged", job.unchanged_count],
+                  ["Review", job.review_count],
+                  ["Skipped", job.skipped_count],
+                  ["Failed", job.failed_count],
+                ] as const
+              ).map(([label, value]) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={outcome === String(label).toUpperCase()}
+                  aria-controls="import-results"
+                  className={outcome === String(label).toUpperCase() ? "is-active" : ""}
+                  disabled={busy}
+                  key={String(label)}
+                  onClick={() => selectOutcome(String(label).toUpperCase() as ImportOutcome)}
+                >
+                  <span>{label}</span>
+                  <strong>{Number(value).toLocaleString()}</strong>
+                </button>
               ))}
             </section>
+
+            {outcome && !busy && displayJob ? (
+              <TrainingImportRowsPanel
+                job={displayJob}
+                outcome={outcome}
+                decisions={decisions}
+                onDecision={(id, value) => setDecisions((current) => ({ ...current, [id]: value }))}
+                support={support}
+                canManage={canManage}
+                scrollToken={scrollToken}
+              />
+            ) : null}
 
             {job.status === "COMPLETED" ? (
               <section className="training-import-completion" aria-label="Completed import outcome">
                 <div className="training-import-complete">
                   <FileCheck2 size={24} />
                   <div>
-                    <strong>Import completed successfully</strong>
+                    <strong>{job.failed_count > 0 ? "Import completed with row issues" : "Import completed successfully"}</strong>
                     <span>
-                      The atomic commit finished{job.committed_at ? ` at ${new Date(job.committed_at).toLocaleString()}` : ""}.
-                      {commitElapsedMs > 0 ? ` Server write time: ${(commitElapsedMs / 1000).toFixed(1)} seconds.` : ""}
+                      Import finished{job.committed_at ? ` at ${new Date(job.committed_at).toLocaleString()}` : ""}.
+                      {commitElapsedMs > 0 ? ` Processing time: ${(commitElapsedMs / 1000).toFixed(1)} seconds.` : ""}
                     </span>
                   </div>
                 </div>
 
                 <div className="training-import-outcome-grid">
-                  <div><span>Personnel profiles</span><strong>{personnelProfilesCreated.toLocaleString()}</strong><small>Created from accepted People rows</small></div>
-                  <div><span>Portal accounts</span><strong>{createdAccountOutcomeCount.toLocaleString()}</strong><small>Inactive, awaiting administrator onboarding</small></div>
-                  <div><span>Non-login identities</span><strong>{nonLoginIdentitiesCreated.toLocaleString()}</strong><small>Retained for governed personnel records</small></div>
-                  <div><span>Job reference</span><strong>{job.id}</strong><small>Use this reference for audit or support</small></div>
+                  {personnelProfilesCreated > 0 ? (
+                    <div>
+                      <span>Personnel profiles</span>
+                      <strong>{personnelProfilesCreated.toLocaleString()}</strong>
+                      <small>Created from accepted People rows</small>
+                    </div>
+                  ) : null}
+                  {createdAccountOutcomeCount > 0 ? (
+                    <div>
+                      <span>Portal accounts</span>
+                      <strong>{createdAccountOutcomeCount.toLocaleString()}</strong>
+                      <small>Inactive, awaiting administrator onboarding</small>
+                    </div>
+                  ) : null}
+                  {nonLoginIdentitiesCreated > 0 ? (
+                    <div>
+                      <span>Non-login identities</span>
+                      <strong>{nonLoginIdentitiesCreated.toLocaleString()}</strong>
+                      <small>Retained for governed personnel records</small>
+                    </div>
+                  ) : null}
                 </div>
 
                 {createdAccountOutcomeCount > 0 ? (
@@ -576,17 +767,28 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
                     </div>
                     <div className="training-import-password-policy">
                       <KeyRound size={18} />
-                      <span><strong>No default password is issued or displayed.</strong> A random unknown credential blocks initial sign-in. After approving and enabling the account, the user must request the secure password-reset link and choose their own password.</span>
+                      <span>
+                        <strong>No default password is issued or displayed.</strong> A random unknown credential blocks initial sign-in. After approving and enabling the account, the user must request the secure password-reset link and choose their own password.
+                      </span>
                     </div>
                     {createdAccountRows.length > 0 ? (
                       <div className="training-import-account-list">
                         {createdAccountRows.map((row) => {
-                          const fullName = row.display_label || payloadText(row, "full_name") || [payloadText(row, "first_name"), payloadText(row, "last_name")].filter(Boolean).join(" ") || "Imported account";
+                          const fullName =
+                            row.display_label ||
+                            payloadText(row, "full_name") ||
+                            [payloadText(row, "first_name"), payloadText(row, "last_name")].filter(Boolean).join(" ") ||
+                            "Imported account";
                           const staffCode = payloadText(row, "person_id") || row.source_key || "No staff code";
                           const email = payloadText(row, "email") || "No email supplied";
                           return (
                             <div key={row.id}>
-                              <div><strong>{fullName}</strong><span>{staffCode} · {email}</span></div>
+                              <div>
+                                <strong>{fullName}</strong>
+                                <span>
+                                  {staffCode} · {email}
+                                </span>
+                              </div>
                               <span className="training-import-account-state">Pending activation</span>
                               <button type="button" className="secondary-chip-btn" onClick={() => openCreatedAccount(row)}>
                                 Review <ArrowRight size={15} />
@@ -603,108 +805,65 @@ const TrainingWorkbookImportDialog: React.FC<Props> = ({ isOpen, onClose, onComp
               </section>
             ) : null}
 
-            {job.sheets.length > 0 ? (
-              <section className="training-import-section">
-                <div className="training-import-section__header">
-                  <div><h4>Workbook functions</h4><p>Every sheet has an explicit portal destination.</p></div>
-                  <ShieldCheck size={20} />
-                </div>
-                <div className="training-import-sheet-grid">
-                  {job.sheets.map((sheet) => (
-                    <button
-                      type="button"
-                      key={sheet.id}
-                      className={`training-import-sheet ${selectedSheet === sheet.sheet_name ? "is-active" : ""}`}
-                      onClick={() => setSelectedSheet((current) => current === sheet.sheet_name ? "ALL" : sheet.sheet_name)}
-                    >
-                      <span className="training-import-sheet__name">{sheet.sheet_name}</span>
-                      <strong>{sheet.portal_destination}</strong>
-                      <small>{sheet.is_operational ? `${sheet.processed_rows || sheet.total_rows} rows · ${humanize(sheet.status)}` : "Live portal view"}</small>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
             {ACTIVE_STATUSES.has(job.status) && activity.length > 0 ? (
               <section className="training-import-section">
-                <div className="training-import-section__header"><div><h4>Processing now</h4><p>Server-confirmed checkpoints; no simulated progress.</p></div></div>
+                <div className="training-import-section__header">
+                  <div>
+                    <h4>Processing now</h4>
+                    <p>Server-confirmed checkpoints; no simulated progress.</p>
+                  </div>
+                </div>
                 <div className="training-import-live-list">
                   {activity.map((item) => (
                     <div key={item.key}>
                       <span>{clockLabel(item.observedAt)}</span>
                       <strong>{item.sheet ? `${item.sheet}${item.label ? ` · ${item.label}` : ""}` : stageLabel({ ...job, stage: item.stage })}</strong>
-                      <small>{item.processed.toLocaleString()} rows · {humanize(item.stage)}</small>
+                      <small>
+                        {item.processed.toLocaleString()} rows · {humanize(item.stage)}
+                      </small>
                     </div>
                   ))}
                 </div>
               </section>
             ) : null}
-
-            {isReviewReady && reviewRows.length > 0 ? (
-              <section className="training-import-section training-import-review">
-                <div className="training-import-section__header">
-                  <div><h4>Personnel and conflict review</h4><p>New people are never silently activated. Create an inactive account for approval, link an existing account when identified, keep a non-login personnel identity, or skip the row.</p></div>
-                  <UserPlus size={20} />
-                </div>
-                <div className="training-import-filterbar">
-                  <label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, staff code or issue" /></label>
-                  <span>{unresolvedDecisions} decision{unresolvedDecisions === 1 ? "" : "s"} remaining</span>
-                </div>
-                <div className="training-import-table-wrap">
-                  <table className="training-import-table">
-                    <thead><tr><th>Workbook row</th><th>Record</th><th>Reason</th><th>Decision</th></tr></thead>
-                    <tbody>
-                      {filteredReviewRows.map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.sheet_name} · {row.source_row}</td>
-                          <td><strong>{row.display_label || row.source_key || "Record"}</strong><small>{row.source_key}</small></td>
-                          <td>{row.issue_message || humanize(row.proposed_action)}</td>
-                          <td>
-                            <select
-                              value={decisions[row.id] || ""}
-                              onChange={(event) => setDecisions((current) => ({ ...current, [row.id]: event.target.value }))}
-                            >
-                              <option value="">Select decision</option>
-                              {row.decision_options.map((option) => <option key={option} value={option}>{decisionLabel(option)}</option>)}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ) : null}
-
-            {issueRows.length > 0 ? (
-              <details className="training-import-issues" open={job.status === "FAILED"}>
-                <summary><AlertTriangle size={17} /> {issueRows.length} row issue{issueRows.length === 1 ? "" : "s"}</summary>
-                <div className="training-import-table-wrap">
-                  <table className="training-import-table">
-                    <thead><tr><th>Location</th><th>Record</th><th>Issue</th></tr></thead>
-                    <tbody>{issueRows.map((row) => <tr key={row.id}><td>{row.sheet_name} · {row.source_row}</td><td>{row.display_label || row.source_key || "—"}</td><td>{row.issue_message || row.issue_code || "Validation failed"}</td></tr>)}</tbody>
-                  </table>
-                </div>
-              </details>
-            ) : null}
-
           </>
         )}
 
-        {error ? <div className="training-import-alert training-import-alert--danger"><XCircle size={18} /><span>{error}</span></div> : null}
+        {error ? (
+          <div className="training-import-alert training-import-alert--danger">
+            <XCircle size={18} />
+            <span>{error}</span>
+          </div>
+        ) : null}
 
         <footer className="training-import-actions">
-          <button type="button" className={job?.status === "COMPLETED" ? "primary-chip-btn" : "secondary-chip-btn"} onClick={requestClose} disabled={busy}>{job?.status === "COMPLETED" ? "Done" : "Close"}</button>
-          {job && ACTIVE_STATUSES.has(job.status) ? <button type="button" className="secondary-chip-btn" onClick={() => void cancel()}>Cancel job</button> : null}
-          {!job ? (
-            <button type="button" className="primary-chip-btn" onClick={() => void upload()} disabled={!file || uploading}>
-              {uploading ? "Uploading…" : "Inspect workbook"}
+          <button type="button" className={job?.status === "COMPLETED" ? "primary-chip-btn" : "secondary-chip-btn"} onClick={requestClose} disabled={busy}>
+            {job?.status === "COMPLETED" ? "Done" : "Close"}
+          </button>
+          {job && canManage && ACTIVE_STATUSES.has(job.status) ? (
+            <button type="button" className="secondary-chip-btn" onClick={() => void cancel()}>
+              Cancel job
             </button>
+          ) : null}
+          {!job ? (
+            support ? null : (
+              <button type="button" className="primary-chip-btn" onClick={() => void upload()} disabled={!file || uploading}>
+                {uploading ? "Uploading…" : "Inspect workbook"}
+              </button>
+            )
           ) : isReviewReady ? (
             <>
-              {job.duplicate_of_job_id ? <label className="training-import-force"><input type="checkbox" checked={forceReimport} onChange={(event) => setForceReimport(event.target.checked)} /> Force reviewed re-import</label> : null}
-              <button type="button" className="primary-chip-btn" onClick={() => void commit()} disabled={committing || unresolvedDecisions > 0}>
+              {job.duplicate_of_job_id ? (
+                <label className="training-import-force">
+                  <input type="checkbox" checked={forceReimport} onChange={(event) => setForceReimport(event.target.checked)} /> Force reviewed re-import
+                </label>
+              ) : null}
+              <button
+                type="button"
+                className="primary-chip-btn"
+                onClick={() => void commit()}
+                disabled={!canManage || !reviewLoaded || rowsLoading || committing || unresolvedDecisions > 0}
+              >
                 {committing ? "Starting import…" : isRetryableFailure ? "Retry reviewed import" : `Commit ${Math.max(0, total - job.failed_count - job.skipped_count).toLocaleString()} reviewed rows`}
               </button>
             </>

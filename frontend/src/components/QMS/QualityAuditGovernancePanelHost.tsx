@@ -235,8 +235,10 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
               <section className="qms-audit-governance-card">
                 <div className="qms-audit-governance-card__heading"><div><FileClock size={18} /><strong>{latestNotice ? `Notice revision ${latestNotice.revision_no}` : "Create notice"}</strong></div><span>{latestNotice?.status || "DRAFT"}</span></div>
                 <label>Notice date<input type="date" value={noticeDate} onChange={(event) => setNoticeDate(event.target.value)} /></label>
-                <label>Exception<select value={exceptionType} onChange={(event) => setExceptionType(event.target.value as typeof exceptionType)}><option value="">None — enforce notice period</option><option value="EMERGENCY">Emergency</option><option value="UNANNOUNCED">Unannounced audit</option></select></label>
-                {exceptionType ? <label>Exception reason<textarea value={exceptionReason} onChange={(event) => setExceptionReason(event.target.value)} placeholder="State the controlled justification and approval basis." /></label> : null}
+                <label>Exception<select value={exceptionType} onChange={(event) => setExceptionType(event.target.value as typeof exceptionType)}><option value="">None — enforce notice period</option><option value="EMERGENCY">Emergency / short-notice waiver</option><option value="UNANNOUNCED">Unannounced audit</option></select></label>
+                {exceptionType ? <label>Exception reason<textarea value={exceptionReason} onChange={(event) => setExceptionReason(event.target.value)} placeholder="State the controlled justification and approval basis." /></label> : (
+                  <p className="qms-audit-governance-hint">If the notice falls inside the configured lead time, provide an Emergency / short-notice waiver reason instead of blocking the notice.</p>
+                )}
                 <label>Lifecycle reason<textarea value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} /></label>
                 {(!latestNotice || latestNotice.status !== "DRAFT") ? <button type="button" onClick={() => saveNotice.mutate()} disabled={saveNotice.isPending || noticeReason.trim().length < 8 || Boolean(exceptionType && exceptionReason.trim().length < 8)}>{latestNotice ? "Create revised notice" : "Create notice draft"}</button> : null}
               </section>

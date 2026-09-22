@@ -7,7 +7,7 @@
   --assurance-observation: #059669;
   --assurance-observation-soft: #d1fae5;
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   min-width: 0;
 }
 
@@ -37,11 +37,11 @@
 .assurance-context-toggle button {
   background: var(--qms-panel, #fff);
   border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.45));
-  border-radius: 0.65rem;
+  border-radius: 0.6rem;
   color: var(--qms-text, #0f172a);
   font: inherit;
   font-size: 0.75rem;
-  min-height: 2.15rem;
+  min-height: 2.1rem;
 }
 
 .assurance-cockpit__period select { padding: 0.35rem 1.8rem 0.35rem 0.55rem; }
@@ -63,7 +63,7 @@
   display: inline-flex;
   gap: 0.35rem;
   justify-content: center;
-  padding: 0.42rem 0.62rem;
+  padding: 0.38rem 0.58rem;
 }
 
 .assurance-context-toggle button { background: transparent; border-color: transparent; }
@@ -92,118 +92,118 @@
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent-primary, #2563eb) 12%, transparent), transparent 40%),
     linear-gradient(135deg, var(--qms-panel, #fff), var(--qms-page, #f8fafc));
   border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 24%, var(--qms-line, #cbd5e1));
-  border-radius: 1rem;
+  border-radius: 0.85rem;
   display: grid;
-  gap: 0.8rem;
-  grid-template-columns: minmax(0, 1fr) minmax(24rem, 0.62fr);
+  gap: 0.7rem;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.6fr);
   overflow: hidden;
-  padding: 1rem;
+  padding: 0.85rem 0.95rem;
 }
 
-.assurance-health__identity { display: grid; gap: 0.45rem; min-width: 0; }
-.assurance-health__eyebrow { align-items: center; color: var(--accent-primary, #2563eb); display: inline-flex; font-size: 0.68rem; font-weight: 850; gap: 0.35rem; letter-spacing: 0.05em; text-transform: uppercase; }
-.assurance-health__headline { align-items: center; display: flex; gap: 0.8rem; }
-.assurance-health__headline > strong { color: var(--qms-text, #0f172a); font-size: clamp(2rem, 4vw, 3.2rem); font-weight: 950; letter-spacing: -0.07em; line-height: 0.95; }
-.assurance-health__headline h2 { color: var(--qms-text, #0f172a); font-size: clamp(1.1rem, 1.6vw, 1.45rem); letter-spacing: -0.03em; margin: 0; }
-.assurance-health__headline p { color: var(--qms-muted, #64748b); font-size: 0.78rem; margin: 0.12rem 0 0; }
-.assurance-health__identity > small { color: var(--qms-muted, #64748b); font-size: 0.66rem; }
+.assurance-health__identity { display: grid; gap: 0.4rem; min-width: 0; }
+.assurance-health__eyebrow { align-items: center; color: var(--accent-primary, #2563eb); display: inline-flex; font-size: 0.66rem; font-weight: 850; gap: 0.35rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.assurance-health__headline { align-items: center; display: flex; gap: 0.75rem; }
+.assurance-health__headline > strong { color: var(--qms-text, #0f172a); font-size: clamp(1.85rem, 3.4vw, 2.85rem); font-weight: 950; letter-spacing: -0.06em; line-height: 0.95; }
+.assurance-health__headline h2 { color: var(--qms-text, #0f172a); font-size: clamp(1.05rem, 1.5vw, 1.35rem); letter-spacing: -0.03em; margin: 0; }
+.assurance-health__headline p { color: var(--qms-muted, #64748b); font-size: 0.76rem; margin: 0.1rem 0 0; line-height: 1.35; }
+.assurance-health__identity > small { color: var(--qms-muted, #64748b); font-size: 0.64rem; }
 
 .assurance-health__signals {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .assurance-health__signals div {
   background: color-mix(in srgb, var(--qms-panel, #fff) 88%, transparent);
   border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.25));
-  border-radius: 0.75rem;
+  border-radius: 0.65rem;
   display: grid;
-  gap: 0.1rem;
-  padding: 0.6rem;
+  gap: 0.08rem;
+  padding: 0.55rem 0.6rem;
 }
 
-.assurance-health__signals span { color: var(--qms-muted, #64748b); font-size: 0.64rem; font-weight: 800; text-transform: uppercase; }
-.assurance-health__signals strong { color: var(--qms-text, #0f172a); font-size: 1rem; }
+.assurance-health__signals span { color: var(--qms-muted, #64748b); font-size: 0.62rem; font-weight: 800; text-transform: uppercase; }
+.assurance-health__signals strong { color: var(--qms-text, #0f172a); font-size: 0.98rem; }
 
 .assurance-kpi-grid {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.5rem;
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .assurance-kpi {
   background: var(--qms-panel, #fff);
   border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.38));
-  border-radius: 0.85rem;
+  border-radius: 0.75rem;
   color: var(--qms-text, #0f172a);
   cursor: pointer;
   display: grid;
-  gap: 0.2rem;
-  min-height: 7.3rem;
-  padding: 0.7rem;
+  gap: 0.16rem;
+  min-height: 6.2rem;
+  padding: 0.6rem 0.65rem;
   position: relative;
   text-align: left;
   transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
-.assurance-kpi:hover { border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 42%, var(--qms-line, #cbd5e1)); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.07); transform: translateY(-1px); }
-.assurance-kpi::before { border-radius: 1rem; content: ""; height: 0.24rem; inset: 0.42rem 0.7rem auto; position: absolute; }
+.assurance-kpi:hover { border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 42%, var(--qms-line, #cbd5e1)); box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06); transform: translateY(-1px); }
+.assurance-kpi::before { border-radius: 1rem; content: ""; height: 0.2rem; inset: 0.38rem 0.65rem auto; position: absolute; }
 .assurance-kpi--good::before { background: #10b981; }
 .assurance-kpi--warn::before { background: #f59e0b; }
 .assurance-kpi--danger::before { background: #ef4444; }
 .assurance-kpi--info::before { background: var(--accent-primary, #2563eb); }
 .assurance-kpi--neutral::before { background: #94a3b8; }
-.assurance-kpi__label { color: var(--qms-muted, #64748b); font-size: 0.67rem; font-weight: 850; margin-top: 0.28rem; text-transform: uppercase; }
-.assurance-kpi > strong { font-size: 1.55rem; letter-spacing: -0.05em; }
-.assurance-kpi > small { color: var(--qms-muted, #64748b); font-size: 0.68rem; line-height: 1.3; }
-.assurance-kpi__open { align-items: center; color: var(--accent-primary, #2563eb); display: inline-flex; font-size: 0.65rem; font-weight: 800; gap: 0.2rem; margin-top: auto; }
+.assurance-kpi__label { color: var(--qms-muted, #64748b); font-size: 0.64rem; font-weight: 850; margin-top: 0.22rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.assurance-kpi > strong { font-size: 1.4rem; letter-spacing: -0.04em; }
+.assurance-kpi > small { color: var(--qms-muted, #64748b); font-size: 0.66rem; line-height: 1.3; }
+.assurance-kpi__open { align-items: center; color: var(--accent-primary, #2563eb); display: inline-flex; font-size: 0.64rem; font-weight: 800; gap: 0.18rem; margin-top: auto; }
 
-.assurance-cockpit__grid { display: grid; gap: 0.75rem; min-width: 0; }
-.assurance-cockpit__grid--primary { grid-template-columns: minmax(0, 1.45fr) minmax(19rem, 0.65fr); }
-.assurance-cockpit__grid--secondary { grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.72fr) minmax(17rem, 0.62fr); }
+.assurance-cockpit__grid { display: grid; gap: 0.65rem; min-width: 0; }
+.assurance-cockpit__grid--primary { grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.65fr); }
+.assurance-cockpit__grid--secondary { grid-template-columns: minmax(0, 1.1fr) minmax(17rem, 0.72fr) minmax(16rem, 0.62fr); }
 
 .assurance-panel,
 .assurance-readiness-panel {
   background: var(--qms-panel, #fff);
   border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.38));
-  border-radius: 0.95rem;
+  border-radius: 0.8rem;
   min-width: 0;
   overflow: hidden;
-  padding: 0.8rem;
+  padding: 0.7rem 0.75rem;
 }
 
 .assurance-panel > header,
 .assurance-readiness-panel > header {
   align-items: flex-start;
   display: flex;
-  gap: 0.65rem;
+  gap: 0.6rem;
   justify-content: space-between;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.5rem;
 }
 
 .assurance-panel > header span,
-.assurance-readiness-panel > header span { color: var(--accent-primary, #2563eb); display: block; font-size: 0.63rem; font-weight: 850; letter-spacing: 0.06em; text-transform: uppercase; }
+.assurance-readiness-panel > header span { color: var(--accent-primary, #2563eb); display: block; font-size: 0.62rem; font-weight: 850; letter-spacing: 0.06em; text-transform: uppercase; }
 .assurance-panel > header h3,
-.assurance-readiness-panel > header h3 { color: var(--qms-text, #0f172a); font-size: 0.96rem; letter-spacing: -0.02em; margin: 0.12rem 0 0; }
-.assurance-panel > header p { color: var(--qms-muted, #64748b); font-size: 0.7rem; margin: 0.14rem 0 0; }
+.assurance-readiness-panel > header h3 { color: var(--qms-text, #0f172a); font-size: 0.92rem; letter-spacing: -0.02em; margin: 0.1rem 0 0; }
+.assurance-panel > header p { color: var(--qms-muted, #64748b); font-size: 0.68rem; margin: 0.12rem 0 0; line-height: 1.35; }
 .assurance-panel > header button { align-items: center; background: transparent; border: 0; color: var(--accent-primary, #2563eb); cursor: pointer; display: inline-flex; font-size: 0.68rem; font-weight: 800; gap: 0.2rem; padding: 0.2rem; white-space: nowrap; }
 
-.assurance-chart { height: 13rem; min-width: 0; }
-.assurance-chart--large { height: 18.5rem; }
+.assurance-chart { height: 11rem; min-width: 0; }
+.assurance-chart--large { height: 14.5rem; }
 
-.assurance-action-list { display: grid; gap: 0.38rem; }
+.assurance-action-list { display: grid; gap: 0.28rem; }
 .assurance-action-list > button {
   align-items: center;
   background: var(--qms-page, #f8fafc);
   border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.28));
-  border-radius: 0.72rem;
+  border-radius: 0.55rem;
   color: var(--qms-text, #0f172a);
   cursor: pointer;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-  padding: 0.55rem;
+  padding: 0.4rem 0.45rem;
   text-align: left;
 }
 .assurance-action-list > button:hover { border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 34%, var(--qms-line, #cbd5e1)); }
@@ -219,8 +219,8 @@
 .assurance-priority--info { background: #e0f2fe; color: #0369a1; }
 
 .assurance-empty,
-.assurance-inbox-zero { align-items: center; color: var(--qms-muted, #64748b); display: flex; flex-direction: column; gap: 0.25rem; justify-content: center; min-height: 12rem; padding: 1rem; text-align: center; }
-.assurance-empty--compact { min-height: 10rem; }
+.assurance-inbox-zero { align-items: center; color: var(--qms-muted, #64748b); display: flex; flex-direction: column; gap: 0.2rem; justify-content: center; min-height: 7.5rem; padding: 0.75rem; text-align: center; }
+.assurance-empty--compact { min-height: 6rem; }
 .assurance-empty strong,
 .assurance-inbox-zero strong { color: var(--qms-text, #0f172a); font-size: 0.8rem; }
 .assurance-empty span,
@@ -228,14 +228,14 @@
 .assurance-empty svg,
 .assurance-inbox-zero svg { color: #10b981; }
 
-.assurance-ageing { display: grid; gap: 0.38rem; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.assurance-ageing button { background: var(--qms-page, #f8fafc); border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.3)); border-radius: 0.72rem; color: var(--qms-text, #0f172a); cursor: pointer; display: grid; gap: 0.1rem; min-height: 4.7rem; place-content: center; text-align: center; }
+.assurance-ageing { display: grid; gap: 0.3rem; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.assurance-ageing button { background: var(--qms-page, #f8fafc); border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.3)); border-radius: 0.55rem; color: var(--qms-text, #0f172a); cursor: pointer; display: grid; gap: 0.06rem; min-height: 3.6rem; place-content: center; text-align: center; }
 .assurance-ageing button:hover { border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 38%, var(--qms-line, #cbd5e1)); }
-.assurance-ageing strong { font-size: 1.15rem; }
-.assurance-ageing span { color: var(--qms-muted, #64748b); font-size: 0.62rem; }
+.assurance-ageing strong { font-size: 1rem; }
+.assurance-ageing span { color: var(--qms-muted, #64748b); font-size: 0.58rem; }
 
-.assurance-pipeline { display: grid; gap: 0.38rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.assurance-pipeline button { background: var(--qms-page, #f8fafc); border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.3)); border-radius: 0.72rem; color: var(--qms-text, #0f172a); cursor: pointer; display: grid; gap: 0.08rem; min-height: 5.4rem; padding: 0.48rem; text-align: left; }
+.assurance-pipeline { display: grid; gap: 0.3rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.assurance-pipeline button { background: var(--qms-page, #f8fafc); border: 1px solid var(--qms-line-soft, rgba(148, 163, 184, 0.3)); border-radius: 0.55rem; color: var(--qms-text, #0f172a); cursor: pointer; display: grid; gap: 0.06rem; min-height: 4.2rem; padding: 0.38rem; text-align: left; }
 .assurance-pipeline button > span { align-items: center; background: color-mix(in srgb, var(--accent-primary, #2563eb) 12%, transparent); border-radius: 999px; color: var(--accent-primary, #2563eb); display: inline-flex; font-size: 0.6rem; font-weight: 900; height: 1.45rem; justify-content: center; width: 1.45rem; }
 .assurance-pipeline strong { font-size: 1.15rem; margin-top: 0.18rem; }
 .assurance-pipeline small { color: var(--qms-muted, #64748b); font-size: 0.59rem; font-weight: 800; text-transform: uppercase; }
@@ -317,12 +317,21 @@
 /* Preserve the existing breakpoints while making every operation reachable. */
 .assurance-cockpit, .assurance-panel, .assurance-health, .qa-workspace-main { min-width: 0; }
 .assurance-cockpit :is(button, select, summary), .assurance-cockpit__toolbar :is(button, select),
-.assurance-unscheduled-drawer :is(button, select), .qa-workspace-mobile-tabs select { min-height: 44px; }
+.assurance-unscheduled-drawer :is(button, select), .qa-workspace-mobile-tabs select { min-height: 2.1rem; }
+@media (pointer: coarse) {
+  .assurance-cockpit :is(button, select, summary),
+  .assurance-cockpit__toolbar :is(button, select),
+  .assurance-unscheduled-drawer :is(button, select),
+  .qa-workspace-mobile-tabs select,
+  .qa-workspace-rail__tab {
+    min-height: 2.75rem;
+  }
+}
 .assurance-cockpit :is(button, a, select, summary):focus-visible,
 .assurance-cockpit__toolbar :is(button, select):focus-visible,
 .assurance-unscheduled-drawer :is(button, a):focus-visible,
 .qa-workspace-rail__tab:focus-visible, .qa-workspace-mobile-tabs select:focus-visible {
-  outline: 3px solid var(--accent-primary, #2563eb); outline-offset: 3px;
+  outline: 2px solid var(--accent-primary, #2563eb); outline-offset: 2px;
 }
 .assurance-cockpit__toolbar { flex-wrap: wrap; min-width: 0; }
 .assurance-health__headline, .assurance-panel > header { flex-wrap: wrap; }
@@ -349,3 +358,258 @@
 @media (prefers-reduced-motion: reduce) {
   .assurance-cockpit *, .assurance-cockpit__toolbar *, .assurance-unscheduled-drawer * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Theme-safe cockpit surfaces (light + dark via shared QMS tokens) */
+html[data-color-scheme="dark"] .assurance-cockpit,
+body[data-color-scheme="dark"] .assurance-cockpit,
+[data-theme="dark"] .assurance-cockpit,
+.dark .assurance-cockpit {
+  --assurance-critical-soft: color-mix(in srgb, #dc2626 22%, var(--qms-panel, #1c1f24));
+  --assurance-major-soft: color-mix(in srgb, #d97706 20%, var(--qms-panel, #1c1f24));
+  --assurance-minor-soft: color-mix(in srgb, #2563eb 20%, var(--qms-panel, #1c1f24));
+  --assurance-observation-soft: color-mix(in srgb, #059669 18%, var(--qms-panel, #1c1f24));
+}
+
+html[data-color-scheme="dark"] :is(
+  .assurance-health,
+  .assurance-kpi,
+  .assurance-panel,
+  .assurance-readiness-panel,
+  .assurance-cockpit__loading,
+  .assurance-cockpit__error,
+  .assurance-source-warnings
+),
+body[data-color-scheme="dark"] :is(
+  .assurance-health,
+  .assurance-kpi,
+  .assurance-panel,
+  .assurance-readiness-panel,
+  .assurance-cockpit__loading,
+  .assurance-cockpit__error,
+  .assurance-source-warnings
+),
+[data-theme="dark"] :is(
+  .assurance-health,
+  .assurance-kpi,
+  .assurance-panel,
+  .assurance-readiness-panel,
+  .assurance-cockpit__loading,
+  .assurance-cockpit__error,
+  .assurance-source-warnings
+),
+.dark :is(
+  .assurance-health,
+  .assurance-kpi,
+  .assurance-panel,
+  .assurance-readiness-panel,
+  .assurance-cockpit__loading,
+  .assurance-cockpit__error,
+  .assurance-source-warnings
+) {
+  background: var(--qms-panel, #1c1f24);
+  border-color: var(--qms-line, rgba(255, 255, 255, 0.12));
+  color: var(--qms-text, #e8eef7);
+}
+
+html[data-color-scheme="dark"] .assurance-health,
+body[data-color-scheme="dark"] .assurance-health,
+[data-theme="dark"] .assurance-health,
+.dark .assurance-health {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent-primary, #4f8cff) 16%, transparent), transparent 42%),
+    linear-gradient(135deg, var(--qms-panel, #1c1f24), color-mix(in srgb, var(--qms-page, #121418) 80%, var(--qms-panel, #1c1f24)));
+}
+
+html[data-color-scheme="dark"] :is(
+  .assurance-health__signals div,
+  .assurance-action-list > button,
+  .assurance-ageing button,
+  .assurance-pipeline button,
+  .assurance-context-toggle,
+  .assurance-cockpit__period select,
+  .assurance-command-trigger,
+  .assurance-refresh
+),
+body[data-color-scheme="dark"] :is(
+  .assurance-health__signals div,
+  .assurance-action-list > button,
+  .assurance-ageing button,
+  .assurance-pipeline button,
+  .assurance-context-toggle,
+  .assurance-cockpit__period select,
+  .assurance-command-trigger,
+  .assurance-refresh
+),
+[data-theme="dark"] :is(
+  .assurance-health__signals div,
+  .assurance-action-list > button,
+  .assurance-ageing button,
+  .assurance-pipeline button,
+  .assurance-context-toggle,
+  .assurance-cockpit__period select,
+  .assurance-command-trigger,
+  .assurance-refresh
+),
+.dark :is(
+  .assurance-health__signals div,
+  .assurance-action-list > button,
+  .assurance-ageing button,
+  .assurance-pipeline button,
+  .assurance-context-toggle,
+  .assurance-cockpit__period select,
+  .assurance-command-trigger,
+  .assurance-refresh
+) {
+  background: color-mix(in srgb, var(--qms-page, #121418) 70%, var(--qms-panel, #1c1f24));
+  border-color: var(--qms-line, rgba(255, 255, 255, 0.12));
+  color: var(--qms-text, #e8eef7);
+}
+
+html[data-color-scheme="dark"] .assurance-context-toggle button.is-active,
+body[data-color-scheme="dark"] .assurance-context-toggle button.is-active,
+[data-theme="dark"] .assurance-context-toggle button.is-active,
+.dark .assurance-context-toggle button.is-active {
+  background: var(--qms-selected, rgba(59, 130, 246, 0.2));
+  border-color: color-mix(in srgb, var(--accent-primary, #4f8cff) 40%, transparent);
+  color: color-mix(in srgb, var(--accent-primary, #4f8cff) 70%, #fff);
+  box-shadow: none;
+}
+
+html[data-color-scheme="dark"] :is(
+  .assurance-health__headline > strong,
+  .assurance-health__headline h2,
+  .assurance-kpi > strong,
+  .assurance-panel > header h3,
+  .assurance-readiness-panel > header h3,
+  .assurance-action-list__copy strong,
+  .assurance-empty strong,
+  .assurance-inbox-zero strong,
+  .assurance-readiness-grid strong
+),
+body[data-color-scheme="dark"] :is(
+  .assurance-health__headline > strong,
+  .assurance-health__headline h2,
+  .assurance-kpi > strong,
+  .assurance-panel > header h3,
+  .assurance-readiness-panel > header h3,
+  .assurance-action-list__copy strong,
+  .assurance-empty strong,
+  .assurance-inbox-zero strong,
+  .assurance-readiness-grid strong
+),
+[data-theme="dark"] :is(
+  .assurance-health__headline > strong,
+  .assurance-health__headline h2,
+  .assurance-kpi > strong,
+  .assurance-panel > header h3,
+  .assurance-readiness-panel > header h3,
+  .assurance-action-list__copy strong,
+  .assurance-empty strong,
+  .assurance-inbox-zero strong,
+  .assurance-readiness-grid strong
+),
+.dark :is(
+  .assurance-health__headline > strong,
+  .assurance-health__headline h2,
+  .assurance-kpi > strong,
+  .assurance-panel > header h3,
+  .assurance-readiness-panel > header h3,
+  .assurance-action-list__copy strong,
+  .assurance-empty strong,
+  .assurance-inbox-zero strong,
+  .assurance-readiness-grid strong
+) {
+  color: var(--qms-text, #f8fafc);
+}
+
+html[data-color-scheme="dark"] :is(
+  .assurance-health__headline p,
+  .assurance-health__identity > small,
+  .assurance-health__signals span,
+  .assurance-kpi__label,
+  .assurance-kpi > small,
+  .assurance-panel > header p,
+  .assurance-action-list__copy small,
+  .assurance-ageing span,
+  .assurance-pipeline small,
+  .assurance-empty,
+  .assurance-inbox-zero,
+  .assurance-readiness-grid > div > span,
+  .assurance-readiness-panel > header > small
+),
+body[data-color-scheme="dark"] :is(
+  .assurance-health__headline p,
+  .assurance-health__identity > small,
+  .assurance-health__signals span,
+  .assurance-kpi__label,
+  .assurance-kpi > small,
+  .assurance-panel > header p,
+  .assurance-action-list__copy small,
+  .assurance-ageing span,
+  .assurance-pipeline small,
+  .assurance-empty,
+  .assurance-inbox-zero,
+  .assurance-readiness-grid > div > span,
+  .assurance-readiness-panel > header > small
+),
+[data-theme="dark"] :is(
+  .assurance-health__headline p,
+  .assurance-health__identity > small,
+  .assurance-health__signals span,
+  .assurance-kpi__label,
+  .assurance-kpi > small,
+  .assurance-panel > header p,
+  .assurance-action-list__copy small,
+  .assurance-ageing span,
+  .assurance-pipeline small,
+  .assurance-empty,
+  .assurance-inbox-zero,
+  .assurance-readiness-grid > div > span,
+  .assurance-readiness-panel > header > small
+),
+.dark :is(
+  .assurance-health__headline p,
+  .assurance-health__identity > small,
+  .assurance-health__signals span,
+  .assurance-kpi__label,
+  .assurance-kpi > small,
+  .assurance-panel > header p,
+  .assurance-action-list__copy small,
+  .assurance-ageing span,
+  .assurance-pipeline small,
+  .assurance-empty,
+  .assurance-inbox-zero,
+  .assurance-readiness-grid > div > span,
+  .assurance-readiness-panel > header > small
+) {
+  color: var(--qms-muted, #94a3b8);
+}
+
+html[data-color-scheme="dark"] .assurance-priority--critical,
+body[data-color-scheme="dark"] .assurance-priority--critical,
+[data-theme="dark"] .assurance-priority--critical,
+.dark .assurance-priority--critical { background: var(--qa-danger-bg, #3a2226); color: var(--qa-danger-ink, #fecaca); }
+html[data-color-scheme="dark"] .assurance-priority--high,
+body[data-color-scheme="dark"] .assurance-priority--high,
+[data-theme="dark"] .assurance-priority--high,
+.dark .assurance-priority--high { background: var(--qa-warn-bg, #3a3120); color: var(--qa-warn-ink, #fde68a); }
+html[data-color-scheme="dark"] .assurance-priority--medium,
+body[data-color-scheme="dark"] .assurance-priority--medium,
+[data-theme="dark"] .assurance-priority--medium,
+.dark .assurance-priority--medium { background: color-mix(in srgb, #f59e0b 18%, var(--qms-panel, #1c1f24)); color: #fcd34d; }
+html[data-color-scheme="dark"] .assurance-priority--low,
+body[data-color-scheme="dark"] .assurance-priority--low,
+[data-theme="dark"] .assurance-priority--low,
+.dark .assurance-priority--low { background: var(--qa-info-bg, #1e2a3a); color: var(--qa-info-ink, #bfdbfe); }
+html[data-color-scheme="dark"] .assurance-priority--info,
+body[data-color-scheme="dark"] .assurance-priority--info,
+[data-theme="dark"] .assurance-priority--info,
+.dark .assurance-priority--info { background: var(--qa-info-bg, #1e2a3a); color: var(--qa-info-ink, #bfdbfe); }
+
+html[data-color-scheme="dark"] .assurance-readiness-grid > div > div,
+body[data-color-scheme="dark"] .assurance-readiness-grid > div > div,
+[data-theme="dark"] .assurance-readiness-grid > div > div,
+.dark .assurance-readiness-grid > div > div {
+  background: color-mix(in srgb, var(--qms-page, #121418) 80%, #fff 8%);
+}
+

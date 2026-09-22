@@ -153,24 +153,29 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
 .quality-context-bar__identity {
   display: flex;
   align-items: center;
-  gap: 0.52rem;
+  gap: 0.65rem;
   min-width: 0;
+  padding-right: 0.35rem;
+  border-right: 1px solid color-mix(in srgb, var(--border-color, rgba(148, 163, 184, 0.28)) 70%, transparent);
+  margin-right: 0.2rem;
 }
 
 .quality-context-bar__mark {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface));
   color: var(--accent-primary);
 }
 
 .quality-context-bar__identity > span:last-child {
   display: grid;
+  align-content: center;
   min-width: 0;
+  gap: 0.08rem;
   line-height: 1.15;
 }
 
@@ -208,10 +213,10 @@ body[data-portal-density="compact"] .tenant-nav__favourite { min-height: 34px; }
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   flex: 0 0 auto;
   min-height: 38px;
-  padding: 0 0.62rem;
+  padding: 0.35rem 0.7rem;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -401,6 +406,9 @@ html.quality-context-active .audit-shell-content {
 }
 
 /* Audit Assurance: denser Quality context + less stacked chrome */
+html.audit-assurance-surface {
+  --qa-assurance-rail-sticky-top: 2.75rem;
+}
 html.audit-assurance-surface .quality-context-bar {
   min-height: 44px;
   gap: 0.45rem;

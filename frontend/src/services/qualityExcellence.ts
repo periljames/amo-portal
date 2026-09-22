@@ -383,20 +383,28 @@ export function reconcileAssuranceEvidence(amoCode: string): Promise<{
   changed: number;
   rejected: number;
   events_processed: number;
+  remaining_events?: number;
   errors: Array<{ evidence_id: string; message: string }>;
   as_of: string;
 }> {
   return apiRequest(qualityPath(amoCode, "/excellence/reconcile"), {
     method: "POST",
-    timeoutMs: 45_000,
+    // Large TRAINING import backlogs clear in one bulk update; evidence refresh
+    // walks every link in server-side batches and can take longer than a short POST.
+    timeoutMs: 180_000,
   });
 }
 
-export function getAssuranceEvents(amoCode: string): Promise<{ items: AssuranceEvent[]; total: number }> {
-  return apiRequest<{ items: AssuranceEvent[]; total: number }>(qualityPath(amoCode, "/excellence/events?limit=100"), {
-    cacheTtlMs: 5_000,
-    timeoutMs: 20_000,
-  });
+export function getAssuranceEvents(
+  amoCode: string,
+  options?: { processingStatus?: AssuranceEvent["processing_status"]; limit?: number },
+): Promise<{ items: AssuranceEvent[]; total: number }> {
+  const params = new URLSearchParams({ limit: String(options?.limit ?? 100) });
+  if (options?.processingStatus) params.set("processing_status", options.processingStatus);
+  return apiRequest<{ items: AssuranceEvent[]; total: number }>(
+    `${qualityPath(amoCode, "/excellence/events")}?${params.toString()}`,
+    { cacheTtlMs: 5_000, timeoutMs: 20_000 },
+  );
 }
 
 export function getManagementReviewPack(amoCode: string): Promise<ManagementReviewPack> {

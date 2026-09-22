@@ -1,0 +1,529 @@
+.qms-car-performance-report {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--qms-text, var(--text-primary, #172033));
+}
+
+.qms-car-performance-report .qms-car-perf-banner {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.qms-car-performance-report .card {
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+}
+
+.qms-car-performance-report .card__header {
+  margin-bottom: 0.35rem;
+}
+
+.qms-car-performance-report .card__header h2 {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.qms-car-performance-report .card__header p {
+  margin: 0.1rem 0 0;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.qms-car-performance-report .qms-car-perf-filters {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.55rem 0.4rem;
+}
+
+.qms-car-perf-filters-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.3rem;
+  min-width: 0;
+}
+
+.qms-car-perf-filters-meta {
+  margin: 0;
+  min-width: 0;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.7rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qms-car-perf-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.qms-car-perf-actions .btn {
+  min-height: 1.85rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.74rem;
+  line-height: 1.15;
+}
+
+.qms-car-performance-report .form-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.25rem 0.45rem;
+  align-items: end;
+}
+
+.qms-car-performance-report .form-grid > label {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.qms-car-performance-report .form-grid .input,
+.qms-car-performance-report .form-grid input,
+.qms-car-performance-report .form-grid select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  height: 2rem;
+  box-sizing: border-box;
+  border: 1px solid var(--qms-line, var(--border-color, #cbd5e1));
+  border-radius: 0.35rem;
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.qms-car-performance-report .qms-car-perf-kpis {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.qms-car-performance-report .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+.qms-car-performance-report .stats-grid > div {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--qms-line, var(--border-color, #d8e0ea));
+  border-radius: 0.35rem;
+  background: var(--qms-page, var(--surface-subtle, #f8fafc));
+}
+
+.qms-car-performance-report .stats-grid > div > span,
+.qms-car-performance-report .stats-grid .muted {
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.55rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qms-car-performance-report .stats-grid > div > strong {
+  color: var(--qms-text, var(--text-primary, #172033));
+  font-size: 0.95rem;
+  font-weight: 750;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.qms-car-perf-kpi--ok > strong {
+  color: color-mix(in srgb, var(--accent-success, #16a34a) 85%, var(--qms-text, #172033));
+}
+
+.qms-car-perf-kpi--warn > strong {
+  color: color-mix(in srgb, var(--accent-warning, #d97706) 90%, var(--qms-text, #172033));
+}
+
+.qms-car-perf-qpi-line {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--qms-muted, #64748b);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qms-car-perf-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.15rem;
+  border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.48));
+  border-radius: 0.4rem;
+  background: var(--qms-page, var(--surface-subtle, #f8fafc));
+}
+
+.qms-car-perf-tab {
+  appearance: none;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.qms-car-perf-tab:hover {
+  color: var(--qms-text, var(--text-primary, #172033));
+  background: color-mix(in srgb, var(--qms-panel, #fff) 70%, transparent);
+}
+
+.qms-car-perf-tab.is-active,
+.qms-car-perf-tab[aria-selected="true"] {
+  border-color: var(--qms-line, rgba(148, 163, 184, 0.55));
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
+  box-shadow: 0 1px 2px color-mix(in srgb, #0f172a 6%, transparent);
+}
+
+.qms-car-perf-tab:focus-visible {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+.qms-car-perf-tab-panels {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qms-car-perf-tab-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qms-car-perf-tab-panel--registers {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.qms-car-perf-canvas {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0.55rem 0.7rem;
+  gap: 0.45rem;
+}
+
+.qms-car-perf-canvas__toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.qms-car-perf-canvas__title {
+  min-width: 0;
+}
+
+.qms-car-perf-canvas__title h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.qms-car-perf-canvas__title p {
+  margin: 0.15rem 0 0;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.qms-car-perf-canvas__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem 0.75rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.qms-car-perf-control {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 11rem;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-car-perf-control .input,
+.qms-car-perf-control select {
+  min-height: 2.05rem;
+  height: 2.05rem;
+  border: 1px solid var(--qms-line, var(--border-color, #cbd5e1));
+  border-radius: 0.35rem;
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
+  padding: 0.2rem 0.45rem;
+  font: inherit;
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 550;
+}
+
+.qms-car-perf-chart-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0.15rem;
+  border: 1px solid var(--qms-line, rgba(148, 163, 184, 0.45));
+  border-radius: 0.45rem;
+  background: var(--qms-page, var(--surface-subtle, #f8fafc));
+}
+
+.qms-car-perf-chart-kind {
+  appearance: none;
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--qms-muted, var(--text-secondary, #64748b));
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.qms-car-perf-chart-kind:hover {
+  color: var(--qms-text, var(--text-primary, #172033));
+  background: color-mix(in srgb, var(--qms-panel, #fff) 75%, transparent);
+}
+
+.qms-car-perf-chart-kind.is-active,
+.qms-car-perf-chart-kind[aria-pressed="true"] {
+  border-color: var(--qms-line, rgba(148, 163, 184, 0.55));
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #172033));
+  box-shadow: 0 1px 2px color-mix(in srgb, #0f172a 6%, transparent);
+}
+
+.qms-car-perf-canvas__chart {
+  flex: 1 1 auto;
+  min-height: 18rem;
+  min-width: 0;
+  height: 100%;
+}
+
+.qms-car-perf-chart-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.qms-car-perf-forecast-layout {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1.55fr) minmax(16rem, 0.85fr);
+  gap: 0.55rem;
+  min-height: 0;
+  height: 100%;
+}
+
+.qms-car-perf-canvas--companion {
+  min-height: 0;
+}
+
+.qms-car-perf-forecast {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.45rem;
+}
+
+.qms-car-perf-forecast dl {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.qms-car-perf-forecast dl div {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--qms-line, #d8e0ea);
+  border-radius: 8px;
+  background: var(--qms-page, #f8fafc);
+  color: var(--qms-text, #172033);
+}
+
+.qms-car-perf-forecast dt {
+  color: var(--qms-muted, #64748b);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-car-perf-forecast dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.qms-car-perf-forecast > p {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--qms-muted, #64748b);
+  overflow: auto;
+  min-height: 0;
+}
+
+.qms-car-perf-register-card {
+  flex: 0 0 auto;
+}
+
+.qms-car-perf-register-card--detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.qms-car-perf-register-grid--detail {
+  flex: 1 1 auto;
+  min-height: 14rem;
+  height: clamp(14rem, 32vh, 26rem);
+}
+
+.qms-car-perf-canvas__chart .recharts-cartesian-axis-tick text,
+.qms-car-perf-canvas__chart .recharts-legend-item-text {
+  fill: var(--qms-muted, #94a3b8) !important;
+}
+
+.qms-car-perf-canvas__chart .recharts-cartesian-axis-line,
+.qms-car-perf-canvas__chart .recharts-cartesian-axis-tick-line {
+  stroke: color-mix(in srgb, var(--qms-muted, #94a3b8) 55%, transparent);
+}
+
+.qms-car-perf-canvas__chart .recharts-default-tooltip {
+  background: var(--qms-panel, #fff) !important;
+  border: 1px solid var(--qms-line, #d8e0ea) !important;
+  color: var(--qms-text, #172033) !important;
+}
+
+@media (max-width: 1200px) {
+  .qms-car-performance-report .form-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .qms-car-performance-report .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .qms-car-performance-report .stats-grid > div {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.05rem;
+  }
+
+  .qms-car-perf-forecast-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 960px) {
+  .qms-car-performance-report {
+    overflow: auto;
+  }
+
+  .qms-car-perf-canvas__chart {
+    min-height: 16rem;
+  }
+
+  .qms-car-performance-report .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .qms-car-performance-report .form-grid,
+  .qms-car-performance-report .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-car-perf-tabs {
+    overflow-x: auto;
+  }
+
+  .qms-car-perf-filters-meta,
+  .qms-car-perf-qpi-line {
+    white-space: normal;
+  }
+
+  .qms-car-perf-actions {
+    flex-wrap: wrap;
+  }
+}

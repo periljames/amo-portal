@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { parseQmsSseBlock } from "./qmsAuditRealtime";
 
@@ -25,5 +25,46 @@ describe("QMS audit realtime SSE parser", () => {
   it("joins multiline data and ignores comments", () => {
     const parsed = parseQmsSseBlock(": keepalive\nevent: activity\ndata: first\ndata: second");
     expect(parsed).toEqual({ event: "activity", data: "first\nsecond" });
+  });
+
+  it("bridges shell realtime instead of opening a dedicated /api/events fetch", async () => {
+    const listeners = new Map<string, Set<EventListener>>();
+    vi.stubGlobal("window", {
+      addEventListener: (type: string, listener: EventListener) => {
+        const set = listeners.get(type) ?? new Set();
+        set.add(listener);
+        listeners.set(type, set);
+      },
+      removeEventListener: (type: string, listener: EventListener) => {
+        listeners.get(type)?.delete(listener);
+      },
+      dispatchEvent: (event: Event) => {
+        for (const listener of listeners.get(event.type) ?? []) listener(event);
+        return true;
+      },
+    });
+    vi.stubGlobal("CustomEvent", class CustomEvent<T> extends Event {
+      detail: T;
+      constructor(type: string, init?: CustomEventInit<T>) {
+        super(type);
+        this.detail = init?.detail as T;
+      }
+    });
+
+    try {
+      const { startQmsAuditRealtimeStream, publishQmsRealtimeEvent } = await import("./qmsAuditRealtime");
+      const seen: string[] = [];
+      const stop = startQmsAuditRealtimeStream({
+        onEvent: (event) => { seen.push(event.event); },
+      });
+      publishQmsRealtimeEvent({
+        event: "qms.audit.updated",
+        data: { type: "qms.audit.updated", metadata: { auditId: "a1", module: "quality" } },
+      });
+      expect(seen).toEqual(["qms.audit.updated"]);
+      stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

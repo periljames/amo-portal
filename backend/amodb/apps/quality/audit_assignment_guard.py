@@ -4,13 +4,20 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy import case
+from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.training.integration import current_training_evidence
 
 from . import models as quality_models
-from .people_models import QualityIndependenceDeclaration, QualityPrivilege, QualityPrivilegeRule
+from .independence_conflict import evaluate_independence_conflicts
+from .people_competence import (
+    active_qm_bypass,
+    apply_auto_suspend_if_currency_lapsed,
+    evaluate_qms_competence_for_privilege,
+)
+from .people_models import QualityPrivilege, QualityPrivilegeRule
 from .planner_schedule_models import QMSPlannerScheduleMetadata
 
 
@@ -20,6 +27,21 @@ _ROLE_TYPES = {
     "ASSISTANT_AUDITOR": "AUDITOR",
 }
 _DEVELOPMENT_ROLES = {"OBSERVER_AUDITOR", "ASSISTANT_AUDITOR"}
+
+
+def _privilege_types_for_assignment(role: str) -> tuple[str, ...]:
+    """Privilege rule types that may authorize an assignment role.
+
+    Lead may be filled by a dedicated LEAD_AUDITOR grant or by an AUDITOR grant
+    when no lead-specific privilege is available for that person.
+    """
+
+    if role == "LEAD_AUDITOR":
+        return ("LEAD_AUDITOR", "AUDITOR")
+    privilege_type = _ROLE_TYPES.get(role)
+    if privilege_type is None:
+        raise ValueError(f"Unsupported auditor assignment role: {role}")
+    return (privilege_type,)
 
 
 def _enum_value(value: Any) -> str:
@@ -125,35 +147,55 @@ def _independence_evidence(
     context_type: str | None,
     context_id: str | None,
     enforce: bool,
+    assignment_scope_key: str | None = None,
 ) -> dict[str, Any]:
     if not required:
-        return {"required": False, "passed": True, "pending": False, "declaration": None}
+        return {"required": False, "passed": True, "pending": False, "declaration": None, "conflicts": []}
+    assessment = evaluate_independence_conflicts(
+        db,
+        amo_id=amo_id,
+        user_id=user_id,
+        context_type=context_type,
+        context_id=context_id,
+        assignment_scope_key=assignment_scope_key,
+    )
     if not enforce:
         return {
             "required": True,
             "passed": True,
             "pending": True,
             "declaration": None,
-            "message": "Independence must be declared against the created assignment before activation or execution.",
+            "message": "Independence enforcement is deferred until assignment activation.",
+            "conflicts": assessment.get("conflicts") or [],
+            "remediations": assessment.get("remediations") or [],
+            "notes": assessment.get("notes") or [],
+            "enforced": assessment.get("enforced"),
         }
     if not context_type or not context_id:
-        return {"required": True, "passed": False, "pending": True, "declaration": None, "message": "Assignment context is required."}
-    row = db.query(QualityIndependenceDeclaration).filter(
-        QualityIndependenceDeclaration.amo_id == amo_id,
-        QualityIndependenceDeclaration.user_id == user_id,
-        QualityIndependenceDeclaration.context_type == context_type,
-        QualityIndependenceDeclaration.context_id == context_id,
-    ).first()
-    if row is None:
-        return {"required": True, "passed": False, "pending": True, "declaration": None, "message": "No independence declaration exists for this assignment."}
+        return {
+            "required": True,
+            "passed": False,
+            "pending": True,
+            "declaration": None,
+            "message": "Assignment context is required.",
+            "conflicts": assessment.get("conflicts") or [],
+            "remediations": assessment.get("remediations") or [],
+        }
     return {
         "required": True,
-        "passed": row.declaration == "INDEPENDENT",
-        "pending": False,
-        "declaration": row.declaration,
-        "declaration_id": str(row.id),
-        "rationale": row.rationale,
-        "declared_at": row.declared_at.isoformat(),
+        "passed": bool(assessment.get("passed")),
+        "pending": bool(assessment.get("pending")),
+        "declaration": (assessment.get("impartiality_form") or {}).get("declaration"),
+        "declaration_id": None,
+        "rationale": (assessment.get("impartiality_form") or {}).get("rationale"),
+        "declared_at": (assessment.get("impartiality_form") or {}).get("declared_at"),
+        "message": assessment.get("message"),
+        "conflicts": assessment.get("conflicts") or [],
+        "remediations": assessment.get("remediations") or [],
+        "notes": assessment.get("notes") or [],
+        "enforced": assessment.get("enforced"),
+        "hard_conflict_count": assessment.get("hard_conflict_count", 0),
+        "work_order_module_connected": assessment.get("work_order_module_connected"),
     }
 
 
@@ -204,14 +246,17 @@ def evaluate_auditor_assignment(
 
     Auditor assignment is fail-closed. A tenant must configure an active Quality
     privilege rule for the requested auditor role before any assignment can pass.
+    Lead assignment may be authorized by LEAD_AUDITOR or AUDITOR privileges;
+    supervised-development AUDITOR rules never authorize lead.
     Observer/assistant development remains possible only when the tenant has
     explicitly marked the governing AUDITOR rule for supervised development.
     """
 
     role = str(assignment_role or "").strip().upper()
-    privilege_type = _ROLE_TYPES.get(role)
-    if privilege_type is None:
-        raise ValueError(f"Unsupported auditor assignment role: {assignment_role}")
+    try:
+        privilege_types = _privilege_types_for_assignment(role)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported auditor assignment role: {assignment_role}") from exc
 
     user = db.query(account_models.User).filter(
         account_models.User.amo_id == amo_id,
@@ -230,49 +275,93 @@ def evaluate_auditor_assignment(
             "assessments": [],
         }
 
-    rules = db.query(QualityPrivilegeRule).filter(
-        QualityPrivilegeRule.amo_id == amo_id,
-        QualityPrivilegeRule.is_active.is_(True),
-        QualityPrivilegeRule.privilege_type == privilege_type,
-    ).order_by(QualityPrivilegeRule.privilege_code.asc()).all()
+    rules = (
+        db.query(QualityPrivilegeRule)
+        .filter(
+            QualityPrivilegeRule.amo_id == amo_id,
+            QualityPrivilegeRule.is_active.is_(True),
+            QualityPrivilegeRule.privilege_type.in_(privilege_types),
+        )
+        .order_by(
+            case(
+                (QualityPrivilegeRule.privilege_type == "LEAD_AUDITOR", 0),
+                else_=1,
+            ),
+            QualityPrivilegeRule.privilege_code.asc(),
+        )
+        .all()
+    )
     if not rules:
+        expected = " or ".join(privilege_types)
         return {
             "eligible": False,
             "governance_configured": False,
             "mode": "CONFIGURATION_REQUIRED",
             "assignment_role": role,
             "user_id": user_id,
-            "reason": f"No active {privilege_type} Quality privilege rule is configured for this tenant. Configure governed auditor competence before assignment.",
+            "reason": (
+                f"No active {expected} Quality privilege rule is configured for this tenant. "
+                "Configure governed auditor competence before assignment."
+            ),
             "assessments": [],
             "independence_pending": False,
         }
 
     assessments: list[dict[str, Any]] = []
     for rule in rules:
-        privileges = db.query(QualityPrivilege).filter(
-            QualityPrivilege.amo_id == amo_id,
-            QualityPrivilege.rule_id == rule.id,
-            QualityPrivilege.user_id == user_id,
-            QualityPrivilege.privilege_code == rule.privilege_code,
-            QualityPrivilege.status == "ACTIVE",
-        ).order_by(QualityPrivilege.updated_at.desc()).all()
+        privileges = (
+            db.query(QualityPrivilege)
+            .options(selectinload(QualityPrivilege.decisions))
+            .filter(
+                QualityPrivilege.amo_id == amo_id,
+                QualityPrivilege.rule_id == rule.id,
+                QualityPrivilege.user_id == user_id,
+                QualityPrivilege.privilege_code == rule.privilege_code,
+                QualityPrivilege.status.in_(["ACTIVE", "SUSPENDED"]),
+            )
+            .order_by(QualityPrivilege.updated_at.desc())
+            .all()
+        )
         privilege = next(
             (
                 row
                 for row in privileges
-                if _privilege_scope_matches(row.scope_key, assignment_scope_key)
+                if row.status == "ACTIVE"
+                and _privilege_scope_matches(row.scope_key, assignment_scope_key)
                 and (row.effective_from is None or row.effective_from <= as_of)
                 and (row.expires_on is None or row.expires_on >= as_of)
             ),
             None,
         )
-        training = _training_evidence(
+        # Prefer the in-scope row for bypass/suspend even if not currently ACTIVE.
+        scoped_privilege = next(
+            (
+                row
+                for row in privileges
+                if _privilege_scope_matches(row.scope_key, assignment_scope_key)
+            ),
+            privilege,
+        )
+        training = evaluate_qms_competence_for_privilege(
             db,
             amo_id=amo_id,
             user_id=user_id,
-            required_codes=list(rule.required_training_course_codes or []),
+            rule=rule,
             as_of=as_of,
         )
+        bypass = active_qm_bypass(scoped_privilege, as_of=as_of) if scoped_privilege else None
+        if scoped_privilege is not None and scoped_privilege.status == "ACTIVE":
+            apply_auto_suspend_if_currency_lapsed(
+                db,
+                amo_id=amo_id,
+                privilege=scoped_privilege,
+                rule=rule,
+                competence=training,
+                as_of=as_of,
+                actor_user_id=None,
+            )
+            if scoped_privilege.status != "ACTIVE":
+                privilege = None
         capacity = _capacity_evidence(
             db,
             amo_id=amo_id,
@@ -289,9 +378,40 @@ def evaluate_auditor_assignment(
             context_type=context_type,
             context_id=context_id,
             enforce=enforce_independence,
+            assignment_scope_key=assignment_scope_key,
         )
         developmental = _development_rule(rule, role)
-        training_passed = bool(training["passed"]) or developmental
+        # Developmental AUDITOR rules authorize supervised observer/assistant work
+        # only — they never authorize lead assignment even under the auditor-may-lead path.
+        if role == "LEAD_AUDITOR" and rule.privilege_type == "AUDITOR":
+            scope_schema = rule.scope_schema if isinstance(rule.scope_schema, dict) else {}
+            if scope_schema.get("supervised_development") is True:
+                assessments.append(
+                    {
+                        "rule_id": str(rule.id),
+                        "privilege_code": rule.privilege_code,
+                        "privilege_type": rule.privilege_type,
+                        "developmental_assignment": True,
+                        "supervision_required": True,
+                        "hard_gates": {
+                            "workforce_active": True,
+                            "active_privilege": False,
+                            "scope_authorized": False,
+                            "training_current_verified": False,
+                            "capacity": True,
+                            "independence": True,
+                        },
+                        "active_privilege": None,
+                        "training": training,
+                        "qm_bypass": bypass,
+                        "capacity": capacity,
+                        "independence": independence,
+                        "eligible": False,
+                        "reason": "Supervised development privileges cannot authorize lead auditor assignment.",
+                    }
+                )
+                continue
+        training_passed = bool(training.get("passed")) or developmental or bypass is not None
         hard_gates = {
             "workforce_active": True,
             "active_privilege": privilege is not None,
@@ -316,8 +436,10 @@ def evaluate_auditor_assignment(
             "training": {
                 **training,
                 "passed": training_passed,
-                "developmental_exception": developmental and not bool(training["passed"]),
+                "developmental_exception": developmental and not bool(training.get("passed")),
+                "qm_bypass": bypass,
             },
+            "qm_bypass": bypass,
             "capacity": capacity,
             "independence": independence,
             "eligible": all(hard_gates.values()),

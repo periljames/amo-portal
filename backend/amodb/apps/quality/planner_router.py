@@ -1,18 +1,36 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 import logging
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 
+from . import models
+from .audit_occurrence_completion_models import QualityAuditMeeting
+from .audit_schedule_rules import (
+    BUSINESS_CLOSE,
+    BUSINESS_OPEN,
+    DEFAULT_END_TIME,
+    DEFAULT_START_TIME,
+    suggest_working_slots,
+)
 from .canonical_core_router import _log_qms_activity
+from .planner_schedule_router import (
+    _Candidate,
+    _audit_user_ids,
+    _collect_conflicts,
+    _metadata_for_audit,
+    _metadata_for_schedule,
+    _schedule_user_ids,
+    _validate_conflict_override,
+)
 from .schedule_weekend import resolve_schedule_window
 from .tenant_security import (
     TenantContext,
@@ -36,6 +54,20 @@ class CalendarRescheduleRequest(BaseModel):
         default=None,
         description="Required when the moved occurrence spans Saturday/Sunday.",
     )
+    start_time: time | None = None
+    end_time: time | None = None
+    allow_conflicts: bool = False
+    conflict_override_reason: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _validate_conflict_override_fields(self) -> "CalendarRescheduleRequest":
+        try:
+            _validate_conflict_override(self.allow_conflicts, self.conflict_override_reason)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            raise ValueError("End time must be later than start time.")
+        return self
 
 
 class CalendarRescheduleResponse(BaseModel):
@@ -43,6 +75,8 @@ class CalendarRescheduleResponse(BaseModel):
     old_date: date
     new_date: date
     end_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
     trace_id: str
 
 
@@ -130,6 +164,170 @@ def _source_record_exists(db: Session, *, table_name: str, amo_id: str, entity_i
             ),
             {"amo_id": amo_id, "entity_id": entity_id},
         ).first()
+    )
+
+
+def _as_minutes(value: time) -> int:
+    return value.hour * 60 + value.minute
+
+
+def _duration_minutes(start_value: time, end_value: time) -> int:
+    return max(_as_minutes(end_value) - _as_minutes(start_value), 30)
+
+
+def _shift_audit_meetings(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: str,
+    day_delta: timedelta,
+    clock_delta: timedelta | None = None,
+) -> int:
+    """Keep opening/closing meetings aligned with the audit's planned day and clock."""
+    total_delta = day_delta + (clock_delta or timedelta())
+    if total_delta == timedelta():
+        return 0
+    meetings = (
+        db.query(QualityAuditMeeting)
+        .filter(
+            QualityAuditMeeting.amo_id == amo_id,
+            QualityAuditMeeting.audit_id == uuid.UUID(str(audit_id)),
+            QualityAuditMeeting.status != "CANCELLED",
+        )
+        .all()
+    )
+    shifted = 0
+    for meeting in meetings:
+        if meeting.scheduled_start is None:
+            continue
+        meeting.scheduled_start = meeting.scheduled_start + total_delta
+        if meeting.scheduled_end is not None:
+            meeting.scheduled_end = meeting.scheduled_end + total_delta
+        shifted += 1
+    return shifted
+
+
+def _raise_personnel_conflicts(
+    *,
+    conflicts: list[Any],
+    start_time: time,
+    end_time: time,
+    trace_id: str,
+    allow: bool,
+) -> None:
+    personnel = [item for item in conflicts if getattr(item, "conflicting_user_ids", None)]
+    if not personnel or allow:
+        return
+    busy = [
+        (item.start_time or BUSINESS_OPEN, item.end_time or BUSINESS_CLOSE)
+        for item in personnel
+        if item.start_time or item.end_time
+    ]
+    slots = suggest_working_slots(
+        duration_minutes=_duration_minutes(start_time, end_time),
+        busy=busy,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "SCHEDULE_CONFLICT",
+            "message": (
+                "This move overlaps another audit for the same lead, observer, or auditor. "
+                "Choose another working-hours slot or confirm an override."
+            ),
+            "conflicts": [item.model_dump(mode="json") for item in personnel],
+            "available_slots": slots,
+            "proposed_start_time": start_time.strftime("%H:%M"),
+            "proposed_end_time": end_time.strftime("%H:%M"),
+            "trace_id": trace_id,
+        },
+    )
+
+
+def _enforce_audit_reschedule_conflicts(
+    db: Session,
+    *,
+    amo_id: str,
+    entity_id: str,
+    start_date: date,
+    end_date: date,
+    start_time: time,
+    end_time: time,
+    payload: CalendarRescheduleRequest,
+    trace_id: str,
+) -> None:
+    audit = (
+        db.query(models.QMSAudit)
+        .filter(models.QMSAudit.amo_id == amo_id, models.QMSAudit.id == uuid.UUID(str(entity_id)))
+        .first()
+    )
+    if not audit:
+        return
+    metadata = _metadata_for_audit(db, amo_id=amo_id, audit_id=audit.id)
+    candidate = _Candidate(
+        subject_type="AUDIT",
+        subject_id=str(audit.id),
+        title=f"{audit.audit_ref} · {audit.title}",
+        start_date=start_date,
+        end_date=end_date,
+        start_time=start_time,
+        end_time=end_time,
+        location=(metadata.location if metadata else None) or audit.location,
+        user_ids=_audit_user_ids(audit, metadata),
+    )
+    conflicts = _collect_conflicts(db, amo_id=amo_id, candidate=candidate, exclude_audit_id=str(audit.id))
+    _raise_personnel_conflicts(
+        conflicts=conflicts,
+        start_time=start_time,
+        end_time=end_time,
+        trace_id=trace_id,
+        allow=payload.allow_conflicts,
+    )
+
+
+def _enforce_schedule_reschedule_conflicts(
+    db: Session,
+    *,
+    amo_id: str,
+    entity_id: str,
+    start_date: date,
+    end_date: date,
+    start_time: time,
+    end_time: time,
+    payload: CalendarRescheduleRequest,
+    trace_id: str,
+) -> None:
+    schedule = (
+        db.query(models.QMSAuditSchedule)
+        .filter(models.QMSAuditSchedule.amo_id == amo_id, models.QMSAuditSchedule.id == uuid.UUID(str(entity_id)))
+        .first()
+    )
+    if not schedule:
+        return
+    metadata = _metadata_for_schedule(db, amo_id=amo_id, schedule_id=schedule.id)
+    candidate = _Candidate(
+        subject_type="AUDIT_SCHEDULE",
+        subject_id=str(schedule.id),
+        title=schedule.title,
+        start_date=start_date,
+        end_date=end_date,
+        start_time=start_time,
+        end_time=end_time,
+        location=metadata.location if metadata else None,
+        user_ids=_schedule_user_ids(schedule, metadata),
+    )
+    conflicts = _collect_conflicts(
+        db,
+        amo_id=amo_id,
+        candidate=candidate,
+        exclude_schedule_id=str(schedule.id),
+    )
+    _raise_personnel_conflicts(
+        conflicts=conflicts,
+        start_time=start_time,
+        end_time=end_time,
+        trace_id=trace_id,
+        allow=payload.allow_conflicts,
     )
 
 
@@ -242,6 +440,7 @@ def qms_planner_reschedule(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
+                "code": "SCHEDULE_STALE",
                 "message": "The schedule changed after the planner loaded. Refresh before moving it again.",
                 "expected_old_date": payload.expected_old_date.isoformat(),
                 "current_date": old_date.isoformat(),
@@ -249,7 +448,7 @@ def qms_planner_reschedule(
             },
         )
 
-    if payload.new_date == old_date:
+    if payload.new_date == old_date and payload.start_time is None and payload.end_time is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "Choose a different date.", "trace_id": trace_id},
@@ -279,6 +478,57 @@ def qms_planner_reschedule(
         weekend_policy=payload.weekend_policy,
         title=None,
     )
+
+    resolved_start_time: time | None = None
+    resolved_end_time: time | None = None
+    previous_start_time: time | None = None
+    if entity_type == "audit":
+        audit = (
+            db.query(models.QMSAudit)
+            .filter(models.QMSAudit.amo_id == ctx.amo_id, models.QMSAudit.id == uuid.UUID(entity_id))
+            .first()
+        )
+        metadata = _metadata_for_audit(db, amo_id=ctx.amo_id, audit_id=uuid.UUID(entity_id)) if audit else None
+        previous_start_time = (
+            (audit.planned_start_time if audit else None)
+            or (metadata.start_time if metadata else None)
+            or DEFAULT_START_TIME
+        )
+        previous_end_time = (
+            (audit.planned_end_time if audit else None)
+            or (metadata.end_time if metadata else None)
+            or DEFAULT_END_TIME
+        )
+        resolved_start_time = payload.start_time or previous_start_time
+        resolved_end_time = payload.end_time or previous_end_time
+        _enforce_audit_reschedule_conflicts(
+            db,
+            amo_id=ctx.amo_id,
+            entity_id=entity_id,
+            start_date=start_date,
+            end_date=new_end,
+            start_time=resolved_start_time,
+            end_time=resolved_end_time,
+            payload=payload,
+            trace_id=trace_id,
+        )
+    elif entity_type == "audit_schedule":
+        metadata = _metadata_for_schedule(db, amo_id=ctx.amo_id, schedule_id=uuid.UUID(entity_id))
+        previous_start_time = (metadata.start_time if metadata else None) or DEFAULT_START_TIME
+        previous_end_time = (metadata.end_time if metadata else None) or DEFAULT_END_TIME
+        resolved_start_time = payload.start_time or previous_start_time
+        resolved_end_time = payload.end_time or previous_end_time
+        _enforce_schedule_reschedule_conflicts(
+            db,
+            amo_id=ctx.amo_id,
+            entity_id=entity_id,
+            start_date=start_date,
+            end_date=new_end,
+            start_time=resolved_start_time,
+            end_time=resolved_end_time,
+            payload=payload,
+            trace_id=trace_id,
+        )
 
     update_params: dict[str, Any] = {
         "new_date": start_date,
@@ -321,7 +571,10 @@ def qms_planner_reschedule(
                     """
                     UPDATE qms_planner_schedule_metadata
                     SET occurrence_date = :new_date,
-                        end_date = :new_end
+                        end_date = :new_end,
+                        start_time = COALESCE(:start_time, start_time),
+                        end_time = COALESCE(:end_time, end_time),
+                        version = COALESCE(version, 1) + 1
                     WHERE amo_id = :amo_id
                       AND CAST(schedule_id AS TEXT) = :entity_id
                     """
@@ -329,6 +582,8 @@ def qms_planner_reschedule(
                 {
                     "new_date": start_date,
                     "new_end": new_end,
+                    "start_time": resolved_start_time,
+                    "end_time": resolved_end_time,
                     "amo_id": ctx.amo_id,
                     "entity_id": entity_id,
                 },
@@ -358,6 +613,60 @@ def qms_planner_reschedule(
             },
         )
 
+    if entity_type == "audit":
+        clock_delta: timedelta | None = None
+        if previous_start_time and resolved_start_time and previous_start_time != resolved_start_time:
+            clock_delta = datetime.combine(date.min, resolved_start_time) - datetime.combine(
+                date.min, previous_start_time
+            )
+        _shift_audit_meetings(
+            db,
+            amo_id=ctx.amo_id,
+            audit_id=entity_id,
+            day_delta=timedelta(days=(start_date - old_date).days),
+            clock_delta=clock_delta,
+        )
+        if resolved_start_time is not None or resolved_end_time is not None:
+            db.execute(
+                text(
+                    """
+                    UPDATE qms_audits
+                    SET planned_start_time = COALESCE(:start_time, planned_start_time),
+                        planned_end_time = COALESCE(:end_time, planned_end_time)
+                    WHERE amo_id = :amo_id
+                      AND CAST(id AS TEXT) = :entity_id
+                    """
+                ),
+                {
+                    "start_time": resolved_start_time,
+                    "end_time": resolved_end_time,
+                    "amo_id": ctx.amo_id,
+                    "entity_id": entity_id,
+                },
+            )
+        db.execute(
+            text(
+                """
+                UPDATE qms_planner_schedule_metadata
+                SET occurrence_date = :new_date,
+                    end_date = :new_end,
+                    start_time = COALESCE(:start_time, start_time),
+                    end_time = COALESCE(:end_time, end_time),
+                    version = COALESCE(version, 1) + 1
+                WHERE amo_id = :amo_id
+                  AND CAST(audit_id AS TEXT) = :entity_id
+                """
+            ),
+            {
+                "new_date": start_date,
+                "new_end": new_end,
+                "start_time": resolved_start_time,
+                "end_time": resolved_end_time,
+                "amo_id": ctx.amo_id,
+                "entity_id": entity_id,
+            },
+        )
+
     # Append the schedule mutation to the tenant-scoped QMS activity ledger before
     # committing. The source update and immutable audit record therefore succeed
     # or roll back together.
@@ -382,6 +691,9 @@ def qms_planner_reschedule(
             "end_date": new_end.isoformat() if new_end else None,
             "duration_days": resolved_duration,
             "weekend_policy": payload.weekend_policy,
+            "start_time": resolved_start_time.strftime("%H:%M") if resolved_start_time else None,
+            "end_time": resolved_end_time.strftime("%H:%M") if resolved_end_time else None,
+            "allow_conflicts": payload.allow_conflicts,
             "reason": payload.reason.strip(),
             "trace_id": trace_id,
         },
@@ -407,5 +719,7 @@ def qms_planner_reschedule(
         old_date=old_date,
         new_date=start_date,
         end_date=new_end,
+        start_time=resolved_start_time,
+        end_time=resolved_end_time,
         trace_id=trace_id,
     )

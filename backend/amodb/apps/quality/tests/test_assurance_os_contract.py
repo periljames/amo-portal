@@ -4,7 +4,10 @@ from decimal import Decimal
 
 from amodb.database import Base
 from amodb.apps.quality import canonical_router
-from amodb.apps.quality.audit_assignment_guard import _privilege_scope_matches
+from amodb.apps.quality.audit_assignment_guard import (
+    _privilege_scope_matches,
+    _privilege_types_for_assignment,
+)
 from amodb.apps.quality.intelligence_governance_router import _compare
 from amodb.apps.quality.planner_assignment_guard_router import router as assignment_guard_router
 from amodb.apps.quality.audit_preparation_router import router as preparation_router
@@ -100,6 +103,12 @@ def test_privilege_scope_contract_preserves_global_and_exact_scope_authority() -
     assert _privilege_scope_matches("DEPT-QA", "dept-qa") is True
     assert _privilege_scope_matches("DEPT-QA", "DEPT-MX") is False
     assert _privilege_scope_matches("DEPT-QA", None) is False
+
+
+def test_lead_assignment_accepts_auditor_privilege_types() -> None:
+    assert _privilege_types_for_assignment("LEAD_AUDITOR") == ("LEAD_AUDITOR", "AUDITOR")
+    assert _privilege_types_for_assignment("OBSERVER_AUDITOR") == ("AUDITOR",)
+    assert _privilege_types_for_assignment("ASSISTANT_AUDITOR") == ("AUDITOR",)
 
 
 def test_signal_threshold_comparisons_are_deterministic() -> None:
