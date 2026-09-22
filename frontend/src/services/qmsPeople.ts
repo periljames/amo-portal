@@ -168,8 +168,14 @@ export type QmsControlledExemption = {
 };
 
 export type QmsAuthorizationCaseDetail = {
-  case: QmsAuthorizationCaseSummary & {
-    person: Record<string, unknown>;
+  case: Omit<QmsAuthorizationCaseSummary, "person"> & {
+    person: {
+      name?: string;
+      home_role?: string | null;
+      department?: string | null;
+      staff_code?: string | null;
+      active?: boolean;
+    };
     current_authorization: Record<string, unknown>;
     requested_authorization: Record<string, unknown>;
     recommendation?: string | null;
