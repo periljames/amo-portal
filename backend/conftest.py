@@ -31,6 +31,7 @@ from amodb.apps.audit import models as audit_models  # noqa: E402
 from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
+from amodb.apps.quality import people_authorization_models as quality_people_authorization_models  # noqa: E402
 from amodb.apps.notifications import models as notification_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
@@ -100,6 +101,12 @@ def db_session():
             quality_people_models.QualityPrivilege.__table__,
             quality_people_models.QualityPrivilegeDecision.__table__,
             quality_people_models.QualityIndependenceDeclaration.__table__,
+            quality_people_authorization_models.QualityAppointment.__table__,
+            quality_people_authorization_models.QualityAuthorizationCase.__table__,
+            quality_people_authorization_models.QualityAuthorizationCaseEvent.__table__,
+            quality_people_authorization_models.QualityAuthorizationEvidence.__table__,
+            quality_people_authorization_models.QualityAuthorizationReview.__table__,
+            quality_people_authorization_models.QualityControlledExemption.__table__,
             notification_models.EmailLog.__table__,
             integration_models.IntegrationConfig.__table__,
             integration_models.IntegrationOutboundEvent.__table__,
