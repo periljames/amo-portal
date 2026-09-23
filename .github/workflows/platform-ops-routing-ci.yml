@@ -9,6 +9,7 @@ on:
       - "docker-compose.prod.yml"
       - "infra/nginx/frontend-default.conf"
       - "scripts/dev_runtime.py"
+      - "scripts/test_dev_runtime.py"
       - "frontend/vite.config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/devProxyRouting.test.ts"
@@ -25,6 +26,7 @@ on:
       - "docker-compose.prod.yml"
       - "infra/nginx/frontend-default.conf"
       - "scripts/dev_runtime.py"
+      - "scripts/test_dev_runtime.py"
       - "frontend/vite.config.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/devProxyRouting.test.ts"
@@ -68,6 +70,11 @@ jobs:
           grep -q 'http://127.0.0.1:8090' frontend/src/services/devProxyRouting.ts
           grep -q 'amodb.platform_ops_main:app' scripts/dev_runtime.py
           grep -q '"8090"' scripts/dev_runtime.py
+
+      - name: Verify dev runtime occupied-port handling
+        run: |
+          python -m py_compile scripts/dev_runtime.py scripts/test_dev_runtime.py
+          python scripts/test_dev_runtime.py
 
       - name: Verify SaaS deployment includes a private Operations gateway
         run: |

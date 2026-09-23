@@ -2,7 +2,7 @@
 
 The development runtime mirrors the production topology closely enough to keep
 interactive API traffic isolated from background work while still making every
-queue consumer immediately available.  It starts and supervises:
+queue consumer immediately available. It starts and supervises:
 
 - portal API (8080)
 - Platform Operations gateway (8090)
@@ -13,13 +13,14 @@ queue consumer immediately available.  It starts and supervises:
 - rostering automation
 - Vite frontend (5173)
 
-All child processes receive the same .env.development values.  Process-specific
+All child processes receive the same .env.development values. Process-specific
 DB pool overrides are applied before Python imports SQLAlchemy so background
 workers cannot consume the user-facing API pool.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import shutil
 import signal
@@ -115,6 +116,154 @@ def _port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.2)
         return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _parse_windows_netstat(output: str, port: int) -> list[int]:
+    """Extract unique LISTENING PIDs for one TCP port from ``netstat -ano``."""
+    pids: set[int] = set()
+    suffix = f":{port}"
+    for raw_line in output.splitlines():
+        fields = raw_line.split()
+        if len(fields) < 5 or fields[0].upper() != "TCP":
+            continue
+        local_address = fields[1]
+        state = fields[-2].upper()
+        if state != "LISTENING" or not local_address.endswith(suffix):
+            continue
+        try:
+            pids.add(int(fields[-1]))
+        except ValueError:
+            continue
+    return sorted(pids)
+
+
+def _port_owner_pids(port: int) -> list[int]:
+    """Best-effort lookup of processes listening on a required dev port."""
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            return _parse_windows_netstat(result.stdout, port)
+        except Exception:
+            return []
+
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return []
+    try:
+        result = subprocess.run(
+            [lsof, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        return sorted({int(value) for value in result.stdout.split() if value.isdigit()})
+    except Exception:
+        return []
+
+
+def _process_label(pid: int) -> str:
+    """Return a short process label for diagnostics without making it authoritative."""
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            line = next((line for line in result.stdout.splitlines() if line.strip()), "")
+            if line and not line.startswith("INFO:"):
+                row = next(csv.reader([line]))
+                if row:
+                    return row[0]
+        except Exception:
+            pass
+        return "unknown"
+
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _terminate_pid_tree(pid: int) -> None:
+    """Terminate a port owner only when the operator explicitly requests takeover."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+
+def _occupied_port_details(services: list[Service]) -> list[str]:
+    details: list[str] = []
+    for service in services:
+        if not service.port or not _port_in_use(service.port):
+            continue
+        pids = _port_owner_pids(service.port)
+        if not pids:
+            details.append(f"  - {service.name}:{service.port} (owner PID unavailable)")
+            continue
+        owners = ", ".join(f"PID {pid} ({_process_label(pid)})" for pid in pids)
+        details.append(f"  - {service.name}:{service.port} -> {owners}")
+    return details
+
+
+def _replace_occupied_ports(services: list[Service]) -> None:
+    """Free required ports after an explicit ``--replace-running`` request."""
+    killed: set[int] = set()
+    for service in services:
+        if not service.port or not _port_in_use(service.port):
+            continue
+        pids = _port_owner_pids(service.port)
+        if not pids:
+            raise SystemExit(
+                f"Cannot determine the process owning required port {service.port}. "
+                "Refusing to terminate an unknown listener."
+            )
+        for pid in pids:
+            if pid in killed:
+                continue
+            _print(
+                f"[runtime     ] replacing listener on :{service.port}: "
+                f"PID {pid} ({_process_label(pid)})"
+            )
+            _terminate_pid_tree(pid)
+            killed.add(pid)
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if not any(service.port and _port_in_use(service.port) for service in services):
+            return
+        time.sleep(0.1)
+
+    remaining = _occupied_port_details(services)
+    raise SystemExit(
+        "Required development ports are still occupied after takeover:\n"
+        + "\n".join(remaining)
+    )
 
 
 def _python_executable() -> str:
@@ -240,7 +389,13 @@ def _services(base_env: Mapping[str, str], include_frontend: bool) -> list[Servi
         ),
         Service(
             "evidence",
-            [python, "-m", "amodb.apps.doc_control.evidence_pack_worker_main", "--poll-seconds", base_env.get("DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS", "0.5")],
+            [
+                python,
+                "-m",
+                "amodb.apps.doc_control.evidence_pack_worker_main",
+                "--poll-seconds",
+                base_env.get("DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS", "0.5"),
+            ],
             BACKEND,
         ),
         Service(
@@ -295,6 +450,14 @@ def main() -> int:
         help="dotenv path relative to the repository root (default: .env.development)",
     )
     parser.add_argument("--no-frontend", action="store_true", help="Do not start Vite")
+    parser.add_argument(
+        "--replace-running",
+        action="store_true",
+        help=(
+            "Terminate processes currently listening on required development ports "
+            "before starting the supervised runtime."
+        ),
+    )
     args = parser.parse_args()
 
     env_file = Path(args.env_file)
@@ -306,11 +469,18 @@ def main() -> int:
     services = _services(base_env, include_frontend=not args.no_frontend)
 
     occupied = [service for service in services if service.port and _port_in_use(service.port)]
+    if occupied and args.replace_running:
+        _replace_occupied_ports(occupied)
+        occupied = [service for service in services if service.port and _port_in_use(service.port)]
+
     if occupied:
-        names = ", ".join(f"{service.name}:{service.port}" for service in occupied)
+        details = _occupied_port_details(occupied)
         raise SystemExit(
-            "Required development ports are already in use: " + names + "\n"
-            "Stop the old dev runtime before starting the supervised runtime."
+            "Required development ports are already in use:\n"
+            + "\n".join(details)
+            + "\n\nStop those processes, or explicitly replace the listeners with:\n"
+            + f"  {Path(sys.executable).name} scripts/dev_runtime.py "
+            + f"--env-file {env_file.name} --replace-running"
         )
 
     _print_topology(services, env_file)
