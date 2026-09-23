@@ -31,6 +31,7 @@ from . import excellence_models as _excellence_models  # noqa: F401,E402
 from . import mission_models as _mission_models  # noqa: F401,E402
 from . import audit_programme_models as _audit_programme_models  # noqa: F401,E402
 from . import people_models as _people_models  # noqa: F401,E402
+from . import people_authorization_models as _people_authorization_models  # noqa: F401,E402
 from . import assurance_case_models as _assurance_case_models  # noqa: F401,E402
 from . import intelligence_models as _intelligence_models  # noqa: F401,E402
 from . import audit_preparation_models as _audit_preparation_models  # noqa: F401,E402
@@ -71,6 +72,7 @@ from . import audit_programme_router as _audit_programme_router  # noqa: F401,E4
 from . import audit_programme_queue_router as _audit_programme_queue_router  # noqa: F401,E402
 from . import audit_programme_schedule_router as _audit_programme_schedule_router  # noqa: F401,E402
 from . import people_router as _people_router  # noqa: F401,E402
+from . import people_authorization_router as _people_authorization_router  # noqa: F401,E402
 from . import assurance_case_router as _assurance_case_router  # noqa: F401,E402
 from . import intelligence_router as _intelligence_router  # noqa: F401,E402
 from . import intelligence_governance_router as _intelligence_governance_router  # noqa: F401,E402
@@ -146,14 +148,15 @@ _canonical_router.router.include_router(_audit_programme_queue_router.router)
 # authoritative audit schedule engine.
 _canonical_router.router.include_router(_audit_programme_schedule_router.router)
 
-# People & Privileges owns only Quality authorization decisions, hard eligibility
-# and independence declarations. Training, Workforce and Rostering stay the
-# authoritative source of their own records.
+# People & Authorization Control owns Quality appointments, authorization cases,
+# governed decisions and retained evidence. Training, Workforce and Rostering stay
+# the authoritative source of their own records.
 _include_once(
     _canonical_router.router,
     _people_router.router,
-    "/api/maintenance/{amo_code}/quality/people",
+    "/api/maintenance/{amo_code}/quality/people/rules",
 )
+_canonical_router.router.include_router(_people_authorization_router.router)
 
 # Assurance Cases coordinate source-backed investigations and corrective-action
 # effectiveness without creating duplicate audit, CAR, supplier or maintenance
@@ -187,8 +190,8 @@ _include_once(
     "/api/maintenance/{amo_code}/quality/audits/{audit_id}/preparation-revisions",
 )
 
-# Governed assignment routes own Planner writes after People & Privileges hard
-# gates have been evaluated.
+# Governed assignment routes own Planner writes after current Quality authorization
+# and assignment-specific hard gates have been evaluated.
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
 
 # CAR/CAPA control-loop records are an additive governance layer over the

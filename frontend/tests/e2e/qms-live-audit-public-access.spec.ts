@@ -217,7 +217,7 @@ test("auditee downloads and acknowledges the exact issued closing report revisio
   await expect.poll(() => reportStatusCount).toBe(1);
   const reportCard = page.getByLabel("Issued audit report");
   await expect(reportCard.getByText("QAR-MO-26-021-issued.pdf")).toBeVisible();
-  await expect(reportCard.getByText(/bbbbbbbbbbbb…bbbbbbbb/)).toBeVisible();
+  await expect(reportCard.getByText(/bbbbbbbbbbbb/)).toHaveCount(0); // Governed checksum remains backend integrity metadata, not public UI.
   await expect(reportCard.getByText(/does not waive any response, corrective-action, review or appeal rights/i)).toBeVisible();
 
   await reportCard.getByRole("button", { name: "Download issued report" }).click();

@@ -22,6 +22,7 @@ from amodb.apps.quality.audit_source_handoff_router import router as audit_sourc
 from amodb.apps.quality.intelligence_governance_router import _compare, _percent, router as intelligence_governance_router
 from amodb.apps.quality.intelligence_router import router as intelligence_router
 from amodb.apps.quality.people_router import router as people_router
+from amodb.apps.quality.people_authorization_router import router as people_authorization_router
 
 
 def _methods(router):
@@ -61,25 +62,44 @@ def test_repository_heads_include_completed_assurance_lineage() -> None:
 
     assert "quality_260809_checklist_exec" in ancestry
     assert "quality_260904_notice_pdf" in ancestry
+    assert "quality_260922_people_authz" in ancestry
 
 
-def test_people_router_exposes_governed_privilege_and_independence_contract() -> None:
+def test_people_authorization_control_exposes_governed_case_review_and_policy_contract() -> None:
     assert {
-        ("/people/summary", "GET"),
         ("/people/rules", "GET"),
         ("/people/rules", "POST"),
         ("/people/rules/ensure-defaults", "POST"),
         ("/people/rules/{rule_id}", "PATCH"),
-        ("/people/privileges", "GET"),
-        ("/people/privileges", "POST"),
-        ("/people/eligibility", "GET"),
-        ("/people/authorization-candidates", "GET"),
-        ("/people/{user_id}/audit-participation", "GET"),
-        ("/people/{user_id}/audit-participation/{audit_id}/issued-report", "GET"),
-        ("/people/privileges/{privilege_id}/decisions", "POST"),
-        ("/people/independence", "GET"),
-        ("/people/independence", "POST"),
+        ("/people/independence/policy", "GET"),
+        ("/people/independence/policy", "PATCH"),
     }.issubset(_methods(people_router))
+    assert {
+        ("/people/authorization-control/overview", "GET"),
+        ("/people/authorization-control/people", "GET"),
+        ("/people/authorization-control/people/{user_id}", "GET"),
+        ("/people/authorization-control/cases", "GET"),
+        ("/people/authorization-control/cases", "POST"),
+        ("/people/authorization-control/cases/batch", "POST"),
+        ("/people/authorization-control/cases/{case_id}", "GET"),
+        ("/people/authorization-control/cases/{case_id}/preparation", "PATCH"),
+        ("/people/authorization-control/cases/{case_id}/submit", "POST"),
+        ("/people/authorization-control/cases/{case_id}/decision", "POST"),
+        ("/people/authorization-control/cases/{case_id}/controlled-exemptions", "POST"),
+        ("/people/authorization-control/cases/{case_id}/evidence", "POST"),
+        ("/people/authorization-control/cases/{case_id}/evidence-file", "POST"),
+        ("/people/authorization-control/authorizations", "GET"),
+        ("/people/authorization-control/authorizations/{privilege_id}/lifecycle", "POST"),
+        ("/people/authorization-control/authorizations/{privilege_id}/reviews", "POST"),
+        ("/people/authorization-control/authorizations/{privilege_id}/controlled-exemptions", "POST"),
+        ("/people/authorization-control/authorizations/{privilege_id}/record", "GET"),
+        ("/people/authorization-control/reviews", "GET"),
+    }.issubset(_methods(people_authorization_router))
+
+    all_people_routes = _methods(people_router) | _methods(people_authorization_router)
+    assert not any("/people/privileges" in path for path, _method in all_people_routes)
+    assert not any("qm-bypass" in path or path.endswith("/rank") for path, _method in all_people_routes)
+    assert not any(method == "DELETE" for path, method in all_people_routes if path.startswith("/people/"))
 
 
 def test_assurance_case_router_exposes_investigation_and_effectiveness_contract() -> None:
@@ -187,6 +207,8 @@ def test_full_audit_governance_contract() -> None:
 def test_new_operating_system_models_are_registered_in_shared_metadata() -> None:
     required_tables = {
         "quality_privilege_rules", "quality_privileges", "quality_privilege_decisions", "quality_independence_declarations",
+        "quality_appointments", "quality_authorization_cases", "quality_authorization_case_events",
+        "quality_authorization_evidence", "quality_authorization_reviews", "quality_controlled_exemptions",
         "quality_assurance_cases", "quality_investigation_entries", "quality_effectiveness_plans", "quality_assurance_case_events",
         "quality_signal_rules", "quality_signal_observations", "quality_requirement_nodes", "quality_requirement_links",
         "quality_audit_preparation_revisions", "quality_audit_preparation_events",
@@ -206,9 +228,11 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         (canonical_router.router, "/api/maintenance/{amo_code}/quality"),
     )
     route_checks = (
-        ("/people/summary", "GET", "people_summary"),
-        ("/people/eligibility", "GET", "get_eligibility"),
-        ("/people/authorization-candidates", "GET", "list_authorization_candidates"),
+        ("/people/rules", "GET", "list_rules"),
+        ("/people/authorization-control/overview", "GET", "authorization_overview"),
+        ("/people/authorization-control/people", "GET", "authorization_people"),
+        ("/people/authorization-control/cases", "GET", "list_authorization_cases"),
+        ("/people/authorization-control/reviews", "GET", "list_authorization_reviews"),
         ("/assurance-cases", "GET", "list_cases"),
         ("/assurance-cases/{case_id}/investigation", "POST", "add_investigation_entry"),
         ("/intelligence/overview", "GET", "intelligence_overview"),

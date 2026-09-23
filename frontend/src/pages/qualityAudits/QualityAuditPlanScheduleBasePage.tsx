@@ -744,6 +744,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       ),
     [auditorOptions],
   );
+  const optionsForField = (field: PersonSearchField): QMSPersonOption[] =>
+    field === "auditee_user_id"
+      ? peopleOptions
+      : field === "lead_auditor_user_id"
+        ? leadAuditorOptions
+        : auditorOptions;
   const auditScopes = useMemo(() => auditScopesQuery.data ?? [], [auditScopesQuery.data]);
   const peopleById = useMemo(() => {
     const next = new Map<string, QMSPersonOption>();

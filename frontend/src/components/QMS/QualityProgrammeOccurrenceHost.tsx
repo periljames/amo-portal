@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, CheckCircle2, History, PanelRightClose, PanelRightOpen, ShieldAlert, Zap } from "lucide-react";
+import { CalendarPlus, CheckCircle2, History, PanelRightClose, PanelRightOpen, ShieldAlert } from "lucide-react";
 
 import {
   createProgrammeOccurrence,
@@ -87,6 +87,8 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
   const occurrenceType = selectedItem?.recurrence as OccurrenceType | undefined;
   const links = linksQuery.data?.items || [];
 
+  /* These effects initialize/reset editable occurrence fields when the governed selection changes. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!programmeId && programmes.length) setProgrammeId(programmes[0].id);
   }, [programmeId, programmes]);
@@ -108,6 +110,7 @@ const QualityProgrammeOccurrenceHost: React.FC<Props> = ({ amoCode = "" }) => {
     setSignalId("");
     setSuccess(null);
   }, [selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const mutation = useMutation({
     mutationFn: () => {

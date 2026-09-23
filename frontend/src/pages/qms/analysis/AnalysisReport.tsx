@@ -7,6 +7,7 @@ import { saveDownloadedFile } from "../../../utils/downloads";
 import { AnalysisMarkdown } from "./AnalysisEditor";
 
 type Props = { tenant: string; data: AnalysisSnapshot; selected: AnalysisSource[]; study?: QmsAssuranceCase; references: Record<string, unknown>[]; answer: DocumentationAssistResponse | null };
+/* eslint-disable-next-line react-refresh/only-export-components -- CSV escaping is exported for contract tests. */
 export function csvCell(value: unknown) {
   const text = String(value ?? "");
   return `"${(/^[\s]*[=+@\-\t\r]/.test(text) ? "'" : "") + text.replaceAll('"', '""')}"`;
@@ -45,7 +46,7 @@ export default function AnalysisReport(props: Props & { canExport: boolean }) {
     await saveDownloadedFile(new Blob(["\ufeff" + rows.map(row => row.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }), `${name}-aggregates.csv`);
   };
   const [error, setError] = useState("");
-  const run = async (action: () => Promise<unknown>) => { setError(""); try { await action(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Export failed."); } };
+  const run = async (action: () => Promise<unknown> | unknown) => { setError(""); try { await action(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Export failed."); } };
   return <section className="qa-analysis-card"><div className="qa-analysis-actions qa-analysis-report-actions">
     <button disabled={!props.canExport} onClick={() => void run(downloadHtml)}>Download formatted report</button>
     <button disabled={!props.canExport} onClick={() => void run(downloadCsv)}>Export aggregate CSV</button>

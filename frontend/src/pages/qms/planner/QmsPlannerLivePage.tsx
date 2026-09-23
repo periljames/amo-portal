@@ -115,10 +115,12 @@ function usePlannerDialogFocusManagement(): void {
         if (!target) return;
 
         const active = document.activeElement as HTMLElement | null;
+        const automaticFallback = fallbackTrigger(dialog);
         const activeIsMeaningfulOther = Boolean(
           restoredOnce
             && active
             && active !== target
+            && active !== automaticFallback
             && active !== document.body
             && active !== document.documentElement
             && isFocusable(active),
@@ -155,7 +157,15 @@ function usePlannerDialogFocusManagement(): void {
       }
 
       const trigger = shortcutTrigger(event);
-      if (isFocusable(trigger)) intendedTriggerRef.current = trigger;
+      if (isFocusable(trigger)) {
+        const activeTrigger = active
+          && active.matches(FOCUSABLE_SELECTOR)
+          && isFocusable(active)
+          && !active.closest("[role='dialog']")
+          ? active
+          : null;
+        intendedTriggerRef.current = activeTrigger || trigger;
+      }
 
       const dialogs = currentDialogs();
       const topDialog = dialogs[dialogs.length - 1];

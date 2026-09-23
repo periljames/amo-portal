@@ -45,6 +45,7 @@ function isHistorical(record: TrainingRecordRead): boolean {
 function byCourseForHistory(courses: TrainingCourseRead[], record: TrainingRecordRead): TrainingCourseRead | null {
   return courses.find((course) => [course.id, course.course_pk, course.course_id].filter(Boolean).some((id) => id === record.course_pk || id === record.course_id)) || null;
 }
+/* eslint-disable-next-line react-refresh/only-export-components -- deterministic requirement projection exported for tests. */
 export function buildRows(
   items: TrainingStatusItem[],
   courses: TrainingCourseRead[],

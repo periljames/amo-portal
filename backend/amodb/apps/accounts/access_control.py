@@ -65,6 +65,7 @@ QUALITY_VIEW_CAPABILITIES = frozenset({
     "qms.equipment.view", "qms.risk.view", "qms.change.view",
     "qms.management_review.view", "qms.reports.view", "qms.external.view",
     "qms.evidence.view", "qms.evidence.download", "qms.settings.view",
+    "qms.people.view",
 })
 QUALITY_ALL_CAPABILITIES = QUALITY_VIEW_CAPABILITIES | frozenset({
     "qms.audit.execute", "qms.audit.manage", "qms.audit.notice.manage",
@@ -78,35 +79,41 @@ QUALITY_ALL_CAPABILITIES = QUALITY_VIEW_CAPABILITIES | frozenset({
     "qms.management_review.manage", "qms.reports.attest_authority",
     "qms.reports.export", "qms.reports.manage", "qms.risk.manage",
     "qms.settings.manage", "qms.supplier.manage", "qms.training.manage",
+    "qms.authorization.prepare", "qms.authorization.approve",
+    "qms.authorization.review", "qms.authorization.exemption.approve",
+    "qms.authorization.policy.manage", "qms.authorization.oversight",
 })
 QUALITY_MANAGER_CAPABILITIES = QUALITY_ALL_CAPABILITIES - frozenset({
     "qms.audit.programme.approve", "qms.reports.attest_authority",
 })
 QUALITY_OFFICER_CAPABILITIES = QUALITY_VIEW_CAPABILITIES | frozenset({
-    "qms.training.manage",
+    "qms.training.manage", "qms.authorization.prepare",
     "qms.audit.execute", "qms.audit.manage", "qms.audit.notice.manage",
     "qms.calendar.manage", "qms.finding.create", "qms.car.issue",
     "qms.car.manage", "qms.car.respond", "qms.reports.export",
 })
 QUALITY_AUDITOR_CAPABILITIES = frozenset({
+    "qms.people.view",
     "qms.dashboard.view", "qms.inbox.view", "qms.calendar.view",
     "qms.audit.view", "qms.audit.execute", "qms.finding.view",
     "qms.finding.create", "qms.car.view", "qms.document.view",
     "qms.evidence.view", "qms.evidence.download",
 })
 QUALITY_SUPPORT_CAPABILITIES = frozenset({
+    "qms.people.view",
     "qms.dashboard.view", "qms.inbox.view", "qms.calendar.view",
     "qms.audit.view", "qms.finding.view", "qms.car.view",
     "qms.document.view", "qms.evidence.view", "qms.training.view",
     "qms.reports.view",
 })
 QUALITY_DOCUMENT_CONTROL_CAPABILITIES = frozenset({
+    "qms.people.view",
     "qms.dashboard.view", "qms.inbox.view", "qms.document.view",
     "qms.evidence.view", "qms.evidence.download", "qms.training.view",
 })
 QUALITY_EXECUTIVE_CAPABILITIES = QUALITY_VIEW_CAPABILITIES | frozenset({
     "qms.reports.export", "qms.reports.attest_authority",
-    "qms.audit.programme.approve",
+    "qms.audit.programme.approve", "qms.authorization.oversight",
 })
 
 TRAINING_SELF_CAPABILITIES = frozenset({

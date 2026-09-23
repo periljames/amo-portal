@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { addQmsInvestigationEntry, createQmsAssuranceCase, listQmsAssuranceCases, type QmsAssuranceCase, type QmsInvestigationEntryType, type QmsInvestigationMethod } from "../../../services/qmsAssuranceCases";
 import AnalysisEditor, { AnalysisMarkdown } from "./AnalysisEditor";
 
+/* eslint-disable-next-line react-refresh/only-export-components -- shared immutable analysis taxonomy. */
 export const QUALITY_PRINCIPLES = ["Customer focus", "Leadership", "Engagement of people", "Process approach", "Improvement", "Evidence-based decision making", "Relationship management"];
 export default function AnalysisInvestigation({ tenant, caseId, study, onSelect, onSaved, references, canEdit }: {
   tenant: string; caseId: string; study?: QmsAssuranceCase; onSelect: (id: string) => void;

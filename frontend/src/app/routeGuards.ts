@@ -30,11 +30,13 @@ const QMS_INSPECTOR_PERMISSIONS = new Set([
   "qms.risk.view",
   "qms.change.view",
   "qms.training.view",
+  "qms.people.view",
 ]);
 
 // Keep this set aligned with backend/apps/quality/tenant_security.py.
 const QMS_OFFICER_PERMISSIONS = new Set([
   "qms.training.manage",
+  "qms.authorization.prepare",
   ...QMS_INSPECTOR_PERMISSIONS,
   "qms.audit.manage",
   "qms.audit.notice.manage",
@@ -63,6 +65,7 @@ const QMS_VIEW_ONLY_PERMISSIONS = new Set([
   "qms.evidence.view",
   "qms.evidence.download",
   "qms.training.view",
+  "qms.people.view",
 ]);
 
 const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
@@ -70,6 +73,7 @@ const QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS = new Set([
   "qms.reports.export",
   "qms.reports.attest_authority",
   "qms.audit.programme.approve",
+  "qms.authorization.oversight",
 ]);
 
 export function isPlatformSuperuser(): boolean {
@@ -107,6 +111,12 @@ export function userHasQmsRolePermission(
   const qualityLevel = user.module_access?.quality;
   if (user.module_access !== undefined && !qualityLevel) return false;
   if (qualityLevel === "view" && !QMS_VIEW_ONLY_PERMISSIONS.has(permission)) return false;
+
+  // Prefer the backend-issued capability set when present so frontend action
+  // visibility cannot drift from the tenant authorization store.
+  if (user.capability_codes?.some((code) => code.startsWith("qms."))) {
+    return user.capability_codes.includes(permission);
+  }
 
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);

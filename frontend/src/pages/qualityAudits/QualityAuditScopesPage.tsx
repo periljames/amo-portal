@@ -98,11 +98,14 @@ const QualityAuditScopesPage: React.FC = () => {
     staleTime: 60_000,
   });
 
+  /* Initialize the editable family draft from the governed tenant setting when it changes. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (workflowQuery.data?.audit_reference_family) {
       setFamilyDraft(normalizeAuditReferenceFamily(workflowQuery.data.audit_reference_family));
     }
   }, [workflowQuery.data?.audit_reference_family]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const referenceFamily = normalizeAuditReferenceFamily(
     familyDraft || workflowQuery.data?.audit_reference_family || DEFAULT_AUDIT_REFERENCE_FAMILY,

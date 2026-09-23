@@ -256,10 +256,11 @@ const QmsCarPerformanceReportPage: React.FC = () => {
 
   const allCars = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
   const allFindings = useMemo(() => findingsQuery.data?.rows ?? [], [findingsQuery.data?.rows]);
+  const [renderStartedAt] = useState(() => Date.now());
   const generatedAt = useMemo(() => {
     const stamp = Math.max(reportQuery.dataUpdatedAt || 0, findingsQuery.dataUpdatedAt || 0);
-    return new Date(stamp || Date.now());
-  }, [findingsQuery.dataUpdatedAt, reportQuery.dataUpdatedAt]);
+    return new Date(stamp || renderStartedAt);
+  }, [findingsQuery.dataUpdatedAt, renderStartedAt, reportQuery.dataUpdatedAt]);
   const today = generatedAt.toISOString().slice(0, 10);
 
   const departments = useMemo(

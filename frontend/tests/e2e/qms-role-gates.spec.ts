@@ -221,16 +221,40 @@ function readyCarControl() {
   };
 }
 
-test("QUALITY_OFFICER can work the CAR control loop, cannot close it, and cannot grant privileges", async ({ page }) => {
+test("QUALITY_OFFICER can work the CAR control loop and prepare authorization cases without final approval authority", async ({ page }) => {
   await prepare(page, "QUALITY_OFFICER", (route, path) => {
     if (path.endsWith(`/quality/cars/${CAR_ID}/control-loop`)) return json(route, readyCarControl());
     if (path.endsWith("/quality/cars/assignees")) return json(route, [{ id: "owner-1", full_name: "Responsible Manager", email: "owner@tenant-a.test", role: "MAINTENANCE_MANAGER", department_name: "Maintenance" }]);
     if (path.endsWith(`/quality/cars/${CAR_ID}/responses`)) return json(route, []);
     if (path.endsWith(`/quality/cars/${CAR_ID}/attachments`)) return json(route, []);
     if (path.endsWith(`/quality/cars/${CAR_ID}/invite`)) return json(route, null);
-    if (path.endsWith("/quality/people/summary")) return json(route, { active_privileges: 1, expiring_within_60_days: 0, suspended_privileges: 0, independence_exceptions: 0 });
-    if (path.endsWith("/quality/people/rules")) return json(route, { items: [{ id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Internal Auditor", privilege_type: "AUDITOR", required_training_course_codes: [], independence_required: true, max_concurrent_assignments: 3, scope_schema: {}, is_active: true, updated_at: "2026-09-01T08:00:00Z" }] });
-    if (path.endsWith("/quality/people/privileges")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/authorization-control/overview")) return json(route, {
+      permissions: {
+        can_view: true, can_prepare: true, can_approve: false, can_review: false,
+        can_approve_exemption: false, can_manage_policy: false, can_oversight: false, self_service_only: false,
+      },
+      metrics: {
+        active_authorizations: 0, suspended_authorizations: 0, expiring_within_60_days: 0,
+        open_authorization_cases: 0, reviews_due: 0, active_controlled_exemptions: 0,
+      },
+      attention: [],
+    });
+    if (path.endsWith("/quality/people/authorization-control/people")) return json(route, {
+      items: [{
+        key: "person-a", name: "Amina Wanjiku", staff_code: "QMS-018",
+        home_role: "AUDITOR", department: "Quality", workforce_status: "Active",
+        authorizations: [], open_cases: 0,
+      }],
+      total: 1,
+    });
+    if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+    if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/authorization-control/authorizations")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/rules")) return json(route, { items: [{
+      id: "rule-auditor", privilege_code: "AUDITOR_INTERNAL", title: "Auditor", privilege_type: "AUDITOR",
+      required_training_course_codes: [], independence_required: true, max_concurrent_assignments: 3,
+      scope_schema: {}, is_active: true, updated_at: "2026-09-01T08:00:00Z",
+    }] });
     return json(route, { items: [], rows: [], total: 0, limit: 30, offset: 0, has_more: false });
   });
 
@@ -241,9 +265,14 @@ test("QUALITY_OFFICER can work the CAR control loop, cannot close it, and cannot
   await expect(page.getByRole("button", { name: "Close CAR" })).toBeDisabled();
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Quality authorization board", { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "New privilege" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Change privilege" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Record review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Record final decision/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Controlled Exemption|Controlled exemption/i })).toHaveCount(0);
 });
 
 function issuedRevision() {

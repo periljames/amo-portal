@@ -56,8 +56,10 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.document.view",
         "qms.evidence.view",
         "qms.evidence.download",
+        "qms.people.view",
     },
     "AUDITOR": {
+        "qms.people.view",
         "qms.dashboard.view",
         "qms.inbox.view",
         "qms.calendar.view",
@@ -72,6 +74,8 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
     "QUALITY_OFFICER": {
         "qms.training.manage",
+        "qms.people.view",
+        "qms.authorization.prepare",
         "qms.dashboard.view",
         "qms.inbox.view",
         "qms.calendar.view",
@@ -107,6 +111,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.evidence.view",
         "qms.training.view",
         "qms.reports.view",
+        "qms.people.view",
     },
     "DOCUMENT_CONTROL_OFFICER": {
         "qms.dashboard.view",
@@ -115,6 +120,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.evidence.view",
         "qms.evidence.download",
         "qms.training.view",
+        "qms.people.view",
     },
     "VIEW_ONLY": {
         "qms.dashboard.view",
@@ -134,6 +140,7 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qms.external.view",
         "qms.evidence.view",
         "qms.evidence.download",
+        "qms.people.view",
     },
 }
 
@@ -148,6 +155,7 @@ _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"].update(
         "qms.reports.export",
         "qms.reports.attest_authority",
         "qms.audit.programme.approve",
+        "qms.authorization.oversight",
     }
 )
 
@@ -169,6 +177,7 @@ _READ_ONLY_SUPPORT_PERMISSIONS = {
     "qms.evidence.view",
     "qms.evidence.download",
     "qms.settings.view",
+    "qms.people.view",
 }
 
 

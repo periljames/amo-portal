@@ -25,16 +25,16 @@ type RoleField = "lead_auditor_user_id" | "observer_auditor_user_id" | "assistan
 type AssignmentDraft = Record<RoleField, string>;
 
 const ROLE_CONFIG: Array<{ field: RoleField; role: AuditAssignmentRole; label: string }> = [
-  { field: "lead_auditor_user_id", role: "LEAD_AUDITOR", label: "Lead auditor" },
-  { field: "observer_auditor_user_id", role: "OBSERVER_AUDITOR", label: "Observer auditor" },
-  { field: "assistant_auditor_user_id", role: "ASSISTANT_AUDITOR", label: "Assistant auditor" },
+  { field: "lead_auditor_user_id", role: "LEAD_AUDITOR", label: "Lead Auditor" },
+  { field: "observer_auditor_user_id", role: "OBSERVER_AUDITOR", label: "Observer / Trainee Auditor" },
+  { field: "assistant_auditor_user_id", role: "ASSISTANT_AUDITOR", label: "Assistant Auditor" },
 ];
 
 const GATE_LABELS: Record<string, string> = {
   workforce_active: "active workforce record",
-  active_privilege: "active Quality privilege",
+  active_privilege: "current Quality authorization",
   scope_authorized: "scope authorisation",
-  training_current_verified: "current required training",
+  training_current_verified: "required training is not currently verified",
   capacity: "assignment capacity",
   independence: "audit-specific independence",
 };
@@ -195,8 +195,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
     return null;
   })();
   const peopleSetupPath = configurationGap
-    ? qmsPeopleWorkspacePath(amoCode, { tab: "rules", action: "CREATE_RULE", ruleType: configurationGap.ruleType })
-    : qmsPeopleWorkspacePath(amoCode, { tab: "privileges", action: "CREATE" });
+    ? qmsPeopleWorkspacePath(amoCode, { tab: "administration", action: "CREATE_RULE", ruleType: configurationGap.ruleType })
+    : qmsPeopleWorkspacePath(amoCode, { tab: "people", action: "CREATE" });
 
   const assignmentMutation = useMutation({
     mutationFn: () => updateAuditAssignments(amoCode, auditId, {
@@ -265,7 +265,7 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
           <ShieldAlert size={15} />
           <span>
             {configurationGap.reason}{" "}
-            <Link to={peopleSetupPath}>Open People &amp; Privileges</Link>
+            <Link to={peopleSetupPath}>Open People &amp; Authorization Control</Link>
           </span>
         </div>
       ) : null}
@@ -447,8 +447,8 @@ const AuditAssignmentGovernancePanel: React.FC<Props> = ({ amoCode, auditKey, on
               <button type="button" onClick={() => setShowRules(false)}>
                 Close
               </button>
-              <Link to={qmsPeopleWorkspacePath(amoCode, { tab: "privileges" })}>
-                Open People &amp; Privileges
+              <Link to={qmsPeopleWorkspacePath(amoCode, { tab: "people" })}>
+                Open People &amp; Authorization Control
               </Link>
             </footer>
           </section>

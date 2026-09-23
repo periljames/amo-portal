@@ -104,7 +104,7 @@ class QualityPrivilege(Base):
     decisions = relationship(
         "QualityPrivilegeDecision",
         back_populates="privilege",
-        cascade="all, delete-orphan",
+        cascade="save-update, merge",
         passive_deletes=True,
         order_by="QualityPrivilegeDecision.created_at",
         lazy="selectin",
@@ -113,12 +113,12 @@ class QualityPrivilege(Base):
 
 
 class QualityPrivilegeDecision(Base):
-    """Human decision history; removable with an authorised privilege purge."""
+    """Governed human decision history retained with the Quality authorization record."""
 
     __tablename__ = "quality_privilege_decisions"
     __table_args__ = (
         CheckConstraint(
-            "decision_type IN ('GRANT','RENEW','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
+            "decision_type IN ('GRANT','RENEW','CHANGE','SUSPEND','REINSTATE','REVOKE','EXPIRE','REJECT')",
             name="ck_quality_privilege_decision_type",
         ),
         CheckConstraint(
@@ -131,7 +131,7 @@ class QualityPrivilegeDecision(Base):
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    privilege_id = Column(String(36), ForeignKey("quality_privileges.id", ondelete="CASCADE"), nullable=False)
+    privilege_id = Column(String(36), ForeignKey("quality_privileges.id", ondelete="RESTRICT"), nullable=False)
     decision_type = Column(String(16), nullable=False)
     resulting_status = Column(String(16), nullable=False)
     rationale = Column(Text, nullable=False)

@@ -54,35 +54,21 @@ assertIncludes(missions, "font-size: 14px;", "Missions must retain a 14px workin
 assertIncludes(missions, "position: relative;", "Mission creation must stay within the workspace flow");
 assertIncludes(missions, "width: 100%;", "Mission creation must fit its workspace");
 
-assertIncludes(people, ".qms-people__workspace", "People must retain the authorization register + person detail workspace");
-assertIncludes(people, ".qms-people__drawer-layer", "People governed actions must remain contextual drawers");
-assertIncludes(peoplePage, "Quality authorization board", "People must remain person/authorization-first");
-assertIncludes(peoplePage, "Check audit assignment", "People must expose the governed audit-assignment preflight contextually");
-assertIncludes(peoplePage, "Change privilege", "People must expose privilege decisions contextually");
-assertIncludes(peoplePage, "snapshotRevision", "People eligibility must retain an explicit refresh revision signal");
-assertIncludes(peoplePage, "setSnapshotRevision((value) => value + 1);", "People reload must invalidate the selected authorization snapshot");
-assertIncludes(peoplePage, "[amoCode, selected, snapshotRevision]", "People authorization-readiness effect must rerun when the selected authorization or refresh revision changes");
-assertIncludes(peoplePage, "snapshot.active_privilege?.id === privilege.id", "People authorization readiness must be tied to the selected privilege record");
-assertIncludes(peoplePage, "selected_privilege_active: selectedPrivilegeMatches", "People must expose whether the selected authorization is the backend active privilege");
-assertIncludes(peoplePage, "preflightQmsAuditorAssignment", "People assignment checks must call the governed Planner assignment preflight");
-assertIncludes(peoplePage, "assignment_scope_key: submitted.assignment_scope_key", "People must send the immutable submitted assignment scope to the authoritative guard");
-assertIncludes(peoplePage, "assignment_role: submitted.assignment_role", "People must send the immutable submitted auditor role to the authoritative guard");
-assertIncludes(peoplePage, "assignment_date: submitted.assignment_date", "People must send the immutable submitted assignment date to the authoritative guard");
-assertIncludes(peoplePage, "enforce_independence: true", "People assignment preflight must enforce independence");
-assertIncludes(peoplePage, "assignmentAssessment?.active_privilege?.id === selected.id", "People must verify that the authoritative assignment guard used the selected privilege record");
-assertIncludes(peoplePage, "assignmentResultInput", "People must retain the exact submitted assignment parameters with the returned preflight result");
-assertIncludes(peoplePage, "invalidateAssignmentResult", "People must explicitly invalidate stale preflight results when inputs change");
-assertIncludes(peoplePage, "assignmentRequestRevision", "People must ignore stale asynchronous preflight responses after result invalidation or drawer closure");
-assertIncludes(peoplePage, "disabled={checkingAssignment}", "People assignment inputs must be locked while the authoritative preflight is in flight");
-assertIncludes(peoplePage, "humanise(assignmentResultInput.assignment_scope_key)", "People must render the checked scope from the submitted snapshot, not mutable form state");
-assertIncludes(peoplePage, "humanise(assignmentResultInput.assignment_role)", "People must render the checked role from the submitted snapshot, not mutable form state");
-assertIncludes(peoplePage, "assignmentResultInput.assignment_date", "People must render the checked date from the submitted snapshot, not mutable form state");
-assertIncludes(peoplePage, 'hasQmsRolePermission("qms.audit.manage")', "People must expose assignment/independence actions only to users permitted to manage audits");
-assertIncludes(peoplePage, 'hasQmsRolePermission("qms.training.manage")', "People must expose privilege mutation controls only to users permitted to manage training/authorization governance");
-assertNotMatch(peoplePage, /eligibilityUserId|eligibilityRule/, "People assignment checks must not regress to free-form user/privilege lookup");
-assertIncludes(peoplePage, "clearQmsApiResponseCache();", "People manual refresh must bypass cached readiness/source data");
-assertIncludes(peopleService, 'qmsPath(amoCode, "/integrations/calendar/auditor-eligibility")', "People service must retain the governed auditor-assignment endpoint");
-assertIncludes(peopleService, "assignment_scope_key: string", "People preflight contract must require an assignment scope");
+assertIncludes(people, ".qms-authz-grid--split", "People authorization control must retain a two-pane operational workspace");
+assertIncludes(people, ".qms-authz-modal", "Governed authorization actions must remain contextual and explicit");
+assertIncludes(peoplePage, "Authorization governance", "People must remain authorization-control focused");
+assertIncludes(peoplePage, "Authorization Cases", "People must expose the governed pre-decision case workflow");
+assertIncludes(peoplePage, "Controlled Exemption / Conditional Authorization", "People must expose only the controlled exception workflow");
+assertIncludes(peoplePage, "Final authorization decision", "People must expose attributable final authorization decisions");
+assertIncludes(peoplePage, "Batch nominate", "People must retain batch nomination without bypassing case governance");
+assertIncludes(peoplePage, "permissions?.can_prepare", "People must split preparation authority from decision authority");
+assertIncludes(peoplePage, "permissions?.can_approve", "People must gate final decisions on approval authority");
+assertIncludes(peoplePage, "permissions?.can_manage_policy", "People advanced policy configuration must be restricted");
+assertIncludes(peopleService, '"/people/authorization-control/cases"', "People service must use governed authorization cases");
+assertIncludes(peopleService, "/lifecycle", "People service must use governed authorization lifecycle decisions");
+assertIncludes(peopleService, "/reviews", "People service must retain governed periodic reviews");
+assertNotMatch(peopleService, /\/people\/privileges|qm-bypass|auditor-eligibility/, "People service must not retain superseded direct privilege, bypass or assignment-preflight APIs");
+assertNotMatch(peoplePage, /Check audit assignment|Change privilege|QM training bypass|personnel ID/i, "People must not retain superseded assignment, direct-rank or identifier UI");
 
 for (const permission of [
   "qms.management_review.view",
@@ -168,7 +154,6 @@ assertIncludes(planner, ".qms-modern-planner-v2.has-left-rail.has-context .qms-p
 assertNotMatch(planner, /\.qms-modern-planner-v2\.has-left-rail\.has-context\s+\.qms-planner-inspector\s*\{\s*display:\s*none;\s*\}/, "Planner must not hide selected-event inspector detail at constrained widths");
 
 for (const testContract of [
-  "People uses the governed Planner preflight",
   "Intelligence keeps authoritative source-warning provenance",
   "My Quality Work treats a date-only deadline due today as due today",
   "Assurance refresh re-reads the selected case detail",
@@ -179,11 +164,9 @@ for (const testContract of [
 }
 
 for (const reviewRegression of [
-  "People invalidates a governed assignment result when any checked input changes and locks inputs in flight",
   "Inbox preserves notification receipt time without treating created_at as a deadline",
-  "People read access does not expose mutation controls to a Quality Auditor",
 ]) {
   assertIncludes(codexRegressions, reviewRegression, `Codex review regression coverage is missing: ${reviewRegression}`);
 }
 
-console.log("QMS operational UI contract passed: readability, backend priority truth, due-vs-received time semantics, immutable assignment preflight snapshots, backend-aligned read permissions, permission boundaries, authoritative refresh, source provenance, Assurance lifecycle/effectiveness gates and responsive reachability are preserved.");
+console.log("QMS operational UI contract passed: readability, governed People authorization cases, split preparation/approval authority, backend-aligned permissions, authoritative refresh, source provenance, Assurance lifecycle/effectiveness gates and responsive reachability are preserved.");

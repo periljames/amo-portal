@@ -262,11 +262,14 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     [scheduleId, schedulesQuery.data]
   );
 
+  /* Reset the editable participant draft only when the authoritative schedule identity changes. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setParticipantForm(participantFormFromSchedule(schedule));
     setEditingParticipants(false);
     setParticipantMessage(null);
   }, [schedule?.id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const participantUpdate = useMutation({
     mutationFn: async () => qmsUpdateAuditSchedule(scheduleId, {

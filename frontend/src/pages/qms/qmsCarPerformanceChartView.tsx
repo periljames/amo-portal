@@ -25,6 +25,7 @@ import type { ChartDatum, DepartmentExposureDatum } from "./qmsCarPerformanceCha
 export type AnalysisMetricId = "qpi" | "workload" | "exposure" | "conversion" | "ageing";
 export type AnalysisChartKind = "bar" | "hbar" | "line" | "area" | "pie" | "donut" | "radial";
 
+/* eslint-disable-next-line react-refresh/only-export-components -- shared immutable chart configuration. */
 export const ANALYSIS_METRICS: ReadonlyArray<{ id: AnalysisMetricId; label: string; hint: string }> = [
   { id: "qpi", label: "QPI vs target", hint: "On-time closure against the 80% requirement." },
   { id: "workload", label: "Workload", hint: "Open, overdue, review and closed volume." },
@@ -33,6 +34,7 @@ export const ANALYSIS_METRICS: ReadonlyArray<{ id: AnalysisMetricId; label: stri
   { id: "ageing", label: "Overdue ageing", hint: "Pareto buckets for overdue corrective actions." },
 ];
 
+/* eslint-disable-next-line react-refresh/only-export-components -- shared immutable chart configuration. */
 export const ANALYSIS_CHART_KINDS: ReadonlyArray<{ id: AnalysisChartKind; label: string }> = [
   { id: "bar", label: "Bar" },
   { id: "hbar", label: "Horizontal" },
@@ -58,6 +60,7 @@ function fillFor(index: number, explicit?: string): string {
   return explicit || FALLBACK_FILLS[index % FALLBACK_FILLS.length];
 }
 
+/* eslint-disable-next-line react-refresh/only-export-components -- deterministic chart transformation exported for tests. */
 export function exposureToSeries(rows: DepartmentExposureDatum[]): ChartDatum[] {
   return rows.map((row, index) => ({
     name: row.department,

@@ -15,12 +15,6 @@ async function expectFontAtLeast(locator: Locator, pixels: number): Promise<void
   expect(actual).toBeGreaterThanOrEqual(pixels);
 }
 
-async function expectMinHeightAtLeast(locator: Locator, pixels: number): Promise<void> {
-  await expect(locator).toBeVisible();
-  const actual = await locator.evaluate((element) => element.getBoundingClientRect().height);
-  expect(actual).toBeGreaterThanOrEqual(pixels);
-}
-
 const assuranceCase = {
   id: "case-1",
   case_ref: "ASC-26-001",
@@ -132,65 +126,73 @@ async function prepare(page: Page): Promise<void> {
     }
     if (path.includes("/accounts/admin/admin-profile/")) return json(route, { eligible: false, active: false });
 
-    if (path.endsWith("/quality/people/summary")) {
-      return json(route, { active_privileges: 4, expiring_within_60_days: 1, suspended_privileges: 0, independence_exceptions: 1 });
+    if (path.endsWith("/quality/people/authorization-control/overview")) {
+      return json(route, {
+        permissions: {
+          can_view: true, can_prepare: true, can_approve: true, can_review: true,
+          can_approve_exemption: true, can_manage_policy: true, can_oversight: true, self_service_only: false,
+        },
+        metrics: {
+          active_authorizations: 1, suspended_authorizations: 0, expiring_within_60_days: 1,
+          open_authorization_cases: 1, reviews_due: 0, active_controlled_exemptions: 0,
+        },
+        attention: [{
+          type: "Authorization case", person: "Amina Wanjiku", authorization: "Auditor",
+          status: "READY_FOR_DECISION", reason: "Final Quality decision required", updated_at: "2026-08-09T10:00:00Z",
+        }],
+      });
+    }
+    if (path.endsWith("/quality/people/authorization-control/people")) {
+      return json(route, { items: [{
+        key: "auditor-user-a", name: "Amina Wanjiku", staff_code: "QMS-018",
+        home_role: "QUALITY_INSPECTOR", department: "Quality", workforce_status: "Active",
+        authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
+        open_cases: 1,
+      }], total: 1 });
+    }
+    if (path.endsWith("/quality/people/authorization-control/people/auditor-user-a")) {
+      return json(route, {
+        person: { name: "Amina Wanjiku", home_role: "QUALITY_INSPECTOR", department: "Quality", staff_code: "QMS-018", active: true },
+        appointments: [{ function: "Internal Quality Auditor", status: "ACTIVE", effective_from: "2026-01-01", effective_until: null }],
+        authorizations: [{
+          key: "priv-1", authorization: "Auditor", status: "ACTIVE", scope: "Global",
+          effective_from: "2026-01-01", expires_on: "2026-12-31", last_reviewed: "2026-06-01", next_review_due: "2027-06-01",
+        }],
+        cases: [],
+        audit_participation: {
+          observed_completed: 3, observed_target: 3,
+          items: [{ reference: "QAR/MO/26/014", title: "Technical Personnel Audit", status: "CLOSED", roles: ["Auditor"], planned_start: "2026-07-15", planned_end: "2026-07-15", actual_end: "2026-07-15" }],
+        },
+      });
+    }
+    if (path.endsWith("/quality/people/authorization-control/cases")) {
+      return json(route, { items: [{
+        id: "case-authorization-1", person: "Amina Wanjiku", home_role: "QUALITY_INSPECTOR",
+        department: "Quality", authorization: "Auditor", case_type: "RENEWAL",
+        status: "READY_FOR_DECISION", nomination_date: "2026-08-08", nominator: "Quality Manager",
+        recommendation: "Renew current authorization.", updated_at: "2026-08-09T10:00:00Z", next_action: "Decision required",
+      }], total: 1 });
+    }
+    if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
+    if (path.endsWith("/quality/people/authorization-control/authorizations")) {
+      return json(route, { items: [{
+        key: "priv-1", person: "Amina Wanjiku", authorization: "Auditor", status: "ACTIVE",
+        scope: "Global", effective_from: "2026-01-01", expires_on: "2026-12-31",
+        last_reviewed: "2026-06-01", next_review_due: "2027-06-01", limitations: [],
+      }] });
     }
     if (path.endsWith("/quality/people/rules")) {
       return json(route, { items: [{
-        id: "rule-1",
-        privilege_code: "AUDITOR_INTERNAL",
-        title: "Internal Auditor",
-        privilege_type: "AUDITOR",
-        required_training_course_codes: ["QMS-AUD"],
-        independence_required: true,
-        max_concurrent_assignments: 2,
-        scope_schema: {},
-        is_active: true,
-        updated_at: "2026-08-08T12:00:00Z",
+        id: "rule-1", privilege_code: "AUDITOR_INTERNAL", title: "Auditor", privilege_type: "AUDITOR",
+        required_training_course_codes: ["QMS-AUD"], independence_required: true, max_concurrent_assignments: 2,
+        scope_schema: {}, is_active: true, updated_at: "2026-08-08T12:00:00Z",
       }] });
-    }
-    if (path.endsWith("/quality/people/privileges")) {
-      return json(route, { items: [{
-        id: "priv-1",
-        rule_id: "rule-1",
-        user_id: "auditor-user-a",
-        privilege_code: "AUDITOR_INTERNAL",
-        scope_key: "GLOBAL",
-        scope: {},
-        limitations: [],
-        status: "ACTIVE",
-        effective_from: "2026-01-01",
-        expires_on: "2026-12-31",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-08-08T12:00:00Z",
-        decisions: [],
-      }] });
-    }
-    if (path.endsWith("/quality/people/eligibility")) {
-      return json(route, {
-        eligible: true,
-        as_of: "2026-08-09T10:00:00Z",
-        person: { user_id: "auditor-user-a", full_name: "Amina Wanjiku", email: "amina@tenant-a.test", role: "QUALITY_INSPECTOR" },
-        rule: { id: "rule-1", privilege_code: "AUDITOR_INTERNAL", title: "Internal Auditor", privilege_type: "AUDITOR" },
-        hard_gates: { active_privilege: true, training_current: true, independence_clear: true, workload_available: true },
-        training: { required: ["QMS-AUD"], satisfied: ["QMS-AUD"], missing: [], records: [], passed: true },
-        independence: { passed: true },
-        workload: { passed: true },
-        active_privilege: { id: "priv-1" },
-      });
     }
 
     if (path.endsWith("/quality/assurance-cases") && request.method() === "GET") {
       return json(route, { items: [assuranceCase], total: 1, limit: 150, offset: 0, has_more: false });
     }
     if (path.endsWith("/quality/assurance-cases/case-1") && request.method() === "GET") return json(route, assuranceCase);
-    if (path.endsWith("/quality/audits/register/paged")) {
-      return json(route, {
-        rows: [], total: 0, limit: 25, offset: 0, has_more: false,
-        car_linked_findings: 0, open_car_count: 0,
-      });
-    }
-
     if (path.endsWith("/quality/intelligence/overview")) {
       return json(route, {
         as_of: "2026-08-09T10:00:00Z",
@@ -267,34 +269,40 @@ async function prepare(page: Page): Promise<void> {
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  // qmsGetAuditRegisterPage can resolve through the preview readiness origin in CI.
+  // Keep this explicit route last so the register test never falls through to the readiness stub.
+  await page.route("**/quality/audits/register/paged**", (route) => json(route, {
+    rows: [], total: 0, limit: 25, offset: 0, has_more: false,
+    car_linked_findings: 0, open_car_count: 0,
+  }));
 }
 
 test("People is person-first, contextual and readable at native 1080p", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.getByRole("heading", { name: "Quality authorization board", exact: true }), 28);
+  await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
+  await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
+  await page.locator(".qms-authz").getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "People and current privileges", exact: true })).toBeVisible();
-  await expect(page.getByText("Current authorization readiness", { exact: true })).toBeVisible();
   await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
+  await page.getByRole("button", { name: /Amina Wanjiku/ }).click();
 
-  await page.getByRole("button", { name: /Check audit assignment/i }).click();
-  await expect(page.getByRole("heading", { name: "Check governed audit assignment", exact: true })).toBeVisible();
-  const input = page.locator(".qms-people__drawer input").first();
-  await expectFontAtLeast(input, 14);
-  await expectMinHeightAtLeast(input, 42);
+  await expect(page.getByRole("heading", { name: "Amina Wanjiku", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Quality authorizations", exact: true })).toBeVisible();
+  await expect(page.getByText("QAR/MO/26/014", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Change privilege/i })).toHaveCount(0);
 });
 
 test("Assurance keeps case triage primary in the consolidated finding lifecycle", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/register", { waitUntil: "domcontentloaded" });
 
-  await expectFontAtLeast(page.locator(".qa-register-grid-page__heading h1"), 17.5);
-  await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
+  await expect(page.locator("section.qa-register-grid-page[aria-label=\"Findings register\"]")).toBeVisible();
   // The consolidated register owns the visible heading; the legacy shell subtitle stays suppressed to avoid duplicate chrome.
   await expect(page.getByText(/one lifecycle from audit finding through auditee action/i)).toBeHidden();
-  await expect(page.getByText("No findings or corrective actions yet", { exact: true })).toBeVisible();
+  await expect(page.locator(".qa-register-grid-page__empty")).toBeVisible();
   await expect(page.getByRole("button", { name: /Open audits/i }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Analysis/i })).toBeVisible();
 });

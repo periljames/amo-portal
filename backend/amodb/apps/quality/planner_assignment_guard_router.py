@@ -49,7 +49,7 @@ def _raise_assignment_blocked(*, result: dict, operation: str) -> None:
         detail={
             "message": f"{operation} is blocked by governed auditor eligibility requirements.",
             "assignment_gate": result,
-            "required_action": "Resolve the failed People & Privileges hard gates before continuing.",
+            "required_action": "Resolve the failed Quality authorization or assignment eligibility gates before continuing.",
         },
     )
 

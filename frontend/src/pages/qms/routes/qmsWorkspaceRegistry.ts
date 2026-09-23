@@ -49,10 +49,10 @@ export const QMS_WORKSPACES: readonly QmsWorkspaceDefinition[] = [
   {
     id: "people",
     segment: "people",
-    label: "People & Privileges",
+    label: "People & Authorization Control",
     shortLabel: "People",
-    permission: "qms.training.view",
-    description: "Competence, internal privileges, authorization evidence and future qualified-coverage exposure.",
+    permission: "qms.people.view",
+    description: "Quality appointments, authorization cases, competence decisions, periodic reviews and governed authorization history.",
     activePrefixes: [],
   },
   {
@@ -95,13 +95,16 @@ export function qmsWorkspaceEntryPath(amoCode: string, workspace: QmsWorkspaceId
   return `${base}?workspace=${encodeSegment(workspace)}`;
 }
 
-/** Deep-link into People & Privileges with optional tab/action/ruleType for setup CTAs. */
+/** Deep-link into People & Authorization Control with optional tab/action/ruleType for governed setup CTAs. */
 export function qmsPeopleWorkspacePath(
   amoCode: string,
-  options: { tab?: "privileges" | "rules" | "reference"; action?: string; ruleType?: string; ruleId?: string } = {},
+  options: { tab?: "overview" | "people" | "cases" | "reviews" | "administration" | "privileges" | "rules" | "reference"; action?: string; ruleType?: string; ruleId?: string } = {},
 ): string {
   const params = new URLSearchParams({ workspace: "people" });
-  if (options.tab) params.set("tab", options.tab);
+  if (options.tab) {
+    const tab = options.tab === "privileges" ? "people" : options.tab === "rules" || options.tab === "reference" ? "administration" : options.tab;
+    params.set("tab", tab);
+  }
   if (options.action) params.set("action", options.action);
   if (options.ruleType) params.set("ruleType", options.ruleType);
   if (options.ruleId) params.set("ruleId", options.ruleId);

@@ -43,14 +43,6 @@ const severityPillClass = (value: string): string => {
 };
 
 
-const formatFindingLevel = (value?: string | null): string => {
-  const upper = String(value || "").toUpperCase();
-  if (upper === "LEVEL_1") return "Level 1 · Critical";
-  if (upper === "LEVEL_2") return "Level 2 · Major";
-  if (upper === "LEVEL_3") return "Level 3 · Minor";
-  if (upper === "LEVEL_4") return "Observations";
-  return value || "Unclassified";
-};
 
 const formatDateTime = (value?: string | null): string => {
   if (!value) return "—";
@@ -82,7 +74,7 @@ const toEvidenceFromAttachment = (item: CARAttachmentOut): EvidenceItem => {
   };
 };
 
-const FindingDrawer: React.FC<Props> = ({ isOpen, amoCode, department, finding, linkedCar, onClose }) => {
+const FindingDrawer: React.FC<Props> = ({ isOpen, amoCode, finding, linkedCar, onClose }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
