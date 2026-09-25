@@ -20,15 +20,17 @@ from . import domain_models
 # Use only roles that exist in the authoritative AccountRole enum. AUDITOR remains
 # execution-only; Quality Officer may perform controlled intake and preparation but
 # does not receive the narrower approval authority below.
+# DMS personas are deliberately narrower than general Quality access.
+# Document Control Officers operate the library, distribution, authority evidence,
+# controlled-copy and release machinery. Quality staff participate only through
+# explicit governed document responsibilities. Tenant admins are the full DMS
+# override; platform superusers are intentionally not.
 CONTROL_ROLES = {
-    "QUALITY_MANAGER",
-    "QUALITY_OFFICER",
     "DOCUMENT_CONTROL_OFFICER",
 }
 
 APPROVER_ROLES = {
     "ACCOUNTABLE_EXECUTIVE",
-    "QUALITY_MANAGER",
 }
 
 WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
