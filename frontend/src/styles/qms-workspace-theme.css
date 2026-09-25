@@ -89,10 +89,10 @@ body[data-color-scheme="dark"] .quality-context-bar,
    3) Dark semantic chips / pastels → charcoal tints
    --------------------------------------------------------------------------- */
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
-[data-theme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
-.dark :is(.qms-missions, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+[data-theme="dark"] :is(.qms-missions, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
+.dark :is(.qms-missions, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
   --qms-danger-chip-bg: #3a2226;
   --qms-danger-chip-ink: #fecaca;
   --qms-warn-chip-bg: #3a3120;
@@ -209,14 +209,14 @@ body[data-color-scheme="dark"] .qms-intelligence__targeted-list article {
 }
 
 /* Shared form controls */
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
   background: #1a1d22 !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: rgba(255, 255, 255, 0.94) !important;
 }
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence) tr.is-selected td,
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence) tr.is-selected td {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-intelligence) tr.is-selected td,
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-intelligence) tr.is-selected td {
   background: color-mix(in srgb, var(--accent-primary, #4f8cff) 14%, var(--qms-panel, #1c1f24)) !important;
 }
