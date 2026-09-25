@@ -286,6 +286,20 @@ test.describe("Publications reader integrated real-world stability", () => {
     }
   });
 
+  test("assisted search executes against the current controlled publication and returns navigable sources", async ({ page }) => {
+    await page.getByRole("button", { name: "Open assisted search" }).click();
+    const assistant = page.locator(".documentation-assistant.is-floating");
+    await expect(assistant).toBeVisible();
+    await assistant.getByRole("tab", { name: "Search" }).click();
+    const query = assistant.getByLabel("Question or document reference");
+    await query.fill(SEARCH_TERM);
+    await assistant.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(assistant.locator(".documentation-assistant__result")).toBeVisible({ timeout: RENDER_MS });
+    await expect(assistant.locator(".documentation-assistant__sources article").first()).toBeVisible({ timeout: RENDER_MS });
+    await expect(assistant.locator(".documentation-assistant__authority-note")).toContainText("controlled source remains authoritative");
+    await expectNoReaderError(page);
+  });
+
   test("reader utilities and assisted search remain usable across 4K, ultrawide, laptop and mobile viewports", async ({ page }) => {
     for (const viewport of [
       { width: 3840, height: 2160 },
