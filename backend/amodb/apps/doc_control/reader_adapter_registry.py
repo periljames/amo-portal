@@ -1,8 +1,9 @@
 """Declarative format negotiation for the governed Publications reader.
 
 The registry describes the bounded rendering path that actually exists in the
-portal. It does not imply native Office editing. Non-PDF office/image sources use
-controlled derivatives plus semantic/OCR aids where ingestion produced them.
+portal. It does not imply native Office editing. PDF and DOCX use client-side
+renderers; legacy Office/image sources use controlled derivatives plus
+semantic/OCR aids where ingestion produced them.
 """
 from __future__ import annotations
 
@@ -46,16 +47,31 @@ PDF = ReaderAdapter(
     supports_layout=True,
 )
 
+DOCX = ReaderAdapter(
+    name="DOCX_CLIENT_LAYOUT",
+    source_types=("DOCX",),
+    mime_types=("application/vnd.openxmlformats-officedocument.wordprocessingml.document",),
+    extensions=("docx",),
+    renderer="DOCX_PREVIEW_CLIENT",
+    location_adapter="SEMANTIC_SECTION_BLOCK",
+    selection_support="SEMANTIC_TEXT",
+    source_exact=False,
+    derivative=False,
+    search="SEMANTIC_TEXT",
+    compare="SEMANTIC_STRUCTURE",
+    ocr_mode="NONE",
+    supports_layout=True,
+)
+
 OFFICE_DOCUMENT = ReaderAdapter(
     name="OFFICE_DOCUMENT_DERIVATIVE",
-    source_types=("DOCX", "ODT", "DOC", "RTF"),
+    source_types=("ODT", "DOC", "RTF"),
     mime_types=(
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.oasis.opendocument.text",
         "application/msword",
         "application/rtf",
     ),
-    extensions=("docx", "odt", "doc", "rtf"),
+    extensions=("odt", "doc", "rtf"),
     renderer="DERIVATIVE_PDF_OR_SEMANTIC_HTML",
     location_adapter="SEMANTIC_SECTION_BLOCK",
     selection_support="SEMANTIC_TEXT",
@@ -156,7 +172,7 @@ FALLBACK = ReaderAdapter(
     supports_layout=False,
 )
 
-ADAPTERS: tuple[ReaderAdapter, ...] = (PDF, OFFICE_DOCUMENT, SPREADSHEET, PRESENTATION, MARKUP_TEXT, IMAGE)
+ADAPTERS: tuple[ReaderAdapter, ...] = (PDF, DOCX, OFFICE_DOCUMENT, SPREADSHEET, PRESENTATION, MARKUP_TEXT, IMAGE)
 
 
 def _normalise(values: Iterable[str | None]) -> set[str]:
