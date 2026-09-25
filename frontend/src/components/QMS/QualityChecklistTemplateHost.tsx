@@ -70,7 +70,7 @@ function isCriteriaCandidate(row: IntegratedLibraryItem): boolean {
 
 function criteriaRevisionLabel(row: IntegratedLibraryItem): string {
   if (row.current_revision) return `Rev ${row.current_revision.revision_number}`;
-  if (row.read_target?.control_status === "CONTROLLED_DRAFT") return "Controlled draft";
+  if (row.read_target?.control_status === "CONTROLLED_DRAFT" || row.read_target?.kind === "UNCONTROLLED") return "DRAFT";
   if (row.read_target?.label) return row.read_target.label;
   return row.read_target?.kind || "Readable revision";
 }
