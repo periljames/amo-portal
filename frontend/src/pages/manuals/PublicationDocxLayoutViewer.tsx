@@ -16,6 +16,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
   const [status, setStatus] = useState("Opening document…");
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const [mediaWarning, setMediaWarning] = useState("");
 
   useEffect(() => {
     if (!frameReady) return;
@@ -29,6 +30,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
     const sheet = frameDocument!.createElement("div");
     setReady(false);
     setError("");
+    setMediaWarning("");
     setStatus("Opening document…");
     void (async () => {
       try {
@@ -39,7 +41,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
         if (!response.ok) throw new Error(`The Word source could not be loaded (${response.status}).`);
         const bytes = await response.arrayBuffer();
         if (!current) return;
-        setStatus("Laying out pages on this device…");
+        setStatus("Laying out Word pages on this device…");
         await renderAsync(bytes, body, sheet, {
           className: "docx",
           inWrapper: true,
@@ -52,8 +54,6 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
           renderFooters: true,
           renderFootnotes: true,
           renderEndnotes: true,
-          renderChanges: true,
-          renderAltChunks: true,
           experimental: true,
           // Data URLs are self-contained inside the sandboxed frame. This keeps
           // package media (logos, signatures and other embedded images) alive
@@ -64,6 +64,30 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
         if (!current) return;
         host.replaceChildren(body);
         styles.replaceChildren(sheet);
+
+        const images = Array.from(host.querySelectorAll<HTMLImageElement>("img"));
+        let failedMedia = 0;
+        const reportFailure = (image: HTMLImageElement) => {
+          if (image.dataset.renderFailure === "true") return;
+          image.dataset.renderFailure = "true";
+          failedMedia += 1;
+          image.alt = image.alt || "Embedded graphic unavailable";
+          image.classList.add("docx-media-failed");
+          const replacement = frameDocument!.createElement("span");
+          replacement.className = "docx-media-fallback";
+          replacement.setAttribute("role", "img");
+          replacement.setAttribute("aria-label", image.alt);
+          replacement.textContent = "Graphic could not be rendered";
+          image.replaceWith(replacement);
+          setMediaWarning(`${failedMedia} embedded graphic${failedMedia === 1 ? "" : "s"} could not be rendered. The missing area has been marked instead of left blank.`);
+        };
+        images.forEach((image) => {
+          image.decoding = "async";
+          image.loading = "eager";
+          if (image.complete && image.naturalWidth === 0) reportFailure(image);
+          else image.addEventListener("error", () => reportFailure(image), { once: true });
+        });
+
         setReady(true);
         setStatus("");
         void frameDocument!.fonts.ready.catch(() => undefined);
@@ -87,7 +111,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
       const page = host.querySelector<HTMLElement>("section.docx");
       const pageWidth = page?.offsetWidth || 816;
       const nextScale = zoom === "fit"
-        ? Math.min(1.5, Math.max(0.25, (frame.clientWidth - 32) / pageWidth))
+        ? Math.min(2, Math.max(0.25, (frame.clientWidth - 32) / pageWidth))
         : Number(zoom) / 100;
       const oldHeight = Math.max(1, viewport.scrollHeight);
       const oldTop = viewport.scrollTop;
@@ -109,6 +133,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
   }, [ready, zoom]);
 
   return <section className="publication-docx" aria-label="Word document reader">
+    {mediaWarning ? <div className="publication-docx__media-warning" role="status">{mediaWarning}</div> : null}
     {!ready && !error ? <p className="publication-docx__status" role="status">{status}</p> : null}
     {error ? <div className="publication-docx__error" role="alert"><p>{error}</p><button type="button" onClick={onTextFallback}>Open accessible text</button></div> : null}
     <iframe ref={frameRef} title={`${title} — Word layout`} sandbox="allow-same-origin" srcDoc={FRAME_DOCUMENT} onLoad={() => setFrameReady(true)} style={{ visibility: ready ? "visible" : "hidden" }} />
