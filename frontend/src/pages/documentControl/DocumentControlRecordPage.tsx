@@ -88,7 +88,8 @@ function activeTabFromParams(params: URLSearchParams): DocumentWorkspaceView {
 
 function controlStatus(detail: DocumentDetailResponse): string {
   const target = detail.document.read_target;
-  return target.control_status || (target.kind === "UNCONTROLLED" ? "CONTROLLED_DRAFT" : target.kind);
+  const status = target.control_status || target.kind;
+  return status === "CONTROLLED_DRAFT" || target.kind === "UNCONTROLLED" ? "DRAFT" : status;
 }
 
 export default function DocumentControlRecordPage() {
@@ -172,7 +173,7 @@ export default function DocumentControlRecordPage() {
       {loading ? <DocumentControlLoading label="Loading unified document workspace…" /> : null}
       {error ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !error && detail && document ? <div className="dms-document" data-testid="document-workspace">
-        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>Controlled draft — not yet issued.</strong> {workflow ? "The approval workflow is active." : "The document is registered; start its review workflow below."} Draft views, downloads and printouts are not approved for operational use until publication.</div></div> : null}
+        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>DRAFT — not yet issued.</strong> {workflow ? "The approval workflow is active." : "The document is registered; start its review workflow below."} Draft views, downloads and printouts are not approved for operational use until publication.</div></div> : null}
 
         <section className="dms-document__identity">
           <div className="dms-document__identity-main">
