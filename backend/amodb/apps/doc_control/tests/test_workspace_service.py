@@ -58,7 +58,7 @@ def _workflow(state: str, *, requires_authority: bool = False) -> DocumentWorkfl
 
 
 def test_document_control_roles_are_explicit_and_fail_closed() -> None:
-    assert service.is_control_user(_user("QUALITY_MANAGER")) is True
+    assert service.is_control_user(_user("QUALITY_MANAGER")) is False
     assert service.is_control_user(_user("QUALITY_INSPECTOR")) is False
     assert service.is_control_user(_user("AUDITOR")) is False
     assert service.is_control_user(_user("DOCUMENT_CONTROL_OFFICER")) is True
@@ -69,7 +69,7 @@ def test_document_control_roles_are_explicit_and_fail_closed() -> None:
 
 
 def test_document_approval_roles_are_narrower_than_general_control_roles() -> None:
-    assert service.is_approver(_user("QUALITY_MANAGER")) is True
+    assert service.is_approver(_user("QUALITY_MANAGER")) is False
     assert service.is_approver(_user("ACCOUNTABLE_EXECUTIVE")) is True
     assert service.is_approver(_user("QUALITY_INSPECTOR")) is False
     assert service.is_approver(_user("AUDITOR")) is False
