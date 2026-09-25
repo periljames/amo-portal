@@ -56,6 +56,15 @@ assertIncludes(missions, "width: 100%;", "Mission creation must fit its workspac
 
 assertIncludes(people, ".qms-authz-grid--split", "People authorization control must retain a two-pane operational workspace");
 assertIncludes(people, ".qms-authz-modal", "Governed authorization actions must remain contextual and explicit");
+assertIncludes(peoplePage, 'className="qms-authz qms-people qms-surface-root"', "People must bind to the shared QMS surface/token contract");
+assertIncludes(people, "--qms-authz-surface: var(--qms-panel", "People surfaces must inherit the shared QMS panel token");
+assertIncludes(people, "--qms-authz-border: var(--qms-line", "People borders must inherit the shared QMS line token");
+assertIncludes(people, "--qms-authz-primary: var(--accent-primary", "People actions must inherit the portal accent token");
+assertIncludes(people, "width: min(100%, 1680px);", "People must use the established QMS workspace width");
+assertIncludes(people, "min-height: 42px;", "People form controls must retain the shared operational control height");
+assertIncludes(people, "@media (max-width: 980px)", "People must collapse the split workspace before laptop widths become cramped");
+assertIncludes(people, "justify-content: flex-end;", "Governed People dialogs must use the bounded drawer pattern");
+assertIncludes(people, ":focus-visible", "People controls must retain visible keyboard focus");
 assertIncludes(peoplePage, "Authorization governance", "People must remain authorization-control focused");
 assertIncludes(peoplePage, "Authorization Cases", "People must expose the governed pre-decision case workflow");
 assertIncludes(peoplePage, "Controlled Exemption / Conditional Authorization", "People must expose only the controlled exception workflow");
