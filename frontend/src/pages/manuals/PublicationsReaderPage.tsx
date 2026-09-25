@@ -1,5 +1,5 @@
 import PublicationDocxLayoutViewer from "./PublicationDocxLayoutViewer";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck,
   Bookmark,
@@ -188,7 +188,7 @@ function initialBootstrap(tenant: string, manualId: string, revisionId: string):
   return tenant && manualId && revisionId ? readCachedPublicationBootstrap(tenant, manualId, revisionId) : null;
 }
 
-export default function PublicationsReaderPage() {
+export default function PublicationsReaderPage({ headerUtilities }: { headerUtilities?: ReactNode } = {}) {
   const { tenant, amoCode, manualId, revId } = useManualRouteContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -715,6 +715,7 @@ export default function PublicationsReaderPage() {
               <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>
               <button type="button" className={governanceOpen ? "active" : ""} onClick={() => setGovernanceOpen(true)}><ShieldCheck size={16} /> Governance</button>
               <button type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || tenant)}/document-control/library/${encodeURIComponent(manualId || "")}?tab=changes`)}>Report problem</button>
+              {headerUtilities ? <div className="publication-document-header__utilities">{headerUtilities}</div> : null}
             </div>
           </header>
 
