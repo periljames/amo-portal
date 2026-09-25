@@ -37,7 +37,7 @@ def test_quality_inspector_does_not_inherit_document_controller_authority() -> N
     assert inspector["publish"] is False
 
 
-def test_document_control_officer_can_administer_without_approval() -> None:
+def test_document_control_officer_can_administer_and_release_without_approval() -> None:
     controller = document_control_capabilities(_user(AccountRole.DOCUMENT_CONTROL_OFFICER))
     assert controller["persona"] == "DOCUMENT_CONTROL"
     assert controller["control"] is True
