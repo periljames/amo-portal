@@ -138,6 +138,7 @@ def test_draft_status_is_presented_simply_without_changing_governance_state() ->
     assert '{isPublished ? "Controlled publication" : "DRAFT"}' in source
     assert "<strong>DRAFT — not yet issued</strong>" in source
 
+
 def test_working_copy_autosave_is_generation_and_lifecycle_safe() -> None:
     source = _source(CORE)
 
