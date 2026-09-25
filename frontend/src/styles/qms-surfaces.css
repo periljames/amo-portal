@@ -24,9 +24,8 @@
 .qms-ops-page,
 .qms-missions,
 .qms-mission-detail,
-.qms-people,
-.qms-intelligence,
-.qms-assurance-cases {
+.qms-authz,
+.qms-intelligence {
   --qms-page: color-mix(in srgb, var(--surface, #f6f8fb) 92%, var(--surface-elevated, #fff) 8%);
   --qms-panel: var(--surface-elevated, #fff);
   --qms-line: color-mix(in srgb, var(--surface-border, #d7dee9) 82%, transparent);
@@ -86,9 +85,8 @@ html[data-color-scheme="dark"] .qms-audit-programme,
 html[data-color-scheme="dark"] .qms-ops-page,
 html[data-color-scheme="dark"] .qms-missions,
 html[data-color-scheme="dark"] .qms-mission-detail,
-html[data-color-scheme="dark"] .qms-people,
+html[data-color-scheme="dark"] .qms-authz,
 html[data-color-scheme="dark"] .qms-intelligence,
-html[data-color-scheme="dark"] .qms-assurance-cases,
 body[data-color-scheme="dark"] .qms-surface-root,
 body[data-color-scheme="dark"] .qms-modern-planner-v2,
 body[data-color-scheme="dark"] .qa-workspace-shell,
@@ -112,9 +110,8 @@ body[data-color-scheme="dark"] .qms-audit-programme,
 body[data-color-scheme="dark"] .qms-ops-page,
 body[data-color-scheme="dark"] .qms-missions,
 body[data-color-scheme="dark"] .qms-mission-detail,
-body[data-color-scheme="dark"] .qms-people,
+body[data-color-scheme="dark"] .qms-authz,
 body[data-color-scheme="dark"] .qms-intelligence,
-body[data-color-scheme="dark"] .qms-assurance-cases,
 [data-theme="dark"] .qms-surface-root,
 [data-theme="dark"] .qms-live-audit-focus,
 [data-theme="dark"] .qms-audit-session-rail,
@@ -127,9 +124,8 @@ body[data-color-scheme="dark"] .qms-assurance-cases,
 .dark .qms-audit-setup-stage,
 .dark .qms-missions,
 .dark .qms-mission-detail,
-.dark .qms-people,
-.dark .qms-intelligence,
-.dark .qms-assurance-cases {
+.dark .qms-authz,
+.dark .qms-intelligence {
   --qms-page: color-mix(in srgb, var(--surface, #12151a) 88%, #0b0d10 12%);
   --qms-panel: var(--surface-elevated, #1c1f24);
   --qms-line: color-mix(in srgb, var(--surface-border, rgba(255, 255, 255, 0.12)) 88%, transparent);

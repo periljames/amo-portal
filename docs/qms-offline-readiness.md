@@ -10,7 +10,7 @@ Offline availability requires a prior online visit and successful caching. Preca
 
 Audit Setup preserves unsaved edits during background refreshes, retains assigned people missing from directory pagination, validates meeting chronology, distinguishes notice revisions from template revisions, and provides one Prepare action. Existing historical records are not rewritten automatically.
 
-Eleven unused legacy QMS page, host and stylesheet files were removed after checking references. `QmsAssurancePage.tsx` remains because an operational UI validation script reads it.
+Unused legacy QMS pages, hosts and styles are removed after reference checks. Assurance now enters the consolidated Audits surface; the retired standalone Assurance page and stylesheet are not retained solely for validation.
 
 ## Release verification
 
