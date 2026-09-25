@@ -281,9 +281,24 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
 
+  const root = page.locator(".qms-authz");
+  await expect(root).toHaveClass(/qms-people/);
+  await expect(root).toHaveClass(/qms-surface-root/);
   await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
   await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
-  await page.locator(".qms-authz").getByRole("button", { name: "People", exact: true }).click();
+  expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await expect(root.locator(".qms-authz-section-title svg")).toHaveCount(0);
+  const metricBoxes = await root.locator(".qms-authz-metric").evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    }),
+  );
+  expect(metricBoxes).toHaveLength(6);
+  expect(Math.max(...metricBoxes.map((box) => box.width)) - Math.min(...metricBoxes.map((box) => box.width))).toBeLessThanOrEqual(1);
+  expect(Math.max(...metricBoxes.map((box) => box.height)) - Math.min(...metricBoxes.map((box) => box.height))).toBeLessThanOrEqual(1);
+
+  await root.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
   await page.getByRole("button", { name: /Amina Wanjiku/ }).click();
@@ -293,6 +308,40 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await expect(page.getByText("QAR/MO/26/014", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Change privilege/i })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Nominate", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Nominate person for Quality authorization" });
+  await expect(dialog).toBeVisible();
+  const panel = dialog.locator(".qms-authz-modal__panel");
+  const panelBox = await panel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(panelBox!.width).toBeGreaterThanOrEqual(620);
+  expect(Math.abs((panelBox!.x + panelBox!.width) - (1920 - 24))).toBeLessThanOrEqual(2);
+  const personSelect = dialog.getByLabel("Person");
+  const controlHeight = await personSelect.evaluate((element) => Number.parseFloat(window.getComputedStyle(element).height));
+  expect(controlHeight).toBeGreaterThanOrEqual(42);
+  await dialog.locator(".qms-authz-modal__header button").click();
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  const split = page.locator(".qms-authz-grid--split").first();
+  const splitChildren = split.locator(":scope > article");
+  const leftBox = await splitChildren.nth(0).boundingBox();
+  const rightBox = await splitChildren.nth(1).boundingBox();
+  expect(leftBox).not.toBeNull();
+  expect(rightBox).not.toBeNull();
+  expect(Math.abs(leftBox!.x - rightBox!.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(leftBox!.width - rightBox!.width)).toBeLessThanOrEqual(2);
+  expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+
+  await page.setViewportSize({ width: 680, height: 800 });
+  await page.getByRole("button", { name: "Nominate", exact: true }).click();
+  const mobileDialog = page.getByRole("dialog", { name: "Nominate person for Quality authorization" });
+  const mobilePanelBox = await mobileDialog.locator(".qms-authz-modal__panel").boundingBox();
+  expect(mobilePanelBox).not.toBeNull();
+  expect(mobilePanelBox!.x).toBeLessThanOrEqual(1);
+  expect(Math.abs(mobilePanelBox!.width - 680)).toBeLessThanOrEqual(2);
+  expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await mobileDialog.locator(".qms-authz-modal__header button").click();
 });
 
 test("Assurance keeps case triage primary in the consolidated finding lifecycle", async ({ page }) => {
