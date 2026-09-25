@@ -20,8 +20,13 @@ def document_control_persona(user: account_models.User) -> str:
         return "DOCUMENT_CONTROL"
     if role_value(user) == "ACCOUNTABLE_EXECUTIVE":
         return "ACCOUNTABLE_EXECUTIVE"
-    if role_value(user) == "QUALITY_MANAGER":
+    role = role_value(user)
+    if role == "QUALITY_MANAGER":
         return "QUALITY_MANAGER"
+    if role in {"BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER", "SAFETY_MANAGER"}:
+        return "POST_HOLDER"
+    if role in {"QUALITY_OFFICER", "SAFETY_OFFICER"}:
+        return "SUPPORT_OFFICER"
     return "READER"
 
 
