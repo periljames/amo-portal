@@ -64,17 +64,6 @@ body[data-color-scheme="dark"] .quality-context-bar,
   color: var(--qms-text, var(--text-primary, #172033));
 }
 
-.qms-people {
-  --qms-people-surface: var(--qms-panel, var(--surface-primary, #fff));
-  --qms-people-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
-  --qms-people-border: var(--qms-line, var(--border-color, #dfe3e8));
-  --qms-people-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-line, #dfe3e8) 70%, transparent));
-  --qms-people-text: var(--qms-text, var(--text-primary, #182230));
-  --qms-people-muted: var(--qms-muted, var(--text-secondary, #667085));
-  --qms-people-primary: var(--accent-primary, var(--primary, #1d4ed8));
-  background: var(--qms-page, transparent);
-  color: var(--qms-people-text);
-}
 
 .qms-intelligence {
   --qms-intel-surface: var(--qms-panel, var(--surface-primary, #fff));
@@ -100,10 +89,10 @@ body[data-color-scheme="dark"] .quality-context-bar,
    3) Dark semantic chips / pastels → charcoal tints
    --------------------------------------------------------------------------- */
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
-[data-theme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
-.dark :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+[data-theme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
+.dark :is(.qms-missions, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
   --qms-danger-chip-bg: #3a2226;
   --qms-danger-chip-ink: #fecaca;
   --qms-warn-chip-bg: #3a3120;
@@ -160,99 +149,6 @@ body[data-color-scheme="dark"] .qms-mission-detail__gates > header > span {
 html[data-color-scheme="dark"] .qms-mission-detail__gates > header > span.is-ready,
 body[data-color-scheme="dark"] .qms-mission-detail__gates > header > span.is-ready {
   color: var(--qms-ok-chip-ink) !important;
-}
-
-/* People */
-html[data-color-scheme="dark"] .qms-people__status--active,
-html[data-color-scheme="dark"] .qms-people__gate-grid > span.is-pass,
-html[data-color-scheme="dark"] .qms-people__eligibility.is-eligible,
-body[data-color-scheme="dark"] .qms-people__status--active,
-body[data-color-scheme="dark"] .qms-people__gate-grid > span.is-pass,
-body[data-color-scheme="dark"] .qms-people__eligibility.is-eligible {
-  background: var(--qms-ok-chip-bg) !important;
-  color: var(--qms-ok-chip-ink) !important;
-  border-color: color-mix(in srgb, #10b981 40%, transparent) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people__status--draft,
-body[data-color-scheme="dark"] .qms-people__status--draft {
-  background: var(--qms-neutral-chip-bg) !important;
-  color: var(--qms-neutral-chip-ink) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people__status--suspended,
-body[data-color-scheme="dark"] .qms-people__status--suspended {
-  background: var(--qms-warn-chip-bg) !important;
-  color: var(--qms-warn-chip-ink) !important;
-}
-
-html[data-color-scheme="dark"] :is(.qms-people__status--expired, .qms-people__status--revoked),
-html[data-color-scheme="dark"] .qms-people__gate-grid > span.is-block,
-html[data-color-scheme="dark"] .qms-people__eligibility.is-blocked,
-html[data-color-scheme="dark"] .qms-people__error,
-body[data-color-scheme="dark"] :is(.qms-people__status--expired, .qms-people__status--revoked),
-body[data-color-scheme="dark"] .qms-people__gate-grid > span.is-block,
-body[data-color-scheme="dark"] .qms-people__eligibility.is-blocked,
-body[data-color-scheme="dark"] .qms-people__error {
-  background: var(--qms-danger-chip-bg) !important;
-  color: var(--qms-danger-chip-ink) !important;
-  border-color: color-mix(in srgb, #ef4444 42%, transparent) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people__detail-badges > span:not(.qms-people__status),
-body[data-color-scheme="dark"] .qms-people__detail-badges > span:not(.qms-people__status) {
-  background: var(--qms-info-chip-bg) !important;
-  color: var(--qms-info-chip-ink) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people th,
-html[data-color-scheme="dark"] .qms-people__gate-grid > span,
-html[data-color-scheme="dark"] .qms-people__context-card,
-body[data-color-scheme="dark"] .qms-people th,
-body[data-color-scheme="dark"] .qms-people__gate-grid > span,
-body[data-color-scheme="dark"] .qms-people__context-card {
-  background: var(--qms-people-surface-soft, #1a1d22) !important;
-  color: var(--qms-people-muted, var(--text-secondary, rgba(255, 255, 255, 0.84))) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people button:not(.is-primary):not(.is-danger):not(.is-warning),
-body[data-color-scheme="dark"] .qms-people button:not(.is-primary):not(.is-danger):not(.is-warning) {
-  background: var(--qms-people-surface, #22252b) !important;
-  border-color: var(--qms-people-border, rgba(255, 255, 255, 0.14)) !important;
-  color: var(--qms-people-text, rgba(255, 255, 255, 0.94)) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people button.is-danger,
-body[data-color-scheme="dark"] .qms-people button.is-danger {
-  background: color-mix(in srgb, var(--qms-people-danger, #f87171) 14%, var(--qms-people-surface, #22252b)) !important;
-  border-color: color-mix(in srgb, var(--qms-people-danger, #f87171) 55%, transparent) !important;
-  color: var(--qms-people-danger, #f87171) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people button.is-danger svg,
-body[data-color-scheme="dark"] .qms-people button.is-danger svg {
-  color: inherit !important;
-}
-
-html[data-color-scheme="dark"] .qms-people button.is-warning,
-body[data-color-scheme="dark"] .qms-people button.is-warning {
-  background: color-mix(in srgb, var(--qms-people-warning, #fbbf24) 14%, var(--qms-people-surface, #22252b)) !important;
-  border-color: color-mix(in srgb, var(--qms-people-warning, #fbbf24) 55%, transparent) !important;
-  color: var(--qms-people-warning, #fbbf24) !important;
-}
-
-html[data-color-scheme="dark"] .qms-people button.is-warning svg,
-body[data-color-scheme="dark"] .qms-people button.is-warning svg {
-  color: inherit !important;
-}
-
-html[data-color-scheme="dark"] .qms-people__drawer,
-html[data-color-scheme="dark"] .qms-people__form footer,
-body[data-color-scheme="dark"] .qms-people__drawer,
-body[data-color-scheme="dark"] .qms-people__form footer {
-  background: var(--qms-people-surface, #1c1f24) !important;
-  border-color: var(--qms-people-border, rgba(255, 255, 255, 0.12)) !important;
-  color: var(--qms-people-text) !important;
 }
 
 /* Intelligence */
@@ -313,14 +209,14 @@ body[data-color-scheme="dark"] .qms-intelligence__targeted-list article {
 }
 
 /* Shared form controls */
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-authz, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
   background: #1a1d22 !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: rgba(255, 255, 255, 0.94) !important;
 }
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence) tr.is-selected td,
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence) tr.is-selected td {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence) tr.is-selected td,
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-authz, .qms-intelligence) tr.is-selected td {
   background: color-mix(in srgb, var(--accent-primary, #4f8cff) 14%, var(--qms-panel, #1c1f24)) !important;
 }
