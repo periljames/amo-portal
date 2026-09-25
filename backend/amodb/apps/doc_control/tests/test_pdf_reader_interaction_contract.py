@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[5]
 ENTRY = ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
 LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
+DOCX_LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationDocxLayoutViewer.tsx"
+PUBLICATIONS = ROOT / "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
 STYLES = ROOT / "frontend/src/pages/manuals/pdfReaderEngineV3.css"
 LIVE_E2E = ROOT / "frontend/tests/e2e/publications-reader-live.spec.ts"
 PRECOMPUTE = ROOT / "backend/amodb/apps/manuals/pdf_reader_precompute.py"
@@ -96,12 +98,16 @@ def test_forms_remain_script_disabled_and_controlled_outputs_are_preserved() -> 
         assert label in source
 
 
-def test_zoom_and_first_render_hide_every_unfinished_canvas() -> None:
+def test_zoom_is_client_scaled_without_rerasterizing_mounted_pages() -> None:
     source = _source(CORE)
     styles = _source(STYLES)
 
     assert "const [ready, setReady] = useState(false)" in source
-    assert 'key={`${page}:${Math.round(pageWidthFor(page))}`}' in source
+    assert "const [rasterWidth] = useState" in source
+    assert "setRasterWidth" not in source
+    assert "pdfv3-zoom-snapshot" not in source
+    assert "data-client-raster-width" in source
+    assert 'willChange: "transform"' in source
     assert "pdfv3-page-skeleton" in source
     assert "onRenderSuccess" in source
     assert ".pdfv3-page-surface" in styles
@@ -112,6 +118,25 @@ def test_zoom_and_first_render_hide_every_unfinished_canvas() -> None:
     assert "background: #fff !important" in styles
     assert "visibility: visible !important" not in styles
 
+
+def test_docx_layout_is_client_rendered_and_zoom_does_not_reparse_source() -> None:
+    source = _source(DOCX_LAYOUT)
+
+    assert 'import("docx-preview")' in source
+    assert "Promise.all([" in source
+    assert "Laying out Word pages on this device" in source
+    assert "experimental: true" in source
+    assert "useBase64URL: false" in source
+    assert "host.style.zoom = String(scale)" in source
+    assert 'aria-label="Word zoom"' in source
+    assert "rendered.pdf" not in source
+
+
+def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:
+    source = _source(PUBLICATIONS)
+
+    assert '{isPublished ? "Controlled publication" : "DRAFT"}' in source
+    assert "<strong>DRAFT — not yet issued</strong>" in source
 
 def test_working_copy_autosave_is_generation_and_lifecycle_safe() -> None:
     source = _source(CORE)
