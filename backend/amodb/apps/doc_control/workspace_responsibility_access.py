@@ -105,7 +105,6 @@ def can_perform_workflow_action(
         responsibility_types = _corrections_responsibility(workflow)
         return bool(
             is_decision_approver(user)
-            or is_control_user(user)
             or has_confirmed_responsibility(
                 db,
                 workflow=workflow,
@@ -119,7 +118,7 @@ def can_perform_workflow_action(
         management_fallback = (
             is_accountable_approver(user)
             if action == "APPROVE_ACCOUNTABLE_MANAGER"
-            else is_decision_approver(user)
+            else False
         )
         return bool(
             management_fallback
