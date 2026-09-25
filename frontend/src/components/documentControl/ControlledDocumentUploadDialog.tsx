@@ -153,6 +153,8 @@ export default function ControlledDocumentUploadDialog({
   const [approvalReference, setApprovalReference] = useState("");
   const [approvalDate, setApprovalDate] = useState("");
   const [approvalBasis, setApprovalBasis] = useState("");
+  const [registeredUpload, setRegisteredUpload] = useState<ControlledDocumentIntakeResult | null>(null);
+  const [approvedUpload, setApprovedUpload] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -167,6 +169,8 @@ export default function ControlledDocumentUploadDialog({
     setApprovalReference("");
     setApprovalDate("");
     setApprovalBasis("");
+    setRegisteredUpload(null);
+    setApprovedUpload(false);
     void listIntegratedLibrary(tenant, { status: "ACTIVE", perPage: 100, sort: "type" })
       .then((result) => setParents(result.items))
       .catch(() => setParents([]));
@@ -268,7 +272,8 @@ export default function ControlledDocumentUploadDialog({
         },
         file,
       };
-      const uploaded = submitIntake ? await submitIntake(payload) : await uploadPublicationRevision(tenant, payload);
+      const uploaded = registeredUpload || (submitIntake ? await submitIntake(payload) : await uploadPublicationRevision(tenant, payload));
+      setRegisteredUpload(uploaded);
       let result: ControlledDocumentIntakeResult = { ...uploaded, intake_state: intakeState, approved_intake: false };
       if (intakeState === "APPROVED") {
         const approval: ApprovedPublicationIntakePayload = {
@@ -281,7 +286,10 @@ export default function ControlledDocumentUploadDialog({
           acknowledgement_required: form.acknowledgementRequired,
           notify_eligible_users: false,
         };
-        await approvePublicationIntake(tenant, uploaded.manual_id, uploaded.revision_id, approval);
+        if (!approvedUpload) {
+          await approvePublicationIntake(tenant, uploaded.manual_id, uploaded.revision_id, approval);
+          setApprovedUpload(true);
+        }
         result = { ...result, status: "PUBLISHED", approved_intake: true, approval_reference: approval.approval_reference };
       }
       await onUploaded(result);
@@ -306,6 +314,7 @@ export default function ControlledDocumentUploadDialog({
           <span className={step === "METADATA" ? "is-active" : ""}><b>2</b> Confirm metadata</span>
         </div>
         {error ? <div className="controlled-intake__error" role="alert">{error}</div> : null}
+        {error && registeredUpload ? <p role="status">The upload is saved. Retrying continues with this document and will not upload another copy. <a href={`/maintenance/${encodeURIComponent(tenant)}/document-control/library/${encodeURIComponent(registeredUpload.manual_id)}?tab=workflow`}>Open saved document</a></p> : null}
         {step === "FILE" ? (
           <div className="controlled-intake__file-step">
             <label>
@@ -317,26 +326,26 @@ export default function ControlledDocumentUploadDialog({
           </div>
         ) : (
           <div className="controlled-intake__body">
-            <div className="controlled-intake__source-summary"><FileCheck2 size={18} /><span><strong>{file?.name}</strong><small>{preview?.source_type} · {preview?.page_count ? `${preview.page_count} pages · ` : ""}{preview?.paragraph_count || 0} indexed text blocks</small></span><button type="button" disabled={busy} onClick={() => { setStep("FILE"); setFile(null); setPreview(null); }}>Change</button></div>
-            <fieldset>
+            <div className="controlled-intake__source-summary"><FileCheck2 size={18} /><span><strong>{file?.name}</strong><small>{preview?.source_type} · {preview?.page_count ? `${preview.page_count} pages · ` : ""}{preview?.paragraph_count || 0} indexed text blocks</small></span><button type="button" disabled={busy || Boolean(registeredUpload)} onClick={() => { setStep("FILE"); setFile(null); setPreview(null); }}>Change</button></div>
+            <fieldset disabled={busy || Boolean(registeredUpload)}>
               <legend><ShieldCheck size={15} /> Required document details</legend>
               <label><span>Document type</span><select value={form.documentType} onChange={(event) => changeType(event.target.value as ControlledDocumentType)}>{permittedTypes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              {allowApprovedIntake ? <label><span>Intake status</span><select value={intakeState} onChange={(event) => setIntakeState(event.target.value as IntakeState)}><option value="DRAFT">Draft for DMS review</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select></label> : null}
+              {allowApprovedIntake ? <label><span>Intake status</span><select value={intakeState} onChange={(event) => setIntakeState(event.target.value as IntakeState)}><option value="DRAFT">Draft for DMS review</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select><small>{preview?.source_type !== "PDF" ? "Already approved intake requires the final PDF to preserve signatures and approval marks. Choose Change above to upload that PDF, or submit this DOCX for review." : "Select Already approved to record existing approval evidence and make the final PDF current."}</small></label> : null}
               <label><span>Document code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label>
               <label className="is-wide"><span>Title</span><input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
               <label><span>Revision</span><input required value={form.revisionNumber} onChange={(event) => setForm({ ...form, revisionNumber: event.target.value })} /></label>
               <label><span>Responsible department</span><input required value={form.ownerDepartment} onChange={(event) => setForm({ ...form, ownerDepartment: event.target.value })} /></label>
-              {allowApprovedIntake && intakeState === "APPROVED" ? <>
+              {allowedParentTypes.length ? <label className="is-wide"><span>Parent controlled document</span><select value={form.parentDocumentId} onChange={(event) => setForm({ ...form, parentDocumentId: event.target.value })}><option value="">No direct parent</option>{parentOptions.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title} · {item.library.node_type.replaceAll("_", " ")}</option>)}</select></label> : null}
+            </fieldset>
+            {allowApprovedIntake && intakeState === "APPROVED" ? <fieldset disabled={busy || approvedUpload}><legend>Existing approval evidence</legend>
                 <label><span>Approving function</span><input required value={approvingAuthority} onChange={(event) => setApprovingAuthority(event.target.value)} /></label>
                 <label><span>Approval reference</span><input required value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} /></label>
                 <label><span>Approval date</span><input required type="date" max={new Date().toISOString().slice(0, 10)} value={approvalDate} onChange={(event) => setApprovalDate(event.target.value)} /></label>
                 <label className="is-wide"><span>Approval basis</span><textarea required rows={2} value={approvalBasis} onChange={(event) => setApprovalBasis(event.target.value)} /></label>
-              </> : null}
-              {allowedParentTypes.length ? <label className="is-wide"><span>Parent controlled document</span><select value={form.parentDocumentId} onChange={(event) => setForm({ ...form, parentDocumentId: event.target.value })}><option value="">No direct parent</option>{parentOptions.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title} · {item.library.node_type.replaceAll("_", " ")}</option>)}</select></label> : null}
-            </fieldset>
+            </fieldset> : null}
             <details className="controlled-intake__optional">
               <summary><FolderTree size={15} /> Additional controls</summary>
-              <fieldset>
+              <fieldset disabled={busy || Boolean(registeredUpload)}>
                 <label><span>Issue</span><input value={form.issueNumber} onChange={(event) => setForm({ ...form, issueNumber: event.target.value })} /></label>
                 <label><span>Proposed effective date</span><input type="date" value={form.effectiveDate} onChange={(event) => setForm({ ...form, effectiveDate: event.target.value })} /></label>
                 <label className="is-wide"><span>Description</span><textarea rows={2} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
@@ -352,7 +361,7 @@ export default function ControlledDocumentUploadDialog({
             </details>
           </div>
         )}
-        <footer><span>{step === "METADATA" ? intakeState === "APPROVED" ? "The final PDF will become the current controlled revision and can be used immediately." : "Registration creates a controlled draft for DMS review; it is not used in fieldwork until approved." : "No record is created until the file is confirmed."}</span><div><button type="button" disabled={busy} onClick={onClose}>Cancel</button>{step === "METADATA" ? <button type="button" className="is-primary" disabled={busy} onClick={() => void submit()}><UploadCloud size={15} /> {busy ? "Registering…" : intakeState === "APPROVED" ? "Register and use in audit" : submitLabel}</button> : null}</div></footer>
+        <footer><span>{step === "METADATA" ? intakeState === "APPROVED" ? "The final PDF will become the current controlled revision." : "Registration creates a controlled draft and notifies Document Control. Open its workflow to submit for review." : "No record is created until the file is confirmed."}</span><div><button type="button" disabled={busy} onClick={onClose}>Cancel</button>{step === "METADATA" ? <button type="button" className="is-primary" disabled={busy} onClick={() => void submit()}><UploadCloud size={15} /> {busy ? "Registering…" : intakeState === "APPROVED" ? "Register approved document" : submitLabel}</button> : null}</div></footer>
       </section>
     </div>
   );

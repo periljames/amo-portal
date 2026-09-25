@@ -443,7 +443,9 @@ class User(Base):
     security_events = relationship(
         "AccountSecurityEvent",
         back_populates="user",
-        lazy="selectin",
+        # Security history is unbounded. Loading a user/tenant roster must not
+        # also transfer every historical event for every returned account.
+        lazy="select",
     )
 
     def is_certifying_staff(self) -> bool:

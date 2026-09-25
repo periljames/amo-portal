@@ -70,6 +70,16 @@ export type DmsChecklistLibraryItem = {
 
 export type DmsChecklistLibrary = {
   items: DmsChecklistLibraryItem[];
+  pending?: Array<{
+    document_id: string;
+    code: string;
+    title: string;
+    revision_id: string;
+    workflow_id: string;
+    state: string;
+    updated_at?: string | null;
+    review_url: string;
+  }>;
   recommendation?: DmsChecklistLibraryItem | null;
 };
 

@@ -904,7 +904,7 @@ def list_current_dms_checklists(
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    """List only current effective DMS forms/checklists; clients never choose revisions."""
+    """Return current selectable checklists and separate, non-selectable review progress."""
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     tenant = _manual_tenant(db, ctx.amo_id)
@@ -913,7 +913,6 @@ def list_current_dms_checklists(
     user = _active_user(db, ctx)
     documents = db.query(manual_models.Manual).filter(
         manual_models.Manual.tenant_id == tenant.id,
-        manual_models.Manual.current_published_rev_id.is_not(None),
     ).order_by(manual_models.Manual.code.asc()).limit(500).all()
     document_ids = [row.id for row in documents]
     nodes = {
@@ -933,6 +932,15 @@ def list_current_dms_checklists(
     needle = str(q or "").strip().lower()
     requested_type = str(document_type or "").upper()
     items: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    workflows = db.query(doc_control_models.DocumentWorkflowInstance).filter(
+        doc_control_models.DocumentWorkflowInstance.tenant_id == ctx.amo_id,
+        doc_control_models.DocumentWorkflowInstance.manual_id.in_(document_ids or ["-"]),
+        doc_control_models.DocumentWorkflowInstance.state.notin_(["PUBLISHED", "ARCHIVED"]),
+    ).order_by(doc_control_models.DocumentWorkflowInstance.updated_at.desc()).all()
+    workflows_by_document: dict[str, list[Any]] = {}
+    for workflow in workflows:
+        workflows_by_document.setdefault(workflow.manual_id, []).append(workflow)
     for document in documents:
         profile = profiles.get(document.id)
         if not can_read_manual(user, profile):
@@ -944,6 +952,13 @@ def list_current_dms_checklists(
         if needle and needle not in " ".join(filter(None, [document.code, document.title, document.manual_type, node.path if node else None])).lower():
             continue
         revision = _current_effective_revision(db, document)
+        for workflow in workflows_by_document.get(document.id, []):
+            pending.append({
+                "document_id": document.id, "code": document.code, "title": document.title,
+                "revision_id": workflow.revision_id, "workflow_id": workflow.id,
+                "state": workflow.state, "updated_at": workflow.updated_at,
+                "review_url": f"/maintenance/{tenant.slug}/document-control/library/{document.id}?tab=workflow&workflow={workflow.id}",
+            })
         if revision is None:
             continue
         items.append({
@@ -986,7 +1001,7 @@ def list_current_dms_checklists(
             "reason": f"Used for {remembered.usage_count} similar audit{'s' if remembered.usage_count != 1 else ''} in this scope.",
             "usage_count": remembered.usage_count,
         }
-    return {"items": items[:200], "recommendation": recommendation}
+    return {"items": items[:200], "recommendation": recommendation, "pending": pending[:200]}
 
 
 @router.post("/audits/{audit_id}/checklist-library/{document_id}/bind-current", status_code=status.HTTP_201_CREATED)

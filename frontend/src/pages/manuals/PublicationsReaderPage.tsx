@@ -1,3 +1,4 @@
+import PublicationDocxLayoutViewer from "./PublicationDocxLayoutViewer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
@@ -210,7 +211,7 @@ export default function PublicationsReaderPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => String(cached?.metadata.source_type || "").toUpperCase() === "PDF" ? "layout" : "text");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => ["PDF", "DOCX"].includes(String(cached?.metadata.source_type || "").toUpperCase()) ? "layout" : "text");
   const [pdfNavigationRequest, setPdfNavigationRequest] = useState<PdfNavigationRequest | null>(null);
   const localPosition = useMemo(() => loadLocalPosition(tenant, manualId || "", revId || ""), [manualId, revId, tenant]);
   const [currentPdfPage, setCurrentPdfPage] = useState(() => cached?.read.progress?.last_page_number || localPosition.page || 1);
@@ -236,9 +237,11 @@ export default function PublicationsReaderPage() {
   const activeTab: ReaderTab = requestedTab && TAB_VALUES.has(requestedTab) ? requestedTab : "detail";
   const isPublished = Boolean(metadata?.is_published && !payload?.not_published);
   const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
+  const sourceIsDocx = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "DOCX";
+  const docxSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
   const sections = useMemo(() => payload?.sections ?? [], [payload?.sections]);
   const textAvailable = sections.length > 0 && !metadata?.image_only;
-  const layoutAvailable = Boolean(metadata?.rendered_pdf_url);
+  const layoutAvailable = sourceIsDocx || Boolean(metadata?.rendered_pdf_url);
   const viewerPdfPath = metadata?.source_url || metadata?.rendered_pdf_url || "";
   const uncontrolledDownloadPath = tenant && manualId && revId
     ? `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revId)}/rendered.pdf`
@@ -255,7 +258,7 @@ export default function PublicationsReaderPage() {
     setZoomPercent((current) => readPayload.progress?.zoom_percent || current || 100);
     setViewMode((current) => {
       const uploadedAsPdf = String(bootstrap.metadata.source_type || readPayload.revision?.source_type || "").toUpperCase() === "PDF";
-      return uploadedAsPdf || bootstrap.metadata.image_only ? "layout" : current;
+      return uploadedAsPdf || String(bootstrap.metadata.source_type).toUpperCase() === "DOCX" || bootstrap.metadata.image_only ? "layout" : current;
     });
     cachePublicationBootstrap(tenant, manualId || "", revId || "", bootstrap);
   }, [manualId, revId, tenant]);
@@ -694,8 +697,8 @@ export default function PublicationsReaderPage() {
     : sections.find((section) => section.anchor_slug === activeSection)?.heading || "Document detail";
   const activeSectionId = sections.find((section) => section.anchor_slug === activeSection)?.id;
   const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
-  const layoutLabel = sourceIsPdf ? "Original layout" : "PDF proof";
-  const textLabel = sourceIsPdf ? "Accessible text" : "Readable document";
+  const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsDocx ? "Word layout" : "PDF proof";
+  const textLabel = "Accessible text";
 
   const content = (
     <div className={`publication-reader-page publication-reader-theme--${readerTheme} publication-reader-width--${readingWidth} ${navigationCollapsed ? "publication-reader-page--nav-collapsed" : ""}`}>
@@ -743,8 +746,8 @@ export default function PublicationsReaderPage() {
           {activeTab === "detail" ? (
             <>
               <section className="publication-metadata" aria-label="Document metadata"><dl>
-                <div><dt>Date</dt><dd>{formatDate(metadata.date)}</dd></div><div><dt>Language</dt><dd>{metadata.language || "Not recorded"}</dd></div><div><dt>Status</dt><dd>{metadata.status || payload.status} · {isPublished ? "Controlled" : "Uncontrolled"}</dd></div>
-                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF · figures, signatures, annotations and approval marks preserved" : "Generated readable proof"}</dd></div>
+                <div><dt>Date</dt><dd>{formatDate(metadata.date)}</dd></div><div><dt>Language</dt><dd>{metadata.language || "Not recorded"}</dd></div><div><dt>Status</dt><dd>{metadata.status || payload.status} · {isPublished ? "Controlled" : "Draft"}</dd></div>
+                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF · figures, signatures, annotations and approval marks preserved" : sourceIsDocx ? "Original Word source · client-rendered pages" : "Generated readable proof"}</dd></div>
                 {hasAcroForm || metadata.form_policy === "READ_ONLY_PRESERVED" ? <div><dt>PDF forms</dt><dd><Eye size={15} /> AcroForm appearances are preserved in read-only mode; the portal does not alter field values.</dd></div> : null}
                 {acknowledgement?.required ? <div><dt>Acknowledgement</dt><dd>{acknowledgement.pending ? <span className="publication-acknowledgement-state publication-acknowledgement-state--pending">Pending{acknowledgement.due_at ? ` · due ${formatDate(acknowledgement.due_at)}` : ""}{isPublished ? <button type="button" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}>Acknowledge now</button> : null}</span> : <span className="publication-acknowledgement-state publication-acknowledgement-state--complete"><BadgeCheck size={16} /> Acknowledged{acknowledgement.acknowledged_at ? ` on ${formatDate(acknowledgement.acknowledged_at)}` : ""}</span>}{acknowledgementError ? <span className="publication-acknowledgement-error">{acknowledgementError}</span> : null}</dd></div> : null}
               </dl></section>
@@ -754,7 +757,7 @@ export default function PublicationsReaderPage() {
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsDocx ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} draft={!isPublished} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       title={metadata.title}
                       sourceByteLength={metadata.source_size_bytes || metadata.rendered_pdf_size_bytes}

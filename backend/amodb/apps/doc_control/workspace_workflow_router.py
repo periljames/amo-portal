@@ -405,6 +405,9 @@ def transition_workflow_with_release_guards(
         workflow.id,
         {"action": payload.action, "from": previous_state, "to": next_state, "version": workflow.version},
     )
+    from .workflow_notifications import notify_workflow_progress
+
+    notify_workflow_progress(db, tenant=tenant, manual=manual, workflow=workflow)
     db.commit()
     _event(
         event_type="doc_control.workflow_transitioned",

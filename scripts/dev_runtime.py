@@ -197,7 +197,7 @@ def _terminate_tree(service: Service) -> None:
             pass
 
 
-def _services(base_env: Mapping[str, str], include_frontend: bool) -> list[Service]:
+def _services(base_env: Mapping[str, str], include_frontend: bool, *, reload: bool = True) -> list[Service]:
     python = _python_executable()
 
     api_pool = base_env.get("PORTAL_DB_POOL_SIZE", base_env.get("DB_POOL_SIZE", "20"))
@@ -265,6 +265,11 @@ def _services(base_env: Mapping[str, str], include_frontend: bool) -> list[Servi
         ),
     ]
 
+    if not reload:
+        for service in services:
+            if "--reload" in service.command:
+                service.command.remove("--reload")
+
     if include_frontend:
         services.append(
             Service(
@@ -295,6 +300,7 @@ def main() -> int:
         help="dotenv path relative to the repository root (default: .env.development)",
     )
     parser.add_argument("--no-frontend", action="store_true", help="Do not start Vite")
+    parser.add_argument("--no-reload", action="store_true", help="Disable file-watcher restarts for long-running development sessions")
     args = parser.parse_args()
 
     env_file = Path(args.env_file)
@@ -303,7 +309,7 @@ def main() -> int:
     env_file = env_file.resolve()
 
     base_env = _load_environment(env_file)
-    services = _services(base_env, include_frontend=not args.no_frontend)
+    services = _services(base_env, include_frontend=not args.no_frontend, reload=not args.no_reload)
 
     occupied = [service for service in services if service.port and _port_in_use(service.port)]
     if occupied:

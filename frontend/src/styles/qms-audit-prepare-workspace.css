@@ -578,3 +578,11 @@
   .qms-audit-prepare__composer > article { grid-template-columns: auto minmax(0, 1fr); }
   .qms-audit-prepare__composer > article > button { grid-column: 2; justify-self: end; }
 }
+
+.qms-audit-prepare__pending-dms { border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; background: #f8fafc; }
+.qms-audit-prepare__pending-dms header, .qms-audit-prepare__pending-dms article { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.qms-audit-prepare__pending-dms p, .qms-audit-prepare__pending-dms small { color: #475569; font-size: 13px; }
+.qms-audit-prepare__pending-dms article { padding: 12px 0; border-top: 1px solid #e2e8f0; }
+.qms-audit-prepare__pending-dms article > div { display: grid; gap: 5px; flex: 1 1 240px; }
+.qms-audit-prepare__pending-dms article span { color: #854d0e; font-size: 12px; font-weight: 700; }
+.qms-audit-prepare__pending-dms a { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }

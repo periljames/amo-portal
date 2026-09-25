@@ -64,7 +64,7 @@ export function MessagingHub() {
   const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const lastNotificationId = useRef<string | null>(null);
+  const seenNotificationIds = useRef(new Set<string>());
   const notificationsInitialized = useRef(false);
 
   const unreadQuery = useQuery({
@@ -156,42 +156,47 @@ export function MessagingHub() {
 
   useEffect(() => {
     if (!notificationsQuery.isSuccess) return;
-    const latest = notificationsQuery.data?.items?.[0];
+    const items = notificationsQuery.data?.items || [];
     const preferences = preferencesQuery.data;
     if (!notificationsInitialized.current) {
       notificationsInitialized.current = true;
-      lastNotificationId.current = latest?.id || null;
+      seenNotificationIds.current = new Set(items.map((item) => item.id));
       return;
     }
-    if (!latest || latest.id === lastNotificationId.current) return;
-    lastNotificationId.current = latest.id;
-    if (latest.read_at) return;
-    const isChat = latest.kind === "CHAT_MESSAGE";
-    if (preferences?.in_app_enabled !== false) {
-      const priority = String(
-        latest.metadata?.priority || latest.metadata?.severity || "",
-      ).toUpperCase();
-      pushToast({
-        title: latest.title,
-        message: latest.body,
-        variant: ["CRITICAL", "HIGH", "URGENT"].includes(priority)
-          ? "warning"
-          : "info",
-        sound: preferences?.sound_enabled !== false,
-        actionLabel: isChat ? "Open message" : "Open notifications",
-        action: () => {
-          setTab(isChat ? "chats" : "notifications");
-          setOpen(true);
-        },
-        dedupeKey: `portal-notification:${latest.id}`,
-      });
-    }
-    if (
-      !preferences?.desktop_enabled ||
-      document.visibilityState === "visible"
-    ) return;
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(latest.title, { body: latest.body, tag: latest.id });
+    const incoming = items.filter((item) => !seenNotificationIds.current.has(item.id) && !item.read_at);
+    seenNotificationIds.current = new Set(items.map((item) => item.id));
+    for (const latest of incoming.slice(0, 3)) {
+      const isChat = latest.kind === "CHAT_MESSAGE";
+      if (preferences?.in_app_enabled !== false) {
+        const priority = String(
+          latest.metadata?.priority || latest.metadata?.severity || "",
+        ).toUpperCase();
+        pushToast({
+          title: latest.title,
+          message: latest.body,
+          variant: ["CRITICAL", "HIGH", "URGENT"].includes(priority)
+            ? "warning"
+            : "info",
+          sound: preferences?.sound_enabled !== false,
+          actionLabel: latest.kind === "DOCUMENT_WORKFLOW" ? "Review document" : isChat ? "Open message" : "Open notifications",
+          action: () => {
+            if (latest.kind === "DOCUMENT_WORKFLOW" && latest.action_url) {
+              void messagingApi.markNotificationRead(latest.id);
+              return;
+            }
+            setTab(isChat ? "chats" : "notifications");
+            setOpen(true);
+          },
+          dedupeKey: `portal-notification:${latest.id}`,
+        });
+      }
+      if (
+        !preferences?.desktop_enabled ||
+        document.visibilityState === "visible"
+      ) continue;
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(latest.title, { body: latest.body, tag: latest.id });
+      }
     }
   }, [notificationsQuery.data, notificationsQuery.isSuccess, preferencesQuery.data, pushToast]);
 

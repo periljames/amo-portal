@@ -35,6 +35,7 @@ export type DocumentControlMyWorkItem = {
 export type DocumentControlMyWorkResponse = {
   items: DocumentControlMyWorkItem[];
   limit: number;
+  warnings?: string[];
 };
 
 async function fetchWorkFeed(tenant: string, suffix: string): Promise<DocumentControlMyWorkResponse> {
@@ -77,11 +78,19 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 export async function getDocumentControlMyWork(tenant: string): Promise<DocumentControlMyWorkResponse> {
-  const [core, external, retention] = await Promise.all([
+  const [coreResult, externalResult, retentionResult] = await Promise.allSettled([
     fetchWorkFeed(tenant, "my-work"),
     fetchWorkFeed(tenant, "external-source-work"),
     listDocumentRetentionWork(tenant),
   ]);
+  if (coreResult.status === "rejected") throw coreResult.reason;
+  const core = coreResult.value;
+  const external = externalResult.status === "fulfilled" ? externalResult.value : { items: [] };
+  const retention = retentionResult.status === "fulfilled" ? retentionResult.value : [];
+  const warnings = [
+    ...(externalResult.status === "rejected" ? ["External-source tasks could not be refreshed."] : []),
+    ...(retentionResult.status === "rejected" ? ["Retention tasks could not be refreshed."] : []),
+  ];
   const retentionItems: DocumentControlMyWorkItem[] = retention.map((item) => {
     const parts = item.title.split(" · ");
     const code = parts.length > 1 ? parts[parts.length - 1] : "Document";
@@ -112,5 +121,5 @@ export async function getDocumentControlMyWork(tenant: string): Promise<Document
       return left.id.localeCompare(right.id);
     })
     .slice(0, 30);
-  return { items, limit: 30 };
+  return { items, limit: 30, warnings };
 }

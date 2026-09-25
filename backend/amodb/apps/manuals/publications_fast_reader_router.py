@@ -208,7 +208,7 @@ def _reader_metadata(
         "revision_number": revision.rev_number,
         "status": _status_value(revision),
         "is_published": is_published,
-        "control_label": "Controlled publication" if is_published else "Uncontrolled draft",
+        "control_label": "Controlled publication" if is_published else "Draft",
         "source_type": source_type or None,
         "source_filename": revision.source_filename,
         "source_size_bytes": source_size,

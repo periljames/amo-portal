@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -16,7 +17,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.database import ReadSessionLocal, get_read_db, get_write_db
+from amodb.database import ReadSessionLocal, close_session_safely, get_read_db, get_write_db
 from amodb.observability import operation_span
 
 from . import models, services
@@ -292,10 +293,12 @@ class SnapshotStore:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._version = 0
         self._last_error: str | None = None
+        self._updated_at: dict[str, float] = {}
 
     def set(self, mode: str, snapshot: dict[str, Any]) -> None:
         with self._lock:
             self._snapshots[mode] = snapshot
+            self._updated_at[mode] = time.monotonic()
             self._version += 1
             self._last_error = None
 
@@ -306,11 +309,20 @@ class SnapshotStore:
     def get(self, mode: str) -> dict[str, Any] | None:
         with self._lock:
             value = self._snapshots.get(mode)
-            return None if value is None else dict(value)
+            if value is None:
+                return None
+            age = max(0.0, time.monotonic() - self._updated_at[mode])
+            return {**value, "freshness": {"age_seconds": age,
+                    "stale": age > REFRESH_SECONDS * 3 or self._last_error is not None,
+                    "stale_after_seconds": REFRESH_SECONDS * 3}}
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {"version": self._version, "modes": sorted(self._snapshots), "last_error": self._last_error}
+            ages = {mode: max(0.0, time.monotonic() - updated) for mode, updated in self._updated_at.items()}
+            fresh = all(mode in ages and ages[mode] <= REFRESH_SECONDS * 3 for mode in ("REAL", "DEMO"))
+            return {"version": self._version, "modes": sorted(self._snapshots), "last_error": self._last_error,
+                    "age_seconds": ages, "fresh": fresh and self._last_error is None,
+                    "stale_after_seconds": REFRESH_SECONDS * 3}
 
 
 snapshot_store = SnapshotStore()
@@ -325,7 +337,7 @@ def refresh_snapshots_once() -> None:
         except Exception as exc:
             snapshot_store.error(exc)
         finally:
-            db.close()
+            close_session_safely(db)
 
 
 async def snapshot_refresher(stop: asyncio.Event) -> None:
@@ -385,7 +397,7 @@ def snapshot(data_mode: str = Query("REAL"), user=Depends(require_platform_super
 @router.get("/health")
 def gateway_health():
     state = snapshot_store.status()
-    return {"status": "ok" if state["modes"] else "warming", **state}
+    return {"status": "ok" if state["fresh"] else "degraded" if state["modes"] else "warming", **state}
 
 
 @router.get("/events")
@@ -405,7 +417,8 @@ async def events(request: Request, data_mode: str = Query("REAL"), user=Depends(
                 payload = json.dumps({"type": "platform.snapshot", "snapshot": value, "created_at": generated}, default=str, separators=(",", ":"))
                 yield f"event: snapshot\ndata: {payload}\n\n"
             else:
-                yield ": keepalive\n\n"
+                payload = json.dumps({"type": "platform.freshness", **snapshot_store.status()}, default=str, separators=(",", ":"))
+                yield f"event: freshness\ndata: {payload}\n\n"
             await asyncio.sleep(2)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})

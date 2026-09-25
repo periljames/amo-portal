@@ -240,11 +240,8 @@ def resolve_login_context(db: Session, identifier: str) -> models.User | None:
             .options(
                 joinedload(models.User.amo),
                 # Login context only needs the matching active account and AMO.
-                # Do not load security_events here. The User.security_events relationship
-                # is configured as selectin on the model, which otherwise triggers an
-                # additional account_security_events query during pre-login context lookup.
-                # That extra eager load made /auth/login-context fail when PostgreSQL
-                # closed an idle SSL connection after migrations/restarts.
+                # Suppress history loading, including accidental lazy access,
+                # during this unauthenticated account-context lookup.
                 noload(models.User.security_events),
                 noload(models.User.authorisations),
             )

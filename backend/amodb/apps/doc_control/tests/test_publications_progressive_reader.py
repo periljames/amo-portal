@@ -163,7 +163,7 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "PdfReaderCoreV5" in bridge
     assert "PdfReaderCoreV4" in shell
     assert "<PdfDocument" not in shell
-    assert "UNCONTROLLED DRAFT" in core
+    assert ">DRAFT</span>" in core
     assert "pointer-events: none" in styles
     assert "content-visibility: auto" not in styles
     assert 'renderMode="none"' not in core

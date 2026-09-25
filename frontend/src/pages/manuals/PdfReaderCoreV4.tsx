@@ -294,6 +294,31 @@ function VirtualPdfPage({
   const [failed, setFailed] = useState("");
   const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
   const [internalPages, setInternalPages] = useState<Record<string, number>>({});
+  const [rasterWidth, setRasterWidth] = useState(width);
+  const snapshotRef = useRef<HTMLCanvasElement | null>(null);
+  const [showSnapshot, setShowSnapshot] = useState(false);
+
+  // Zoom the existing canvas and its text/annotation layers immediately. Raster
+  // work starts only after input settles, without remounting the page or PDF.
+  useEffect(() => {
+    if (Math.abs(width - rasterWidth) < 1) return;
+    const timer = window.setTimeout(() => {
+      const canvas = pageRef.current?.querySelector<HTMLCanvasElement>(".react-pdf__Page__canvas");
+      const snapshot = snapshotRef.current;
+      if (canvas && snapshot && canvas.width && canvas.height && canvas.style.visibility !== "hidden") {
+        snapshot.width = canvas.width;
+        snapshot.height = canvas.height;
+        snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
+        setShowSnapshot(true);
+      }
+      setRasterWidth(width);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [width, rasterWidth]);
+
+  const textRenderer = useCallback(({ str }: { str: string }) => (
+    highlightPdfText(str, query, searchOptions, false)
+  ), [query, searchOptions]);
 
   useEffect(() => {
     if (!ready || !pageRef.current) return;
@@ -359,23 +384,21 @@ function VirtualPdfPage({
         </div>
       ) : null}
 
-      <div className="pdfv3-page-surface" aria-hidden={!ready}>
+      <div className="pdfv3-page-surface" aria-hidden={!ready} style={{ width: rasterWidth, transform: `scale(${width / rasterWidth})`, transformOrigin: "top left", position: "absolute", top: 0, left: 0 }}>
         <PdfPage
           pageNumber={page}
-          width={width}
+          width={rasterWidth}
           renderMode="canvas"
           renderTextLayer
           renderAnnotationLayer
           renderForms={safeForm}
           devicePixelRatio={pdfDevicePixelRatio(
             maxDevicePixelRatio,
-            width,
-            width * ratio,
+            rasterWidth,
+            rasterWidth * ratio,
             maxCanvasPixels,
           )}
-          customTextRenderer={({ str }: { str: string }) => (
-            highlightPdfText(str, query, searchOptions, false)
-          )}
+          customTextRenderer={textRenderer}
           loading={null}
           error={null}
           onGetAnnotationsSuccess={(annotations: PdfItemClickTarget[]) => {
@@ -417,6 +440,8 @@ function VirtualPdfPage({
           onRenderSuccess={() => {
             setFailed("");
             setReady(true);
+            setShowSnapshot(false);
+            if (snapshotRef.current) { snapshotRef.current.width = 0; snapshotRef.current.height = 0; }
           }}
           onRenderError={(error: unknown) => {
             setReady(false);
@@ -426,7 +451,9 @@ function VirtualPdfPage({
         />
       </div>
 
-      {uncontrolled ? <span className="pdfv3-watermark">UNCONTROLLED DRAFT</span> : null}
+      <canvas ref={snapshotRef} aria-hidden="true" className="pdfv3-zoom-snapshot" style={{ visibility: showSnapshot ? "visible" : "hidden", position: "absolute", inset: 0, width, height: width * ratio, pointerEvents: "none" }} />
+
+      {uncontrolled ? <span className="pdfv3-watermark">DRAFT</span> : null}
       {renderOverlay?.(page)}
     </article>
   );
@@ -1573,7 +1600,7 @@ export default function PdfReaderCoreV4({
                   }}
                 >
                   <VirtualPdfPage
-                    key={`${page}:${Math.round(pageWidthFor(page))}`}
+                    key={page}
                     page={page}
                     width={pageWidthFor(page)}
                     ratio={ratio}

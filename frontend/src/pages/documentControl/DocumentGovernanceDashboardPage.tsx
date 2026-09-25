@@ -95,9 +95,9 @@ export default function DocumentGovernanceDashboardPage() {
   const [secondaryError, setSecondaryError] = useState("");
   const [running, setRunning] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!tenant) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError("");
     setSecondaryError("");
     try {
@@ -110,7 +110,9 @@ export default function DocumentGovernanceDashboardPage() {
 
       const workResult = results[0];
       if (workResult.status === "fulfilled") {
-        setMyWork((workResult.value as Awaited<ReturnType<typeof getDocumentControlMyWork>>).items);
+        const work = workResult.value as Awaited<ReturnType<typeof getDocumentControlMyWork>>;
+        setMyWork(work.items);
+        if (work.warnings?.length) setSecondaryError(work.warnings.join(" "));
       } else {
         setMyWork([]);
         setSecondaryError("Your assigned Document Control work could not be refreshed.");
@@ -134,7 +136,13 @@ export default function DocumentGovernanceDashboardPage() {
     }
   }, [tenant]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const refresh = () => { if (document.visibilityState === "visible") void load(true); };
+    const timer = window.setInterval(refresh, 20_000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [load]);
 
   const runDryCheck = async () => {
     if (!dashboard?.capabilities.control) return;
@@ -187,8 +195,8 @@ export default function DocumentGovernanceDashboardPage() {
           {secondaryError ? <div className="dms-home__notice" role="alert"><AlertTriangle size={16} /><span>{secondaryError}</span><button type="button" onClick={() => void load()}>Retry</button></div> : null}
 
           <DocumentControlSection
-            title="My Work"
-            description="Only obligations attributable to you through direct ownership, recipient/custody assignment, authority submission, confirmed document responsibility or a named retention/disposition role."
+            title="Reviews & my work"
+            description="New uploads and workflow decisions you can act on, followed by your assigned obligations. Open Review document to preview the source and submit, approve or return it. Refreshes automatically."
             actions={<span className="dms-home__count">{myWork.length}</span>}
           >
             {myWork.length ? (

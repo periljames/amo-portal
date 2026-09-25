@@ -153,7 +153,7 @@ class _PublicationPdfFlow:
         if not self.controlled:
             self.page.insert_textbox(
                 self.fitz.Rect(_MARGIN_X, 43, _A4_WIDTH - _MARGIN_X, 61),
-                "UNCONTROLLED DRAFT - NOT FOR OPERATIONAL USE",
+                "DRAFT - NOT FOR OPERATIONAL USE",
                 fontsize=9.5,
                 fontname="hebo",
                 color=(0.75, 0.08, 0.08),
@@ -208,7 +208,7 @@ class _PublicationPdfFlow:
             footer = (
                 "Controlled publication - verify current revision in the AMO Portal before use."
                 if self.controlled
-                else "UNCONTROLLED DRAFT - not approved for operational use or controlled distribution."
+                else "DRAFT - not approved for operational use or controlled distribution."
             )
             page.insert_text(
                 (_MARGIN_X, _A4_HEIGHT - 24),
@@ -226,7 +226,7 @@ class _PublicationPdfFlow:
             if not self.controlled:
                 page.insert_textbox(
                     self.fitz.Rect(70, (_A4_HEIGHT / 2) - 24, _A4_WIDTH - 70, (_A4_HEIGHT / 2) + 24),
-                    "UNCONTROLLED DRAFT",
+                    "DRAFT",
                     fontsize=28,
                     fontname="hebo",
                     color=(0.82, 0.18, 0.18),
@@ -286,7 +286,7 @@ def _watermark_uncontrolled_source(source_path: Path) -> bytes:
         for page in document:
             page.insert_textbox(
                 fitz.Rect(24, 18, page.rect.width - 24, 46),
-                "UNCONTROLLED DRAFT - NOT FOR OPERATIONAL USE",
+                "DRAFT - NOT FOR OPERATIONAL USE",
                 fontsize=10,
                 fontname="hebo",
                 color=(0.78, 0.08, 0.08),
@@ -295,7 +295,7 @@ def _watermark_uncontrolled_source(source_path: Path) -> bytes:
             )
             page.insert_textbox(
                 fitz.Rect(44, (page.rect.height / 2) - 24, page.rect.width - 44, (page.rect.height / 2) + 24),
-                "UNCONTROLLED DRAFT",
+                "DRAFT",
                 fontsize=28,
                 fontname="hebo",
                 color=(0.82, 0.18, 0.18),
@@ -373,7 +373,7 @@ def reader_metadata(
         "revision_number": revision.rev_number,
         "status": _status_value(revision),
         "is_published": is_published,
-        "control_label": "Controlled publication" if is_published else "Uncontrolled draft",
+        "control_label": "Controlled publication" if is_published else "Draft",
         "source_type": source_type or None,
         "source_filename": revision.source_filename,
         "source_size_bytes": source_size,

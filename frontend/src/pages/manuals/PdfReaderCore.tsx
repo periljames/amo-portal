@@ -139,11 +139,8 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         return { url: remoteUrl, key: `${remoteUrl}:${fingerprint || "unverified"}` };
       }
 
-      if (navigator.onLine !== false) {
-        setOfflineState(await hasCachedPdfSource(identity, fingerprint, remoteUrl) ? "AVAILABLE" : "UNAVAILABLE");
-        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
-      }
-
+      // The live capability response verifies the fingerprint. Reuse that exact
+      // encrypted source even on a slow-but-online connection.
       const cachedBytes = await readCachedPdfSource(identity, fingerprint, remoteUrl);
       if (!cachedBytes) {
         setOfflineState("UNAVAILABLE");
@@ -218,6 +215,11 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
 
       if (!cached && navigator.onLine === false && await mountLatestOffline()) return;
 
+      // Read-only PDF.js display does not depend on server form processing.
+      // Scripting/eval/XFA are disabled in PDF_DOCUMENT_OPTIONS. Verified form
+      // permissions and a sanitized replacement source arrive independently.
+      if (!sourceMountedRef.current) await mount(READ_ONLY_FALLBACK, false);
+
       try {
         const live = await getPdfReaderCapabilities(
           identity.tenant,
@@ -252,8 +254,12 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         cachePdfCapabilities(identity, live);
         setCapabilities(live);
 
-        if (!cached || sourceChanged || readerChanged || sourceUrlChanged || !sourceMountedRef.current) {
+        const initialSourceChanged = !cached && liveReaderUrl !== props.fileUrl;
+        if (sourceChanged || readerChanged || sourceUrlChanged || initialSourceChanged || !sourceMountedRef.current) {
           await mount(live, true);
+        } else if (!cached && liveReaderFingerprint) {
+          setOfflineDescriptor({ sha256: liveReaderFingerprint, url: liveReaderUrl, byteLength: live.reader_size_bytes || props.sourceByteLength });
+          setOfflineState(await hasCachedPdfSource(identity, liveReaderFingerprint, liveReaderUrl) ? "AVAILABLE" : "UNAVAILABLE");
         }
 
       } catch (error) {

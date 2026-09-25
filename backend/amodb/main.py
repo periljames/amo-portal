@@ -440,7 +440,7 @@ async def meter_api_calls(request: Request, call_next):
             wake = _is_interactive_wake_path(request.url.path)
             if wake:
                 database_circuit.request_wake_probe()
-            if probe_database(force=wake):
+            if await asyncio.to_thread(probe_database, force=wake):
                 response = await call_next(request)
             else:
                 response = _database_unavailable_response()

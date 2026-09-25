@@ -10,6 +10,7 @@ os.environ.setdefault("AMO_INSTALL_SHARED_STORAGE_ROUTE_HARDENING", "false")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from amodb.apps.platform.ops_api_router import router as versioned_ops_router
 from amodb.apps.platform.ops_capacity_router import router as capacity_router
@@ -76,7 +77,7 @@ def healthz():
     intelligence = snapshot_store.status()
     running = bool(broker_health.get("running"))
     return {
-        "status": "ok" if running and intelligence.get("modes") else "starting" if running else "degraded",
+        "status": "ok" if running and broker_health.get("snapshot_fresh") and intelligence.get("fresh") else "degraded",
         "broker": broker_health,
         "intelligence": intelligence,
         "role": "platform-operations-gateway",
@@ -87,5 +88,9 @@ def healthz():
 def readyz():
     broker_health = broker.health()
     intelligence = snapshot_store.status()
-    ready = bool(broker_health.get("prepared_snapshot") and intelligence.get("modes"))
-    return {"status": "ready" if ready else "not_ready", "broker": broker_health, "intelligence": intelligence}
+    task = getattr(app.state, "snapshot_task", None)
+    ready = bool(broker_health.get("running") and broker_health.get("snapshot_fresh")
+                 and intelligence.get("fresh") and task is not None and not task.done())
+    return JSONResponse(status_code=200 if ready else 503, content={
+        "status": "ready" if ready else "not_ready", "broker": broker_health, "intelligence": intelligence,
+    })

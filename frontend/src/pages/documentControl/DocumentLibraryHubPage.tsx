@@ -531,8 +531,9 @@ export default function DocumentLibraryHubPage() {
       <ControlledDocumentUploadDialog
         tenant={tenant}
         open={uploadOpen}
+        allowApprovedIntake={canControl}
         onClose={() => setUploadOpen(false)}
-        onUploaded={async () => { await load(); }}
+        onUploaded={async (result) => { await load(); navigate(`${basePath}/library/${result.manual_id}?tab=workflow`); }}
       />
     </section>
   </DocumentControlShell>;

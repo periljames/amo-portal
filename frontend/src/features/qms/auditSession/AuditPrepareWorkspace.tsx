@@ -225,6 +225,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     queryFn: ({ signal }) => listCurrentDmsChecklists(amoCode, auditId, { q: checklistSearch, documentType: checklistDocumentType }, signal),
     enabled: Boolean(auditId && canManage),
     staleTime: 5_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
   const preparationRevisionsQuery = useQuery({
     queryKey: ["qms-audit-preparation-revisions", amoCode, auditId],
@@ -637,6 +639,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 {bindings.length ? <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label> : null}
                 {dmsChecklistsQuery.error ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> The DMS checklist library could not be loaded. You can upload a controlled checklist or create this audit’s questions in realtime.</p> : null}
                 {!dmsChecklistsQuery.isLoading && !dmsChecklists.length ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> No current effective {checklistDocumentType.toLowerCase()} is available in DMS. Upload one here or create the questions in realtime.</p> : null}
+                {dmsChecklistsQuery.data?.pending?.length ? <section className="qms-audit-prepare__pending-dms is-wide" aria-label="Awaiting DMS approval">
+                  <header><strong>Awaiting DMS approval ({dmsChecklistsQuery.data.pending.length})</strong><button type="button" disabled={dmsChecklistsQuery.isFetching} onClick={() => void dmsChecklistsQuery.refetch()}>Refresh status</button></header>
+                  <p>Status refreshes automatically. Approved, effective documents appear in the selector above.</p>
+                  {dmsChecklistsQuery.data.pending.map((item) => <article key={item.workflow_id}>
+                    <div><strong>{item.code} · {item.title}</strong><span>{item.state.replaceAll("_", " ")}</span><small>{item.state === "DRAFT" ? "Registered · awaiting submission for technical review" : item.state === "CORRECTIONS_REQUIRED" ? "Changes requested · open the workflow for review comments" : "Review in progress · open the workflow for decisions and remaining steps"}</small></div>
+                    <Link to={item.review_url}>Review document <ArrowRight size={14} /></Link>
+                  </article>)}
+                </section> : null}
                 <footer><button type="button" onClick={() => setChecklistUploadOpen(true)}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={!effectiveDmsChecklistId || checklistReason.trim().length < 8 || applyChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
               </form>
             ) : (
@@ -787,7 +797,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             await refresh(binding);
             return;
           }
-          setLocalSuccess("The checklist was registered as a DMS draft. It will become available here after Document Control approves it.");
+          setLocalSuccess("The checklist was registered as a DMS draft. Track it under Awaiting DMS approval below; open Review document to advance its workflow.");
           await refresh();
         }}
       />

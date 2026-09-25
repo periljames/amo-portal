@@ -281,6 +281,9 @@ def approve_existing_publication_intake(
             current_user=current_user,
             request=request,
         )
+    from amodb.apps.doc_control.workflow_notifications import notify_workflow_progress
+
+    notify_workflow_progress(db, tenant=tenant, manual=manual, workflow=workflow)
     db.commit()
     return {
         "manual_id": manual.id,

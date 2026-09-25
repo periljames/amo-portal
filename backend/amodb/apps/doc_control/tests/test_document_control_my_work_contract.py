@@ -59,7 +59,7 @@ def test_specialist_personal_work_has_explicit_kinds_and_canonical_targets() -> 
     assert "assessment_source" in external
 
 
-def test_workflow_tasks_require_confirmed_effective_responsibility() -> None:
+def test_workflow_tasks_use_authoritative_permissions_and_confirmed_responsibility() -> None:
     source = _source("backend/amodb/apps/doc_control/workspace_dashboard_router.py")
 
     assert 'DocumentResponsibilityAssignment.confirmation_status == "CONFIRMED"' in source
@@ -69,7 +69,8 @@ def test_workflow_tasks_require_confirmed_effective_responsibility() -> None:
     assert "DocumentResponsibilityAssignment.assignee_department_id == current_user.department_id" in source
     assert "DocumentResponsibilityAssignment.assignee_role.in_" in source
     assert "WORKFLOW_RESPONSIBILITY" in source
-    assert "required.intersection(responsibilities.get(row.manual_id, set()))" in source
+    assert "workflow_actions_for_user(db, workflow=row, user=current_user)" in source
+    assert "is_control_user(current_user) or is_decision_approver(current_user)" in source
 
 
 def test_my_work_filters_document_metadata_through_reader_access() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -59,6 +60,7 @@ class PreparedSnapshotBroker:
         self._sequence = 0
         self._latest_snapshot: dict[str, Any] | None = None
         self._latest_snapshot_at: str | None = None
+        self._latest_snapshot_monotonic: float | None = None
         self._last_success_at: str | None = None
         self._last_error: str | None = None
         self._refresh_count = 0
@@ -126,6 +128,7 @@ class PreparedSnapshotBroker:
                         }
                         self._latest_snapshot = prepared
                         self._latest_snapshot_at = self._now()
+                        self._latest_snapshot_monotonic = time.monotonic()
                         await self._publish(
                             "snapshot",
                             {
@@ -215,8 +218,12 @@ class PreparedSnapshotBroker:
             self._subscriber_count = max(0, self._subscriber_count - 1)
 
     def health(self) -> dict[str, Any]:
+        age = None if self._latest_snapshot_monotonic is None else max(0.0, time.monotonic() - self._latest_snapshot_monotonic)
+        fresh = age is not None and age <= self._snapshot_interval * 3 and not self._last_error
         return {
-            "status": "ok" if self._running and not self._last_error else ("degraded" if self._running else "starting"),
+            "status": "ok" if self._running and fresh else ("degraded" if self._running else "starting"),
+            "snapshot_fresh": bool(fresh),
+            "snapshot_age_seconds": age,
             "running": self._running,
             "prepared_snapshot": self._latest_snapshot is not None,
             "latest_snapshot_at": self._latest_snapshot_at,

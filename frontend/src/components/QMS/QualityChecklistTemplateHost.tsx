@@ -592,7 +592,7 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "" }) => {
         </aside>
       ) : null}
 
-      <ControlledDocumentUploadDialog tenant={resolvedAmo} open={uploadOpen} defaultDocumentType="CHECKLIST" allowedTypes={["CHECKLIST", "FORM"]} heading="Upload checklist to Document Control" submitLabel="Register controlled draft" onClose={() => setUploadOpen(false)} onUploaded={async () => { setSuccess("Checklist registered as a controlled DMS draft. Complete its approval workflow before audit use."); await Promise.all([queryClient.invalidateQueries({ queryKey: ["qms-dms-checklist-library", resolvedAmo] }), queryClient.invalidateQueries({ queryKey: ["qms-ai-criteria-library", resolvedAmo] })]); }} />
+      <ControlledDocumentUploadDialog tenant={resolvedAmo} open={uploadOpen} defaultDocumentType="CHECKLIST" allowedTypes={["CHECKLIST", "FORM"]} heading="Upload checklist to Document Control" submitLabel="Register controlled draft" allowApprovedIntake onClose={() => setUploadOpen(false)} onUploaded={async (result) => { setSuccess(result.approved_intake === true ? "Approved checklist registered as the current DMS revision." : "Checklist registered as a controlled DMS draft. Open Document Control Home to review and submit it."); await Promise.all([queryClient.invalidateQueries({ queryKey: ["qms-dms-checklist-library", resolvedAmo] }), queryClient.invalidateQueries({ queryKey: ["qms-ai-criteria-library", resolvedAmo] })]); }} />
     </section>
   );
 };

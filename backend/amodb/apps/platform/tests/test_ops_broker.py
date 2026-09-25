@@ -68,6 +68,7 @@ def test_broker_retains_last_good_snapshot_when_refresh_fails():
     assert second["marker"] == "last-good"
     assert health["refresh_failures"] >= 1
     assert health["status"] == "degraded"
+    assert health["snapshot_fresh"] is False
 
 
 def test_last_event_id_parser_is_backward_compatible_and_safe():

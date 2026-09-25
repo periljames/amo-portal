@@ -398,4 +398,7 @@ def ensure_intake_workflow(
     )
     db.add(workflow)
     db.flush()
+    from .workflow_notifications import notify_workflow_progress
+
+    notify_workflow_progress(db, tenant=tenant, manual=manual, workflow=workflow)
     return workflow

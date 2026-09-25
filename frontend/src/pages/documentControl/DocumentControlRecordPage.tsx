@@ -103,6 +103,7 @@ export default function DocumentControlRecordPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const activeView = activeTabFromParams(searchParams);
+  const requestedWorkflowId = searchParams.get("workflow");
 
   const load = useCallback(async () => {
     if (!tenant || !docId) return;
@@ -110,6 +111,8 @@ export default function DocumentControlRecordPage() {
     setError("");
     try {
       const record = await getDocumentControlDocument(tenant, docId);
+      const selected = record.workflows.find((item) => item.id === requestedWorkflowId);
+      if (selected) record.workflows = [selected, ...record.workflows.filter((item) => item.id !== selected.id)];
       setDetail(record);
       getDocumentRegulationLinks(tenant, docId).then(setRegulationLinks).catch(() => setRegulationLinks([]));
     } catch (caught) {
@@ -117,7 +120,7 @@ export default function DocumentControlRecordPage() {
     } finally {
       setLoading(false);
     }
-  }, [docId, tenant]);
+  }, [docId, tenant, requestedWorkflowId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -146,6 +149,10 @@ export default function DocumentControlRecordPage() {
   };
 
   const openReader = () => {
+    if (activeView === "workflow" && workflow?.revision_id && document) {
+      navigate(`${readerBasePath}/${document.id}/rev/${workflow.revision_id}/read`);
+      return;
+    }
     if (!document?.read_target.revision_id) return;
     navigate(`${readerBasePath}/${document.id}/rev/${document.read_target.revision_id}/read`);
   };
@@ -159,7 +166,7 @@ export default function DocumentControlRecordPage() {
       actions={document && detail ? <>
         <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library`)}>Back to library</button>
         <DocumentControlRecordActions detail={detail} onChanged={() => void load()} compact activeView={activeView} />
-        <button type="button" className="dc-button dc-button--primary" disabled={!document.read_target.revision_id} onClick={openReader}><BookOpen size={15} /> Read current</button>
+        <button type="button" className="dc-button dc-button--primary" disabled={activeView === "workflow" ? !workflow?.revision_id : !document.read_target.revision_id} onClick={openReader}><BookOpen size={15} /> {activeView === "workflow" ? "Preview review revision" : "Read current"}</button>
       </> : undefined}
     >
       {loading ? <DocumentControlLoading label="Loading unified document workspace…" /> : null}
@@ -203,7 +210,7 @@ export default function DocumentControlRecordPage() {
         {activeView === "relationships" ? <RelationshipsView detail={detail} governance={governance} loading={governanceLoading} error={governanceError} onRetry={() => { setGovernance(null); setGovernanceError(""); }} onOpenGovernance={() => navigate(`${basePath}/library/${document.id}?governance=assignments`)} /> : null}
         {activeView === "history" ? <HistoryView detail={detail} /> : null}
 
-        {canControl ? <DocumentControlRecordActions detail={detail} onChanged={() => void load()} activeView={activeView} /> : null}
+        {canControl || detail.workflows.some((item) => item.allowed_actions?.length) ? <DocumentControlRecordActions detail={detail} onChanged={() => void load()} activeView={activeView} /> : null}
       </div> : null}
     </DocumentControlShell>
   );

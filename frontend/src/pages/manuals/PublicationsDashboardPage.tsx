@@ -172,6 +172,7 @@ export default function PublicationsDashboardPage() {
       <ControlledDocumentUploadDialog
         tenant={tenant}
         open={uploadOpen}
+        allowApprovedIntake
         onClose={() => setUploadOpen(false)}
         onUploaded={async (result) => {
           await refresh();

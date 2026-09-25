@@ -16,7 +16,8 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
 from amodb.apps.notifications import service as notification_service
 from amodb.apps.realtime import models as realtime_models
-from amodb.database import WriteSessionLocal, close_session_safely
+from amodb.database import WriteSessionLocal, close_session_safely, probe_database
+from amodb.database_resilience import database_circuit, is_database_disconnect
 
 from . import domain_models as dm
 from . import reminder_models as rm
@@ -609,16 +610,25 @@ def run_document_control_reminder_cycle(db: Session, *, now: datetime | None = N
 
 def _scheduler_loop() -> None:
     while not _stop_event.is_set():
+        if not probe_database():
+            _stop_event.wait(database_circuit.retry_after_seconds())
+            continue
         db = WriteSessionLocal()
+        delay = REMINDER_INTERVAL_SECONDS
         try:
             result = run_document_control_reminder_cycle(db)
             logger.info("Document Control reminder cycle completed: %s", result)
-        except Exception:
-            db.rollback()
-            logger.exception("Document Control automatic reminder cycle failed")
+        except Exception as exc:
+            # Closing below rolls back/discards the failed transaction. A second
+            # network error during explicit rollback must not kill this thread.
+            if is_database_disconnect(exc):
+                delay = max(2, database_circuit.retry_after_seconds())
+                logger.warning("Document Control reminders paused: database unavailable")
+            else:
+                logger.exception("Document Control automatic reminder cycle failed")
         finally:
             close_session_safely(db)
-        _stop_event.wait(REMINDER_INTERVAL_SECONDS)
+        _stop_event.wait(delay)
 
 
 def start_document_control_reminder_scheduler() -> None:

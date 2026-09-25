@@ -15,6 +15,8 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import governance_models as gm
 from .workspace_capabilities import document_control_capabilities, reader_capabilities
+from .workspace_decision_policy import is_decision_approver
+from .workspace_responsibility_access import workflow_actions_for_user
 from .workspace_router import OPEN_CHANGE_STATUSES, OPEN_WORKFLOW_STATES, dashboard as _get_full_dashboard
 from .workspace_service import can_read_manual, is_control_user, resolve_tenant, role_assignment_tokens
 
@@ -214,8 +216,8 @@ def _my_work(
     """Return bounded work attributable to the current user.
 
     Tenant totals are deliberately excluded. Tasks enter this queue only when
-    ownership/custody is explicit or a confirmed responsibility assignment maps
-    the current workflow decision to the user, their department, or their role.
+    ownership/custody is explicit or the authoritative workflow policy permits
+    an action through management authority or confirmed document responsibility.
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     now = datetime.utcnow()
@@ -395,21 +397,24 @@ def _my_work(
         })
 
     responsibilities = _responsibilities_for_user(db, tenant=tenant, current_user=current_user)
-    if responsibilities:
-        workflows = (
+    if responsibilities or is_control_user(current_user) or is_decision_approver(current_user):
+        workflow_query = (
             db.query(dm.DocumentWorkflowInstance)
             .filter(
                 dm.DocumentWorkflowInstance.tenant_id == tenant.amo_id,
-                dm.DocumentWorkflowInstance.manual_id.in_(set(responsibilities)),
                 dm.DocumentWorkflowInstance.state.in_(OPEN_WORKFLOW_STATES),
             )
+        )
+        if not (is_control_user(current_user) or is_decision_approver(current_user)):
+            workflow_query = workflow_query.filter(dm.DocumentWorkflowInstance.manual_id.in_(set(responsibilities)))
+        workflows = (
+            workflow_query
             .order_by(dm.DocumentWorkflowInstance.updated_at.asc())
             .limit(50)
             .all()
         )
         for row in workflows:
-            required = WORKFLOW_RESPONSIBILITY.get(row.state)
-            if not required or not required.intersection(responsibilities.get(row.manual_id, set())):
+            if not workflow_actions_for_user(db, workflow=row, user=current_user):
                 continue
             manual_ids.add(row.manual_id)
             tasks.append({
@@ -417,12 +422,12 @@ def _my_work(
                 "kind": "WORKFLOW_DECISION",
                 "manual_id": row.manual_id,
                 "entity_id": row.id,
-                "title": f"{row.state.replace('_', ' ').title()} decision",
+                "title": "New upload — submit for review" if row.state == "DRAFT" else f"{row.state.replace('_', ' ').title()} decision",
                 "status": row.state,
                 "priority": "ACTION",
                 "due_at": None,
-                "action_label": "Open workflow",
-                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=workflow#document-control-record-actions",
+                "action_label": "Review document",
+                "target_path": f"/maintenance/{tenant_slug}/document-control/library/{row.manual_id}?tab=workflow&workflow={row.id}#document-control-record-actions",
                 "_sort_at": None,
             })
 
