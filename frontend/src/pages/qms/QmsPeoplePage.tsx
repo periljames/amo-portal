@@ -736,7 +736,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
       <nav className="qms-authz-tabs" aria-label="Authorization control views">
         {visibleTabs.map(([value, label]) => (
-          <button key={value} type="button" className={effectiveTab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
+          <button
+            key={value}
+            type="button"
+            className={effectiveTab === value ? "is-active" : ""}
+            aria-current={effectiveTab === value ? "page" : undefined}
+            onClick={() => chooseTab(value)}
+          >
             {label}
           </button>
         ))}
@@ -783,7 +789,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
       {effectiveTab === "people" ? (
         <div className={selfServiceOnly ? "qms-authz-stack" : "qms-authz-grid qms-authz-grid--split"}>
-          {!selfServiceOnly ? <article className="qms-authz-card">
+          {!selfServiceOnly ? <article className="qms-authz-card qms-authz-card--rail">
             <div className="qms-authz-toolbar">
               <SectionTitle icon={<Users size={19} />} title="People" subtitle="Workforce identity and current Quality authorization status." />
               {canPrepare ? (
@@ -793,8 +799,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 </div>
               ) : null}
             </div>
-            <label className="qms-authz-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, staff code, role or department" /></label>
-            <div className="qms-authz-list">
+            <label className="qms-authz-search"><Search size={16} /><input aria-label="Search people" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, staff code, role or department" /></label>
+            <div className="qms-authz-list qms-authz-list--viewport">
               {filteredPeople.map((person) => (
                 <button type="button" className={`qms-authz-row qms-authz-row--button ${selectedPersonKey === person.key ? "is-selected" : ""}`} key={person.key} onClick={() => setSelectedPersonKey(person.key)}>
                   <div>
@@ -807,6 +813,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   </div>
                 </button>
               ))}
+              {!filteredPeople.length ? <div className="qms-authz-empty qms-authz-empty--compact">No people match the current search.</div> : null}
             </div>
           </article> : null}
 
@@ -893,7 +900,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
       {effectiveTab === "cases" ? (
         <div className="qms-authz-grid qms-authz-grid--split">
-          <article className="qms-authz-card">
+          <article className="qms-authz-card qms-authz-card--rail">
             <div className="qms-authz-toolbar">
               <SectionTitle icon={<ClipboardCheck size={19} />} title="Authorization Cases" subtitle="Pre-decision nomination, evidence, recommendation and approval." />
               {canPrepare ? <button type="button" className="qms-authz-button" onClick={() => setNominateOpen(true)}><FilePlus2 size={16} /> New case</button> : null}
@@ -902,13 +909,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
               <option value="">All case statuses</option>
               {CASE_STATUSES.map((value) => <option value={value} key={value}>{human(value)}</option>)}
             </select>
-            <div className="qms-authz-list">
+            <div className="qms-authz-list qms-authz-list--viewport">
               {filteredCases.map((item) => (
                 <button type="button" className={`qms-authz-row qms-authz-row--button ${selectedCaseId === item.id ? "is-selected" : ""}`} key={item.id} onClick={() => setSelectedCaseId(item.id)}>
                   <div><strong>{item.person}</strong><span>{item.authorization} · {human(item.case_type)}</span></div>
                   <div><Pill tone={statusTone(item.status)}>{human(item.status)}</Pill><small>{item.next_action}</small></div>
                 </button>
               ))}
+              {!filteredCases.length ? <div className="qms-authz-empty qms-authz-empty--compact">No authorization cases match the selected status.</div> : null}
             </div>
           </article>
 
@@ -1236,9 +1244,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {nominateOpen ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Nominate person for Quality authorization">
-          <form className="qms-authz-modal__panel" onSubmit={(event) => void submitNomination(event)}>
-            <div className="qms-authz-modal__header"><h2>Nominate for Quality authorization</h2><button type="button" onClick={() => setNominateOpen(false)}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <form className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Nominate person for Quality authorization" onSubmit={(event) => void submitNomination(event)}>
+            <div className="qms-authz-modal__header"><h2>Nominate for Quality authorization</h2><button type="button" aria-label="Close dialog" onClick={() => setNominateOpen(false)}><XCircle size={20} /></button></div>
             <label>Person<select required value={nominatePerson} onChange={(event) => setNominatePerson(event.target.value)}><option value="">Select person</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}{item.home_role ? ` — ${human(item.home_role)}` : ""}</option>)}</select></label>
             <label>Authorization type<select required value={nominateRule} onChange={(event) => setNominateRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
             <label>Nomination reason<textarea required rows={4} value={nominateReason} onChange={(event) => setNominateReason(event.target.value)} /></label>
@@ -1248,9 +1256,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {batchOpen ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Batch nominate personnel">
-          <form className="qms-authz-modal__panel" onSubmit={(event) => void submitBatch(event)}>
-            <div className="qms-authz-modal__header"><h2>Batch nominate</h2><button type="button" onClick={() => setBatchOpen(false)}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <form className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Batch nominate personnel" onSubmit={(event) => void submitBatch(event)}>
+            <div className="qms-authz-modal__header"><h2>Batch nominate</h2><button type="button" aria-label="Close dialog" onClick={() => setBatchOpen(false)}><XCircle size={20} /></button></div>
             <label>Authorization type<select required value={batchRule} onChange={(event) => setBatchRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
             <fieldset className="qms-authz-checklist"><legend>People</legend>{people.filter((item) => item.workforce_status === "Active").map((item) => <label key={item.key}><input type="checkbox" checked={batchPeople.includes(item.key)} onChange={(event) => setBatchPeople((current) => event.target.checked ? [...current, item.key] : current.filter((value) => value !== item.key))} /> <span>{item.name}</span></label>)}</fieldset>
             <label>Nomination reason<textarea required rows={4} value={batchReason} onChange={(event) => setBatchReason(event.target.value)} /></label>
@@ -1260,9 +1268,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {reviewOpen ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Record periodic authorization review">
-          <form className="qms-authz-modal__panel" onSubmit={(event) => void submitReview(event)}>
-            <div className="qms-authz-modal__header"><h2>Record periodic review</h2><button type="button" onClick={() => setReviewOpen(false)}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <form className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Record periodic authorization review" onSubmit={(event) => void submitReview(event)}>
+            <div className="qms-authz-modal__header"><h2>Record periodic review</h2><button type="button" aria-label="Close dialog" onClick={() => setReviewOpen(false)}><XCircle size={20} /></button></div>
             <p><strong>Reviewer:</strong> {actorName}</p>
             <label>Authorization<select required value={reviewAuthorization} onChange={(event) => setReviewAuthorization(event.target.value)}><option value="">Select active authorization</option>{authorizations.filter((item) => ["ACTIVE", "SUSPENDED"].includes(item.status)).map((item) => <option key={item.key} value={item.key}>{item.person} — {item.authorization}</option>)}</select></label>
             <label>Outcome<select value={reviewOutcome} onChange={(event) => setReviewOutcome(event.target.value as typeof reviewOutcome)}><option value="CONTINUE">Continue</option><option value="CONTINUE_WITH_CONDITIONS">Continue with conditions</option><option value="REQUIRES_ACTION">Requires action</option><option value="SUSPEND">Suspend</option><option value="REVOKE">Revoke</option></select></label>
@@ -1276,9 +1284,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {exemptionOpen && canExempt && exemptionAuthorization ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Controlled exemption for active authorization">
-          <div className="qms-authz-modal__panel">
-            <div className="qms-authz-modal__header"><h2>Controlled Exemption / Conditional Authorization</h2><button type="button" onClick={() => { setExemptionOpen(false); setExemptionAuthorization(null); }}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <div className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Controlled exemption for active authorization">
+            <div className="qms-authz-modal__header"><h2>Controlled Exemption / Conditional Authorization</h2><button type="button" aria-label="Close dialog" onClick={() => { setExemptionOpen(false); setExemptionAuthorization(null); }}><XCircle size={20} /></button></div>
             <p><strong>{exemptionAuthorization.person || personDetail?.person.name}</strong> · {exemptionAuthorization.authorization}</p>
             <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
             <div className="qms-authz-form-grid">
@@ -1301,9 +1309,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {lifecycleOpen && lifecycleAuthorization ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Authorization lifecycle decision">
-          <form className="qms-authz-modal__panel" onSubmit={(event) => void submitLifecycle(event)}>
-            <div className="qms-authz-modal__header"><h2>{human(lifecycleDecision)} authorization</h2><button type="button" onClick={() => setLifecycleOpen(false)}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <form className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Authorization lifecycle decision" onSubmit={(event) => void submitLifecycle(event)}>
+            <div className="qms-authz-modal__header"><h2>{human(lifecycleDecision)} authorization</h2><button type="button" aria-label="Close dialog" onClick={() => setLifecycleOpen(false)}><XCircle size={20} /></button></div>
             <p><strong>{lifecycleAuthorization.person}</strong> · {lifecycleAuthorization.authorization}</p>
             <div className="qms-authz-decision-context">
               <span><strong>Decision authority:</strong> {actorName}</span>
@@ -1329,9 +1337,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       ) : null}
 
       {ruleOpen && canManagePolicy ? (
-        <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Authorization policy">
-          <form className="qms-authz-modal__panel" onSubmit={(event) => void saveRule(event)}>
-            <div className="qms-authz-modal__header"><h2>{editingRule ? "Edit authorization policy" : "New authorization policy"}</h2><button type="button" onClick={() => setRuleOpen(false)}><XCircle size={20} /></button></div>
+        <div className="qms-authz-modal overlay-backdrop">
+          <form className="qms-authz-modal__panel" role="dialog" aria-modal="true" aria-label="Authorization policy" onSubmit={(event) => void saveRule(event)}>
+            <div className="qms-authz-modal__header"><h2>{editingRule ? "Edit authorization policy" : "New authorization policy"}</h2><button type="button" aria-label="Close dialog" onClick={() => setRuleOpen(false)}><XCircle size={20} /></button></div>
             <label>Title<input required value={ruleTitle} onChange={(event) => setRuleTitle(event.target.value)} /></label>
             {!editingRule ? <label>Code<input required value={ruleCode} onChange={(event) => setRuleCode(event.target.value)} placeholder="AUDITOR_SPECIALIST" /></label> : null}
             {!editingRule ? <label>Type<select value={ruleType} onChange={(event) => setRuleType(event.target.value as typeof ruleType)}><option value="AUDITOR">Auditor</option><option value="LEAD_AUDITOR">Lead Auditor</option><option value="QUALITY_INSPECTOR">Quality Assurance Inspector</option><option value="AUTHORIZATION_REVIEWER">Authorization Reviewer</option><option value="CUSTOM">Custom</option></select></label> : null}
