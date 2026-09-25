@@ -4,12 +4,12 @@
   --qms-authz-warning: var(--accent-warning);
   --qms-authz-positive: var(--accent-success);
   --qms-authz-info: var(--accent-info);
-  --qms-authz-border: var(--surface-border, var(--border-subtle));
+  --qms-authz-border: var(--qms-line, var(--surface-border, var(--border-subtle)));
   --qms-authz-border-soft: color-mix(in srgb, var(--qms-authz-border) 68%, transparent);
-  --qms-authz-surface: var(--surface-elevated);
-  --qms-authz-surface-muted: var(--surface-soft);
-  --qms-authz-text: var(--text-primary);
-  --qms-authz-muted: var(--text-secondary);
+  --qms-authz-surface: var(--qms-panel, var(--surface-elevated));
+  --qms-authz-surface-muted: var(--surface-subtle, var(--surface-soft));
+  --qms-authz-text: var(--qms-text, var(--text-primary));
+  --qms-authz-muted: var(--qms-muted, var(--text-secondary));
   display: grid;
   gap: .75rem;
   width: 100%;
