@@ -127,9 +127,10 @@ def test_docx_layout_is_client_rendered_and_zoom_does_not_reparse_source() -> No
     assert "Laying out Word pages on this device" in source
     assert "experimental: true" in source
     assert "useBase64URL: true" in source
-    assert "renderAltChunks: true" in source
     assert "renderHeaders: true" in source
     assert "renderFooters: true" in source
+    assert "docx-media-fallback" in source
+    assert "embedded graphic" in source
     assert "host.style.zoom = String(nextScale)" in source
     assert 'aria-label="Document zoom"' in _source(PUBLICATIONS)
     assert "rendered.pdf" not in source
