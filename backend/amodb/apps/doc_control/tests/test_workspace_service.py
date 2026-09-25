@@ -120,7 +120,7 @@ def test_normal_user_cannot_enumerate_controller_worklists() -> None:
 def test_controller_can_enter_governance_worklists() -> None:
     enforce_workspace_access(
         _request("GET", "/doc-control/workspace/t/safarilink/workflows"),
-        _user("QUALITY_MANAGER"),
+        _user("DOCUMENT_CONTROL_OFFICER"),
     )
 
 
