@@ -349,17 +349,6 @@ body[data-color-scheme="light"] .publication-native-pdf__error {
   color: var(--text-secondary, #cbd5e1);
 }
 
-.publication-to-top {
-  left: 50%;
-  right: auto;
-  bottom: 1rem;
-  z-index: 18;
-  transform: translateX(-50%);
-}
-
-.publication-to-top:hover {
-  transform: translateX(-50%) translateY(-2px);
-}
 
 @keyframes publication-page-shimmer {
   to { background-position-x: -200%; }
