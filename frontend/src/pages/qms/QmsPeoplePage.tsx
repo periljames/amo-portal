@@ -1,19 +1,12 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  BadgeCheck,
-  CalendarClock,
   CheckCircle2,
-  ClipboardCheck,
   Download,
   FilePlus2,
-  History,
   RefreshCw,
   Search,
-  Settings2,
-  ShieldCheck,
   UserCheck,
-  Users,
   XCircle,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -109,10 +102,9 @@ function Pill({ children, tone = "neutral" }: { children: React.ReactNode; tone?
   return <span className={`qms-authz-pill qms-authz-pill--${tone}`}>{children}</span>;
 }
 
-function SectionTitle({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="qms-authz-section-title">
-      <span>{icon}</span>
       <div>
         <h2>{title}</h2>
         {subtitle ? <p>{subtitle}</p> : null}
@@ -760,7 +752,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             ))}
           </div>
           <article className="qms-authz-card">
-            <SectionTitle icon={<CalendarClock size={19} />} title="Attention required" subtitle="Items needing preparation, decision or review." />
+            <SectionTitle title="Attention required" subtitle="Items needing preparation, decision or review." />
             {overview.attention.length ? (
               <div className="qms-authz-list">
                 {overview.attention.map((item, index) => (
@@ -785,7 +777,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className={selfServiceOnly ? "qms-authz-stack" : "qms-authz-grid qms-authz-grid--split"}>
           {!selfServiceOnly ? <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
-              <SectionTitle icon={<Users size={19} />} title="People" subtitle="Workforce identity and current Quality authorization status." />
+              <SectionTitle title="People" subtitle="Workforce identity and current Quality authorization status." />
               {canPrepare ? (
                 <div className="qms-authz-toolbar__actions">
                   <button type="button" className="qms-authz-button" onClick={() => setNominateOpen(true)}><UserCheck size={16} /> Nominate</button>
@@ -813,7 +805,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <article className="qms-authz-card qms-authz-detail">
             {personDetail ? (
               <>
-                <SectionTitle icon={<ShieldCheck size={19} />} title={personDetail.person.name} subtitle={[personDetail.person.home_role ? human(personDetail.person.home_role) : null, personDetail.person.department].filter(Boolean).join(" · ")} />
+                <SectionTitle title={personDetail.person.name} subtitle={[personDetail.person.home_role ? human(personDetail.person.home_role) : null, personDetail.person.department].filter(Boolean).join(" · ")} />
                 <div className="qms-authz-facts">
                   <div><span>Workforce</span><strong>{personDetail.person.active ? "Active" : "Inactive"}</strong></div>
                   <div><span>Staff code</span><strong>{personDetail.person.staff_code || "Not recorded"}</strong></div>
@@ -842,7 +834,6 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                     </div>
                     {item.readiness?.development.supervision_required ? (
                       <div className="qms-authz-alert qms-authz-alert--info">
-                        <BadgeCheck size={16} />
                         Development authorization · Training: {item.readiness.training.status} · Supervision required · Observed audits {item.readiness.development.progress_label}
                       </div>
                     ) : null}
@@ -895,7 +886,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className="qms-authz-grid qms-authz-grid--split">
           <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
-              <SectionTitle icon={<ClipboardCheck size={19} />} title="Authorization Cases" subtitle="Pre-decision nomination, evidence, recommendation and approval." />
+              <SectionTitle title="Authorization Cases" subtitle="Pre-decision nomination, evidence, recommendation and approval." />
               {canPrepare ? <button type="button" className="qms-authz-button" onClick={() => setNominateOpen(true)}><FilePlus2 size={16} /> New case</button> : null}
             </div>
             <select className="qms-authz-select" value={caseStatus} onChange={(event) => setCaseStatus(event.target.value)}>
@@ -915,7 +906,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <article className="qms-authz-card qms-authz-detail">
             {caseDetail ? (
               <>
-                <SectionTitle icon={<History size={19} />} title={caseDetail.case.person.name || "Person unavailable"} subtitle={caseDetail.case.authorization} />
+                <SectionTitle title={caseDetail.case.person.name || "Person unavailable"} subtitle={caseDetail.case.authorization} />
                 <div className="qms-authz-case-banner">
                   <Pill tone={statusTone(caseDetail.case.status)}>{human(caseDetail.case.status)}</Pill>
                   <span>{human(caseDetail.case.case_type)} · Nominated {shortDate(caseDetail.case.nomination_date)} by {caseDetail.case.nominator}</span>
@@ -939,8 +930,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 ) : null}
                 {caseDetail.readiness.development.observed_audits < caseDetail.readiness.development.target ? (
                   <div className="qms-authz-alert qms-authz-alert--info">
-                    <BadgeCheck size={16} />
-                    The three-observer-audit target is development evidence, not an automatic promotion gate. An approving manager must record the basis if approving before the target is complete.
+                        The three-observer-audit target is development evidence, not an automatic promotion gate. An approving manager must record the basis if approving before the target is complete.
                   </div>
                 ) : null}
 
@@ -1142,7 +1132,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className="qms-authz-stack">
           <article className="qms-authz-card">
             <div className="qms-authz-toolbar">
-              <SectionTitle icon={<CalendarClock size={19} />} title="Review Control" subtitle="Due, overdue, conditional, suspended and competence-driven reassessment queues." />
+              <SectionTitle title="Review Control" subtitle="Due, overdue, conditional, suspended and competence-driven reassessment queues." />
               {canReview ? <button type="button" className="qms-authz-button" onClick={() => setReviewOpen(true)}>Record review</button> : null}
             </div>
             <div className="qms-authz-metrics">
@@ -1170,7 +1160,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             ["Competence lapses", reviewQueues.competenceLapses, "Mandatory current competence is not verified."],
           ] as Array<[string, QmsAuthorization[], string]>).map(([title, items, helper]) => (
             <article className="qms-authz-card" key={title}>
-              <SectionTitle icon={<AlertTriangle size={18} />} title={title} subtitle={helper} />
+              <SectionTitle title={title} subtitle={helper} />
               <div className="qms-authz-list">
                 {items.length ? items.map((item) => (
                   <div className="qms-authz-row" key={item.key}>
@@ -1193,7 +1183,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           ))}
 
           <article className="qms-authz-card">
-            <SectionTitle icon={<History size={19} />} title="Completed Reviews" subtitle="Immutable governed review history." />
+            <SectionTitle title="Completed Reviews" subtitle="Immutable governed review history." />
             <div className="qms-authz-list">
               {reviews.length ? reviews.map((item) => (
                 <div className="qms-authz-row" key={item.id}>
@@ -1209,7 +1199,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {effectiveTab === "administration" && canManagePolicy ? (
         <article className="qms-authz-card">
           <div className="qms-authz-toolbar">
-            <SectionTitle icon={<Settings2 size={19} />} title="Authorization Policy Administration" subtitle="Restricted configuration. Training course recurrence remains owned by Training." />
+            <SectionTitle title="Authorization Policy Administration" subtitle="Restricted configuration. Training course recurrence remains owned by Training." />
             <div className="qms-authz-toolbar__actions">
               {!rules.some((rule) => rule.is_active) ? <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={() => void createDefaultPolicies()} disabled={busy}>Create default policies</button> : null}
               <button type="button" className="qms-authz-button" onClick={openCreateRule}>New authorization type</button>
