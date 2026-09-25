@@ -225,6 +225,7 @@ export default function PublicationsReaderPage() {
   const [hasAcroForm, setHasAcroForm] = useState(false);
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
   const [readingWidth, setReadingWidth] = useState<ReadingWidth>(() => (window.localStorage.getItem("amo-publication-reader-width") as ReadingWidth) || "fit");
+  const [docxZoom, setDocxZoom] = useState(() => window.localStorage.getItem("amo-publication-docx-zoom") || "fit");
   const [blocksBySection, setBlocksBySection] = useState<Record<string, ExtendedReadPayload["blocks"]>>({});
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -630,12 +631,6 @@ export default function PublicationsReaderPage() {
     window.localStorage.setItem("amo-publication-reader-width", width);
   };
 
-  const scrollToTop = () => {
-    const scroller = appScroller();
-    if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" });
-    else window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
   const navigation = (
     <aside className={`publication-navigation ${mobileNavigationOpen ? "publication-navigation--open" : ""}`} aria-label="Publication navigation">
       <div className="publication-navigation__mobile-head"><strong>Navigate publication</strong><button type="button" onClick={() => setMobileNavigationOpen(false)} aria-label="Close navigation"><X size={18} /></button></div>
@@ -731,6 +726,7 @@ export default function PublicationsReaderPage() {
             <div className="publication-reader-controls">
               <select value={readerTheme} onChange={(event) => setTheme(event.target.value as ReaderTheme)} aria-label="Reading theme"><option value="neutral">Neutral</option><option value="warm">Warm</option><option value="sepia">Sepia</option><option value="contrast">High contrast</option></select>
               <select value={readingWidth} onChange={(event) => setWidth(event.target.value as ReadingWidth)} aria-label="Reading width"><option value="fit">Fit</option><option value="focus">Focus</option><option value="wide">Wide</option></select>
+              {sourceIsDocx && viewMode === "layout" ? <select value={docxZoom} onChange={(event) => { const value = event.target.value; setDocxZoom(value); window.localStorage.setItem("amo-publication-docx-zoom", value); }} aria-label="Document zoom"><option value="fit">Fit width</option>{[50, 75, 100, 125, 150, 200].map((value) => <option key={value} value={value}>{value}%</option>)}</select> : null}
               <button type="button" className={viewMode === "layout" ? "active" : ""} disabled={!layoutAvailable} onClick={() => setViewMode("layout")}>{layoutLabel}</button>
               <button type="button" className={viewMode === "text" ? "active" : ""} disabled={!textAvailable} onClick={() => setViewMode("text")}>{textLabel}</button>
             </div>
@@ -757,7 +753,7 @@ export default function PublicationsReaderPage() {
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    sourceIsDocx ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} draft={!isPublished} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsDocx ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       title={metadata.title}
                       sourceByteLength={metadata.source_size_bytes || metadata.rendered_pdf_size_bytes}
@@ -806,7 +802,6 @@ export default function PublicationsReaderPage() {
             viewMode={viewMode}
             onAnnotationsChanged={setReaderAnnotations}
           />
-          <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>
           {mobileNavigationOpen ? <button type="button" className="publication-navigation-backdrop" onClick={() => setMobileNavigationOpen(false)} aria-label="Close navigation overlay" /> : null}
         </>
       ) : null}
