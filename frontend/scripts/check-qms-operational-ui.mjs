@@ -56,6 +56,15 @@ assertIncludes(missions, "width: 100%;", "Mission creation must fit its workspac
 
 assertIncludes(people, ".qms-authz-grid--split", "People authorization control must retain a two-pane operational workspace");
 assertIncludes(people, ".qms-authz-modal", "Governed authorization actions must remain contextual and explicit");
+assertIncludes(people, "--qms-authz-accent: var(--accent-primary);", "People must consume the portal/QMS accent token instead of a local colour system");
+assertIncludes(people, "--qms-authz-surface: var(--surface-elevated);", "People must consume the portal elevated-surface token");
+assertIncludes(people, "background: var(--portal-overlay);", "People modal scrims must use the portal overlay token");
+assertIncludes(people, ".qms-authz-list--viewport", "People and case registers must have bounded vertical growth");
+assertIncludes(people, "@media (max-width: 1080px)", "People must collapse the two-pane workspace before constrained laptop widths overflow");
+assertNotMatch(people, /--accent-color|--border-color/, "People must not reintroduce page-local accent/border token aliases");
+assertNotMatch(peoplePage, /className="qms-authz-modal"\s+role="dialog"/, "People must not apply dialog semantics to the full-screen modal scrim");
+assertIncludes(peoplePage, 'className="qms-authz-modal__panel" role="dialog"', "People dialog semantics must live on the actual modal panel");
+assertIncludes(peoplePage, 'aria-current={effectiveTab === value ? "page" : undefined}', "People tab navigation must expose the active view accessibly");
 assertIncludes(peoplePage, "Authorization governance", "People must remain authorization-control focused");
 assertIncludes(peoplePage, "Authorization Cases", "People must expose the governed pre-decision case workflow");
 assertIncludes(peoplePage, "Controlled Exemption / Conditional Authorization", "People must expose only the controlled exception workflow");
