@@ -294,27 +294,13 @@ function VirtualPdfPage({
   const [failed, setFailed] = useState("");
   const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
   const [internalPages, setInternalPages] = useState<Record<string, number>>({});
-  const [rasterWidth, setRasterWidth] = useState(width);
-  const snapshotRef = useRef<HTMLCanvasElement | null>(null);
-  const [showSnapshot, setShowSnapshot] = useState(false);
-
-  // Zoom the existing canvas and its text/annotation layers immediately. Raster
-  // work starts only after input settles, without remounting the page or PDF.
-  useEffect(() => {
-    if (Math.abs(width - rasterWidth) < 1) return;
-    const timer = window.setTimeout(() => {
-      const canvas = pageRef.current?.querySelector<HTMLCanvasElement>(".react-pdf__Page__canvas");
-      const snapshot = snapshotRef.current;
-      if (canvas && snapshot && canvas.width && canvas.height && canvas.style.visibility !== "hidden") {
-        snapshot.width = canvas.width;
-        snapshot.height = canvas.height;
-        snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
-        setShowSnapshot(true);
-      }
-      setRasterWidth(width);
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [width, rasterWidth]);
+  // Keep the PDF.js raster stable for the lifetime of a mounted virtual page.
+  // Zoom and viewport resize are presentation-only transforms, so changing the
+  // percentage never asks PDF.js to rebuild an already-rendered canvas. Pages
+  // render once at the width they have when mounted; newly mounted pages use the
+  // current width. This keeps zoom instant and leaves page decoding/raster work
+  // entirely on the client without a render loop on every control change.
+  const [rasterWidth] = useState(() => Math.max(1, width));
 
   const textRenderer = useCallback(({ str }: { str: string }) => (
     highlightPdfText(str, query, searchOptions, false)
@@ -384,7 +370,20 @@ function VirtualPdfPage({
         </div>
       ) : null}
 
-      <div className="pdfv3-page-surface" aria-hidden={!ready} style={{ width: rasterWidth, transform: `scale(${width / rasterWidth})`, transformOrigin: "top left", position: "absolute", top: 0, left: 0 }}>
+      <div
+        className="pdfv3-page-surface"
+        aria-hidden={!ready}
+        data-client-raster-width={Math.round(rasterWidth)}
+        style={{
+          width: rasterWidth,
+          transform: `scale(${width / rasterWidth})`,
+          transformOrigin: "top left",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          willChange: "transform",
+        }}
+      >
         <PdfPage
           pageNumber={page}
           width={rasterWidth}
@@ -440,8 +439,6 @@ function VirtualPdfPage({
           onRenderSuccess={() => {
             setFailed("");
             setReady(true);
-            setShowSnapshot(false);
-            if (snapshotRef.current) { snapshotRef.current.width = 0; snapshotRef.current.height = 0; }
           }}
           onRenderError={(error: unknown) => {
             setReady(false);
@@ -450,8 +447,6 @@ function VirtualPdfPage({
           onRenderTextLayerSuccess={() => onTextReady(page)}
         />
       </div>
-
-      <canvas ref={snapshotRef} aria-hidden="true" className="pdfv3-zoom-snapshot" style={{ visibility: showSnapshot ? "visible" : "hidden", position: "absolute", inset: 0, width, height: width * ratio, pointerEvents: "none" }} />
 
       {uncontrolled ? <span className="pdfv3-watermark">DRAFT</span> : null}
       {renderOverlay?.(page)}

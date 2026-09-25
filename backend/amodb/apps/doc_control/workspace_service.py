@@ -362,7 +362,7 @@ def serialize_manual(
             "label": (
                 "Read current issue"
                 if target_kind == "PUBLISHED"
-                else "Review controlled draft"
+                else "Review draft"
                 if target_kind == "UNCONTROLLED"
                 else "No readable revision"
             ),

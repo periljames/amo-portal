@@ -88,7 +88,8 @@ function activeTabFromParams(params: URLSearchParams): DocumentWorkspaceView {
 
 function controlStatus(detail: DocumentDetailResponse): string {
   const target = detail.document.read_target;
-  return target.control_status || (target.kind === "UNCONTROLLED" ? "CONTROLLED_DRAFT" : target.kind);
+  const status = target.control_status || target.kind;
+  return status === "CONTROLLED_DRAFT" || target.kind === "UNCONTROLLED" ? "DRAFT" : status;
 }
 
 export default function DocumentControlRecordPage() {
@@ -172,7 +173,7 @@ export default function DocumentControlRecordPage() {
       {loading ? <DocumentControlLoading label="Loading unified document workspace…" /> : null}
       {error ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !error && detail && document ? <div className="dms-document" data-testid="document-workspace">
-        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>Controlled draft — not yet issued.</strong> {workflow ? "The approval workflow is active." : "The document is registered; start its review workflow below."} Draft views, downloads and printouts are not approved for operational use until publication.</div></div> : null}
+        {document.read_target.kind === "UNCONTROLLED" ? <div className="dc-callout dc-callout--warning"><AlertTriangle size={18} /><div><strong>DRAFT — not yet issued.</strong> {workflow ? "The approval workflow is active." : "The document is registered; start its review workflow below."} Draft views, downloads and printouts are not approved for operational use until publication.</div></div> : null}
 
         <section className="dms-document__identity">
           <div className="dms-document__identity-main">
@@ -284,7 +285,7 @@ function WorkflowView({ detail }: { detail: DocumentDetailResponse }) {
 function DistributionView({ detail }: { detail: DocumentDetailResponse }) {
   return <div className="dms-document__stack">
     <SimpleTable title="Distribution campaigns" description="Current digital issue populations, acknowledgement obligations and retained issue evidence." empty="No distribution campaign is recorded." headers={["Campaign", "Revision", "Status", "Issued", "Due", "Recipients"]} rows={detail.distribution_campaigns.map((row) => [<><strong>{row.title}</strong><small>{row.id}</small></>, row.revision_id, <DocumentControlStatus status={row.status} kind={statusKind(row.status)} />, formatDate(row.issued_at), formatDate(row.due_at), Object.entries(row.recipients || {}).map(([key, value]) => `${key}: ${value}`).join(" · ") || "0"])} />
-    <SimpleTable title="Physical controlled copies" description="Current custody state is explicit; event history remains retained evidence." empty="No numbered physical controlled copy exists." headers={["Copy", "Revision", "Holder", "Location", "Due back", "State"]} rows={detail.controlled_copies.map((row) => [<><strong>{row.copy_number}</strong><small>{row.format}</small></>, row.revision_id, row.holder_name || "Person unavailable" || "On shelf / unassigned", row.location_text, formatDate(row.due_back_at), <DocumentControlStatus status={row.status} kind={statusKind(row.status)} />])} />
+    <SimpleTable title="Physical controlled copies" description="Current custody state is explicit; event history remains retained evidence." empty="No numbered physical controlled copy exists." headers={["Copy", "Revision", "Holder", "Location", "Due back", "State"]} rows={detail.controlled_copies.map((row) => [<><strong>{row.copy_number}</strong><small>{row.format}</small></>, row.revision_id, row.holder_name || "On shelf / unassigned", row.location_text, formatDate(row.due_back_at), <DocumentControlStatus status={row.status} kind={statusKind(row.status)} />])} />
   </div>;
 }
 

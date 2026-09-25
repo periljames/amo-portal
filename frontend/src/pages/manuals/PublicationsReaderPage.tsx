@@ -709,7 +709,7 @@ export default function PublicationsReaderPage() {
           <header className="publication-document-header">
             <div className="publication-document-header__title">
               <button type="button" className="publication-mobile-nav-button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open table of contents"><Menu size={18} /></button>
-              <div><p>{metadata.manual_type || "Publication"}</p><h1>{metadata.title}</h1><span>{metadata.code} · Issue {metadata.issue_number || "—"} · Revision {metadata.revision_number || "—"}</span><span className={`publication-control-status ${isPublished ? "publication-control-status--controlled" : "publication-control-status--uncontrolled"}`}>{isPublished ? "Controlled publication" : "Controlled draft"}</span></div>
+              <div><p>{metadata.manual_type || "Publication"}</p><h1>{metadata.title}</h1><span>{metadata.code} · Issue {metadata.issue_number || "—"} · Revision {metadata.revision_number || "—"}</span><span className={`publication-control-status ${isPublished ? "publication-control-status--controlled" : "publication-control-status--uncontrolled"}`}>{isPublished ? "Controlled publication" : "DRAFT"}</span></div>
             </div>
             <div className="publication-document-header__actions">
               {refreshing ? <span className="publication-cache-state">Refreshing index…</span> : <span className="publication-cache-state">Reader ready</span>}
@@ -723,7 +723,7 @@ export default function PublicationsReaderPage() {
             </div>
           </header>
 
-          {!isPublished ? <div className="publication-control-banner" role="status"><TriangleAlert size={18} /><div><strong>Controlled draft — not yet issued</strong>This revision is registered in DMS and moving through its approval workflow. Downloads and printouts remain marked as uncontrolled copies until publication.</div></div> : null}
+          {!isPublished ? <div className="publication-control-banner" role="status"><TriangleAlert size={18} /><div><strong>DRAFT — not yet issued</strong>This revision is registered in DMS and moving through its approval workflow. Downloads and printouts remain marked as uncontrolled copies until publication.</div></div> : null}
 
           <div className="publication-floating-header">
             {navigationCollapsed ? <button type="button" className="publication-nav-restore" onClick={() => setNavigationCollapsed(false)} aria-label="Show document navigation"><PanelLeftOpen size={17} /></button> : <button type="button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open document navigation"><Menu size={17} /></button>}

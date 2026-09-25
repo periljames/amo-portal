@@ -101,7 +101,8 @@ function revisionText(item: IntegratedLibraryItem): string {
 }
 
 function controlStatus(item: IntegratedLibraryItem): string {
-  return item.read_target.control_status || (item.read_target.kind === "UNCONTROLLED" ? "CONTROLLED_DRAFT" : item.read_target.kind);
+  const status = item.read_target.control_status || item.read_target.kind;
+  return status === "CONTROLLED_DRAFT" || item.read_target.kind === "UNCONTROLLED" ? "DRAFT" : status;
 }
 
 function metadataText(item: IntegratedLibraryItem, key: string): string {

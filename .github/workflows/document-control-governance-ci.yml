@@ -257,7 +257,6 @@ jobs:
           src/pages/documentControl/DocumentGovernanceDashboardPage.tsx
           src/pages/documentControl/DocumentGovernanceRecordPage.tsx
           src/pages/documentControl/DocumentLibraryHubPage.tsx
-          src/pages/documentControl/DocumentLibraryCopiesPage.tsx
           src/pages/documentControl/DocumentControlChangesPortfolioPage.tsx
           src/pages/documentControl/DocumentControlDistributionPortfolioPage.tsx
           src/pages/documentControl/DocumentControlCompliancePortfolioPage.tsx
@@ -271,6 +270,9 @@ jobs:
           src/pages/documentControl/DmsOperatingModel.contract.test.ts
           src/pages/manuals/ManualReaderPage.tsx
           src/pages/manuals/PublicationsReaderPage.tsx
+          src/pages/manuals/PublicationPdfLayoutViewer.tsx
+          src/pages/manuals/PdfReaderCoreV4.tsx
+          src/pages/manuals/PublicationDocxLayoutViewer.tsx
           src/pages/manuals/PublicationGovernancePanel.tsx
           tests/e2e/document-governance-live.spec.ts
           tests/e2e/document-control-md-completion.spec.ts
