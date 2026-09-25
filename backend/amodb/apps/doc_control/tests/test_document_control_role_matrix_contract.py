@@ -43,8 +43,9 @@ def test_document_control_officer_can_administer_without_approval() -> None:
     assert controller["control"] is True
     assert controller["edit_properties"] is True
     assert controller["manage_distribution"] is True
+    assert controller["manage_authority_records"] is True
     assert controller["approve"] is False
-    assert controller["publish"] is False
+    assert controller["publish"] is True
 
 
 def test_quality_manager_does_not_inherit_global_dms_control_or_accountable_approval() -> None:
