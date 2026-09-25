@@ -61,7 +61,6 @@ jobs:
           src/pages/qms/routes/qmsWorkspaceRegistry.ts
           src/pages/qms/routes/qmsRouteRegistry.ts
           src/pages/qms/QmsPeoplePage.tsx
-          src/pages/qms/QmsAssurancePage.tsx
           src/pages/qms/QmsIntelligencePage.tsx
           src/pages/qms/QmsRegisterPage.tsx
           src/services/qmsPeople.ts
