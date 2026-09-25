@@ -43,3 +43,28 @@
 @media (max-width: 760px) {
   .publication-docx iframe { min-height: calc(100dvh - 96px); }
 }
+
+.publication-docx__media-warning {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 0.42rem 0.7rem;
+  border-bottom: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+@media (min-width: 1920px) {
+  .publication-docx iframe { min-height: calc(100dvh - 104px); }
+}
+
+@media (min-width: 3000px) {
+  .publication-docx iframe { min-height: calc(100dvh - 96px); }
+}
+
+@media (max-height: 700px) and (orientation: landscape) {
+  .publication-docx iframe { min-height: calc(100dvh - 78px); }
+}
