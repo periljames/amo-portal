@@ -173,7 +173,7 @@ def bounded_document_governance_payload(
             or_(gm.DocumentResponsibilityAssignment.effective_to.is_(None), gm.DocumentResponsibilityAssignment.effective_to >= today),
         ).distinct().all()
     }
-    required = {"DOCUMENT_OWNER", "RESPONSIBLE_DEPARTMENT", "DOCUMENT_CONTROLLER", "QUALITY_REVIEWER", "APPROVER"}
+    required = {"DOCUMENT_OWNER", "RESPONSIBLE_DEPARTMENT", "DOCUMENT_CONTROLLER", "TECHNICAL_REVIEWER", "QUALITY_REVIEWER", "APPROVER", "DISTRIBUTION_ADMINISTRATOR", "CUSTODIAN", "RETENTION_OWNER"}
     missing_responsibilities = sorted(required - active_types)
     structure, structure_bound = _bounded_structure(db, tenant_id=tenant.amo_id, manual_id=manual.id)
     bounds["structure_children"] = structure_bound
