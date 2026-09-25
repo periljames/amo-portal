@@ -61,6 +61,7 @@ assertIncludes(people, "--qms-authz-accent: var(--accent-primary);", "People mus
 assertIncludes(sharedSurfaces, ".qms-authz", "Shared QMS surface tokens must attach to the live People authorization workspace");
 assertNotMatch(sharedSurfaces, /\.qms-people\b/, "Shared QMS surfaces must not retain the retired People selector");
 assertNotMatch(workspaceTheme, /\.qms-people\b/, "QMS workspace theme must not retain the retired People selector");
+assertNotMatch(workspaceTheme, /\.qms-authz\b/, "Legacy QMS workspace theme overrides must not target the tokenized People authorization workspace");
 assertIncludes(people, "--qms-authz-surface: var(--qms-panel, var(--surface-elevated));", "People must consume the shared QMS elevated-surface token");
 assertIncludes(people, "background: var(--portal-overlay);", "People modal scrims must use the portal overlay token");
 assertIncludes(people, ".qms-authz-list--viewport", "People and case registers must have bounded vertical growth");
