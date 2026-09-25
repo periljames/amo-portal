@@ -128,9 +128,14 @@ def can_perform_workflow_action(
 
     responsibility_types = _ACTION_RESPONSIBILITIES.get(action)
     if responsibility_types:
+        role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
         management_fallback = (
             is_accountable_approver(user)
             if action == "APPROVE_ACCOUNTABLE_MANAGER"
+            else role == "QUALITY_MANAGER"
+            if action == "APPROVE_QUALITY"
+            else role in _TECHNICAL_OWNER_ROLES
+            if action == "APPROVE_TECHNICAL"
             else False
         )
         return bool(
