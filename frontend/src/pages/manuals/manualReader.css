@@ -678,23 +678,6 @@
 .publication-reader-error strong { display: block; }
 .publication-reader-error p { margin: 0.25rem 0 0; color: var(--publication-muted); font-size: 0.78rem; }
 
-.publication-to-top {
-  position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 30;
-  min-height: 32px;
-  padding: 0.35rem 0.65rem;
-  border: 0;
-  border-radius: 0.35rem;
-  background: var(--publication-warning);
-  color: #221605;
-  font-size: 0.69rem;
-  font-weight: 750;
-  cursor: pointer;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--ink, #172033) 18%, transparent);
-}
-
 .publication-navigation-backdrop { display: none; }
 
 .sr-only {
@@ -773,8 +756,7 @@
   .publication-floating-header,
   .publication-document-tabs,
   .publication-metadata,
-  .publication-navigation,
-  .publication-to-top {
+  .publication-navigation {
     display: none !important;
   }
 

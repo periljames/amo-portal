@@ -129,6 +129,21 @@ export default function DocumentationAssistantPanel({
   }, [panelWidth]);
 
   useEffect(() => {
+    setResult(null);
+    setError("");
+  }, [manualId, revisionId]);
+
+  useEffect(() => {
+    if (embedded || !open || typeof window === "undefined") return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [embedded, open]);
+
+  useEffect(() => {
     if (!resizing || embedded || typeof window === "undefined") return undefined;
 
     const resize = (event: PointerEvent) => {

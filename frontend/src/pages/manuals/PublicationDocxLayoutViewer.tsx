@@ -3,20 +3,20 @@ import { authHeaders } from "../../services/auth";
 import { getApiBaseUrl } from "../../services/config";
 import "./publicationDocxLayout.css";
 
-const FRAME_DOCUMENT = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:;"><style>html,body{margin:0;min-height:100%;background:#e5e7eb}body{padding:16px;box-sizing:border-box;overflow:auto}#document{transform-origin:top left;contain:layout style}.docx-wrapper{padding:0!important;background:transparent!important}.docx-wrapper>section.docx{margin:0 auto 16px!important;box-shadow:0 2px 8px #0002}</style></head><body><div id="styles"></div><div id="document"></div></body></html>`;
+const FRAME_DOCUMENT = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:;"><style>html,body{margin:0;min-height:100%;background:#e5e7eb}body{padding:12px;box-sizing:border-box;overflow:auto}#document{transform-origin:top left;contain:layout style}.docx-wrapper{padding:0!important;background:transparent!important}.docx-wrapper>section.docx{margin:0 auto 12px!important;box-shadow:0 2px 8px #0002}.docx-wrapper img,.docx-wrapper svg{max-width:none;image-rendering:auto}.docx-media-fallback{display:inline-flex;align-items:center;justify-content:center;min-width:120px;min-height:48px;padding:8px;border:1px dashed #b45309;background:#fffbeb;color:#92400e;font:600 12px/1.35 system-ui,sans-serif;text-align:center}</style></head><body><div id="styles"></div><div id="document"></div></body></html>`;
 
-export default function PublicationDocxLayoutViewer({ fileUrl, title, draft, onTextFallback }: {
+export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTextFallback }: {
   fileUrl: string;
   title: string;
-  draft: boolean;
+  zoom: string;
   onTextFallback: () => void;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameReady, setFrameReady] = useState(false);
-  const [status, setStatus] = useState("Opening Word document…");
+  const [status, setStatus] = useState("Opening document…");
   const [error, setError] = useState("");
-  const [zoom, setZoom] = useState("fit");
   const [ready, setReady] = useState(false);
+  const [mediaWarning, setMediaWarning] = useState("");
 
   useEffect(() => {
     if (!frameReady) return;
@@ -26,17 +26,14 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, draft, onT
     const host = frameDocument?.getElementById("document");
     const styles = frameDocument?.getElementById("styles");
     if (!host || !styles) return;
-    // Each generation renders into its own detached nodes. A cancelled render
-    // cannot overwrite a newer revision or leave partial Word pages visible.
     const body = frameDocument!.createElement("div");
     const sheet = frameDocument!.createElement("div");
     setReady(false);
     setError("");
-    setStatus("Opening Word document…");
+    setMediaWarning("");
+    setStatus("Opening document…");
     void (async () => {
       try {
-        // Load the source bytes and renderer in parallel. The API transports
-        // the immutable DOCX bytes; page layout happens in this browser.
         const [response, { renderAsync }] = await Promise.all([
           fetch(`${getApiBaseUrl()}${fileUrl}`, { headers: authHeaders(), signal: controller.signal }),
           import("docx-preview"),
@@ -58,15 +55,41 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, draft, onT
           renderFootnotes: true,
           renderEndnotes: true,
           experimental: true,
-          useBase64URL: false,
+          // Data URLs are self-contained inside the sandboxed frame. This keeps
+          // package media (logos, signatures and other embedded images) alive
+          // for the full reader session instead of depending on transient blob
+          // URL ownership outside the frame.
+          useBase64URL: true,
         });
         if (!current) return;
         host.replaceChildren(body);
         styles.replaceChildren(sheet);
+
+        const images = Array.from(host.querySelectorAll<HTMLImageElement>("img"));
+        let failedMedia = 0;
+        const reportFailure = (image: HTMLImageElement) => {
+          if (image.dataset.renderFailure === "true") return;
+          image.dataset.renderFailure = "true";
+          failedMedia += 1;
+          image.alt = image.alt || "Embedded graphic unavailable";
+          image.classList.add("docx-media-failed");
+          const replacement = frameDocument!.createElement("span");
+          replacement.className = "docx-media-fallback";
+          replacement.setAttribute("role", "img");
+          replacement.setAttribute("aria-label", image.alt);
+          replacement.textContent = "Graphic could not be rendered";
+          image.replaceWith(replacement);
+          setMediaWarning(`${failedMedia} embedded graphic${failedMedia === 1 ? "" : "s"} could not be rendered. The missing area has been marked instead of left blank.`);
+        };
+        images.forEach((image) => {
+          image.decoding = "async";
+          image.loading = "eager";
+          if (image.complete && image.naturalWidth === 0) reportFailure(image);
+          else image.addEventListener("error", () => reportFailure(image), { once: true });
+        });
+
         setReady(true);
         setStatus("");
-        // Fonts may finish resolving after first paint. Do not block a
-        // lightweight Word document on font readiness.
         void frameDocument!.fonts.ready.catch(() => undefined);
       } catch (caught) {
         if (current) setError(caught instanceof Error ? caught.message : "The Word document could not be rendered.");
@@ -78,15 +101,31 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, draft, onT
   useEffect(() => {
     if (!ready) return;
     const frame = frameRef.current;
-    const host = frame?.contentDocument?.getElementById("document");
-    if (!frame || !host) return;
+    const frameDocument = frame?.contentDocument;
+    const host = frameDocument?.getElementById("document");
+    const viewport = frameDocument?.scrollingElement;
+    if (!frame || !host || !viewport) return;
+
+    let previousScale = Number(host.dataset.scale || "1");
     const size = () => {
       const page = host.querySelector<HTMLElement>("section.docx");
       const pageWidth = page?.offsetWidth || 816;
-      const scale = zoom === "fit" ? Math.min(1.5, Math.max(0.25, (frame.clientWidth - 48) / pageWidth)) : Number(zoom) / 100;
-      // CSS zoom preserves the browser's scroll geometry and never reparses DOCX.
-      host.style.zoom = String(scale);
+      const nextScale = zoom === "fit"
+        ? Math.min(2, Math.max(0.25, (frame.clientWidth - 32) / pageWidth))
+        : Number(zoom) / 100;
+      const oldHeight = Math.max(1, viewport.scrollHeight);
+      const oldTop = viewport.scrollTop;
+      const anchorRatio = oldTop / oldHeight;
+      host.style.zoom = String(nextScale);
+      host.dataset.scale = String(nextScale);
+      if (Math.abs(nextScale - previousScale) > 0.001) {
+        requestAnimationFrame(() => {
+          viewport.scrollTop = anchorRatio * Math.max(1, viewport.scrollHeight);
+        });
+      }
+      previousScale = nextScale;
     };
+
     size();
     const observer = new ResizeObserver(size);
     observer.observe(frame);
@@ -94,9 +133,9 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, draft, onT
   }, [ready, zoom]);
 
   return <section className="publication-docx" aria-label="Word document reader">
-    <div className="publication-docx__toolbar"><strong>{draft ? "DRAFT" : "Word document"}</strong><label>Zoom <select aria-label="Word zoom" value={zoom} onChange={(event) => setZoom(event.target.value)}><option value="fit">Fit width</option>{[50, 75, 100, 125, 150, 200].map((value) => <option key={value} value={value}>{value}%</option>)}</select></label></div>
-    {!ready && !error ? <p role="status">{status}</p> : null}
-    {error ? <div role="alert"><p>{error}</p><button type="button" onClick={onTextFallback}>Open accessible text</button></div> : null}
+    {mediaWarning ? <div className="publication-docx__media-warning" role="status">{mediaWarning}</div> : null}
+    {!ready && !error ? <p className="publication-docx__status" role="status">{status}</p> : null}
+    {error ? <div className="publication-docx__error" role="alert"><p>{error}</p><button type="button" onClick={onTextFallback}>Open accessible text</button></div> : null}
     <iframe ref={frameRef} title={`${title} — Word layout`} sandbox="allow-same-origin" srcDoc={FRAME_DOCUMENT} onLoad={() => setFrameReady(true)} style={{ visibility: ready ? "visible" : "hidden" }} />
   </section>;
 }

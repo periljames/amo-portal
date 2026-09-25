@@ -270,14 +270,65 @@ test.describe("Publications reader integrated real-world stability", () => {
 
   test("toolbar does not clip controls at desktop, tablet, or mobile widths", async ({ page }) => {
     for (const viewport of [
+      { width: 3840, height: 2160 },
+      { width: 2560, height: 1080 },
+      { width: 1920, height: 1080 },
       { width: 1440, height: 900 },
+      { width: 1366, height: 768 },
       { width: 1024, height: 820 },
       { width: 768, height: 900 },
+      { width: 844, height: 390 },
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize(viewport);
       await page.waitForTimeout(120);
       await expectToolbarFits(page);
+    }
+  });
+
+  test("assisted search executes against the current controlled publication and returns navigable sources", async ({ page }) => {
+    await page.getByRole("button", { name: "Open assisted search" }).click();
+    const assistant = page.locator(".documentation-assistant.is-floating");
+    await expect(assistant).toBeVisible();
+    await assistant.getByRole("tab", { name: "Search" }).click();
+    const query = assistant.getByLabel("Question or document reference");
+    await query.fill(SEARCH_TERM);
+    await assistant.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(assistant.locator(".documentation-assistant__result")).toBeVisible({ timeout: RENDER_MS });
+    await expect(assistant.locator(".documentation-assistant__sources article").first()).toBeVisible({ timeout: RENDER_MS });
+    await expect(assistant.locator(".documentation-assistant__authority-note")).toContainText("controlled source remains authoritative");
+    await expectNoReaderError(page);
+  });
+
+  test("reader utilities and assisted search remain usable across 4K, ultrawide, laptop and mobile viewports", async ({ page }) => {
+    for (const viewport of [
+      { width: 3840, height: 2160 },
+      { width: 2560, height: 1080 },
+      { width: 1366, height: 768 },
+      { width: 844, height: 390 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(120);
+      const utilities = page.locator(".publication-document-header__utilities");
+      await expect(utilities).toBeVisible();
+      const utilityBox = await utilities.boundingBox();
+      expect(utilityBox).not.toBeNull();
+      expect(utilityBox!.x).toBeGreaterThanOrEqual(-1);
+      expect(utilityBox!.x + utilityBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+
+      const launcher = page.getByRole("button", { name: "Open assisted search" });
+      await expect(launcher).toBeVisible();
+      await launcher.click();
+      const assistant = page.locator(".documentation-assistant.is-floating");
+      await expect(assistant).toBeVisible();
+      const assistantBox = await assistant.boundingBox();
+      expect(assistantBox).not.toBeNull();
+      expect(assistantBox!.x).toBeGreaterThanOrEqual(-1);
+      expect(assistantBox!.x + assistantBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+      expect(assistantBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+      await page.getByRole("button", { name: "Close document assistant" }).click();
+      await expect(assistant).toHaveCount(0);
     }
   });
 
