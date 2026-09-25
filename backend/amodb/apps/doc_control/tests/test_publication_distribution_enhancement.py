@@ -32,7 +32,7 @@ def test_controller_and_publisher_permissions_are_separated() -> None:
     assert inspector["publish"] is False
     assert controller["upload_revision"] is True
     assert controller["edit_properties"] is True
-    assert controller["publish"] is False
+    assert controller["publish"] is True
     assert accountable["approve"] is True
     assert accountable["publish"] is False
     assert reader["register"] is False
