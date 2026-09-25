@@ -1,6 +1,6 @@
 /* Global QMS workspace theme.
    One shared token layer for Quality tabs + Missions / People / Intelligence /
-   Assurance-cases. Surfaces come from qms-surfaces.css (--qms-page/panel/line/text).
+   active Quality workspaces. Surfaces come from qms-surfaces.css (--qms-page/panel/line/text).
    Page CSS keeps structure; this file remaps locals and kills light pastels in dark. */
 
 /* ---------------------------------------------------------------------------
@@ -88,17 +88,6 @@ body[data-color-scheme="dark"] .quality-context-bar,
   color: var(--qms-intel-text);
 }
 
-.qms-assurance-cases {
-  --qms-assurance-surface: var(--qms-panel, var(--surface-primary, #fff));
-  --qms-assurance-surface-soft: var(--surface-subtle, var(--qms-page, #f7f9fc));
-  --qms-assurance-border: var(--qms-line, var(--border-color, #dfe3e8));
-  --qms-assurance-border-soft: var(--qms-line-soft, color-mix(in srgb, var(--qms-line, #dfe3e8) 70%, transparent));
-  --qms-assurance-text: var(--qms-text, var(--text-primary, #182230));
-  --qms-assurance-muted: var(--qms-muted, var(--text-secondary, #667085));
-  --qms-assurance-primary: var(--accent-primary, var(--primary, #1d4ed8));
-  background: var(--qms-page, transparent);
-  color: var(--qms-assurance-text);
-}
 
 .qms-audit-programme,
 .qms-audit-programme-flow,
@@ -111,8 +100,8 @@ body[data-color-scheme="dark"] .quality-context-bar,
    3) Dark semantic chips / pastels → charcoal tints
    --------------------------------------------------------------------------- */
 
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow, .qms-programme-matrix),
 [data-theme="dark"] :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix),
 .dark :is(.qms-missions, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-programme-matrix) {
   --qms-danger-chip-bg: #3a2226;
@@ -324,8 +313,8 @@ body[data-color-scheme="dark"] .qms-intelligence__targeted-list article {
 }
 
 /* Shared form controls */
-html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
-body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-assurance-cases, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
+html[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea),
+body[data-color-scheme="dark"] :is(.qms-missions, .qms-mission-detail, .qms-people, .qms-intelligence, .qms-audit-programme, .qms-audit-programme-flow) :is(input, select, textarea) {
   background: #1a1d22 !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: rgba(255, 255, 255, 0.94) !important;
