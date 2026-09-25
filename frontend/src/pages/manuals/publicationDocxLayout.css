@@ -1,5 +1,45 @@
-.publication-docx { display: flex; flex-direction: column; min-height: 65vh; height: 100%; width: 100%; }
-.publication-docx__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-bottom: 1px solid #cbd5e1; }
-.publication-docx__toolbar label { display: flex; gap: 8px; align-items: center; }
-.publication-docx__toolbar select { padding: 6px; }
-.publication-docx iframe { border: 0; width: 100%; flex: 1; min-height: 65vh; background: #e5e7eb; }
+.publication-docx {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #e5e7eb;
+}
+
+.publication-docx iframe {
+  display: block;
+  width: 100%;
+  min-height: calc(100dvh - 112px);
+  flex: 1 1 auto;
+  border: 0;
+  background: #e5e7eb;
+}
+
+.publication-docx__status,
+.publication-docx__error {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  z-index: 2;
+  max-width: min(34rem, calc(100% - 2rem));
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 14px rgb(15 23 42 / 12%);
+}
+
+.publication-docx__error button {
+  margin-left: 0.5rem;
+}
+
+@media (max-width: 760px) {
+  .publication-docx iframe { min-height: calc(100dvh - 96px); }
+}
