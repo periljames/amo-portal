@@ -57,7 +57,8 @@ export default function ManualReaderPage() {
     className={`dms-reader-shell dms-reader-shell--${mode}${fullscreen ? " dms-reader-shell--fullscreen" : ""}`}
     data-reader-mode={mode}
   >
-    <div className="dms-reader-modebar" aria-label="Reader display mode">
+    {fullscreenError ? <div className="dms-reader-mode-error" role="alert">{fullscreenError}</div> : null}
+    <PublicationsReaderPage headerUtilities={<div className="dms-reader-modebar" aria-label="Reader display mode">
       {workspaceCode ? <button type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(workspaceCode)}/document-control/library`)} title="Return to Document Control library"><ArrowLeft size={14} /><span>Library</span></button> : null}
       <div role="group" aria-label="Reading mode">
         <button type="button" className={mode === "standard" ? "active" : ""} aria-pressed={mode === "standard"} onClick={() => setMode("standard")}><Expand size={14} /><span>Standard</span></button>
@@ -66,9 +67,7 @@ export default function ManualReaderPage() {
         <button type="button" className={fullscreen ? "active" : ""} aria-pressed={fullscreen} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</span></button>
       </div>
       {tenant ? <DocumentationAssistantPanel tenant={tenant} manualId={params.manualId} revisionId={params.revId} /> : null}
-    </div>
-    {fullscreenError ? <div className="dms-reader-mode-error" role="alert">{fullscreenError}</div> : null}
-    <PublicationsReaderPage />
+    </div>} />
     <PublicationAssistedNavigationBridge />
     <PublicationInlineReferenceController />
   </div>;
