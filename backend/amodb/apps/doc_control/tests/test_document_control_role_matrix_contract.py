@@ -48,9 +48,10 @@ def test_document_control_officer_can_administer_and_release_without_approval() 
     assert controller["publish"] is True
 
 
-def test_quality_manager_does_not_inherit_global_dms_control_or_accountable_approval() -> None:
+def test_quality_manager_has_quality_review_without_librarian_or_accountable_authority() -> None:
     manager = document_control_capabilities(_user(AccountRole.QUALITY_MANAGER))
-    assert manager["persona"] == "READER"
+    assert manager["persona"] == "QUALITY_MANAGER"
+    assert manager["quality_review"] is True
     assert manager["control"] is False
     assert manager["approve"] is False
     assert manager["publish"] is False
