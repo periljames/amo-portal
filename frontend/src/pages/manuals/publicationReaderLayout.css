@@ -389,8 +389,7 @@ body[data-color-scheme="light"] .publication-native-pdf__error {
     animation: none;
   }
 
-  .publication-native-pdf__page,
-  .publication-to-top {
+  .publication-native-pdf__page {
     transition: none;
   }
 }
