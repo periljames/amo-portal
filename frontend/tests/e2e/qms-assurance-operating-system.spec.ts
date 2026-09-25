@@ -283,9 +283,19 @@ test("People is person-first, contextual and readable at native 1080p", async ({
 
   await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
   await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
-  await page.locator(".qms-authz").getByRole("button", { name: "People", exact: true }).click();
+  const peopleWorkspace = page.locator(".qms-authz");
+  await expect.poll(() => peopleWorkspace.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await peopleWorkspace.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expectFontAtLeast(page.getByText("Amina Wanjiku", { exact: true }).first(), 13.5);
+  await expect(page.locator(".qms-authz-list--viewport").first()).toHaveCSS("overflow-y", "auto");
+
+  await page.getByRole("button", { name: "Nominate", exact: true }).click();
+  const nominationDialog = page.getByRole("dialog", { name: "Nominate person for Quality authorization" });
+  await expect(nominationDialog).toHaveClass(/qms-authz-modal__panel/);
+  await expect(page.locator(".qms-authz-modal")).not.toHaveAttribute("role", "dialog");
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+
   await page.getByRole("button", { name: /Amina Wanjiku/ }).click();
 
   await expect(page.getByRole("heading", { name: "Amina Wanjiku", exact: true })).toBeVisible();
