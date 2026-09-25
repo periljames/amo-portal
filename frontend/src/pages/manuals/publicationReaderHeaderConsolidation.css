@@ -35,7 +35,7 @@
 .dms-reader-shell--standard .publication-document-header__title {
   grid-column: 1;
   min-width: 0;
-  min-height: 64px;
+  min-height: 54px;
   align-items: center;
   padding: 0.38rem 0.75rem;
   border-right: 1px solid var(--publication-border);
@@ -81,8 +81,8 @@
   grid-column: 2;
   align-self: start;
   min-width: 0;
-  min-height: 32px;
-  height: 32px;
+  min-height: 27px;
+  height: 27px;
   gap: 0.08rem;
   overflow-x: auto;
   padding: 0 0.35rem;
@@ -92,8 +92,8 @@
 }
 
 .dms-reader-shell--standard .publication-document-tabs button {
-  min-height: 32px;
-  height: 32px;
+  min-height: 27px;
+  height: 27px;
   padding: 0 0.56rem;
   font-size: 0.7rem;
   white-space: nowrap;
@@ -111,8 +111,8 @@
   grid-column: 2;
   align-self: end;
   min-width: 0;
-  min-height: 32px;
-  height: 32px;
+  min-height: 27px;
+  height: 27px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -167,7 +167,7 @@
 
 .dms-reader-shell--standard .publication-document-header__actions {
   grid-column: 3;
-  min-height: 64px;
+  min-height: 54px;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: nowrap;
@@ -218,16 +218,16 @@
 }
 
 .dms-reader-shell--standard .publication-reader-workspace {
-  min-height: calc(100dvh - 64px);
+  min-height: calc(100dvh - 54px);
 }
 
 .dms-reader-shell--standard .publication-navigation {
-  top: 64px;
-  height: calc(100dvh - 64px);
+  top: 54px;
+  height: calc(100dvh - 54px);
 }
 
 .dms-reader-shell--standard .publication-native-pdf__toolbar {
-  top: 64px;
+  top: 54px;
 }
 
 /* The consolidated header remains one row on normal desktop widths. On
