@@ -19,9 +19,16 @@ from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is
 # corresponding controlled decision. Accountable management roles remain a secure
 # fallback for operational continuity and publication governance.
 _ACTION_RESPONSIBILITIES: dict[str, tuple[str, ...]] = {
-    "APPROVE_TECHNICAL": ("TECHNICAL_REVIEWER",),
+    "APPROVE_TECHNICAL": ("TECHNICAL_REVIEWER", "DOCUMENT_OWNER"),
     "APPROVE_QUALITY": ("QUALITY_REVIEWER",),
     "APPROVE_ACCOUNTABLE_MANAGER": ("APPROVER",),
+}
+
+_TECHNICAL_OWNER_ROLES = {
+    "BASE_MAINTENANCE_MANAGER",
+    "LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER",
+    "SAFETY_MANAGER",
 }
 
 
