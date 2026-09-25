@@ -712,11 +712,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   if (pageLoading && !overview) {
-    return <section className="qms-authz"><div className="qms-authz-loading">Loading Quality authorization control…</div></section>;
+    return <section className="qms-authz qms-people qms-surface-root"><div className="qms-authz-loading">Loading Quality authorization control…</div></section>;
   }
 
   return (
-    <section className="qms-authz" aria-label="QMS People and authorization control">
+    <section className="qms-authz qms-people qms-surface-root" aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
           <p className="qms-authz-eyebrow">Quality Management System</p>
