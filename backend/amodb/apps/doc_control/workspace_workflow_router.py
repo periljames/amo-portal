@@ -11,7 +11,6 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
-from .workspace_service import is_control_user
 from .workspace_integration_router import refresh_integration_link
 from .workspace_responsibility_access import require_workflow_action
 from .workspace_router import _event
@@ -334,10 +333,10 @@ def transition_workflow_with_release_guards(
         current_user=current_user,
     )
 
-    if payload.effective_at is not None and not (is_decision_approver(current_user) or is_control_user(current_user)):
+    if payload.effective_at is not None and not is_decision_approver(current_user):
         raise HTTPException(
             status_code=403,
-            detail="Document Control or accountable approval privileges are required to schedule effectivity",
+            detail="Accountable document approval privileges are required to schedule effectivity",
         )
 
     manual = get_manual(db, tenant, workflow.manual_id)
