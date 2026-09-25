@@ -110,8 +110,14 @@ def can_perform_workflow_action(
 
     if action == "REQUEST_CORRECTIONS":
         responsibility_types = _corrections_responsibility(workflow)
+        role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
+        baseline_reviewer = (
+            (workflow.state == "QUALITY_REVIEW" and role == "QUALITY_MANAGER")
+            or (workflow.state == "TECHNICAL_REVIEW" and role in _TECHNICAL_OWNER_ROLES)
+        )
         return bool(
             is_decision_approver(user)
+            or baseline_reviewer
             or has_confirmed_responsibility(
                 db,
                 workflow=workflow,
