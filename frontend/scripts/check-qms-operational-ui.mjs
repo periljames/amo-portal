@@ -19,7 +19,6 @@ function assertNotMatch(content, pattern, message) {
 
 const missions = read("src/styles/qms/missions.css");
 const people = read("src/styles/qms/people.css");
-const assurance = read("src/styles/qms-assurance-cases.css");
 const intelligence = read("src/styles/qms-intelligence.css");
 const controlRoom = read("src/styles/qms-assurance-control-room.css");
 const register = read("src/styles/qms/register.css");
@@ -28,20 +27,20 @@ const car = read("src/styles/qms-car-operational.css");
 const planner = read("src/styles/qms-planner-readability.css");
 const peoplePage = read("src/pages/qms/QmsPeoplePage.tsx");
 const peopleService = read("src/services/qmsPeople.ts");
-const assurancePage = read("src/pages/qms/QmsAssurancePage.tsx");
 const intelligencePage = read("src/pages/qms/QmsIntelligencePage.tsx");
 const routeGuards = read("src/app/routeGuards.ts");
 const workspaceRegistry = read("src/pages/qms/routes/qmsWorkspaceRegistry.ts");
+const overviewPage = read("src/pages/qms/QmsOverviewPage.tsx");
 const routeRegistry = read("src/pages/qms/routes/qmsRouteRegistry.ts");
 const backendAssurancePermissions = read("../backend/amodb/apps/quality/assurance_permissions.py");
 const backendTenantSecurity = read("../backend/amodb/apps/quality/tenant_security.py");
 const semanticRegressions = read("tests/e2e/qms-operational-semantic-regressions.spec.ts");
+const assuranceBrowser = read("tests/e2e/qms-assurance-operating-system.spec.ts");
 const codexRegressions = read("tests/e2e/qms-codex-review-regressions.spec.ts");
 
 for (const [name, css] of [
   ["Missions", missions],
   ["People", people],
-  ["Assurance", assurance],
   ["Intelligence", intelligence],
   ["Control Room", controlRoom],
   ["QMS registers", register],
@@ -100,22 +99,12 @@ assertNotMatch(workspaceRegistry, /qms\.report\.view/, "Intelligence workspace m
 assertNotMatch(routeRegistry, /qms\.report\.view|qms\.review\.view/, "QMS reporting routes must not use obsolete frontend-only permission aliases");
 assertNotMatch(routeGuards, /qms\.report\.view|qms\.review\.view/, "Frontend role guards must not use obsolete reporting permission aliases");
 
-assertIncludes(assurance, ".qms-assurance-cases__metrics + .qms-assurance-cases__panel", "Assurance New Case must remain a bounded secondary workflow");
-assertIncludes(assurance, "position: fixed;", "Assurance New Case panel must remain a drawer");
-assertIncludes(assurancePage, "selectedIdRef", "Assurance must track selected case identity independently from a stale detail object");
-assertIncludes(assurancePage, "getQmsAssuranceCase(amoCode, selectedId, signal)", "Assurance portfolio refresh must re-read selected case detail");
-assertIncludes(assurancePage, "clearQmsApiResponseCache();", "Assurance manual refresh must bypass cached case data");
-assertIncludes(assurancePage, 'OPEN: ["INVESTIGATING", "CANCELLED"]', "Assurance UI must retain the backend OPEN transition contract");
-assertIncludes(assurancePage, 'EFFECTIVENESS_REVIEW: ["CLOSED", "ACTION_PENDING", "CANCELLED"]', "Assurance UI must retain the backend effectiveness-review transition contract");
-assertIncludes(assurancePage, "concludeQmsEffectivenessPlan", "Assurance must expose the backend effectiveness-conclusion operation");
-assertIncludes(assurancePage, "Record immutable effectiveness conclusion", "Assurance must let operators conclude effectiveness with governed evidence");
-assertIncludes(assurancePage, "conclusionEvidence.trim()", "Assurance effectiveness conclusions must require an authoritative evidence reference");
-assertIncludes(assurancePage, "plan.planned_review_date <= today", "Assurance must not expose conclusion before the planned review date");
-assertIncludes(assurancePage, 'reviewDate < today', "Assurance must reject effectiveness plans with a past review date");
-assertIncludes(assurancePage, 'entryType === "CAUSAL_CONCLUSION"', "Assurance must distinguish causal conclusions from ordinary investigation statements");
-assertIncludes(assurancePage, "hasRecordedFact && Boolean(evidenceSource.trim())", "Assurance causal conclusions must require a prior fact and explicit evidence");
-assertIncludes(assurancePage, "status !== \"CLOSED\" || !closureBlocked", "Assurance must hide CLOSED while effectiveness closure gates fail");
-assertIncludes(assurancePage, 'const isTerminal = selected ? ["CLOSED", "CANCELLED"].includes(selected.status)', "Assurance must suppress new investigation/effectiveness work on terminal cases");
+assertIncludes(workspaceRegistry, 'if (workspace === "assurance") return qmsModulePath(amoCode, "audits", "dashboard");', "Assurance navigation must enter the consolidated Audits hub");
+assertIncludes(overviewPage, 'if (workspace === "assurance")', "Legacy Assurance workspace links must be handled explicitly");
+assertIncludes(overviewPage, 'return <Navigate to={`${qualityRoot}/audits/register`} replace />;', "Legacy Assurance workspace links must redirect to the consolidated audits register");
+assertIncludes(assuranceBrowser, "Assurance keeps case triage primary in the consolidated finding lifecycle", "Browser coverage must exercise the live consolidated Assurance surface");
+assertIncludes(assuranceBrowser, "/maintenance/tenant-a/quality/audits/register", "Assurance browser coverage must use the live consolidated audits route");
+assertNotMatch(semanticRegressions, /workspace=assurance/, "Semantic regressions must not exercise the retired Assurance workspace");
 
 assertIncludes(intelligencePage, "Surveillance priorities & assurance impact", "Intelligence must lead with surveillance priorities");
 assertIncludes(intelligencePage, "source_record", "Intelligence must expose source-record provenance");
@@ -165,9 +154,6 @@ assertNotMatch(planner, /\.qms-modern-planner-v2\.has-left-rail\.has-context\s+\
 for (const testContract of [
   "Intelligence keeps authoritative source-warning provenance",
   "My Quality Work treats a date-only deadline due today as due today",
-  "Assurance refresh re-reads the selected case detail",
-  "Assurance exposes only backend-allowed transitions",
-  "Assurance requires an evidence-backed effectiveness conclusion before closure becomes available",
 ]) {
   assertIncludes(semanticRegressions, testContract, `Semantic browser regression is missing: ${testContract}`);
 }
