@@ -64,6 +64,11 @@ assertIncludes(people, "width: min(100%, 1680px);", "People must use the establi
 assertIncludes(people, "min-height: 42px;", "People form controls must retain the shared operational control height");
 assertIncludes(people, "@media (max-width: 980px)", "People must collapse the split workspace before laptop widths become cramped");
 assertIncludes(people, "justify-content: flex-end;", "Governed People dialogs must use the bounded drawer pattern");
+assertIncludes(people, "grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));", "People metrics must resize automatically instead of relying on rigid column counts");
+assertIncludes(people, "grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));", "People fact cards must resize automatically");
+assertIncludes(people, "grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));", "People evidence/course cards must resize automatically");
+assertIncludes(peoplePage, "function SectionTitle({ title, subtitle }", "People section hierarchy must remain text-led");
+assertNotMatch(peoplePage, /<SectionTitle\s+icon=/, "People must not decorate every section heading with an icon");
 assertIncludes(people, ":focus-visible", "People controls must retain visible keyboard focus");
 assertIncludes(peoplePage, "Authorization governance", "People must remain authorization-control focused");
 assertIncludes(peoplePage, "Authorization Cases", "People must expose the governed pre-decision case workflow");
