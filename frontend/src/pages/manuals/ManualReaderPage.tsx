@@ -65,15 +65,11 @@ export default function ManualReaderPage() {
         {params.manualId && params.revId ? <button type="button" onClick={openReview} title="Review changes against the available baseline"><FileDiff size={14} /><span>Review changes</span></button> : null}
         <button type="button" className={fullscreen ? "active" : ""} aria-pressed={fullscreen} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</span></button>
       </div>
+      {tenant ? <DocumentationAssistantPanel tenant={tenant} manualId={params.manualId} revisionId={params.revId} /> : null}
     </div>
     {fullscreenError ? <div className="dms-reader-mode-error" role="alert">{fullscreenError}</div> : null}
     <PublicationsReaderPage />
     <PublicationAssistedNavigationBridge />
     <PublicationInlineReferenceController />
-    {tenant ? <DocumentationAssistantPanel
-      tenant={tenant}
-      manualId={params.manualId}
-      revisionId={params.revId}
-    /> : null}
   </div>;
 }
