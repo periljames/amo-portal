@@ -20,6 +20,8 @@ def document_control_persona(user: account_models.User) -> str:
         return "DOCUMENT_CONTROL"
     if role_value(user) == "ACCOUNTABLE_EXECUTIVE":
         return "ACCOUNTABLE_EXECUTIVE"
+    if role_value(user) == "QUALITY_MANAGER":
+        return "QUALITY_MANAGER"
     return "READER"
 
 
@@ -43,6 +45,7 @@ def document_control_capabilities(user: account_models.User) -> dict[str, bool |
         "configure": admin,
         "publish": control,
         "accountable_approval": approve,
+        "quality_review": role_value(user) == "QUALITY_MANAGER" or admin,
         "admin_all": admin,
     }
 
@@ -63,5 +66,6 @@ def reader_capabilities() -> dict[str, bool | str]:
         "configure": False,
         "publish": False,
         "accountable_approval": False,
+        "quality_review": False,
         "admin_all": False,
     }
