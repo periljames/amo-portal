@@ -32,6 +32,7 @@ import {
   placeLibraryHold,
   scanLibraryHolding,
   scanLibraryInventorySession,
+  searchLibraryPatrons,
   searchExternalCatalog,
   searchTenantWarehouse,
   type ExternalCatalogResult,
@@ -39,6 +40,7 @@ import {
   type LibraryHoldingRegisterResponse,
   type LibraryHoldingScan,
   type LibraryInventorySession,
+  type LibraryPatron,
   type MyLibraryAccount,
   type WarehouseSearchResponse,
 } from "../../services/documentLibrary";
@@ -229,6 +231,9 @@ export default function LibraryOperationsPanel({
   const [callNumber, setCallNumber] = useState("");
   const [location, setLocation] = useState("Document Control library");
   const [acknowledgement, setAcknowledgement] = useState(false);
+  const [patronQuery, setPatronQuery] = useState("");
+  const [patrons, setPatrons] = useState<LibraryPatron[]>([]);
+  const [selectedPatronId, setSelectedPatronId] = useState("");
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T | null> => {
     setBusy(true);
@@ -360,15 +365,28 @@ export default function LibraryOperationsPanel({
     }
   };
 
+
+  const loadPatrons = async () => {
+    if (!canControl) return;
+    const result = await run(() => searchLibraryPatrons(tenant, patronQuery.trim() || undefined, 30));
+    if (result) setPatrons(result.items);
+  };
+
   const circulation = async (action: "CHECK_OUT" | "CHECK_IN" | "RENEW" | "VERIFY_LOCATION") => {
     if (!scan) return;
+    if (action === "CHECK_OUT" && scan.capabilities.control && !selectedPatronId) {
+      setError("Select the borrower before librarian checkout.");
+      return;
+    }
     const result = await run(() => circulateLibraryHolding(tenant, scan.holding.id, {
       action,
+      patron_user_id: action === "CHECK_OUT" && scan.capabilities.control ? selectedPatronId : undefined,
       acknowledgement: action === "CHECK_OUT" ? acknowledgement : undefined,
       location: action === "VERIFY_LOCATION" || action === "CHECK_IN" ? scan.holding.home_location : undefined,
     }));
     if (result) {
       setAcknowledgement(false);
+      if (action === "CHECK_OUT") { setSelectedPatronId(""); setPatronQuery(""); setPatrons([]); }
       setNotice(action === "CHECK_OUT" ? "Custody accepted and item checked out." : action === "CHECK_IN" ? "Item checked in." : action === "RENEW" ? "Loan renewed." : "Location verified.");
       await performScan(scan.holding.barcode);
       await loadAccount();
@@ -449,7 +467,7 @@ export default function LibraryOperationsPanel({
     }
   };
 
-  const availableForSelfCheckout = Boolean(scan?.holding.status === "AVAILABLE" && scan?.capabilities.self_checkout);
+  const availableForCheckout = Boolean(scan?.holding.status === "AVAILABLE" && (scan?.capabilities.control || scan?.capabilities.self_checkout));
   const canCheckIn = Boolean(scan?.capabilities.check_in && scan?.holding.status === "CHECKED_OUT");
   const canRenew = Boolean(scan?.capabilities.renew && scan?.holding.status === "CHECKED_OUT");
   const canPlaceHold = Boolean(scan?.capabilities.place_hold && scan?.holding.status !== "AVAILABLE");
@@ -535,9 +553,13 @@ export default function LibraryOperationsPanel({
             <div><dt>Due</dt><dd>{formatDate(scan.holding.due_at)}</dd></div>
             <div><dt>Renewals</dt><dd>{scan.holding.renewal_count ?? "—"}</dd></div>
           </dl>
-          {availableForSelfCheckout ? <label className="library-ack"><input type="checkbox" checked={acknowledgement} onChange={(event) => setAcknowledgement(event.target.checked)} /><span>I accept custody of this physical item and responsibility to return it by the assigned due date.</span></label> : null}
+          {availableForCheckout && scan.capabilities.control ? <div className="library-patron-picker">
+            <label><span>Borrower</span><div><input value={patronQuery} onChange={(event) => setPatronQuery(event.target.value)} placeholder="Search name, staff code or email" /><button type="button" className="dc-button" disabled={busy} onClick={() => void loadPatrons()}>Find</button></div></label>
+            {patrons.length ? <select value={selectedPatronId} onChange={(event) => setSelectedPatronId(event.target.value)}><option value="">Select borrower</option>{patrons.map((patron) => <option key={patron.id} value={patron.id}>{patron.name} · {patron.staff_code || patron.email}{patron.department ? ` · ${patron.department}` : ""}</option>)}</select> : null}
+          </div> : null}
+          {availableForCheckout ? <label className="library-ack"><input type="checkbox" checked={acknowledgement} onChange={(event) => setAcknowledgement(event.target.checked)} /><span>{scan.capabilities.control ? "Borrower custody and return obligation have been acknowledged." : "I accept custody of this physical item and responsibility to return it by the assigned due date."}</span></label> : null}
           <div className="library-scan-card__actions">
-            {availableForSelfCheckout ? <button type="button" className="dc-button dc-button--primary" disabled={!acknowledgement || busy} onClick={() => void circulation("CHECK_OUT")}><PackageCheck size={14} /> Check out</button> : null}
+            {availableForCheckout ? <button type="button" className="dc-button dc-button--primary" disabled={!acknowledgement || busy || (scan.capabilities.control && !selectedPatronId)} onClick={() => void circulation("CHECK_OUT")}><PackageCheck size={14} /> {scan.capabilities.control ? "Check out to borrower" : "Check out"}</button> : null}
             {canCheckIn ? <button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void circulation("CHECK_IN")}><Undo2 size={14} /> Check in</button> : null}
             {canRenew ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("RENEW")}><RefreshCcw size={14} /> Renew</button> : null}
             {canPlaceHold ? <button type="button" className="dc-button" disabled={busy} onClick={() => void placeHold(scan.item)}>Place hold</button> : null}
