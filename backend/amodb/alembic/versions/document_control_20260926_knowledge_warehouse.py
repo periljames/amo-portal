@@ -499,6 +499,7 @@ def upgrade() -> None:
         _enable_rls(table)
     _append_only("document_warehouse_acknowledgements", "Warehouse acknowledgement history")
     _append_only("document_warehouse_audit_events", "Warehouse audit history")
+    _append_only("document_warehouse_item_events", "Warehouse physical item history")
     _protect_version_identity()
 
 
@@ -506,7 +507,7 @@ def downgrade() -> None:
     if _postgres():
         op.execute(sa.text("DROP TRIGGER IF EXISTS trg_document_warehouse_version_identity_immutable ON document_warehouse_content_versions"))
         op.execute(sa.text("DROP FUNCTION IF EXISTS prevent_document_warehouse_version_identity_mutation()"))
-        for table_name in ("document_warehouse_audit_events", "document_warehouse_acknowledgements"):
+        for table_name in ("document_warehouse_audit_events", "document_warehouse_acknowledgements", "document_warehouse_item_events"):
             op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table_name}_append_only ON {table_name}"))
             op.execute(sa.text(f"DROP FUNCTION IF EXISTS prevent_{table_name}_mutation()"))
 
