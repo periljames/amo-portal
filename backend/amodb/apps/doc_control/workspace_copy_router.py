@@ -23,6 +23,7 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from . import warehouse_service as warehouse
 from .workspace_router import _copy_payload
 from .workspace_service import (
     active_tenant_users,
@@ -314,6 +315,23 @@ def register_controlled_copy(
         to_location=row.location_text,
         reason="Registered physical controlled copy",
     ))
+    warehouse_copy = warehouse.sync_controlled_copy(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        actor_user_id=str(current_user.id),
+    )
+    if warehouse_copy is not None:
+        warehouse.record_event(
+            db,
+            tenant_id=str(tenant.amo_id),
+            content_record_id=warehouse_copy.content_record_id,
+            content_version_id=warehouse_copy.content_version_id,
+            item_copy_id=warehouse_copy.id,
+            event_type="item.registered",
+            actor_user_id=str(current_user.id),
+            metadata={"controlled_copy_id": row.id, "copy_number": row.copy_number},
+        )
     audit(db, tenant, request, "document.copy.registered", "document_controlled_copy", row.id, _copy_payload(row))
     db.commit()
     return _copy_payload(row)
@@ -372,6 +390,23 @@ def create_guarded_copy_event(
     elif payload.event_type in {"WITHDRAW", "DESTROY"}:
         row.status = "WITHDRAWN" if payload.event_type == "WITHDRAW" else "DESTROYED"
         row.withdrawn_at = utcnow()
+    warehouse_copy = warehouse.sync_controlled_copy(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        actor_user_id=str(current_user.id),
+    )
+    if warehouse_copy is not None:
+        warehouse.record_event(
+            db,
+            tenant_id=str(tenant.amo_id),
+            content_record_id=warehouse_copy.content_record_id,
+            content_version_id=warehouse_copy.content_version_id,
+            item_copy_id=warehouse_copy.id,
+            event_type=f"item.{payload.event_type.lower()}",
+            actor_user_id=str(current_user.id),
+            metadata={"controlled_copy_id": row.id, "copy_number": row.copy_number},
+        )
     audit(db, tenant, request, f"document.copy.{payload.event_type.lower()}", "document_controlled_copy", row.id, _copy_payload(row))
     db.commit()
     return _copy_payload(row)
@@ -544,6 +579,23 @@ def circulate_controlled_copy(
         }],
     )
     db.add(event)
+    warehouse_copy = warehouse.sync_controlled_copy(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        actor_user_id=str(current_user.id),
+    )
+    if warehouse_copy is not None:
+        warehouse.record_event(
+            db,
+            tenant_id=str(tenant.amo_id),
+            content_record_id=warehouse_copy.content_record_id,
+            content_version_id=warehouse_copy.content_version_id,
+            item_copy_id=warehouse_copy.id,
+            event_type=f"item.{event_type.lower()}",
+            actor_user_id=str(current_user.id),
+            metadata={"controlled_copy_id": row.id, "copy_number": row.copy_number},
+        )
     audit(db, tenant, request, f"document.copy.{event_type.lower()}", "document_controlled_copy", row.id, {
         "copy_number": row.copy_number,
         "manual_id": row.manual_id,
