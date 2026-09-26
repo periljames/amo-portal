@@ -15,6 +15,7 @@ from . import evidence_models as _evidence_models  # noqa: F401
 from . import governance_models as _governance_models  # noqa: F401
 from . import library_models as _library_models  # noqa: F401
 from . import reader_governance_models as _reader_governance_models  # noqa: F401
+from . import records_vault_models as _records_vault_models  # noqa: F401
 from . import reminder_models as _reminder_models  # noqa: F401
 
 
