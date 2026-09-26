@@ -11,6 +11,7 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
+from .workflow_policy import resolve_document_lifecycle_policy
 from .workspace_integration_router import refresh_integration_link
 from .workspace_responsibility_access import require_workflow_action
 from .workspace_router import _event
@@ -276,6 +277,29 @@ def get_profile_by_workflow(
     )
 
 
+def _policy_next_state(
+    *,
+    profile: dm.DocumentControlProfile | None,
+    manual,
+    workflow: dm.DocumentWorkflowInstance,
+    action: str,
+    default_state: str,
+) -> str:
+    """Skip approval stages that do not apply to this documented-information type."""
+    if profile is None:
+        return default_state
+    policy = resolve_document_lifecycle_policy(profile, manual)
+    if action == "APPROVE_TECHNICAL":
+        if policy.quality_review:
+            return "TECHNICAL_APPROVED"
+        if policy.accountable_approval:
+            return "QUALITY_APPROVED"
+        return "SCHEDULED_FOR_EFFECTIVITY"
+    if action == "APPROVE_QUALITY" and not policy.accountable_approval:
+        return "SCHEDULED_FOR_EFFECTIVITY"
+    return default_state
+
+
 def _dedupe_blockers(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
     seen: set[tuple[str, str]] = set()
     result: list[dict[str, str]] = []
@@ -364,6 +388,13 @@ def transition_workflow_with_release_guards(
 
     previous_state = workflow.state
     next_state = next_workflow_state(workflow, payload.action)
+    next_state = _policy_next_state(
+        profile=get_profile_by_workflow(db, workflow),
+        manual=manual,
+        workflow=workflow,
+        action=payload.action,
+        default_state=next_state,
+    )
     if payload.action == "PUBLISH":
         release_blockers = _publication_blockers(db, tenant=tenant, workflow=workflow)
         state_blockers = workflow_blockers(db, workflow)
