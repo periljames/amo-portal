@@ -98,6 +98,10 @@ export function listRecords(
   return api(`${path(tenant, "/records")}?${params.toString()}`);
 }
 
+export function getRecord(tenant: string, recordId: string): Promise<RetainedRecord> {
+  return api(path(tenant, `/records/${encodeURIComponent(recordId)}`));
+}
+
 export function uploadRecord(
   tenant: string,
   payload: { artifact: File; seriesId: string; recordNumber: string; title: string; sourceModule?: string; sourceEntityType?: string; sourceEntityId?: string },
