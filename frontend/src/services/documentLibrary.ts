@@ -372,3 +372,256 @@ export async function downloadPhysicalCopyLabel(tenant: string, copyId: string, 
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
+
+
+export type LibraryCatalogItem = {
+  id: string;
+  catalogue_code: string;
+  material_type: "BOOK" | "JOURNAL" | "MAGAZINE" | "REFERENCE" | "MEDIA" | "MAP" | "ARCHIVE_OBJECT" | "OTHER";
+  title: string;
+  subtitle?: string | null;
+  authors: string[];
+  publisher?: string | null;
+  publication_year?: number | null;
+  edition?: string | null;
+  language?: string | null;
+  identifiers: Record<string, string>;
+  subjects: string[];
+  description?: string | null;
+  source_provider: string;
+  source_record_id?: string | null;
+  source_url?: string | null;
+  cover_url?: string | null;
+  restricted: boolean;
+  circulation_policy: {
+    circulatable: boolean;
+    self_checkout: boolean;
+    loan_period_days: number;
+    max_renewals: number;
+    reference_only: boolean;
+  };
+  status: string;
+  holdings?: { total: number; available: number; checked_out: number; on_hold: number; overdue: number };
+};
+
+export type LibraryHolding = {
+  id: string;
+  catalog_item_id: string;
+  barcode: string;
+  qr_token?: string | null;
+  accession_number?: string | null;
+  call_number?: string | null;
+  format: string;
+  home_location: string;
+  current_location: string;
+  status: string;
+  holder_user_id?: string | null;
+  checked_out_at?: string | null;
+  due_at?: string | null;
+  renewal_count?: number | null;
+  last_inventory_at?: string | null;
+  overdue: boolean;
+  version: number;
+};
+
+export type ExternalCatalogResult = {
+  provider: "GOOGLE_BOOKS" | "OPEN_LIBRARY";
+  provider_id?: string | null;
+  material_type: string;
+  title: string;
+  subtitle?: string | null;
+  authors: string[];
+  publisher?: string | null;
+  published_date?: string | null;
+  language?: string | null;
+  identifiers: Record<string, string>;
+  subjects: string[];
+  description?: string | null;
+  cover_url?: string | null;
+  source_url?: string | null;
+};
+
+export type ExternalCatalogSearchResponse = {
+  query: string;
+  items: ExternalCatalogResult[];
+  provider_errors: Array<{ provider: string; message: string }>;
+  links: { google_search: string; google_books: string; open_library: string };
+  privacy_notice: string;
+};
+
+export type LibraryCatalogResponse = {
+  items: LibraryCatalogItem[];
+  facets: { material_types: Record<string, number> };
+  pagination: { page: number; per_page: number; total: number; returned: number };
+  capabilities: { read: boolean; control: boolean };
+};
+
+export type LibraryHoldingScan = {
+  item: LibraryCatalogItem;
+  holding: LibraryHolding;
+  events: Array<{
+    id: string;
+    event_type: string;
+    patron_user_id?: string | null;
+    from_status?: string | null;
+    to_status?: string | null;
+    from_location?: string | null;
+    to_location?: string | null;
+    due_at?: string | null;
+    notes?: string | null;
+    created_at?: string | null;
+  }>;
+  capabilities: {
+    control: boolean;
+    self_checkout: boolean;
+    check_in: boolean;
+    renew: boolean;
+    place_hold: boolean;
+  };
+};
+
+export type MyLibraryAccount = {
+  loans: Array<{ item: LibraryCatalogItem; holding: LibraryHolding }>;
+  holds: Array<{
+    id: string;
+    status: string;
+    pickup_location?: string | null;
+    expires_at?: string | null;
+    item: LibraryCatalogItem;
+  }>;
+};
+
+export function searchExternalCatalog(
+  tenant: string,
+  query: string,
+  provider: "all" | "google" | "openlibrary" = "all",
+  limit = 8,
+): Promise<ExternalCatalogSearchResponse> {
+  return api(`${workspacePath(tenant, "/catalog/external-search")}${queryString({ q: query, provider, limit })}`);
+}
+
+export function listLibraryCatalog(
+  tenant: string,
+  filters: { q?: string; materialType?: string; availability?: "any" | "available" | "checked_out"; page?: number; perPage?: number } = {},
+): Promise<LibraryCatalogResponse> {
+  return api(`${workspacePath(tenant, "/catalog/items")}${queryString({
+    q: filters.q,
+    material_type: filters.materialType,
+    availability: filters.availability || "any",
+    page: filters.page || 1,
+    per_page: filters.perPage || 30,
+  })}`);
+}
+
+export function createLibraryCatalogItem(
+  tenant: string,
+  payload: {
+    catalogue_code: string;
+    material_type?: string;
+    title: string;
+    subtitle?: string | null;
+    authors?: string[];
+    publisher?: string | null;
+    publication_year?: number | null;
+    edition?: string | null;
+    language?: string | null;
+    identifiers?: Record<string, string>;
+    subjects?: string[];
+    description?: string | null;
+    source_provider?: string;
+    source_record_id?: string | null;
+    source_url?: string | null;
+    cover_url?: string | null;
+    restricted?: boolean;
+    access_scope?: Record<string, unknown>;
+    circulation_policy?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<LibraryCatalogItem> {
+  return api(workspacePath(tenant, "/catalog/items"), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createLibraryHolding(
+  tenant: string,
+  itemId: string,
+  payload: {
+    barcode: string;
+    accession_number?: string | null;
+    call_number?: string | null;
+    format?: string;
+    home_location: string;
+    acquired_on?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<LibraryHolding> {
+  return api(workspacePath(tenant, `/catalog/items/${encodeURIComponent(itemId)}/holdings`), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function scanLibraryHolding(tenant: string, code: string): Promise<LibraryHoldingScan> {
+  return api(workspacePath(tenant, `/catalog/scan/${encodeURIComponent(code.trim())}`));
+}
+
+export function circulateLibraryHolding(
+  tenant: string,
+  holdingId: string,
+  payload: {
+    action: "CHECK_OUT" | "CHECK_IN" | "RENEW" | "VERIFY_LOCATION";
+    patron_user_id?: string | null;
+    due_at?: string | null;
+    location?: string | null;
+    acknowledgement?: boolean;
+    override_hold?: boolean;
+    comments?: string | null;
+  },
+): Promise<{ item: LibraryCatalogItem; holding: LibraryHolding }> {
+  return api(workspacePath(tenant, `/catalog/holdings/${encodeURIComponent(holdingId)}/circulation`), {
+    method: "POST",
+    body: JSON.stringify({ ...payload, due_at: serverUtcDate(payload.due_at) }),
+  });
+}
+
+export function placeLibraryHold(
+  tenant: string,
+  itemId: string,
+  payload: { pickup_location?: string | null; expires_at?: string | null } = {},
+): Promise<{ id: string; status: string; already_exists: boolean }> {
+  return api(workspacePath(tenant, `/catalog/items/${encodeURIComponent(itemId)}/holds`), {
+    method: "POST",
+    body: JSON.stringify({ ...payload, expires_at: serverUtcDate(payload.expires_at) }),
+  });
+}
+
+export function cancelLibraryHold(tenant: string, holdId: string): Promise<{ id: string; status: string }> {
+  return api(workspacePath(tenant, `/catalog/holds/${encodeURIComponent(holdId)}`), { method: "DELETE" });
+}
+
+export function getMyLibraryAccount(tenant: string): Promise<MyLibraryAccount> {
+  return api(workspacePath(tenant, "/catalog/me"));
+}
+
+export async function downloadLibraryHoldingLabel(
+  tenant: string,
+  holdingId: string,
+  filename: string,
+): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}${workspacePath(tenant, `/catalog/holdings/${encodeURIComponent(holdingId)}/label.pdf`)}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(`Library label could not be generated (${response.status})`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
