@@ -462,8 +462,6 @@ def next_workflow_state(
                 "allowed_actions": sorted(allowed),
             },
         )
-    if workflow.requires_authority and workflow.state == "ACCOUNTABLE_MANAGER_APPROVAL" and action == "APPROVE_ACCOUNTABLE_MANAGER":
-        raise HTTPException(status_code=409, detail="Authority submission is required for this revision")
     if not workflow.requires_authority and action == "MARK_AUTHORITY_SUBMITTED":
         raise HTTPException(status_code=409, detail="This revision does not require authority approval")
     return next_state
