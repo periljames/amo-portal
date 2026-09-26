@@ -1,0 +1,420 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  Barcode,
+  BookOpenCheck,
+  Camera,
+  CircleX,
+  ExternalLink,
+  Globe2,
+  LibraryBig,
+  PackageCheck,
+  Plus,
+  RefreshCcw,
+  Search,
+  Undo2,
+} from "lucide-react";
+
+import {
+  cancelLibraryHold,
+  circulateLibraryHolding,
+  createLibraryCatalogItem,
+  createLibraryHolding,
+  getMyLibraryAccount,
+  listLibraryCatalog,
+  placeLibraryHold,
+  scanLibraryHolding,
+  searchExternalCatalog,
+  type ExternalCatalogResult,
+  type LibraryCatalogItem,
+  type LibraryHoldingScan,
+  type MyLibraryAccount,
+} from "../../services/documentLibrary";
+import "./libraryOperations.css";
+
+type PanelMode = "catalog" | "scan" | "internet" | "account";
+
+type Props = {
+  tenant: string;
+  canControl: boolean;
+  initialMode?: PanelMode;
+  initialScan?: string | null;
+  onClose: () => void;
+};
+
+type BarcodeDetectorResult = { rawValue: string };
+type BarcodeDetectorLike = {
+  detect(source: CanvasImageSource): Promise<BarcodeDetectorResult[]>;
+};
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
+
+function cleanCatalogueCode(result: ExternalCatalogResult): string {
+  const provider = result.provider === "GOOGLE_BOOKS" ? "GB" : "OL";
+  const identity = String(
+    result.identifiers?.isbn_13
+      || result.identifiers?.isbn_10
+      || result.provider_id
+      || result.title,
+  )
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 70);
+  return `LIB-${provider}-${identity || "ITEM"}`;
+}
+
+function displayAuthors(item: { authors?: string[] }): string {
+  return item.authors?.filter(Boolean).join(", ") || "Unknown author";
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function CameraScanner({ onDetected, onClose }: { onDetected: (value: string) => void; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [error, setError] = useState("");
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+    let timer = 0;
+    const detectorCtor = (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
+    if (!detectorCtor) {
+      setError("Camera barcode detection is not available in this browser. Use the barcode field or a USB/Bluetooth scanner.");
+      return;
+    }
+    const detector = new detectorCtor({
+      formats: ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "data_matrix"],
+    });
+
+    const begin = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (cancelled || !videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setRunning(true);
+        const tick = async () => {
+          if (cancelled || !videoRef.current) return;
+          try {
+            const results = await detector.detect(videoRef.current);
+            const value = results.find((row) => row.rawValue)?.rawValue?.trim();
+            if (value) {
+              onDetected(value);
+              return;
+            }
+          } catch {
+            // A frame can fail while the camera is focusing; keep scanning.
+          }
+          timer = window.setTimeout(() => void tick(), 180);
+        };
+        void tick();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Camera access could not be started.");
+      }
+    };
+    void begin();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [onDetected]);
+
+  return <div className="library-camera">
+    <div className="library-camera__frame">
+      <video ref={videoRef} playsInline muted aria-label="Barcode scanner camera" />
+      <span aria-hidden="true" />
+    </div>
+    {error ? <p className="library-ops__error" role="alert">{error}</p> : <p>{running ? "Point the camera at a QR or barcode." : "Starting camera…"}</p>}
+    <button type="button" className="dc-button" onClick={onClose}><CircleX size={14} /> Close camera</button>
+  </div>;
+}
+
+export default function LibraryOperationsPanel({
+  tenant,
+  canControl,
+  initialMode = "catalog",
+  initialScan,
+  onClose,
+}: Props) {
+  const [mode, setMode] = useState<PanelMode>(initialScan ? "scan" : initialMode);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
+  const [scanCode, setScanCode] = useState(initialScan || "");
+  const [scan, setScan] = useState<LibraryHoldingScan | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [internetQuery, setInternetQuery] = useState("");
+  const [internetResults, setInternetResults] = useState<ExternalCatalogResult[]>([]);
+  const [internetLinks, setInternetLinks] = useState<Record<string, string>>({});
+  const [internetPrivacy, setInternetPrivacy] = useState("");
+  const [account, setAccount] = useState<MyLibraryAccount | null>(null);
+  const [selectedCatalog, setSelectedCatalog] = useState<LibraryCatalogItem | null>(null);
+  const [barcode, setBarcode] = useState("");
+  const [callNumber, setCallNumber] = useState("");
+  const [location, setLocation] = useState("Document Control library");
+  const [acknowledgement, setAcknowledgement] = useState(false);
+
+  const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T | null> => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      return await operation();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The library operation could not be completed.");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const loadAccount = useCallback(async () => {
+    const result = await run(() => getMyLibraryAccount(tenant));
+    if (result) setAccount(result);
+  }, [run, tenant]);
+
+  const loadCatalog = useCallback(async (query = catalogQuery) => {
+    const result = await run(() => listLibraryCatalog(tenant, { q: query.trim() || undefined, perPage: 50 }));
+    if (result) setCatalog(result.items);
+  }, [catalogQuery, run, tenant]);
+
+  const performScan = useCallback(async (value = scanCode) => {
+    const code = value.trim();
+    if (!code) return;
+    setCameraOpen(false);
+    const result = await run(() => scanLibraryHolding(tenant, code));
+    if (result) {
+      setScanCode(code);
+      setScan(result);
+      setMode("scan");
+    }
+  }, [run, scanCode, tenant]);
+
+  useEffect(() => {
+    if (initialScan?.trim()) void performScan(initialScan);
+  }, [initialScan, performScan]);
+
+  useEffect(() => {
+    if (mode === "account" && !account) void loadAccount();
+    if (mode === "catalog" && !catalog.length) void loadCatalog("");
+  }, [account, catalog.length, loadAccount, loadCatalog, mode]);
+
+  // Hardware barcode scanners commonly behave like a keyboard and terminate with
+  // Enter. Keeping a focused plain input means those devices work without drivers.
+  const scannerInput = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void performScan();
+  };
+
+  const externalSearch = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!internetQuery.trim()) return;
+    const result = await run(() => searchExternalCatalog(tenant, internetQuery.trim(), "all", 8));
+    if (!result) return;
+    setInternetResults(result.items);
+    setInternetLinks(result.links);
+    setInternetPrivacy(result.privacy_notice);
+  };
+
+  const importExternal = async (result: ExternalCatalogResult) => {
+    const yearText = String(result.published_date || "").slice(0, 4);
+    const publicationYear = /^\d{4}$/.test(yearText) ? Number(yearText) : null;
+    const created = await run(() => createLibraryCatalogItem(tenant, {
+      catalogue_code: cleanCatalogueCode(result),
+      material_type: result.material_type || "BOOK",
+      title: result.title,
+      subtitle: result.subtitle,
+      authors: result.authors || [],
+      publisher: result.publisher,
+      publication_year: publicationYear,
+      language: result.language,
+      identifiers: result.identifiers || {},
+      subjects: result.subjects || [],
+      description: result.description,
+      source_provider: result.provider,
+      source_record_id: result.provider_id,
+      source_url: result.source_url,
+      cover_url: result.cover_url,
+      circulation_policy: {
+        circulatable: true,
+        self_checkout: false,
+        loan_period_days: 14,
+        max_renewals: 2,
+      },
+    }));
+    if (created) {
+      setSelectedCatalog(created);
+      setMode("catalog");
+      setNotice("Catalogue record added. Register the physical copy below when it arrives.");
+      void loadCatalog("");
+    }
+  };
+
+  const registerHolding = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedCatalog || !barcode.trim() || !location.trim()) return;
+    const holding = await run(() => createLibraryHolding(tenant, selectedCatalog.id, {
+      barcode: barcode.trim(),
+      call_number: callNumber.trim() || null,
+      home_location: location.trim(),
+    }));
+    if (holding) {
+      setNotice(`${selectedCatalog.title} · physical item ${holding.barcode} registered.`);
+      setBarcode("");
+      setCallNumber("");
+      await loadCatalog(catalogQuery);
+    }
+  };
+
+  const circulation = async (action: "CHECK_OUT" | "CHECK_IN" | "RENEW" | "VERIFY_LOCATION") => {
+    if (!scan) return;
+    const result = await run(() => circulateLibraryHolding(tenant, scan.holding.id, {
+      action,
+      acknowledgement: action === "CHECK_OUT" ? acknowledgement : undefined,
+      location: action === "VERIFY_LOCATION" || action === "CHECK_IN" ? scan.holding.home_location : undefined,
+    }));
+    if (result) {
+      setAcknowledgement(false);
+      setNotice(action === "CHECK_OUT" ? "Custody accepted and item checked out." : action === "CHECK_IN" ? "Item checked in." : action === "RENEW" ? "Loan renewed." : "Location verified.");
+      await performScan(scan.holding.barcode);
+      await loadAccount();
+    }
+  };
+
+  const placeHold = async (item: LibraryCatalogItem) => {
+    const result = await run(() => placeLibraryHold(tenant, item.id));
+    if (result) {
+      setNotice(result.already_exists ? "You already have an active hold on this title." : "Hold placed.");
+      await loadAccount();
+    }
+  };
+
+  const cancelHold = async (holdId: string) => {
+    const result = await run(() => cancelLibraryHold(tenant, holdId));
+    if (result) {
+      setNotice("Hold cancelled.");
+      await loadAccount();
+    }
+  };
+
+  const availableForSelfCheckout = Boolean(scan?.holding.status === "AVAILABLE" && scan?.capabilities.self_checkout);
+  const canCheckIn = Boolean(scan?.capabilities.check_in && scan?.holding.status === "CHECKED_OUT");
+  const canRenew = Boolean(scan?.capabilities.renew && scan?.holding.status === "CHECKED_OUT");
+  const canPlaceHold = Boolean(scan?.capabilities.place_hold && scan?.holding.status !== "AVAILABLE");
+
+  const modes = useMemo(() => [
+    ["catalog", "Library catalogue", LibraryBig],
+    ["scan", "Scan / circulate", Barcode],
+    ["internet", "Internet catalogue", Globe2],
+    ["account", "My loans & holds", BookOpenCheck],
+  ] as const, []);
+
+  return <aside className="library-ops" role="dialog" aria-modal="true" aria-label="Library services">
+    <header className="library-ops__header">
+      <div><LibraryBig size={19} /><span><strong>Library services</strong><small>Digital + physical tenant holdings</small></span></div>
+      <button type="button" className="dc-button" onClick={onClose}><CircleX size={15} /> Close</button>
+    </header>
+    <nav className="library-ops__tabs" aria-label="Library service">
+      {modes.map(([id, label, Icon]) => <button key={id} type="button" className={mode === id ? "active" : ""} onClick={() => setMode(id)}><Icon size={15} /> {label}</button>)}
+    </nav>
+    {error ? <div className="library-ops__error" role="alert">{error}</div> : null}
+    {notice ? <div className="library-ops__notice" role="status">{notice}</div> : null}
+
+    <div className="library-ops__body">
+      {mode === "catalog" ? <>
+        <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadCatalog(); }}>
+          <Search size={16} /><input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search tenant books, journals, ISBN, author, subject…" autoFocus /><button className="dc-button" disabled={busy}>Search</button>
+        </form>
+        <div className="library-catalog-list">
+          {catalog.map((item) => <article key={item.id}>
+            <div className="library-catalog-list__cover">{item.cover_url ? <img src={item.cover_url} alt="" loading="lazy" /> : <LibraryBig size={24} />}</div>
+            <div><small>{item.catalogue_code} · {item.material_type.replaceAll("_", " ")}</small><strong>{item.title}</strong><span>{displayAuthors(item)}</span><span>{item.publisher || "Publisher not recorded"}{item.publication_year ? ` · ${item.publication_year}` : ""}</span><span>{item.holdings ? `${item.holdings.available} available · ${item.holdings.checked_out} checked out · ${item.holdings.on_hold} on hold` : "No physical holdings"}</span></div>
+            <div className="library-catalog-list__actions">
+              {canControl ? <button type="button" className="dc-button" onClick={() => setSelectedCatalog(item)}><Plus size={14} /> Add copy</button> : null}
+              {item.holdings && item.holdings.available === 0 && item.circulation_policy.circulatable ? <button type="button" className="dc-button" onClick={() => void placeHold(item)}>Place hold</button> : null}
+              {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Source</a> : null}
+            </div>
+          </article>)}
+          {!busy && !catalog.length ? <p>No catalogue item matches this search.</p> : null}
+        </div>
+        {canControl && selectedCatalog ? <form className="library-holding-form" onSubmit={registerHolding}>
+          <header><strong>Register physical holding</strong><span>{selectedCatalog.title}</span></header>
+          <label><span>Barcode</span><input value={barcode} onChange={(event) => setBarcode(event.target.value)} required placeholder="Scan or enter barcode" /></label>
+          <label><span>Call number</span><input value={callNumber} onChange={(event) => setCallNumber(event.target.value)} placeholder="Shelf/classification call number" /></label>
+          <label className="wide"><span>Home location</span><input value={location} onChange={(event) => setLocation(event.target.value)} required /></label>
+          <div className="library-holding-form__actions"><button type="button" className="dc-button" onClick={() => setSelectedCatalog(null)}>Cancel</button><button type="submit" className="dc-button dc-button--primary" disabled={busy}><PackageCheck size={14} /> Register copy</button></div>
+        </form> : null}
+      </> : null}
+
+      {mode === "scan" ? <>
+        <form className="library-ops__search" onSubmit={scannerInput}>
+          <Barcode size={16} /><input value={scanCode} onChange={(event) => setScanCode(event.target.value)} placeholder="Scan barcode / QR or type item code" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Resolve</button><button type="button" className="dc-button" onClick={() => setCameraOpen((value) => !value)}><Camera size={14} /> Camera</button>
+        </form>
+        {cameraOpen ? <CameraScanner onDetected={(value) => void performScan(value)} onClose={() => setCameraOpen(false)} /> : null}
+        {scan ? <article className="library-scan-card">
+          <header><div><small>{scan.item.catalogue_code}</small><h2>{scan.item.title}</h2><p>{displayAuthors(scan.item)}</p></div><strong className={scan.holding.overdue ? "overdue" : ""}>{scan.holding.status.replaceAll("_", " ")}</strong></header>
+          <dl>
+            <div><dt>Barcode</dt><dd>{scan.holding.barcode}</dd></div>
+            <div><dt>Call no.</dt><dd>{scan.holding.call_number || "—"}</dd></div>
+            <div><dt>Location</dt><dd>{scan.holding.current_location}</dd></div>
+            <div><dt>Home</dt><dd>{scan.holding.home_location}</dd></div>
+            <div><dt>Due</dt><dd>{formatDate(scan.holding.due_at)}</dd></div>
+            <div><dt>Renewals</dt><dd>{scan.holding.renewal_count ?? "—"}</dd></div>
+          </dl>
+          {availableForSelfCheckout ? <label className="library-ack"><input type="checkbox" checked={acknowledgement} onChange={(event) => setAcknowledgement(event.target.checked)} /><span>I accept custody of this physical item and responsibility to return it by the assigned due date.</span></label> : null}
+          <div className="library-scan-card__actions">
+            {availableForSelfCheckout ? <button type="button" className="dc-button dc-button--primary" disabled={!acknowledgement || busy} onClick={() => void circulation("CHECK_OUT")}><PackageCheck size={14} /> Check out</button> : null}
+            {canCheckIn ? <button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void circulation("CHECK_IN")}><Undo2 size={14} /> Check in</button> : null}
+            {canRenew ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("RENEW")}><RefreshCcw size={14} /> Renew</button> : null}
+            {canPlaceHold ? <button type="button" className="dc-button" disabled={busy} onClick={() => void placeHold(scan.item)}>Place hold</button> : null}
+            {scan.capabilities.control ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("VERIFY_LOCATION")}>Verify location</button> : null}
+          </div>
+        </article> : <p className="library-ops__hint">USB/Bluetooth scanners work as keyboard input: focus the field and scan. Camera scanning is used where the browser supports it.</p>}
+      </> : null}
+
+      {mode === "internet" ? <>
+        <form className="library-ops__search" onSubmit={externalSearch}>
+          <Globe2 size={16} /><input value={internetQuery} onChange={(event) => setInternetQuery(event.target.value)} placeholder="Search books by title, author, ISBN or subject" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search internet</button>
+        </form>
+        {internetPrivacy ? <p className="library-ops__privacy">{internetPrivacy}</p> : <p className="library-ops__privacy">External lookup runs only when you submit this search. Tenant document content is not sent.</p>}
+        {Object.keys(internetLinks).length ? <div className="library-external-links">
+          {Object.entries(internetLinks).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer"><ExternalLink size={13} /> {label.replaceAll("_", " ")}</a>)}
+        </div> : null}
+        <div className="library-catalog-list">
+          {internetResults.map((item) => <article key={`${item.provider}:${item.provider_id || item.title}`}>
+            <div className="library-catalog-list__cover">{item.cover_url ? <img src={item.cover_url} alt="" loading="lazy" /> : <Globe2 size={24} />}</div>
+            <div><small>{item.provider.replaceAll("_", " ")}</small><strong>{item.title}</strong><span>{displayAuthors(item)}</span><span>{item.publisher || "Publisher not listed"}{item.published_date ? ` · ${item.published_date}` : ""}</span><span>{Object.values(item.identifiers || {}).filter(Boolean).slice(0, 2).join(" · ") || "No ISBN supplied"}</span></div>
+            <div className="library-catalog-list__actions">
+              {canControl ? <button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void importExternal(item)}><Plus size={14} /> Add to tenant library</button> : null}
+              {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open source</a> : null}
+            </div>
+          </article>)}
+        </div>
+      </> : null}
+
+      {mode === "account" ? <>
+        <div className="library-account-header"><div><BookOpenCheck size={18} /><span><strong>My library account</strong><small>Loans and reservations visible only to you and authorized library staff.</small></span></div><button type="button" className="dc-button" disabled={busy} onClick={() => void loadAccount()}><RefreshCcw size={14} /> Refresh</button></div>
+        <section className="library-account-section"><h3>Checked out</h3>
+          {account?.loans.map(({ item, holding }) => <article key={holding.id}><div><strong>{item.title}</strong><span>{displayAuthors(item)}</span><small>{holding.barcode} · due {formatDate(holding.due_at)}{holding.overdue ? " · OVERDUE" : ""}</small></div><div><button type="button" className="dc-button" disabled={busy} onClick={() => { setScanCode(holding.barcode); void performScan(holding.barcode); }}>Open item</button></div></article>)}
+          {account && !account.loans.length ? <p>No items currently checked out.</p> : null}
+        </section>
+        <section className="library-account-section"><h3>Holds</h3>
+          {account?.holds.map((hold) => <article key={hold.id}><div><strong>{hold.item.title}</strong><span>{hold.status.replaceAll("_", " ")}</span><small>{hold.pickup_location || "Pickup location not assigned"}</small></div><button type="button" className="dc-button" disabled={busy} onClick={() => void cancelHold(hold.id)}>Cancel hold</button></article>)}
+          {account && !account.holds.length ? <p>No active holds.</p> : null}
+        </section>
+      </> : null}
+    </div>
+  </aside>;
+}
