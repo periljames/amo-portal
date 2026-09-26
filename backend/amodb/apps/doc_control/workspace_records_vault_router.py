@@ -22,6 +22,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import records_vault_models as rm
+from .document_text_extractor import extract_document_text
 from .workspace_evidence_router import _safe_filename, _validate_file_signature
 from .workspace_library_router import _scope_match
 from .workspace_service import audit, is_control_user, resolve_tenant, role_value, utcnow
@@ -413,6 +414,15 @@ async def upload_record(
     destination = directory / filename
     destination.write_bytes(content)
 
+    extracted = extract_document_text(filename, content, mime_type)
+    metadata = {
+        **metadata,
+        "text_index": {
+            "engine": extracted.engine,
+            "truncated": extracted.truncated,
+            "warning": extracted.warning,
+        },
+    }
     search_text = " ".join(filter(None, [
         number,
         title.strip(),
@@ -421,7 +431,8 @@ async def upload_record(
         source_entity_type or "",
         source_entity_id or "",
         " ".join(str(value) for value in metadata.values() if isinstance(value, (str, int, float))),
-    ]))[:100_000]
+        extracted.text,
+    ]))[:2_000_000]
     row = rm.TenantRecordAsset(
         id=record_id,
         tenant_id=tenant.amo_id,
@@ -459,6 +470,8 @@ async def upload_record(
         "source_entity_type": row.source_entity_type,
         "source_entity_id": row.source_entity_id,
         "sha256": row.sha256,
+        "text_index_engine": extracted.engine,
+        "text_index_warning": extracted.warning,
         "retention_due_at": row.retention_due_at.isoformat() if row.retention_due_at else None,
     })
     db.commit()
