@@ -99,8 +99,11 @@ def can_perform_workflow_action(
     if action not in valid_actions:
         return False
 
-    if action in {"PUBLISH", "ARCHIVE", "SCHEDULE_EFFECTIVITY"}:
+    if action in {"PUBLISH", "ARCHIVE"}:
         return is_control_user(user)
+
+    if action == "SCHEDULE_EFFECTIVITY":
+        return is_accountable_approver(user)
 
     if action == "REQUEST_CORRECTIONS":
         responsibility_types = _corrections_responsibility(workflow)
