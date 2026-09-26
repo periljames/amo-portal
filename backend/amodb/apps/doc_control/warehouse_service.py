@@ -458,7 +458,7 @@ def sync_library_circulation_event(
         if loan:
             loan.due_at = event.due_at
             loan.renewal_count = int(loan.renewal_count or 0) + 1
-    elif event.event_type == "CHECK_IN":
+    elif event.event_type in {"CHECK_IN", "MARK_LOST", "MARK_DAMAGED", "WITHDRAW", "SEND_REPAIR"}:
         db.query(wm.WarehouseLoan).filter(
             wm.WarehouseLoan.tenant_id == tenant_id,
             wm.WarehouseLoan.item_copy_id == item_copy.id,
@@ -1449,7 +1449,7 @@ def sync_governed_relationships(
                 db,
                 tenant_id=tenant_id,
                 resource_type=target_type,
-                canonical_code=str(source.exact_token or source.target_entity_id),
+                canonical_code=f"{target_type}:{source.target_entity_id}",
                 title=str(source.section_label or source.exact_token or f"{target_type} {source.target_entity_id}"),
                 source_entity_type=target_type,
                 source_entity_id=str(source.target_entity_id),
