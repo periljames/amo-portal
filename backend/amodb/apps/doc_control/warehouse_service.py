@@ -1483,7 +1483,7 @@ def sync_governed_relationships(
                 relationship_type=str(source.relationship_type).strip().upper(),
                 target_record_id=target_record.id,
                 target_version_id=target_version.id if target_version else None,
-                status="ACTIVE",
+                status=canonical_status,
                 verified_by_user_id=source.confirmed_by_user_id,
                 metadata_json={
                     "source_relationship_id": source.id,
