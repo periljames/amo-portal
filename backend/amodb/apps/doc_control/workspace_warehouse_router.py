@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -30,8 +31,8 @@ class WarehouseRelationshipCreate(BaseModel):
     relationship_type: str = Field(min_length=2, max_length=64)
     source_version_id: str | None = None
     target_version_id: str | None = None
-    effective_from: str | None = None
-    effective_to: str | None = None
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -97,6 +98,42 @@ def _matching_policy_principals(user: account_models.User) -> list[tuple[str, st
     return values
 
 
+def _policy_conditions_match(policy: wm.WarehouseAccessPolicy, user: account_models.User) -> bool:
+    conditions = dict(policy.conditions_json or {})
+    if not conditions:
+        return True
+
+    supported = {"roles", "departments", "user_active"}
+    if set(conditions) - supported:
+        return False
+
+    if "user_active" in conditions and bool(getattr(user, "is_active", False)) is not bool(conditions["user_active"]):
+        return False
+
+    if "roles" in conditions:
+        allowed_roles = {str(value).strip().upper() for value in conditions["roles"] if str(value).strip()}
+        if role_value(user).upper() not in allowed_roles:
+            return False
+
+    if "departments" in conditions:
+        department = getattr(user, "department", None)
+        actual = {
+            str(value).strip().upper()
+            for value in (
+                getattr(user, "department_id", None),
+                getattr(department, "id", None),
+                getattr(department, "code", None),
+                getattr(department, "name", None),
+            )
+            if value
+        }
+        required = {str(value).strip().upper() for value in conditions["departments"] if str(value).strip()}
+        if not actual.intersection(required):
+            return False
+
+    return True
+
+
 def _native_policy_allows(db: Session, *, tenant_id: str, record_id: str, user: account_models.User, action: str = "READ") -> bool:
     principals = _matching_policy_principals(user)
     matches = (
@@ -116,9 +153,10 @@ def _native_policy_allows(db: Session, *, tenant_id: str, record_id: str, user: 
         .order_by(wm.WarehouseAccessPolicy.priority.asc(), wm.WarehouseAccessPolicy.created_at.asc())
         .all()
     )
-    if any(row.effect == "DENY" for row in matches):
+    applicable = [row for row in matches if _policy_conditions_match(row, user)]
+    if any(row.effect == "DENY" for row in applicable):
         return False
-    return any(row.effect == "ALLOW" for row in matches)
+    return any(row.effect == "ALLOW" for row in applicable)
 
 
 def _source_visible(
@@ -740,6 +778,8 @@ def create_warehouse_relationship(
         relationship_type=relation_type,
         target_record_id=target.id,
         target_version_id=target_version_id,
+        effective_from=payload.effective_from,
+        effective_to=payload.effective_to,
         metadata_json=dict(payload.metadata),
         created_by_user_id=current_user.id,
     )
@@ -818,6 +858,18 @@ def create_access_policy(
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     record = _resource(db, str(tenant.amo_id), record_id)
+    supported_condition_keys = {"roles", "departments", "user_active"}
+    unknown_conditions = set(payload.conditions) - supported_condition_keys
+    if unknown_conditions:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported access-policy conditions: {', '.join(sorted(unknown_conditions))}",
+        )
+    for key in ("roles", "departments"):
+        if key in payload.conditions and not isinstance(payload.conditions[key], list):
+            raise HTTPException(status_code=422, detail=f"Access-policy condition '{key}' must be a list")
+    if "user_active" in payload.conditions and not isinstance(payload.conditions["user_active"], bool):
+        raise HTTPException(status_code=422, detail="Access-policy condition 'user_active' must be boolean")
     principal_value = payload.principal_value.strip()
     if payload.principal_type in {"ROLE", "DEPARTMENT", "ALL"}:
         principal_value = principal_value.upper()
