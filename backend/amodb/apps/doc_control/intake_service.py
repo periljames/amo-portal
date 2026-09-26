@@ -15,6 +15,7 @@ from amodb.apps.manuals import models as manual_models
 from . import domain_models as dm
 from . import governance_models as gm
 from . import knowledge_models as km
+from . import warehouse_service as warehouse
 from .workflow_policy import resolve_document_lifecycle_policy, serialize_document_lifecycle_policy
 from .knowledge_service import (
     EXECUTABLE_NODE_TYPES,
@@ -330,6 +331,13 @@ def apply_controlled_document_metadata(
         if execution:
             db.delete(execution)
 
+    warehouse.sync_manual(
+        db,
+        tenant,
+        manual,
+        actor_user_id=str(user.id),
+        include_revisions=True,
+    )
     db.flush()
     return {
         "document_type": document_type,
