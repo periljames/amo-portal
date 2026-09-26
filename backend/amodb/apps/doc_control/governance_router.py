@@ -47,6 +47,7 @@ from .workspace_service import (
     require_control_user,
     require_manual_access,
     resolve_tenant,
+    role_value,
 )
 
 
@@ -77,6 +78,28 @@ def _audit(
         ip_device=f"{request.client.host if request.client else 'unknown'}::{request.headers.get('user-agent', 'n/a')}",
         diff_json=diff,
     ))
+
+
+
+def _can_manage_responsibility(user: account_models.User, responsibility_type: str) -> bool:
+    """Authorize governance without turning Quality into a document librarian.
+
+    Document Control/admin administer the complete responsibility register. The
+    Quality Manager has a deliberately narrow delegation power for Quality review
+    only, reflecting the manager's inherent review responsibility and ability to
+    nominate a reviewer without gaining unrelated DMS control privileges.
+    """
+    if is_control_user(user):
+        return True
+    return role_value(user) == "QUALITY_MANAGER" and responsibility_type == "QUALITY_REVIEWER"
+
+
+def _require_responsibility_authority(user: account_models.User, responsibility_type: str) -> None:
+    if not _can_manage_responsibility(user, responsibility_type):
+        raise HTTPException(
+            status_code=403,
+            detail="This role cannot create or decide that document responsibility.",
+        )
 
 
 def _validate_assignee_tenant(
@@ -241,6 +264,7 @@ def get_document_governance(
         "control": is_control_user(current_user),
         "annotate": True,
         "controlled_evidence": is_control_user(current_user),
+        "delegate_quality_review": role_value(current_user) == "QUALITY_MANAGER" or is_control_user(current_user),
     }
     return payload
 
@@ -254,11 +278,11 @@ def create_responsibility(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     manual = get_manual(db, tenant, manual_id)
     if payload.responsibility_type not in RESPONSIBILITY_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported responsibility type")
+    _require_responsibility_authority(current_user, payload.responsibility_type)
     if payload.assignment_source not in ASSIGNMENT_SOURCES or payload.confirmation_status not in CONFIRMATION_STATES:
         raise HTTPException(status_code=422, detail="Unsupported responsibility provenance or state")
     if payload.assignment_source in {"INFERRED", "IMPORTED"} and payload.confirmation_status == "CONFIRMED":
@@ -330,7 +354,6 @@ def decide_responsibility(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = db.query(gm.DocumentResponsibilityAssignment).filter(
         gm.DocumentResponsibilityAssignment.id == assignment_id,
@@ -338,6 +361,7 @@ def decide_responsibility(
     ).with_for_update().first()
     if not row:
         raise HTTPException(status_code=404, detail="Responsibility assignment not found")
+    _require_responsibility_authority(current_user, row.responsibility_type)
     if row.confirmation_status == "SUPERSEDED":
         raise HTTPException(status_code=409, detail="A superseded assignment cannot be reviewed")
     row.confirmation_status = payload.decision
