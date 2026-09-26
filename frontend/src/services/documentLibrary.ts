@@ -414,6 +414,7 @@ export type LibraryHolding = {
   format: string;
   home_location: string;
   current_location: string;
+  transfer_destination?: string | null;
   status: string;
   holder_user_id?: string | null;
   checked_out_at?: string | null;
@@ -651,7 +652,7 @@ export function controlLibraryHolding(
   tenant: string,
   holdingId: string,
   payload: {
-    action: "MARK_LOST" | "MARK_DAMAGED" | "SEND_REPAIR" | "RETURN_TO_SHELF" | "WITHDRAW";
+    action: "MARK_LOST" | "MARK_DAMAGED" | "SEND_REPAIR" | "RETURN_TO_SHELF" | "WITHDRAW" | "TRANSFER_OUT" | "TRANSFER_IN";
     location?: string | null;
     reason: string;
     evidence?: Array<Record<string, unknown>>;

@@ -53,7 +53,7 @@ MATERIAL_TYPES = {
     "ARCHIVE_OBJECT",
     "OTHER",
 }
-HOLDING_STATUSES = {"AVAILABLE", "CHECKED_OUT", "ON_HOLD", "LOST", "DAMAGED", "WITHDRAWN", "IN_REPAIR"}
+HOLDING_STATUSES = {"AVAILABLE", "CHECKED_OUT", "ON_HOLD", "LOST", "DAMAGED", "WITHDRAWN", "IN_REPAIR", "IN_TRANSIT"}
 _ACTIVE_HOLD_STATUSES = {"ACTIVE", "READY"}
 _EXTERNAL_TIMEOUT_SECONDS = 4.0
 _EXTERNAL_LIMIT = 12
@@ -118,7 +118,7 @@ class HoldCreate(BaseModel):
 
 
 class HoldingControlRequest(BaseModel):
-    action: Literal["MARK_LOST", "MARK_DAMAGED", "SEND_REPAIR", "RETURN_TO_SHELF", "WITHDRAW"]
+    action: Literal["MARK_LOST", "MARK_DAMAGED", "SEND_REPAIR", "RETURN_TO_SHELF", "WITHDRAW", "TRANSFER_OUT", "TRANSFER_IN"]
     location: str | None = Field(default=None, max_length=255)
     reason: str = Field(min_length=2, max_length=2000)
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=25)
@@ -337,6 +337,7 @@ def _serialize_holding(row: lm.LibraryHolding, *, controller: bool, own: bool = 
         "format": row.format,
         "home_location": row.home_location,
         "current_location": row.current_location,
+        "transfer_destination": (row.metadata_json or {}).get("transfer_destination") if controller and row.status == "IN_TRANSIT" else None,
         "status": row.status,
         "holder_user_id": row.holder_user_id if expose_holder else None,
         "checked_out_at": row.checked_out_at.isoformat() if expose_holder and row.checked_out_at else None,
@@ -824,6 +825,28 @@ def control_holding(
     item = _item(db, tenant.amo_id, holding.catalog_item_id, current_user)
     before_status = holding.status
     before_location = holding.current_location
+    transfer_destination = str((holding.metadata_json or {}).get("transfer_destination") or "")
+
+    if payload.action == "TRANSFER_OUT":
+        if holding.status != "AVAILABLE" or holding.holder_user_id:
+            raise HTTPException(status_code=409, detail="Only an available item can be transferred")
+        destination = (payload.location or "").strip()
+        if not destination or destination.casefold() == holding.current_location.casefold():
+            raise HTTPException(status_code=422, detail="Enter a different destination location")
+        holding.status = "IN_TRANSIT"
+        holding.metadata_json = {**dict(holding.metadata_json or {}), "transfer_destination": destination}
+    elif payload.action == "TRANSFER_IN":
+        if holding.status != "IN_TRANSIT" or not transfer_destination:
+            raise HTTPException(status_code=409, detail="This item is not awaiting transfer receipt")
+        received_at = (payload.location or "").strip()
+        if received_at.casefold() != transfer_destination.casefold():
+            raise HTTPException(status_code=422, detail="Scan or enter the pending destination to receive the item")
+        holding.status = "AVAILABLE"
+        holding.current_location = transfer_destination
+        holding.metadata_json = {key: value for key, value in dict(holding.metadata_json or {}).items() if key != "transfer_destination"}
+    else:
+        if holding.status == "IN_TRANSIT":
+            raise HTTPException(status_code=409, detail="Receive the transfer before changing the item state")
 
     if payload.action in {"MARK_DAMAGED", "SEND_REPAIR", "WITHDRAW"} and holding.holder_user_id:
         raise HTTPException(
@@ -843,13 +866,13 @@ def control_holding(
         holding.due_at = None
         holding.renewal_count = 0
         holding.current_location = str(payload.location or holding.home_location).strip()
-    else:
+    elif payload.action == "WITHDRAW":
         holding.status = "WITHDRAWN"
         holding.holder_user_id = None
         holding.checked_out_at = None
         holding.due_at = None
 
-    if payload.location:
+    if payload.location and payload.action not in {"TRANSFER_OUT", "TRANSFER_IN"}:
         holding.current_location = payload.location.strip()
     holding.version = int(holding.version or 0) + 1
     event = lm.LibraryCirculationEvent(
@@ -864,7 +887,7 @@ def control_holding(
         to_location=holding.current_location,
         due_at=holding.due_at,
         notes=payload.reason.strip(),
-        metadata_json={"evidence": list(payload.evidence)},
+        metadata_json={"evidence": list(payload.evidence), **({"destination": transfer_destination or payload.location.strip()} if payload.action in {"TRANSFER_OUT", "TRANSFER_IN"} else {})},
     )
     db.add(event)
     db.flush()

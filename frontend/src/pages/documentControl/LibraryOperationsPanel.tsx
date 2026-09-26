@@ -241,6 +241,8 @@ export default function LibraryOperationsPanel({
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
   const [scanCode, setScanCode] = useState(initialScan || "");
   const [scan, setScan] = useState<LibraryHoldingScan | null>(null);
+  const [transferLocation, setTransferLocation] = useState("");
+  const [transferReason, setTransferReason] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [internetQuery, setInternetQuery] = useState("");
   const [internetResults, setInternetResults] = useState<ExternalCatalogResult[]>([]);
@@ -322,6 +324,7 @@ export default function LibraryOperationsPanel({
     if (result) {
       setScanCode(code);
       setScan(result);
+      setTransferLocation(result.holding.transfer_destination || "");
       setNotice(`${result.item.title} · ${result.holding.status.replaceAll("_", " ")} · ${result.holding.current_location}`);
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(35);
       setMode("scan");
@@ -509,6 +512,23 @@ export default function LibraryOperationsPanel({
       setNotice(`Physical item updated to ${result.holding.status.replaceAll("_", " ")}.`);
       await loadInventory();
     }
+  };
+
+  const transferHolding = async (action: "TRANSFER_OUT" | "TRANSFER_IN") => {
+    if (!scan?.capabilities.control || !transferLocation.trim() || !transferReason.trim()) {
+      setError("Enter the destination and custody reason before recording the transfer.");
+      return;
+    }
+    const result = await run(() => controlLibraryHolding(tenant, scan.holding.id, {
+      action,
+      location: transferLocation.trim(),
+      reason: transferReason.trim(),
+    }));
+    if (!result) return;
+    setTransferReason("");
+    await performScan(scan.holding.barcode);
+    setNotice(action === "TRANSFER_OUT" ? `Item dispatched to ${transferLocation.trim()}. Receiving scan is required.` : `Item received at ${transferLocation.trim()}. Custody history updated.`);
+    if (inventory) await loadInventory();
   };
 
 
@@ -726,6 +746,12 @@ export default function LibraryOperationsPanel({
             {canPlaceHold ? <button type="button" className="dc-button" disabled={busy} onClick={() => void placeHold(scan.item)}>Place hold</button> : null}
             {scan.capabilities.control ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("VERIFY_LOCATION")}>Verify location</button> : null}
           </div>
+          {scan.capabilities.control && ["AVAILABLE", "IN_TRANSIT"].includes(scan.holding.status) ? <div className="library-transfer">
+            <strong>{scan.holding.status === "IN_TRANSIT" ? "Receive transferred copy" : "Transfer physical copy"}</strong>
+            <label><span>{scan.holding.status === "IN_TRANSIT" ? "Pending destination" : "Destination shelf or room"}</span><input value={transferLocation} onChange={(event) => setTransferLocation(event.target.value)} placeholder="Site / room / shelf" /></label>
+            <label><span>Custody reason or handoff reference</span><input value={transferReason} onChange={(event) => setTransferReason(event.target.value)} placeholder="Required for custody history" /></label>
+            <button type="button" className="dc-button dc-button--primary" disabled={busy || !transferLocation.trim() || !transferReason.trim()} onClick={() => void transferHolding(scan.holding.status === "IN_TRANSIT" ? "TRANSFER_IN" : "TRANSFER_OUT")}>{scan.holding.status === "IN_TRANSIT" ? "Confirm receipt at destination" : "Dispatch copy"}</button>
+          </div> : null}
         </article> : <p className="library-ops__hint">USB/Bluetooth scanners work as keyboard input: focus the field and scan. Camera scanning is used where the browser supports it.</p>}
       </> : null}
 
