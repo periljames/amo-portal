@@ -86,54 +86,93 @@ function CameraScanner({ onDetected, onClose }: { onDetected: (value: string) =>
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
+  const [engine, setEngine] = useState<"native" | "zxing" | "">("");
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let cancelled = false;
     let timer = 0;
+    let zxingReader: { reset: () => void } | null = null;
     const detectorCtor = (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
-    if (!detectorCtor) {
-      setError("Camera barcode detection is not available in this browser. Use the barcode field or a USB/Bluetooth scanner.");
-      return;
-    }
-    const detector = new detectorCtor({
-      formats: ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "data_matrix"],
-    });
+
+    const nativeScan = async () => {
+      if (!detectorCtor || !videoRef.current) return false;
+      const detector = new detectorCtor({
+        formats: ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "data_matrix"],
+      });
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      if (cancelled || !videoRef.current) return true;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+      setEngine("native");
+      setRunning(true);
+      const tick = async () => {
+        if (cancelled || !videoRef.current) return;
+        try {
+          const results = await detector.detect(videoRef.current);
+          const value = results.find((row) => row.rawValue)?.rawValue?.trim();
+          if (value) {
+            onDetected(value);
+            return;
+          }
+        } catch {
+          // Camera focus and motion can make an individual frame undecodable.
+        }
+        timer = window.setTimeout(() => void tick(), 160);
+      };
+      void tick();
+      return true;
+    };
+
+    const zxingScan = async () => {
+      if (!videoRef.current) return;
+      const { BrowserMultiFormatReader } = await import("@zxing/library");
+      if (cancelled || !videoRef.current) return;
+      const reader = new BrowserMultiFormatReader();
+      zxingReader = reader;
+      setEngine("zxing");
+      setRunning(true);
+      try {
+        const result = await reader.decodeOnceFromVideoDevice(undefined, videoRef.current);
+        if (!cancelled) onDetected(result.getText().trim());
+      } finally {
+        reader.reset();
+      }
+    };
 
     const begin = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
-        if (cancelled || !videoRef.current) return;
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setRunning(true);
-        const tick = async () => {
-          if (cancelled || !videoRef.current) return;
-          try {
-            const results = await detector.detect(videoRef.current);
-            const value = results.find((row) => row.rawValue)?.rawValue?.trim();
-            if (value) {
-              onDetected(value);
-              return;
-            }
-          } catch {
-            // A frame can fail while the camera is focusing; keep scanning.
-          }
-          timer = window.setTimeout(() => void tick(), 180);
-        };
-        void tick();
+        const nativeStarted = await nativeScan();
+        if (!nativeStarted) await zxingScan();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Camera access could not be started.");
+        if (cancelled) return;
+        // If the native detector exists but its camera pipeline fails for a
+        // browser-specific reason, release it before trying ZXing once.
+        stream?.getTracks().forEach((track) => track.stop());
+        stream = null;
+        try {
+          await zxingScan();
+        } catch (fallbackError) {
+          const message = fallbackError instanceof Error
+            ? fallbackError.message
+            : caught instanceof Error
+              ? caught.message
+              : "Camera scanning could not be started.";
+          setError(`${message} Use a USB/Bluetooth scanner or enter the barcode manually.`);
+          setRunning(false);
+        }
       }
     };
+
     void begin();
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
       stream?.getTracks().forEach((track) => track.stop());
+      zxingReader?.reset();
     };
   }, [onDetected]);
 
@@ -142,7 +181,9 @@ function CameraScanner({ onDetected, onClose }: { onDetected: (value: string) =>
       <video ref={videoRef} playsInline muted aria-label="Barcode scanner camera" />
       <span aria-hidden="true" />
     </div>
-    {error ? <p className="library-ops__error" role="alert">{error}</p> : <p>{running ? "Point the camera at a QR or barcode." : "Starting camera…"}</p>}
+    {error
+      ? <p className="library-ops__error" role="alert">{error}</p>
+      : <p>{running ? `Scanning with ${engine === "native" ? "browser barcode detection" : "ZXing fallback"}…` : "Starting camera…"}</p>}
     <button type="button" className="dc-button" onClick={onClose}><CircleX size={14} /> Close camera</button>
   </div>;
 }
