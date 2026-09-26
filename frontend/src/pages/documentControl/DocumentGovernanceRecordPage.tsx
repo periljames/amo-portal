@@ -45,7 +45,6 @@ const RESPONSIBILITIES = [
   ["RESPONSIBLE_ORG_UNIT", "Responsible section or organization unit"],
   ["ACCOUNTABLE_ROLE", "Accountable role"],
   ["DOCUMENT_CONTROLLER", "Document controller"],
-  ["CUSTODIAN", "Custodian"],
   ["TECHNICAL_REVIEWER", "Technical reviewer"],
   ["QUALITY_REVIEWER", "Quality reviewer"],
   ["APPROVER", "Accountable approval"],
