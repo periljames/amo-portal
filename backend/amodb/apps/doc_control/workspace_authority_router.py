@@ -9,7 +9,6 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
-from .workspace_decision_policy import require_decision_approver
 from .workspace_evidence_router import validate_evidence_references
 from .workspace_router import _authority_payload, _event
 from .workspace_service import (
@@ -172,8 +171,13 @@ def update_authority_submission_with_guards(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    """Update authority evidence without silently advancing the document workflow."""
-    require_decision_approver(current_user)
+    """Maintain authority correspondence/evidence without silently advancing the document workflow.
+
+    This is a Document Control librarian function: the officer records what the
+    authority actually sent or accepted. The separate workflow transition remains
+    the accountable decision gate and cannot be manufactured by this evidence update.
+    """
+    require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = (
         db.query(dm.DocumentAuthoritySubmission)

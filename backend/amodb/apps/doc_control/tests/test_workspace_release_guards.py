@@ -33,7 +33,7 @@ def _workflow() -> DocumentWorkflowInstance:
 def _approver():
     return SimpleNamespace(
         id="user-1",
-        role="QUALITY_MANAGER",
+        role="ACCOUNTABLE_EXECUTIVE",
         is_superuser=False,
         is_amo_admin=False,
     )

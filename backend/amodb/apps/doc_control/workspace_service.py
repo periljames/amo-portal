@@ -20,15 +20,17 @@ from . import domain_models
 # Use only roles that exist in the authoritative AccountRole enum. AUDITOR remains
 # execution-only; Quality Officer may perform controlled intake and preparation but
 # does not receive the narrower approval authority below.
+# DMS personas are deliberately narrower than general Quality access.
+# Document Control Officers operate the library, distribution, authority evidence,
+# controlled-copy and release machinery. Quality staff participate only through
+# explicit governed document responsibilities. Tenant admins are the full DMS
+# override; platform superusers are intentionally not.
 CONTROL_ROLES = {
-    "QUALITY_MANAGER",
-    "QUALITY_OFFICER",
     "DOCUMENT_CONTROL_OFFICER",
 }
 
 APPROVER_ROLES = {
     "ACCOUNTABLE_EXECUTIVE",
-    "QUALITY_MANAGER",
 }
 
 WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
@@ -53,9 +55,12 @@ WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
         "SUBMIT_ACCOUNTABLE_MANAGER": "ACCOUNTABLE_MANAGER_APPROVAL",
     },
     "ACCOUNTABLE_MANAGER_APPROVAL": {
-        "APPROVE_ACCOUNTABLE_MANAGER": "SCHEDULED_FOR_EFFECTIVITY",
-        "MARK_AUTHORITY_SUBMITTED": "AUTHORITY_SUBMITTED",
+        "APPROVE_ACCOUNTABLE_MANAGER": "ACCOUNTABLE_APPROVED",
         "REQUEST_CORRECTIONS": "CORRECTIONS_REQUIRED",
+    },
+    "ACCOUNTABLE_APPROVED": {
+        "MARK_AUTHORITY_SUBMITTED": "AUTHORITY_SUBMITTED",
+        "SCHEDULE_EFFECTIVITY": "SCHEDULED_FOR_EFFECTIVITY",
     },
     "AUTHORITY_SUBMITTED": {
         "MARK_AUTHORITY_APPROVED": "AUTHORITY_APPROVED",
@@ -136,6 +141,11 @@ def resolve_tenant(db: Session, tenant_slug: str, user: account_models.User) -> 
     tenant = _tenant_by_slug(db, tenant_slug)
     if not getattr(user, "is_superuser", False) and str(getattr(user, "amo_id", "")) != str(tenant.amo_id):
         raise HTTPException(status_code=403, detail="The requested tenant is outside the active AMO context")
+    # Warehouse, library and vault tables enforce this setting through RLS.
+    # The setting is LOCAL to this transaction, including pooled connections.
+    if db.get_bind().dialect.name == "postgresql":
+        from sqlalchemy import text
+        db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant.amo_id)})
     return tenant
 
 
@@ -457,8 +467,6 @@ def next_workflow_state(
                 "allowed_actions": sorted(allowed),
             },
         )
-    if workflow.requires_authority and workflow.state == "ACCOUNTABLE_MANAGER_APPROVAL" and action == "APPROVE_ACCOUNTABLE_MANAGER":
-        raise HTTPException(status_code=409, detail="Authority submission is required for this revision")
     if not workflow.requires_authority and action == "MARK_AUTHORITY_SUBMITTED":
         raise HTTPException(status_code=409, detail="This revision does not require authority approval")
     return next_state

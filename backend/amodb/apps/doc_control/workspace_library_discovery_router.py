@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import String, and_, cast, exists, func, or_
+from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -83,8 +83,10 @@ def library_discovery(
             access_conditions.append(_scope_match(profile.access_scope_json, "departments", str(department_code), case_insensitive=True))
         query = query.filter(or_(*access_conditions))
 
+    search_rank = None
     if q and q.strip():
-        needle = f"%{q.strip()}%"
+        search_text = q.strip()
+        needle = f"%{search_text}%"
         matching_revision = exists().where(and_(
             manual_models.ManualRevision.manual_id == manual_models.Manual.id,
             or_(
@@ -107,12 +109,52 @@ def library_discovery(
             account_models.User.id == dm.DocumentControlProfile.owner_user_id,
             or_(account_models.User.full_name.ilike(needle), account_models.User.email.ilike(needle)),
         ))
-        matching_indexed_content = exists().where(and_(
-            manual_models.ManualRevision.manual_id == manual_models.Manual.id,
-            manual_models.ManualSection.revision_id == manual_models.ManualRevision.id,
-            manual_models.ManualBlock.section_id == manual_models.ManualSection.id,
-            or_(manual_models.ManualSection.heading.ilike(needle), manual_models.ManualBlock.text_plain.ilike(needle)),
-        ))
+
+        if str(db.get_bind().dialect.name) == "postgresql":
+            language = literal_column("'simple'")
+            tsquery = func.websearch_to_tsquery(language, search_text)
+            heading_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualSection.heading, ""))
+            block_vector = func.to_tsvector(language, func.coalesce(manual_models.ManualBlock.text_plain, ""))
+            content_rank = (
+                select(func.max(
+                    func.ts_rank_cd(heading_vector, tsquery) * 1.8
+                    + func.ts_rank_cd(block_vector, tsquery)
+                ))
+                .select_from(manual_models.ManualRevision)
+                .join(
+                    manual_models.ManualSection,
+                    manual_models.ManualSection.revision_id == manual_models.ManualRevision.id,
+                )
+                .outerjoin(
+                    manual_models.ManualBlock,
+                    manual_models.ManualBlock.section_id == manual_models.ManualSection.id,
+                )
+                .where(
+                    manual_models.ManualRevision.manual_id == manual_models.Manual.id,
+                    or_(heading_vector.op("@@")(tsquery), block_vector.op("@@")(tsquery)),
+                )
+                .correlate(manual_models.Manual)
+                .scalar_subquery()
+            )
+            matching_indexed_content = func.coalesce(content_rank, 0.0) > 0
+            identity_rank = case(
+                (func.lower(manual_models.Manual.code) == search_text.lower(), 120.0),
+                (manual_models.Manual.code.ilike(needle), 70.0),
+                (manual_models.Manual.title.ilike(needle), 55.0),
+                else_=0.0,
+            )
+            search_rank = identity_rank + func.coalesce(content_rank, 0.0)
+        else:
+            matching_indexed_content = exists().where(and_(
+                manual_models.ManualRevision.manual_id == manual_models.Manual.id,
+                manual_models.ManualSection.revision_id == manual_models.ManualRevision.id,
+                manual_models.ManualBlock.section_id == manual_models.ManualSection.id,
+                or_(
+                    manual_models.ManualSection.heading.ilike(needle),
+                    manual_models.ManualBlock.text_plain.ilike(needle),
+                ),
+            ))
+
         query = query.filter(or_(
             manual_models.Manual.code.ilike(needle),
             manual_models.Manual.title.ilike(needle),
@@ -124,7 +166,11 @@ def library_discovery(
             matching_indexed_content,
         ))
 
-    ordering = (manual_models.Manual.code.asc(), manual_models.Manual.id.asc())
+    ordering = (
+        search_rank.desc(),
+        manual_models.Manual.code.asc(),
+        manual_models.Manual.id.asc(),
+    ) if search_rank is not None else (manual_models.Manual.code.asc(), manual_models.Manual.id.asc())
     progress_subquery = None
     revision_activity_subquery = None
 

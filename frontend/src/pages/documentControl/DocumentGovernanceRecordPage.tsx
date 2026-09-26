@@ -45,11 +45,12 @@ const RESPONSIBILITIES = [
   ["RESPONSIBLE_ORG_UNIT", "Responsible section or organization unit"],
   ["ACCOUNTABLE_ROLE", "Accountable role"],
   ["DOCUMENT_CONTROLLER", "Document controller"],
-  ["CUSTODIAN", "Custodian"],
   ["TECHNICAL_REVIEWER", "Technical reviewer"],
   ["QUALITY_REVIEWER", "Quality reviewer"],
-  ["APPROVER", "Approver"],
-  ["RETENTION_OWNER", "Retention owner"],
+  ["APPROVER", "Accountable approval"],
+  ["DISTRIBUTION_ADMINISTRATOR", "Distribution administrator"],
+  ["CUSTODIAN", "Physical-copy custodian"],
+  ["RETENTION_OWNER", "Retention / filing owner"],
 ] as const;
 
 const RELATIONSHIP_GROUPS: Array<[string, string[]]> = [

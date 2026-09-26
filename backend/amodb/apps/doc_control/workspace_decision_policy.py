@@ -15,7 +15,6 @@ from .workspace_service import role_value
 # librarian/controller or publication authority from their operational titles.
 DECISION_APPROVER_ROLES = {
     "ACCOUNTABLE_EXECUTIVE",
-    "QUALITY_MANAGER",
 }
 
 

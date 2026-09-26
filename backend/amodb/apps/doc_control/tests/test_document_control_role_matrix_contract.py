@@ -37,24 +37,41 @@ def test_quality_inspector_does_not_inherit_document_controller_authority() -> N
     assert inspector["publish"] is False
 
 
-def test_document_control_officer_can_administer_without_approval() -> None:
+def test_document_control_officer_can_administer_and_release_without_approval() -> None:
     controller = document_control_capabilities(_user(AccountRole.DOCUMENT_CONTROL_OFFICER))
+    assert controller["persona"] == "DOCUMENT_CONTROL"
     assert controller["control"] is True
     assert controller["edit_properties"] is True
     assert controller["manage_distribution"] is True
+    assert controller["manage_authority_records"] is True
     assert controller["approve"] is False
-    assert controller["publish"] is False
+    assert controller["publish"] is True
 
 
-def test_quality_manager_has_control_and_accountable_decision_capability() -> None:
+def test_quality_manager_has_quality_review_without_librarian_or_accountable_authority() -> None:
     manager = document_control_capabilities(_user(AccountRole.QUALITY_MANAGER))
-    assert manager["control"] is True
-    assert manager["approve"] is True
-    assert manager["publish"] is True
+    assert manager["persona"] == "QUALITY_MANAGER"
+    assert manager["quality_review"] is True
+    assert manager["control"] is False
+    assert manager["approve"] is False
+    assert manager["publish"] is False
+
+
+def test_accountable_executive_approves_without_becoming_the_librarian() -> None:
+    accountable = document_control_capabilities(_user(AccountRole.ACCOUNTABLE_EXECUTIVE))
+    assert accountable["persona"] == "ACCOUNTABLE_EXECUTIVE"
+    assert accountable["read"] is True
+    assert accountable["approve"] is True
+    assert accountable["accountable_approval"] is True
+    assert accountable["control"] is False
+    assert accountable["upload_revision"] is False
+    assert accountable["manage_distribution"] is False
+    assert accountable["publish"] is False
 
 
 def test_tenant_admin_overlay_includes_document_control_authority() -> None:
     admin = document_control_capabilities(_user(AccountRole.AMO_ADMIN, is_amo_admin=True))
+    assert admin["persona"] == "ADMIN"
     assert admin["control"] is True
     assert admin["approve"] is True
     assert admin["register"] is True

@@ -149,6 +149,57 @@ def test_assigned_reviewer_authority_is_not_overridden_by_accountable_role_polic
     assert "require_decision_approver(current_user)" not in review_source
 
 
+def test_quality_manager_is_primary_quality_reviewer_without_extra_assignment(monkeypatch) -> None:
+    workflow = SimpleNamespace(
+        state="QUALITY_REVIEW",
+        tenant_id="tenant-1",
+        manual_id="manual-1",
+        revision_id="revision-1",
+    )
+    manager = SimpleNamespace(
+        id="quality-manager",
+        is_superuser=False,
+        is_amo_admin=False,
+        role="QUALITY_MANAGER",
+        department_id=None,
+    )
+    monkeypatch.setattr(
+        responsibility_access,
+        "has_confirmed_responsibility",
+        lambda *args, **kwargs: False,
+    )
+    assert responsibility_access.can_perform_workflow_action(
+        object(), workflow=workflow, user=manager, action="APPROVE_QUALITY"
+    ) is True
+    assert responsibility_access.can_perform_workflow_action(
+        object(), workflow=workflow, user=manager, action="REQUEST_CORRECTIONS"
+    ) is True
+
+
+def test_quality_officer_requires_governed_delegation_for_quality_review(monkeypatch) -> None:
+    workflow = SimpleNamespace(
+        state="QUALITY_REVIEW",
+        tenant_id="tenant-1",
+        manual_id="manual-1",
+        revision_id="revision-1",
+    )
+    officer = SimpleNamespace(
+        id="quality-officer",
+        is_superuser=False,
+        is_amo_admin=False,
+        role="QUALITY_OFFICER",
+        department_id=None,
+    )
+    monkeypatch.setattr(
+        responsibility_access,
+        "has_confirmed_responsibility",
+        lambda *args, **kwargs: False,
+    )
+    assert responsibility_access.can_perform_workflow_action(
+        object(), workflow=workflow, user=officer, action="APPROVE_QUALITY"
+    ) is False
+
+
 def test_publication_still_requires_accountable_decision_authority() -> None:
     workflow = SimpleNamespace(
         state="SCHEDULED_FOR_EFFECTIVITY",

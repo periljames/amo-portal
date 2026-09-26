@@ -36,6 +36,7 @@ const WORKFLOW_ACTIONS: Record<string, ActionOption[]> = {
     { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
   ],
   QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Executive" }],
+  ACCOUNTABLE_APPROVED: [{ action: "SCHEDULE_EFFECTIVITY", label: "Set effectivity" }],
   AUTHORITY_SUBMITTED: [
     { action: "MARK_AUTHORITY_APPROVED", label: "Confirm authority approval" },
     { action: "REQUEST_CORRECTIONS", label: "Return for corrections", danger: true },
@@ -109,15 +110,10 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
 
   let actions = WORKFLOW_ACTIONS[workflow.state] || [];
   if (workflow.state === "ACCOUNTABLE_MANAGER_APPROVAL") {
-    actions = workflow.requires_authority
-      ? [
-          { action: "MARK_AUTHORITY_SUBMITTED", label: "Confirm authority submission" },
-          { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
-        ]
-      : [
-          { action: "APPROVE_ACCOUNTABLE_MANAGER", label: "Approve and schedule" },
-          { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
-        ];
+    actions = [
+      { action: "APPROVE_ACCOUNTABLE_MANAGER", label: "Approve document" },
+      { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
+    ];
   }
   const serverAllowedActions = new Set(workflow.allowed_actions || []);
   actions = actions.filter((item) => serverAllowedActions.has(item.action));

@@ -2,6 +2,7 @@
 import { useMemo, type ReactNode } from "react";
 import {
   BookOpen,
+  Archive,
   ClipboardList,
   FileCog,
   FileSearch,
@@ -28,6 +29,7 @@ type PrimaryWorkspaceId =
   | "home"
   | "library"
   | "structure"
+  | "records"
   | "changes"
   | "distribution"
   | "compliance"
@@ -50,6 +52,7 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
   { id: "home", label: "Home", path: "", icon: Gauge },
   { id: "library", label: "Library", path: "/library", icon: BookOpen },
   { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
+  { id: "records", label: "Records", path: "/records", icon: Archive },
   { id: "changes", label: "Changes", path: "/changes", icon: ClipboardList, controlOnly: true },
   { id: "distribution", label: "Distribution", path: "/distribution", icon: Send, controlOnly: true },
   { id: "compliance", label: "Compliance", path: "/compliance", icon: ShieldCheck, controlOnly: true },
@@ -58,6 +61,7 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
 ];
 
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
+  if (pathname.includes("/records")) return "records";
   if (pathname.includes("/structure")) return "structure";
   if (pathname.includes("/changes")) return "changes";
   if (pathname.includes("/distribution")) return "distribution";

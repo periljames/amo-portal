@@ -107,6 +107,12 @@ def _run_document_indexing_once() -> Any:
     return knowledge_worker.run_once(limit=2)
 
 
+def _run_record_indexing_once() -> Any:
+    from amodb.apps.doc_control import record_index_worker
+
+    return record_index_worker.run_once(limit=2)
+
+
 def _run_training_plans_once() -> Any:
     from amodb.jobs import training_plan_automation
 
@@ -164,6 +170,11 @@ def _families() -> tuple[WorkerFamily, ...]:
             "document-indexing",
             _bounded_float("DOCUMENT_INDEX_WORKER_POLL_SECONDS", 2.0, 0.5, 30.0),
             _run_document_indexing_once,
+        ),
+        WorkerFamily(
+            "record-indexing",
+            _bounded_float("RECORD_INDEX_WORKER_POLL_SECONDS", 3.0, 0.5, 30.0),
+            _run_record_indexing_once,
         ),
         WorkerFamily(
             "training-plans",

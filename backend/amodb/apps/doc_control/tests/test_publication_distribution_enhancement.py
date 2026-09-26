@@ -24,7 +24,7 @@ def _user(role: str, *, amo_id: str = "amo-1", superuser: bool = False):
 def test_controller_and_publisher_permissions_are_separated() -> None:
     inspector = document_control_capabilities(_user("QUALITY_INSPECTOR"))
     controller = document_control_capabilities(_user("DOCUMENT_CONTROL_OFFICER"))
-    manager = document_control_capabilities(_user("QUALITY_MANAGER"))
+    accountable = document_control_capabilities(_user("ACCOUNTABLE_EXECUTIVE"))
     reader = reader_capabilities()
 
     assert inspector["upload_revision"] is False
@@ -32,8 +32,9 @@ def test_controller_and_publisher_permissions_are_separated() -> None:
     assert inspector["publish"] is False
     assert controller["upload_revision"] is True
     assert controller["edit_properties"] is True
-    assert controller["publish"] is False
-    assert manager["publish"] is True
+    assert controller["publish"] is True
+    assert accountable["approve"] is True
+    assert accountable["publish"] is False
     assert reader["register"] is False
     assert reader["manage_distribution"] is False
 
@@ -88,7 +89,7 @@ def test_manual_upload_guard_rejects_cross_tenant_controller(monkeypatch) -> Non
         upload_guard_router._require_upload_scope(
             SimpleNamespace(),
             tenant_slug="other-amo",
-            current_user=_user("QUALITY_MANAGER", amo_id="amo-1"),
+            current_user=_user("DOCUMENT_CONTROL_OFFICER", amo_id="amo-1"),
         )
     assert caught.value.status_code == 403
     assert "outside the active AMO context" in str(caught.value.detail)

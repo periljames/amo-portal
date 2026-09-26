@@ -6,7 +6,7 @@ import pytest
 from amodb.apps.doc_control import workspace_dashboard_router as dashboard
 
 
-@pytest.mark.parametrize("role,expected", [("AMO_ADMIN", 1), ("QUALITY_OFFICER", 1), ("AUDITOR", 0)])
+@pytest.mark.parametrize("role,expected", [("AMO_ADMIN", 1), ("DOCUMENT_CONTROL_OFFICER", 1), ("QUALITY_OFFICER", 0), ("AUDITOR", 0)])
 def test_unassigned_drafts_follow_workflow_authority(monkeypatch, role, expected):
     workflow = SimpleNamespace(id="wf", manual_id="doc", tenant_id="amo", revision_id="rev", state="DRAFT", updated_at=datetime.now())
     class Query:

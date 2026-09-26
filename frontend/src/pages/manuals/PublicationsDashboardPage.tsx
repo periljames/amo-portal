@@ -38,7 +38,7 @@ function canWritePublications(): boolean {
   const user = getCachedUser();
   const role = String(user?.role || "");
   return user?.module_access?.documents === "manage"
-    && ["QUALITY_MANAGER", "QUALITY_OFFICER", "DOCUMENT_CONTROL_OFFICER"].includes(role);
+    && ["DOCUMENT_CONTROL_OFFICER", "AMO_ADMIN"].includes(role);
 }
 
 export default function PublicationsDashboardPage() {

@@ -6,8 +6,11 @@ import {
   createDocumentWorkflow,
   createTemporaryRevision,
   transitionDocumentWorkflow,
+  updateAuthoritySubmission,
   type DocumentDetailResponse,
 } from "../../services/documentControl";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
+import DocumentEvidencePicker from "./DocumentEvidencePicker";
 import type { LifecycleView } from "./DocumentControlLifecycleActions";
 import { DocumentControlEmpty } from "./DocumentControlShell";
 
@@ -28,9 +31,11 @@ const CONTROLLER_WORKFLOW_ACTIONS: Record<string, ControllerAction[]> = {
   TECHNICAL_APPROVED: [{ action: "START_QUALITY_REVIEW", label: "Start Quality review" }],
   QUALITY_REVIEW: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
   QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Executive" }],
-  ACCOUNTABLE_MANAGER_APPROVAL: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
-  AUTHORITY_SUBMITTED: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
-  SCHEDULED_FOR_EFFECTIVITY: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
+  ACCOUNTABLE_MANAGER_APPROVAL: [],
+  ACCOUNTABLE_APPROVED: [{ action: "MARK_AUTHORITY_SUBMITTED", label: "Record authority submission" }],
+  AUTHORITY_SUBMITTED: [{ action: "MARK_AUTHORITY_APPROVED", label: "Record authority approval" }],
+  SCHEDULED_FOR_EFFECTIVITY: [{ action: "PUBLISH", label: "Release published revision" }],
+  PUBLISHED: [{ action: "ARCHIVE", label: "Archive superseded revision", danger: true }],
 };
 
 function statementsFrom(value: string): string[] {
@@ -68,7 +73,7 @@ function ApprovalBoundary() {
       <ShieldCheck size={17} />
       <div>
         <strong>Accountable approval is separate from document control.</strong>
-        <div>Preparation and submission actions remain available. Approval, authority disposition, effectivity, publication, archive, and temporary-revision transitions require an authorized approver.</div>
+        <div>Document Control administers the record, authority evidence, release and distribution. Technical, Quality and Accountable decisions remain with their authorized decision owners.</div>
       </div>
     </div>
   );
@@ -158,6 +163,18 @@ function ControllerAuthorityActions({ detail, tenant, onChanged }: Omit<Props, "
   const [authorityName, setAuthorityName] = useState("Kenya Civil Aviation Authority");
   const [reference, setReference] = useState("");
   const [responseDue, setResponseDue] = useState("");
+  const [selectedId, setSelectedId] = useState(detail.authority_submissions[0]?.id || "");
+  const selected = detail.authority_submissions.find((row) => row.id === selectedId) || detail.authority_submissions[0];
+  const nextByStatus: Record<string, string[]> = {
+    DRAFT: ["SUBMITTED", "WITHDRAWN"],
+    SUBMITTED: ["IN_REVIEW", "QUERY_RECEIVED", "APPROVED", "REJECTED", "WITHDRAWN"],
+    IN_REVIEW: ["QUERY_RECEIVED", "APPROVED", "REJECTED", "WITHDRAWN"],
+    QUERY_RECEIVED: ["SUBMITTED", "IN_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN"],
+  };
+  const available = selected ? nextByStatus[selected.status] || [] : [];
+  const [nextStatus, setNextStatus] = useState(available[0] || "");
+  const [summary, setSummary] = useState("");
+  const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
 
   const create = (event: FormEvent) => {
     event.preventDefault();
@@ -173,6 +190,32 @@ function ControllerAuthorityActions({ detail, tenant, onChanged }: Omit<Props, "
     }));
   };
 
+  const selectSubmission = (id: string) => {
+    setSelectedId(id);
+    const row = detail.authority_submissions.find((item) => item.id === id);
+    setNextStatus(row ? (nextByStatus[row.status] || [])[0] || "" : "");
+    setSummary("");
+    setEvidence([]);
+  };
+
+  const update = () => {
+    if (!selected || !nextStatus) return;
+    if (["SUBMITTED", "APPROVED"].includes(nextStatus) && !evidence.length && !(selected.evidence || []).length) {
+      mutation.setError("Retained authority evidence is required before recording submission or approval.");
+      return;
+    }
+    if (["QUERY_RECEIVED", "APPROVED", "REJECTED", "WITHDRAWN"].includes(nextStatus) && !summary.trim()) {
+      mutation.setError("Record the authority response, reference or disposition before continuing.");
+      return;
+    }
+    void mutation.run(() => updateAuthoritySubmission(tenant, selected.id, {
+      status: nextStatus,
+      response_summary: summary.trim() || null,
+      response_due_at: responseDue ? new Date(responseDue).toISOString() : null,
+      evidence: evidence.length ? evidence : undefined,
+    }));
+  };
+
   return (
     <div className="dc-grid">
       <form className="dc-form" onSubmit={create}>
@@ -181,12 +224,16 @@ function ControllerAuthorityActions({ detail, tenant, onChanged }: Omit<Props, "
         <label><span>Submission reference</span><input value={reference} onChange={(event) => setReference(event.target.value)} required /></label>
         <label><span>Response due</span><input type="datetime-local" value={responseDue} onChange={(event) => setResponseDue(event.target.value)} /></label>
         <ErrorMessage message={mutation.error} />
-        <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !revision}><Landmark size={14} /> Create draft submission</button></div>
+        <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !revision}><Landmark size={14} /> Create authority record</button></div>
       </form>
-      <DocumentControlEmpty
-        title="Authority decisions are approver-only"
-        message="Controllers may prepare a draft submission. Submission, response, approval, rejection, withdrawal, and workflow alignment require accountable approval authority."
-      />
+      {selected ? <div className="dc-form">
+        <label className="wide"><span>Authority record</span><select value={selected.id} onChange={(event) => selectSubmission(event.target.value)}>{detail.authority_submissions.map((row) => <option key={row.id} value={row.id}>{row.authority_name} · {row.submission_reference} · {row.status}</option>)}</select></label>
+        <label><span>Recorded status</span><select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>{available.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <label className="wide"><span>Authority response / reference</span><textarea value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+        <DocumentEvidencePicker tenant={tenant} manualId={detail.document.id} revisionId={selected.revision_id} category="AUTHORITY" purpose={`AUTHORITY_${nextStatus || selected.status}`} value={evidence} onChange={setEvidence} label="Authority correspondence / evidence" />
+        <ErrorMessage message={mutation.error} />
+        <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || !nextStatus} onClick={update}><Landmark size={14} /> Record authority status</button></div>
+      </div> : <DocumentControlEmpty title="No authority record" message="Create the authority correspondence record for this revision." />}
     </div>
   );
 }

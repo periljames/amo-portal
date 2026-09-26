@@ -13,6 +13,7 @@ from amodb.apps.manuals import models as manual_models
 from . import governance_models as gm
 from . import governance_service as service
 from . import knowledge_models as km
+from .workflow_policy import resolve_document_lifecycle_policy
 
 
 _LIMITS = {
@@ -173,7 +174,17 @@ def bounded_document_governance_payload(
             or_(gm.DocumentResponsibilityAssignment.effective_to.is_(None), gm.DocumentResponsibilityAssignment.effective_to >= today),
         ).distinct().all()
     }
-    required = {"DOCUMENT_OWNER", "RESPONSIBLE_DEPARTMENT", "DOCUMENT_CONTROLLER", "QUALITY_REVIEWER", "APPROVER"}
+    policy = resolve_document_lifecycle_policy(profile, manual) if profile is not None else None
+    required = {"DOCUMENT_OWNER", "RESPONSIBLE_DEPARTMENT"}
+    # Quality Manager and Accountable Executive authority comes from appointment;
+    # requiring duplicate assignments would create decorative governance records.
+    # Technical review may be performed by the confirmed document owner or an
+    # explicitly delegated reviewer, so a separate TECHNICAL_REVIEWER row is not
+    # universally mandatory either.
+    if profile is not None and profile.document_class == "RECORD":
+        required.add("RETENTION_OWNER")
+    if policy is not None and policy.code == "EXTERNAL_SOURCE_CONTROL":
+        required.add("DOCUMENT_CONTROLLER")
     missing_responsibilities = sorted(required - active_types)
     structure, structure_bound = _bounded_structure(db, tenant_id=tenant.amo_id, manual_id=manual.id)
     bounds["structure_children"] = structure_bound
