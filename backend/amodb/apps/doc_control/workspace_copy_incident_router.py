@@ -106,6 +106,14 @@ def record_controlled_copy_incident(
         "recorded_by_user_id": str(current_user.id),
     }
     row.metadata_json = metadata
+    db.flush()
+    warehouse.sync_controlled_copy_event(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        event=event,
+        actor_user_id=str(current_user.id),
+    )
     warehouse_copy = warehouse.sync_controlled_copy(
         db,
         manual_tenant=tenant,
