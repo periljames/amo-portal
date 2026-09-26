@@ -113,6 +113,19 @@ def upgrade() -> None:
             ON document_library_catalog_items
             USING gin (to_tsvector('simple', coalesce(search_text, '')))
         """))
+        # Controlled documents already store normalized section/block text. These
+        # indexes make company-wide content search use the same PostgreSQL search
+        # engine instead of repeated wildcard scans over large manuals.
+        op.execute(sa.text("""
+            CREATE INDEX IF NOT EXISTS ix_manual_sections_heading_fts
+            ON manual_sections
+            USING gin (to_tsvector('simple', coalesce(heading, '')))
+        """))
+        op.execute(sa.text("""
+            CREATE INDEX IF NOT EXISTS ix_manual_blocks_text_plain_fts
+            ON manual_blocks
+            USING gin (to_tsvector('simple', coalesce(text_plain, '')))
+        """))
 
     op.create_table(
         "document_library_holdings",
@@ -216,6 +229,8 @@ def downgrade() -> None:
     op.drop_table("document_library_holdings")
 
     if _postgres():
+        op.execute(sa.text("DROP INDEX IF EXISTS ix_manual_blocks_text_plain_fts"))
+        op.execute(sa.text("DROP INDEX IF EXISTS ix_manual_sections_heading_fts"))
         op.execute(sa.text("DROP INDEX IF EXISTS ix_doc_library_item_search_fts"))
     op.drop_index("ix_doc_library_item_tenant_title", table_name="document_library_catalog_items")
     op.drop_index("ix_doc_library_item_tenant_type_status", table_name="document_library_catalog_items")
