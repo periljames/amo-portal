@@ -3,6 +3,7 @@ import {
   Barcode,
   BookOpenCheck,
   Camera,
+  Database,
   CircleX,
   ExternalLink,
   Globe2,
@@ -13,6 +14,7 @@ import {
   Search,
   Undo2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import {
   cancelLibraryHold,
@@ -27,15 +29,17 @@ import {
   placeLibraryHold,
   scanLibraryHolding,
   searchExternalCatalog,
+  searchTenantWarehouse,
   type ExternalCatalogResult,
   type LibraryCatalogItem,
   type LibraryHoldingRegisterResponse,
   type LibraryHoldingScan,
   type MyLibraryAccount,
+  type WarehouseSearchResponse,
 } from "../../services/documentLibrary";
 import "./libraryOperations.css";
 
-type PanelMode = "catalog" | "scan" | "inventory" | "internet" | "account";
+type PanelMode = "warehouse" | "catalog" | "scan" | "inventory" | "internet" | "account";
 
 type Props = {
   tenant: string;
@@ -150,10 +154,13 @@ export default function LibraryOperationsPanel({
   initialScan,
   onClose,
 }: Props) {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<PanelMode>(initialScan ? "scan" : initialMode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [warehouseQuery, setWarehouseQuery] = useState("");
+  const [warehouse, setWarehouse] = useState<WarehouseSearchResponse | null>(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
   const [scanCode, setScanCode] = useState(initialScan || "");
@@ -232,6 +239,15 @@ export default function LibraryOperationsPanel({
   const scannerInput = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void performScan();
+  };
+
+
+  const searchWarehouse = async (event: FormEvent) => {
+    event.preventDefault();
+    const query = warehouseQuery.trim();
+    if (!query) return;
+    const result = await run(() => searchTenantWarehouse(tenant, query, 12));
+    if (result) setWarehouse(result);
   };
 
   const externalSearch = async (event: FormEvent) => {
@@ -348,6 +364,7 @@ export default function LibraryOperationsPanel({
   const canPlaceHold = Boolean(scan?.capabilities.place_hold && scan?.holding.status !== "AVAILABLE");
 
   const modes = useMemo(() => [
+    ["warehouse", "Search everything", Database],
     ["catalog", "Library catalogue", LibraryBig],
     ["scan", "Scan / circulate", Barcode],
     ...(canControl ? [["inventory", "Inventory & custody", PackageCheck] as const] : []),
@@ -367,6 +384,26 @@ export default function LibraryOperationsPanel({
     {notice ? <div className="library-ops__notice" role="status">{notice}</div> : null}
 
     <div className="library-ops__body">
+      {mode === "warehouse" ? <>
+        <form className="library-ops__search" onSubmit={searchWarehouse}>
+          <Database size={16} /><input value={warehouseQuery} onChange={(event) => setWarehouseQuery(event.target.value)} placeholder="Search controlled documents, indexed content, books and retained records" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search</button>
+        </form>
+        <p className="library-ops__privacy">Tenant search is permission-filtered before results are returned. Internet links use only the words you enter, never tenant document or record content.</p>
+        {warehouse ? <div className="library-warehouse-results">
+          {([
+            ["Controlled documents", warehouse.groups.controlled_documents],
+            ["Library holdings", warehouse.groups.library_items],
+            ["Retained records", warehouse.groups.retained_records],
+          ] as const).map(([label, items]) => <section key={label}>
+            <header><strong>{label}</strong><small>{items.length} match{items.length === 1 ? "" : "es"}</small></header>
+            {items.map((item) => <button type="button" key={`${item.kind}:${item.id}:${item.heading || item.record_number || ""}`} className="library-warehouse-result" onClick={() => item.target_path && navigate(item.target_path)}>
+              <span><small>{item.code || item.series_code || item.catalogue_code || item.kind.replaceAll("_", " ")}</small><strong>{item.title}</strong>{item.heading ? <em>{item.heading}{item.page_number ? ` · page ${item.page_number}` : ""}</em> : null}{item.snippet ? <p>{item.snippet}</p> : null}</span>
+            </button>)}
+            {!items.length ? <p className="library-ops__hint">No authorized matches.</p> : null}
+          </section>)}
+          <section className="library-warehouse-results__internet"><header><strong>Search the public web</strong><small>Explicit external navigation</small></header><div className="library-external-links">{Object.entries(warehouse.internet.links).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer"><ExternalLink size={13} /> {label.replaceAll("_", " ")}</a>)}</div></section>
+        </div> : <p className="library-ops__hint">One search can locate a controlled paragraph, a physical book, or a retained business record without crossing permission boundaries.</p>}
+      </> : null}
       {mode === "catalog" ? <>
         <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadCatalog(); }}>
           <Search size={16} /><input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search tenant books, journals, ISBN, author, subject…" autoFocus /><button className="dc-button" disabled={busy}>Search</button>
