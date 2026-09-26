@@ -39,6 +39,7 @@ from .workspace_evidence_router import router as workspace_evidence_router
 from .workspace_external_assessment_router import router as workspace_external_assessment_router
 from .workspace_external_router import router as workspace_external_router
 from .workspace_integration_router import router as workspace_integration_router
+from .workspace_library_catalog_router import router as workspace_library_catalog_router
 from .workspace_library_discovery_router import router as workspace_library_discovery_router
 from .workspace_library_router import router as workspace_library_router
 from .workspace_portfolio_router import router as workspace_portfolio_router
@@ -96,6 +97,7 @@ router.include_router(workspace_reports_export_router, prefix="/doc-control")
 router.include_router(workspace_administration_router, prefix="/doc-control")
 router.include_router(workspace_external_assessment_router, prefix="/doc-control")
 router.include_router(workspace_copy_incident_router, prefix="/doc-control")
+router.include_router(workspace_library_catalog_router, prefix="/doc-control")
 router.include_router(workspace_library_discovery_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
