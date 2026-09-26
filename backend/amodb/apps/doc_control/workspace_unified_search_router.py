@@ -18,13 +18,46 @@ from . import records_vault_models as rm
 from . import warehouse_models as wm
 from .workspace_library_catalog_router import _serialize_item, _visible_query
 from .workspace_records_vault_router import _record_access_predicate, _record_payload
-from .workspace_warehouse_router import _target_path, _visible_record_ids
+from .workspace_warehouse_router import (
+    _matching_policy_principals,
+    _policy_conditions_match,
+    _target_path,
+    _visible_record_ids,
+)
 from .workspace_service import can_read_manual, get_profile, is_control_user, resolve_tenant
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Unified Search"])
 
 _MAX_PER_SOURCE = 25
+
+
+def _denied_source_ids(db: Session, *, tenant, user: account_models.User) -> dict[str, set[str]]:
+    """Apply explicit warehouse DENY across every search source before exposing metadata."""
+    if is_control_user(user):
+        return {}
+    principals = _matching_policy_principals(user)
+    policies = (
+        db.query(wm.WarehouseAccessPolicy, wm.WarehouseContentRecord)
+        .join(wm.WarehouseContentRecord, wm.WarehouseContentRecord.id == wm.WarehouseAccessPolicy.content_record_id)
+        .filter(
+            wm.WarehouseAccessPolicy.tenant_id == tenant.amo_id,
+            wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
+            wm.WarehouseAccessPolicy.action == "READ",
+            wm.WarehouseAccessPolicy.effect == "DENY",
+            or_(*[
+                (wm.WarehouseAccessPolicy.principal_type == kind)
+                & (func.upper(wm.WarehouseAccessPolicy.principal_value) == value.upper())
+                for kind, value in principals
+            ]),
+        )
+        .all()
+    )
+    denied: dict[str, set[str]] = {}
+    for policy, record in policies:
+        if _policy_conditions_match(policy, user):
+            denied.setdefault(record.source_entity_type, set()).add(record.source_entity_id)
+    return denied
 
 
 def _controlled_documents(
@@ -34,6 +67,7 @@ def _controlled_documents(
     user: account_models.User,
     query_text: str,
     limit: int,
+    denied_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     manuals = (
         db.query(manual_models.Manual)
@@ -46,7 +80,7 @@ def _controlled_documents(
     visible_ids = [
         row.id
         for row in manuals
-        if can_read_manual(user, get_profile(db, tenant, row.id))
+        if str(row.id) not in (denied_ids or set()) and can_read_manual(user, get_profile(db, tenant, row.id))
     ]
     if not visible_ids:
         return []
@@ -177,6 +211,7 @@ def _catalog(
     user: account_models.User,
     query_text: str,
     limit: int,
+    denied_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     query = _visible_query(
         db.query(lm.LibraryCatalogItem).filter(
@@ -185,6 +220,8 @@ def _catalog(
         ),
         user,
     )
+    if denied_ids:
+        query = query.filter(lm.LibraryCatalogItem.id.notin_(denied_ids))
     if db.get_bind().dialect.name == "postgresql":
         tsquery = func.websearch_to_tsquery("simple", query_text)
         vector = func.to_tsvector("simple", lm.LibraryCatalogItem.search_text)
@@ -210,6 +247,7 @@ def _records(
     user: account_models.User,
     query_text: str,
     limit: int,
+    denied_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     query = (
         db.query(rm.TenantRecordAsset, rm.TenantRecordSeries)
@@ -220,6 +258,8 @@ def _records(
             _record_access_predicate(user),
         )
     )
+    if denied_ids:
+        query = query.filter(rm.TenantRecordAsset.id.notin_(denied_ids))
     if db.get_bind().dialect.name == "postgresql":
         tsquery = func.websearch_to_tsquery("simple", query_text)
         vector = func.to_tsvector("simple", rm.TenantRecordAsset.search_text)
@@ -346,10 +386,11 @@ def unified_search(
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     query_text = " ".join(q.split())
+    denied = _denied_source_ids(db, tenant=tenant, user=current_user) if scope != "external" else {}
     governed = _governed_resources(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope == "everything" else []
-    controlled = _controlled_documents(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "repository"} else []
-    catalog = _catalog(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "library"} else []
-    records = _records(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "records"} else []
+    controlled = _controlled_documents(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit, denied_ids=denied.get("CONTROLLED_DOCUMENT")) if scope in {"everything", "repository"} else []
+    catalog = _catalog(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit, denied_ids=denied.get("LIBRARY_CATALOG_ITEM")) if scope in {"everything", "library"} else []
+    records = _records(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit, denied_ids=denied.get("RETAINED_RECORD")) if scope in {"everything", "records"} else []
     encoded = quote_plus(query_text)
     return {
         "query": query_text,
