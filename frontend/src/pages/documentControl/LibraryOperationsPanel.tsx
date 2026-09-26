@@ -18,6 +18,9 @@ import { useNavigate } from "react-router-dom";
 
 import {
   cancelLibraryHold,
+  closeLibraryInventorySession,
+  createLibraryInventorySession,
+  getLibraryInventorySession,
   circulateLibraryHolding,
   createLibraryCatalogItem,
   createLibraryHolding,
@@ -28,12 +31,14 @@ import {
   controlLibraryHolding,
   placeLibraryHold,
   scanLibraryHolding,
+  scanLibraryInventorySession,
   searchExternalCatalog,
   searchTenantWarehouse,
   type ExternalCatalogResult,
   type LibraryCatalogItem,
   type LibraryHoldingRegisterResponse,
   type LibraryHoldingScan,
+  type LibraryInventorySession,
   type MyLibraryAccount,
   type WarehouseSearchResponse,
 } from "../../services/documentLibrary";
@@ -214,6 +219,10 @@ export default function LibraryOperationsPanel({
   const [account, setAccount] = useState<MyLibraryAccount | null>(null);
   const [inventory, setInventory] = useState<LibraryHoldingRegisterResponse | null>(null);
   const [inventoryQuery, setInventoryQuery] = useState("");
+  const [inventorySession, setInventorySession] = useState<LibraryInventorySession | null>(null);
+  const [inventoryLocation, setInventoryLocation] = useState("");
+  const [inventoryScanCode, setInventoryScanCode] = useState("");
+  const [inventoryCameraOpen, setInventoryCameraOpen] = useState(false);
   const [inventoryReason, setInventoryReason] = useState("");
   const [selectedCatalog, setSelectedCatalog] = useState<LibraryCatalogItem | null>(null);
   const [barcode, setBarcode] = useState("");
@@ -383,6 +392,47 @@ export default function LibraryOperationsPanel({
     }
   };
 
+
+  const startInventorySession = async () => {
+    const location = inventoryLocation.trim();
+    if (!location) {
+      setError("Enter the shelf, room or controlled location to inventory.");
+      return;
+    }
+    const result = await run(() => createLibraryInventorySession(tenant, { location_prefix: location }));
+    if (result) {
+      setInventorySession(result);
+      setNotice(`Inventory started for ${result.location_prefix}. Scan each physical item once.`);
+    }
+  };
+
+  const inventoryScan = async (value = inventoryScanCode) => {
+    if (!inventorySession) return;
+    const code = value.trim();
+    if (!code) return;
+    const result = await run(() => scanLibraryInventorySession(tenant, inventorySession.id, {
+      code,
+      observed_location: inventoryLocation.trim() || inventorySession.location_prefix,
+    }));
+    if (!result) return;
+    setInventoryScanCode("");
+    setInventoryCameraOpen(false);
+    setNotice(`${result.title} · ${result.outcome.replaceAll("_", " ")}`);
+    const refreshed = await run(() => getLibraryInventorySession(tenant, inventorySession.id));
+    if (refreshed) setInventorySession(refreshed);
+    await loadInventory();
+  };
+
+  const closeInventory = async () => {
+    if (!inventorySession) return;
+    const result = await run(() => closeLibraryInventorySession(tenant, inventorySession.id));
+    if (result) {
+      setInventorySession(result);
+      setNotice(`Inventory closed: ${result.observed_count}/${result.expected_count} observed, ${result.missing_count} missing, ${result.misplaced_count} misplaced.`);
+      await loadInventory();
+    }
+  };
+
   const placeHold = async (item: LibraryCatalogItem) => {
     const result = await run(() => placeLibraryHold(tenant, item.id));
     if (result) {
@@ -497,6 +547,26 @@ export default function LibraryOperationsPanel({
       </> : null}
 
       {mode === "inventory" && canControl ? <>
+        <section className="library-stocktake">
+          <header><div><PackageCheck size={17} /><span><strong>Physical inventory / shelf audit</strong><small>Scan the actual item at the actual location. Missing and misplaced holdings are reconciled when the session closes.</small></span></div></header>
+          {!inventorySession || inventorySession.status !== "OPEN" ? <div className="library-stocktake__start">
+            <label><span>Location / shelf</span><input value={inventoryLocation} onChange={(event) => setInventoryLocation(event.target.value)} placeholder="e.g. Technical Library / Shelf A3" /></label>
+            <button type="button" className="dc-button dc-button--primary" disabled={busy || !inventoryLocation.trim()} onClick={() => void startInventorySession()}>Start inventory</button>
+          </div> : <div className="library-stocktake__active">
+            <div className="library-inventory-summary">
+              <span><strong>{inventorySession.expected_count}</strong> expected</span>
+              <span><strong>{inventorySession.observed_count}</strong> observed</span>
+              <span><strong>{inventorySession.misplaced_count}</strong> misplaced</span>
+              <span><strong>{inventorySession.missing_count}</strong> missing</span>
+            </div>
+            <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void inventoryScan(); }}>
+              <Barcode size={16} /><input value={inventoryScanCode} onChange={(event) => setInventoryScanCode(event.target.value)} placeholder="Scan barcode / QR" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Record scan</button><button type="button" className="dc-button" onClick={() => setInventoryCameraOpen((value) => !value)}><Camera size={14} /> Camera</button>
+            </form>
+            {inventoryCameraOpen ? <CameraScanner onDetected={(value) => void inventoryScan(value)} onClose={() => setInventoryCameraOpen(false)} /> : null}
+            {inventorySession.observations?.length ? <div className="library-stocktake__observations">{inventorySession.observations.slice(0, 8).map((row) => <div key={row.id}><span><strong>{row.title}</strong><small>{row.barcode}</small></span><em className={row.outcome === "MATCH" ? "ok" : "exception"}>{row.outcome.replaceAll("_", " ")}</em></div>)}</div> : null}
+            <div className="library-scan-card__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void closeInventory()}>Close & reconcile inventory</button></div>
+          </div>}
+        </section>
         <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadInventory(); }}>
           <Search size={16} /><input value={inventoryQuery} onChange={(event) => setInventoryQuery(event.target.value)} placeholder="Barcode, call number, title, shelf or accession…" autoFocus /><button className="dc-button" disabled={busy}>Search inventory</button>
         </form>
