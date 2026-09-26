@@ -10,9 +10,12 @@ import {
   UnlockKeyhole,
 } from "lucide-react";
 
+import { useSearchParams } from "react-router-dom";
+
 import { getCachedUser } from "../../services/auth";
 import {
   createRecordSeries,
+  getRecord,
   disposeRecord,
   downloadRecord,
   listRecords,
@@ -51,9 +54,12 @@ function when(value?: string | null): string {
 
 export default function DocumentRecordsVaultPage() {
   const { tenant } = useDocumentControlRoute();
+  const [params, setParams] = useSearchParams();
+  const requestedRecordId = params.get("record") || "";
   const canControl = canControlRecords();
   const [series, setSeries] = useState<RecordSeries[]>([]);
   const [records, setRecords] = useState<RetainedRecord[]>([]);
+  const [focusedRecord, setFocusedRecord] = useState<RetainedRecord | null>(null);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [seriesId, setSeriesId] = useState("");
@@ -93,6 +99,14 @@ export default function DocumentRecordsVaultPage() {
   }, [disposition, legalHoldOnly, q, retentionDue, seriesId, sourceModule, tenant]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!tenant || !requestedRecordId) { setFocusedRecord(null); return; }
+    let active = true;
+    void getRecord(tenant, requestedRecordId)
+      .then((row) => { if (active) setFocusedRecord(row); })
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The requested retained record could not be opened."); });
+    return () => { active = false; };
+  }, [requestedRecordId, tenant]);
 
   const sourceModules = useMemo(
     () => Array.from(new Set(records.map((row) => row.source_module).filter(Boolean) as string[])).sort(),
@@ -144,7 +158,14 @@ export default function DocumentRecordsVaultPage() {
         {!busy && !records.length ? <DocumentControlEmpty title="No records match" message="Change the filters or deposit a retained record into an accessible series." /> : null}
 
         <div className="records-vault__list">
-          {records.map((record) => (
+          {focusedRecord ? <div className="records-vault__focused">
+            <span><strong>Opened from search</strong><small>{focusedRecord.series_code} · {focusedRecord.record_number}</small></span>
+            <button type="button" className="dc-button" onClick={() => { const next = new URLSearchParams(params); next.delete("record"); setParams(next, { replace: true }); }}>Clear</button>
+          </div> : null}
+          {[
+            ...(focusedRecord ? [focusedRecord] : []),
+            ...records.filter((record) => record.id !== focusedRecord?.id),
+          ].map((record) => (
             <article key={record.id} className="records-vault__record">
               <header>
                 <div><small>{record.series_code} · {record.record_number}</small><h2>{record.title}</h2></div>
