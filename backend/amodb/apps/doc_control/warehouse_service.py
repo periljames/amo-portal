@@ -140,9 +140,13 @@ def ensure_content_version(
     # Source-backed versions preserve their sequence/source identity while the
     # projection may refresh lifecycle metadata. The source binary itself remains
     # authoritative and is never overwritten by this registry.
-    row.version_label = (version_label or row.version_label or "1")[:128]
+    # The version label and source hash are write-once identity. Lifecycle status
+    # may move (for example PUBLISHED -> SUPERSEDED) without rewriting the version.
+    if not row.version_label:
+        row.version_label = (version_label or "1")[:128]
     row.lifecycle_status = (lifecycle_status or "DRAFT").strip().upper()[:32]
-    row.file_hash = (file_hash or "").strip()[:64] or None
+    if not row.file_hash and file_hash:
+        row.file_hash = str(file_hash).strip()[:64] or None
     row.effective_at = _as_datetime(effective_at)
     row.superseded_at = _as_datetime(superseded_at)
     row.change_summary = (change_summary or "").strip() or None
