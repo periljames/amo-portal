@@ -703,3 +703,64 @@ export type WarehouseSearchResponse = {
 export function searchTenantWarehouse(tenant: string, query: string, limit = 12): Promise<WarehouseSearchResponse> {
   return api(`${workspacePath(tenant, "/search")}${queryString({ q: query, limit })}`);
 }
+
+
+export type LibraryInventoryObservation = {
+  id: string;
+  holding_id: string;
+  barcode: string;
+  title: string;
+  observed_location: string;
+  expected_location: string;
+  outcome: "MATCH" | "MISPLACED" | "EXCEPTION";
+  observed_at?: string | null;
+};
+
+export type LibraryInventorySession = {
+  id: string;
+  location_prefix: string;
+  status: "OPEN" | "CLOSED" | "CANCELLED";
+  expected_count: number;
+  observed_count: number;
+  misplaced_count: number;
+  missing_count: number;
+  started_at?: string | null;
+  closed_at?: string | null;
+  observations?: LibraryInventoryObservation[];
+};
+
+export function createLibraryInventorySession(
+  tenant: string,
+  payload: { location_prefix: string; notes?: string | null },
+): Promise<LibraryInventorySession> {
+  return api(workspacePath(tenant, "/catalog/inventory-sessions"), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getLibraryInventorySession(tenant: string, sessionId: string): Promise<LibraryInventorySession> {
+  return api(workspacePath(tenant, `/catalog/inventory-sessions/${encodeURIComponent(sessionId)}`));
+}
+
+export function scanLibraryInventorySession(
+  tenant: string,
+  sessionId: string,
+  payload: { code: string; observed_location: string },
+): Promise<{ duplicate: boolean; barcode: string; title: string; outcome: string; expected_location: string; observed_location: string }> {
+  return api(workspacePath(tenant, `/catalog/inventory-sessions/${encodeURIComponent(sessionId)}/scan`), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function closeLibraryInventorySession(
+  tenant: string,
+  sessionId: string,
+  notes?: string,
+): Promise<LibraryInventorySession> {
+  return api(workspacePath(tenant, `/catalog/inventory-sessions/${encodeURIComponent(sessionId)}/close`), {
+    method: "POST",
+    body: JSON.stringify({ notes: notes || null }),
+  });
+}
