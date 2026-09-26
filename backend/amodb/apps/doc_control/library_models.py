@@ -62,6 +62,26 @@ class LibraryCatalogItem(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+class LibraryCatalogIdentifier(Base):
+    """Normalized external/library identifier used for deduplication and lookup."""
+
+    __tablename__ = "document_library_catalog_identifiers"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "scheme", "normalized_value", name="uq_doc_library_identifier_tenant_scheme_value"),
+        Index("ix_doc_library_identifier_item", "catalog_item_id"),
+        Index("ix_doc_library_identifier_lookup", "tenant_id", "normalized_value"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    catalog_item_id = Column(String(36), ForeignKey("document_library_catalog_items.id", ondelete="CASCADE"), nullable=False)
+    scheme = Column(String(32), nullable=False)
+    normalized_value = Column(String(255), nullable=False)
+    display_value = Column(String(255), nullable=False)
+    source = Column(String(64), nullable=False, default="MANUAL")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
 class LibraryHolding(Base):
     """One physical or offline-media item that can be located and circulated."""
 
