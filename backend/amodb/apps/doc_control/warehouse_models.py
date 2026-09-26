@@ -275,3 +275,171 @@ class WarehouseAuditEvent(Base):
     transaction_id = Column(String(64), nullable=False, default=_uuid)
     metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class WarehouseCollection(Base):
+    __tablename__ = "document_warehouse_collections"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_doc_wh_collection_code"),
+        Index("ix_doc_wh_collection_type_status", "tenant_id", "collection_type", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(128), nullable=False)
+    name = Column(String(255), nullable=False)
+    collection_type = Column(String(40), nullable=False, default="GENERAL")
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class WarehouseCollectionMembership(Base):
+    __tablename__ = "document_warehouse_collection_memberships"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "collection_id", "content_record_id", name="uq_doc_wh_collection_member"),
+        Index("ix_doc_wh_collection_member_record", "tenant_id", "content_record_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    collection_id = Column(String(36), ForeignKey("document_warehouse_collections.id", ondelete="CASCADE"), nullable=False)
+    content_record_id = Column(String(36), ForeignKey("document_warehouse_content_records.id", ondelete="CASCADE"), nullable=False)
+    added_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class WarehousePatron(Base):
+    __tablename__ = "document_warehouse_patrons"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", name="uq_doc_wh_patron_user"),
+        UniqueConstraint("tenant_id", "patron_barcode", name="uq_doc_wh_patron_barcode"),
+        Index("ix_doc_wh_patron_status_type", "tenant_id", "status", "patron_type"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    patron_barcode = Column(String(128), nullable=True)
+    patron_type = Column(String(32), nullable=False, default="EMPLOYEE")
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class WarehouseLoan(Base):
+    __tablename__ = "document_warehouse_loans"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_entity_type", "source_entity_id", name="uq_doc_wh_loan_source"),
+        Index("ix_doc_wh_loan_patron_status", "tenant_id", "patron_id", "status", "due_at"),
+        Index("ix_doc_wh_loan_item_status", "item_copy_id", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    item_copy_id = Column(String(36), ForeignKey("document_warehouse_item_copies.id", ondelete="CASCADE"), nullable=False)
+    patron_id = Column(String(36), ForeignKey("document_warehouse_patrons.id", ondelete="RESTRICT"), nullable=False)
+    source_entity_type = Column(String(64), nullable=False)
+    source_entity_id = Column(String(128), nullable=False)
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    checked_out_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    returned_at = Column(DateTime(timezone=True), nullable=True)
+    renewal_count = Column(Integer, nullable=False, default=0)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class WarehouseHold(Base):
+    __tablename__ = "document_warehouse_holds"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_entity_type", "source_entity_id", name="uq_doc_wh_hold_source"),
+        Index("ix_doc_wh_hold_record_status", "content_record_id", "status", "created_at"),
+        Index("ix_doc_wh_hold_patron_status", "patron_id", "status", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    content_record_id = Column(String(36), ForeignKey("document_warehouse_content_records.id", ondelete="CASCADE"), nullable=False)
+    patron_id = Column(String(36), ForeignKey("document_warehouse_patrons.id", ondelete="CASCADE"), nullable=False)
+    fulfilled_item_copy_id = Column(String(36), ForeignKey("document_warehouse_item_copies.id", ondelete="SET NULL"), nullable=True)
+    source_entity_type = Column(String(64), nullable=False)
+    source_entity_id = Column(String(128), nullable=False)
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    pickup_location = Column(String(1000), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class WarehouseItemEvent(Base):
+    __tablename__ = "document_warehouse_item_events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_event_type", "source_event_id", name="uq_doc_wh_item_event_source"),
+        Index("ix_doc_wh_item_event_copy_created", "item_copy_id", "created_at"),
+        Index("ix_doc_wh_item_event_tenant_type", "tenant_id", "event_type", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    item_copy_id = Column(String(36), ForeignKey("document_warehouse_item_copies.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(40), nullable=False)
+    source_event_type = Column(String(64), nullable=False)
+    source_event_id = Column(String(128), nullable=False)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    patron_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=True)
+    from_location = Column(String(1000), nullable=True)
+    to_location = Column(String(1000), nullable=True)
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class WarehouseWorkflowInstance(Base):
+    __tablename__ = "document_warehouse_workflows"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_workflow_type", "source_workflow_id", name="uq_doc_wh_workflow_source"),
+        Index("ix_doc_wh_workflow_record_state", "content_record_id", "state"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    content_record_id = Column(String(36), ForeignKey("document_warehouse_content_records.id", ondelete="CASCADE"), nullable=False)
+    content_version_id = Column(String(36), ForeignKey("document_warehouse_content_versions.id", ondelete="SET NULL"), nullable=True)
+    source_workflow_type = Column(String(64), nullable=False)
+    source_workflow_id = Column(String(128), nullable=False)
+    state = Column(String(48), nullable=False)
+    effective_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class WarehouseRetentionRule(Base):
+    __tablename__ = "document_warehouse_retention_rules"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_rule_type", "source_rule_id", name="uq_doc_wh_retention_source"),
+        UniqueConstraint("tenant_id", "code", name="uq_doc_wh_retention_code"),
+        Index("ix_doc_wh_retention_status", "tenant_id", "status", "disposition_action"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(128), nullable=False)
+    name = Column(String(255), nullable=False)
+    source_rule_type = Column(String(64), nullable=False)
+    source_rule_id = Column(String(128), nullable=False)
+    retention_months = Column(Integer, nullable=False)
+    trigger_event = Column(String(64), nullable=False, default="CAPTURED")
+    disposition_action = Column(String(32), nullable=False, default="REVIEW_AT_EXPIRY")
+    status = Column(String(24), nullable=False, default="ACTIVE")
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
