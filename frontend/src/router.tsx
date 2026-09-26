@@ -30,6 +30,7 @@ const DocControlDistributionPage = lazy(() => import("./pages/DocControlPages").
 const DocControlCompliancePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlCompliancePage })));
 const DocControlReportsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlReportsPage })));
 const DocControlAdministrationPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlAdministrationPage })));
+const DocControlRecordsVaultPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlRecordsVaultPage })));
 
 type GuardProps = { children: React.ReactElement };
 
@@ -201,6 +202,7 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/records" element={<WorkspaceRequireAuth><DocControlRecordsVaultPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure/records/:recordId" element={<WorkspaceRequireAuth><DocControlGeneratedRecordPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage /></WorkspaceRequireAuth>} />
