@@ -764,3 +764,17 @@ export function closeLibraryInventorySession(
     body: JSON.stringify({ notes: notes || null }),
   });
 }
+
+
+export type LibraryPatron = {
+  id: string;
+  name: string;
+  email: string;
+  staff_code?: string | null;
+  role: string;
+  department?: string | null;
+};
+
+export function searchLibraryPatrons(tenant: string, q?: string, limit = 30): Promise<{ items: LibraryPatron[] }> {
+  return api(`${workspacePath(tenant, "/catalog/patrons")}${queryString({ q, limit })}`);
+}
