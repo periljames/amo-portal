@@ -28,6 +28,7 @@ import {
   createLibraryHolding,
   downloadLibraryHoldingLabel,
   getMyLibraryAccount,
+  getWarehouseOverview,
   importLibraryMarcXml,
   downloadLibraryMarcXml,
   listLibraryCatalog,
@@ -46,6 +47,7 @@ import {
   type LibraryInventorySession,
   type LibraryPatron,
   type MyLibraryAccount,
+  type WarehouseOverviewResponse,
   type WarehouseSearchResponse,
   type WarehouseSearchScope,
   type WarehouseRevisionException,
@@ -225,6 +227,7 @@ export default function LibraryOperationsPanel({
   const [warehouseQuery, setWarehouseQuery] = useState("");
   const [warehouseScope, setWarehouseScope] = useState<WarehouseSearchScope>("everything");
   const [warehouse, setWarehouse] = useState<WarehouseSearchResponse | null>(null);
+  const [warehouseOverview, setWarehouseOverview] = useState<WarehouseOverviewResponse | null>(null);
   const [revisionExceptions, setRevisionExceptions] = useState<WarehouseRevisionException[]>([]);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
@@ -282,6 +285,12 @@ export default function LibraryOperationsPanel({
     if (result) setCatalog(result.items);
   }, [catalogQuery, run, tenant]);
 
+  const loadWarehouseOverview = useCallback(async () => {
+    const result = await run(() => getWarehouseOverview(tenant));
+    if (result) setWarehouseOverview(result);
+  }, [run, tenant]);
+
+
   const performScan = useCallback(async (value = scanCode) => {
     const code = value.trim();
     if (!code) return;
@@ -304,7 +313,8 @@ export default function LibraryOperationsPanel({
     if (mode === "account" && !account) void loadAccount();
     if (mode === "catalog" && !catalog.length) void loadCatalog("");
     if (mode === "inventory" && canControl && !inventory) void loadInventory("");
-  }, [account, canControl, catalog.length, inventory, loadAccount, loadCatalog, loadInventory, mode]);
+    if (mode === "warehouse" && !warehouseOverview) void loadWarehouseOverview();
+  }, [account, canControl, catalog.length, inventory, loadAccount, loadCatalog, loadInventory, loadWarehouseOverview, mode, warehouseOverview]);
 
   // Hardware barcode scanners commonly behave like a keyboard and terminate with
   // Enter. Keeping a focused plain input means those devices work without drivers.
@@ -328,6 +338,8 @@ export default function LibraryOperationsPanel({
     if (!result) return;
     const exceptions = await run(() => listWarehouseRevisionExceptions(tenant, 1, 100));
     if (exceptions) setRevisionExceptions(exceptions.items);
+    const overview = await run(() => getWarehouseOverview(tenant));
+    if (overview) setWarehouseOverview(overview);
     if (warehouseQuery.trim()) {
       const refreshed = await run(() => searchTenantWarehouse(tenant, warehouseQuery.trim(), 12, warehouseScope));
       if (refreshed) setWarehouse(refreshed);
@@ -562,6 +574,20 @@ export default function LibraryOperationsPanel({
           </div>
           {canControl ? <button type="button" className="dc-button" disabled={busy} onClick={() => void reconcileWarehouse()}><RefreshCcw size={14} /> Reconcile warehouse</button> : null}
         </div>
+        {warehouseOverview ? <section className="library-warehouse-overview" aria-label="Knowledge warehouse overview">
+          <button type="button" onClick={() => setWarehouseScope("everything")}>
+            <strong>{warehouseOverview.resources.total}</strong><span>Governed resources</span><small>{Object.keys(warehouseOverview.resources.by_type).length} resource types</small>
+          </button>
+          <button type="button" onClick={() => setMode("scan")}>
+            <strong>{warehouseOverview.physical_copies.total}</strong><span>Physical / offline copies</span><small>{warehouseOverview.physical_copies.revision_required ? `${warehouseOverview.physical_copies.revision_required} require revision` : "Revision state current"}</small>
+          </button>
+          <button type="button" onClick={() => setWarehouseScope("repository")}>
+            <strong>{warehouseOverview.relationships.total}</strong><span>Governed relationships</span><small>{warehouseOverview.relationships.unverified ? `${warehouseOverview.relationships.unverified} need verification` : "All active links verified"}</small>
+          </button>
+          <button type="button" onClick={() => setMode("account")}>
+            <strong>{warehouseOverview.my_work.active_loans + warehouseOverview.my_work.active_holds}</strong><span>My circulation work</span><small>{warehouseOverview.my_work.active_loans} loans · {warehouseOverview.my_work.active_holds} holds</small>
+          </button>
+        </section> : null}
         <form className="library-ops__search" onSubmit={searchWarehouse}>
           <Database size={16} /><input value={warehouseQuery} onChange={(event) => setWarehouseQuery(event.target.value)} placeholder={warehouseScope === "external" ? "Enter public search terms" : "Document number, title, ISBN, record number, clause or text"} autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search</button>
         </form>
