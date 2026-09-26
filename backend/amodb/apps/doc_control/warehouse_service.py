@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.manuals import models as manual_models
 
 from . import domain_models as dm
+from . import governance_models as gm
 from . import library_models as lm
 from . import records_vault_models as rm
 from . import warehouse_models as wm
@@ -652,6 +654,272 @@ def sync_controlled_copy(
     return row
 
 
+
+def _warehouse_record_for_manual(
+    db: Session,
+    *,
+    tenant_id: str,
+    manual_id: str,
+) -> wm.WarehouseContentRecord | None:
+    return (
+        db.query(wm.WarehouseContentRecord)
+        .filter(
+            wm.WarehouseContentRecord.tenant_id == tenant_id,
+            wm.WarehouseContentRecord.source_entity_type == "CONTROLLED_DOCUMENT",
+            wm.WarehouseContentRecord.source_entity_id == str(manual_id),
+        )
+        .first()
+    )
+
+
+def _warehouse_version_for_manual_revision(
+    db: Session,
+    *,
+    tenant_id: str,
+    revision_id: str | None,
+) -> wm.WarehouseContentVersion | None:
+    if not revision_id:
+        return None
+    return (
+        db.query(wm.WarehouseContentVersion)
+        .filter(
+            wm.WarehouseContentVersion.tenant_id == tenant_id,
+            wm.WarehouseContentVersion.source_version_type == "MANUAL_REVISION",
+            wm.WarehouseContentVersion.source_version_id == str(revision_id),
+        )
+        .first()
+    )
+
+
+def sync_governed_relationships(
+    db: Session,
+    *,
+    manual_tenant: manual_models.Tenant,
+    actor_user_id: str | None = None,
+) -> int:
+    """Project existing document governance links into the cross-resource graph."""
+    tenant_id = str(manual_tenant.amo_id)
+    relationships = (
+        db.query(gm.DocumentGovernedRelationship)
+        .filter(
+            gm.DocumentGovernedRelationship.tenant_id == tenant_id,
+            gm.DocumentGovernedRelationship.resolution_status != "SUPERSEDED",
+        )
+        .all()
+    )
+    count = 0
+    namespace = uuid.UUID("d3851f76-9f78-4cc8-a98f-c7d891d4f5cc")
+    for source in relationships:
+        source_record = _warehouse_record_for_manual(
+            db,
+            tenant_id=tenant_id,
+            manual_id=source.source_manual_id,
+        )
+        if source_record is None:
+            continue
+        source_version = _warehouse_version_for_manual_revision(
+            db,
+            tenant_id=tenant_id,
+            revision_id=source.source_revision_id,
+        )
+
+        target_record = None
+        target_version = None
+        if source.target_manual_id:
+            target_record = _warehouse_record_for_manual(
+                db,
+                tenant_id=tenant_id,
+                manual_id=source.target_manual_id,
+            )
+            target_version = _warehouse_version_for_manual_revision(
+                db,
+                tenant_id=tenant_id,
+                revision_id=source.target_revision_id,
+            )
+        elif source.target_entity_id:
+            target_type = str(source.target_entity_type or "RELATED_ENTITY").strip().upper()
+            target_record = ensure_content_record(
+                db,
+                tenant_id=tenant_id,
+                resource_type=target_type,
+                canonical_code=str(source.exact_token or source.target_entity_id),
+                title=str(source.section_label or source.exact_token or f"{target_type} {source.target_entity_id}"),
+                source_entity_type=target_type,
+                source_entity_id=str(source.target_entity_id),
+                actor_user_id=actor_user_id,
+                lifecycle_status="REFERENCED",
+                metadata={
+                    "placeholder_from_relationship": True,
+                    "relationship_source": source.relationship_source,
+                },
+            )
+        if target_record is None or target_record.id == source_record.id:
+            continue
+
+        relation_id = str(uuid.uuid5(namespace, f"{tenant_id}:{source.id}"))
+        row = (
+            db.query(wm.WarehouseRelationship)
+            .filter(wm.WarehouseRelationship.id == relation_id)
+            .first()
+        )
+        if row is None:
+            row = wm.WarehouseRelationship(
+                id=relation_id,
+                tenant_id=tenant_id,
+                source_record_id=source_record.id,
+                source_version_id=source_version.id if source_version else None,
+                relationship_type=str(source.relationship_type).strip().upper(),
+                target_record_id=target_record.id,
+                target_version_id=target_version.id if target_version else None,
+                status="ACTIVE",
+                verified_by_user_id=source.confirmed_by_user_id,
+                metadata_json={
+                    "source_relationship_id": source.id,
+                    "relationship_source": source.relationship_source,
+                    "occurrence_key": source.occurrence_key,
+                    "exact_token": source.exact_token,
+                    "exact_quote": source.exact_quote,
+                    "page_number": source.page_number,
+                    "section_label": source.section_label,
+                    "confidence_percent": source.confidence_percent,
+                    "resolution_status": source.resolution_status,
+                    "provenance": dict(source.provenance_json or {}),
+                },
+                created_by_user_id=source.created_by_user_id or actor_user_id,
+            )
+            db.add(row)
+        else:
+            row.source_version_id = source_version.id if source_version else None
+            row.target_version_id = target_version.id if target_version else None
+            row.relationship_type = str(source.relationship_type).strip().upper()
+            row.status = "ACTIVE"
+            row.verified_by_user_id = source.confirmed_by_user_id
+            row.metadata_json = {
+                **dict(row.metadata_json or {}),
+                "confidence_percent": source.confidence_percent,
+                "resolution_status": source.resolution_status,
+                "provenance": dict(source.provenance_json or {}),
+            }
+        count += 1
+    return count
+
+
+def sync_manual_acknowledgements(
+    db: Session,
+    *,
+    manual_tenant: manual_models.Tenant,
+) -> int:
+    """Bind existing reader sign-offs to the exact canonical content version/hash."""
+    tenant_id = str(manual_tenant.amo_id)
+    rows = (
+        db.query(manual_models.Acknowledgement)
+        .join(manual_models.ManualRevision, manual_models.ManualRevision.id == manual_models.Acknowledgement.revision_id)
+        .join(manual_models.Manual, manual_models.Manual.id == manual_models.ManualRevision.manual_id)
+        .filter(
+            manual_models.Manual.tenant_id == manual_tenant.id,
+            manual_models.Acknowledgement.holder_user_id.isnot(None),
+            manual_models.Acknowledgement.acknowledged_at.isnot(None),
+        )
+        .all()
+    )
+    count = 0
+    for source in rows:
+        version = _warehouse_version_for_manual_revision(
+            db,
+            tenant_id=tenant_id,
+            revision_id=source.revision_id,
+        )
+        if version is None:
+            continue
+        record = (
+            db.query(wm.WarehouseContentRecord)
+            .filter(wm.WarehouseContentRecord.id == version.content_record_id)
+            .first()
+        )
+        if record is None:
+            continue
+        existing = (
+            db.query(wm.WarehouseAcknowledgement)
+            .filter(
+                wm.WarehouseAcknowledgement.tenant_id == tenant_id,
+                wm.WarehouseAcknowledgement.content_version_id == version.id,
+                wm.WarehouseAcknowledgement.user_id == source.holder_user_id,
+            )
+            .first()
+        )
+        if existing is None:
+            db.add(wm.WarehouseAcknowledgement(
+                tenant_id=tenant_id,
+                content_record_id=record.id,
+                content_version_id=version.id,
+                user_id=source.holder_user_id,
+                file_hash=version.file_hash,
+                acknowledgement_method="LEGACY_READER_SIGNOFF",
+                session_metadata_json={
+                    "source_acknowledgement_id": source.id,
+                    "acknowledgement_text": source.acknowledgement_text,
+                    "evidence_uri": source.evidence_uri,
+                },
+                acknowledged_at=source.acknowledged_at,
+            ))
+        count += 1
+    return count
+
+
+def sync_external_document_references(
+    db: Session,
+    *,
+    manual_tenant: manual_models.Tenant,
+    actor_user_id: str | None = None,
+) -> int:
+    tenant_id = str(manual_tenant.amo_id)
+    sources = (
+        db.query(dm.ExternalDocumentSource)
+        .filter(
+            dm.ExternalDocumentSource.tenant_id == tenant_id,
+            dm.ExternalDocumentSource.access_url.isnot(None),
+        )
+        .all()
+    )
+    count = 0
+    for source in sources:
+        record = _warehouse_record_for_manual(
+            db,
+            tenant_id=tenant_id,
+            manual_id=source.manual_id,
+        )
+        if record is None or not source.access_url:
+            continue
+        existing = (
+            db.query(wm.WarehouseExternalReference)
+            .filter(
+                wm.WarehouseExternalReference.tenant_id == tenant_id,
+                wm.WarehouseExternalReference.content_record_id == record.id,
+                wm.WarehouseExternalReference.provider == str(source.provider).strip().upper(),
+                wm.WarehouseExternalReference.url == source.access_url,
+            )
+            .first()
+        )
+        if existing is None:
+            db.add(wm.WarehouseExternalReference(
+                tenant_id=tenant_id,
+                content_record_id=record.id,
+                provider=str(source.provider).strip().upper(),
+                reference_type="AUTHORITATIVE_SOURCE",
+                external_id=source.subscription_reference,
+                url=source.access_url,
+                metadata_json={
+                    "authority": source.authority,
+                    "status": source.status,
+                    "update_method": source.update_method,
+                    "last_checked_at": source.last_checked_at.isoformat() if source.last_checked_at else None,
+                    "next_check_due_at": source.next_check_due_at.isoformat() if source.next_check_due_at else None,
+                },
+                created_by_user_id=actor_user_id,
+            ))
+        count += 1
+    return count
+
 def reconcile_tenant_warehouse(
     db: Session,
     *,
@@ -666,6 +934,9 @@ def reconcile_tenant_warehouse(
         "library_items": 0,
         "library_holdings": 0,
         "retained_records": 0,
+        "relationships": 0,
+        "acknowledgements": 0,
+        "external_references": 0,
     }
 
     manuals = (
@@ -731,6 +1002,21 @@ def reconcile_tenant_warehouse(
     for copy in copies:
         if sync_controlled_copy(db, manual_tenant=manual_tenant, copy=copy, actor_user_id=actor_user_id):
             counts["controlled_copies"] += 1
+
+    counts["relationships"] = sync_governed_relationships(
+        db,
+        manual_tenant=manual_tenant,
+        actor_user_id=actor_user_id,
+    )
+    counts["acknowledgements"] = sync_manual_acknowledgements(
+        db,
+        manual_tenant=manual_tenant,
+    )
+    counts["external_references"] = sync_external_document_references(
+        db,
+        manual_tenant=manual_tenant,
+        actor_user_id=actor_user_id,
+    )
 
     db.flush()
     return counts
