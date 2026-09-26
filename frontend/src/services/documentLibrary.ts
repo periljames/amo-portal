@@ -581,11 +581,27 @@ export function circulateLibraryHolding(
     override_hold?: boolean;
     comments?: string | null;
   },
-): Promise<{ item: LibraryCatalogItem; holding: LibraryHolding }> {
+): Promise<{ item: LibraryCatalogItem; holding: LibraryHolding; transaction_id: string }> {
   return api(workspacePath(tenant, `/catalog/holdings/${encodeURIComponent(holdingId)}/circulation`), {
     method: "POST",
     body: JSON.stringify({ ...payload, due_at: serverUtcDate(payload.due_at) }),
   });
+}
+
+export async function downloadLibraryCirculationReceipt(tenant: string, holdingId: string, transactionId: string): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}${workspacePath(tenant, `/catalog/holdings/${encodeURIComponent(holdingId)}/transactions/${encodeURIComponent(transactionId)}/receipt.pdf`)}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(`Library receipt could not be generated (${response.status})`);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `library-receipt-${transactionId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 export function placeLibraryHold(

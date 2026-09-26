@@ -27,6 +27,7 @@ import {
   createLibraryCatalogItem,
   createLibraryHolding,
   downloadLibraryHoldingLabel,
+  downloadLibraryCirculationReceipt,
   getMyLibraryAccount,
   getWarehouseOverview,
   getWarehouseImpact,
@@ -241,6 +242,7 @@ export default function LibraryOperationsPanel({
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
   const [scanCode, setScanCode] = useState(initialScan || "");
   const [scan, setScan] = useState<LibraryHoldingScan | null>(null);
+  const [lastTransaction, setLastTransaction] = useState<{ holdingId: string; id: string } | null>(null);
   const [transferLocation, setTransferLocation] = useState("");
   const [transferReason, setTransferReason] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -489,6 +491,7 @@ export default function LibraryOperationsPanel({
       location: action === "VERIFY_LOCATION" || action === "CHECK_IN" ? scan.holding.home_location : undefined,
     }));
     if (result) {
+      if (action !== "VERIFY_LOCATION") setLastTransaction({ holdingId: scan.holding.id, id: result.transaction_id });
       setAcknowledgement(false);
       if (action === "CHECK_OUT") { setSelectedPatronId(""); setPatronQuery(""); setPatrons([]); }
       setNotice(action === "CHECK_OUT" ? "Custody accepted and item checked out." : action === "CHECK_IN" ? "Item checked in." : action === "RENEW" ? "Loan renewed." : "Location verified.");
@@ -592,6 +595,9 @@ export default function LibraryOperationsPanel({
   const canCheckIn = Boolean(scan?.capabilities.check_in && scan?.holding.status === "CHECKED_OUT");
   const canRenew = Boolean(scan?.capabilities.renew && scan?.holding.status === "CHECKED_OUT");
   const canPlaceHold = Boolean(scan?.capabilities.place_hold && scan?.holding.status !== "AVAILABLE");
+  const latestReceiptId = lastTransaction?.holdingId === scan?.holding.id
+    ? lastTransaction.id
+    : scan?.events.find((event) => ["CHECK_OUT", "CHECK_IN", "RENEW"].includes(event.event_type))?.id;
 
   const modes = useMemo(() => [
     ["warehouse", "Search everything", Database],
@@ -745,6 +751,7 @@ export default function LibraryOperationsPanel({
             {canRenew ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("RENEW")}><RefreshCcw size={14} /> Renew</button> : null}
             {canPlaceHold ? <button type="button" className="dc-button" disabled={busy} onClick={() => void placeHold(scan.item)}>Place hold</button> : null}
             {scan.capabilities.control ? <button type="button" className="dc-button" disabled={busy} onClick={() => void circulation("VERIFY_LOCATION")}>Verify location</button> : null}
+            {latestReceiptId ? <button type="button" className="dc-button" disabled={busy} onClick={() => void run(() => downloadLibraryCirculationReceipt(tenant, scan.holding.id, latestReceiptId))}><Download size={14} /> Receipt</button> : null}
           </div>
           {scan.capabilities.control && ["AVAILABLE", "IN_TRANSIT"].includes(scan.holding.status) ? <div className="library-transfer">
             <strong>{scan.holding.status === "IN_TRANSIT" ? "Receive transferred copy" : "Transfer physical copy"}</strong>

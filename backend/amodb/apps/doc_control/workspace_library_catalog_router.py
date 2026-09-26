@@ -1396,7 +1396,67 @@ def circulate_holding(
     return {
         "item": _serialize_item(item),
         "holding": _serialize_holding(holding, controller=controller, own=str(holding.holder_user_id or "") == str(current_user.id)),
+        "transaction_id": event.id,
     }
+
+
+@router.get("/t/{tenant_slug}/catalog/holdings/{holding_id}/transactions/{event_id}/receipt.pdf")
+def circulation_receipt(
+    tenant_slug: str,
+    holding_id: str,
+    event_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    holding = _holding(db, tenant.amo_id, holding_id)
+    item = _item(db, tenant.amo_id, holding.catalog_item_id, current_user)
+    event = db.query(lm.LibraryCirculationEvent).filter(
+        lm.LibraryCirculationEvent.tenant_id == tenant.amo_id,
+        lm.LibraryCirculationEvent.holding_id == holding.id,
+        lm.LibraryCirculationEvent.id == event_id,
+        lm.LibraryCirculationEvent.event_type.in_(["CHECK_OUT", "CHECK_IN", "RENEW"]),
+    ).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Circulation transaction not found")
+    if not is_control_user(current_user) and str(event.patron_user_id or "") != str(current_user.id):
+        raise HTTPException(status_code=403, detail="This receipt belongs to another borrower")
+
+    borrower = db.query(account_models.User).filter(
+        account_models.User.id == event.patron_user_id,
+        account_models.User.amo_id == tenant.amo_id,
+    ).first()
+    output = BytesIO()
+    width, height = A6
+    pdf = canvas.Canvas(output, pagesize=A6)
+    pdf.setTitle("Library circulation receipt")
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(10 * mm, height - 16 * mm, "Library circulation receipt")
+    pdf.setFont("Helvetica", 9)
+    details = [
+        ("Transaction", event.event_type.replace("_", " ")),
+        ("Recorded", event.created_at.strftime("%d %b %Y %H:%M UTC") if event.created_at else "—"),
+        ("Title", item.title[:42] + ("..." if len(item.title) > 42 else "")),
+        ("Copy", holding.barcode),
+        ("Borrower", str(getattr(borrower, "full_name", None) or getattr(borrower, "email", None) or "Name unavailable")[:42]),
+        ("Due", event.due_at.strftime("%d %b %Y %H:%M UTC") if event.due_at else "—"),
+        ("Reference", event.id),
+    ]
+    for index, (label, value) in enumerate(details):
+        pdf.drawString(10 * mm, height - (31 + index * 9) * mm, f"{label}: {value}")
+    pdf.showPage()
+    pdf.save()
+    audit(db, tenant, request, "document.library.receipt_downloaded", "library_circulation_event", event.id, {
+        "holding_id": holding.id,
+        "event_type": event.event_type,
+    })
+    db.commit()
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="library-receipt-{event.id}.pdf"'},
+    )
 
 
 @router.post("/t/{tenant_slug}/catalog/items/{item_id}/holds", status_code=201)

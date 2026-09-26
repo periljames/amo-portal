@@ -39,6 +39,7 @@ type PublicationPdfLayoutViewerProps = {
   navigationRequest?: PdfReaderNavigationRequest | null;
   initialPage?: number;
   initialZoom?: number;
+  initialSearchQuery?: string;
   references?: DocumentationReference[];
   activeReferenceId?: string | null;
   onReferenceClick?: (reference: DocumentationReference) => void;
@@ -135,6 +136,7 @@ export default function PublicationPdfLayoutViewer({
   navigationRequest,
   initialPage = 1,
   initialZoom = 100,
+  initialSearchQuery = "",
   references = [],
   activeReferenceId,
   onReferenceClick,
@@ -505,6 +507,7 @@ export default function PublicationPdfLayoutViewer({
           navigationRequest={readerNavigationRequest}
           initialPage={initialPage}
           initialZoom={initialZoom}
+          initialSearchQuery={initialSearchQuery}
           onPageChange={(pageNumber) => {
             setCurrentPage(pageNumber);
             setReaderNavigationRequest((current) => (

@@ -779,6 +779,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                       navigationRequest={pdfNavigationRequest}
                       initialPage={targetPage || payload.progress?.last_page_number || localPosition.page || 1}
                       initialZoom={payload.progress?.zoom_percent || localPosition.zoom || 100}
+                      initialSearchQuery={query}
                       onPageChange={onPdfPageChange}
                       onZoomChange={onZoomChange}
                       onAcroFormDetected={setHasAcroForm}

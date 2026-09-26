@@ -165,6 +165,7 @@ export type PdfReaderCoreProps = {
   uncontrolled?: boolean;
   initialPage?: number;
   initialZoom?: number;
+  initialSearchQuery?: string;
   navigationRequest?: PdfReaderNavigationRequest | null;
   capabilities?: PdfReaderCapabilities | null;
   offlineControl?: PdfReaderOfflineControl;
@@ -463,6 +464,7 @@ export default function PdfReaderCoreV4({
   uncontrolled = false,
   initialPage = 1,
   initialZoom = 100,
+  initialSearchQuery = "",
   navigationRequest,
   capabilities: suppliedCapabilities,
   offlineControl,
@@ -515,8 +517,8 @@ export default function PdfReaderCoreV4({
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState<"" | "ORIGINAL" | "WORKING" | "FLATTEN" | "SUBMIT">("");
   const [record, setRecord] = useState<DocumentationRecord | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
+  const [query, setQuery] = useState(initialSearchQuery);
   const [searchOptions, setSearchOptions] = useState<PdfSearchOptions>({
     caseSensitive: false,
     wholeWord: false,
@@ -524,6 +526,11 @@ export default function PdfReaderCoreV4({
   const [searchResults, setSearchResults] = useState<PdfSearchResult[]>([]);
   const [searchIndex, setSearchIndex] = useState(-1);
   const [searchBusy, setSearchBusy] = useState(false);
+  useEffect(() => {
+    if (!initialSearchQuery) return;
+    setQuery(initialSearchQuery);
+    setSearchOpen(true);
+  }, [initialSearchQuery]);
   const [hotIndexes, setHotIndexes] = useState<number[]>([]);
   const [viewLinkCopied, setViewLinkCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
