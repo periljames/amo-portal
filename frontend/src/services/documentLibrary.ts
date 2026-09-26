@@ -728,6 +728,16 @@ export type WarehouseReconcileResponse = {
     library_items: number;
     library_holdings: number;
     retained_records: number;
+    relationships?: number;
+    acknowledgements?: number;
+    external_references?: number;
+    workflows?: number;
+    patrons?: number;
+    loans?: number;
+    holds?: number;
+    item_events?: number;
+    retention_rules?: number;
+    collections?: number;
   };
 };
 
@@ -837,4 +847,57 @@ export type LibraryPatron = {
 
 export function searchLibraryPatrons(tenant: string, q?: string, limit = 30): Promise<{ items: LibraryPatron[] }> {
   return api(`${workspacePath(tenant, "/catalog/patrons")}${queryString({ q, limit })}`);
+}
+
+
+export type MarcXmlImportResponse = {
+  dry_run: boolean;
+  records_received: number;
+  importable?: number;
+  imported?: number;
+  skipped: number;
+  errors?: Array<{ catalogue_code: string; title: string; error: string }>;
+  items: Array<Record<string, unknown>>;
+};
+
+export function importLibraryMarcXml(
+  tenant: string,
+  marcxml: string,
+  options: {
+    dryRun?: boolean;
+    restricted?: boolean;
+    accessScope?: Record<string, unknown>;
+    circulationPolicy?: Record<string, unknown>;
+  } = {},
+): Promise<MarcXmlImportResponse> {
+  return api(workspacePath(tenant, "/catalog/marcxml/import"), {
+    method: "POST",
+    body: JSON.stringify({
+      marcxml,
+      dry_run: Boolean(options.dryRun),
+      restricted: Boolean(options.restricted),
+      access_scope: options.accessScope || {},
+      circulation_policy: options.circulationPolicy || {},
+    }),
+  });
+}
+
+export async function downloadLibraryMarcXml(
+  tenant: string,
+  filename = "library-marc21.xml",
+): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}${workspacePath(tenant, "/catalog/marcxml/export")}`,
+    { headers: authHeaders(), credentials: "same-origin" },
+  );
+  if (!response.ok) throw new Error(`MARCXML export could not be generated (${response.status})`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
