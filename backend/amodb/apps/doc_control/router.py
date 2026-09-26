@@ -56,6 +56,7 @@ from .workspace_review_router import router as workspace_review_router
 from .workspace_router import router as workspace_router
 from .workspace_tr_router import router as workspace_tr_router
 from .workspace_tr_terminal_router import router as workspace_tr_terminal_router
+from .workspace_unified_search_router import router as workspace_unified_search_router
 from .workspace_workflow_authority_router import router as workspace_workflow_authority_router
 from .workspace_workflow_create_router import router as workspace_workflow_create_router
 from .workspace_workflow_review_router import router as workspace_workflow_review_router
@@ -98,6 +99,7 @@ router.include_router(workspace_administration_router, prefix="/doc-control")
 router.include_router(workspace_external_assessment_router, prefix="/doc-control")
 router.include_router(workspace_copy_incident_router, prefix="/doc-control")
 router.include_router(workspace_library_catalog_router, prefix="/doc-control")
+router.include_router(workspace_unified_search_router, prefix="/doc-control")
 router.include_router(workspace_library_discovery_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
