@@ -28,6 +28,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import library_models as lm
+from . import warehouse_service as warehouse
 from .workspace_library_router import _scope_match
 from .workspace_service import (
     active_tenant_users,
@@ -648,6 +649,12 @@ def create_catalog_item(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Catalogue code already exists in this tenant") from exc
+    warehouse.sync_library_catalog_item(
+        db,
+        tenant_id=str(tenant.amo_id),
+        item=row,
+        actor_user_id=str(current_user.id),
+    )
     audit(db, tenant, request, "document.library.catalogued", "library_catalog_item", row.id, {
         "catalogue_code": row.catalogue_code,
         "material_type": row.material_type,
@@ -722,6 +729,13 @@ def create_holding(
         to_status="AVAILABLE",
         to_location=location,
     ))
+    warehouse.sync_library_holding(
+        db,
+        tenant_id=str(tenant.amo_id),
+        item=item,
+        holding=row,
+        actor_user_id=str(current_user.id),
+    )
     audit(db, tenant, request, "document.library.holding_registered", "library_holding", row.id, {
         "catalog_item_id": item.id,
         "barcode": row.barcode,
@@ -849,6 +863,13 @@ def control_holding(
         notes=payload.reason.strip(),
         metadata_json={"evidence": list(payload.evidence)},
     ))
+    warehouse.sync_library_holding(
+        db,
+        tenant_id=str(tenant.amo_id),
+        item=item,
+        holding=holding,
+        actor_user_id=str(current_user.id),
+    )
     audit(db, tenant, request, f"document.library.{payload.action.lower()}", "library_holding", holding.id, {
         "catalog_item_id": item.id,
         "barcode": holding.barcode,
@@ -1063,6 +1084,14 @@ def scan_inventory_session(
         to_location=observed_location,
         metadata_json={"session_id": session.id, "outcome": outcome, "expected_location": expected_location},
     ))
+    if item is not None:
+        warehouse.sync_library_holding(
+            db,
+            tenant_id=str(tenant.amo_id),
+            item=item,
+            holding=holding,
+            actor_user_id=str(current_user.id),
+        )
     audit(db, tenant, request, "document.library.inventory_observed", "library_holding", holding.id, {
         "session_id": session.id,
         "barcode": holding.barcode,
@@ -1305,6 +1334,13 @@ def circulate_holding(
             "override_hold": bool(controller and payload.override_hold),
         },
     ))
+    warehouse.sync_library_holding(
+        db,
+        tenant_id=str(tenant.amo_id),
+        item=item,
+        holding=holding,
+        actor_user_id=str(current_user.id),
+    )
     audit(db, tenant, request, f"document.library.{event_type.lower()}", "library_holding", holding.id, {
         "catalog_item_id": item.id,
         "barcode": holding.barcode,
