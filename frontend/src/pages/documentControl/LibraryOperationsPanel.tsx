@@ -5,6 +5,7 @@ import {
   Camera,
   Database,
   CircleX,
+  Download,
   ExternalLink,
   Globe2,
   LibraryBig,
@@ -13,6 +14,7 @@ import {
   RefreshCcw,
   Search,
   Undo2,
+  Upload,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -26,6 +28,8 @@ import {
   createLibraryHolding,
   downloadLibraryHoldingLabel,
   getMyLibraryAccount,
+  importLibraryMarcXml,
+  downloadLibraryMarcXml,
   listLibraryCatalog,
   listLibraryHoldings,
   controlLibraryHolding,
@@ -213,6 +217,7 @@ export default function LibraryOperationsPanel({
   onClose,
 }: Props) {
   const navigate = useNavigate();
+  const marcFileRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<PanelMode>(initialScan ? "scan" : initialMode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -374,6 +379,36 @@ export default function LibraryOperationsPanel({
       setNotice("Catalogue record added. Register the physical copy below when it arrives.");
       void loadCatalog("");
     }
+  };
+
+  const importMarcFile = async (file: File | null) => {
+    if (!file || !canControl) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".xml") && !lower.endsWith(".marcxml")) {
+      setError("Select a MARCXML .xml or .marcxml file.");
+      return;
+    }
+    const xml = await file.text();
+    const result = await run(() => importLibraryMarcXml(tenant, xml, {
+      circulationPolicy: {
+        circulatable: true,
+        self_checkout: false,
+        loan_period_days: 14,
+        max_renewals: 2,
+      },
+    }));
+    if (!result) return;
+    setNotice(`MARC 21 import complete: ${result.imported || 0} imported, ${result.skipped} skipped${result.errors?.length ? `, ${result.errors.length} conflict(s)` : ""}.`);
+    if (marcFileRef.current) marcFileRef.current.value = "";
+    await loadCatalog("");
+  };
+
+  const exportMarc = async () => {
+    const result = await run(async () => {
+      await downloadLibraryMarcXml(tenant, `${tenant.toLowerCase()}-library-marc21.xml`);
+      return true;
+    });
+    if (result) setNotice("MARC 21 catalogue export generated.");
   };
 
   const registerHolding = async (event: FormEvent) => {
@@ -561,6 +596,12 @@ export default function LibraryOperationsPanel({
         </div> : <p className="library-ops__hint">Search one governed warehouse for controlled documents, exact identifiers, books, physical copies and retained records. Deep document hits still open at the matching section/page where available.</p>}
       </> : null}
       {mode === "catalog" ? <>
+        {canControl ? <div className="library-catalog-tools">
+          <input ref={marcFileRef} type="file" accept=".xml,.marcxml,application/xml,text/xml" hidden onChange={(event) => void importMarcFile(event.target.files?.[0] || null)} />
+          <button type="button" className="dc-button" disabled={busy} onClick={() => marcFileRef.current?.click()}><Upload size={14} /> Import MARCXML</button>
+          <button type="button" className="dc-button" disabled={busy} onClick={() => void exportMarc()}><Download size={14} /> Export MARCXML</button>
+          <span>MARC 21 bibliographic interchange; imported identifiers remain searchable across the warehouse.</span>
+        </div> : null}
         <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadCatalog(); }}>
           <Search size={16} /><input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search tenant books, journals, ISBN, author, subject…" autoFocus /><button className="dc-button" disabled={busy}>Search</button>
         </form>
