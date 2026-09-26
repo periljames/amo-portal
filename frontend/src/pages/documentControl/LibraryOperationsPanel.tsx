@@ -43,6 +43,8 @@ import {
   type LibraryPatron,
   type MyLibraryAccount,
   type WarehouseSearchResponse,
+  type WarehouseSearchScope,
+  type WarehouseRevisionException,
 } from "../../services/documentLibrary";
 import "./libraryOperations.css";
 
@@ -55,6 +57,14 @@ type Props = {
   initialScan?: string | null;
   onClose: () => void;
 };
+
+const WAREHOUSE_SCOPES: Array<{ id: WarehouseSearchScope; label: string }> = [
+  { id: "everything", label: "Everything" },
+  { id: "repository", label: "Repository" },
+  { id: "library", label: "Library" },
+  { id: "records", label: "Records" },
+  { id: "external", label: "External" },
+];
 
 type BarcodeDetectorResult = { rawValue: string };
 type BarcodeDetectorLike = {
@@ -208,7 +218,9 @@ export default function LibraryOperationsPanel({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [warehouseQuery, setWarehouseQuery] = useState("");
+  const [warehouseScope, setWarehouseScope] = useState<WarehouseSearchScope>("everything");
   const [warehouse, setWarehouse] = useState<WarehouseSearchResponse | null>(null);
+  const [revisionExceptions, setRevisionExceptions] = useState<WarehouseRevisionException[]>([]);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
   const [scanCode, setScanCode] = useState(initialScan || "");
@@ -301,8 +313,23 @@ export default function LibraryOperationsPanel({
     event.preventDefault();
     const query = warehouseQuery.trim();
     if (!query) return;
-    const result = await run(() => searchTenantWarehouse(tenant, query, 12));
+    const result = await run(() => searchTenantWarehouse(tenant, query, 12, warehouseScope));
     if (result) setWarehouse(result);
+  };
+
+  const reconcileWarehouse = async () => {
+    if (!canControl) return;
+    const result = await run(() => reconcileTenantWarehouse(tenant));
+    if (!result) return;
+    const exceptions = await run(() => listWarehouseRevisionExceptions(tenant, 1, 100));
+    if (exceptions) setRevisionExceptions(exceptions.items);
+    if (warehouseQuery.trim()) {
+      const refreshed = await run(() => searchTenantWarehouse(tenant, warehouseQuery.trim(), 12, warehouseScope));
+      if (refreshed) setWarehouse(refreshed);
+    }
+    const indexed = result.counts.controlled_documents + result.counts.library_items + result.counts.retained_records;
+    const copies = result.counts.controlled_copies + result.counts.library_holdings;
+    setNotice(`Warehouse reconciled: ${indexed} governed resources and ${copies} physical copies synchronized.`);
   };
 
   const externalSearch = async (event: FormEvent) => {
@@ -483,7 +510,7 @@ export default function LibraryOperationsPanel({
 
   return <aside className="library-ops" role="dialog" aria-modal="true" aria-label="Library services">
     <header className="library-ops__header">
-      <div><LibraryBig size={19} /><span><strong>Library services</strong><small>Digital + physical tenant holdings</small></span></div>
+      <div><LibraryBig size={19} /><span><strong>Knowledge warehouse & library</strong><small>Controlled content, records, physical custody and external discovery</small></span></div>
       <button type="button" className="dc-button" onClick={onClose}><CircleX size={15} /> Close</button>
     </header>
     <nav className="library-ops__tabs" aria-label="Library service">
@@ -494,24 +521,44 @@ export default function LibraryOperationsPanel({
 
     <div className="library-ops__body">
       {mode === "warehouse" ? <>
+        <div className="library-warehouse-toolbar">
+          <div className="library-warehouse-scopes" role="group" aria-label="Warehouse search scope">
+            {WAREHOUSE_SCOPES.map((scope) => <button key={scope.id} type="button" className={warehouseScope === scope.id ? "active" : ""} onClick={() => setWarehouseScope(scope.id)}>{scope.label}</button>)}
+          </div>
+          {canControl ? <button type="button" className="dc-button" disabled={busy} onClick={() => void reconcileWarehouse()}><RefreshCcw size={14} /> Reconcile warehouse</button> : null}
+        </div>
         <form className="library-ops__search" onSubmit={searchWarehouse}>
-          <Database size={16} /><input value={warehouseQuery} onChange={(event) => setWarehouseQuery(event.target.value)} placeholder="Search controlled documents, indexed content, books and retained records" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search</button>
+          <Database size={16} /><input value={warehouseQuery} onChange={(event) => setWarehouseQuery(event.target.value)} placeholder={warehouseScope === "external" ? "Enter public search terms" : "Document number, title, ISBN, record number, clause or text"} autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search</button>
         </form>
-        <p className="library-ops__privacy">Tenant search is permission-filtered before results are returned. Internet links use only the words you enter, never tenant document or record content.</p>
+        <p className="library-ops__privacy">Internal results are permission-filtered before return. External scope sends only the words you enter; approved tenant content is never appended to the public query.</p>
+        {canControl && revisionExceptions.length ? <section className="library-revision-exceptions">
+          <header><span><strong>{revisionExceptions.length} physical cop{revisionExceptions.length === 1 ? "y" : "ies"} require revision</strong><small>Installed revision does not match the required current revision.</small></span></header>
+          {revisionExceptions.slice(0, 6).map((exception) => <button type="button" key={exception.copy.id} onClick={() => exception.resource.target_path && navigate(exception.resource.target_path)}>
+            <span><strong>{exception.resource.canonical_code} · {exception.copy.copy_number || exception.copy.barcode}</strong><small>{exception.copy.location || "Location not recorded"}</small></span>
+            <em>{exception.copy.installed_version || "?"} → {exception.copy.required_version || "?"}</em>
+          </button>)}
+        </section> : null}
         {warehouse ? <div className="library-warehouse-results">
           {([
-            ["Controlled documents", warehouse.groups.controlled_documents],
+            ["Governed resources", warehouse.groups.governed_resources],
+            ["Controlled document hits", warehouse.groups.controlled_documents],
             ["Library holdings", warehouse.groups.library_items],
             ["Retained records", warehouse.groups.retained_records],
           ] as const).map(([label, items]) => <section key={label}>
             <header><strong>{label}</strong><small>{items.length} match{items.length === 1 ? "" : "es"}</small></header>
             {items.map((item) => <button type="button" key={`${item.kind}:${item.id}:${item.heading || item.record_number || ""}`} className="library-warehouse-result" onClick={() => item.target_path && navigate(item.target_path)}>
-              <span><small>{item.code || item.series_code || item.catalogue_code || item.kind.replaceAll("_", " ")}</small><strong>{item.title}</strong>{item.heading ? <em>{item.heading}{item.page_number ? ` · page ${item.page_number}` : ""}</em> : null}{item.snippet ? <p>{item.snippet}</p> : null}</span>
+              <span>
+                <small>{item.code || item.series_code || item.catalogue_code || item.resource_type || item.kind.replaceAll("_", " ")}</small>
+                <strong>{item.title}</strong>
+                {item.heading ? <em>{item.heading}{item.page_number ? ` · page ${item.page_number}` : ""}</em> : null}
+                {item.copies?.total ? <em>{item.copies.total} physical cop{item.copies.total === 1 ? "y" : "ies"}{item.copies.revision_required ? ` · ${item.copies.revision_required} revision required` : ""}</em> : null}
+                {item.snippet ? <p>{item.snippet}</p> : null}
+              </span>
             </button>)}
-            {!items.length ? <p className="library-ops__hint">No authorized matches.</p> : null}
+            {!items.length ? <p className="library-ops__hint">No authorized matches in this scope.</p> : null}
           </section>)}
-          <section className="library-warehouse-results__internet"><header><strong>Search the public web</strong><small>Explicit external navigation</small></header><div className="library-external-links">{Object.entries(warehouse.internet.links).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer"><ExternalLink size={13} /> {label.replaceAll("_", " ")}</a>)}</div></section>
-        </div> : <p className="library-ops__hint">One search can locate a controlled paragraph, a physical book, or a retained business record without crossing permission boundaries.</p>}
+          {warehouse.internet.enabled ? <section className="library-warehouse-results__internet"><header><strong>Search the public web</strong><small>Explicit external navigation</small></header><div className="library-external-links">{Object.entries(warehouse.internet.links).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer"><ExternalLink size={13} /> {label.replaceAll("_", " ")}</a>)}</div></section> : null}
+        </div> : <p className="library-ops__hint">Search one governed warehouse for controlled documents, exact identifiers, books, physical copies and retained records. Deep document hits still open at the matching section/page where available.</p>}
       </> : null}
       {mode === "catalog" ? <>
         <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadCatalog(); }}>
