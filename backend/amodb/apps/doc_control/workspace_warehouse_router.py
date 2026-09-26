@@ -372,6 +372,150 @@ def reconcile_warehouse(
     }
 
 
+@router.get("/t/{tenant_slug}/warehouse/overview")
+def warehouse_overview(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Permission-filtered operational picture of the tenant knowledge warehouse."""
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    visible_ids = _visible_record_ids(db, tenant=tenant, user=current_user)
+    record_ids = visible_ids
+    if record_ids is None:
+        record_ids = [
+            str(row[0])
+            for row in db.query(wm.WarehouseContentRecord.id)
+            .filter(wm.WarehouseContentRecord.tenant_id == tenant.amo_id)
+            .all()
+        ]
+    scoped_ids = record_ids or ["-"]
+
+    resource_rows = (
+        db.query(wm.WarehouseContentRecord.resource_type, func.count(wm.WarehouseContentRecord.id))
+        .filter(
+            wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
+            wm.WarehouseContentRecord.id.in_(scoped_ids),
+        )
+        .group_by(wm.WarehouseContentRecord.resource_type)
+        .all()
+    )
+    version_rows = (
+        db.query(wm.WarehouseContentVersion.lifecycle_status, func.count(wm.WarehouseContentVersion.id))
+        .filter(
+            wm.WarehouseContentVersion.tenant_id == tenant.amo_id,
+            wm.WarehouseContentVersion.content_record_id.in_(scoped_ids),
+        )
+        .group_by(wm.WarehouseContentVersion.lifecycle_status)
+        .all()
+    )
+    copy_rows = (
+        db.query(wm.WarehouseItemCopy.status, func.count(wm.WarehouseItemCopy.id))
+        .filter(
+            wm.WarehouseItemCopy.tenant_id == tenant.amo_id,
+            wm.WarehouseItemCopy.content_record_id.in_(scoped_ids),
+        )
+        .group_by(wm.WarehouseItemCopy.status)
+        .all()
+    )
+    revision_required = int(
+        db.query(func.count(wm.WarehouseItemCopy.id))
+        .filter(
+            wm.WarehouseItemCopy.tenant_id == tenant.amo_id,
+            wm.WarehouseItemCopy.content_record_id.in_(scoped_ids),
+            wm.WarehouseItemCopy.revision_compliance == "REVISION_REQUIRED",
+        )
+        .scalar() or 0
+    )
+    unverified_relationships = int(
+        db.query(func.count(wm.WarehouseRelationship.id))
+        .filter(
+            wm.WarehouseRelationship.tenant_id == tenant.amo_id,
+            wm.WarehouseRelationship.status == "ACTIVE",
+            wm.WarehouseRelationship.verified_by_user_id.is_(None),
+            wm.WarehouseRelationship.source_record_id.in_(scoped_ids),
+            wm.WarehouseRelationship.target_record_id.in_(scoped_ids),
+        )
+        .scalar() or 0
+    )
+
+    patron = (
+        db.query(wm.WarehousePatron)
+        .filter(
+            wm.WarehousePatron.tenant_id == tenant.amo_id,
+            wm.WarehousePatron.user_id == current_user.id,
+        )
+        .first()
+    )
+    my_active_loans = 0
+    my_active_holds = 0
+    if patron is not None:
+        my_active_loans = int(
+            db.query(func.count(wm.WarehouseLoan.id))
+            .filter(
+                wm.WarehouseLoan.tenant_id == tenant.amo_id,
+                wm.WarehouseLoan.patron_id == patron.id,
+                wm.WarehouseLoan.status == "ACTIVE",
+            )
+            .scalar() or 0
+        )
+        my_active_holds = int(
+            db.query(func.count(wm.WarehouseHold.id))
+            .filter(
+                wm.WarehouseHold.tenant_id == tenant.amo_id,
+                wm.WarehouseHold.patron_id == patron.id,
+                wm.WarehouseHold.status == "ACTIVE",
+            )
+            .scalar() or 0
+        )
+
+    my_acknowledgements = int(
+        db.query(func.count(wm.WarehouseAcknowledgement.id))
+        .filter(
+            wm.WarehouseAcknowledgement.tenant_id == tenant.amo_id,
+            wm.WarehouseAcknowledgement.user_id == current_user.id,
+            wm.WarehouseAcknowledgement.content_record_id.in_(scoped_ids),
+        )
+        .scalar() or 0
+    )
+    total_relationships = int(
+        db.query(func.count(wm.WarehouseRelationship.id))
+        .filter(
+            wm.WarehouseRelationship.tenant_id == tenant.amo_id,
+            wm.WarehouseRelationship.status == "ACTIVE",
+            wm.WarehouseRelationship.source_record_id.in_(scoped_ids),
+            wm.WarehouseRelationship.target_record_id.in_(scoped_ids),
+        )
+        .scalar() or 0
+    )
+
+    return {
+        "resources": {
+            "total": sum(int(count or 0) for _, count in resource_rows),
+            "by_type": {str(kind): int(count or 0) for kind, count in resource_rows},
+        },
+        "versions": {
+            "total": sum(int(count or 0) for _, count in version_rows),
+            "by_status": {str(status): int(count or 0) for status, count in version_rows},
+        },
+        "physical_copies": {
+            "total": sum(int(count or 0) for _, count in copy_rows),
+            "by_status": {str(status): int(count or 0) for status, count in copy_rows},
+            "revision_required": revision_required,
+        },
+        "relationships": {
+            "total": total_relationships,
+            "unverified": unverified_relationships,
+        },
+        "my_work": {
+            "active_loans": my_active_loans,
+            "active_holds": my_active_holds,
+            "acknowledgements_completed": my_acknowledgements,
+        },
+        "capabilities": {"control": is_control_user(current_user)},
+    }
+
+
 @router.get("/t/{tenant_slug}/warehouse/resources")
 def list_warehouse_resources(
     tenant_slug: str,
@@ -625,6 +769,109 @@ def get_warehouse_resource(
     }
 
 
+@router.get("/t/{tenant_slug}/warehouse/resources/{record_id}/impact")
+def warehouse_resource_impact(
+    tenant_slug: str,
+    record_id: str,
+    depth: int = Query(default=2, ge=1, le=3),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Traverse verified and unverified governed relationships without crossing access boundaries."""
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    root = _resource(db, str(tenant.amo_id), record_id)
+    if not _source_visible(db, tenant=tenant, user=current_user, row=root):
+        raise HTTPException(status_code=403, detail="This warehouse resource is outside your authorized scope")
+
+    visible_ids = _visible_record_ids(db, tenant=tenant, user=current_user)
+    allowed_ids = None if visible_ids is None else set(visible_ids)
+    discovered = {root.id}
+    frontier = {root.id}
+    edges: list[wm.WarehouseRelationship] = []
+
+    for _ in range(depth):
+        if not frontier:
+            break
+        batch = (
+            db.query(wm.WarehouseRelationship)
+            .filter(
+                wm.WarehouseRelationship.tenant_id == tenant.amo_id,
+                wm.WarehouseRelationship.status == "ACTIVE",
+                or_(
+                    wm.WarehouseRelationship.source_record_id.in_(frontier),
+                    wm.WarehouseRelationship.target_record_id.in_(frontier),
+                ),
+            )
+            .all()
+        )
+        next_frontier: set[str] = set()
+        for relation in batch:
+            if allowed_ids is not None and (
+                relation.source_record_id not in allowed_ids
+                or relation.target_record_id not in allowed_ids
+            ):
+                continue
+            if all(existing.id != relation.id for existing in edges):
+                edges.append(relation)
+            for candidate in (relation.source_record_id, relation.target_record_id):
+                if candidate not in discovered:
+                    discovered.add(candidate)
+                    next_frontier.add(candidate)
+        frontier = next_frontier
+
+    nodes = (
+        db.query(wm.WarehouseContentRecord)
+        .filter(
+            wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
+            wm.WarehouseContentRecord.id.in_(list(discovered)),
+        )
+        .all()
+    )
+    revision_rows = (
+        db.query(
+            wm.WarehouseItemCopy.content_record_id,
+            func.count(wm.WarehouseItemCopy.id),
+        )
+        .filter(
+            wm.WarehouseItemCopy.tenant_id == tenant.amo_id,
+            wm.WarehouseItemCopy.content_record_id.in_(list(discovered)),
+            wm.WarehouseItemCopy.revision_compliance == "REVISION_REQUIRED",
+        )
+        .group_by(wm.WarehouseItemCopy.content_record_id)
+        .all()
+    )
+    revision_required = {str(rid): int(count or 0) for rid, count in revision_rows}
+    return {
+        "root_record_id": root.id,
+        "depth": depth,
+        "nodes": [
+            {
+                **_serialize_resource(tenant, node),
+                "revision_required_copies": revision_required.get(str(node.id), 0),
+            }
+            for node in nodes
+        ],
+        "edges": [{
+            "id": relation.id,
+            "source_record_id": relation.source_record_id,
+            "source_version_id": relation.source_version_id,
+            "relationship_type": relation.relationship_type,
+            "target_record_id": relation.target_record_id,
+            "target_version_id": relation.target_version_id,
+            "verified": relation.verified_by_user_id is not None,
+            "verified_by_user_id": relation.verified_by_user_id if is_control_user(current_user) else None,
+            "effective_from": relation.effective_from.isoformat() if relation.effective_from else None,
+            "effective_to": relation.effective_to.isoformat() if relation.effective_to else None,
+        } for relation in edges],
+        "summary": {
+            "resources": len(nodes),
+            "relationships": len(edges),
+            "unverified_relationships": sum(1 for relation in edges if relation.verified_by_user_id is None),
+            "revision_required_copies": sum(revision_required.values()),
+        },
+    }
+
+
 @router.get("/t/{tenant_slug}/warehouse/resolve/{token}")
 def resolve_warehouse_copy(
     tenant_slug: str,
@@ -801,6 +1048,58 @@ def create_warehouse_relationship(
     })
     db.commit()
     return {"id": relation.id, "status": relation.status, "duplicate": False}
+
+
+@router.post("/t/{tenant_slug}/warehouse/relationships/{relationship_id}/verify")
+def verify_warehouse_relationship(
+    tenant_slug: str,
+    relationship_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    relation = (
+        db.query(wm.WarehouseRelationship)
+        .filter(
+            wm.WarehouseRelationship.tenant_id == tenant.amo_id,
+            wm.WarehouseRelationship.id == relationship_id,
+            wm.WarehouseRelationship.status == "ACTIVE",
+        )
+        .first()
+    )
+    if relation is None:
+        raise HTTPException(status_code=404, detail="Warehouse relationship not found")
+    relation.verified_by_user_id = current_user.id
+    warehouse.record_event(
+        db,
+        tenant_id=str(tenant.amo_id),
+        content_record_id=relation.source_record_id,
+        content_version_id=relation.source_version_id,
+        event_type="relationship.verified",
+        actor_user_id=str(current_user.id),
+        metadata={
+            "relationship_id": relation.id,
+            "relationship_type": relation.relationship_type,
+            "target_record_id": relation.target_record_id,
+        },
+    )
+    audit(
+        db,
+        tenant,
+        request,
+        "document.warehouse.relationship_verified",
+        "warehouse_relationship",
+        relation.id,
+        {
+            "source_record_id": relation.source_record_id,
+            "target_record_id": relation.target_record_id,
+            "relationship_type": relation.relationship_type,
+        },
+    )
+    db.commit()
+    return {"id": relation.id, "status": relation.status, "verified": True}
 
 
 @router.post("/t/{tenant_slug}/warehouse/resources/{record_id}/external-references", status_code=201)
