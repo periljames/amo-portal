@@ -21,17 +21,20 @@ import {
   createLibraryHolding,
   getMyLibraryAccount,
   listLibraryCatalog,
+  listLibraryHoldings,
+  controlLibraryHolding,
   placeLibraryHold,
   scanLibraryHolding,
   searchExternalCatalog,
   type ExternalCatalogResult,
   type LibraryCatalogItem,
+  type LibraryHoldingRegisterResponse,
   type LibraryHoldingScan,
   type MyLibraryAccount,
 } from "../../services/documentLibrary";
 import "./libraryOperations.css";
 
-type PanelMode = "catalog" | "scan" | "internet" | "account";
+type PanelMode = "catalog" | "scan" | "inventory" | "internet" | "account";
 
 type Props = {
   tenant: string;
@@ -160,6 +163,9 @@ export default function LibraryOperationsPanel({
   const [internetLinks, setInternetLinks] = useState<Record<string, string>>({});
   const [internetPrivacy, setInternetPrivacy] = useState("");
   const [account, setAccount] = useState<MyLibraryAccount | null>(null);
+  const [inventory, setInventory] = useState<LibraryHoldingRegisterResponse | null>(null);
+  const [inventoryQuery, setInventoryQuery] = useState("");
+  const [inventoryReason, setInventoryReason] = useState("");
   const [selectedCatalog, setSelectedCatalog] = useState<LibraryCatalogItem | null>(null);
   const [barcode, setBarcode] = useState("");
   const [callNumber, setCallNumber] = useState("");
@@ -179,6 +185,12 @@ export default function LibraryOperationsPanel({
       setBusy(false);
     }
   }, []);
+
+  const loadInventory = useCallback(async (query = inventoryQuery) => {
+    if (!canControl) return;
+    const result = await run(() => listLibraryHoldings(tenant, { q: query.trim() || undefined, perPage: 100 }));
+    if (result) setInventory(result);
+  }, [canControl, inventoryQuery, run, tenant]);
 
   const loadAccount = useCallback(async () => {
     const result = await run(() => getMyLibraryAccount(tenant));
@@ -209,7 +221,8 @@ export default function LibraryOperationsPanel({
   useEffect(() => {
     if (mode === "account" && !account) void loadAccount();
     if (mode === "catalog" && !catalog.length) void loadCatalog("");
-  }, [account, catalog.length, loadAccount, loadCatalog, mode]);
+    if (mode === "inventory" && canControl && !inventory) void loadInventory("");
+  }, [account, canControl, catalog.length, inventory, loadAccount, loadCatalog, loadInventory, mode]);
 
   // Hardware barcode scanners commonly behave like a keyboard and terminate with
   // Enter. Keeping a focused plain input means those devices work without drivers.
@@ -293,6 +306,23 @@ export default function LibraryOperationsPanel({
     }
   };
 
+  const controlHolding = async (
+    holdingId: string,
+    action: "MARK_LOST" | "MARK_DAMAGED" | "SEND_REPAIR" | "RETURN_TO_SHELF" | "WITHDRAW",
+  ) => {
+    const reason = inventoryReason.trim();
+    if (!reason) {
+      setError("Record the physical-control reason before changing item status.");
+      return;
+    }
+    const result = await run(() => controlLibraryHolding(tenant, holdingId, { action, reason }));
+    if (result) {
+      setInventoryReason("");
+      setNotice(`Physical item updated to ${result.holding.status.replaceAll("_", " ")}.`);
+      await loadInventory();
+    }
+  };
+
   const placeHold = async (item: LibraryCatalogItem) => {
     const result = await run(() => placeLibraryHold(tenant, item.id));
     if (result) {
@@ -317,9 +347,10 @@ export default function LibraryOperationsPanel({
   const modes = useMemo(() => [
     ["catalog", "Library catalogue", LibraryBig],
     ["scan", "Scan / circulate", Barcode],
+    ...(canControl ? [["inventory", "Inventory & custody", PackageCheck] as const] : []),
     ["internet", "Internet catalogue", Globe2],
     ["account", "My loans & holds", BookOpenCheck],
-  ] as const, []);
+  ] as const, [canControl]);
 
   return <aside className="library-ops" role="dialog" aria-modal="true" aria-label="Library services">
     <header className="library-ops__header">
@@ -384,6 +415,34 @@ export default function LibraryOperationsPanel({
         </article> : <p className="library-ops__hint">USB/Bluetooth scanners work as keyboard input: focus the field and scan. Camera scanning is used where the browser supports it.</p>}
       </> : null}
 
+      {mode === "inventory" && canControl ? <>
+        <form className="library-ops__search" onSubmit={(event) => { event.preventDefault(); void loadInventory(); }}>
+          <Search size={16} /><input value={inventoryQuery} onChange={(event) => setInventoryQuery(event.target.value)} placeholder="Barcode, call number, title, shelf or accession…" autoFocus /><button className="dc-button" disabled={busy}>Search inventory</button>
+        </form>
+        {inventory ? <div className="library-inventory-summary">
+          <span><strong>{inventory.pagination.total}</strong> items in result</span>
+          <span><strong>{inventory.summary.available}</strong> available</span>
+          <span><strong>{inventory.summary.checked_out}</strong> checked out</span>
+          <span><strong>{inventory.summary.overdue}</strong> overdue</span>
+          <span><strong>{inventory.summary.exceptions}</strong> exceptions</span>
+        </div> : null}
+        <label className="library-inventory-reason"><span>Reason for loss, damage, repair, return-to-shelf or withdrawal</span><input value={inventoryReason} onChange={(event) => setInventoryReason(event.target.value)} placeholder="Required before a physical-control status change" /></label>
+        <div className="library-inventory-list">
+          {inventory?.items.map(({ item, holding }) => <article key={holding.id}>
+            <div><small>{holding.barcode} · {holding.call_number || "No call number"}</small><strong>{item.title}</strong><span>{holding.status.replaceAll("_", " ")} · {holding.current_location}</span><span>{holding.due_at ? `Due ${formatDate(holding.due_at)}` : "No return due"}{holding.overdue ? " · OVERDUE" : ""}</span></div>
+            <div className="library-inventory-list__actions">
+              <button type="button" className="dc-button" onClick={() => { setScanCode(holding.barcode); void performScan(holding.barcode); }}>Open</button>
+              {holding.status !== "LOST" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "MARK_LOST")}>Lost</button> : null}
+              {holding.status === "AVAILABLE" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "MARK_DAMAGED")}>Damaged</button> : null}
+              {holding.status === "DAMAGED" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "SEND_REPAIR")}>Repair</button> : null}
+              {["LOST", "DAMAGED", "IN_REPAIR", "ON_HOLD"].includes(holding.status) ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "RETURN_TO_SHELF")}>Return to shelf</button> : null}
+              {holding.status !== "WITHDRAWN" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "WITHDRAW")}>Withdraw</button> : null}
+            </div>
+          </article>)}
+          {inventory && !inventory.items.length ? <p>No physical holding matches this inventory search.</p> : null}
+        </div>
+      </> : null}
+
       {mode === "internet" ? <>
         <form className="library-ops__search" onSubmit={externalSearch}>
           <Globe2 size={16} /><input value={internetQuery} onChange={(event) => setInternetQuery(event.target.value)} placeholder="Search books by title, author, ISBN or subject" autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search internet</button>
@@ -397,7 +456,7 @@ export default function LibraryOperationsPanel({
             <div className="library-catalog-list__cover">{item.cover_url ? <img src={item.cover_url} alt="" loading="lazy" /> : <Globe2 size={24} />}</div>
             <div><small>{item.provider.replaceAll("_", " ")}</small><strong>{item.title}</strong><span>{displayAuthors(item)}</span><span>{item.publisher || "Publisher not listed"}{item.published_date ? ` · ${item.published_date}` : ""}</span><span>{Object.values(item.identifiers || {}).filter(Boolean).slice(0, 2).join(" · ") || "No ISBN supplied"}</span></div>
             <div className="library-catalog-list__actions">
-              {canControl ? <button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void importExternal(item)}><Plus size={14} /> Add to tenant library</button> : null}
+              {canControl ? <button type="button" className="dc-button dc-button--primary" disabled={busy || Boolean(item.existing_catalog_item_id)} onClick={() => void importExternal(item)}><Plus size={14} /> {item.existing_catalog_item_id ? "Already catalogued" : "Add to tenant library"}</button> : null}
               {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open source</a> : null}
             </div>
           </article>)}
