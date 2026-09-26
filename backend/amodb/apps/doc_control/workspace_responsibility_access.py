@@ -10,7 +10,7 @@ from amodb.apps.accounts import models as account_models
 
 from . import domain_models as dm
 from . import governance_models as gm
-from .workspace_decision_policy import is_decision_approver
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is_control_user, role_assignment_tokens
 
 
@@ -21,15 +21,9 @@ from .workspace_service import WORKFLOW_TRANSITIONS, is_accountable_approver, is
 _ACTION_RESPONSIBILITIES: dict[str, tuple[str, ...]] = {
     "APPROVE_TECHNICAL": ("TECHNICAL_REVIEWER", "DOCUMENT_OWNER"),
     "APPROVE_QUALITY": ("QUALITY_REVIEWER",),
-    "APPROVE_ACCOUNTABLE_MANAGER": ("APPROVER",),
 }
 
-_TECHNICAL_OWNER_ROLES = {
-    "BASE_MAINTENANCE_MANAGER",
-    "LINE_MAINTENANCE_MANAGER",
-    "WORKSHOP_MANAGER",
-    "SAFETY_MANAGER",
-}
+_TECHNICAL_OWNER_ROLES = {"BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER", "SAFETY_MANAGER"}
 
 
 def _assignment_target_filter(db: Session, user: account_models.User):
@@ -111,41 +105,56 @@ def can_perform_workflow_action(
     if action == "REQUEST_CORRECTIONS":
         responsibility_types = _corrections_responsibility(workflow)
         role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
-        baseline_reviewer = (
-            (workflow.state == "QUALITY_REVIEW" and role == "QUALITY_MANAGER")
-            or (workflow.state == "TECHNICAL_REVIEW" and role in _TECHNICAL_OWNER_ROLES)
-        )
-        return bool(
-            is_decision_approver(user)
-            or baseline_reviewer
-            or has_confirmed_responsibility(
+        if is_tenant_admin(user):
+            return True
+        if workflow.state == "QUALITY_REVIEW" and role == "QUALITY_MANAGER":
+            return True
+        if workflow.state == "ACCOUNTABLE_MANAGER_APPROVAL" and is_accountable_approver(user):
+            return True
+        if workflow.state == "TECHNICAL_REVIEW" and role in _TECHNICAL_OWNER_ROLES:
+            # A post-holder title is not authority over every controlled document.
+            # Baseline technical authority is bounded to documents for which that
+            # post holder is the confirmed owner; a separately delegated technical
+            # reviewer remains valid through the governed assignment below.
+            if has_confirmed_responsibility(
                 db,
                 workflow=workflow,
                 user=user,
-                responsibility_types=responsibility_types,
-            )
+                responsibility_types=("DOCUMENT_OWNER",),
+            ):
+                return True
+        return has_confirmed_responsibility(
+            db,
+            workflow=workflow,
+            user=user,
+            responsibility_types=responsibility_types,
         )
+
+    if action == "APPROVE_ACCOUNTABLE_MANAGER":
+        # Final accountable approval belongs to the AE (or tenant admin override).
+        # A generic assignment must not manufacture delegated final accountability.
+        return is_accountable_approver(user)
 
     responsibility_types = _ACTION_RESPONSIBILITIES.get(action)
     if responsibility_types:
         role = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).upper()
-        management_fallback = (
-            is_accountable_approver(user)
-            if action == "APPROVE_ACCOUNTABLE_MANAGER"
-            else role == "QUALITY_MANAGER"
-            if action == "APPROVE_QUALITY"
-            else role in _TECHNICAL_OWNER_ROLES
-            if action == "APPROVE_TECHNICAL"
-            else False
-        )
-        return bool(
-            management_fallback
-            or has_confirmed_responsibility(
+        if is_tenant_admin(user):
+            return True
+        if action == "APPROVE_QUALITY" and role == "QUALITY_MANAGER":
+            return True
+        if action == "APPROVE_TECHNICAL" and role in _TECHNICAL_OWNER_ROLES:
+            if has_confirmed_responsibility(
                 db,
                 workflow=workflow,
                 user=user,
-                responsibility_types=responsibility_types,
-            )
+                responsibility_types=("DOCUMENT_OWNER",),
+            ):
+                return True
+        return has_confirmed_responsibility(
+            db,
+            workflow=workflow,
+            user=user,
+            responsibility_types=responsibility_types,
         )
 
     # Starting/submitting/handoff and authority-recording transitions remain
