@@ -67,11 +67,11 @@ def _append_only_events() -> None:
         trigger_name = f"trg_{table_name}_append_only"
         op.execute(sa.text(f"""
             CREATE OR REPLACE FUNCTION {function_name}()
-            RETURNS trigger AS $
+            RETURNS trigger AS $append_only$
             BEGIN
                 RAISE EXCEPTION '{label} is append-only';
             END;
-            $ LANGUAGE plpgsql;
+            $append_only$ LANGUAGE plpgsql;
         """))
         op.execute(sa.text(f"""
             CREATE TRIGGER {trigger_name}
