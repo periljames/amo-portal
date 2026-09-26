@@ -664,8 +664,10 @@ export function controlLibraryHolding(
 }
 
 
+export type WarehouseSearchScope = "everything" | "repository" | "library" | "records" | "external";
+
 export type WarehouseSearchResult = {
-  kind: "CONTROLLED_DOCUMENT" | "LIBRARY_ITEM" | "RETAINED_RECORD";
+  kind: "GOVERNED_RESOURCE" | "CONTROLLED_DOCUMENT" | "LIBRARY_ITEM" | "RETAINED_RECORD";
   id: string;
   title: string;
   target_path?: string | null;
@@ -679,29 +681,87 @@ export type WarehouseSearchResult = {
   authors?: string[];
   status?: string | null;
   disposition_status?: string | null;
+  resource_type?: string | null;
+  classification?: string | null;
+  source_entity_type?: string | null;
+  copies?: { total: number; revision_required: number };
 };
 
 export type WarehouseSearchResponse = {
   query: string;
+  scope: WarehouseSearchScope;
   groups: {
+    governed_resources: WarehouseSearchResult[];
     controlled_documents: WarehouseSearchResult[];
     library_items: WarehouseSearchResult[];
     retained_records: WarehouseSearchResult[];
   };
   counts: {
+    governed_resources: number;
     controlled_documents: number;
     library_items: number;
     retained_records: number;
   };
   internet: {
+    enabled: boolean;
     privacy: string;
     links: Record<string, string>;
   };
   capabilities: { control: boolean };
 };
 
-export function searchTenantWarehouse(tenant: string, query: string, limit = 12): Promise<WarehouseSearchResponse> {
-  return api(`${workspacePath(tenant, "/search")}${queryString({ q: query, limit })}`);
+export function searchTenantWarehouse(
+  tenant: string,
+  query: string,
+  limit = 12,
+  scope: WarehouseSearchScope = "everything",
+): Promise<WarehouseSearchResponse> {
+  return api(`${workspacePath(tenant, "/search")}${queryString({ q: query, scope, limit })}`);
+}
+
+export type WarehouseReconcileResponse = {
+  status: "RECONCILED";
+  counts: {
+    controlled_documents: number;
+    controlled_versions: number;
+    controlled_copies: number;
+    library_items: number;
+    library_holdings: number;
+    retained_records: number;
+  };
+};
+
+export function reconcileTenantWarehouse(tenant: string): Promise<WarehouseReconcileResponse> {
+  return api(workspacePath(tenant, "/warehouse/reconcile"), { method: "POST" });
+}
+
+export type WarehouseRevisionException = {
+  resource: {
+    id: string;
+    resource_type: string;
+    canonical_code: string;
+    title: string;
+    classification: string;
+    lifecycle_status: string;
+    target_path?: string | null;
+  };
+  copy: {
+    id: string;
+    copy_number?: string | null;
+    barcode: string;
+    location?: string | null;
+    installed_version?: string | null;
+    required_version?: string | null;
+    status: string;
+  };
+};
+
+export function listWarehouseRevisionExceptions(
+  tenant: string,
+  page = 1,
+  perPage = 100,
+): Promise<{ items: WarehouseRevisionException[]; pagination: { page: number; per_page: number; total: number; returned: number } }> {
+  return api(`${workspacePath(tenant, "/warehouse/revision-exceptions")}${queryString({ page, per_page: perPage })}`);
 }
 
 
