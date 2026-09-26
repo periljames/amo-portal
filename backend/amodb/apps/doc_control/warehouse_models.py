@@ -22,7 +22,7 @@ class WarehouseContentRecord(Base):
 
     __tablename__ = "document_warehouse_content_records"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "canonical_code", name="uq_doc_wh_record_tenant_code"),
+        UniqueConstraint("tenant_id", "resource_type", "canonical_code", name="uq_doc_wh_record_tenant_type_code"),
         UniqueConstraint("tenant_id", "source_entity_type", "source_entity_id", name="uq_doc_wh_record_source"),
         Index("ix_doc_wh_record_tenant_type_status", "tenant_id", "resource_type", "lifecycle_status"),
         Index("ix_doc_wh_record_tenant_title", "tenant_id", "title"),
@@ -79,7 +79,7 @@ class WarehouseBinaryObject(Base):
 
     __tablename__ = "document_warehouse_binary_objects"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "sha256", "object_role", name="uq_doc_wh_binary_hash_role"),
+        UniqueConstraint("tenant_id", "content_version_id", "sha256", "object_role", name="uq_doc_wh_binary_version_hash_role"),
         Index("ix_doc_wh_binary_version", "content_version_id", "object_role"),
     )
 
