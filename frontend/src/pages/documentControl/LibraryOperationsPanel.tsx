@@ -19,6 +19,7 @@ import {
   circulateLibraryHolding,
   createLibraryCatalogItem,
   createLibraryHolding,
+  downloadLibraryHoldingLabel,
   getMyLibraryAccount,
   listLibraryCatalog,
   listLibraryHoldings,
@@ -210,6 +211,8 @@ export default function LibraryOperationsPanel({
     if (result) {
       setScanCode(code);
       setScan(result);
+      setNotice(`${result.item.title} · ${result.holding.status.replaceAll("_", " ")} · ${result.holding.current_location}`);
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(35);
       setMode("scan");
     }
   }, [run, scanCode, tenant]);
@@ -432,6 +435,7 @@ export default function LibraryOperationsPanel({
             <div><small>{holding.barcode} · {holding.call_number || "No call number"}</small><strong>{item.title}</strong><span>{holding.status.replaceAll("_", " ")} · {holding.current_location}</span><span>{holding.due_at ? `Due ${formatDate(holding.due_at)}` : "No return due"}{holding.overdue ? " · OVERDUE" : ""}</span></div>
             <div className="library-inventory-list__actions">
               <button type="button" className="dc-button" onClick={() => { setScanCode(holding.barcode); void performScan(holding.barcode); }}>Open</button>
+              <button type="button" className="dc-button" onClick={() => void downloadLibraryHoldingLabel(tenant, holding.id, `${item.catalogue_code}-${holding.barcode}.pdf`)}>Label</button>
               {holding.status !== "LOST" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "MARK_LOST")}>Lost</button> : null}
               {holding.status === "AVAILABLE" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "MARK_DAMAGED")}>Damaged</button> : null}
               {holding.status === "DAMAGED" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void controlHolding(holding.id, "SEND_REPAIR")}>Repair</button> : null}
