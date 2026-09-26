@@ -720,7 +720,7 @@ def create_holding(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Barcode already exists in this tenant library") from exc
-    db.add(lm.LibraryCirculationEvent(
+    event = lm.LibraryCirculationEvent(
         tenant_id=tenant.amo_id,
         holding_id=row.id,
         event_type="REGISTER",
@@ -728,10 +728,13 @@ def create_holding(
         from_status=None,
         to_status="AVAILABLE",
         to_location=location,
-    ))
-    warehouse.sync_library_holding(
+    )
+    db.add(event)
+    db.flush()
+    warehouse.sync_library_circulation_event(
         db,
         tenant_id=str(tenant.amo_id),
+        event=event,
         item=item,
         holding=row,
         actor_user_id=str(current_user.id),
@@ -849,7 +852,7 @@ def control_holding(
     if payload.location:
         holding.current_location = payload.location.strip()
     holding.version = int(holding.version or 0) + 1
-    db.add(lm.LibraryCirculationEvent(
+    event = lm.LibraryCirculationEvent(
         tenant_id=tenant.amo_id,
         holding_id=holding.id,
         event_type=payload.action,
@@ -862,10 +865,13 @@ def control_holding(
         due_at=holding.due_at,
         notes=payload.reason.strip(),
         metadata_json={"evidence": list(payload.evidence)},
-    ))
-    warehouse.sync_library_holding(
+    )
+    db.add(event)
+    db.flush()
+    warehouse.sync_library_circulation_event(
         db,
         tenant_id=str(tenant.amo_id),
+        event=event,
         item=item,
         holding=holding,
         actor_user_id=str(current_user.id),
@@ -1073,7 +1079,7 @@ def scan_inventory_session(
     session.observed_count = int(session.observed_count or 0) + 1
     if outcome == "MISPLACED":
         session.misplaced_count = int(session.misplaced_count or 0) + 1
-    db.add(lm.LibraryCirculationEvent(
+    event = lm.LibraryCirculationEvent(
         tenant_id=tenant.amo_id,
         holding_id=holding.id,
         event_type="INVENTORY_SCAN",
@@ -1083,11 +1089,14 @@ def scan_inventory_session(
         from_location=holding.current_location,
         to_location=observed_location,
         metadata_json={"session_id": session.id, "outcome": outcome, "expected_location": expected_location},
-    ))
+    )
+    db.add(event)
+    db.flush()
     if item is not None:
-        warehouse.sync_library_holding(
+        warehouse.sync_library_circulation_event(
             db,
             tenant_id=str(tenant.amo_id),
+            event=event,
             item=item,
             holding=holding,
             actor_user_id=str(current_user.id),
@@ -1233,6 +1242,7 @@ def circulate_holding(
     before_status = holding.status
     before_location = holding.current_location
     patron_id = holding.holder_user_id
+    changed_hold: lm.LibraryHoldRequest | None = None
 
     if payload.action == "CHECK_OUT":
         if holding.status not in {"AVAILABLE", "ON_HOLD"} or holding.holder_user_id:
@@ -1284,6 +1294,7 @@ def circulate_holding(
         if waiting:
             waiting.status = "READY"
             waiting.fulfilled_holding_id = holding.id
+            changed_hold = waiting
         event_type = "CHECK_IN"
     elif payload.action == "RENEW":
         if not (controller or own):
@@ -1317,7 +1328,7 @@ def circulate_holding(
         event_type = "LOCATION_VERIFIED"
 
     holding.version = int(holding.version or 0) + 1
-    db.add(lm.LibraryCirculationEvent(
+    event = lm.LibraryCirculationEvent(
         tenant_id=tenant.amo_id,
         holding_id=holding.id,
         event_type=event_type,
@@ -1333,14 +1344,23 @@ def circulate_holding(
             "acknowledgement": payload.acknowledgement,
             "override_hold": bool(controller and payload.override_hold),
         },
-    ))
-    warehouse.sync_library_holding(
+    )
+    db.add(event)
+    db.flush()
+    warehouse.sync_library_circulation_event(
         db,
         tenant_id=str(tenant.amo_id),
+        event=event,
         item=item,
         holding=holding,
         actor_user_id=str(current_user.id),
     )
+    if changed_hold is not None:
+        warehouse.sync_library_hold_request(
+            db,
+            tenant_id=str(tenant.amo_id),
+            hold=changed_hold,
+        )
     audit(db, tenant, request, f"document.library.{event_type.lower()}", "library_holding", holding.id, {
         "catalog_item_id": item.id,
         "barcode": holding.barcode,
@@ -1387,6 +1407,7 @@ def create_hold(
     )
     db.add(row)
     db.flush()
+    warehouse.sync_library_hold_request(db, tenant_id=str(tenant.amo_id), hold=row)
     audit(db, tenant, request, "document.library.hold_placed", "library_hold", row.id, {"catalog_item_id": item.id})
     db.commit()
     return {"id": row.id, "status": row.status, "already_exists": False}
@@ -1412,6 +1433,7 @@ def cancel_hold(
     if row.status not in _ACTIVE_HOLD_STATUSES:
         raise HTTPException(status_code=409, detail="This hold is no longer active")
     row.status = "CANCELLED"
+    warehouse.sync_library_hold_request(db, tenant_id=str(tenant.amo_id), hold=row)
     audit(db, tenant, request, "document.library.hold_cancelled", "library_hold", row.id, {"catalog_item_id": row.catalog_item_id})
     db.commit()
     return {"id": row.id, "status": row.status}
