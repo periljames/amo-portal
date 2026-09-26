@@ -15,6 +15,7 @@ from amodb.security import get_current_active_user
 
 from . import governance_models as gm
 from . import knowledge_models as km
+from . import warehouse_service as warehouse
 from .governance_backfill import create_run, process_batch, serialize_run
 from .governance_schemas import (
     AnnotationCreate,
@@ -434,6 +435,10 @@ def create_relationship(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="This exact relationship occurrence already exists") from exc
+    warehouse.sync_manual(db, tenant, manual, actor_user_id=str(current_user.id), include_revisions=True)
+    if target_manual is not None:
+        warehouse.sync_manual(db, tenant, target_manual, actor_user_id=str(current_user.id), include_revisions=True)
+    warehouse.sync_governed_relationships(db, manual_tenant=tenant, actor_user_id=str(current_user.id))
     _audit(db, tenant=tenant, user=current_user, request=request, action="document.governance.relationship_created", entity_type="document_governed_relationship", entity_id=row.id, diff={"source_manual_id": manual.id, "relationship_type": row.relationship_type, "source": row.relationship_source, "status": row.resolution_status})
     db.commit()
     return serialize_relationship(row, {target_manual.id: target_manual} if target_manual else {})
@@ -538,6 +543,8 @@ def decide_relationship(
     row.confirmed_by_user_id = current_user.id if payload.decision == "CONFIRMED" else None
     row.confirmed_at = utcnow() if payload.decision == "CONFIRMED" else None
     row.provenance_json = {**dict(row.provenance_json or {}), "review_comments": payload.comments}
+    db.flush()
+    warehouse.sync_governed_relationships(db, manual_tenant=tenant, actor_user_id=str(current_user.id))
     _audit(db, tenant=tenant, user=current_user, request=request, action="document.governance.relationship_decided", entity_type="document_governed_relationship", entity_id=row.id, diff={"decision": payload.decision, "comments": payload.comments})
     db.commit()
     return serialize_relationship(row)
