@@ -123,6 +123,20 @@ class HoldingControlRequest(BaseModel):
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=25)
 
 
+class InventorySessionCreate(BaseModel):
+    location_prefix: str = Field(min_length=2, max_length=255)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class InventoryObservationCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=255)
+    observed_location: str = Field(min_length=2, max_length=255)
+
+
+class InventorySessionClose(BaseModel):
+    notes: str | None = Field(default=None, max_length=4000)
+
+
 def _normalize_identifier(scheme: str, value: str) -> tuple[str, str] | None:
     normalized_scheme = str(scheme or "").strip().lower().replace("-", "_")
     display = str(value or "").strip()
@@ -846,6 +860,254 @@ def control_holding(
     })
     db.commit()
     return {"item": _serialize_item(item), "holding": _serialize_holding(holding, controller=True)}
+
+
+@router.post("/t/{tenant_slug}/catalog/inventory-sessions", status_code=201)
+def create_inventory_session(
+    tenant_slug: str,
+    payload: InventorySessionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    location_prefix = payload.location_prefix.strip()
+    existing = db.query(lm.LibraryInventorySession).filter(
+        lm.LibraryInventorySession.tenant_id == tenant.amo_id,
+        lm.LibraryInventorySession.status == "OPEN",
+        func.lower(lm.LibraryInventorySession.location_prefix) == location_prefix.lower(),
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail={"message": "An inventory session is already open for this location.", "session_id": existing.id})
+    expected_count = int(db.query(func.count(lm.LibraryHolding.id)).filter(
+        lm.LibraryHolding.tenant_id == tenant.amo_id,
+        lm.LibraryHolding.home_location.ilike(f"{location_prefix}%"),
+        lm.LibraryHolding.status.notin_(["CHECKED_OUT", "WITHDRAWN"]),
+    ).scalar() or 0)
+    session = lm.LibraryInventorySession(
+        tenant_id=tenant.amo_id,
+        location_prefix=location_prefix,
+        expected_count=expected_count,
+        notes=(payload.notes or "").strip() or None,
+        started_by_user_id=current_user.id,
+    )
+    db.add(session)
+    db.flush()
+    audit(db, tenant, request, "document.library.inventory_started", "library_inventory_session", session.id, {
+        "location_prefix": location_prefix,
+        "expected_count": expected_count,
+    })
+    db.commit()
+    return {
+        "id": session.id,
+        "location_prefix": session.location_prefix,
+        "status": session.status,
+        "expected_count": session.expected_count,
+        "observed_count": 0,
+        "misplaced_count": 0,
+        "missing_count": 0,
+        "started_at": session.started_at.isoformat() if session.started_at else None,
+    }
+
+
+@router.get("/t/{tenant_slug}/catalog/inventory-sessions/{session_id}")
+def get_inventory_session(
+    tenant_slug: str,
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    session = db.query(lm.LibraryInventorySession).filter(
+        lm.LibraryInventorySession.id == session_id,
+        lm.LibraryInventorySession.tenant_id == tenant.amo_id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Inventory session not found")
+    observations = db.query(lm.LibraryInventoryObservation, lm.LibraryHolding, lm.LibraryCatalogItem).join(
+        lm.LibraryHolding, lm.LibraryHolding.id == lm.LibraryInventoryObservation.holding_id,
+    ).join(
+        lm.LibraryCatalogItem, lm.LibraryCatalogItem.id == lm.LibraryHolding.catalog_item_id,
+    ).filter(
+        lm.LibraryInventoryObservation.tenant_id == tenant.amo_id,
+        lm.LibraryInventoryObservation.session_id == session.id,
+    ).order_by(lm.LibraryInventoryObservation.observed_at.desc()).limit(500).all()
+    return {
+        "id": session.id,
+        "location_prefix": session.location_prefix,
+        "status": session.status,
+        "expected_count": session.expected_count,
+        "observed_count": session.observed_count,
+        "misplaced_count": session.misplaced_count,
+        "missing_count": session.missing_count,
+        "started_at": session.started_at.isoformat() if session.started_at else None,
+        "closed_at": session.closed_at.isoformat() if session.closed_at else None,
+        "observations": [{
+            "id": observation.id,
+            "holding_id": holding.id,
+            "barcode": holding.barcode,
+            "title": item.title,
+            "observed_location": observation.observed_location,
+            "expected_location": observation.expected_location,
+            "outcome": observation.outcome,
+            "observed_at": observation.observed_at.isoformat() if observation.observed_at else None,
+        } for observation, holding, item in observations],
+    }
+
+
+@router.post("/t/{tenant_slug}/catalog/inventory-sessions/{session_id}/scan")
+def scan_inventory_session(
+    tenant_slug: str,
+    session_id: str,
+    payload: InventoryObservationCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    session = db.query(lm.LibraryInventorySession).filter(
+        lm.LibraryInventorySession.id == session_id,
+        lm.LibraryInventorySession.tenant_id == tenant.amo_id,
+    ).with_for_update().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Inventory session not found")
+    if session.status != "OPEN":
+        raise HTTPException(status_code=409, detail="This inventory session is closed")
+    holding = _holding_by_scan(db, tenant.amo_id, payload.code)
+    if not holding:
+        raise HTTPException(status_code=404, detail="No library item matches this barcode or QR code")
+    item = db.query(lm.LibraryCatalogItem).filter(
+        lm.LibraryCatalogItem.id == holding.catalog_item_id,
+        lm.LibraryCatalogItem.tenant_id == tenant.amo_id,
+    ).first()
+    existing = db.query(lm.LibraryInventoryObservation).filter(
+        lm.LibraryInventoryObservation.session_id == session.id,
+        lm.LibraryInventoryObservation.holding_id == holding.id,
+    ).first()
+    if existing:
+        return {
+            "duplicate": True,
+            "barcode": holding.barcode,
+            "title": item.title if item else "Library item",
+            "outcome": existing.outcome,
+            "expected_location": existing.expected_location,
+            "observed_location": existing.observed_location,
+        }
+    observed_location = payload.observed_location.strip()
+    expected_location = holding.home_location
+    if holding.status in {"LOST", "WITHDRAWN", "CHECKED_OUT"}:
+        outcome = "EXCEPTION"
+    elif observed_location.casefold() == expected_location.casefold():
+        outcome = "MATCH"
+    else:
+        outcome = "MISPLACED"
+    observation = lm.LibraryInventoryObservation(
+        tenant_id=tenant.amo_id,
+        session_id=session.id,
+        holding_id=holding.id,
+        observed_location=observed_location,
+        expected_location=expected_location,
+        outcome=outcome,
+        observed_by_user_id=current_user.id,
+    )
+    db.add(observation)
+    holding.last_inventory_at = utcnow()
+    session.observed_count = int(session.observed_count or 0) + 1
+    if outcome == "MISPLACED":
+        session.misplaced_count = int(session.misplaced_count or 0) + 1
+    db.add(lm.LibraryCirculationEvent(
+        tenant_id=tenant.amo_id,
+        holding_id=holding.id,
+        event_type="INVENTORY_SCAN",
+        actor_user_id=current_user.id,
+        from_status=holding.status,
+        to_status=holding.status,
+        from_location=holding.current_location,
+        to_location=observed_location,
+        metadata_json={"session_id": session.id, "outcome": outcome, "expected_location": expected_location},
+    ))
+    audit(db, tenant, request, "document.library.inventory_observed", "library_holding", holding.id, {
+        "session_id": session.id,
+        "barcode": holding.barcode,
+        "outcome": outcome,
+        "observed_location": observed_location,
+        "expected_location": expected_location,
+    })
+    db.commit()
+    return {
+        "duplicate": False,
+        "barcode": holding.barcode,
+        "title": item.title if item else "Library item",
+        "outcome": outcome,
+        "expected_location": expected_location,
+        "observed_location": observed_location,
+    }
+
+
+@router.post("/t/{tenant_slug}/catalog/inventory-sessions/{session_id}/close")
+def close_inventory_session(
+    tenant_slug: str,
+    session_id: str,
+    payload: InventorySessionClose,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    session = db.query(lm.LibraryInventorySession).filter(
+        lm.LibraryInventorySession.id == session_id,
+        lm.LibraryInventorySession.tenant_id == tenant.amo_id,
+    ).with_for_update().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Inventory session not found")
+    if session.status != "OPEN":
+        raise HTTPException(status_code=409, detail="This inventory session is already closed")
+    expected_ids = {
+        row[0]
+        for row in db.query(lm.LibraryHolding.id).filter(
+            lm.LibraryHolding.tenant_id == tenant.amo_id,
+            lm.LibraryHolding.home_location.ilike(f"{session.location_prefix}%"),
+            lm.LibraryHolding.status.notin_(["CHECKED_OUT", "WITHDRAWN"]),
+        ).all()
+    }
+    observed_ids = {
+        row[0]
+        for row in db.query(lm.LibraryInventoryObservation.holding_id).filter(
+            lm.LibraryInventoryObservation.session_id == session.id,
+        ).all()
+    }
+    session.expected_count = len(expected_ids)
+    session.observed_count = len(observed_ids)
+    session.missing_count = len(expected_ids - observed_ids)
+    session.misplaced_count = int(db.query(func.count(lm.LibraryInventoryObservation.id)).filter(
+        lm.LibraryInventoryObservation.session_id == session.id,
+        lm.LibraryInventoryObservation.outcome == "MISPLACED",
+    ).scalar() or 0)
+    session.status = "CLOSED"
+    session.closed_by_user_id = current_user.id
+    session.closed_at = utcnow()
+    if payload.notes:
+        session.notes = "\n".join(filter(None, [session.notes, payload.notes.strip()]))
+    audit(db, tenant, request, "document.library.inventory_closed", "library_inventory_session", session.id, {
+        "expected_count": session.expected_count,
+        "observed_count": session.observed_count,
+        "missing_count": session.missing_count,
+        "misplaced_count": session.misplaced_count,
+    })
+    db.commit()
+    return {
+        "id": session.id,
+        "status": session.status,
+        "expected_count": session.expected_count,
+        "observed_count": session.observed_count,
+        "missing_count": session.missing_count,
+        "misplaced_count": session.misplaced_count,
+        "closed_at": session.closed_at.isoformat() if session.closed_at else None,
+    }
 
 
 @router.get("/t/{tenant_slug}/catalog/scan/{code}")
