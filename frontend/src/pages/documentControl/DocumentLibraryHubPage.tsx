@@ -30,9 +30,11 @@ import ControlledDocumentUploadDialog from "../../components/documentControl/Con
 import {
   discoverLibrary,
   listIntegratedLibrary,
+  listLibraryCatalog,
   type IntegratedLibraryFilters,
   type IntegratedLibraryItem,
   type IntegratedLibraryResponse,
+  type LibraryCatalogItem,
   type LibraryDiscoveryItem,
   type LibraryDiscoveryResponse,
   type LibraryDiscoveryView,
@@ -160,6 +162,7 @@ export default function DocumentLibraryHubPage() {
   const [searchText, setSearchText] = useState(urlQuery);
   const [data, setData] = useState<IntegratedLibraryResponse | null>(null);
   const [discoveryData, setDiscoveryData] = useState<LibraryDiscoveryResponse | null>(null);
+  const [catalogItems, setCatalogItems] = useState<LibraryCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -216,6 +219,22 @@ export default function DocumentLibraryHubPage() {
         setData(next);
         setDiscoveryData(null);
       }
+      if (!selectingDocumentForJob) {
+        try {
+          const catalogue = await listLibraryCatalog(tenant, {
+            q: filters.q,
+            page: 1,
+            perPage: 12,
+          });
+          setCatalogItems(catalogue.items);
+        } catch {
+          // Controlled-document discovery must remain usable if a public/library
+          // catalogue service is temporarily unavailable.
+          setCatalogItems([]);
+        }
+      } else {
+        setCatalogItems([]);
+      }
       hasLoadedRef.current = true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The controlled library could not be loaded.");
@@ -223,7 +242,7 @@ export default function DocumentLibraryHubPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [discoveryMode, discoveryView, filters, tenant]);
+  }, [discoveryMode, discoveryView, filters, selectingDocumentForJob, tenant]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
@@ -293,7 +312,7 @@ export default function DocumentLibraryHubPage() {
   const offlineSnapshot = discoveryMode ? discoveryData?.offline_snapshot : data?.offline_snapshot;
   const totalPages = pagination ? Math.max(1, Math.ceil(pagination.total / pagination.per_page)) : 1;
   const canControl = Boolean((discoveryMode ? discoveryData?.capabilities.control : data?.capabilities.control));
-  const hasRows = discoveryMode ? Boolean(discoveryData?.items.length) : Boolean(data?.items.length);
+  const hasRows = (discoveryMode ? Boolean(discoveryData?.items.length) : Boolean(data?.items.length)) || Boolean(catalogItems.length);
 
   const openReader = useCallback((item: IntegratedLibraryItem) => {
     const revisionId = item.read_target?.revision_id;
@@ -456,6 +475,26 @@ export default function DocumentLibraryHubPage() {
           <button type="button" className={presentation === "register" ? "active" : ""} aria-pressed={presentation === "register"} onClick={() => setPresentation("register")}><List size={15} /> Register</button>
         </div>
       </div>
+
+      {!loading && !selectingDocumentForJob && catalogItems.length ? <section className="dlibrary__materials" aria-label="Library books and physical materials">
+        <header>
+          <div><LibraryBig size={17} /><span><strong>Books & library materials</strong><small>Tenant catalogue · physical and reference holdings</small></span></div>
+          <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("catalog"); setLibraryServicesOpen(true); }}>Open library services</button>
+        </header>
+        <div className="dlibrary__materials-grid">
+          {catalogItems.map((item) => <article key={item.id}>
+            <div className="dlibrary__material-cover">{item.cover_url ? <img src={item.cover_url} alt="" loading="lazy" /> : <LibraryBig size={22} />}</div>
+            <div className="dlibrary__material-body">
+              <small>{item.catalogue_code} · {item.material_type.replaceAll("_", " ")}</small>
+              <strong>{item.title}</strong>
+              <span>{item.authors?.join(", ") || "Unknown author"}</span>
+              <span>{item.publisher || "Publisher not recorded"}{item.publication_year ? ` · ${item.publication_year}` : ""}</span>
+              <span>{item.holdings ? `${item.holdings.available} available · ${item.holdings.checked_out} out · ${item.holdings.on_hold} held` : "No physical copies"}</span>
+            </div>
+            <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode(item.holdings?.available ? "scan" : "catalog"); setLibraryServicesOpen(true); }}>Library actions</button>
+          </article>)}
+        </div>
+      </section> : null}
 
       {loading ? <DocumentControlLoading label={selectedJob ? "Loading eligible controlled documents…" : "Opening the company library…"} /> : null}
       {error && !data && !discoveryData ? <DocumentControlError message={error} retry={() => void load()} /> : null}
