@@ -168,7 +168,7 @@ export default function DocumentLibraryHubPage() {
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [libraryServicesOpen, setLibraryServicesOpen] = useState(false);
-  const [libraryServicesMode, setLibraryServicesMode] = useState<"catalog" | "scan" | "internet" | "account">("catalog");
+  const [libraryServicesMode, setLibraryServicesMode] = useState<"warehouse" | "catalog" | "scan" | "internet" | "account">("warehouse");
   const [presentation, setPresentation] = useState<LibraryPresentation>(() => (
     typeof window !== "undefined" && window.localStorage.getItem(PRESENTATION_STORAGE_KEY) === "register"
       ? "register"
@@ -434,10 +434,10 @@ export default function DocumentLibraryHubPage() {
     subtitle={selectedJob ? selectedJob.selectionPrompt : "Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."}
     canControl={canControl}
     actions={<>
-      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("catalog"); setLibraryServicesOpen(true); }}><LibraryBig size={14} /> Library services</button> : null}
+      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("warehouse"); setLibraryServicesOpen(true); }}><Search size={14} /> Search everything</button> : null}\n      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("catalog"); setLibraryServicesOpen(true); }}><LibraryBig size={14} /> Library services</button> : null}
       {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("scan"); setLibraryServicesOpen(true); }}><ScanLine size={14} /> Scan item</button> : null}
       {canControl && !selectedJob ? <button type="button" className="dc-button dc-button--primary" onClick={() => setUploadOpen(true)}><UploadCloud size={14} /> Register document</button> : null}
-      {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/reports?view=retention`)}><Archive size={14} /> Retained records</button> : null}
+      {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/records`)}><Archive size={14} /> Records vault</button> : null}
     </>}
   >
     <section className="dlibrary" data-testid="integrated-document-library" aria-busy={refreshing}>
