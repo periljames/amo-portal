@@ -8,3 +8,5 @@ export { default as DocControlDistributionPage } from "./documentControl/Documen
 export { default as DocControlCompliancePage } from "./documentControl/DocumentControlCompliancePortfolioPage";
 export { default as DocControlReportsPage } from "./documentControl/DocumentControlReportsPage";
 export { default as DocControlAdministrationPage } from "./documentControl/DocumentControlAdministrationPage";
+
+export { default as DocControlRecordsVaultPage } from "./documentControl/DocumentRecordsVaultPage";
