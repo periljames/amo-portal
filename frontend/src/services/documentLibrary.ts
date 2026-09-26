@@ -662,3 +662,44 @@ export function controlLibraryHolding(
     body: JSON.stringify({ ...payload, evidence: payload.evidence || [] }),
   });
 }
+
+
+export type WarehouseSearchResult = {
+  kind: "CONTROLLED_DOCUMENT" | "LIBRARY_ITEM" | "RETAINED_RECORD";
+  id: string;
+  title: string;
+  target_path?: string | null;
+  code?: string | null;
+  heading?: string | null;
+  page_number?: number | null;
+  snippet?: string | null;
+  record_number?: string | null;
+  series_code?: string | null;
+  catalogue_code?: string | null;
+  authors?: string[];
+  status?: string | null;
+  disposition_status?: string | null;
+};
+
+export type WarehouseSearchResponse = {
+  query: string;
+  groups: {
+    controlled_documents: WarehouseSearchResult[];
+    library_items: WarehouseSearchResult[];
+    retained_records: WarehouseSearchResult[];
+  };
+  counts: {
+    controlled_documents: number;
+    library_items: number;
+    retained_records: number;
+  };
+  internet: {
+    privacy: string;
+    links: Record<string, string>;
+  };
+  capabilities: { control: boolean };
+};
+
+export function searchTenantWarehouse(tenant: string, query: string, limit = 12): Promise<WarehouseSearchResponse> {
+  return api(`${workspacePath(tenant, "/search")}${queryString({ q: query, limit })}`);
+}
