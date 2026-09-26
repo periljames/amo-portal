@@ -862,6 +862,40 @@ def control_holding(
     return {"item": _serialize_item(item), "holding": _serialize_holding(holding, controller=True)}
 
 
+@router.get("/t/{tenant_slug}/catalog/patrons")
+def search_library_patrons(
+    tenant_slug: str,
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=30, ge=1, le=75),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Librarian borrower lookup; never require staff to memorize internal user IDs."""
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    query = db.query(account_models.User).filter(
+        account_models.User.amo_id == tenant.amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    )
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        query = query.filter(or_(
+            account_models.User.full_name.ilike(needle),
+            account_models.User.email.ilike(needle),
+            account_models.User.staff_code.ilike(needle),
+        ))
+    rows = query.order_by(account_models.User.full_name.asc(), account_models.User.email.asc()).limit(limit).all()
+    return {"items": [{
+        "id": row.id,
+        "name": row.full_name or row.email,
+        "email": row.email,
+        "staff_code": row.staff_code,
+        "role": role_value(row),
+        "department": getattr(getattr(row, "department", None), "name", None),
+    } for row in rows]}
+
+
 @router.post("/t/{tenant_slug}/catalog/inventory-sessions", status_code=201)
 def create_inventory_session(
     tenant_slug: str,
