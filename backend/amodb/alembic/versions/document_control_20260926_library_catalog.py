@@ -21,6 +21,8 @@ _TABLES = (
     "document_library_holdings",
     "document_library_circulation_events",
     "document_library_holds",
+    "document_library_inventory_sessions",
+    "document_library_inventory_observations",
     "document_record_series",
     "document_record_assets",
     "document_record_events",
@@ -224,6 +226,41 @@ def upgrade() -> None:
     )
     op.create_index("ix_doc_library_hold_item_status", "document_library_holds", ["catalog_item_id", "status", "created_at"])
     op.create_index("ix_doc_library_hold_user_status", "document_library_holds", ["tenant_id", "user_id", "status"])
+
+    op.create_table(
+        "document_library_inventory_sessions",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("location_prefix", sa.String(length=255), nullable=False),
+        sa.Column("status", sa.String(length=24), nullable=False, server_default="OPEN"),
+        sa.Column("expected_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("observed_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("misplaced_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("missing_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("started_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("closed_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.CheckConstraint("status IN ('OPEN','CLOSED','CANCELLED')", name="ck_doc_library_inventory_status"),
+    )
+    op.create_index("ix_doc_library_inventory_tenant_status", "document_library_inventory_sessions", ["tenant_id", "status", "started_at"])
+
+    op.create_table(
+        "document_library_inventory_observations",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("session_id", sa.String(length=36), sa.ForeignKey("document_library_inventory_sessions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("holding_id", sa.String(length=36), sa.ForeignKey("document_library_holdings.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("observed_location", sa.String(length=255), nullable=False),
+        sa.Column("expected_location", sa.String(length=255), nullable=False),
+        sa.Column("outcome", sa.String(length=24), nullable=False),
+        sa.Column("observed_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("observed_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("session_id", "holding_id", name="uq_doc_library_inventory_observation"),
+        sa.CheckConstraint("outcome IN ('MATCH','MISPLACED','EXCEPTION')", name="ck_doc_library_inventory_observation_outcome"),
+    )
+    op.create_index("ix_doc_library_inventory_observation_session", "document_library_inventory_observations", ["session_id", "observed_at"])
 
     op.create_table(
         "document_record_series",
