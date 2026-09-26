@@ -15,7 +15,9 @@ import {
   Heart,
   History,
   LayoutGrid,
+  LibraryBig,
   List,
+  ScanLine,
   Search,
   ShieldCheck,
   UserRound,
@@ -35,6 +37,7 @@ import {
   type LibraryDiscoveryResponse,
   type LibraryDiscoveryView,
 } from "../../services/documentLibrary";
+import LibraryOperationsPanel from "./LibraryOperationsPanel";
 import DocumentControlShell, {
   DocumentControlEmpty,
   DocumentControlError,
@@ -161,6 +164,8 @@ export default function DocumentLibraryHubPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [libraryServicesOpen, setLibraryServicesOpen] = useState(false);
+  const [libraryServicesMode, setLibraryServicesMode] = useState<"catalog" | "scan" | "internet" | "account">("catalog");
   const [presentation, setPresentation] = useState<LibraryPresentation>(() => (
     typeof window !== "undefined" && window.localStorage.getItem(PRESENTATION_STORAGE_KEY) === "register"
       ? "register"
@@ -222,6 +227,12 @@ export default function DocumentLibraryHubPage() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
+  useEffect(() => {
+    if (params.get("library_scan")) {
+      setLibraryServicesMode("scan");
+      setLibraryServicesOpen(true);
+    }
+  }, [params]);
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(PRESENTATION_STORAGE_KEY, presentation);
@@ -404,6 +415,8 @@ export default function DocumentLibraryHubPage() {
     subtitle={selectedJob ? selectedJob.selectionPrompt : "Find the current controlled information you need, then read it or open its document workspace for lifecycle and evidence context."}
     canControl={canControl}
     actions={<>
+      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("catalog"); setLibraryServicesOpen(true); }}><LibraryBig size={14} /> Library services</button> : null}
+      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("scan"); setLibraryServicesOpen(true); }}><ScanLine size={14} /> Scan item</button> : null}
       {canControl && !selectedJob ? <button type="button" className="dc-button dc-button--primary" onClick={() => setUploadOpen(true)}><UploadCloud size={14} /> Register document</button> : null}
       {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/reports?view=retention`)}><Archive size={14} /> Retained records</button> : null}
     </>}
@@ -529,6 +542,20 @@ export default function DocumentLibraryHubPage() {
         <span>Page {pagination.page} of {totalPages}</span>
         <button type="button" disabled={pagination.page >= totalPages || refreshing} onClick={() => update("page", String(pagination.page + 1))}>Next <ChevronRight size={15} /></button>
       </footer> : null}
+      {libraryServicesOpen ? <LibraryOperationsPanel
+        tenant={tenant}
+        canControl={canControl}
+        initialMode={libraryServicesMode}
+        initialScan={params.get("library_scan")}
+        onClose={() => {
+          setLibraryServicesOpen(false);
+          if (params.get("library_scan")) {
+            const next = new URLSearchParams(params);
+            next.delete("library_scan");
+            setParams(next, { replace: true });
+          }
+        }}
+      /> : null}
       <ControlledDocumentUploadDialog
         tenant={tenant}
         open={uploadOpen}
