@@ -339,6 +339,15 @@ def transition_workflow_with_release_guards(
             detail="Accountable document approval privileges are required to schedule effectivity",
         )
 
+    if payload.action == "SCHEDULE_EFFECTIVITY":
+        if payload.effective_at is None and workflow.effective_at is None:
+            raise HTTPException(status_code=422, detail="An accountable effectivity date and time is required")
+        if workflow.requires_authority and workflow.state != "AUTHORITY_APPROVED":
+            raise HTTPException(
+                status_code=409,
+                detail="Authority-required documents cannot be scheduled before recorded authority approval",
+            )
+
     manual = get_manual(db, tenant, workflow.manual_id)
     revision = get_revision(db, manual, workflow.revision_id)
     if revision.immutable_locked and workflow.state not in {"PUBLISHED"}:
