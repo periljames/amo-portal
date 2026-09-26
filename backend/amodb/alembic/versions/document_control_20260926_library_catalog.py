@@ -17,6 +17,7 @@ depends_on = None
 
 _TABLES = (
     "document_library_catalog_items",
+    "document_library_catalog_identifiers",
     "document_library_holdings",
     "document_library_circulation_events",
     "document_library_holds",
@@ -128,6 +129,21 @@ def upgrade() -> None:
         """))
 
     op.create_table(
+        "document_library_catalog_identifiers",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("catalog_item_id", sa.String(length=36), sa.ForeignKey("document_library_catalog_items.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("scheme", sa.String(length=32), nullable=False),
+        sa.Column("normalized_value", sa.String(length=255), nullable=False),
+        sa.Column("display_value", sa.String(length=255), nullable=False),
+        sa.Column("source", sa.String(length=64), nullable=False, server_default="MANUAL"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("tenant_id", "scheme", "normalized_value", name="uq_doc_library_identifier_tenant_scheme_value"),
+    )
+    op.create_index("ix_doc_library_identifier_item", "document_library_catalog_identifiers", ["catalog_item_id"])
+    op.create_index("ix_doc_library_identifier_lookup", "document_library_catalog_identifiers", ["tenant_id", "normalized_value"])
+
+    op.create_table(
         "document_library_holdings",
         sa.Column("id", sa.String(length=36), primary_key=True),
         sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
@@ -227,6 +243,10 @@ def downgrade() -> None:
     op.drop_index("ix_doc_library_holding_catalog_status", table_name="document_library_holdings")
     op.drop_index("ix_doc_library_holding_tenant_status", table_name="document_library_holdings")
     op.drop_table("document_library_holdings")
+
+    op.drop_index("ix_doc_library_identifier_lookup", table_name="document_library_catalog_identifiers")
+    op.drop_index("ix_doc_library_identifier_item", table_name="document_library_catalog_identifiers")
+    op.drop_table("document_library_catalog_identifiers")
 
     if _postgres():
         op.execute(sa.text("DROP INDEX IF EXISTS ix_manual_blocks_text_plain_fts"))
