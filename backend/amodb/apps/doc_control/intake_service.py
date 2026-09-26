@@ -338,6 +338,24 @@ def apply_controlled_document_metadata(
         actor_user_id=str(user.id),
         include_revisions=True,
     )
+    if parent_document_id:
+        parent_for_warehouse = db.query(manual_models.Manual).filter(
+            manual_models.Manual.id == parent_document_id,
+            manual_models.Manual.tenant_id == tenant.id,
+        ).first()
+        if parent_for_warehouse is not None:
+            warehouse.sync_manual(
+                db,
+                tenant,
+                parent_for_warehouse,
+                actor_user_id=str(user.id),
+                include_revisions=True,
+            )
+    warehouse.sync_governed_relationships(
+        db,
+        manual_tenant=tenant,
+        actor_user_id=str(user.id),
+    )
     db.flush()
     return {
         "document_type": document_type,
