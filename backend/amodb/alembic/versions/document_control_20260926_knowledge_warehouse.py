@@ -93,7 +93,8 @@ def _protect_version_identity() -> None:
                OR OLD.source_version_type IS DISTINCT FROM NEW.source_version_type
                OR OLD.source_version_id IS DISTINCT FROM NEW.source_version_id
                OR OLD.sequence IS DISTINCT FROM NEW.sequence
-               OR OLD.file_hash IS DISTINCT FROM NEW.file_hash THEN
+               OR OLD.version_label IS DISTINCT FROM NEW.version_label
+               OR (OLD.file_hash IS NOT NULL AND OLD.file_hash IS DISTINCT FROM NEW.file_hash) THEN
                 RAISE EXCEPTION 'Warehouse version identity and source hash are immutable';
             END IF;
             RETURN NEW;
