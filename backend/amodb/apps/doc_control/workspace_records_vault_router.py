@@ -481,6 +481,24 @@ async def upload_record(
     }
 
 
+@router.get("/t/{tenant_slug}/records/{record_id}")
+def get_record(
+    tenant_slug: str,
+    record_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _record(db, tenant.amo_id, record_id)
+    series = _series(db, tenant.amo_id, row.series_id)
+    if not _can_read_record(current_user, series, row):
+        raise HTTPException(status_code=403, detail="This retained record is outside your authorized scope")
+    return {
+        **_record_payload(row, series, current_user),
+        "download_url": f"/doc-control/workspace/t/{tenant_slug}/records/{row.id}/download",
+    }
+
+
 @router.get("/t/{tenant_slug}/records/{record_id}/download")
 def download_record(
     tenant_slug: str,
