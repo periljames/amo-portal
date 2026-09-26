@@ -366,6 +366,255 @@ def ensure_patron(
     return row
 
 
+
+def sync_library_circulation_event(
+    db: Session,
+    *,
+    tenant_id: str,
+    event: lm.LibraryCirculationEvent,
+    item: lm.LibraryCatalogItem,
+    holding: lm.LibraryHolding,
+    actor_user_id: str | None = None,
+) -> wm.WarehouseItemEvent:
+    item_copy = sync_library_holding(
+        db,
+        tenant_id=tenant_id,
+        item=item,
+        holding=holding,
+        actor_user_id=actor_user_id,
+    )
+    canonical_event = (
+        db.query(wm.WarehouseItemEvent)
+        .filter(
+            wm.WarehouseItemEvent.tenant_id == tenant_id,
+            wm.WarehouseItemEvent.source_event_type == "LIBRARY_CIRCULATION_EVENT",
+            wm.WarehouseItemEvent.source_event_id == event.id,
+        )
+        .first()
+    )
+    if canonical_event is None:
+        canonical_event = wm.WarehouseItemEvent(
+            tenant_id=tenant_id,
+            item_copy_id=item_copy.id,
+            event_type=event.event_type,
+            source_event_type="LIBRARY_CIRCULATION_EVENT",
+            source_event_id=event.id,
+            actor_user_id=event.actor_user_id,
+            patron_user_id=event.patron_user_id,
+            from_status=event.from_status,
+            to_status=event.to_status,
+            from_location=event.from_location,
+            to_location=event.to_location,
+            due_at=event.due_at,
+            metadata_json={**dict(event.metadata_json or {}), "notes": event.notes},
+            created_at=event.created_at,
+        )
+        db.add(canonical_event)
+        db.flush()
+
+    if event.event_type == "CHECK_OUT" and event.patron_user_id:
+        patron = ensure_patron(db, tenant_id=tenant_id, user_id=str(event.patron_user_id))
+        # A copy must never have two active custody loans.
+        db.query(wm.WarehouseLoan).filter(
+            wm.WarehouseLoan.tenant_id == tenant_id,
+            wm.WarehouseLoan.item_copy_id == item_copy.id,
+            wm.WarehouseLoan.status == "ACTIVE",
+        ).update(
+            {"status": "RETURNED", "returned_at": event.created_at},
+            synchronize_session=False,
+        )
+        loan = (
+            db.query(wm.WarehouseLoan)
+            .filter(
+                wm.WarehouseLoan.tenant_id == tenant_id,
+                wm.WarehouseLoan.source_entity_type == "LIBRARY_CHECK_OUT_EVENT",
+                wm.WarehouseLoan.source_entity_id == event.id,
+            )
+            .first()
+        )
+        if loan is None:
+            db.add(wm.WarehouseLoan(
+                tenant_id=tenant_id,
+                item_copy_id=item_copy.id,
+                patron_id=patron.id,
+                source_entity_type="LIBRARY_CHECK_OUT_EVENT",
+                source_entity_id=event.id,
+                status="ACTIVE",
+                checked_out_at=event.created_at,
+                due_at=event.due_at,
+                metadata_json={"holding_id": holding.id},
+            ))
+    elif event.event_type == "RENEW":
+        loan = (
+            db.query(wm.WarehouseLoan)
+            .filter(
+                wm.WarehouseLoan.tenant_id == tenant_id,
+                wm.WarehouseLoan.item_copy_id == item_copy.id,
+                wm.WarehouseLoan.status == "ACTIVE",
+            )
+            .order_by(wm.WarehouseLoan.checked_out_at.desc())
+            .first()
+        )
+        if loan:
+            loan.due_at = event.due_at
+            loan.renewal_count = int(loan.renewal_count or 0) + 1
+    elif event.event_type == "CHECK_IN":
+        db.query(wm.WarehouseLoan).filter(
+            wm.WarehouseLoan.tenant_id == tenant_id,
+            wm.WarehouseLoan.item_copy_id == item_copy.id,
+            wm.WarehouseLoan.status == "ACTIVE",
+        ).update(
+            {"status": "RETURNED", "returned_at": event.created_at},
+            synchronize_session=False,
+        )
+    return canonical_event
+
+
+def sync_library_hold_request(
+    db: Session,
+    *,
+    tenant_id: str,
+    hold: lm.LibraryHoldRequest,
+) -> wm.WarehouseHold | None:
+    record = (
+        db.query(wm.WarehouseContentRecord)
+        .filter(
+            wm.WarehouseContentRecord.tenant_id == tenant_id,
+            wm.WarehouseContentRecord.source_entity_type == "LIBRARY_CATALOG_ITEM",
+            wm.WarehouseContentRecord.source_entity_id == hold.catalog_item_id,
+        )
+        .first()
+    )
+    if record is None:
+        return None
+    patron = ensure_patron(db, tenant_id=tenant_id, user_id=str(hold.user_id))
+    fulfilled_copy = None
+    if hold.fulfilled_holding_id:
+        fulfilled_copy = (
+            db.query(wm.WarehouseItemCopy)
+            .filter(
+                wm.WarehouseItemCopy.tenant_id == tenant_id,
+                wm.WarehouseItemCopy.source_entity_type == "LIBRARY_HOLDING",
+                wm.WarehouseItemCopy.source_entity_id == hold.fulfilled_holding_id,
+            )
+            .first()
+        )
+    row = (
+        db.query(wm.WarehouseHold)
+        .filter(
+            wm.WarehouseHold.tenant_id == tenant_id,
+            wm.WarehouseHold.source_entity_type == "LIBRARY_HOLD",
+            wm.WarehouseHold.source_entity_id == hold.id,
+        )
+        .first()
+    )
+    if row is None:
+        row = wm.WarehouseHold(
+            tenant_id=tenant_id,
+            content_record_id=record.id,
+            patron_id=patron.id,
+            source_entity_type="LIBRARY_HOLD",
+            source_entity_id=hold.id,
+            created_at=hold.created_at,
+        )
+        db.add(row)
+    row.fulfilled_item_copy_id = fulfilled_copy.id if fulfilled_copy else None
+    row.status = hold.status
+    row.pickup_location = hold.pickup_location
+    row.expires_at = hold.expires_at
+    return row
+
+
+def sync_controlled_copy_event(
+    db: Session,
+    *,
+    manual_tenant: manual_models.Tenant,
+    copy: dm.DocumentControlledCopy,
+    event: dm.DocumentControlledCopyEvent,
+    actor_user_id: str | None = None,
+) -> wm.WarehouseItemEvent | None:
+    tenant_id = str(manual_tenant.amo_id)
+    item_copy = sync_controlled_copy(
+        db,
+        manual_tenant=manual_tenant,
+        copy=copy,
+        actor_user_id=actor_user_id,
+    )
+    if item_copy is None:
+        return None
+    row = (
+        db.query(wm.WarehouseItemEvent)
+        .filter(
+            wm.WarehouseItemEvent.tenant_id == tenant_id,
+            wm.WarehouseItemEvent.source_event_type == "CONTROLLED_COPY_EVENT",
+            wm.WarehouseItemEvent.source_event_id == event.id,
+        )
+        .first()
+    )
+    if row is None:
+        row = wm.WarehouseItemEvent(
+            tenant_id=tenant_id,
+            item_copy_id=item_copy.id,
+            event_type=event.event_type,
+            source_event_type="CONTROLLED_COPY_EVENT",
+            source_event_id=event.id,
+            actor_user_id=event.actor_user_id,
+            patron_user_id=event.to_holder_user_id or event.from_holder_user_id,
+            from_location=event.from_location,
+            to_location=event.to_location,
+            metadata_json={
+                "from_holder_user_id": event.from_holder_user_id,
+                "to_holder_user_id": event.to_holder_user_id,
+                "reason": event.reason,
+                "evidence": list(event.evidence_json or []),
+            },
+            created_at=event.created_at,
+        )
+        db.add(row)
+        db.flush()
+
+    if event.event_type in {"ISSUE", "CHECK_OUT", "TRANSFER"} and event.to_holder_user_id:
+        patron = ensure_patron(db, tenant_id=tenant_id, user_id=str(event.to_holder_user_id))
+        db.query(wm.WarehouseLoan).filter(
+            wm.WarehouseLoan.tenant_id == tenant_id,
+            wm.WarehouseLoan.item_copy_id == item_copy.id,
+            wm.WarehouseLoan.status == "ACTIVE",
+        ).update(
+            {"status": "RETURNED", "returned_at": event.created_at},
+            synchronize_session=False,
+        )
+        loan = (
+            db.query(wm.WarehouseLoan)
+            .filter(
+                wm.WarehouseLoan.tenant_id == tenant_id,
+                wm.WarehouseLoan.source_entity_type == "CONTROLLED_COPY_EVENT",
+                wm.WarehouseLoan.source_entity_id == event.id,
+            )
+            .first()
+        )
+        if loan is None:
+            db.add(wm.WarehouseLoan(
+                tenant_id=tenant_id,
+                item_copy_id=item_copy.id,
+                patron_id=patron.id,
+                source_entity_type="CONTROLLED_COPY_EVENT",
+                source_entity_id=event.id,
+                status="ACTIVE",
+                checked_out_at=event.created_at,
+                due_at=copy.due_back_at,
+                metadata_json={"controlled_copy_id": copy.id},
+            ))
+    elif event.event_type in {"RETURN", "CHECK_IN", "WITHDRAW", "DESTROY", "LOSS", "DAMAGE"}:
+        db.query(wm.WarehouseLoan).filter(
+            wm.WarehouseLoan.tenant_id == tenant_id,
+            wm.WarehouseLoan.item_copy_id == item_copy.id,
+            wm.WarehouseLoan.status == "ACTIVE",
+        ).update(
+            {"status": "RETURNED", "returned_at": event.created_at},
+            synchronize_session=False,
+        )
+    return row
+
 def sync_library_operations(
     db: Session,
     *,
@@ -516,32 +765,8 @@ def sync_library_operations(
         )
         if record is None:
             continue
-        patron = ensure_patron(db, tenant_id=tenant_id, user_id=str(source.user_id))
-        fulfilled_copy = copies.get(str(source.fulfilled_holding_id or ""))
-        row = (
-            db.query(wm.WarehouseHold)
-            .filter(
-                wm.WarehouseHold.tenant_id == tenant_id,
-                wm.WarehouseHold.source_entity_type == "LIBRARY_HOLD",
-                wm.WarehouseHold.source_entity_id == source.id,
-            )
-            .first()
-        )
-        if row is None:
-            row = wm.WarehouseHold(
-                tenant_id=tenant_id,
-                content_record_id=record.id,
-                patron_id=patron.id,
-                source_entity_type="LIBRARY_HOLD",
-                source_entity_id=source.id,
-                created_at=source.created_at,
-            )
-            db.add(row)
-        row.fulfilled_item_copy_id = fulfilled_copy.id if fulfilled_copy else None
-        row.status = source.status
-        row.pickup_location = source.pickup_location
-        row.expires_at = source.expires_at
-        counts["holds"] += 1
+        if sync_library_hold_request(db, tenant_id=tenant_id, hold=source):
+            counts["holds"] += 1
     return counts
 
 
@@ -1015,6 +1240,15 @@ def sync_retained_record(
             "legal_hold": bool(record_asset.legal_hold),
             "access_scope": dict(record_asset.access_scope_json or {}),
         },
+    )
+    assign_system_collection(
+        db,
+        tenant_id=tenant_id,
+        content_record_id=record.id,
+        code="RECORDS",
+        name="Records Vault",
+        collection_type="RECORDS",
+        actor_user_id=actor_user_id,
     )
     version = ensure_content_version(
         db,
@@ -1510,4 +1744,14 @@ def reconcile_tenant_warehouse(
     counts["retention_rules"] = sync_retention_rules(db, tenant_id=tenant_id)
 
     db.flush()
+    counts["relationships"] = int(db.query(func.count(wm.WarehouseRelationship.id)).filter(wm.WarehouseRelationship.tenant_id == tenant_id).scalar() or 0)
+    counts["acknowledgements"] = int(db.query(func.count(wm.WarehouseAcknowledgement.id)).filter(wm.WarehouseAcknowledgement.tenant_id == tenant_id).scalar() or 0)
+    counts["external_references"] = int(db.query(func.count(wm.WarehouseExternalReference.id)).filter(wm.WarehouseExternalReference.tenant_id == tenant_id).scalar() or 0)
+    counts["workflows"] = int(db.query(func.count(wm.WarehouseWorkflowInstance.id)).filter(wm.WarehouseWorkflowInstance.tenant_id == tenant_id).scalar() or 0)
+    counts["patrons"] = int(db.query(func.count(wm.WarehousePatron.id)).filter(wm.WarehousePatron.tenant_id == tenant_id).scalar() or 0)
+    counts["loans"] = int(db.query(func.count(wm.WarehouseLoan.id)).filter(wm.WarehouseLoan.tenant_id == tenant_id).scalar() or 0)
+    counts["holds"] = int(db.query(func.count(wm.WarehouseHold.id)).filter(wm.WarehouseHold.tenant_id == tenant_id).scalar() or 0)
+    counts["item_events"] = int(db.query(func.count(wm.WarehouseItemEvent.id)).filter(wm.WarehouseItemEvent.tenant_id == tenant_id).scalar() or 0)
+    counts["retention_rules"] = int(db.query(func.count(wm.WarehouseRetentionRule.id)).filter(wm.WarehouseRetentionRule.tenant_id == tenant_id).scalar() or 0)
+    counts["collections"] = int(db.query(func.count(wm.WarehouseCollection.id)).filter(wm.WarehouseCollection.tenant_id == tenant_id).scalar() or 0)
     return counts
