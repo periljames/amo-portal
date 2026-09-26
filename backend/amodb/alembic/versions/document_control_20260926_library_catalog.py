@@ -21,6 +21,9 @@ _TABLES = (
     "document_library_holdings",
     "document_library_circulation_events",
     "document_library_holds",
+    "document_record_series",
+    "document_record_assets",
+    "document_record_events",
 )
 
 
@@ -54,19 +57,25 @@ def _disable_rls(table_name: str) -> None:
 def _append_only_events() -> None:
     if not _postgres():
         return
-    op.execute(sa.text("""
-        CREATE OR REPLACE FUNCTION prevent_document_library_circulation_event_mutation()
-        RETURNS trigger AS $$
-        BEGIN
-            RAISE EXCEPTION 'Library circulation history is append-only';
-        END;
-        $$ LANGUAGE plpgsql;
-    """))
-    op.execute(sa.text("""
-        CREATE TRIGGER trg_document_library_circulation_events_append_only
-        BEFORE UPDATE OR DELETE ON document_library_circulation_events
-        FOR EACH ROW EXECUTE FUNCTION prevent_document_library_circulation_event_mutation();
-    """))
+    for table_name, label in (
+        ("document_library_circulation_events", "Library circulation history"),
+        ("document_record_events", "Record custody history"),
+    ):
+        function_name = f"prevent_{table_name}_mutation"
+        trigger_name = f"trg_{table_name}_append_only"
+        op.execute(sa.text(f"""
+            CREATE OR REPLACE FUNCTION {function_name}()
+            RETURNS trigger AS $
+            BEGIN
+                RAISE EXCEPTION '{label} is append-only';
+            END;
+            $ LANGUAGE plpgsql;
+        """))
+        op.execute(sa.text(f"""
+            CREATE TRIGGER {trigger_name}
+            BEFORE UPDATE OR DELETE ON {table_name}
+            FOR EACH ROW EXECUTE FUNCTION {function_name}();
+        """))
 
 
 def upgrade() -> None:
@@ -216,6 +225,96 @@ def upgrade() -> None:
     op.create_index("ix_doc_library_hold_item_status", "document_library_holds", ["catalog_item_id", "status", "created_at"])
     op.create_index("ix_doc_library_hold_user_status", "document_library_holds", ["tenant_id", "user_id", "status"])
 
+    op.create_table(
+        "document_record_series",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("code", sa.String(length=128), nullable=False),
+        sa.Column("title", sa.String(length=500), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("owner_department", sa.String(length=128), nullable=False),
+        sa.Column("retention_years", sa.Integer(), nullable=False, server_default="7"),
+        sa.Column("disposition_method", sa.String(length=40), nullable=False, server_default="REVIEW_AT_EXPIRY"),
+        sa.Column("restricted_flag", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("controllers_can_read", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("access_scope_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb") if _postgres() else None),
+        sa.Column("metadata_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb") if _postgres() else None),
+        sa.Column("status", sa.String(length=32), nullable=False, server_default="ACTIVE"),
+        sa.Column("created_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("tenant_id", "code", name="uq_document_record_series_tenant_code"),
+        sa.CheckConstraint("retention_years BETWEEN 1 AND 100", name="ck_document_record_series_retention"),
+        sa.CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_document_record_series_status"),
+        sa.CheckConstraint(
+            "disposition_method IN ('REVIEW_AT_EXPIRY','ARCHIVE','TRANSFER','DESTROY')",
+            name="ck_document_record_series_disposition",
+        ),
+    )
+    op.create_index("ix_document_record_series_tenant_owner", "document_record_series", ["tenant_id", "owner_department", "status"])
+
+    op.create_table(
+        "document_record_assets",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("series_id", sa.String(length=36), sa.ForeignKey("document_record_series.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("record_number", sa.String(length=160), nullable=False),
+        sa.Column("title", sa.String(length=500), nullable=False),
+        sa.Column("source_module", sa.String(length=64), nullable=False, server_default="DOCUMENT_CONTROL"),
+        sa.Column("source_entity_type", sa.String(length=80), nullable=True),
+        sa.Column("source_entity_id", sa.String(length=160), nullable=True),
+        sa.Column("filename", sa.String(length=255), nullable=False),
+        sa.Column("mime_type", sa.String(length=128), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("sha256", sa.String(length=64), nullable=False),
+        sa.Column("storage_path", sa.Text(), nullable=False),
+        sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("retention_due_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("legal_hold", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("legal_hold_reason", sa.Text(), nullable=True),
+        sa.Column("legal_hold_set_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("legal_hold_set_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("disposition_status", sa.String(length=40), nullable=False, server_default="ACTIVE"),
+        sa.Column("disposed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("disposed_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("disposition_reason", sa.Text(), nullable=True),
+        sa.Column("search_text", sa.Text(), nullable=False, server_default=""),
+        sa.Column("access_scope_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb") if _postgres() else None),
+        sa.Column("metadata_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb") if _postgres() else None),
+        sa.Column("uploaded_by_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("tenant_id", "record_number", name="uq_document_record_asset_tenant_number"),
+        sa.CheckConstraint("size_bytes >= 0", name="ck_document_record_asset_size"),
+        sa.CheckConstraint(
+            "disposition_status IN ('ACTIVE','ARCHIVED','TRANSFERRED','DISPOSED')",
+            name="ck_document_record_asset_disposition",
+        ),
+    )
+    op.create_index("ix_document_record_asset_series_capture", "document_record_assets", ["series_id", "captured_at"])
+    op.create_index("ix_document_record_asset_tenant_retention", "document_record_assets", ["tenant_id", "retention_due_at", "disposition_status"])
+    op.create_index("ix_document_record_asset_tenant_source", "document_record_assets", ["tenant_id", "source_module", "source_entity_type", "source_entity_id"])
+    op.create_index("ix_document_record_asset_tenant_sha", "document_record_assets", ["tenant_id", "sha256"])
+    if _postgres():
+        op.execute(sa.text("""
+            CREATE INDEX ix_document_record_asset_search_fts
+            ON document_record_assets
+            USING gin (to_tsvector('simple', coalesce(search_text, '')))
+        """))
+
+    op.create_table(
+        "document_record_events",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("record_asset_id", sa.String(length=36), sa.ForeignKey("document_record_assets.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("event_type", sa.String(length=48), nullable=False),
+        sa.Column("actor_user_id", sa.String(length=36), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("metadata_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb") if _postgres() else None),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+    op.create_index("ix_document_record_event_asset_created", "document_record_events", ["record_asset_id", "created_at"])
+    op.create_index("ix_document_record_event_tenant_action", "document_record_events", ["tenant_id", "event_type", "created_at"])
+
     for table in _TABLES:
         _enable_rls(table)
     _append_only_events()
@@ -223,13 +322,26 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     if _postgres():
-        op.execute(sa.text(
-            "DROP TRIGGER IF EXISTS trg_document_library_circulation_events_append_only "
-            "ON document_library_circulation_events"
-        ))
-        op.execute(sa.text("DROP FUNCTION IF EXISTS prevent_document_library_circulation_event_mutation()"))
+        for table_name in ("document_record_events", "document_library_circulation_events"):
+            op.execute(sa.text(f"DROP TRIGGER IF EXISTS trg_{table_name}_append_only ON {table_name}"))
+            op.execute(sa.text(f"DROP FUNCTION IF EXISTS prevent_{table_name}_mutation()"))
     for table in reversed(_TABLES):
         _disable_rls(table)
+
+    op.drop_index("ix_document_record_event_tenant_action", table_name="document_record_events")
+    op.drop_index("ix_document_record_event_asset_created", table_name="document_record_events")
+    op.drop_table("document_record_events")
+
+    if _postgres():
+        op.execute(sa.text("DROP INDEX IF EXISTS ix_document_record_asset_search_fts"))
+    op.drop_index("ix_document_record_asset_tenant_sha", table_name="document_record_assets")
+    op.drop_index("ix_document_record_asset_tenant_source", table_name="document_record_assets")
+    op.drop_index("ix_document_record_asset_tenant_retention", table_name="document_record_assets")
+    op.drop_index("ix_document_record_asset_series_capture", table_name="document_record_assets")
+    op.drop_table("document_record_assets")
+
+    op.drop_index("ix_document_record_series_tenant_owner", table_name="document_record_series")
+    op.drop_table("document_record_series")
 
     op.drop_index("ix_doc_library_hold_user_status", table_name="document_library_holds")
     op.drop_index("ix_doc_library_hold_item_status", table_name="document_library_holds")
