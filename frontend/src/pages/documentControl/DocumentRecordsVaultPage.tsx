@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   Archive,
   Download,
   FileArchive,
   FilePlus2,
   LockKeyhole,
+  BookOpen,
   Search,
   ShieldAlert,
   UnlockKeyhole,
@@ -20,10 +21,14 @@ import {
   downloadRecord,
   listRecords,
   listRecordSeries,
+  prefetchRecord,
+  readRecord,
+  reindexRecord,
   setRecordLegalHold,
   uploadRecord,
   type RecordSeries,
   type RetainedRecord,
+  type RecordRead,
 } from "../../services/documentRecordsVault";
 import DocumentControlShell, {
   DocumentControlEmpty,
@@ -33,6 +38,8 @@ import DocumentControlShell, {
 } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
 import "./documentRecordsVault.css";
+
+const RecordPdfPreview = lazy(() => import("./RecordPdfPreview"));
 
 function canControlRecords(): boolean {
   const user = getCachedUser();
@@ -70,6 +77,8 @@ export default function DocumentRecordsVaultPage() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [reading, setReading] = useState<RecordRead | null>(null);
+  const [readingId, setReadingId] = useState("");
 
   const refresh = useCallback(async () => {
     if (!tenant) return;
@@ -103,7 +112,13 @@ export default function DocumentRecordsVaultPage() {
     if (!tenant || !requestedRecordId) { setFocusedRecord(null); return; }
     let active = true;
     void getRecord(tenant, requestedRecordId)
-      .then((row) => { if (active) setFocusedRecord(row); })
+      .then((row) => {
+        if (!active) return;
+        setFocusedRecord(row);
+        setReadingId(row.id);
+        void readRecord(tenant, row.id).then((content) => { if (active) setReading(content); })
+          .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Record reader could not be opened."); });
+      })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The requested retained record could not be opened."); });
     return () => { active = false; };
   }, [requestedRecordId, tenant]);
@@ -112,6 +127,11 @@ export default function DocumentRecordsVaultPage() {
     () => Array.from(new Set(records.map((row) => row.source_module).filter(Boolean) as string[])).sort(),
     [records],
   );
+  const openRecord = async (record: RetainedRecord) => {
+    setReadingId(record.id); setReading(null); setError("");
+    try { setReading(await readRecord(tenant, record.id)); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Record preview could not be opened."); }
+  };
 
   if (!tenant) return <DocumentControlError message="Tenant context is unavailable." />;
 
@@ -126,8 +146,8 @@ export default function DocumentRecordsVaultPage() {
         <section className="records-vault__summary">
           <div><strong>{total}</strong><span>visible retained records</span></div>
           <div><strong>{series.length}</strong><span>accessible record series</span></div>
-          <div><strong>{records.filter((row) => row.legal_hold).length}</strong><span>legal / administrative holds</span></div>
-          <div><strong>{records.filter((row) => row.retention_due_at && new Date(row.retention_due_at) <= new Date() && row.disposition_status === "ACTIVE").length}</strong><span>retention actions due</span></div>
+          {canControl ? <><div><strong>{records.filter((row) => row.legal_hold).length}</strong><span>legal / administrative holds</span></div>
+          <div><strong>{records.filter((row) => row.retention_due_at && new Date(row.retention_due_at) <= new Date() && row.disposition_status === "ACTIVE").length}</strong><span>retention actions due</span></div></> : null}
         </section>
 
         <section className="records-vault__filters" aria-label="Records search and filters">
@@ -144,8 +164,8 @@ export default function DocumentRecordsVaultPage() {
             <option value="">All statuses</option>
             <option>ACTIVE</option><option>ARCHIVED</option><option>TRANSFERRED</option><option>DISPOSED</option>
           </select>
-          <label><input type="checkbox" checked={retentionDue} onChange={(event) => setRetentionDue(event.target.checked)} /> Retention due</label>
-          <label><input type="checkbox" checked={legalHoldOnly} onChange={(event) => setLegalHoldOnly(event.target.checked)} /> Legal hold</label>
+          {canControl ? <><label><input type="checkbox" checked={retentionDue} onChange={(event) => setRetentionDue(event.target.checked)} /> Retention due</label>
+          <label><input type="checkbox" checked={legalHoldOnly} onChange={(event) => setLegalHoldOnly(event.target.checked)} /> Legal hold</label></> : null}
           <button type="button" className="dc-button dc-button--primary" disabled={busy} onClick={() => void refresh()}>Search</button>
         </section>
 
@@ -157,36 +177,44 @@ export default function DocumentRecordsVaultPage() {
 
         {!busy && !records.length ? <DocumentControlEmpty title="No records match" message="Change the filters or deposit a retained record into an accessible series." /> : null}
 
-        <div className="records-vault__list">
-          {focusedRecord ? <div className="records-vault__focused">
-            <span><strong>Opened from search</strong><small>{focusedRecord.series_code} · {focusedRecord.record_number}</small></span>
-            <button type="button" className="dc-button" onClick={() => { const next = new URLSearchParams(params); next.delete("record"); setParams(next, { replace: true }); }}>Clear</button>
-          </div> : null}
-          {[
-            ...(focusedRecord ? [focusedRecord] : []),
-            ...records.filter((record) => record.id !== focusedRecord?.id),
-          ].map((record) => (
-            <article key={record.id} className="records-vault__record">
-              <header>
-                <div><small>{record.series_code} · {record.record_number}</small><h2>{record.title}</h2></div>
-                <div className="records-vault__status">
-                  <DocumentControlStatus kind={record.legal_hold ? "danger" : record.disposition_status === "ACTIVE" ? "success" : "neutral"}>
-                    {record.legal_hold ? "LEGAL HOLD" : record.disposition_status}
-                  </DocumentControlStatus>
-                </div>
-              </header>
-              <dl>
-                <div><dt>Source</dt><dd>{record.source_module || "—"}{record.source_entity_type ? ` · ${record.source_entity_type}` : ""}</dd></div>
-                <div><dt>Captured</dt><dd>{when(record.captured_at)}</dd></div>
-                <div><dt>Retention due</dt><dd>{when(record.retention_due_at)}</dd></div>
-                <div><dt>File</dt><dd>{record.filename || "Restricted"} · {humanBytes(record.size_bytes)}</dd></div>
-              </dl>
-              <div className="records-vault__actions">
-                {record.content_access && record.download_url ? <button type="button" className="dc-button" onClick={() => void downloadRecord(tenant, record).catch((caught) => setError(caught instanceof Error ? caught.message : "Download failed."))}><Download size={14} /> Download</button> : null}
-                {canControl ? <RecordControlButtons tenant={tenant} record={record} onChanged={() => void refresh()} setNotice={setNotice} setError={setError} /> : null}
-              </div>
-            </article>
-          ))}
+        {readingId ? <section className="records-vault__reader" aria-label="Retained record reader">
+          <header><h2>Record reader</h2><button type="button" className="dc-button" onClick={() => { setReadingId(""); setReading(null); }}>Close</button></header>
+          {reading ? <>
+            <p>{reading.filename} · {reading.metadata.text_index?.engine || "Index pending"}</p>
+            {reading.metadata.text_index?.warning ? <p role="status">{reading.metadata.text_index.warning}</p> : null}
+            {reading.mime_type === "application/pdf" ? <Suspense fallback={<DocumentControlLoading label="Loading PDF reader…" />}><RecordPdfPreview tenant={tenant} recordId={reading.record_id} /></Suspense> : null}
+            {reading.metadata.extracted && Object.keys(reading.metadata.extracted).length ? <dl className="records-vault__metadata">{Object.entries(reading.metadata.extracted).map(([key, value]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{String(value)}</dd></div>)}</dl> : null}
+            <pre>{reading.text || "The text index is pending or this file has no searchable text. Download the original to view it."}</pre>
+            {reading.truncated ? <small>Preview limited to 120,000 characters. Download the original for the complete record.</small> : null}
+          </> : <DocumentControlLoading label="Opening record…" />}
+        </section> : null}
+
+        {focusedRecord ? <div className="records-vault__focused">
+          <span><strong>Opened from search</strong><small>{focusedRecord.series_code} · {focusedRecord.record_number}</small></span>
+          <button type="button" className="dc-button" onClick={() => { const next = new URLSearchParams(params); next.delete("record"); setParams(next, { replace: true }); }}>Clear</button>
+        </div> : null}
+        <div className="records-vault__table-wrap">
+          <table className="records-vault__table">
+            <thead><tr><th scope="col">Record</th><th scope="col">Source</th><th scope="col">File / index</th><th scope="col">Retention</th><th scope="col">Actions</th></tr></thead>
+            <tbody>{[...(focusedRecord ? [focusedRecord] : []), ...records.filter((record) => record.id !== focusedRecord?.id)].map((record) => (
+              <tr key={record.id}>
+                <td data-label="Record"><strong>{record.title}</strong><small>{record.series_code} · {record.record_number}</small>
+                  <DocumentControlStatus kind={record.legal_hold ? "danger" : record.disposition_status === "ACTIVE" ? "success" : "neutral"}>{record.legal_hold ? "LEGAL HOLD" : record.disposition_status}</DocumentControlStatus>
+                </td>
+                <td data-label="Source">{record.source_module || "—"}<small>{record.source_entity_type || ""}</small></td>
+                <td data-label="File / index">{record.filename || "Restricted"}<small>{humanBytes(record.size_bytes)} · {record.metadata?.text_index?.status || "—"}</small>
+                  {record.metadata?.extracted?.page_count ? <small>{record.metadata.extracted.page_count} pages</small> : null}
+                </td>
+                <td data-label="Retention">Captured {when(record.captured_at)}<small>Due {when(record.retention_due_at)}</small></td>
+                <td data-label="Actions"><div className="records-vault__actions">
+                  {record.content_access ? <button type="button" className="dc-button" onMouseEnter={() => prefetchRecord(tenant, record.id)} onFocus={() => prefetchRecord(tenant, record.id)} onClick={() => void openRecord(record)}><BookOpen size={14} /> Read</button> : null}
+                  {record.content_access && record.download_url ? <button type="button" className="dc-button" onClick={() => void downloadRecord(tenant, record).catch((caught) => setError(caught instanceof Error ? caught.message : "Download failed."))}><Download size={14} /> Download</button> : null}
+                  {canControl && record.metadata?.text_index?.status !== "READY" ? <button type="button" className="dc-button" onClick={() => void reindexRecord(tenant, record.id).then(() => { setNotice("Indexing queued."); void refresh(); }).catch((caught) => setError(caught instanceof Error ? caught.message : "Indexing failed."))}>Retry index</button> : null}
+                  {canControl ? <RecordControlButtons tenant={tenant} record={record} onChanged={() => void refresh()} setNotice={setNotice} setError={setError} /> : null}
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table>
         </div>
       </div>
     </DocumentControlShell>
@@ -219,6 +247,13 @@ function RecordsControlDesk({
   const [recordNumber, setRecordNumber] = useState("");
   const [title, setTitle] = useState("");
   const [sourceModule, setSourceModule] = useState("DOCUMENT_CONTROL");
+  const [sourceEntityType, setSourceEntityType] = useState("");
+  const [sourceEntityId, setSourceEntityId] = useState("");
+  const [capturedAt, setCapturedAt] = useState("");
+  const [description, setDescription] = useState("");
+  const [tags, setTags] = useState("");
+  const [progress, setProgress] = useState<number | null>(null);
+  const [controller, setController] = useState<AbortController | null>(null);
   const [artifact, setArtifact] = useState<File | null>(null);
 
   const run = async (operation: () => Promise<unknown>, message: string) => {
@@ -244,13 +279,20 @@ function RecordsControlDesk({
   const deposit = (event: FormEvent) => {
     event.preventDefault();
     if (!artifact) { setError("Choose a file to deposit."); return; }
+    const abort = new AbortController();
+    setController(abort); setProgress(0);
     void run(() => uploadRecord(tenant, {
       artifact,
       seriesId: depositSeries,
       recordNumber,
       title,
       sourceModule,
-    }), "Record deposited into the tenant vault.");
+      sourceEntityType,
+      sourceEntityId,
+      capturedAt,
+      metadata: { description, tags },
+    }, { signal: abort.signal, onProgress: setProgress }), "Record deposited. Text and metadata indexing is queued.")
+      .finally(() => { setController(null); setProgress(null); });
   };
 
   return <section className="records-vault__control">
@@ -269,7 +311,13 @@ function RecordsControlDesk({
       <label><span>Record number</span><input value={recordNumber} onChange={(e) => setRecordNumber(e.target.value)} required /></label>
       <label><span>Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
       <label><span>Source module</span><input value={sourceModule} onChange={(e) => setSourceModule(e.target.value)} required /></label>
+      <label><span>Source entity type</span><input value={sourceEntityType} onChange={(e) => setSourceEntityType(e.target.value)} maxLength={80} placeholder="e.g. AUDIT_FINDING" /></label>
+      <label><span>Source entity ID</span><input value={sourceEntityId} onChange={(e) => setSourceEntityId(e.target.value)} maxLength={128} /></label>
+      <label><span>Captured at</span><input type="datetime-local" value={capturedAt} onChange={(e) => setCapturedAt(e.target.value)} /></label>
+      <label><span>Tags</span><input value={tags} onChange={(e) => setTags(e.target.value)} maxLength={500} placeholder="Comma separated" /></label>
+      <label className="wide"><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} /></label>
       <label className="wide"><span>Evidence file</span><input type="file" onChange={(e) => setArtifact(e.target.files?.[0] || null)} required /></label>
+      {progress !== null ? <div className="records-vault__progress" role="status"><progress value={progress} max={100} /> {progress}% uploaded {controller ? <button type="button" className="dc-button" onClick={() => controller.abort()}>Cancel</button> : null}</div> : null}
       <button className="dc-button dc-button--primary" disabled={busy || !artifact}>Deposit</button>
     </form> : null}
   </section>;

@@ -23,11 +23,13 @@ services:
       PLATFORM_OPS_GATEWAY_PROCESS_COUNT: "1"
       PLATFORM_OPS_WORKER_PROCESS_COUNT: "1"
       ROSTER_AUTOMATION_PROCESS_COUNT: "1"
+      DOCUMENT_RECORD_VAULT_DIR: "/app/uploads/document-record-vault"
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - /opt/amo-portal/shared/logs:/var/log/amo
+      - /opt/amo-portal/shared/record-vault:/app/uploads/document-record-vault
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
       interval: 30s
@@ -41,7 +43,7 @@ services:
     env_file:
       - .env
     environment:
-      PORTAL_WORKER_FAMILIES: "${PORTAL_WORKER_FAMILIES:-workforce,saas,training-workbooks,training-reports,document-indexing}"
+      PORTAL_WORKER_FAMILIES: "${PORTAL_WORKER_FAMILIES:-workforce,saas,training-workbooks,training-reports,document-indexing,record-indexing}"
       PORTAL_WORKER_CONCURRENCY: "${PORTAL_WORKER_CONCURRENCY:-1}"
       PORTAL_WORKER_DB_POOL_SIZE: "${PORTAL_WORKER_DB_POOL_SIZE:-2}"
       PORTAL_WORKER_DB_MAX_OVERFLOW: "${PORTAL_WORKER_DB_MAX_OVERFLOW:-1}"
@@ -50,11 +52,15 @@ services:
       # processing within roughly one second without sharing the API pool.
       TRAINING_REPORT_JOB_INTERVAL_SECONDS: "${TRAINING_REPORT_JOB_INTERVAL_SECONDS:-1}"
       DOCUMENT_INDEX_WORKER_POLL_SECONDS: "${DOCUMENT_INDEX_WORKER_POLL_SECONDS:-1}"
+      RECORD_INDEX_WORKER_POLL_SECONDS: "${RECORD_INDEX_WORKER_POLL_SECONDS:-2}"
+      DOCUMENT_RECORD_VAULT_DIR: "/app/uploads/document-record-vault"
     command: ["python", "-m", "amodb.jobs.portal_worker_main"]
     restart: unless-stopped
     cpus: "${PORTAL_WORKER_CPU_LIMIT:-2.0}"
     mem_limit: "${PORTAL_WORKER_MEMORY_LIMIT:-2g}"
     pids_limit: 256
+    volumes:
+      - /opt/amo-portal/shared/record-vault:/app/uploads/document-record-vault
     depends_on:
       backend:
         condition: service_healthy

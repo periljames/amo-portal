@@ -6,6 +6,7 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
@@ -65,6 +66,7 @@ def _tika_extract(content: bytes, mime_type: str) -> ExtractedDocumentText | Non
 
 def _xml_archive_text(content: bytes, prefixes: tuple[str, ...]) -> str:
     values: list[str] = []
+    length = 0
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         for name in archive.namelist():
             if not any(name.startswith(prefix) for prefix in prefixes) or not name.endswith(".xml"):
@@ -76,7 +78,8 @@ def _xml_archive_text(content: bytes, prefixes: tuple[str, ...]) -> str:
             for node in root.iter():
                 if node.text and node.text.strip():
                     values.append(node.text.strip())
-                    if sum(len(value) for value in values) >= _MAX_INDEX_CHARS:
+                    length += len(node.text.strip())
+                    if length >= _MAX_INDEX_CHARS:
                         return "\n".join(values)
     return "\n".join(values)
 
@@ -87,10 +90,12 @@ def _pdf_text(content: bytes) -> str:
     except ImportError:
         return ""
     values: list[str] = []
+    length = 0
     with fitz.open(stream=content, filetype="pdf") as document:
         for page in document:
             values.append(str(page.get_text("text") or ""))
-            if sum(len(value) for value in values) >= _MAX_INDEX_CHARS:
+            length += len(values[-1])
+            if length >= _MAX_INDEX_CHARS:
                 break
     return "\n".join(values)
 
@@ -102,6 +107,7 @@ def _xlsx_text(content: bytes) -> str:
         return ""
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     values: list[str] = []
+    length = 0
     try:
         for sheet in workbook.worksheets:
             values.append(sheet.title)
@@ -109,7 +115,8 @@ def _xlsx_text(content: bytes) -> str:
                 line = " | ".join(str(value) for value in row if value is not None)
                 if line:
                     values.append(line)
-                if sum(len(value) for value in values) >= _MAX_INDEX_CHARS:
+                    length += len(line)
+                if length >= _MAX_INDEX_CHARS:
                     return "\n".join(values)
     finally:
         workbook.close()

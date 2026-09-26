@@ -141,6 +141,11 @@ def resolve_tenant(db: Session, tenant_slug: str, user: account_models.User) -> 
     tenant = _tenant_by_slug(db, tenant_slug)
     if not getattr(user, "is_superuser", False) and str(getattr(user, "amo_id", "")) != str(tenant.amo_id):
         raise HTTPException(status_code=403, detail="The requested tenant is outside the active AMO context")
+    # Warehouse, library and vault tables enforce this setting through RLS.
+    # The setting is LOCAL to this transaction, including pooled connections.
+    if db.get_bind().dialect.name == "postgresql":
+        from sqlalchemy import text
+        db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant.amo_id)})
     return tenant
 
 

@@ -4,7 +4,7 @@ declare module "react-pdf" {
   export const pdfjs: any;
 
   export interface DocumentProps {
-    file: string | Blob | Uint8Array | null;
+    file: string | Blob | Uint8Array | { url: string; httpHeaders?: Record<string, string>; withCredentials?: boolean } | null;
     className?: string;
     loading?: React.ReactNode;
     error?: React.ReactNode;

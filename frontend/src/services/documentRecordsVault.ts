@@ -1,5 +1,6 @@
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { sanitizeDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 
 function path(tenant: string, suffix: string): string {
   return `/doc-control/workspace/t/${encodeURIComponent(tenant.toLowerCase())}${suffix}`;
@@ -55,7 +56,30 @@ export type RetainedRecord = {
   disposition_status: "ACTIVE" | "ARCHIVED" | "TRANSFERRED" | "DISPOSED";
   content_access: boolean;
   download_url?: string | null;
+  read_url?: string | null;
+  metadata?: { text_index?: { status?: "PENDING" | "READY" | "FAILED"; engine?: string; warning?: string; truncated?: boolean }; extracted?: Record<string, string | number>; [key: string]: unknown } | null;
 };
+
+export type RecordRead = { record_id: string; filename: string; mime_type: string; text: string; truncated: boolean; metadata: NonNullable<RetainedRecord["metadata"]> };
+const readCache = new Map<string, { promise: Promise<RecordRead>; expires: number }>();
+
+export function readRecord(tenant: string, recordId: string): Promise<RecordRead> {
+  const key = `${tenant}:${recordId}`;
+  const existing = readCache.get(key);
+  if (existing && existing.expires > Date.now()) return existing.promise;
+  const promise = api<RecordRead>(path(tenant, `/records/${encodeURIComponent(recordId)}/read`)).catch((error) => { readCache.delete(key); throw error; });
+  readCache.set(key, { promise, expires: Date.now() + 15_000 });
+  return promise;
+}
+
+export function prefetchRecord(tenant: string, recordId: string): void {
+  void readRecord(tenant, recordId).catch(() => undefined);
+}
+
+export function reindexRecord(tenant: string, recordId: string): Promise<{ id: string; status: string }> {
+  readCache.delete(`${tenant}:${recordId}`);
+  return api(path(tenant, `/records/${encodeURIComponent(recordId)}/reindex`), { method: "POST" });
+}
 
 export type RecordsResponse = {
   items: RetainedRecord[];
@@ -104,7 +128,8 @@ export function getRecord(tenant: string, recordId: string): Promise<RetainedRec
 
 export function uploadRecord(
   tenant: string,
-  payload: { artifact: File; seriesId: string; recordNumber: string; title: string; sourceModule?: string; sourceEntityType?: string; sourceEntityId?: string },
+  payload: { artifact: File; seriesId: string; recordNumber: string; title: string; sourceModule?: string; sourceEntityType?: string; sourceEntityId?: string; capturedAt?: string; metadata?: Record<string, string> },
+  options: { onProgress?: (percentage: number) => void; signal?: AbortSignal } = {},
 ): Promise<RetainedRecord> {
   const body = new FormData();
   body.append("artifact", payload.artifact);
@@ -114,7 +139,30 @@ export function uploadRecord(
   body.append("source_module", payload.sourceModule || "DOCUMENT_CONTROL");
   if (payload.sourceEntityType) body.append("source_entity_type", payload.sourceEntityType);
   if (payload.sourceEntityId) body.append("source_entity_id", payload.sourceEntityId);
-  return api(path(tenant, "/records"), { method: "POST", body });
+  if (payload.capturedAt) body.append("captured_at", new Date(payload.capturedAt).toISOString());
+  if (payload.metadata) body.append("metadata_json", JSON.stringify(payload.metadata));
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${getApiBaseUrl()}${path(tenant, "/records")}`);
+    xhr.withCredentials = true;
+    new Headers(authHeaders()).forEach((value, key) => xhr.setRequestHeader(key, value));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) options.onProgress?.(Math.round(event.loaded * 100 / event.total));
+    };
+    const abort = () => xhr.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    xhr.onload = () => {
+      options.signal?.removeEventListener("abort", abort);
+      let data: { detail?: string | { message?: string } } = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* HTTP status fallback */ }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || `Upload failed (${xhr.status})`));
+      } else resolve(data as unknown as RetainedRecord);
+    };
+    xhr.onerror = () => { options.signal?.removeEventListener("abort", abort); reject(new Error("Network error during upload.")); };
+    xhr.onabort = () => { options.signal?.removeEventListener("abort", abort); reject(new Error("Upload cancelled.")); };
+    xhr.send(body);
+  });
 }
 
 export function setRecordLegalHold(tenant: string, recordId: string, enabled: boolean, reason: string): Promise<{ id: string; legal_hold: boolean }> {
@@ -143,13 +191,12 @@ export async function downloadRecord(tenant: string, record: RetainedRecord): Pr
     credentials: "same-origin",
   });
   if (!response.ok) throw new Error(`Record download failed (${response.status})`);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = record.filename || record.record_number;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  const filename = sanitizeDownloadFilename(record.filename || record.record_number);
+  const picker = (window as Window & { showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{ createWritable: () => Promise<WritableStream<Uint8Array>> }> }).showSaveFilePicker;
+  if (picker && response.body) {
+    const handle = await picker.call(window, { suggestedName: filename });
+    await response.body.pipeTo(await handle.createWritable());
+    return;
+  }
+  saveDownloadedFile(await response.blob(), filename);
 }

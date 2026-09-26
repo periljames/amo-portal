@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, true
@@ -22,9 +22,10 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import records_vault_models as rm
+from . import warehouse_models as wm
 from . import warehouse_service as warehouse
-from .document_text_extractor import extract_document_text
-from .workspace_evidence_router import _safe_filename, _validate_file_signature
+from .record_file_indexer import index_record, validate_record_file
+from .workspace_evidence_router import _safe_filename
 from .workspace_library_router import _scope_match
 from .workspace_service import audit, is_control_user, resolve_tenant, role_value, utcnow
 
@@ -145,6 +146,35 @@ def _can_read_record(user: account_models.User, series: rm.TenantRecordSeries, r
     return not scope or is_tenant_admin(user) or _scope_allows(user, scope)
 
 
+def _denied_record_ids(db: Session, tenant_id: str, user: account_models.User) -> set[str]:
+    # Share the same principal/condition semantics as warehouse detail and search.
+    from .workspace_warehouse_router import _matching_policy_principals, _policy_conditions_match
+
+    principals = _matching_policy_principals(user)
+    policies = db.query(wm.WarehouseAccessPolicy, wm.WarehouseContentRecord.source_entity_id).join(
+        wm.WarehouseContentRecord,
+        wm.WarehouseContentRecord.id == wm.WarehouseAccessPolicy.content_record_id,
+    ).filter(
+        wm.WarehouseAccessPolicy.tenant_id == tenant_id,
+        wm.WarehouseAccessPolicy.action == "READ",
+        wm.WarehouseAccessPolicy.effect == "DENY",
+        wm.WarehouseContentRecord.source_entity_type == "RETAINED_RECORD",
+        or_(*[
+            and_(
+                wm.WarehouseAccessPolicy.principal_type == principal_type,
+                func.upper(wm.WarehouseAccessPolicy.principal_value) == value.upper(),
+            )
+            for principal_type, value in principals
+        ]),
+    ).all()
+    return {source_id for policy, source_id in policies if _policy_conditions_match(policy, user)}
+
+
+def _require_record_read(db: Session, tenant_id: str, user: account_models.User, series: rm.TenantRecordSeries, row: rm.TenantRecordAsset) -> None:
+    if not _can_read_record(user, series, row) or row.id in _denied_record_ids(db, tenant_id, user):
+        raise HTTPException(status_code=403, detail="This retained record is outside your authorized scope")
+
+
 def _series(db: Session, tenant_id: str, series_id: str) -> rm.TenantRecordSeries:
     row = db.query(rm.TenantRecordSeries).filter(
         rm.TenantRecordSeries.tenant_id == tenant_id,
@@ -204,6 +234,7 @@ def _record_payload(row: rm.TenantRecordAsset, series: rm.TenantRecordSeries, us
         "legal_hold_reason": row.legal_hold_reason if controller else None,
         "disposition_status": row.disposition_status,
         "content_access": can_read,
+        "metadata": {key: value for key, value in dict(row.metadata_json or {}).items() if not key.startswith("_")} if can_read else None,
     }
 
 
@@ -308,6 +339,9 @@ def list_records(
         rm.TenantRecordSeries.tenant_id == tenant.amo_id,
     )
     query = query.filter(_record_access_predicate(current_user))
+    denied = _denied_record_ids(db, str(tenant.amo_id), current_user)
+    if denied:
+        query = query.filter(rm.TenantRecordAsset.id.notin_(denied))
     if series_id:
         query = query.filter(rm.TenantRecordAsset.series_id == series_id)
     if source_module:
@@ -359,6 +393,7 @@ def list_records(
 async def upload_record(
     tenant_slug: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     artifact: UploadFile = File(...),
     series_id: str = Form(...),
     record_number: str = Form(...),
@@ -379,18 +414,17 @@ async def upload_record(
     if series.status != "ACTIVE":
         raise HTTPException(status_code=409, detail="This record series is not active")
     number = record_number.strip()
+    if not number or len(number) > 160 or not title.strip() or len(title.strip()) > 500:
+        raise HTTPException(status_code=422, detail="Record number and title are required within their configured lengths")
+    if not source_module.strip() or len(source_module.strip()) > 64 or len((source_entity_type or "").strip()) > 80 or len((source_entity_id or "").strip()) > 160:
+        raise HTTPException(status_code=422, detail="Source fields exceed their configured lengths")
     if db.query(rm.TenantRecordAsset.id).filter(
         rm.TenantRecordAsset.tenant_id == tenant.amo_id,
         rm.TenantRecordAsset.record_number == number,
     ).first():
         raise HTTPException(status_code=409, detail="Record number already exists")
 
-    content = await artifact.read(MAX_RECORD_BYTES + 1)
-    if len(content) > MAX_RECORD_BYTES:
-        raise HTTPException(status_code=413, detail="Retained record exceeds the configured maximum file size")
     filename = _safe_filename(artifact.filename)
-    mime_type = _validate_file_signature(filename, content)
-    checksum = hashlib.sha256(content).hexdigest()
     if captured_at:
         try:
             captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
@@ -405,25 +439,40 @@ async def upload_record(
         raise HTTPException(status_code=422, detail="Record access scope and metadata must be valid JSON objects") from exc
     if not isinstance(scope, dict) or not isinstance(metadata, dict):
         raise HTTPException(status_code=422, detail="Record access scope and metadata must be JSON objects")
+    if len(json.dumps(metadata)) > 16_384 or len(json.dumps(scope)) > 8_192:
+        raise HTTPException(status_code=413, detail="Record metadata or access scope is too large")
 
     record_id = str(uuid.uuid4())
-    directory = (RECORD_ROOT / str(tenant.amo_id) / series.code / record_id).resolve()
+    directory = (RECORD_ROOT / str(tenant.amo_id) / series.id / record_id).resolve()
     expected_root = RECORD_ROOT.resolve()
     if expected_root not in directory.parents:
         raise HTTPException(status_code=400, detail="Invalid record storage path")
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / filename
-    destination.write_bytes(content)
-
-    extracted = extract_document_text(filename, content, mime_type)
-    metadata = {
-        **metadata,
-        "text_index": {
-            "engine": extracted.engine,
-            "truncated": extracted.truncated,
-            "warning": extracted.warning,
-        },
-    }
+    temporary = directory / f".{uuid.uuid4().hex}.upload"
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with temporary.open("xb") as target:
+            while chunk := await artifact.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_RECORD_BYTES:
+                    raise HTTPException(status_code=413, detail="Retained record exceeds the configured maximum file size")
+                digest.update(chunk)
+                target.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=422, detail="Retained record is empty")
+        mime_type = validate_record_file(temporary, filename)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+        raise
+    finally:
+        await artifact.close()
     search_text = " ".join(filter(None, [
         number,
         title.strip(),
@@ -432,8 +481,8 @@ async def upload_record(
         source_entity_type or "",
         source_entity_id or "",
         " ".join(str(value) for value in metadata.values() if isinstance(value, (str, int, float))),
-        extracted.text,
     ]))[:2_000_000]
+    metadata = {**metadata, "_index_base": search_text, "text_index": {"status": "PENDING"}}
     row = rm.TenantRecordAsset(
         id=record_id,
         tenant_id=tenant.amo_id,
@@ -445,8 +494,8 @@ async def upload_record(
         source_entity_id=(source_entity_id or "").strip() or None,
         filename=filename,
         mime_type=mime_type,
-        size_bytes=len(content),
-        sha256=checksum,
+        size_bytes=size,
+        sha256=digest.hexdigest(),
         storage_path=str(destination),
         captured_at=captured,
         retention_due_at=_add_years(captured, series.retention_years),
@@ -455,43 +504,49 @@ async def upload_record(
         metadata_json=metadata,
         uploaded_by_user_id=current_user.id,
     )
-    db.add(row)
-    _write_event(
-        db,
-        tenant_id=tenant.amo_id,
-        record_id=row.id,
-        user_id=current_user.id,
-        event_type="DEPOSITED",
-        metadata={"source_module": row.source_module, "sha256": row.sha256},
-    )
-    warehouse_record, warehouse_version = warehouse.sync_retained_record(
-        db,
-        tenant_id=str(tenant.amo_id),
-        record_asset=row,
-        series=series,
-        actor_user_id=str(current_user.id),
-    )
-    warehouse.record_event(
-        db,
-        tenant_id=str(tenant.amo_id),
-        content_record_id=warehouse_record.id,
-        content_version_id=warehouse_version.id,
-        event_type="record.deposited",
-        actor_user_id=str(current_user.id),
-        metadata={"record_asset_id": row.id, "record_number": row.record_number},
-    )
-    audit(db, tenant, request, "document.records.deposited", "record_asset", row.id, {
-        "series_id": series.id,
-        "record_number": row.record_number,
-        "source_module": row.source_module,
-        "source_entity_type": row.source_entity_type,
-        "source_entity_id": row.source_entity_id,
-        "sha256": row.sha256,
-        "text_index_engine": extracted.engine,
-        "text_index_warning": extracted.warning,
-        "retention_due_at": row.retention_due_at.isoformat() if row.retention_due_at else None,
-    })
-    db.commit()
+    try:
+        db.add(row)
+        db.add(rm.TenantRecordIndexJob(tenant_id=tenant.amo_id, record_asset_id=row.id, status="PENDING"))
+        _write_event(
+            db,
+            tenant_id=tenant.amo_id,
+            record_id=row.id,
+            user_id=current_user.id,
+            event_type="DEPOSITED",
+            metadata={"source_module": row.source_module, "sha256": row.sha256},
+        )
+        warehouse_record, warehouse_version = warehouse.sync_retained_record(
+            db,
+            tenant_id=str(tenant.amo_id),
+            record_asset=row,
+            series=series,
+            actor_user_id=str(current_user.id),
+        )
+        warehouse.record_event(
+            db,
+            tenant_id=str(tenant.amo_id),
+            content_record_id=warehouse_record.id,
+            content_version_id=warehouse_version.id,
+            event_type="record.deposited",
+            actor_user_id=str(current_user.id),
+            metadata={"record_asset_id": row.id, "record_number": row.record_number},
+        )
+        audit(db, tenant, request, "document.records.deposited", "record_asset", row.id, {
+            "series_id": series.id,
+            "record_number": row.record_number,
+            "source_module": row.source_module,
+            "source_entity_type": row.source_entity_type,
+            "source_entity_id": row.source_entity_id,
+            "sha256": row.sha256,
+            "text_index_status": "PENDING",
+            "retention_due_at": row.retention_due_at.isoformat() if row.retention_due_at else None,
+        })
+        db.commit()
+    except Exception:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    background_tasks.add_task(index_record, str(tenant.amo_id), row.id, RECORD_ROOT)
     return {
         **_record_payload(row, series, current_user),
         "download_url": f"/doc-control/workspace/t/{tenant_slug}/records/{row.id}/download",
@@ -508,12 +563,67 @@ def get_record(
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = _record(db, tenant.amo_id, record_id)
     series = _series(db, tenant.amo_id, row.series_id)
-    if not _can_read_record(current_user, series, row):
-        raise HTTPException(status_code=403, detail="This retained record is outside your authorized scope")
+    _require_record_read(db, str(tenant.amo_id), current_user, series, row)
     return {
         **_record_payload(row, series, current_user),
         "download_url": f"/doc-control/workspace/t/{tenant_slug}/records/{row.id}/download",
+        "read_url": f"/doc-control/workspace/t/{tenant_slug}/records/{row.id}/read",
     }
+
+
+@router.get("/t/{tenant_slug}/records/{record_id}/read")
+def read_record(
+    tenant_slug: str,
+    record_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _record(db, tenant.amo_id, record_id)
+    series = _series(db, tenant.amo_id, row.series_id)
+    _require_record_read(db, str(tenant.amo_id), current_user, series, row)
+    audit(db, tenant, request, "document.records.text_retrieved", "record_asset", row.id, {"record_number": row.record_number})
+    _write_event(db, tenant_id=tenant.amo_id, record_id=row.id, user_id=current_user.id, event_type="ACCESSED")
+    db.commit()
+    return {
+        "record_id": row.id,
+        "filename": row.filename,
+        "mime_type": row.mime_type,
+        "text": row.search_text[:120_000],
+        "truncated": len(row.search_text) > 120_000,
+        "metadata": {key: value for key, value in dict(row.metadata_json or {}).items() if not key.startswith("_")},
+    }
+
+
+@router.post("/t/{tenant_slug}/records/{record_id}/reindex", status_code=202)
+def reindex_record(
+    tenant_slug: str,
+    record_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not is_control_user(current_user):
+        raise HTTPException(status_code=403, detail="Document Control privileges are required to reindex records")
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _record(db, tenant.amo_id, record_id)
+    path = Path(row.storage_path).resolve()
+    if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    row.metadata_json = {**dict(row.metadata_json or {}), "text_index": {"status": "PENDING"}}
+    job = db.query(rm.TenantRecordIndexJob).filter(
+        rm.TenantRecordIndexJob.tenant_id == tenant.amo_id,
+        rm.TenantRecordIndexJob.record_asset_id == row.id,
+    ).first()
+    if job:
+        job.status = "PENDING"
+        job.error_summary = None
+    else:
+        db.add(rm.TenantRecordIndexJob(tenant_id=tenant.amo_id, record_asset_id=row.id, status="PENDING"))
+    db.commit()
+    background_tasks.add_task(index_record, str(tenant.amo_id), row.id, RECORD_ROOT)
+    return {"id": row.id, "status": "PENDING"}
 
 
 @router.get("/t/{tenant_slug}/records/{record_id}/download")
@@ -527,8 +637,7 @@ def download_record(
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = _record(db, tenant.amo_id, record_id)
     series = _series(db, tenant.amo_id, row.series_id)
-    if not _can_read_record(current_user, series, row):
-        raise HTTPException(status_code=403, detail="This retained record is outside your authorized scope")
+    _require_record_read(db, str(tenant.amo_id), current_user, series, row)
     path = Path(row.storage_path).resolve()
     if not path.is_file() or RECORD_ROOT.resolve() not in path.parents:
         raise HTTPException(status_code=404, detail="Retained record file is unavailable")
@@ -558,6 +667,33 @@ def download_record(
         path,
         media_type=row.mime_type,
         filename=row.filename,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/t/{tenant_slug}/records/{record_id}/content")
+def record_content(
+    tenant_slug: str,
+    record_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _record(db, tenant.amo_id, record_id)
+    series = _series(db, tenant.amo_id, row.series_id)
+    _require_record_read(db, str(tenant.amo_id), current_user, series, row)
+    path = Path(row.storage_path).resolve()
+    if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    audit(db, tenant, request, "document.records.viewed", "record_asset", row.id, {"record_number": row.record_number})
+    _write_event(db, tenant_id=tenant.amo_id, record_id=row.id, user_id=current_user.id, event_type="ACCESSED")
+    db.commit()
+    return FileResponse(
+        path,
+        media_type=row.mime_type,
+        filename=row.filename,
+        content_disposition_type="inline",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 

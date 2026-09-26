@@ -51,7 +51,7 @@ class TenantRecordAsset(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "record_number", name="uq_document_record_asset_tenant_number"),
         Index("ix_document_record_asset_series_capture", "series_id", "captured_at"),
-        Index("ix_document_record_asset_tenant_retention", "tenant_id", "retention_due_at", "status"),
+        Index("ix_document_record_asset_tenant_retention", "tenant_id", "retention_due_at", "disposition_status"),
         Index("ix_document_record_asset_tenant_source", "tenant_id", "source_module", "source_entity_type", "source_entity_id"),
         Index("ix_document_record_asset_tenant_sha", "tenant_id", "sha256"),
     )
@@ -103,3 +103,21 @@ class TenantRecordEvent(Base):
     reason = Column(Text, nullable=True)
     metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class TenantRecordIndexJob(Base):
+    """Durable claim for asynchronous extraction, recoverable after process exit."""
+
+    __tablename__ = "document_record_index_jobs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "record_asset_id", name="uq_document_record_index_asset"),
+        Index("ix_document_record_index_pending", "status", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    record_asset_id = Column(String(36), ForeignKey("document_record_assets.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    error_summary = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)

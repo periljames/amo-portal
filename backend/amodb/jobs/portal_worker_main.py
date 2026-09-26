@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 
-DEFAULT_FAMILIES = "workforce,saas,training-workbooks,training-reports,document-indexing,quality-recycle-bin"
+DEFAULT_FAMILIES = "workforce,saas,training-workbooks,training-reports,document-indexing,record-indexing,quality-recycle-bin"
 
 
 def _load_env_file(path_value: str | None) -> None:
