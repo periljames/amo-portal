@@ -439,7 +439,7 @@ def sync_library_circulation_event(
                 patron_id=patron.id,
                 source_entity_type="LIBRARY_CHECK_OUT_EVENT",
                 source_entity_id=event.id,
-                status="ACTIVE",
+                status=canonical_status,
                 checked_out_at=event.created_at,
                 due_at=event.due_at,
                 metadata_json={"holding_id": holding.id},
@@ -1408,10 +1408,7 @@ def sync_governed_relationships(
     tenant_id = str(manual_tenant.amo_id)
     relationships = (
         db.query(gm.DocumentGovernedRelationship)
-        .filter(
-            gm.DocumentGovernedRelationship.tenant_id == tenant_id,
-            gm.DocumentGovernedRelationship.resolution_status != "SUPERSEDED",
-        )
+        .filter(gm.DocumentGovernedRelationship.tenant_id == tenant_id)
         .all()
     )
     count = 0
@@ -1460,10 +1457,18 @@ def sync_governed_relationships(
                     "relationship_source": source.relationship_source,
                 },
             )
+        relation_id = str(uuid.uuid5(namespace, f"{tenant_id}:{source.id}"))
+        canonical_status = (
+            "ACTIVE" if source.resolution_status == "CONFIRMED"
+            else "REJECTED" if source.resolution_status in {"REJECTED", "SUPERSEDED"}
+            else "PENDING"
+        )
         if target_record is None or target_record.id == source_record.id:
+            existing = db.query(wm.WarehouseRelationship).filter(wm.WarehouseRelationship.id == relation_id).first()
+            if existing is not None:
+                existing.status = canonical_status
             continue
 
-        relation_id = str(uuid.uuid5(namespace, f"{tenant_id}:{source.id}"))
         row = (
             db.query(wm.WarehouseRelationship)
             .filter(wm.WarehouseRelationship.id == relation_id)
@@ -1499,7 +1504,7 @@ def sync_governed_relationships(
             row.source_version_id = source_version.id if source_version else None
             row.target_version_id = target_version.id if target_version else None
             row.relationship_type = str(source.relationship_type).strip().upper()
-            row.status = "ACTIVE"
+            row.status = canonical_status
             row.verified_by_user_id = source.confirmed_by_user_id
             row.metadata_json = {
                 **dict(row.metadata_json or {}),
