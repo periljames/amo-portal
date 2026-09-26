@@ -719,6 +719,60 @@ export function searchTenantWarehouse(
   return api(`${workspacePath(tenant, "/search")}${queryString({ q: query, scope, limit })}`);
 }
 
+export type WarehouseOverviewResponse = {
+  resources: { total: number; by_type: Record<string, number> };
+  versions: { total: number; by_status: Record<string, number> };
+  physical_copies: { total: number; by_status: Record<string, number>; revision_required: number };
+  relationships: { total: number; unverified: number };
+  my_work: { active_loans: number; active_holds: number; acknowledgements_completed: number };
+  capabilities: { control: boolean };
+};
+
+export function getWarehouseOverview(tenant: string): Promise<WarehouseOverviewResponse> {
+  return api(workspacePath(tenant, "/warehouse/overview"));
+}
+
+export type WarehouseImpactResponse = {
+  root_record_id: string;
+  depth: number;
+  nodes: Array<{
+    id: string;
+    resource_type: string;
+    canonical_code: string;
+    title: string;
+    classification: string;
+    lifecycle_status: string;
+    target_path?: string | null;
+    revision_required_copies: number;
+  }>;
+  edges: Array<{
+    id: string;
+    source_record_id: string;
+    source_version_id?: string | null;
+    relationship_type: string;
+    target_record_id: string;
+    target_version_id?: string | null;
+    verified: boolean;
+    verified_by_user_id?: string | null;
+    effective_from?: string | null;
+    effective_to?: string | null;
+  }>;
+  summary: {
+    resources: number;
+    relationships: number;
+    unverified_relationships: number;
+    revision_required_copies: number;
+  };
+};
+
+export function getWarehouseImpact(tenant: string, recordId: string, depth = 2): Promise<WarehouseImpactResponse> {
+  return api(`${workspacePath(tenant, `/warehouse/resources/${encodeURIComponent(recordId)}/impact`)}${queryString({ depth })}`);
+}
+
+export function verifyWarehouseRelationship(tenant: string, relationshipId: string): Promise<{ id: string; status: string; verified: boolean }> {
+  return api(workspacePath(tenant, `/warehouse/relationships/${encodeURIComponent(relationshipId)}/verify`), { method: "POST" });
+}
+
 export type WarehouseReconcileResponse = {
   status: "RECONCILED";
   counts: {
