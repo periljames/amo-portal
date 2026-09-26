@@ -439,6 +439,7 @@ export type ExternalCatalogResult = {
   description?: string | null;
   cover_url?: string | null;
   source_url?: string | null;
+  existing_catalog_item_id?: string | null;
 };
 
 export type ExternalCatalogSearchResponse = {
@@ -624,4 +625,40 @@ export async function downloadLibraryHoldingLabel(
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+
+export type LibraryHoldingRegisterResponse = {
+  items: Array<{ item: LibraryCatalogItem; holding: LibraryHolding }>;
+  pagination: { page: number; per_page: number; total: number; returned: number };
+  summary: { available: number; checked_out: number; on_hold: number; overdue: number; exceptions: number };
+};
+
+export function listLibraryHoldings(
+  tenant: string,
+  filters: { q?: string; status?: string; overdue?: boolean; page?: number; perPage?: number } = {},
+): Promise<LibraryHoldingRegisterResponse> {
+  return api(`${workspacePath(tenant, "/catalog/holdings")}${queryString({
+    q: filters.q,
+    status: filters.status,
+    overdue: filters.overdue,
+    page: filters.page || 1,
+    per_page: filters.perPage || 50,
+  })}`);
+}
+
+export function controlLibraryHolding(
+  tenant: string,
+  holdingId: string,
+  payload: {
+    action: "MARK_LOST" | "MARK_DAMAGED" | "SEND_REPAIR" | "RETURN_TO_SHELF" | "WITHDRAW";
+    location?: string | null;
+    reason: string;
+    evidence?: Array<Record<string, unknown>>;
+  },
+): Promise<{ item: LibraryCatalogItem; holding: LibraryHolding }> {
+  return api(workspacePath(tenant, `/catalog/holdings/${encodeURIComponent(holdingId)}/control`), {
+    method: "POST",
+    body: JSON.stringify({ ...payload, evidence: payload.evidence || [] }),
+  });
 }
