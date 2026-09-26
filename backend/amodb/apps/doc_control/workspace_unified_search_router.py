@@ -61,7 +61,7 @@ def _controlled_documents(
     ]
     if is_control_user(user):
         latest = (
-            db.query(manual_models.ManualRevision.manual_id, func.max(manual_models.ManualRevision.created_at))
+            db.query(manual_models.ManualRevision.manual_id, func.max(manual_models.ManualRevision.created_at).label("latest_created_at"))
             .filter(manual_models.ManualRevision.manual_id.in_(visible_ids))
             .group_by(manual_models.ManualRevision.manual_id)
             .subquery()
@@ -72,7 +72,7 @@ def _controlled_documents(
             .join(
                 latest,
                 (latest.c.manual_id == manual_models.ManualRevision.manual_id)
-                & (latest.c.max_1 == manual_models.ManualRevision.created_at),
+                & (latest.c.latest_created_at == manual_models.ManualRevision.created_at),
             )
             .all()
         )
