@@ -306,7 +306,7 @@ def register_controlled_copy(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Controlled copy number already exists for the document") from exc
-    db.add(dm.DocumentControlledCopyEvent(
+    event = dm.DocumentControlledCopyEvent(
         tenant_id=tenant.amo_id,
         controlled_copy_id=row.id,
         event_type="ISSUE" if holder else "REGISTER",
@@ -314,7 +314,16 @@ def register_controlled_copy(
         to_holder_user_id=row.holder_user_id,
         to_location=row.location_text,
         reason="Registered physical controlled copy",
-    ))
+    )
+    db.add(event)
+    db.flush()
+    warehouse_item_event = warehouse.sync_controlled_copy_event(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        event=event,
+        actor_user_id=str(current_user.id),
+    )
     warehouse_copy = warehouse.sync_controlled_copy(
         db,
         manual_tenant=tenant,
@@ -390,6 +399,14 @@ def create_guarded_copy_event(
     elif payload.event_type in {"WITHDRAW", "DESTROY"}:
         row.status = "WITHDRAWN" if payload.event_type == "WITHDRAW" else "DESTROYED"
         row.withdrawn_at = utcnow()
+    db.flush()
+    warehouse.sync_controlled_copy_event(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        event=event,
+        actor_user_id=str(current_user.id),
+    )
     warehouse_copy = warehouse.sync_controlled_copy(
         db,
         manual_tenant=tenant,
@@ -579,6 +596,14 @@ def circulate_controlled_copy(
         }],
     )
     db.add(event)
+    db.flush()
+    warehouse.sync_controlled_copy_event(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        event=event,
+        actor_user_id=str(current_user.id),
+    )
     warehouse_copy = warehouse.sync_controlled_copy(
         db,
         manual_tenant=tenant,
