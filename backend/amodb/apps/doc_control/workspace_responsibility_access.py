@@ -103,7 +103,15 @@ def can_perform_workflow_action(
         return is_control_user(user)
 
     if action == "SCHEDULE_EFFECTIVITY":
+        if bool(getattr(workflow, "requires_authority", False)) and workflow.state != "AUTHORITY_APPROVED":
+            return False
         return is_accountable_approver(user)
+
+    if action == "MARK_AUTHORITY_SUBMITTED":
+        return bool(getattr(workflow, "requires_authority", False)) and is_control_user(user)
+
+    if action == "MARK_AUTHORITY_APPROVED":
+        return is_control_user(user)
 
     if action == "REQUEST_CORRECTIONS":
         responsibility_types = _corrections_responsibility(workflow)
