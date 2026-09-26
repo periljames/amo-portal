@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_, true
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -23,6 +23,7 @@ from amodb.security import get_current_active_user
 
 from . import records_vault_models as rm
 from .workspace_evidence_router import _safe_filename, _validate_file_signature
+from .workspace_library_router import _scope_match
 from .workspace_service import audit, is_control_user, resolve_tenant, role_value, utcnow
 
 
@@ -83,6 +84,46 @@ def _scope_allows(user: account_models.User, scope: dict[str, Any]) -> bool:
         if value
     }
     return bool(department_tokens.intersection({str(value).upper() for value in scope.get("departments", [])}))
+
+
+def _scope_sql_conditions(user: account_models.User, scope_column) -> list:
+    conditions = [_scope_match(scope_column, "user_ids", str(user.id))]
+    role = role_value(user)
+    if role:
+        conditions.append(_scope_match(scope_column, "roles", role, case_insensitive=True))
+    department = getattr(user, "department", None)
+    department_tokens = {
+        str(value)
+        for value in [
+            getattr(user, "department_id", None),
+            getattr(department, "id", None),
+            getattr(department, "code", None),
+            getattr(department, "name", None),
+        ]
+        if value
+    }
+    for token in department_tokens:
+        conditions.append(_scope_match(scope_column, "departments", token, case_insensitive=True))
+    return conditions
+
+
+def _record_access_predicate(user: account_models.User):
+    """Filter before count/offset so restricted records never distort pagination."""
+    if is_tenant_admin(user):
+        return true()
+    series_conditions = [
+        rm.TenantRecordSeries.restricted_flag.is_(False),
+        *_scope_sql_conditions(user, rm.TenantRecordSeries.access_scope_json),
+    ]
+    if is_control_user(user):
+        series_conditions.append(rm.TenantRecordSeries.controllers_can_read.is_(True))
+
+    record_scope_empty = func.coalesce(func.jsonb_object_length(rm.TenantRecordAsset.access_scope_json), 0) == 0
+    record_conditions = [
+        record_scope_empty,
+        *_scope_sql_conditions(user, rm.TenantRecordAsset.access_scope_json),
+    ]
+    return and_(or_(*series_conditions), or_(*record_conditions))
 
 
 def _can_read_series(user: account_models.User, series: rm.TenantRecordSeries) -> bool:
@@ -161,7 +202,6 @@ def _record_payload(row: rm.TenantRecordAsset, series: rm.TenantRecordSeries, us
         "legal_hold_reason": row.legal_hold_reason if controller else None,
         "disposition_status": row.disposition_status,
         "content_access": can_read,
-        "download_url": f"/doc-control/workspace/t/{{tenant_slug}}/records/{row.id}/download" if can_read else None,
     }
 
 
@@ -265,6 +305,7 @@ def list_records(
         rm.TenantRecordAsset.tenant_id == tenant.amo_id,
         rm.TenantRecordSeries.tenant_id == tenant.amo_id,
     )
+    query = query.filter(_record_access_predicate(current_user))
     if series_id:
         query = query.filter(rm.TenantRecordAsset.series_id == series_id)
     if source_module:
@@ -294,12 +335,11 @@ def list_records(
                 rm.TenantRecordAsset.filename.ilike(needle),
                 rm.TenantRecordAsset.search_text.ilike(needle),
             ))
+    total = int(query.order_by(None).count())
     rows = query.order_by(
         rm.TenantRecordAsset.captured_at.desc(),
         rm.TenantRecordAsset.id.desc(),
     ).offset((page - 1) * per_page).limit(per_page).all()
-    if not is_control_user(current_user):
-        rows = [(row, series) for row, series in rows if _can_read_record(current_user, series, row)]
     return {
         "items": [
             {
@@ -309,7 +349,7 @@ def list_records(
             }
             for row, series in rows
         ],
-        "pagination": {"page": page, "per_page": per_page, "returned": len(rows)},
+        "pagination": {"page": page, "per_page": per_page, "total": total, "returned": len(rows)},
     }
 
 
@@ -349,9 +389,18 @@ async def upload_record(
     filename = _safe_filename(artifact.filename)
     mime_type = _validate_file_signature(filename, content)
     checksum = hashlib.sha256(content).hexdigest()
-    captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00")) if captured_at else utcnow()
-    scope = json.loads(access_scope_json) if access_scope_json else {}
-    metadata = json.loads(metadata_json) if metadata_json else {}
+    if captured_at:
+        try:
+            captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="captured_at must be an ISO-8601 date/time") from exc
+    else:
+        captured = utcnow()
+    try:
+        scope = json.loads(access_scope_json) if access_scope_json else {}
+        metadata = json.loads(metadata_json) if metadata_json else {}
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Record access scope and metadata must be valid JSON objects") from exc
     if not isinstance(scope, dict) or not isinstance(metadata, dict):
         raise HTTPException(status_code=422, detail="Record access scope and metadata must be JSON objects")
 
