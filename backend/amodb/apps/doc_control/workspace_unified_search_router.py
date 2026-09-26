@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, Query
@@ -15,8 +15,10 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import library_models as lm
 from . import records_vault_models as rm
+from . import warehouse_models as wm
 from .workspace_library_catalog_router import _serialize_item, _visible_query
 from .workspace_records_vault_router import _record_access_predicate, _record_payload
+from .workspace_warehouse_router import _target_path, _visible_record_ids
 from .workspace_service import can_read_manual, get_profile, is_control_user, resolve_tenant
 
 
@@ -238,10 +240,90 @@ def _records(
     } for row, series in rows]
 
 
+
+def _governed_resources(
+    db: Session,
+    *,
+    tenant,
+    user: account_models.User,
+    query_text: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    visible_ids = _visible_record_ids(db, tenant=tenant, user=user)
+    query = db.query(wm.WarehouseContentRecord).filter(
+        wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
+    )
+    if visible_ids is not None:
+        query = query.filter(wm.WarehouseContentRecord.id.in_(visible_ids or ["-"]))
+
+    normalized = query_text.strip().upper()
+    identifier_match = db.query(wm.WarehouseIdentifier.id).filter(
+        wm.WarehouseIdentifier.tenant_id == tenant.amo_id,
+        wm.WarehouseIdentifier.content_record_id == wm.WarehouseContentRecord.id,
+        or_(
+            func.upper(wm.WarehouseIdentifier.normalized_value) == normalized,
+            wm.WarehouseIdentifier.display_value.ilike(f"%{query_text}%"),
+        ),
+    ).exists()
+    if db.get_bind().dialect.name == "postgresql":
+        tsquery = func.websearch_to_tsquery("simple", query_text)
+        vector = func.to_tsvector(
+            "simple",
+            func.concat_ws(
+                " ",
+                wm.WarehouseContentRecord.canonical_code,
+                wm.WarehouseContentRecord.title,
+                func.coalesce(wm.WarehouseContentRecord.description, ""),
+            ),
+        )
+        query = query.filter(or_(
+            func.upper(wm.WarehouseContentRecord.canonical_code) == normalized,
+            identifier_match,
+            vector.op("@@")(tsquery),
+        ))
+    else:
+        needle = f"%{query_text}%"
+        query = query.filter(or_(
+            wm.WarehouseContentRecord.canonical_code.ilike(needle),
+            wm.WarehouseContentRecord.title.ilike(needle),
+            wm.WarehouseContentRecord.description.ilike(needle),
+            identifier_match,
+        ))
+
+    rows = query.order_by(
+        wm.WarehouseContentRecord.title.asc(),
+        wm.WarehouseContentRecord.canonical_code.asc(),
+    ).limit(limit).all()
+    ids = [row.id for row in rows]
+    copy_summary: dict[str, dict[str, int]] = {}
+    if ids:
+        copy_rows = db.query(wm.WarehouseItemCopy).filter(
+            wm.WarehouseItemCopy.content_record_id.in_(ids),
+        ).all()
+        for copy in copy_rows:
+            summary = copy_summary.setdefault(str(copy.content_record_id), {"total": 0, "revision_required": 0})
+            summary["total"] += 1
+            if copy.revision_compliance == "REVISION_REQUIRED":
+                summary["revision_required"] += 1
+
+    return [{
+        "kind": "GOVERNED_RESOURCE",
+        "id": row.id,
+        "code": row.canonical_code,
+        "title": row.title,
+        "resource_type": row.resource_type,
+        "classification": row.classification,
+        "status": row.lifecycle_status,
+        "source_entity_type": row.source_entity_type,
+        "target_path": _target_path(tenant, row),
+        "copies": copy_summary.get(str(row.id), {"total": 0, "revision_required": 0}),
+    } for row in rows]
+
 @router.get("/t/{tenant_slug}/search")
 def unified_search(
     tenant_slug: str,
     q: str = Query(min_length=2, max_length=255),
+    scope: Literal["everything", "repository", "library", "records", "external"] = "everything",
     limit: int = Query(default=12, ge=1, le=_MAX_PER_SOURCE),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -253,23 +335,28 @@ def unified_search(
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
     query_text = " ".join(q.split())
-    controlled = _controlled_documents(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit)
-    catalog = _catalog(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit)
-    records = _records(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit)
+    governed = _governed_resources(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope == "everything" else []
+    controlled = _controlled_documents(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "repository"} else []
+    catalog = _catalog(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "library"} else []
+    records = _records(db, tenant=tenant, user=current_user, query_text=query_text, limit=limit) if scope in {"everything", "records"} else []
     encoded = quote_plus(query_text)
     return {
         "query": query_text,
+        "scope": scope,
         "groups": {
+            "governed_resources": governed,
             "controlled_documents": controlled,
             "library_items": catalog,
             "retained_records": records,
         },
         "counts": {
+            "governed_resources": len(governed),
             "controlled_documents": len(controlled),
             "library_items": len(catalog),
             "retained_records": len(records),
         },
         "internet": {
+            "enabled": scope in {"everything", "external"},
             "privacy": "External links contain only the search terms you entered. Tenant content is never appended.",
             "links": {
                 "google": f"https://www.google.com/search?q={encoded}",
