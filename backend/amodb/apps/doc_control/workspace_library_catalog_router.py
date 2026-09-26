@@ -116,6 +116,13 @@ class HoldCreate(BaseModel):
     expires_at: datetime | None = None
 
 
+class HoldingControlRequest(BaseModel):
+    action: Literal["MARK_LOST", "MARK_DAMAGED", "SEND_REPAIR", "RETURN_TO_SHELF", "WITHDRAW"]
+    location: str | None = Field(default=None, max_length=255)
+    reason: str = Field(min_length=2, max_length=2000)
+    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=25)
+
+
 def _normalize_identifier(scheme: str, value: str) -> tuple[str, str] | None:
     normalized_scheme = str(scheme or "").strip().lower().replace("-", "_")
     display = str(value or "").strip()
@@ -708,6 +715,137 @@ def create_holding(
     })
     db.commit()
     return _serialize_holding(row, controller=True)
+
+
+@router.get("/t/{tenant_slug}/catalog/holdings")
+def list_holdings(
+    tenant_slug: str,
+    q: str | None = Query(default=None, max_length=255),
+    status: str | None = Query(default=None, max_length=32),
+    overdue: bool = False,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    query = db.query(lm.LibraryHolding, lm.LibraryCatalogItem).join(
+        lm.LibraryCatalogItem,
+        lm.LibraryCatalogItem.id == lm.LibraryHolding.catalog_item_id,
+    ).filter(
+        lm.LibraryHolding.tenant_id == tenant.amo_id,
+        lm.LibraryCatalogItem.tenant_id == tenant.amo_id,
+    )
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        query = query.filter(or_(
+            lm.LibraryHolding.barcode.ilike(needle),
+            lm.LibraryHolding.accession_number.ilike(needle),
+            lm.LibraryHolding.call_number.ilike(needle),
+            lm.LibraryHolding.home_location.ilike(needle),
+            lm.LibraryHolding.current_location.ilike(needle),
+            lm.LibraryCatalogItem.catalogue_code.ilike(needle),
+            lm.LibraryCatalogItem.title.ilike(needle),
+        ))
+    if status:
+        query = query.filter(lm.LibraryHolding.status == status.strip().upper())
+    if overdue:
+        query = query.filter(
+            lm.LibraryHolding.status == "CHECKED_OUT",
+            lm.LibraryHolding.due_at.isnot(None),
+            lm.LibraryHolding.due_at < utcnow(),
+        )
+    total = int(query.count())
+    rows = query.order_by(
+        lm.LibraryCatalogItem.title.asc(),
+        lm.LibraryHolding.call_number.asc(),
+        lm.LibraryHolding.barcode.asc(),
+    ).offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "items": [{
+            "item": _serialize_item(item),
+            "holding": _serialize_holding(holding, controller=True),
+        } for holding, item in rows],
+        "pagination": {"page": page, "per_page": per_page, "total": total, "returned": len(rows)},
+        "summary": {
+            "available": sum(1 for holding, _item_row in rows if holding.status == "AVAILABLE"),
+            "checked_out": sum(1 for holding, _item_row in rows if holding.status == "CHECKED_OUT"),
+            "on_hold": sum(1 for holding, _item_row in rows if holding.status == "ON_HOLD"),
+            "overdue": sum(1 for holding, _item_row in rows if holding.status == "CHECKED_OUT" and holding.due_at and holding.due_at < utcnow()),
+            "exceptions": sum(1 for holding, _item_row in rows if holding.status in {"LOST", "DAMAGED", "IN_REPAIR"}),
+        },
+    }
+
+
+@router.post("/t/{tenant_slug}/catalog/holdings/{holding_id}/control")
+def control_holding(
+    tenant_slug: str,
+    holding_id: str,
+    payload: HoldingControlRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    holding = _holding(db, tenant.amo_id, holding_id)
+    item = _item(db, tenant.amo_id, holding.catalog_item_id, current_user)
+    before_status = holding.status
+    before_location = holding.current_location
+
+    if payload.action in {"MARK_DAMAGED", "SEND_REPAIR", "WITHDRAW"} and holding.holder_user_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Check the item in or record it lost before changing its physical-control state.",
+        )
+    if payload.action == "MARK_LOST":
+        holding.status = "LOST"
+    elif payload.action == "MARK_DAMAGED":
+        holding.status = "DAMAGED"
+    elif payload.action == "SEND_REPAIR":
+        holding.status = "IN_REPAIR"
+    elif payload.action == "RETURN_TO_SHELF":
+        holding.status = "AVAILABLE"
+        holding.holder_user_id = None
+        holding.checked_out_at = None
+        holding.due_at = None
+        holding.renewal_count = 0
+        holding.current_location = str(payload.location or holding.home_location).strip()
+    else:
+        holding.status = "WITHDRAWN"
+        holding.holder_user_id = None
+        holding.checked_out_at = None
+        holding.due_at = None
+
+    if payload.location:
+        holding.current_location = payload.location.strip()
+    holding.version = int(holding.version or 0) + 1
+    db.add(lm.LibraryCirculationEvent(
+        tenant_id=tenant.amo_id,
+        holding_id=holding.id,
+        event_type=payload.action,
+        actor_user_id=current_user.id,
+        patron_user_id=holding.holder_user_id,
+        from_status=before_status,
+        to_status=holding.status,
+        from_location=before_location,
+        to_location=holding.current_location,
+        due_at=holding.due_at,
+        notes=payload.reason.strip(),
+        metadata_json={"evidence": list(payload.evidence)},
+    ))
+    audit(db, tenant, request, f"document.library.{payload.action.lower()}", "library_holding", holding.id, {
+        "catalog_item_id": item.id,
+        "barcode": holding.barcode,
+        "from_status": before_status,
+        "to_status": holding.status,
+        "from_location": before_location,
+        "to_location": holding.current_location,
+        "reason": payload.reason.strip(),
+    })
+    db.commit()
+    return {"item": _serialize_item(item), "holding": _serialize_holding(holding, controller=True)}
 
 
 @router.get("/t/{tenant_slug}/catalog/scan/{code}")
