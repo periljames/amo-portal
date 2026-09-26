@@ -162,3 +162,46 @@ class LibraryHoldRequest(Base):
     fulfilled_holding_id = Column(String(36), ForeignKey("document_library_holdings.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class LibraryInventorySession(Base):
+    """A governed shelf/room stocktake performed by Document Control."""
+
+    __tablename__ = "document_library_inventory_sessions"
+    __table_args__ = (
+        Index("ix_doc_library_inventory_tenant_status", "tenant_id", "status", "started_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    location_prefix = Column(String(255), nullable=False)
+    status = Column(String(24), nullable=False, default="OPEN")
+    expected_count = Column(Integer, nullable=False, default=0)
+    observed_count = Column(Integer, nullable=False, default=0)
+    misplaced_count = Column(Integer, nullable=False, default=0)
+    missing_count = Column(Integer, nullable=False, default=0)
+    started_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    closed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
+
+class LibraryInventoryObservation(Base):
+    """One immutable scan/observation made during a physical inventory session."""
+
+    __tablename__ = "document_library_inventory_observations"
+    __table_args__ = (
+        UniqueConstraint("session_id", "holding_id", name="uq_doc_library_inventory_observation"),
+        Index("ix_doc_library_inventory_observation_session", "session_id", "observed_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(36), ForeignKey("document_library_inventory_sessions.id", ondelete="CASCADE"), nullable=False)
+    holding_id = Column(String(36), ForeignKey("document_library_holdings.id", ondelete="CASCADE"), nullable=False)
+    observed_location = Column(String(255), nullable=False)
+    expected_location = Column(String(255), nullable=False)
+    outcome = Column(String(24), nullable=False)
+    observed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
