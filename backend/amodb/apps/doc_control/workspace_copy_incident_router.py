@@ -12,6 +12,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import domain_models as dm
+from . import warehouse_service as warehouse
 from .workspace_router import _copy_payload
 from .workspace_service import audit, require_control_user, resolve_tenant, utcnow
 
@@ -105,6 +106,23 @@ def record_controlled_copy_incident(
         "recorded_by_user_id": str(current_user.id),
     }
     row.metadata_json = metadata
+    warehouse_copy = warehouse.sync_controlled_copy(
+        db,
+        manual_tenant=tenant,
+        copy=row,
+        actor_user_id=str(current_user.id),
+    )
+    if warehouse_copy is not None:
+        warehouse.record_event(
+            db,
+            tenant_id=str(tenant.amo_id),
+            content_record_id=warehouse_copy.content_record_id,
+            content_version_id=warehouse_copy.content_version_id,
+            item_copy_id=warehouse_copy.id,
+            event_type=f"item.{payload.incident_type.lower()}",
+            actor_user_id=str(current_user.id),
+            metadata={"controlled_copy_id": row.id, "reason": payload.reason.strip()},
+        )
     audit(
         db,
         tenant,
