@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+import os
+import re
+import time
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
@@ -53,6 +56,9 @@ HOLDING_STATUSES = {"AVAILABLE", "CHECKED_OUT", "ON_HOLD", "LOST", "DAMAGED", "W
 _ACTIVE_HOLD_STATUSES = {"ACTIVE", "READY"}
 _EXTERNAL_TIMEOUT_SECONDS = 4.0
 _EXTERNAL_LIMIT = 12
+_EXTERNAL_CACHE_TTL_SECONDS = 15 * 60
+_EXTERNAL_CACHE_MAX = 256
+_EXTERNAL_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class CatalogItemCreate(BaseModel):
@@ -91,7 +97,7 @@ class HoldingCreate(BaseModel):
     call_number: str | None = Field(default=None, max_length=128)
     format: str = Field(default="PHYSICAL", max_length=32)
     home_location: str = Field(min_length=2, max_length=255)
-    acquired_on: datetime | None = None
+    acquired_on: date | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -108,6 +114,61 @@ class CirculationRequest(BaseModel):
 class HoldCreate(BaseModel):
     pickup_location: str | None = Field(default=None, max_length=255)
     expires_at: datetime | None = None
+
+
+def _normalize_identifier(scheme: str, value: str) -> tuple[str, str] | None:
+    normalized_scheme = str(scheme or "").strip().lower().replace("-", "_")
+    display = str(value or "").strip()
+    if not normalized_scheme or not display:
+        return None
+    if normalized_scheme in {"isbn", "isbn_10", "isbn_13", "issn", "ean", "upc"}:
+        normalized = re.sub(r"[^0-9Xx]", "", display).upper()
+    elif normalized_scheme == "doi":
+        normalized = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", display, flags=re.IGNORECASE).strip().lower()
+    else:
+        normalized = re.sub(r"\s+", "", display).lower()
+    if not normalized:
+        return None
+    return normalized_scheme[:32], normalized[:255]
+
+
+def _identifier_pairs(identifiers: dict[str, str]) -> list[tuple[str, str, str]]:
+    output: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for scheme, display in identifiers.items():
+        normalized = _normalize_identifier(scheme, display)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        output.append((normalized[0], normalized[1], str(display).strip()[:255]))
+    return output
+
+
+def _existing_identifier_map(
+    db: Session,
+    *,
+    tenant_id: str,
+    items: list[dict[str, Any]],
+) -> dict[tuple[str, str], str]:
+    pairs = {
+        (scheme, normalized)
+        for item in items
+        for scheme, normalized, _display in _identifier_pairs(dict(item.get("identifiers") or {}))
+    }
+    if not pairs:
+        return {}
+    clauses = [
+        and_(
+            lm.LibraryCatalogIdentifier.scheme == scheme,
+            lm.LibraryCatalogIdentifier.normalized_value == normalized,
+        )
+        for scheme, normalized in pairs
+    ]
+    rows = db.query(lm.LibraryCatalogIdentifier).filter(
+        lm.LibraryCatalogIdentifier.tenant_id == tenant_id,
+        or_(*clauses),
+    ).all()
+    return {(row.scheme, row.normalized_value): row.catalog_item_id for row in rows}
 
 
 def _clean_list(values: list[str], *, limit: int, item_limit: int = 255) -> list[str]:
@@ -266,19 +327,32 @@ def _serialize_holding(row: lm.LibraryHolding, *, controller: bool, own: bool = 
 
 
 def _external_json(url: str) -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _EXTERNAL_CACHE.get(url)
+    if cached and now - cached[0] <= _EXTERNAL_CACHE_TTL_SECONDS:
+        return dict(cached[1])
+
+    contact = str(os.getenv("LIBRARY_EXTERNAL_CONTACT") or "").strip()
+    user_agent = "AMO-Portal-DMS/1.0"
+    if contact:
+        user_agent += f" ({contact})"
+    else:
+        user_agent += " (+https://github.com/periljames/amo-portal)"
     request = UrlRequest(
         url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "AMO-Portal-DMS/1.0 (+https://github.com/periljames/amo-portal)",
-        },
+        headers={"Accept": "application/json", "User-Agent": user_agent},
         method="GET",
     )
     try:
         with urlopen(request, timeout=_EXTERNAL_TIMEOUT_SECONDS) as response:
             if int(getattr(response, "status", 200)) != 200:
                 raise HTTPException(status_code=502, detail="External catalogue provider returned an error")
-            return json.loads(response.read(2_000_000).decode("utf-8"))
+            payload = json.loads(response.read(2_000_000).decode("utf-8"))
+            if len(_EXTERNAL_CACHE) >= _EXTERNAL_CACHE_MAX:
+                oldest = min(_EXTERNAL_CACHE, key=lambda key: _EXTERNAL_CACHE[key][0])
+                _EXTERNAL_CACHE.pop(oldest, None)
+            _EXTERNAL_CACHE[url] = (now, payload)
+            return dict(payload)
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=502, detail="External catalogue provider is temporarily unavailable") from exc
 
@@ -312,7 +386,7 @@ def _google_books(query: str, limit: int) -> list[dict[str, Any]]:
             "identifiers": identifiers,
             "subjects": info.get("categories") or [],
             "description": info.get("description"),
-            "cover_url": (info.get("imageLinks") or {}).get("thumbnail"),
+            "cover_url": str((info.get("imageLinks") or {}).get("thumbnail") or "").replace("http://", "https://") or None,
             "source_url": info.get("canonicalVolumeLink") or info.get("infoLink"),
         })
     return output[:limit]
@@ -366,7 +440,7 @@ def external_catalog_search(
 ):
     # External discovery is intentionally explicit. Queries are sent to the named
     # public provider only after the user invokes this endpoint.
-    resolve_tenant(db, tenant_slug, current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     providers = ["google", "openlibrary"] if provider == "all" else [provider]
@@ -376,9 +450,18 @@ def external_catalog_search(
             results.extend(rows)
         except HTTPException as exc:
             errors.append({"provider": selected.upper(), "message": str(exc.detail)})
+    selected_results = results[: limit * len(providers)]
+    existing = _existing_identifier_map(db, tenant_id=tenant.amo_id, items=selected_results)
+    for item in selected_results:
+        matches = [
+            existing.get((scheme, normalized))
+            for scheme, normalized, _display in _identifier_pairs(dict(item.get("identifiers") or {}))
+            if existing.get((scheme, normalized))
+        ]
+        item["existing_catalog_item_id"] = matches[0] if matches else None
     return {
         "query": q,
-        "items": results[: limit * len(providers)],
+        "items": selected_results,
         "provider_errors": errors,
         "links": {
             "google_search": f"https://www.google.com/search?q={quote_plus(q)}",
@@ -418,11 +501,20 @@ def list_catalog_items(
             query = query.filter(vector.op("@@")(tsquery)).order_by(func.ts_rank_cd(vector, tsquery).desc())
         else:
             needle = f"%{search}%"
+            identifier_match = db.query(lm.LibraryCatalogIdentifier.id).filter(
+                lm.LibraryCatalogIdentifier.tenant_id == tenant.amo_id,
+                lm.LibraryCatalogIdentifier.catalog_item_id == lm.LibraryCatalogItem.id,
+                or_(
+                    lm.LibraryCatalogIdentifier.normalized_value.ilike(needle),
+                    lm.LibraryCatalogIdentifier.display_value.ilike(needle),
+                ),
+            ).exists()
             query = query.filter(or_(
                 lm.LibraryCatalogItem.title.ilike(needle),
                 lm.LibraryCatalogItem.subtitle.ilike(needle),
                 lm.LibraryCatalogItem.search_text.ilike(needle),
                 cast(lm.LibraryCatalogItem.identifiers_json, String).ilike(needle),
+                identifier_match,
             ))
     if availability != "any":
         wanted = ["AVAILABLE"] if availability == "available" else ["CHECKED_OUT"]
@@ -471,6 +563,29 @@ def create_catalog_item(
 ):
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
+    normalized_identifiers = _identifier_pairs(payload.identifiers)
+    if normalized_identifiers:
+        duplicate = db.query(lm.LibraryCatalogIdentifier).filter(
+            lm.LibraryCatalogIdentifier.tenant_id == tenant.amo_id,
+            or_(*[
+                and_(
+                    lm.LibraryCatalogIdentifier.scheme == scheme,
+                    lm.LibraryCatalogIdentifier.normalized_value == normalized,
+                )
+                for scheme, normalized, _display in normalized_identifiers
+            ]),
+        ).first()
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "A catalogue item with this identifier already exists.",
+                    "existing_catalog_item_id": duplicate.catalog_item_id,
+                    "scheme": duplicate.scheme,
+                    "identifier": duplicate.display_value,
+                },
+            )
+
     row = lm.LibraryCatalogItem(
         tenant_id=tenant.amo_id,
         catalogue_code=payload.catalogue_code.strip(),
@@ -498,6 +613,16 @@ def create_catalog_item(
     )
     db.add(row)
     try:
+        db.flush()
+        for scheme, normalized, display in normalized_identifiers:
+            db.add(lm.LibraryCatalogIdentifier(
+                tenant_id=tenant.amo_id,
+                catalog_item_id=row.id,
+                scheme=scheme,
+                normalized_value=normalized,
+                display_value=display,
+                source=row.source_provider,
+            ))
         db.flush()
     except IntegrityError as exc:
         db.rollback()
@@ -557,7 +682,7 @@ def create_holding(
         format=payload.format.strip().upper(),
         home_location=location,
         current_location=location,
-        acquired_on=payload.acquired_on.date() if payload.acquired_on else None,
+        acquired_on=payload.acquired_on,
         metadata_json=dict(payload.metadata),
         created_by_user_id=current_user.id,
     )
