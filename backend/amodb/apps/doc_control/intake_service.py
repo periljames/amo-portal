@@ -15,6 +15,7 @@ from amodb.apps.manuals import models as manual_models
 from . import domain_models as dm
 from . import governance_models as gm
 from . import knowledge_models as km
+from .workflow_policy import resolve_document_lifecycle_policy, serialize_document_lifecycle_policy
 from .knowledge_service import (
     EXECUTABLE_NODE_TYPES,
     _default_group_code,
@@ -211,11 +212,17 @@ def apply_controlled_document_metadata(
         "retention_years": retention_years,
         "parent_document_id": _text(metadata.get("parent_document_id"), max_length=36),
         "intake_origin": origin,
+        "control_purpose": _text(metadata.get("control_purpose"), max_length=64),
         "metadata_confirmed_by_user_id": str(user.id),
         "metadata_confirmed_at": datetime.now(timezone.utc).isoformat(),
     }
-    profile.version = int(profile.version or 0) + 1
     manual.manual_type = TYPE_STORAGE_VALUE[document_type]
+    lifecycle_policy = resolve_document_lifecycle_policy(profile, manual)
+    profile.metadata_json = {
+        **dict(profile.metadata_json or {}),
+        "lifecycle_policy": serialize_document_lifecycle_policy(lifecycle_policy),
+    }
+    profile.version = int(profile.version or 0) + 1
 
     # Materialize the canonical node before validating a user-confirmed parent.
     reconcile_documentation_hierarchy(db, manual_tenant=tenant, actor_id=str(user.id))
@@ -384,12 +391,17 @@ def ensure_intake_workflow(
         any(change.qms_blocking for change in open_changes)
         or linked_modules.intersection({"QMS", "QUALITY", "QUALITY_AND_COMPLIANCE"})
     )
+    lifecycle_policy = resolve_document_lifecycle_policy(profile, manual)
+    profile.metadata_json = {
+        **dict(profile.metadata_json or {}),
+        "lifecycle_policy": serialize_document_lifecycle_policy(lifecycle_policy),
+    }
     workflow = dm.DocumentWorkflowInstance(
         tenant_id=tenant.amo_id,
         manual_id=manual.id,
         revision_id=revision.id,
         state="DRAFT",
-        requires_authority=bool(profile.requires_authority_approval or profile.regulated_flag),
+        requires_authority=lifecycle_policy.authority_approval,
         training_impact_required=training_required,
         training_readiness_status="PENDING" if training_required else "NOT_REQUIRED",
         qms_readiness_status="PENDING" if qms_required else "NOT_REQUIRED",
