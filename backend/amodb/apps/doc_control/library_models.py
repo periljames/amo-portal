@@ -47,6 +47,7 @@ class LibraryCatalogItem(Base):
     identifiers_json = Column(JSONB, nullable=False, default=dict)
     subjects_json = Column(JSONB, nullable=False, default=list)
     description = Column(Text, nullable=True)
+    search_text = Column(Text, nullable=False, default="")
     source_provider = Column(String(64), nullable=False, default="MANUAL")
     source_record_id = Column(String(255), nullable=True)
     source_url = Column(Text, nullable=True)
