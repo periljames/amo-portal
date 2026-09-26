@@ -202,8 +202,8 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [loading, setLoading] = useState(!cached);
   const [refreshing, setRefreshing] = useState(Boolean(cached));
   const [error, setError] = useState("");
-  const [navigationTab, setNavigationTab] = useState<NavigationTab>("toc");
-  const [query, setQuery] = useState("");
+  const [navigationTab, setNavigationTab] = useState<NavigationTab>(() => searchParams.get("q") ? "search" : "toc");
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [searchResults, setSearchResults] = useState<PublicationSearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [activeSection, setActiveSection] = useState(() => cached?.read.progress?.last_anchor_slug || cached?.read.sections[0]?.anchor_slug || "");
@@ -214,7 +214,9 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [viewMode, setViewMode] = useState<ViewMode>(() => ["PDF", "DOCX"].includes(String(cached?.metadata.source_type || "").toUpperCase()) ? "layout" : "text");
   const [pdfNavigationRequest, setPdfNavigationRequest] = useState<PdfNavigationRequest | null>(null);
   const localPosition = useMemo(() => loadLocalPosition(tenant, manualId || "", revId || ""), [manualId, revId, tenant]);
-  const [currentPdfPage, setCurrentPdfPage] = useState(() => cached?.read.progress?.last_page_number || localPosition.page || 1);
+  const requestedPage = Number(searchParams.get("page"));
+  const targetPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : null;
+  const [currentPdfPage, setCurrentPdfPage] = useState(() => targetPage || cached?.read.progress?.last_page_number || localPosition.page || 1);
   const [zoomPercent, setZoomPercent] = useState(() => cached?.read.progress?.zoom_percent || localPosition.zoom || 100);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -255,14 +257,29 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
     setMetadata(bootstrap.metadata);
     setAcknowledgement(bootstrap.acknowledgement);
     setActiveSection((current) => current || readPayload.progress?.last_anchor_slug || readPayload.sections[0]?.anchor_slug || "");
-    setCurrentPdfPage((current) => readPayload.progress?.last_page_number || current || 1);
+    setCurrentPdfPage((current) => targetPage || current || readPayload.progress?.last_page_number || 1);
     setZoomPercent((current) => readPayload.progress?.zoom_percent || current || 100);
     setViewMode((current) => {
       const uploadedAsPdf = String(bootstrap.metadata.source_type || readPayload.revision?.source_type || "").toUpperCase() === "PDF";
       return uploadedAsPdf || String(bootstrap.metadata.source_type).toUpperCase() === "DOCX" || bootstrap.metadata.image_only ? "layout" : current;
     });
     cachePublicationBootstrap(tenant, manualId || "", revId || "", bootstrap);
-  }, [manualId, revId, tenant]);
+  }, [manualId, revId, targetPage, tenant]);
+
+  useEffect(() => {
+    if (!targetPage) return;
+    setCurrentPdfPage(targetPage);
+    setViewMode("layout");
+    setPdfNavigationRequest({ page: targetPage, token: Date.now() });
+  }, [targetPage, manualId, revId]);
+
+  useEffect(() => {
+    const incoming = searchParams.get("q") || "";
+    if (incoming) {
+      setQuery(incoming);
+      setNavigationTab("search");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!tenant || !manualId || !revId) {
@@ -760,7 +777,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                       sourceByteLength={metadata.source_size_bytes || metadata.rendered_pdf_size_bytes}
                       uncontrolled={!isPublished}
                       navigationRequest={pdfNavigationRequest}
-                      initialPage={payload.progress?.last_page_number || localPosition.page || 1}
+                      initialPage={targetPage || payload.progress?.last_page_number || localPosition.page || 1}
                       initialZoom={payload.progress?.zoom_percent || localPosition.zoom || 100}
                       onPageChange={onPdfPageChange}
                       onZoomChange={onZoomChange}

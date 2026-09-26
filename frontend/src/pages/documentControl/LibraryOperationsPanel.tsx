@@ -29,10 +29,12 @@ import {
   downloadLibraryHoldingLabel,
   getMyLibraryAccount,
   getWarehouseOverview,
+  getWarehouseImpact,
   importLibraryMarcXml,
   downloadLibraryMarcXml,
   listLibraryCatalog,
   listLibraryHoldings,
+  listWarehouseRevisionExceptions,
   controlLibraryHolding,
   placeLibraryHold,
   scanLibraryHolding,
@@ -40,6 +42,8 @@ import {
   searchLibraryPatrons,
   searchExternalCatalog,
   searchTenantWarehouse,
+  reconcileTenantWarehouse,
+  verifyWarehouseRelationship,
   type ExternalCatalogResult,
   type LibraryCatalogItem,
   type LibraryHoldingRegisterResponse,
@@ -48,10 +52,12 @@ import {
   type LibraryPatron,
   type MyLibraryAccount,
   type WarehouseOverviewResponse,
+  type WarehouseImpactResponse,
   type WarehouseSearchResponse,
   type WarehouseSearchScope,
   type WarehouseRevisionException,
 } from "../../services/documentLibrary";
+import { prefetchPublicationReader } from "../../services/publications";
 import "./libraryOperations.css";
 
 type PanelMode = "warehouse" | "catalog" | "scan" | "inventory" | "internet" | "account";
@@ -220,6 +226,7 @@ export default function LibraryOperationsPanel({
 }: Props) {
   const navigate = useNavigate();
   const marcFileRef = useRef<HTMLInputElement | null>(null);
+  const exceptionsLoadedRef = useRef(false);
   const [mode, setMode] = useState<PanelMode>(initialScan ? "scan" : initialMode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -228,6 +235,7 @@ export default function LibraryOperationsPanel({
   const [warehouseScope, setWarehouseScope] = useState<WarehouseSearchScope>("everything");
   const [warehouse, setWarehouse] = useState<WarehouseSearchResponse | null>(null);
   const [warehouseOverview, setWarehouseOverview] = useState<WarehouseOverviewResponse | null>(null);
+  const [impact, setImpact] = useState<WarehouseImpactResponse | null>(null);
   const [revisionExceptions, setRevisionExceptions] = useState<WarehouseRevisionException[]>([]);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalog, setCatalog] = useState<LibraryCatalogItem[]>([]);
@@ -290,6 +298,21 @@ export default function LibraryOperationsPanel({
     if (result) setWarehouseOverview(result);
   }, [run, tenant]);
 
+  const loadImpact = async (recordId: string) => {
+    const result = await run(() => getWarehouseImpact(tenant, recordId));
+    if (result) setImpact(result);
+  };
+
+  const verifyRelationship = async (relationshipId: string) => {
+    if (!canControl) return;
+    const result = await run(() => verifyWarehouseRelationship(tenant, relationshipId));
+    if (result?.verified && impact) {
+      await loadImpact(impact.root_record_id);
+      await loadWarehouseOverview();
+      setNotice("Relationship verified and recorded in warehouse history.");
+    }
+  };
+
 
   const performScan = useCallback(async (value = scanCode) => {
     const code = value.trim();
@@ -314,7 +337,11 @@ export default function LibraryOperationsPanel({
     if (mode === "catalog" && !catalog.length) void loadCatalog("");
     if (mode === "inventory" && canControl && !inventory) void loadInventory("");
     if (mode === "warehouse" && !warehouseOverview) void loadWarehouseOverview();
-  }, [account, canControl, catalog.length, inventory, loadAccount, loadCatalog, loadInventory, loadWarehouseOverview, mode, warehouseOverview]);
+    if (mode === "warehouse" && canControl && !exceptionsLoadedRef.current && warehouseOverview?.physical_copies.revision_required) {
+      exceptionsLoadedRef.current = true;
+      void listWarehouseRevisionExceptions(tenant, 1, 100).then((result) => setRevisionExceptions(result.items)).catch(() => undefined);
+    }
+  }, [account, canControl, catalog.length, inventory, loadAccount, loadCatalog, loadInventory, loadWarehouseOverview, mode, tenant, warehouseOverview]);
 
   // Hardware barcode scanners commonly behave like a keyboard and terminate with
   // Enter. Keeping a focused plain input means those devices work without drivers.
@@ -575,18 +602,18 @@ export default function LibraryOperationsPanel({
           {canControl ? <button type="button" className="dc-button" disabled={busy} onClick={() => void reconcileWarehouse()}><RefreshCcw size={14} /> Reconcile warehouse</button> : null}
         </div>
         {warehouseOverview ? <section className="library-warehouse-overview" aria-label="Knowledge warehouse overview">
-          <button type="button" onClick={() => setWarehouseScope("everything")}>
-            <strong>{warehouseOverview.resources.total}</strong><span>Governed resources</span><small>{Object.keys(warehouseOverview.resources.by_type).length} resource types</small>
-          </button>
-          <button type="button" onClick={() => setMode("scan")}>
-            <strong>{warehouseOverview.physical_copies.total}</strong><span>Physical / offline copies</span><small>{warehouseOverview.physical_copies.revision_required ? `${warehouseOverview.physical_copies.revision_required} require revision` : "Revision state current"}</small>
-          </button>
-          <button type="button" onClick={() => setWarehouseScope("repository")}>
-            <strong>{warehouseOverview.relationships.total}</strong><span>Governed relationships</span><small>{warehouseOverview.relationships.unverified ? `${warehouseOverview.relationships.unverified} need verification` : "All active links verified"}</small>
-          </button>
           <button type="button" onClick={() => setMode("account")}>
-            <strong>{warehouseOverview.my_work.active_loans + warehouseOverview.my_work.active_holds}</strong><span>My circulation work</span><small>{warehouseOverview.my_work.active_loans} loans · {warehouseOverview.my_work.active_holds} holds</small>
+            <strong>{warehouseOverview.my_work.active_loans + warehouseOverview.my_work.active_holds}</strong><span>My loans and holds</span><small>{warehouseOverview.my_work.active_loans} loans · {warehouseOverview.my_work.active_holds} holds</small>
           </button>
+          {canControl ? <button type="button" onClick={() => setWarehouseScope("everything")}>
+            <strong>{warehouseOverview.resources.total}</strong><span>Governed resources</span><small>{Object.keys(warehouseOverview.resources.by_type).length} resource types</small>
+          </button> : null}
+          {canControl ? <button type="button" onClick={() => setMode("inventory")}>
+            <strong>{warehouseOverview.physical_copies.total}</strong><span>Physical / offline copies</span><small>{warehouseOverview.physical_copies.revision_required ? `${warehouseOverview.physical_copies.revision_required} require revision` : "Revision state current"}</small>
+          </button> : null}
+          {canControl ? <button type="button" onClick={() => setWarehouseScope("repository")}>
+            <strong>{warehouseOverview.relationships.total}</strong><span>Governed relationships</span><small>{warehouseOverview.relationships.unverified ? `${warehouseOverview.relationships.unverified} need verification` : "All active links verified"}</small>
+          </button> : null}
         </section> : null}
         <form className="library-ops__search" onSubmit={searchWarehouse}>
           <Database size={16} /><input value={warehouseQuery} onChange={(event) => setWarehouseQuery(event.target.value)} placeholder={warehouseScope === "external" ? "Enter public search terms" : "Document number, title, ISBN, record number, clause or text"} autoFocus /><button className="dc-button dc-button--primary" disabled={busy}>Search</button>
@@ -599,6 +626,25 @@ export default function LibraryOperationsPanel({
             <em>{exception.copy.installed_version || "?"} → {exception.copy.required_version || "?"}</em>
           </button>)}
         </section> : null}
+        {impact ? <section className="library-impact" aria-label="Resource impact analysis">
+          <header>
+            <div><strong>Connected resources</strong><small>{impact.summary.resources} resources · {impact.summary.relationships} links · {impact.summary.unverified_relationships} unverified · {impact.summary.revision_required_copies} copies need revision</small></div>
+            <button type="button" className="dc-button" onClick={() => setImpact(null)}>Close impact</button>
+          </header>
+          <div className="library-impact__table-wrap"><table>
+            <thead><tr><th scope="col">Source</th><th scope="col">Relationship</th><th scope="col">Target</th><th scope="col">Review</th></tr></thead>
+            <tbody>{impact.edges.map((edge) => {
+              const source = impact.nodes.find((node) => node.id === edge.source_record_id);
+              const target = impact.nodes.find((node) => node.id === edge.target_record_id);
+              return <tr key={edge.id}>
+                <td>{source?.canonical_code || "Resource"}</td><td>{edge.relationship_type.replaceAll("_", " ")}</td>
+                <td>{target?.target_path ? <button type="button" onClick={() => navigate(target.target_path!)}>{target.canonical_code}</button> : target?.canonical_code || "Resource"}{target?.revision_required_copies ? <small>{target.revision_required_copies} copies need revision</small> : null}</td>
+                <td>{edge.verified ? "Verified" : canControl ? <button type="button" className="dc-button" disabled={busy} onClick={() => void verifyRelationship(edge.id)}>Verify</button> : "Unverified"}</td>
+              </tr>;
+            })}</tbody>
+          </table></div>
+          {!impact.edges.length ? <p>No linked resources are visible in your access scope.</p> : null}
+        </section> : null}
         {warehouse ? <div className="library-warehouse-results">
           {([
             ["Governed resources", warehouse.groups.governed_resources],
@@ -607,15 +653,16 @@ export default function LibraryOperationsPanel({
             ["Retained records", warehouse.groups.retained_records],
           ] as const).map(([label, items]) => <section key={label}>
             <header><strong>{label}</strong><small>{items.length} match{items.length === 1 ? "" : "es"}</small></header>
-            {items.map((item) => <button type="button" key={`${item.kind}:${item.id}:${item.heading || item.record_number || ""}`} className="library-warehouse-result" onClick={() => item.target_path && navigate(item.target_path)}>
-              <span>
+            {items.map((item) => <div key={`${item.kind}:${item.id}:${item.heading || item.record_number || ""}`} className="library-warehouse-result">
+              <button type="button" className="library-warehouse-result__open" disabled={!item.target_path} onMouseEnter={() => { if (item.kind === "CONTROLLED_DOCUMENT" && item.revision_id) prefetchPublicationReader(tenant, item.id, item.revision_id); }} onFocus={() => { if (item.kind === "CONTROLLED_DOCUMENT" && item.revision_id) prefetchPublicationReader(tenant, item.id, item.revision_id); }} onClick={() => item.target_path && navigate(item.target_path)}>
                 <small>{item.code || item.series_code || item.catalogue_code || item.resource_type || item.kind.replaceAll("_", " ")}</small>
                 <strong>{item.title}</strong>
                 {item.heading ? <em>{item.heading}{item.page_number ? ` · page ${item.page_number}` : ""}</em> : null}
                 {item.copies?.total ? <em>{item.copies.total} physical cop{item.copies.total === 1 ? "y" : "ies"}{item.copies.revision_required ? ` · ${item.copies.revision_required} revision required` : ""}</em> : null}
                 {item.snippet ? <p>{item.snippet}</p> : null}
-              </span>
-            </button>)}
+              </button>
+              {item.kind === "GOVERNED_RESOURCE" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void loadImpact(item.id)}>Impact</button> : null}
+            </div>)}
             {!items.length ? <p className="library-ops__hint">No authorized matches in this scope.</p> : null}
           </section>)}
           {warehouse.internet.enabled ? <section className="library-warehouse-results__internet"><header><strong>Search the public web</strong><small>Explicit external navigation</small></header><div className="library-external-links">{Object.entries(warehouse.internet.links).map(([label, href]) => <a key={label} href={href} target="_blank" rel="noreferrer"><ExternalLink size={13} /> {label.replaceAll("_", " ")}</a>)}</div></section> : null}

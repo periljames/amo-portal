@@ -672,6 +672,7 @@ export type WarehouseSearchResult = {
   title: string;
   target_path?: string | null;
   code?: string | null;
+  revision_id?: string | null;
   heading?: string | null;
   page_number?: number | null;
   snippet?: string | null;

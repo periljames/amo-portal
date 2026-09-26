@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -161,9 +161,8 @@ def _controlled_documents(
             "score": float(rank or 0),
             "status": str(getattr(getattr(revision, "status_enum", None), "value", getattr(revision, "status_enum", ""))),
             "target_path": (
-                f"/maintenance/{tenant.slug.upper()}/document-control/library/{manual.id}"
-                f"?tab=content&revision={revision.id}"
-                + (f"&page={page}" if page else "")
+                f"/maintenance/{tenant.slug.upper()}/publications/{manual.id}/rev/{revision.id}/read"
+                f"?{urlencode({**({'page': page} if page else {}), 'q': needle})}"
             ),
         })
         if len(output) >= limit:
@@ -265,6 +264,11 @@ def _governed_resources(
             wm.WarehouseIdentifier.display_value.ilike(f"%{query_text}%"),
         ),
     ).exists()
+    exact_identifier = db.query(wm.WarehouseIdentifier.id).filter(
+        wm.WarehouseIdentifier.tenant_id == tenant.amo_id,
+        wm.WarehouseIdentifier.content_record_id == wm.WarehouseContentRecord.id,
+        func.upper(wm.WarehouseIdentifier.normalized_value) == normalized,
+    ).exists()
     if db.get_bind().dialect.name == "postgresql":
         tsquery = func.websearch_to_tsquery("simple", query_text)
         vector = func.to_tsvector(
@@ -291,6 +295,12 @@ def _governed_resources(
         ))
 
     rows = query.order_by(
+        # An exact document number, ISBN or barcode should precede lexical hits.
+        case(
+            (or_(func.upper(wm.WarehouseContentRecord.canonical_code) == normalized, exact_identifier), 0),
+            (func.upper(wm.WarehouseContentRecord.title) == normalized, 1),
+            else_=2,
+        ),
         wm.WarehouseContentRecord.title.asc(),
         wm.WarehouseContentRecord.canonical_code.asc(),
     ).limit(limit).all()
@@ -298,6 +308,7 @@ def _governed_resources(
     copy_summary: dict[str, dict[str, int]] = {}
     if ids:
         copy_rows = db.query(wm.WarehouseItemCopy).filter(
+            wm.WarehouseItemCopy.tenant_id == tenant.amo_id,
             wm.WarehouseItemCopy.content_record_id.in_(ids),
         ).all()
         for copy in copy_rows:

@@ -134,7 +134,7 @@ def _policy_conditions_match(policy: wm.WarehouseAccessPolicy, user: account_mod
     return True
 
 
-def _native_policy_allows(db: Session, *, tenant_id: str, record_id: str, user: account_models.User, action: str = "READ") -> bool:
+def _native_policy_decision(db: Session, *, tenant_id: str, record_id: str, user: account_models.User, action: str = "READ") -> bool | None:
     principals = _matching_policy_principals(user)
     matches = (
         db.query(wm.WarehouseAccessPolicy)
@@ -156,7 +156,13 @@ def _native_policy_allows(db: Session, *, tenant_id: str, record_id: str, user: 
     applicable = [row for row in matches if _policy_conditions_match(row, user)]
     if any(row.effect == "DENY" for row in applicable):
         return False
-    return any(row.effect == "ALLOW" for row in applicable)
+    if any(row.effect == "ALLOW" for row in applicable):
+        return True
+    return None
+
+
+def _native_policy_allows(db: Session, *, tenant_id: str, record_id: str, user: account_models.User, action: str = "READ") -> bool:
+    return _native_policy_decision(db, tenant_id=tenant_id, record_id=record_id, user=user, action=action) is True
 
 
 def _source_visible(
@@ -168,6 +174,10 @@ def _source_visible(
 ) -> bool:
     if is_control_user(user):
         return True
+
+    policy = _native_policy_decision(db, tenant_id=str(tenant.amo_id), record_id=row.id, user=user)
+    if policy is False:
+        return False
 
     source_type = row.source_entity_type
     if source_type == "CONTROLLED_DOCUMENT":
@@ -203,13 +213,7 @@ def _source_visible(
         )
         return bool(pair and _can_read_record(user, pair[1], pair[0]))
 
-    return _native_policy_allows(
-        db,
-        tenant_id=str(tenant.amo_id),
-        record_id=row.id,
-        user=user,
-        action="READ",
-    )
+    return policy is True
 
 
 def _visible_record_ids(
@@ -285,8 +289,11 @@ def _visible_record_ids(
         )
         .all()
     )
-    denied = {str(row.content_record_id) for row in policies if row.effect == "DENY"}
-    policy_record_ids = {str(row.content_record_id) for row in policies if row.effect == "ALLOW"} - denied
+    applicable = [row for row in policies if _policy_conditions_match(row, user)]
+    denied = {str(row.content_record_id) for row in applicable if row.effect == "DENY"}
+    # Explicit grants only introduce native warehouse records. Source-backed
+    # records must still satisfy the source module's own access policy.
+    policy_record_ids = {str(row.content_record_id) for row in applicable if row.effect == "ALLOW"} - denied
 
     if source_conditions:
         source_ids = {
@@ -302,7 +309,16 @@ def _visible_record_ids(
         }
     else:
         source_ids = set()
-    return sorted(source_ids | policy_record_ids)
+    candidate_ids = (source_ids | policy_record_ids) - denied
+    if not candidate_ids:
+        return []
+    candidates = db.query(wm.WarehouseContentRecord).filter(
+        wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
+        wm.WarehouseContentRecord.id.in_(candidate_ids),
+    ).all()
+    return sorted(row.id for row in candidates if (
+        row.source_entity_type in allowed_sources and row.source_entity_id in allowed_sources[row.source_entity_type]
+    ) or (row.source_entity_type not in allowed_sources and row.id in policy_record_ids))
 
 
 def _target_path(tenant: manual_models.Tenant, row: wm.WarehouseContentRecord) -> str | None:
@@ -651,6 +667,8 @@ def get_warehouse_resource(
         .order_by(wm.WarehouseContentVersion.sequence.desc())
         .all()
     )
+    if row.source_entity_type == "CONTROLLED_DOCUMENT" and not is_control_user(current_user):
+        versions = [version for version in versions if version.lifecycle_status in {"PUBLISHED", "SUPERSEDED"}]
     identifiers = (
         db.query(wm.WarehouseIdentifier)
         .filter(
@@ -687,6 +705,11 @@ def get_warehouse_resource(
         )
         .all()
     )
+    visible_ids = _visible_record_ids(db, tenant=tenant, user=current_user)
+    if visible_ids is not None:
+        visible_set = set(visible_ids)
+        outgoing = [relation for relation in outgoing if relation.target_record_id in visible_set]
+        incoming = [relation for relation in incoming if relation.source_record_id in visible_set]
     references = (
         db.query(wm.WarehouseExternalReference)
         .filter(
@@ -1316,69 +1339,6 @@ def create_warehouse_location(
     })
     db.commit()
     return {"id": row.id, "code": row.code, "name": row.name, "path_text": row.path_text}
-
-
-@router.get("/t/{tenant_slug}/warehouse/resources/{record_id}/impact")
-def warehouse_impact(
-    tenant_slug: str,
-    record_id: str,
-    max_depth: int = Query(default=3, ge=1, le=6),
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
-):
-    tenant = resolve_tenant(db, tenant_slug, current_user)
-    root = _resource(db, str(tenant.amo_id), record_id)
-    if not _source_visible(db, tenant=tenant, user=current_user, row=root):
-        raise HTTPException(status_code=403, detail="This warehouse resource is outside your authorized scope")
-
-    visible_ids = _visible_record_ids(db, tenant=tenant, user=current_user)
-    allowed = None if visible_ids is None else set(visible_ids)
-    frontier = {root.id}
-    visited = {root.id}
-    edges: list[dict[str, Any]] = []
-    depth = 0
-    while frontier and depth < max_depth:
-        rows = (
-            db.query(wm.WarehouseRelationship)
-            .filter(
-                wm.WarehouseRelationship.tenant_id == tenant.amo_id,
-                wm.WarehouseRelationship.status == "ACTIVE",
-                wm.WarehouseRelationship.source_record_id.in_(frontier),
-            )
-            .all()
-        )
-        next_frontier: set[str] = set()
-        for relation in rows:
-            if allowed is not None and relation.target_record_id not in allowed:
-                continue
-            edges.append({
-                "id": relation.id,
-                "source_record_id": relation.source_record_id,
-                "target_record_id": relation.target_record_id,
-                "relationship_type": relation.relationship_type,
-                "source_version_id": relation.source_version_id,
-                "target_version_id": relation.target_version_id,
-            })
-            if relation.target_record_id not in visited:
-                visited.add(relation.target_record_id)
-                next_frontier.add(relation.target_record_id)
-        frontier = next_frontier
-        depth += 1
-
-    resources = (
-        db.query(wm.WarehouseContentRecord)
-        .filter(
-            wm.WarehouseContentRecord.tenant_id == tenant.amo_id,
-            wm.WarehouseContentRecord.id.in_(visited),
-        )
-        .all()
-    )
-    return {
-        "root_record_id": root.id,
-        "max_depth": max_depth,
-        "resources": [_serialize_resource(tenant, row) for row in resources],
-        "relationships": edges,
-    }
 
 
 @router.get("/t/{tenant_slug}/warehouse/audit")
