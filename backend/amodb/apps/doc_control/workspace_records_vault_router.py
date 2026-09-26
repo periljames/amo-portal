@@ -22,6 +22,7 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from . import records_vault_models as rm
+from . import warehouse_service as warehouse
 from .document_text_extractor import extract_document_text
 from .workspace_evidence_router import _safe_filename, _validate_file_signature
 from .workspace_library_router import _scope_match
@@ -463,6 +464,22 @@ async def upload_record(
         event_type="DEPOSITED",
         metadata={"source_module": row.source_module, "sha256": row.sha256},
     )
+    warehouse_record, warehouse_version = warehouse.sync_retained_record(
+        db,
+        tenant_id=str(tenant.amo_id),
+        record_asset=row,
+        series=series,
+        actor_user_id=str(current_user.id),
+    )
+    warehouse.record_event(
+        db,
+        tenant_id=str(tenant.amo_id),
+        content_record_id=warehouse_record.id,
+        content_version_id=warehouse_version.id,
+        event_type="record.deposited",
+        actor_user_id=str(current_user.id),
+        metadata={"record_asset_id": row.id, "record_number": row.record_number},
+    )
     audit(db, tenant, request, "document.records.deposited", "record_asset", row.id, {
         "series_id": series.id,
         "record_number": row.record_number,
@@ -520,6 +537,22 @@ def download_record(
         "series_id": row.series_id,
     })
     _write_event(db, tenant_id=tenant.amo_id, record_id=row.id, user_id=current_user.id, event_type="ACCESSED")
+    warehouse_record, warehouse_version = warehouse.sync_retained_record(
+        db,
+        tenant_id=str(tenant.amo_id),
+        record_asset=row,
+        series=series,
+        actor_user_id=str(current_user.id),
+    )
+    warehouse.record_event(
+        db,
+        tenant_id=str(tenant.amo_id),
+        content_record_id=warehouse_record.id,
+        content_version_id=warehouse_version.id,
+        event_type="record.downloaded",
+        actor_user_id=str(current_user.id),
+        metadata={"record_asset_id": row.id},
+    )
     db.commit()
     return FileResponse(
         path,
@@ -553,6 +586,22 @@ def set_legal_hold(
         user_id=current_user.id,
         event_type="LEGAL_HOLD_SET" if payload.enabled else "LEGAL_HOLD_RELEASED",
         reason=payload.reason.strip(),
+    )
+    warehouse_record, warehouse_version = warehouse.sync_retained_record(
+        db,
+        tenant_id=str(tenant.amo_id),
+        record_asset=row,
+        series=_series(db, tenant.amo_id, row.series_id),
+        actor_user_id=str(current_user.id),
+    )
+    warehouse.record_event(
+        db,
+        tenant_id=str(tenant.amo_id),
+        content_record_id=warehouse_record.id,
+        content_version_id=warehouse_version.id,
+        event_type="retention_hold.applied" if payload.enabled else "retention_hold.released",
+        actor_user_id=str(current_user.id),
+        metadata={"reason": payload.reason.strip()},
     )
     audit(db, tenant, request, "document.records.legal_hold_changed", "record_asset", row.id, {
         "enabled": payload.enabled,
@@ -591,6 +640,22 @@ def dispose_record(
         event_type=f"DISPOSITION_{payload.disposition_status}",
         reason=payload.reason.strip(),
         metadata={"evidence": list(payload.evidence)},
+    )
+    warehouse_record, warehouse_version = warehouse.sync_retained_record(
+        db,
+        tenant_id=str(tenant.amo_id),
+        record_asset=row,
+        series=_series(db, tenant.amo_id, row.series_id),
+        actor_user_id=str(current_user.id),
+    )
+    warehouse.record_event(
+        db,
+        tenant_id=str(tenant.amo_id),
+        content_record_id=warehouse_record.id,
+        content_version_id=warehouse_version.id,
+        event_type="record.disposition_recorded",
+        actor_user_id=str(current_user.id),
+        metadata={"status": row.disposition_status, "reason": row.disposition_reason},
     )
     audit(db, tenant, request, "document.records.disposition_recorded", "record_asset", row.id, {
         "status": row.disposition_status,
