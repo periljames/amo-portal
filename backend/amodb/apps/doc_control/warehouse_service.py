@@ -439,7 +439,7 @@ def sync_library_circulation_event(
                 patron_id=patron.id,
                 source_entity_type="LIBRARY_CHECK_OUT_EVENT",
                 source_entity_id=event.id,
-                status=canonical_status,
+                status="ACTIVE",
                 checked_out_at=event.created_at,
                 due_at=event.due_at,
                 metadata_json={"holding_id": holding.id},
