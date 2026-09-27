@@ -14,6 +14,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _tenant_by_slug
+from .office_rendering import OfficeRenderError, render_word_source_to_pdf
 
 
 router = APIRouter(
@@ -352,6 +353,15 @@ def reader_metadata(
 
     if source_type == "PDF" and source_path:
         rendered_size = source_size if is_published else len(_watermark_uncontrolled_source(source_path))
+    elif source_type == "DOCX" and source_path:
+        try:
+            office_pdf = render_word_source_to_pdf(
+                source_path,
+                source_checksum=getattr(revision, "source_sha256", None),
+            )
+            rendered_size = office_pdf.stat().st_size if is_published else len(_watermark_uncontrolled_source(office_pdf))
+        except OfficeRenderError:
+            rendered_size = 0
     else:
         rendered_size = len(_render_revision_pdf(db, manual, revision))
 
@@ -444,7 +454,8 @@ def rendered_publication_pdf(
     is_published = _is_published(revision)
     cache_control = "private, max-age=60" if is_published else "private, no-store"
 
-    if _source_type(revision) == "PDF" and source_path and is_published:
+    source_type = _source_type(revision)
+    if source_type == "PDF" and source_path and is_published:
         return FileResponse(
             path=str(source_path),
             media_type="application/pdf",
@@ -452,7 +463,23 @@ def rendered_publication_pdf(
             headers={"Cache-Control": cache_control},
         )
 
-    if _source_type(revision) == "PDF" and source_path:
+    if source_type == "DOCX" and source_path:
+        try:
+            office_pdf = render_word_source_to_pdf(
+                source_path,
+                source_checksum=getattr(revision, "source_sha256", None),
+            )
+        except OfficeRenderError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if is_published:
+            return FileResponse(
+                path=str(office_pdf),
+                media_type="application/pdf",
+                filename=filename,
+                headers={"Cache-Control": cache_control},
+            )
+        payload = _watermark_uncontrolled_source(office_pdf)
+    elif source_type == "PDF" and source_path:
         payload = _watermark_uncontrolled_source(source_path)
     else:
         payload = _render_revision_pdf(db, manual, revision)
