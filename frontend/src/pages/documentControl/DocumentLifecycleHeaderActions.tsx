@@ -180,7 +180,7 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
       setDetection(detected);
       setDocumentType(detected.type);
       if (!code.trim() && next.metadata.part_number) setCode(clean(next.metadata.part_number));
-      if (!title.trim()) setTitle(clean(next.metadata.title) || clean(next.heading) || selected.name.replace(/\.(pdf|docx)$/i, ""));
+      if (!title.trim()) setTitle(clean(next.metadata.title) || clean(next.heading) || selected.name.replace(/\.(pdf|docx|doc|odt|rtf)$/i, ""));
       if (next.metadata.issue_number) setIssue(clean(next.metadata.issue_number));
       if (next.metadata.revision_number) setRevision(clean(next.metadata.revision_number));
       if (next.metadata.effective_date) setEffectiveDate(clean(next.metadata.effective_date).slice(0, 10));
