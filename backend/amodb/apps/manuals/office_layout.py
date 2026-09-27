@@ -155,7 +155,7 @@ def normalize_office_source_to_docx(content: bytes, filename: str | None, *, tim
             detail = (completed.stderr or completed.stdout or "conversion failed").strip()
             raise OfficeLayoutError(f"Office source normalization failed: {detail[:500]}")
         payload = output.read_bytes()
-        if not payload.startswith(b"PK\\x03\\x04"):
+        if not payload.startswith(b"PK\x03\x04"):
             raise OfficeLayoutError("Office source normalization produced an invalid DOCX package")
         return payload
 
