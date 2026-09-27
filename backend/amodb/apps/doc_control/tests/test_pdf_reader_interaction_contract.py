@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[5]
 ENTRY = ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
 LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
-OFFICE_RENDER = ROOT / "backend/amodb/apps/manuals/office_rendering.py"
+OFFICE_RENDER = ROOT / "backend/amodb/apps/manuals/office_layout.py"
 PUBLICATIONS = ROOT / "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
 STYLES = ROOT / "frontend/src/pages/manuals/pdfReaderEngineV3.css"
 LIVE_E2E = ROOT / "frontend/tests/e2e/publications-reader-live.spec.ts"
@@ -125,8 +125,8 @@ def test_docx_layout_uses_cached_office_pdf_derivative_and_shared_pdf_reader() -
 
     assert '"--convert-to"' in renderer
     assert '"pdf:writer_pdf_Export"' in renderer
-    assert "DOCUMENT_OFFICE_RENDER_CACHE_DIR" in renderer
-    assert "os.replace(temporary_target, target)" in renderer
+    assert "office_layout_pdf_path" in renderer
+    assert "os.replace(staging, target)" in renderer
     assert "sourceIsPdf ? (metadata?.source_url" in publications
     assert "metadata?.rendered_pdf_url" in publications
     assert "PublicationDocxLayoutViewer" not in publications
