@@ -241,6 +241,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const isPublished = Boolean(metadata?.is_published && !payload?.not_published);
   const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
   const sourceIsDocx = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "DOCX";
+  const officeLayoutProofAvailable = sourceIsDocx && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url);
   const docxSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
   const sections = useMemo(() => payload?.sections ?? [], [payload?.sections]);
   const textAvailable = sections.length > 0 && !metadata?.image_only;
@@ -709,7 +710,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
     : sections.find((section) => section.anchor_slug === activeSection)?.heading || "Document detail";
   const activeSectionId = sections.find((section) => section.anchor_slug === activeSection)?.id;
   const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
-  const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsDocx ? "Word layout" : "PDF proof";
+  const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsDocx ? (officeLayoutProofAvailable ? "Word layout proof" : "Word layout") : "PDF proof";
   const textLabel = "Accessible text";
 
   const content = (
@@ -744,7 +745,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
             <div className="publication-reader-controls">
               <select value={readerTheme} onChange={(event) => setTheme(event.target.value as ReaderTheme)} aria-label="Reading theme"><option value="neutral">Neutral</option><option value="warm">Warm</option><option value="sepia">Sepia</option><option value="contrast">High contrast</option></select>
               <select value={readingWidth} onChange={(event) => setWidth(event.target.value as ReadingWidth)} aria-label="Reading width"><option value="fit">Fit</option><option value="focus">Focus</option><option value="wide">Wide</option></select>
-              {sourceIsDocx && viewMode === "layout" ? <select value={docxZoom} onChange={(event) => { const value = event.target.value; setDocxZoom(value); window.localStorage.setItem("amo-publication-docx-zoom", value); }} aria-label="Document zoom"><option value="fit">Fit width</option>{[50, 75, 100, 125, 150, 200].map((value) => <option key={value} value={value}>{value}%</option>)}</select> : null}
+              {sourceIsDocx && viewMode === "layout" && !officeLayoutProofAvailable ? <select value={docxZoom} onChange={(event) => { const value = event.target.value; setDocxZoom(value); window.localStorage.setItem("amo-publication-docx-zoom", value); }} aria-label="Document zoom"><option value="fit">Fit width</option>{[50, 75, 100, 125, 150, 200].map((value) => <option key={value} value={value}>{value}%</option>)}</select> : null}
               <button type="button" className={viewMode === "layout" ? "active" : ""} disabled={!layoutAvailable} onClick={() => setViewMode("layout")}>{layoutLabel}</button>
               <button type="button" className={viewMode === "text" ? "active" : ""} disabled={!textAvailable} onClick={() => setViewMode("text")}>{textLabel}</button>
             </div>
@@ -761,7 +762,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
             <>
               <section className="publication-metadata" aria-label="Document metadata"><dl>
                 <div><dt>Date</dt><dd>{formatDate(metadata.date)}</dd></div><div><dt>Language</dt><dd>{metadata.language || "Not recorded"}</dd></div><div><dt>Status</dt><dd>{metadata.status || payload.status} · {isPublished ? "Controlled" : "Draft"}</dd></div>
-                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF · figures, signatures, annotations and approval marks preserved" : sourceIsDocx ? "Original Word source · client-rendered pages" : "Generated readable proof"}</dd></div>
+                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF · figures, signatures, annotations and approval marks preserved" : officeLayoutProofAvailable ? "Original Word source retained · stable page-layout proof preserves headers, footers, graphics and pagination for reading" : sourceIsDocx ? "Original Word source · browser layout fallback" : "Generated readable proof"}</dd></div>
                 {hasAcroForm || metadata.form_policy === "READ_ONLY_PRESERVED" ? <div><dt>PDF forms</dt><dd><Eye size={15} /> AcroForm appearances are preserved in read-only mode; the portal does not alter field values.</dd></div> : null}
                 {acknowledgement?.required ? <div><dt>Acknowledgement</dt><dd>{acknowledgement.pending ? <span className="publication-acknowledgement-state publication-acknowledgement-state--pending">Pending{acknowledgement.due_at ? ` · due ${formatDate(acknowledgement.due_at)}` : ""}{isPublished ? <button type="button" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}>Acknowledge now</button> : null}</span> : <span className="publication-acknowledgement-state publication-acknowledgement-state--complete"><BadgeCheck size={16} /> Acknowledged{acknowledgement.acknowledged_at ? ` on ${formatDate(acknowledgement.acknowledged_at)}` : ""}</span>}{acknowledgementError ? <span className="publication-acknowledgement-error">{acknowledgementError}</span> : null}</dd></div> : null}
               </dl></section>
@@ -771,10 +772,10 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    sourceIsDocx ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsDocx && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       title={metadata.title}
-                      sourceByteLength={metadata.source_size_bytes || metadata.rendered_pdf_size_bytes}
+                      sourceByteLength={sourceIsPdf ? metadata.source_size_bytes : metadata.rendered_pdf_size_bytes}
                       uncontrolled={!isPublished}
                       navigationRequest={pdfNavigationRequest}
                       initialPage={targetPage || payload.progress?.last_page_number || localPosition.page || 1}
