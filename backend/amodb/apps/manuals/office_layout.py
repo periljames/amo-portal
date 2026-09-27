@@ -17,6 +17,12 @@ import tempfile
 
 
 SUPPORTED_OFFICE_EXTENSIONS = {".docx", ".doc", ".odt", ".rtf"}
+OFFICE_MIME_BY_EXTENSION = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".rtf": "application/rtf",
+}
 
 
 class OfficeLayoutError(RuntimeError):
@@ -92,6 +98,63 @@ def _office_binary() -> str:
     if not resolved:
         raise OfficeLayoutError("LibreOffice Writer is not installed in this deployment")
     return resolved
+
+
+def office_mime_type(filename: str | None) -> str:
+    suffix = Path(str(filename or "")).suffix.lower()
+    return OFFICE_MIME_BY_EXTENSION.get(suffix, "application/octet-stream")
+
+
+def normalize_office_source_to_docx(content: bytes, filename: str | None, *, timeout_seconds: int = 90) -> bytes:
+    """Return DOCX bytes for semantic extraction while retaining the original source elsewhere."""
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix not in SUPPORTED_OFFICE_EXTENSIONS:
+        raise OfficeLayoutError(f"Unsupported Office source type: {suffix or 'unknown'}")
+    if suffix == ".docx":
+        return content
+    if not content:
+        raise OfficeLayoutError("The Office source file is empty")
+
+    binary = _office_binary()
+    with tempfile.TemporaryDirectory(prefix="office-normalize-") as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        input_path = temp_dir / f"source{suffix}"
+        input_path.write_bytes(content)
+        profile = temp_dir / "lo-profile"
+        profile.mkdir(parents=True, exist_ok=True)
+        command = [
+            binary,
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nolockcheck",
+            "--norestore",
+            f"-env:UserInstallation={profile.as_uri()}",
+            "--convert-to",
+            "docx:Office Open XML Text",
+            "--outdir",
+            str(temp_dir),
+            str(input_path),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=max(15, int(timeout_seconds)),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise OfficeLayoutError("Office source normalization timed out") from exc
+
+        output = temp_dir / "source.docx"
+        if completed.returncode != 0 or not output.exists():
+            detail = (completed.stderr or completed.stdout or "conversion failed").strip()
+            raise OfficeLayoutError(f"Office source normalization failed: {detail[:500]}")
+        payload = output.read_bytes()
+        if not payload.startswith(b"PK\\x03\\x04"):
+            raise OfficeLayoutError("Office source normalization produced an invalid DOCX package")
+        return payload
 
 
 def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
