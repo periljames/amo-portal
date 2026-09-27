@@ -14,7 +14,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _tenant_by_slug
-from .office_rendering import OfficeRenderError, render_word_source_to_pdf
+from .office_layout import OfficeLayoutError, office_layout_pdf_path, prepare_office_layout_pdf
 
 
 router = APIRouter(
@@ -353,14 +353,11 @@ def reader_metadata(
 
     if source_type == "PDF" and source_path:
         rendered_size = source_size if is_published else len(_watermark_uncontrolled_source(source_path))
-    elif source_type == "DOCX" and source_path:
+    elif office_layout_pdf_path(revision) and source_path:
         try:
-            office_pdf = render_word_source_to_pdf(
-                source_path,
-                source_checksum=getattr(revision, "source_sha256", None),
-            )
+            office_pdf = prepare_office_layout_pdf(revision).path
             rendered_size = office_pdf.stat().st_size if is_published else len(_watermark_uncontrolled_source(office_pdf))
-        except OfficeRenderError:
+        except OfficeLayoutError:
             rendered_size = 0
     else:
         rendered_size = len(_render_revision_pdf(db, manual, revision))
@@ -463,13 +460,10 @@ def rendered_publication_pdf(
             headers={"Cache-Control": cache_control},
         )
 
-    if source_type == "DOCX" and source_path:
+    if office_layout_pdf_path(revision) and source_path:
         try:
-            office_pdf = render_word_source_to_pdf(
-                source_path,
-                source_checksum=getattr(revision, "source_sha256", None),
-            )
-        except OfficeRenderError as exc:
+            office_pdf = prepare_office_layout_pdf(revision).path
+        except OfficeLayoutError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         if is_published:
             return FileResponse(
