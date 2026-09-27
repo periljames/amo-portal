@@ -191,9 +191,9 @@ const publicationBootstrapMemory = new Map<string, PublicationReaderBootstrap>()
 
 function extensionOf(file: File): "docx" | "pdf" {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".docx")) return "docx";
+  if (/\.(docx|doc|odt|rtf)$/.test(name)) return "docx";
   if (name.endsWith(".pdf")) return "pdf";
-  throw new Error("Only searchable DOCX and PDF publications are supported.");
+  throw new Error("Choose a PDF or supported Word document (DOCX, DOC, ODT, or RTF).");
 }
 
 function readerCacheKey(tenantSlug: string, manualId: string, revisionId: string): string {
