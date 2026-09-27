@@ -1,4 +1,3 @@
-import PublicationDocxLayoutViewer from "./PublicationDocxLayoutViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck,
@@ -227,7 +226,6 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [hasAcroForm, setHasAcroForm] = useState(false);
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
   const [readingWidth, setReadingWidth] = useState<ReadingWidth>(() => (window.localStorage.getItem("amo-publication-reader-width") as ReadingWidth) || "fit");
-  const [docxZoom, setDocxZoom] = useState(() => window.localStorage.getItem("amo-publication-docx-zoom") || "fit");
   const [blocksBySection, setBlocksBySection] = useState<Record<string, ExtendedReadPayload["blocks"]>>({});
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -242,11 +240,10 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
   const sourceIsDocx = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "DOCX";
   const officeLayoutProofAvailable = sourceIsDocx && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url);
-  const docxSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
   const sections = useMemo(() => payload?.sections ?? [], [payload?.sections]);
   const textAvailable = sections.length > 0 && !metadata?.image_only;
   const layoutAvailable = sourceIsDocx || Boolean(metadata?.rendered_pdf_url);
-  const viewerPdfPath = metadata?.source_url || metadata?.rendered_pdf_url || "";
+  const viewerPdfPath = sourceIsPdf ? (metadata?.source_url || metadata?.rendered_pdf_url || "") : (metadata?.rendered_pdf_url || "");
   const uncontrolledDownloadPath = tenant && manualId && revId
     ? `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revId)}/rendered.pdf`
     : "";
