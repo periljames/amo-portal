@@ -105,6 +105,8 @@ export type PublicationReaderMetadata = {
   rendered_pdf_size_bytes: number;
   download_filename: string;
   reader_mode: "html" | "pdf";
+  layout_renderer?: "PDF_SOURCE" | "OFFICE_PDF_PROOF" | "SEMANTIC_FALLBACK" | string;
+  layout_proof_available?: boolean;
   image_only: boolean;
   text_char_count: number;
   citation_current: number;
