@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[5]
 ENTRY = ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
 LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
-DOCX_LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationDocxLayoutViewer.tsx"
+OFFICE_RENDER = ROOT / "backend/amodb/apps/manuals/office_rendering.py"
 PUBLICATIONS = ROOT / "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
 STYLES = ROOT / "frontend/src/pages/manuals/pdfReaderEngineV3.css"
 LIVE_E2E = ROOT / "frontend/tests/e2e/publications-reader-live.spec.ts"
@@ -119,21 +119,18 @@ def test_zoom_is_client_scaled_without_rerasterizing_mounted_pages() -> None:
     assert "visibility: visible !important" not in styles
 
 
-def test_docx_layout_is_client_rendered_and_zoom_does_not_reparse_source() -> None:
-    source = _source(DOCX_LAYOUT)
+def test_docx_layout_uses_cached_office_pdf_derivative_and_shared_pdf_reader() -> None:
+    renderer = _source(OFFICE_RENDER)
+    publications = _source(PUBLICATIONS)
 
-    assert 'import("docx-preview")' in source
-    assert "Promise.all([" in source
-    assert "Laying out Word pages on this device" in source
-    assert "experimental: true" in source
-    assert "useBase64URL: true" in source
-    assert "renderHeaders: true" in source
-    assert "renderFooters: true" in source
-    assert "docx-media-fallback" in source
-    assert "embedded graphic" in source
-    assert "host.style.zoom = String(nextScale)" in source
-    assert 'aria-label="Document zoom"' in _source(PUBLICATIONS)
-    assert "rendered.pdf" not in source
+    assert '"--convert-to"' in renderer
+    assert '"pdf:writer_pdf_Export"' in renderer
+    assert "DOCUMENT_OFFICE_RENDER_CACHE_DIR" in renderer
+    assert "os.replace(temporary_target, target)" in renderer
+    assert "sourceIsPdf ? (metadata?.source_url" in publications
+    assert "metadata?.rendered_pdf_url" in publications
+    assert "PublicationDocxLayoutViewer" not in publications
+    assert 'aria-label="Document zoom"' not in publications
 
 
 def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:
