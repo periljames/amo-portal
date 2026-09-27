@@ -82,11 +82,11 @@ function isoAfterMonths(months: number): string {
 }
 
 function fileStem(filename: string): string {
-  return filename.replace(/\.(docx|pdf)$/i, "").replace(/[_-]+/g, " ").trim();
+  return filename.replace(/\.(docx|doc|odt|rtf|pdf)$/i, "").replace(/[_-]+/g, " ").trim();
 }
 
 function fallbackCode(filename: string): string {
-  return filename.replace(/\.(docx|pdf)$/i, "").toUpperCase().replace(/[^A-Z0-9]+/g, "/").replace(/^\/+|\/+$/g, "").slice(0, 32);
+  return filename.replace(/\.(docx|doc|odt|rtf|pdf)$/i, "").toUpperCase().replace(/[^A-Z0-9]+/g, "/").replace(/^\/+|\/+$/g, "").slice(0, 32);
 }
 
 function initialForm(documentType: ControlledDocumentType): FormState {
@@ -192,8 +192,8 @@ export default function ControlledDocumentUploadDialog({
 
   const chooseFile = async (selected: File | null) => {
     if (!selected) return;
-    if (!/\.(docx|pdf)$/i.test(selected.name)) {
-      setError("Choose a PDF or DOCX file.");
+    if (!/\.(docx|doc|odt|rtf|pdf)$/i.test(selected.name)) {
+      setError("Choose a PDF or supported Word file (DOCX, DOC, ODT, or RTF).");
       return;
     }
     setBusy(true);
@@ -319,9 +319,9 @@ export default function ControlledDocumentUploadDialog({
           <div className="controlled-intake__file-step">
             <label>
               <UploadCloud size={26} />
-              <strong>{busy ? "Inspecting source…" : "Choose a PDF or DOCX document"}</strong>
-              <span>PDF up to 50 MB · DOCX up to 10 MB · original source retained</span>
-              <input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0] || null)} />
+              <strong>{busy ? "Inspecting source…" : "Choose a PDF or Word document"}</strong>
+              <span>PDF up to 50 MB · Word documents up to 10 MB · original source retained</span>
+              <input type="file" accept=".pdf,.docx,.doc,.odt,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,application/rtf" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0] || null)} />
             </label>
           </div>
         ) : (
