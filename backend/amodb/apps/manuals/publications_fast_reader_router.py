@@ -19,6 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _audit, _tenant_by_slug
+from .office_layout import office_layout_pdf_path
 
 
 router = APIRouter(
@@ -181,6 +182,13 @@ def _reader_metadata(
     page_count = max(1, int(getattr(revision, "source_page_count", 0) or 1))
     image_only = source_type == "PDF" and text_char_count < max(80, page_count * 16)
     is_published = _status_value(revision) == "PUBLISHED"
+    office_layout_path = office_layout_pdf_path(revision)
+    office_layout_ready = bool(
+        office_layout_path
+        and office_layout_path.exists()
+        and office_layout_path.is_file()
+        and office_layout_path.stat().st_size > 0
+    )
     if source_type == "PDF" and source_path:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream.pdf"
@@ -188,10 +196,20 @@ def _reader_metadata(
         )
         rendered_size = source_size
         source_exact = True
+        layout_renderer = "PDF_SOURCE"
+    elif office_layout_ready:
+        rendered_url = (
+            f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream-layout.pdf"
+            f"?v={cache_key}"
+        )
+        rendered_size = office_layout_path.stat().st_size
+        source_exact = False
+        layout_renderer = "OFFICE_PDF_PROOF"
     else:
         rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
         rendered_size = 0
         source_exact = False
+        layout_renderer = "SEMANTIC_FALLBACK"
     effective_date = revision.effective_date.isoformat() if revision.effective_date else None
     published_date = revision.published_at.date().isoformat() if revision.published_at else None
     created_date = revision.created_at.date().isoformat() if revision.created_at else None
@@ -217,7 +235,9 @@ def _reader_metadata(
         "rendered_pdf_url": rendered_url,
         "rendered_pdf_size_bytes": rendered_size,
         "download_filename": f"{manual.code}_Rev_{revision.rev_number or 'current'}.pdf",
-        "reader_mode": "pdf" if source_type == "PDF" else "html",
+        "reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html",
+        "layout_renderer": layout_renderer,
+        "layout_proof_available": office_layout_ready,
         "image_only": image_only,
         "text_char_count": text_char_count,
         "citation_current": 0,
@@ -577,6 +597,44 @@ def _stream_source(path: Path, request: Request, *, filename: str, cache_key: st
         _iter_file(path, 0, max(0, size - 1)),
         media_type="application/pdf",
         headers={**common_headers, "Content-Length": str(size)},
+    )
+
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/stream-layout.pdf")
+def stream_publication_office_layout(
+    tenant_slug: str,
+    manual_id: str,
+    revision_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _tenant, manual, revision, _profile = _load_publication(
+        db,
+        tenant_slug=tenant_slug,
+        manual_id=manual_id,
+        revision_id=revision_id,
+        current_user=current_user,
+    )
+    source_type = _source_type(revision)
+    if source_type not in {"DOCX", "DOC", "ODT", "RTF"}:
+        raise HTTPException(status_code=409, detail="This revision does not use an Office layout proof")
+    path = office_layout_pdf_path(revision)
+    if not path or not path.exists() or not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="The Office layout proof is not ready. The original source remains available.",
+        )
+    source = _source_path(revision)
+    cache_key = _cache_key(revision, source)
+    safe_code = re.sub(r"[^A-Za-z0-9._-]+", "_", manual.code or "publication")
+    safe_revision = re.sub(r"[^A-Za-z0-9._-]+", "_", revision.rev_number or "current")
+    return _stream_source(
+        path,
+        request,
+        filename=f"{safe_code}_Rev_{safe_revision}_layout.pdf",
+        cache_key=f"{cache_key}-office-layout",
     )
 
 
