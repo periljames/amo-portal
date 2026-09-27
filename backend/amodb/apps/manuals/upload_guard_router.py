@@ -19,6 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import core_router as core
 from .pdf_reader_precompute import precompute_pdf_reader_assets
+from .office_layout import precompute_office_layout_assets
 
 
 router = APIRouter(prefix="/manuals", tags=["Manual Upload RBAC"])
@@ -109,8 +110,14 @@ async def upload_docx_revision_guarded(
         db=db,
         current_user=current_user,
     )
-    background_tasks.add_task(index_revision_background, result["revision_id"])
-    return {**result, "reference_index_status": "PENDING"}
+    revision_id = result["revision_id"]
+    background_tasks.add_task(precompute_office_layout_assets, revision_id)
+    background_tasks.add_task(index_revision_background, revision_id)
+    return {
+        **result,
+        "reference_index_status": "PENDING",
+        "office_layout_status": "PENDING",
+    }
 
 
 @router.post("/t/{tenant_slug}/upload-pdf", include_in_schema=False)
