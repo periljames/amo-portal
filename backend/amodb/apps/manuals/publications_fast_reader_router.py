@@ -19,7 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _audit, _tenant_by_slug
-from .office_layout import office_layout_pdf_path
+from .office_layout import OfficeLayoutError, office_layout_pdf_path, prepare_office_layout_pdf
 
 
 router = APIRouter(
@@ -183,6 +183,7 @@ def _reader_metadata(
     image_only = source_type == "PDF" and text_char_count < max(80, page_count * 16)
     is_published = _status_value(revision) == "PUBLISHED"
     office_layout_path = office_layout_pdf_path(revision)
+    office_layout_capable = bool(office_layout_path and source_path)
     office_layout_ready = bool(
         office_layout_path
         and office_layout_path.exists()
@@ -197,14 +198,14 @@ def _reader_metadata(
         rendered_size = source_size
         source_exact = True
         layout_renderer = "PDF_SOURCE"
-    elif office_layout_ready:
+    elif office_layout_capable:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream-layout.pdf"
             f"?v={cache_key}"
         )
-        rendered_size = office_layout_path.stat().st_size
+        rendered_size = office_layout_path.stat().st_size if office_layout_ready else 0
         source_exact = False
-        layout_renderer = "OFFICE_PDF_PROOF"
+        layout_renderer = "OFFICE_PDF_PROOF" if office_layout_ready else "OFFICE_PDF_PROOF_PENDING"
     else:
         rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
         rendered_size = 0
@@ -235,9 +236,10 @@ def _reader_metadata(
         "rendered_pdf_url": rendered_url,
         "rendered_pdf_size_bytes": rendered_size,
         "download_filename": f"{manual.code}_Rev_{revision.rev_number or 'current'}.pdf",
-        "reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html",
+        "reader_mode": "pdf" if source_type == "PDF" or office_layout_capable else "html",
         "layout_renderer": layout_renderer,
-        "layout_proof_available": office_layout_ready,
+        "layout_proof_available": office_layout_capable,
+        "layout_proof_ready": office_layout_ready,
         "image_only": image_only,
         "text_char_count": text_char_count,
         "citation_current": 0,
@@ -621,11 +623,17 @@ def stream_publication_office_layout(
     if source_type not in {"DOCX", "DOC", "ODT", "RTF"}:
         raise HTTPException(status_code=409, detail="This revision does not use an Office layout proof")
     path = office_layout_pdf_path(revision)
-    if not path or not path.exists() or not path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="The Office layout proof is not ready. The original source remains available.",
-        )
+    if not path:
+        raise HTTPException(status_code=409, detail="The Office layout proof path is unavailable")
+    if not path.exists() or not path.is_file():
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+        except OfficeLayoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        path = derivative.path
+        revision.source_page_count = derivative.page_count
+        db.add(revision)
+        db.commit()
     source = _source_path(revision)
     cache_key = _cache_key(revision, source)
     safe_code = re.sub(r"[^A-Za-z0-9._-]+", "_", manual.code or "publication")
