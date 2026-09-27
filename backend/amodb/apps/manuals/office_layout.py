@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import logging
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 
+
+LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_OFFICE_EXTENSIONS = {".docx", ".doc", ".odt", ".rtf"}
 OFFICE_MIME_BY_EXTENSION = {
@@ -229,3 +232,32 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
         source_sha256=checksum,
         created=True,
     )
+
+
+def precompute_office_layout_assets(revision_id: str) -> None:
+    """Materialize the stable Office layout proof once after source upload."""
+    from amodb.database import WriteSessionLocal
+    from . import models
+
+    db = WriteSessionLocal()
+    try:
+        revision = (
+            db.query(models.ManualRevision)
+            .filter(models.ManualRevision.id == revision_id)
+            .first()
+        )
+        if revision is None:
+            LOGGER.warning("Office layout precompute skipped: revision %s not found", revision_id)
+            return
+        raw = str(getattr(revision, "source_storage_path", "") or "").strip()
+        if not raw or Path(raw).suffix.lower() not in SUPPORTED_OFFICE_EXTENSIONS:
+            return
+        derivative = prepare_office_layout_pdf(revision)
+        revision.source_page_count = derivative.page_count
+        db.add(revision)
+        db.commit()
+    except Exception:
+        db.rollback()
+        LOGGER.exception("Office layout precompute failed for revision %s", revision_id)
+    finally:
+        db.close()
