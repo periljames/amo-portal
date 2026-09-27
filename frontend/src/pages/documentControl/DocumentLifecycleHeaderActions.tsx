@@ -231,9 +231,9 @@ function AddDocumentDialog({ tenant, basePath, onClose }: { tenant: string; base
     navigate(`${basePath}/library/${createdManualId}`);
   };
 
-  return <Modal title="Add controlled document" description="Upload the first PDF or DOCX revision. The portal inspects the source, proposes a document type, and always lets you override it before saving." busy={busy} onClose={onClose}>
+  return <Modal title="Add controlled document" description="Upload the first PDF or Word-document revision. The portal inspects the source, proposes a document type, and always lets you override it before saving." busy={busy} onClose={onClose}>
     <form className="dclife-form" onSubmit={submit}>
-      <label className="wide"><span>Source document</span><input type="file" disabled={Boolean(createdManualId)} accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void inspect(event.target.files?.[0] || null)} required /></label>
+      <label className="wide"><span>Source document</span><input type="file" disabled={Boolean(createdManualId)} accept=".pdf,.docx,.doc,.odt,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,application/rtf" onChange={(event) => void inspect(event.target.files?.[0] || null)} required /></label>
       {preview ? <div className="dclife-detection wide" data-confidence={detection?.confidence || "LOW"}>
         <FileSearch2 size={18} />
         <div><strong>Detected as {TYPE_LABELS[detection?.type || "MANUAL"]} · {detection?.confidence.toLowerCase()} confidence</strong><span>{detection?.reason}</span><small>Detection is advisory. Your selection below is authoritative.</small></div>
