@@ -97,10 +97,27 @@ def _office_binary() -> str:
         resolved = shutil.which(configured) or (configured if Path(configured).exists() else "")
         if resolved:
             return str(resolved)
+
     resolved = shutil.which("soffice") or shutil.which("libreoffice")
-    if not resolved:
-        raise OfficeLayoutError("LibreOffice Writer is not installed in this deployment")
-    return resolved
+    if resolved:
+        return resolved
+
+    # Local Windows/macOS development often has LibreOffice installed without
+    # adding its program directory to PATH. Production Linux images already
+    # install libreoffice-writer, so these probes are only compatibility aids.
+    candidates = [
+        Path(os.environ.get("PROGRAMFILES", "")) / "LibreOffice" / "program" / "soffice.exe",
+        Path(os.environ.get("PROGRAMFILES(X86)", "")) / "LibreOffice" / "program" / "soffice.exe",
+        Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+    ]
+    for candidate in candidates:
+        if str(candidate) and candidate.exists() and candidate.is_file():
+            return str(candidate)
+
+    raise OfficeLayoutError(
+        "LibreOffice Writer is required for faithful Word page-layout rendering. "
+        "Install LibreOffice or set OFFICE_LAYOUT_CONVERTER to the soffice executable."
+    )
 
 
 def office_mime_type(filename: str | None) -> str:
