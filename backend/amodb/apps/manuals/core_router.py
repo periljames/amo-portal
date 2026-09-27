@@ -29,6 +29,12 @@ from amodb.apps.accounts.models import AMO
 from amodb.apps.platform import saas_models, saas_queue
 
 from . import models
+from .office_layout import (
+    OfficeLayoutError,
+    SUPPORTED_OFFICE_EXTENSIONS,
+    normalize_office_source_to_docx,
+    office_mime_type,
+)
 from .schemas import (
     AcknowledgeRequest,
     DiffSummaryOut,
@@ -150,20 +156,43 @@ def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
     filename = (file.filename or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="Missing filename")
-    if not filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_OFFICE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a supported Word document: DOCX, DOC, ODT, or RTF")
     if not content:
-        raise HTTPException(status_code=400, detail="Uploaded DOCX is empty")
+        raise HTTPException(status_code=400, detail="Uploaded Word document is empty")
     if len(content) > MAX_DOCX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"DOCX file is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+        raise HTTPException(status_code=413, detail=f"Word document is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+
+    if suffix == ".docx":
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as zf:
+                if "word/document.xml" not in set(zf.namelist()):
+                    raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
+    elif suffix == ".doc" and not content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise HTTPException(status_code=400, detail="Invalid legacy DOC file")
+    elif suffix == ".rtf" and not content.lstrip().startswith(b"{\\rtf"):
+        raise HTTPException(status_code=400, detail="Invalid RTF file")
+    elif suffix == ".odt":
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as zf:
+                if "content.xml" not in set(zf.namelist()):
+                    raise HTTPException(status_code=400, detail="Invalid ODT structure: content.xml missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid ODT file") from exc
+
+
+def _office_semantic_docx_bytes(file: UploadFile, content: bytes) -> bytes:
     try:
-        with zipfile.ZipFile(BytesIO(content)) as zf:
-            if "word/document.xml" not in set(zf.namelist()):
-                raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
+        return normalize_office_source_to_docx(content, file.filename)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _validate_pdf_upload(file: UploadFile, content: bytes) -> None:
@@ -979,7 +1008,8 @@ async def preview_docx_upload(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
-    parsed = _extract_docx_content(content, file.filename)
+    semantic_docx = _office_semantic_docx_bytes(file, content)
+    parsed = _extract_docx_content(semantic_docx, file.filename)
     paragraphs = [str(item.get("text") or "") for item in list(parsed.get("paragraphs", []))]
     headings = [str(item.get("heading") or "") for item in list(parsed.get("headings", []))]
     metadata = dict(parsed.get("metadata", {}))
@@ -1050,8 +1080,9 @@ async def upload_docx_revision(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
+    semantic_docx = _office_semantic_docx_bytes(file, content)
 
-    parsed = _extract_docx_content(content, file.filename)
+    parsed = _extract_docx_content(semantic_docx, file.filename)
     metadata = dict(parsed.get("metadata", {}))
     section_specs = _build_manual_sections(parsed)
     paragraph_count = sum(len(list(spec.get("paragraphs") or [])) for spec in section_specs)
@@ -1097,7 +1128,7 @@ async def upload_docx_revision(
         manual_uuid=f"manual::{manual.id}::rev::{uuid4().hex[:12]}",
         notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
         source_type_enum=models.ManualSourceType.DOCX,
-        source_mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        source_mime_type=office_mime_type(file.filename),
     )
     db.add(rev)
     db.flush()
@@ -1122,7 +1153,7 @@ async def upload_docx_revision(
             heading=str(spec.get("heading") or f"Section {section_index}")[:255],
             anchor_slug=str(spec.get("anchor_slug") or f"section-{section_index}"),
             level=int(spec.get("level") or 1),
-            metadata_json={"source": "docx-upload", "filename": file.filename, "paragraphs": len(list(spec.get("paragraphs") or []))},
+            metadata_json={"source": "office-upload", "filename": file.filename, "paragraphs": len(list(spec.get("paragraphs") or []))},
         )
         db.add(section)
         db.flush()
