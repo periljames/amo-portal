@@ -63,6 +63,8 @@ describe("DMS frontend operating-model contract", () => {
       expect(router).not.toContain(`document-control${removed}"`);
     }
     expect(router).toContain("DocumentControlFallback");
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/reports/records"');
+    expect(router).toContain('.replace(/\\/+$/, "")');
     expect(router).not.toContain('<Navigate to="." replace />');
   });
 
