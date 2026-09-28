@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from amodb.apps.doc_control.reminder_policy import DocumentReminderPolicy
-from amodb.apps.doc_control.reminder_service import reminder_stage
+from amodb.apps.doc_control.reminder_service import _reminder_priority, reminder_stage
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -41,6 +41,12 @@ def test_reminder_thresholds_are_staged_and_repeat_overdue_by_policy_bucket() ->
 def test_policy_normalizes_lead_days_and_rejects_empty_valid_window() -> None:
     policy = DocumentReminderPolicy(lead_days=[7, 30, 14, 7])
     assert policy.lead_days == [30, 14, 7]
+
+
+def test_bucketed_overdue_and_escalation_stages_are_high_priority() -> None:
+    for stage in ("OVERDUE_W1", "OVERDUE_W2", "OWNER_ESCALATION_W1", "QUALITY_ESCALATION_W2", "FINAL_W1"):
+        assert _reminder_priority(stage) == "HIGH"
+    assert _reminder_priority("DUE_7") == "NORMAL"
 
 
 def test_reminder_ledger_is_durable_and_idempotent_per_obligation_recipient_stage() -> None:
