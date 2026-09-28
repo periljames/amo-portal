@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from amodb.apps.manuals import approved_intake_router as approved
+from amodb.apps.manuals import core_router as core
 from amodb.apps.manuals import publications_fast_reader_router as reader
 
 
@@ -88,6 +89,24 @@ def test_exact_pdf_stream_rejects_invalid_or_multiple_ranges(tmp_path: Path) -> 
         )
 
     assert caught.value.status_code == 416
+
+
+def test_uploaded_source_storage_preserves_exact_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "MANUAL_UPLOAD_DIR", tmp_path)
+    original = b"exact-uploaded-office-source\x00\x01\x02"
+
+    stored_path, checksum = core._store_manual_source(
+        tenant_slug="tenant",
+        manual_code="MPM",
+        revision_id="revision-1",
+        filename="original.docx",
+        content=original,
+    )
+
+    stored = Path(stored_path)
+    assert stored.read_bytes() == original
+    assert checksum == __import__("hashlib").sha256(original).hexdigest()
+    assert not list(stored.parent.glob("*.upload"))
 
 
 def test_approved_intake_requires_final_pdf_source(tmp_path: Path) -> None:
