@@ -166,18 +166,6 @@ async function markNotificationRead(notificationId: string): Promise<PortalNotif
   );
 }
 
-async function openNotification(notification: PortalNotification): Promise<PortalNotification> {
-  const updated = await markNotificationRead(notification.id);
-  if (
-    updated.action_url
-    && updated.entity_type !== "chat_thread"
-    && typeof window !== "undefined"
-  ) {
-    window.location.assign(updated.action_url);
-  }
-  return updated;
-}
-
 export const messagingApi = {
   directory: () => request<ChatDirectory>("/api/chat/directory"),
   threads: () => request<ChatThread[]>("/api/chat/threads?limit=300"),
@@ -230,7 +218,6 @@ export const messagingApi = {
   },
   unreadCount: () => request<{ notifications: number; messages: number; total: number }>("/api/notifications/me/unread-count"),
   markNotificationRead,
-  openNotification,
   markAllNotificationsRead: () => request<{ read_at: string; updated: number }>("/api/notifications/read-all", { method: "POST" }),
   preferences: () => request<NotificationPreferences>("/api/notifications/preferences"),
   updatePreferences: (payload: Partial<NotificationPreferences>) => request<NotificationPreferences>("/api/notifications/preferences", {
