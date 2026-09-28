@@ -217,11 +217,12 @@ export const messagingApi = {
     `/api/chat/threads/${encodeURIComponent(threadId)}/notifications`,
     { method: "PATCH", body: JSON.stringify({ notification_level: notificationLevel, muted_until: mutedUntil || null }) },
   ),
-  notifications: (params: { unreadOnly?: boolean; limit?: number; offset?: number } = {}) => {
+  notifications: (params: { unreadOnly?: boolean; limit?: number; offset?: number } | boolean = {}) => {
+    const options = typeof params === "boolean" ? { unreadOnly: params } : params;
     const search = new URLSearchParams({
-      limit: String(Math.max(1, Math.min(params.limit ?? 150, 250))),
-      offset: String(Math.max(0, params.offset ?? 0)),
-      unread_only: params.unreadOnly ? "true" : "false",
+      limit: String(Math.max(1, Math.min(options.limit ?? 150, 250))),
+      offset: String(Math.max(0, options.offset ?? 0)),
+      unread_only: options.unreadOnly ? "true" : "false",
     });
     return request<{ items: PortalNotification[]; total: number; limit: number; offset: number }>(
       `/api/notifications/me?${search.toString()}`,
