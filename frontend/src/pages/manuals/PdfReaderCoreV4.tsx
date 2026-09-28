@@ -158,6 +158,8 @@ export type PdfReaderOfflineControl = {
 export type PdfReaderCoreProps = {
   fileUrl: string;
   originalDownloadUrl?: string;
+  originalDownloadLabel?: string;
+  printUrl?: string;
   title: string;
   filename?: string | null;
   sourceByteLength?: number | null;
@@ -257,6 +259,7 @@ function VirtualPdfPage({
   width,
   ratio,
   safeForm,
+  deferRender,
   query,
   searchOptions,
   uncontrolled,
@@ -275,6 +278,7 @@ function VirtualPdfPage({
   width: number;
   ratio: number;
   safeForm: boolean;
+  deferRender: boolean;
   query: string;
   searchOptions: PdfSearchOptions;
   uncontrolled: boolean;
@@ -293,6 +297,7 @@ function VirtualPdfPage({
   const annotationGenerationRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState("");
+  const [renderRequested, setRenderRequested] = useState(() => !deferRender);
   const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
   const [internalPages, setInternalPages] = useState<Record<string, number>>({});
   // Keep the PDF.js raster stable for the lifetime of a mounted virtual page.
@@ -306,6 +311,10 @@ function VirtualPdfPage({
   const textRenderer = useCallback(({ str }: { str: string }) => (
     highlightPdfText(str, query, searchOptions, false)
   ), [query, searchOptions]);
+
+  useEffect(() => {
+    if (!deferRender) setRenderRequested(true);
+  }, [deferRender]);
 
   useEffect(() => {
     if (!ready || !pageRef.current) return;
@@ -362,6 +371,8 @@ function VirtualPdfPage({
               <AlertTriangle size={18} />
               <span>{failed}</span>
             </>
+          ) : deferRender && !renderRequested ? (
+            <span>Page {page}</span>
           ) : (
             <>
               <LoaderCircle className="is-spinning" size={18} />
@@ -385,7 +396,7 @@ function VirtualPdfPage({
           willChange: "transform",
         }}
       >
-        <PdfPage
+        {renderRequested ? <PdfPage
           pageNumber={page}
           width={rasterWidth}
           renderMode="canvas"
@@ -446,7 +457,7 @@ function VirtualPdfPage({
             setFailed(error instanceof Error ? error.message : `Page ${page} could not be rendered.`);
           }}
           onRenderTextLayerSuccess={() => onTextReady(page)}
-        />
+        /> : null}
       </div>
 
       {uncontrolled ? <span className="pdfv3-watermark">DRAFT</span> : null}
@@ -458,6 +469,8 @@ function VirtualPdfPage({
 export default function PdfReaderCoreV4({
   fileUrl,
   originalDownloadUrl,
+  originalDownloadLabel,
+  printUrl,
   title,
   filename,
   identity,
@@ -532,6 +545,9 @@ export default function PdfReaderCoreV4({
     setSearchOpen(true);
   }, [initialSearchQuery]);
   const [hotIndexes, setHotIndexes] = useState<number[]>([]);
+  const [fastScrolling, setFastScrolling] = useState(false);
+  const fastScrollingRef = useRef(false);
+  const scrollSettleTimerRef = useRef<number | null>(null);
   const [viewLinkCopied, setViewLinkCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -624,16 +640,18 @@ export default function PdfReaderCoreV4({
     setPageInput(String(next));
     onPageChange?.(next);
 
-    setHotIndexes(() => {
-      const candidates: number[] = [];
-      for (let distance = 0; distance <= profile.renderRadius; distance += 1) {
-        if (distance === 0) candidates.push(next - 1);
-        else candidates.push(next - 1 + distance, next - 1 - distance);
-      }
-      return [...new Set(candidates)]
-        .filter((index) => index >= 0 && index < pageCount)
-        .slice(0, profile.hotPageLimit);
-    });
+    if (!fastScrollingRef.current) {
+      setHotIndexes(() => {
+        const candidates: number[] = [];
+        for (let distance = 0; distance <= profile.renderRadius; distance += 1) {
+          if (distance === 0) candidates.push(next - 1);
+          else candidates.push(next - 1 + distance, next - 1 - distance);
+        }
+        return [...new Set(candidates)]
+          .filter((index) => index >= 0 && index < pageCount)
+          .slice(0, profile.hotPageLimit);
+      });
+    }
   }, [onPageChange, pageCount, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
@@ -657,6 +675,33 @@ export default function PdfReaderCoreV4({
       synchronizePhysicalPage();
     });
   }, [synchronizePhysicalPage]);
+
+  const handleViewportScroll = useCallback(() => {
+    if (!fastScrollingRef.current) {
+      fastScrollingRef.current = true;
+      setFastScrolling(true);
+    }
+    if (scrollSettleTimerRef.current !== null) {
+      window.clearTimeout(scrollSettleTimerRef.current);
+    }
+    scrollSettleTimerRef.current = window.setTimeout(() => {
+      scrollSettleTimerRef.current = null;
+      fastScrollingRef.current = false;
+      setFastScrolling(false);
+      const page = currentPageRef.current;
+      const candidates: number[] = [];
+      for (let distance = 0; distance <= profile.renderRadius; distance += 1) {
+        if (distance === 0) candidates.push(page - 1);
+        else candidates.push(page - 1 + distance, page - 1 - distance);
+      }
+      setHotIndexes(
+        [...new Set(candidates)]
+          .filter((index) => index >= 0 && index < pageCount)
+          .slice(0, profile.hotPageLimit),
+      );
+    }, 140);
+    schedulePhysicalSync();
+  }, [pageCount, profile.hotPageLimit, profile.renderRadius, schedulePhysicalSync]);
 
   const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {
     if (!pageCount) return;
@@ -1050,7 +1095,7 @@ export default function PdfReaderCoreV4({
   const printDocument = () => perform("ORIGINAL", async () => {
     const popup = window.open("", "_blank", "noopener,noreferrer");
     try {
-      const result = await fetchPublicationBlob(originalDownloadUrl || fileUrl);
+      const result = await fetchPublicationBlob(printUrl || originalDownloadUrl || fileUrl);
       const url = URL.createObjectURL(result.blob);
       if (popup) popup.location.href = url;
       else window.location.assign(url);
@@ -1371,7 +1416,7 @@ export default function PdfReaderCoreV4({
                 disabled={Boolean(busy) || !capabilities.can_download_original}
                 onClick={() => void downloadOriginal()}
               >
-                Original PDF
+                {originalDownloadLabel || "Original PDF"}
               </button>
               <button
                 type="button"
@@ -1553,7 +1598,7 @@ export default function PdfReaderCoreV4({
       <div
         ref={viewportRef}
         className="pdfv3-viewport"
-        onScroll={schedulePhysicalSync}
+        onScroll={handleViewportScroll}
       >
         {loadError ? (
           <div className="pdfv3-document-error" role="alert">
@@ -1607,6 +1652,7 @@ export default function PdfReaderCoreV4({
                     width={pageWidthFor(page)}
                     ratio={ratio}
                     safeForm={safeForm}
+                    deferRender={fastScrolling}
                     query={query}
                     searchOptions={searchOptions}
                     uncontrolled={uncontrolled}
