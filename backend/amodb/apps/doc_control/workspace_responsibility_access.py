@@ -142,9 +142,17 @@ def can_perform_workflow_action(
         )
 
     if action == "APPROVE_ACCOUNTABLE_MANAGER":
-        # Final accountable approval belongs to the AE (or tenant admin override).
-        # A generic assignment must not manufacture delegated final accountability.
-        return is_accountable_approver(user)
+        # The Accountable Executive remains the standing authority. A confirmed,
+        # governed APPROVER responsibility is the explicit delegation record used
+        # when another authorized management approver is assigned to this document.
+        if is_accountable_approver(user):
+            return True
+        return has_confirmed_responsibility(
+            db,
+            workflow=workflow,
+            user=user,
+            responsibility_types=("APPROVER",),
+        )
 
     responsibility_types = _ACTION_RESPONSIBILITIES.get(action)
     if responsibility_types:
