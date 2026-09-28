@@ -13,6 +13,17 @@ import type {
   NotificationPreferences,
   PortalNotification,
 } from "../../services/messaging";
+import {
+  canAskAi,
+  notificationActionLabel,
+  notificationAssistantUrl,
+  notificationDueAt,
+  notificationGroupKey,
+  notificationModule,
+  notificationPriority,
+  notificationRequiresAction,
+  type NotificationFilter,
+} from "./notificationModel";
 
 const EVENT_NAME = "amo:realtime-envelope";
 type DirectoryTab = "users" | "departments" | "groups";
@@ -207,6 +218,7 @@ export function MessagingHub() {
     setShowDirectory(false);
   };
   const openChats = () => {
+    setShowSettings(false);
     setTab("chats");
     setOpen(true);
   };
@@ -298,7 +310,7 @@ export function MessagingHub() {
             </div>
           </header>
 
-          {showSettings && preferences ? (
+          {tab === "notifications" && showSettings && preferences ? (
             <div className="messaging-settings">
               <label><input type="checkbox" checked={preferences.in_app_enabled} onChange={(event) => updatePreferences.mutate({ in_app_enabled: event.target.checked })} /> In-app alerts</label>
               <label><input type="checkbox" checked={preferences.desktop_enabled} onChange={(event) => {
@@ -415,64 +427,6 @@ function DirectoryPicker({ data, loading, activeTab, onTab, onSelect }: { data?:
   );
 }
 
-type NotificationFilter = "all" | "action" | "due" | "unread";
-
-function metadataString(notification: PortalNotification, key: string): string {
-  const value = notification.metadata?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-function notificationRequiresAction(notification: PortalNotification): boolean {
-  if (notification.metadata?.requires_action === true) return true;
-  const text = `${notification.title} ${notification.body}`.toLowerCase();
-  return /(acknowledg|approval|required|respond|review|overdue|expires|expiry|invitation|assigned)/.test(text);
-}
-
-function notificationDueAt(notification: PortalNotification): Date | null {
-  const raw = metadataString(notification, "due_at") || metadataString(notification, "due_date");
-  if (!raw) return null;
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function notificationModule(notification: PortalNotification): string {
-  return metadataString(notification, "module") || notification.entity_type?.split("_")[0]?.toUpperCase() || "PORTAL";
-}
-
-function notificationPriority(notification: PortalNotification): string {
-  return (metadataString(notification, "priority") || metadataString(notification, "severity") || "NORMAL").toUpperCase();
-}
-
-function notificationActionLabel(notification: PortalNotification): string {
-  const explicit = metadataString(notification, "action_label");
-  if (explicit) return explicit;
-  if (notification.kind === "DOCUMENT_WORKFLOW") return "Review document";
-  if (notificationRequiresAction(notification)) return "Review";
-  return notification.action_url ? "Open" : "View";
-}
-
-function notificationGroupKey(notification: PortalNotification): string {
-  return metadataString(notification, "group_key") || (notification.entity_type && notification.entity_id
-    ? `${notification.entity_type}:${notification.entity_id}`
-    : notification.id);
-}
-
-function canAskAi(notification: PortalNotification): boolean {
-  return Boolean(notification.action_url && (
-    notification.metadata?.manual_id
-    || notification.metadata?.revision_id
-    || String(notification.entity_type || "").includes("document")
-  ));
-}
-
-function assistantUrl(notification: PortalNotification): string | null {
-  if (!notification.action_url || typeof window === "undefined") return null;
-  const url = new URL(notification.action_url, window.location.origin);
-  url.searchParams.set("assistant", "1");
-  url.searchParams.set("assistant_query", `Explain what this notification requires, why it matters, and show the controlling authorised sources: ${notification.title}. ${notification.body}`.slice(0, 700));
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
 function NotificationList({ notifications, loading, onRead, onReadAll }: { notifications: PortalNotification[]; loading: boolean; onRead: (notification: PortalNotification) => void; onReadAll: () => void }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<NotificationFilter>("all");
@@ -498,7 +452,7 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
   const groups = [...grouped.values()].map((items) => items.sort((a, b) => b.created_at.localeCompare(a.created_at)));
 
   const askAi = async (notification: PortalNotification) => {
-    const target = assistantUrl(notification);
+    const target = notificationAssistantUrl(notification);
     if (!target) return;
     try {
       await messagingApi.markNotificationReadOnly(notification.id);
