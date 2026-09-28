@@ -22,7 +22,8 @@ def notify_workflow_progress(db, *, tenant, manual, workflow) -> None:
     for user in users:
         if not can_read_manual(user, profile):
             continue
-        if str(user.id) != str(workflow.created_by_user_id) and not workflow_actions_for_user(db, workflow=workflow, user=user):
+        user_actions = workflow_actions_for_user(db, workflow=workflow, user=user)
+        if str(user.id) != str(workflow.created_by_user_id) and not user_actions:
             continue
         key = f"document-workflow:{workflow.id}:{workflow.version or 1}:{user.id}"
         if db.query(PortalNotification.id).filter(
@@ -37,7 +38,18 @@ def notify_workflow_progress(db, *, tenant, manual, workflow) -> None:
             body=f"{manual.code} · {manual.title}. Status: {state.replace('_', ' ').lower()}. Open the document to view progress and available actions."[:1000],
             entity_type="document_workflow", entity_id=workflow.id,
             action_url=target, dedupe_key=key,
-            metadata_json={"manual_id": manual.id, "revision_id": workflow.revision_id, "state": state},
+            metadata_json={
+                "manual_id": manual.id,
+                "revision_id": workflow.revision_id,
+                "state": state,
+                "module": "DMS",
+                "category": "ACTION" if user_actions else "UPDATE",
+                "priority": "NORMAL",
+                "requires_action": bool(user_actions),
+                "action_label": "Review document" if user_actions else "Open document",
+                "group_key": f"document-workflow:{workflow.id}",
+                "available_actions": list(user_actions),
+            },
         )
         db.add(notification)
         db.flush()
