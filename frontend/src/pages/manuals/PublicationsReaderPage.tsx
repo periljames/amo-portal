@@ -246,6 +246,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const officeLayoutProofAvailable = sourceIsOffice && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url);
   const officeSourcePath = metadata?.original_source_url
     || `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
+  const browserOfficeSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/browser-office.docx`;
   const originalSourceFilename = metadata?.original_source_filename || metadata?.source_filename || "";
   const originalSourceExtension = originalSourceFilename.includes(".")
     ? originalSourceFilename.split(".").pop()?.toUpperCase() || "SOURCE"
@@ -826,7 +827,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    sourceIsOffice && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={officeSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsOffice && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={browserOfficeSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       originalDownloadUrl={downloadPath || viewerPdfPath}
                       originalDownloadLabel={originalDownloadLabel}
