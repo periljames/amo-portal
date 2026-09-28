@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile
+from amodb.apps.doc_control.pdf_capability_service import inspect_pdf_capabilities_bytes
 from amodb.apps.doc_control.pdfium_service import PdfEngineError
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -19,12 +20,24 @@ from .pdf_reader_form_override_router import (
     _safe_reader_cache_path,
 )
 from .pdf_reader_precompute import cached_pdf_inspection
+from .office_layout import OfficeLayoutError, prepare_office_layout_pdf
 
 
 router = APIRouter(
     prefix="/manuals",
     tags=["Controlled PDF Reader Precomputed Capabilities"],
 )
+
+
+def _source_type_value(revision) -> str:
+    raw = getattr(revision, "source_type_enum", None)
+    return str(getattr(raw, "value", raw or "")).upper()
+
+
+def _office_layout_inspection(revision):
+    derivative = prepare_office_layout_pdf(revision)
+    inspection = inspect_pdf_capabilities_bytes(derivative.path.read_bytes())
+    return inspection, derivative
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/pdf-capabilities")
@@ -42,6 +55,50 @@ async def precomputed_pdf_reader_capabilities(
         revision_id=revision_id,
         current_user=current_user,
     )
+    source_type = _source_type_value(revision)
+    if source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        try:
+            inspection, derivative = await run_in_threadpool(
+                _office_layout_inspection,
+                revision,
+            )
+        except OfficeLayoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PdfEngineError as exc:
+            raise _engine_http_error(exc) from exc
+
+        payload = _safe_form_capabilities(
+            execution,
+            inspection,
+            execution_allowed=(
+                can_execute_profile(current_user, execution)
+                if execution is not None
+                else True
+            ),
+        )
+        # Office layout proofs are immutable reading derivatives, never editable
+        # PDF templates. Inspect the proof itself for trusted reader metadata but
+        # keep all working-copy/form actions disabled.
+        payload.update(
+            {
+                "can_fill": False,
+                "can_save_draft": False,
+                "can_download_working": False,
+                "can_flatten": False,
+                "can_submit": False,
+                "automatic_form_execution": False,
+                "form_download_mode": None,
+                "unsupported_reason": inspection.unsupported_reason,
+                "reader_pdf_url": (
+                    f"/manuals/t/{tenant_slug.lower()}/{manual_id}/rev/{revision_id}/stream-layout.pdf"
+                    f"?v={inspection.source_sha256}"
+                ),
+                "reader_source_sha256": inspection.source_sha256,
+                "reader_size_bytes": derivative.size_bytes,
+            }
+        )
+        return payload
+
     try:
         inspection = await run_in_threadpool(
             cached_pdf_inspection,
