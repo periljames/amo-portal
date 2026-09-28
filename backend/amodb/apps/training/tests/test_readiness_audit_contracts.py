@@ -66,6 +66,16 @@ def test_invitation_delivery_and_rsvp_states_are_separate() -> None:
     assert invitation.rsvp_status == "PENDING"
 
 
+def test_rsvp_resolves_in_app_invitation_attention_state() -> None:
+    service_source = (TRAINING_DIR / "readiness_service.py").read_text(encoding="utf-8")
+    assert 'PortalNotification.kind == "TRAINING_SESSION_INVITATION"' in service_source
+    assert '"requires_action": False' in service_source
+    assert '"category": "UPDATE"' in service_source
+    assert '"rsvp_status": response' in service_source
+    assert "notification.read_at = notification.read_at or now" in service_source
+    assert "realtime_messaging._queue_user_event(" in service_source
+
+
 def test_readiness_migration_contains_every_shared_control_table() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
     for table in (
