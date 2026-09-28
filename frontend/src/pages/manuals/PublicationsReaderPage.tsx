@@ -257,7 +257,9 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
     ? `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revId)}/rendered.pdf`
     : "";
   const printablePdfPath = !isPublished ? uncontrolledDownloadPath : metadata?.rendered_pdf_url || "";
-  const downloadPath = sourceIsDocx ? docxSourcePath : printablePdfPath;
+  const downloadPath = sourceIsDocx
+    ? docxSourcePath
+    : isPublished ? (metadata?.original_source_url || printablePdfPath) : printablePdfPath;
   const originalDownloadLabel = sourceIsDocx
     ? `Original ${originalSourceExtension}`
     : isPublished ? "Original PDF" : "Uncontrolled PDF copy";
@@ -825,7 +827,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                   {viewMode === "layout" ? (
                     sourceIsDocx && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
-                      originalDownloadUrl={sourceIsDocx ? docxSourcePath : (printablePdfPath || viewerPdfPath)}
+                      originalDownloadUrl={downloadPath || viewerPdfPath}
                       originalDownloadLabel={originalDownloadLabel}
                       printUrl={printablePdfPath || viewerPdfPath}
                       title={metadata.title}
