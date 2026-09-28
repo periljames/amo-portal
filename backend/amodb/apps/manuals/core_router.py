@@ -1807,6 +1807,12 @@ def get_revision_source(
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
     checksum = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    if not checksum:
+        digest = hashlib.sha256()
+        with source_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        checksum = digest.hexdigest()
     headers = {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
