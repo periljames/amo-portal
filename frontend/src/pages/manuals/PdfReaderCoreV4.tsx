@@ -311,6 +311,8 @@ function VirtualPdfPage({
   const textRenderer = useCallback(({ str }: { str: string }) => (
     highlightPdfText(str, query, searchOptions, false)
   ), [query, searchOptions]);
+  const renderTextLayer = !deferRender && (active || Boolean(query.trim()));
+  const renderAnnotationLayer = !deferRender && (active || safeForm);
 
   useEffect(() => {
     if (!deferRender) setRenderRequested(true);
@@ -400,8 +402,8 @@ function VirtualPdfPage({
           pageNumber={page}
           width={rasterWidth}
           renderMode="canvas"
-          renderTextLayer
-          renderAnnotationLayer
+          renderTextLayer={renderTextLayer}
+          renderAnnotationLayer={renderAnnotationLayer}
           renderForms={safeForm}
           devicePixelRatio={pdfDevicePixelRatio(
             maxDevicePixelRatio,
