@@ -104,6 +104,9 @@ export default function DocumentControlShell({
   const active = primaryWorkspaceForPath(location.pathname);
   const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
   const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
+  const assistantParams = new URLSearchParams(location.search);
+  const assistantQuery = assistantParams.get("assistant_query") || "";
+  const assistantRequested = assistantParams.get("assistant") === "1";
   const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
@@ -150,6 +153,9 @@ export default function DocumentControlShell({
       {showContextualAssistant ? <DocumentationAssistantPanel
         tenant={tenant}
         manualId={assistantDocumentId}
+        defaultOpen={assistantRequested}
+        initialQuery={assistantQuery}
+        initialMode="ASSIST"
         title={assistantDocumentId ? "Document evidence search" : "Controlled information search"}
       /> : null}
     </div>
