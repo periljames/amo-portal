@@ -169,6 +169,26 @@
 .messaging-thread-list { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid var(--border-color, #e2e8f0); }
 .messaging-thread-toolbar { min-height: 40px; padding: 7px 10px; }
 .messaging-thread-toolbar span { font-weight: 650; }
+.messaging-thread-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #d5dde8);
+  border-radius: 8px;
+  background: var(--surface-muted, #f8fafc);
+}
+.messaging-thread-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
 .messaging-thread-toolbar button,
 .messaging-notification-toolbar button {
   border: 1px solid var(--border-color, #cbd5e1);
