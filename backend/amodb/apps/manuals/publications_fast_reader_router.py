@@ -19,7 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _audit, _tenant_by_slug
-from .office_layout import OfficeLayoutError, office_layout_pdf_path, precompute_office_layout_assets, prepare_office_layout_pdf
+from .office_layout import OfficeLayoutError, office_layout_pdf_checksum, office_layout_pdf_path, precompute_office_layout_assets, prepare_office_layout_pdf
 
 
 router = APIRouter(
@@ -190,6 +190,12 @@ def _reader_metadata(
         and office_layout_path.is_file()
         and office_layout_path.stat().st_size > 0
     )
+    office_layout_sha256 = ""
+    if office_layout_ready and office_layout_path:
+        try:
+            office_layout_sha256 = office_layout_pdf_checksum(office_layout_path)
+        except (OfficeLayoutError, OSError):
+            office_layout_ready = False
     if source_type == "PDF" and source_path:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream.pdf"
@@ -201,7 +207,7 @@ def _reader_metadata(
     elif office_layout_ready:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream-layout.pdf"
-            f"?v={cache_key}"
+            f"?v={office_layout_sha256 or cache_key}"
         )
         rendered_size = office_layout_path.stat().st_size
         source_exact = False
