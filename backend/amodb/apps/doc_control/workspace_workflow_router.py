@@ -108,7 +108,18 @@ def _validate_readiness_change(
     if not any(value is not None for value in proposed.values()):
         return
 
-    require_decision_approver(current_user)
+    may_change_readiness = is_decision_approver(current_user) or (
+        payload.action == "APPROVE_ACCOUNTABLE_MANAGER"
+        and not workflow.requires_authority
+        and can_perform_workflow_action(
+            db,
+            workflow=workflow,
+            user=current_user,
+            action=payload.action,
+        )
+    )
+    if not may_change_readiness:
+        require_decision_approver(current_user)
     comments = str(payload.comments or "").strip()
     evidence = list(payload.evidence or [])
 
