@@ -42,17 +42,38 @@ export function notificationGroupKey(notification: PortalNotification): string {
     : notification.id);
 }
 
+function assistantHostUrl(notification: PortalNotification): URL | null {
+  if (!notification.action_url) return null;
+  let source: URL;
+  try {
+    source = new URL(notification.action_url, "https://amo-portal.invalid");
+  } catch {
+    return null;
+  }
+
+  if (/\/publications\/[^/]+\/rev\/[^/]+\/read\/?$/i.test(source.pathname)) {
+    return source;
+  }
+
+  const manualId = metadataString(notification, "manual_id");
+  const marker = "/document-control/";
+  const markerIndex = source.pathname.indexOf(marker);
+  if (!manualId || markerIndex < 0) return null;
+
+  const prefix = source.pathname.slice(0, markerIndex);
+  source.pathname = `${prefix}/document-control/library/${encodeURIComponent(manualId)}`;
+  source.search = "";
+  source.hash = "";
+  return source;
+}
+
 export function canAskAi(notification: PortalNotification): boolean {
-  return Boolean(notification.action_url && (
-    notification.metadata?.manual_id
-    || notification.metadata?.revision_id
-    || String(notification.entity_type || "").includes("document")
-  ));
+  return assistantHostUrl(notification) !== null;
 }
 
 export function notificationAssistantUrl(notification: PortalNotification): string | null {
-  if (!notification.action_url || typeof window === "undefined") return null;
-  const url = new URL(notification.action_url, window.location.origin);
+  const url = assistantHostUrl(notification);
+  if (!url) return null;
   url.searchParams.set("assistant", "1");
   url.searchParams.set(
     "assistant_query",
