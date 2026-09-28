@@ -197,8 +197,8 @@ describe("messaging API", () => {
   });
 
   it("supports bounded notification pagination while preserving boolean compatibility", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      jsonResponse({ items: [], total: 0, limit: 25, offset: 10 }),
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => jsonResponse({ items: [], total: 0, limit: 25, offset: 10 }),
     );
 
     await messagingApi.notifications({ unreadOnly: true, limit: 25, offset: 10 });
