@@ -134,3 +134,41 @@ def test_email_notifications_remain_opt_in(db_session):
     assert preferences["in_app_enabled"] is True
     assert preferences["chat_enabled"] is True
     assert preferences["email_enabled"] is False
+
+
+
+def test_notification_payload_exposes_structured_action_semantics(db_session):
+    amo, _, first, _ = _seed_tenant(db_session, "SEMANTIC")
+    row = models.PortalNotification(
+        amo_id=amo.id,
+        user_id=first.id,
+        kind="DOCUMENT_CONTROL_REMINDER",
+        title="Acknowledgement due",
+        body="Review the controlled publication.",
+        entity_type="document_distribution_campaign",
+        entity_id="campaign-1",
+        action_url="/maintenance/semantic/document-control/library/doc-1",
+        metadata_json={
+            "module": "DMS",
+            "category": "ACTION",
+            "priority": "HIGH",
+            "requires_action": True,
+            "action_label": "Review & acknowledge",
+            "business_state": "DUE_SOON",
+            "due_at": "2026-10-05T09:00:00+03:00",
+            "group_key": "document-publication:revision-1",
+        },
+    )
+    db_session.add(row)
+    db_session.flush()
+
+    payload = messaging.notification_payload(row)
+
+    assert payload["module"] == "DMS"
+    assert payload["category"] == "ACTION"
+    assert payload["priority"] == "HIGH"
+    assert payload["requires_action"] is True
+    assert payload["action_label"] == "Review & acknowledge"
+    assert payload["business_state"] == "DUE_SOON"
+    assert payload["group_key"] == "document-publication:revision-1"
+    assert payload["due_at"] == "2026-10-05T09:00:00+03:00"
