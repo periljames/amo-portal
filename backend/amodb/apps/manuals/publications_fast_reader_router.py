@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
@@ -19,7 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _audit, _tenant_by_slug
-from .office_layout import OfficeLayoutError, office_layout_pdf_path, prepare_office_layout_pdf
+from .office_layout import OfficeLayoutError, office_layout_pdf_path, precompute_office_layout_assets, prepare_office_layout_pdf
 
 
 router = APIRouter(
@@ -272,6 +272,7 @@ def reader_bootstrap(
     revision_id: str,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -289,6 +290,10 @@ def reader_bootstrap(
         .all()
     )
     source_path = _source_path(revision)
+    if _source_type(revision) in {"DOCX", "DOC", "ODT", "RTF"}:
+        proof_path = office_layout_pdf_path(revision)
+        if not proof_path or not proof_path.exists() or not proof_path.is_file():
+            background_tasks.add_task(precompute_office_layout_assets, revision.id)
     cache_key = _cache_key(revision, source_path)
     etag = _etag(cache_key)
     if request.headers.get("if-none-match") == etag:
