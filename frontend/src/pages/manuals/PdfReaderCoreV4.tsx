@@ -608,7 +608,7 @@ export default function PdfReaderCoreV4({
     estimateSize: (index) => (
       Math.round(pageWidthFor(index + 1) * (pageRatios[index + 1] || fallbackRatio)) + PAGE_GAP
     ),
-    overscan: profile.renderRadius,
+    overscan: fastScrolling ? 0 : profile.renderRadius,
     rangeExtractor,
     getItemKey: (index) => index + 1,
   });
@@ -680,6 +680,7 @@ export default function PdfReaderCoreV4({
     if (!fastScrollingRef.current) {
       fastScrollingRef.current = true;
       setFastScrolling(true);
+      setHotIndexes([]);
     }
     if (scrollSettleTimerRef.current !== null) {
       window.clearTimeout(scrollSettleTimerRef.current);
