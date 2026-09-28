@@ -53,9 +53,26 @@ def test_exact_pdf_stream_honours_single_byte_ranges(tmp_path: Path) -> None:
     assert response.headers["content-range"] == f"bytes 9-12/{source.stat().st_size}"
     assert response.headers["content-length"] == "4"
     assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
-    assert response.headers["x-publication-source"] == "exact-original"
+    assert response.headers["x-publication-source"] == "reader-source"
     assert response.headers["x-acroform-policy"] == "read-only"
     assert b"".join(reader._iter_file(source, 9, 12)) == source.read_bytes()[9:13]
+
+
+def test_checksum_keyed_reader_stream_exposes_verified_fingerprint(tmp_path: Path) -> None:
+    source = tmp_path / "approved.pdf"
+    source.write_bytes(b"%PDF-1.7\nverified-reader")
+    fingerprint = "a" * 64
+
+    response = reader._stream_source(
+        source,
+        _request(),
+        filename="approved.pdf",
+        cache_key=fingerprint,
+    )
+
+    assert response.headers["x-reader-sha256"] == fingerprint
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
 
 
 def test_exact_pdf_stream_rejects_invalid_or_multiple_ranges(tmp_path: Path) -> None:
@@ -154,11 +171,15 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "8 * MIB" in performance
     assert "maxCanvasPixels" in performance
     assert "disableRange: false" in service
+    assert "disableStream: false" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
     assert "fetchPublicationBlob(viewerPdfPath)" not in reader_page
     assert 'renderMode="canvas"' in core
     assert "renderForms={safeForm}" in core
+    assert "handleViewportScroll" in core
+    assert "overscan: fastScrolling ? 0 : profile.renderRadius" in core
+    assert "deferRender={fastScrolling}" in core
     assert "getFieldObjects" in core
     assert "PdfReaderCoreV5" in bridge
     assert "PdfReaderCoreV4" in shell
