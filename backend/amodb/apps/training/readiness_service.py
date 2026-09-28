@@ -566,7 +566,16 @@ def send_session_invitations(db: Session, *, actor: account_models.User, event_i
                     amo_id=amo_id, user_id=user_id, kind="TRAINING_SESSION_INVITATION", title=f"Training invitation: {event.title}",
                     body=payload.message or f"You are invited to {event.title} on {event.starts_on}.", entity_type="training_event",
                     entity_id=str(event.id), action_url=action_url, dedupe_key=f"training-invite:{event.id}:{user_id}:{row.attempt_count}",
-                    metadata_json={"event_id": str(event.id), "starts_on": str(event.starts_on)},
+                    metadata_json={
+                        "event_id": str(event.id),
+                        "starts_on": str(event.starts_on),
+                        "module": "TRAINING",
+                        "category": "ACTION",
+                        "priority": "NORMAL",
+                        "requires_action": True,
+                        "action_label": "View invitation",
+                        "group_key": f"training-session:{event.id}",
+                    },
                 ))
                 row.delivery_status = "DELIVERED"; row.sent_at = _now(); row.delivered_at = _now()
             else:
