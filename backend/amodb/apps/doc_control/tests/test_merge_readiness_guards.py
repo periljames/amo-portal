@@ -276,6 +276,18 @@ def test_terminal_temporary_revision_states_are_immutable() -> None:
     assert tr_terminal._TERMINAL_STATUSES == {"WITHDRAWN", "INCORPORATED"}
 
 
+def test_delegated_accountable_approver_can_supply_effectivity_after_action_authorization() -> None:
+    repository_root = Path(__file__).resolve().parents[5]
+    router_source = (
+        repository_root
+        / "backend/amodb/apps/doc_control/workspace_workflow_router.py"
+    ).read_text(encoding="utf-8")
+    assert "can_perform_workflow_action(" in router_source
+    assert 'payload.action == "APPROVE_ACCOUNTABLE_MANAGER"' in router_source
+    assert "and not workflow.requires_authority" in router_source
+    assert "may_set_effectivity" in router_source
+
+
 def test_controller_ui_uses_server_approval_capability() -> None:
     repository_root = Path(__file__).resolve().parents[5]
     guarded_source = (
