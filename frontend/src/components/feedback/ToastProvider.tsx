@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import { BellRing, CheckCircle2, CircleAlert, Info, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import * as notificationPreferences from "../../services/notificationPreferences";
 import { TOAST_AUTO_CLOSE_MS } from "./toastPolicy";
 import {
@@ -150,8 +151,17 @@ function ToastCard({ toast, onDismiss, onElement }: ToastCardProps) {
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const stackRef = useRef<HTMLDivElement>(null);
   const errorRefs = useRef(new Map<string, HTMLElement>());
   const invalidGuard = useRef<{ form: HTMLFormElement | null; at: number }>({ form: null, at: 0 });
+
+  useEffect(() => {
+    const stack = stackRef.current;
+    if (!stack || typeof stack.showPopover !== "function") return;
+    // A CSS z-index cannot cover dialogs promoted to the browser top layer.
+    if (stack.matches(":popover-open")) stack.hidePopover();
+    if (toasts.length) stack.showPopover();
+  }, [toasts]);
 
   useEffect(() => {
     // The audio pre-warm helper was added after the original notification
@@ -292,7 +302,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toast-stack" aria-label="System notifications">
+      {createPortal(<div ref={stackRef} popover="manual" className="toast-stack" aria-label="System notifications">
         {toasts.map((toast) => (
           <ToastCard
             key={toast.id}
@@ -301,7 +311,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             onElement={registerToastElement}
           />
         ))}
-      </div>
+      </div>, document.body)}
     </ToastContext.Provider>
   );
 };

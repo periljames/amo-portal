@@ -595,7 +595,7 @@ export default function LibraryOperationsPanel({
   const canCheckIn = Boolean(scan?.capabilities.check_in && scan?.holding.status === "CHECKED_OUT");
   const canRenew = Boolean(scan?.capabilities.renew && scan?.holding.status === "CHECKED_OUT");
   const canPlaceHold = Boolean(scan?.capabilities.place_hold && scan?.holding.status !== "AVAILABLE");
-  const latestReceiptId = lastTransaction?.holdingId === scan?.holding.id
+  const latestReceiptId = lastTransaction && lastTransaction.holdingId === scan?.holding.id
     ? lastTransaction.id
     : scan?.events.find((event) => ["CHECK_OUT", "CHECK_IN", "RENEW"].includes(event.event_type))?.id;
 

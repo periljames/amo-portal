@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 from types import SimpleNamespace
+import pytest
+from fastapi import HTTPException
 
 import amodb.apps.quality.audit_checklist_template_router as checklist_router
 
@@ -9,6 +11,15 @@ from amodb.apps.quality.audit_checklist_template_router import (
     bind_current_dms_checklist,
     upload_dms_checklist_from_audit,
 )
+
+
+def test_empty_issued_checklist_cannot_create_a_misleading_binding():
+    with pytest.raises(HTTPException, match="no questions") as error:
+        checklist_router._instantiate_binding(
+            None, ctx=None, audit=None, template=None,
+            revision=SimpleNamespace(items=[]), reason="Selected for audit", allow_existing_items=False,
+        )
+    assert error.value.status_code == 409
 
 
 def test_qms_upload_registers_a_dms_draft_without_bypassing_document_control() -> None:
@@ -62,3 +73,45 @@ def test_pending_checklists_have_progress_but_cannot_be_selected(monkeypatch):
     assert len(result["pending"]) == 1
     assert result["pending"][0]["state"] == "TECHNICAL_REVIEW"
     assert "workflow=wf-1" in result["pending"][0]["review_url"]
+
+
+def test_reselecting_current_dms_checklist_returns_saved_binding_without_duplicate_rows(monkeypatch):
+    document = SimpleNamespace(id="doc-1")
+    revision = SimpleNamespace(id="revision-1")
+    existing = SimpleNamespace(id="binding-1")
+    audit = SimpleNamespace(id="audit-1")
+
+    class Query:
+        def __init__(self, row): self.row = row
+        def filter(self, *args): return self
+        def first(self): return self.row
+
+    class DB:
+        def query(self, entity):
+            if entity is checklist_router.manual_models.Manual: return Query(document)
+            if entity is checklist_router.QualityAuditChecklistBinding: return Query(existing)
+            return Query(None)
+
+    monkeypatch.setattr(checklist_router, "assert_quality_permission", lambda *a: None)
+    monkeypatch.setattr(checklist_router, "set_postgres_tenant_context", lambda *a, **kw: None)
+    monkeypatch.setattr(checklist_router, "_audit", lambda *a, **kw: audit)
+    monkeypatch.setattr(checklist_router, "_assert_checklist_can_change", lambda *a: None)
+    monkeypatch.setattr(checklist_router, "_manual_tenant", lambda *a: SimpleNamespace(id="tenant-1"))
+    monkeypatch.setattr(checklist_router, "_active_user", lambda *a: SimpleNamespace())
+    monkeypatch.setattr(checklist_router, "can_read_manual", lambda *a: True)
+    monkeypatch.setattr(checklist_router, "_document_type", lambda *a: "CHECKLIST")
+    monkeypatch.setattr(checklist_router, "_current_effective_revision", lambda *a: revision)
+    monkeypatch.setattr(checklist_router, "_issued_template_for_document", lambda *a, **kw: (SimpleNamespace(), revision))
+    monkeypatch.setattr(checklist_router, "_binding_dict", lambda row: {"id": row.id})
+
+    def duplicate(*a, **kw):
+        raise AssertionError("A retry must not create checklist rows or increment usage")
+
+    monkeypatch.setattr(checklist_router, "_instantiate_binding", duplicate)
+    for _ in range(2):
+        result = bind_current_dms_checklist(
+            audit_id=audit.id, document_id=document.id,
+            payload=SimpleNamespace(reason="Selected for audit", allow_existing_items=False),
+            ctx=SimpleNamespace(amo_id="amo-1", user_id="user-1"), db=DB(),
+        )
+        assert result == {"id": "binding-1"}
