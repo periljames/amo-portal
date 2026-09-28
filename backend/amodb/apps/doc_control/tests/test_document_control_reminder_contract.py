@@ -125,6 +125,12 @@ def test_failed_only_delivery_remains_retryable_until_a_channel_succeeds() -> No
     assert 'row.sent_at = now' in guard
 
 
+def test_distribution_notifications_group_by_campaign_obligation() -> None:
+    publication = _text(APP / "workspace_publication_distribution.py")
+    assert '"campaign_id": campaign.id' in publication
+    assert '"group_key": f"document-publication:{manual.id}:{revision.id}:{campaign.id}"' in publication
+
+
 def test_scheduler_is_single_writer_and_escalates_only_after_policy_thresholds() -> None:
     source = _text(APP / "reminder_service.py")
     lifecycle = _text(APP / "reminder_lifecycle_router.py")
