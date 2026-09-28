@@ -8,7 +8,7 @@ function metadataString(notification: PortalNotification, key: string): string {
 }
 
 export function notificationRequiresAction(notification: PortalNotification): boolean {
-  if (notification.metadata?.requires_action === true) return true;
+  if (typeof notification.metadata?.requires_action === "boolean") return notification.metadata.requires_action;
   const text = `${notification.title} ${notification.body}`.toLowerCase();
   return /(acknowledg|approval|required|respond|review|overdue|expires|expiry|invitation|assigned)/.test(text);
 }
@@ -56,7 +56,7 @@ export function notificationAssistantUrl(notification: PortalNotification): stri
   url.searchParams.set("assistant", "1");
   url.searchParams.set(
     "assistant_query",
-    `Explain what this notification requires, why it matters, and show the controlling authorised sources: ${notification.title}. ${notification.body}`.slice(0, 700),
+    `Explain what this notification requires, why it matters, and show the controlling authorised sources: ${notification.title}. ${notification.body}`.slice(0, 500),
   );
   return `${url.pathname}${url.search}${url.hash}`;
 }
