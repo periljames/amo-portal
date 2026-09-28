@@ -9,7 +9,7 @@ from amodb.apps.doc_control.reader_adapter_registry import resolve_adapter, supp
     ("source_type", "mime", "filename", "expected"),
     [
         ("PDF", "application/pdf", "manual.pdf", "PDF_CANONICAL"),
-        ("DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "manual.docx", "DOCX_PDF_DERIVATIVE"),
+        ("DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "manual.docx", "DOCX_CLIENT_LAYOUT"),
         ("ODT", "application/vnd.oasis.opendocument.text", "manual.odt", "OFFICE_DOCUMENT_DERIVATIVE"),
         ("XLSX", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "register.xlsx", "SPREADSHEET_DERIVATIVE"),
         ("ODS", "application/vnd.oasis.opendocument.spreadsheet", "register.ods", "SPREADSHEET_DERIVATIVE"),
@@ -55,7 +55,7 @@ def test_catalogue_exposes_all_governed_adapter_families() -> None:
     } <= names
 
 
-def test_docx_adapter_is_client_rendered_without_server_derivative() -> None:
+def test_docx_adapter_uses_office_pdf_proof_in_client_reader() -> None:
     adapter = resolve_adapter(
         source_type="DOCX",
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
