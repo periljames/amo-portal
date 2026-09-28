@@ -4,6 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.quality import models as quality_models
+from amodb.apps.quality.enums import QMSNotificationSeverity
 from amodb.apps.realtime import messaging, models, notification_counts, secure_messaging
 
 
@@ -172,3 +174,42 @@ def test_notification_payload_exposes_structured_action_semantics(db_session):
     assert payload["business_state"] == "DUE_SOON"
     assert payload["group_key"] == "document-publication:revision-1"
     assert payload["due_at"] == "2026-10-05T09:00:00+03:00"
+
+
+
+def test_global_notification_projection_includes_qms_without_double_counting_chat(db_session):
+    amo, _, first, second = _seed_tenant(db_session, "QMSPROJ")
+    thread = secure_messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
+    secure_messaging.send_message(
+        db_session,
+        user=first,
+        thread_id=thread["id"],
+        body="Chat should stay in the messages count.",
+        client_msg_id="qms-projection-chat",
+    )
+    qms = quality_models.QMSNotification(
+        amo_id=amo.id,
+        user_id=second.id,
+        message="Review CAR QAR/MO/26/015.",
+        severity=QMSNotificationSeverity.ACTION_REQUIRED,
+        action_url="/maintenance/qmsproj/quality/cars/qar-mo-26-015",
+        action_label="Review CAR",
+        entity_type="CAR",
+        entity_id="qar-mo-26-015",
+    )
+    db_session.add(qms)
+    db_session.commit()
+
+    counts = notification_counts.unread_notification_count(db_session, user=second)
+    assert counts == {"notifications": 1, "messages": 1, "total": 2}
+
+    page = messaging.list_notifications(db_session, user=second, limit=20)
+    projected = next(item for item in page["items"] if item["id"] == f"qms:{qms.id}")
+    assert projected["module"] == "QMS"
+    assert projected["requires_action"] is True
+    assert projected["action_label"] == "Review CAR"
+    assert projected["entity_id"] == "qar-mo-26-015"
+
+    messaging.mark_notification_read(db_session, user=second, notification_id=projected["id"])
+    db_session.refresh(qms)
+    assert qms.read_at is not None
