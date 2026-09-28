@@ -607,9 +607,29 @@ def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
     target_dir = MANUAL_UPLOAD_DIR / tenant_slug / re.sub(r"[^A-Za-z0-9._-]+", "_", manual_code or "manual") / revision_id
     _ensure_upload_dir(target_dir)
-    target = target_dir / safe_name
-    target.write_bytes(content)
-    return str(target), hashlib.sha256(content).hexdigest()
+    target = (target_dir / safe_name).resolve()
+    source_sha256 = hashlib.sha256(content).hexdigest()
+
+    # Never expose a partially-written governed source. Write and fsync a
+    # unique sibling first, verify the staged bytes, then atomically publish it.
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{safe_name}-",
+        suffix=".upload",
+        dir=target_dir,
+        delete=False,
+    ) as handle:
+        temporary = Path(handle.name).resolve()
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        staged_sha256 = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        if staged_sha256 != source_sha256:
+            raise IOError("Stored source verification failed before publication")
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return str(target), source_sha256
 
 
 def _extract_pdf_content(content: bytes, filename: str | None = None) -> dict[str, object]:
@@ -1806,13 +1826,20 @@ def get_revision_source(
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
-    checksum = str(getattr(rev, "source_sha256", "") or "").strip().lower()
-    if not checksum:
-        digest = hashlib.sha256()
-        with source_path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        checksum = digest.hexdigest()
+    recorded_checksum = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    digest = hashlib.sha256()
+    with source_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    checksum = digest.hexdigest()
+    if recorded_checksum and checksum != recorded_checksum:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SOURCE_CHECKSUM_MISMATCH",
+                "message": "The retained source no longer matches the uploaded controlled-file checksum.",
+            },
+        )
     headers = {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
