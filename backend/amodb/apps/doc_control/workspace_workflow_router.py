@@ -13,7 +13,7 @@ from . import workspace_schemas as schemas
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
 from .workflow_policy import resolve_document_lifecycle_policy
 from .workspace_integration_router import refresh_integration_link
-from .workspace_responsibility_access import require_workflow_action
+from .workspace_responsibility_access import can_perform_workflow_action, require_workflow_action
 from .workspace_router import _event
 from .workspace_service import (
     audit,
@@ -357,10 +357,20 @@ def transition_workflow_with_release_guards(
         current_user=current_user,
     )
 
-    if payload.effective_at is not None and not is_decision_approver(current_user):
+    may_set_effectivity = is_decision_approver(current_user) or (
+        payload.action == "APPROVE_ACCOUNTABLE_MANAGER"
+        and not workflow.requires_authority
+        and can_perform_workflow_action(
+            db,
+            workflow=workflow,
+            user=current_user,
+            action=payload.action,
+        )
+    )
+    if payload.effective_at is not None and not may_set_effectivity:
         raise HTTPException(
             status_code=403,
-            detail="Accountable document approval privileges are required to schedule effectivity",
+            detail="Accountable document approval privileges or a governed approver delegation are required to schedule effectivity",
         )
 
     scheduling_now = (
