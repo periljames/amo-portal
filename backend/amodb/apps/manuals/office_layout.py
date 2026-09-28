@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -38,6 +39,7 @@ class OfficeLayoutDerivative:
     page_count: int
     size_bytes: int
     source_sha256: str
+    pdf_sha256: str
     created: bool
 
 
@@ -97,6 +99,57 @@ def _validate_pdf(path: Path) -> None:
     with path.open("rb") as handle:
         if handle.read(5) != b"%PDF-":
             raise OfficeLayoutError("Office layout conversion produced an invalid PDF")
+
+
+def _pdf_checksum(path: Path) -> str:
+    """Return a stable checksum for the immutable Office PDF proof.
+
+    A size/mtime keyed sidecar avoids re-hashing large manuals on every range
+    request while still detecting an unexpected replacement of the derivative.
+    """
+
+    stat = path.stat()
+    sidecar = path.with_suffix(f"{path.suffix}.sha256.json")
+    if sidecar.exists() and sidecar.is_file():
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            checksum = str(payload.get("sha256") or "").strip().lower()
+            if (
+                len(checksum) == 64
+                and int(payload.get("size_bytes") or 0) == stat.st_size
+                and int(payload.get("mtime_ns") or 0) == stat.st_mtime_ns
+            ):
+                return checksum
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    checksum = digest.hexdigest()
+    payload = {
+        "sha256": checksum,
+        "size_bytes": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{path.stem}-sha256-",
+        suffix=".tmp",
+        dir=path.parent,
+        delete=False,
+        mode="w",
+        encoding="utf-8",
+    ) as handle:
+        temporary = Path(handle.name).resolve()
+        json.dump(payload, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, sidecar)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return checksum
 
 
 def _office_binary() -> str:
@@ -223,6 +276,7 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
                 page_count=_pdf_page_count(target),
                 size_bytes=target.stat().st_size,
                 source_sha256=checksum,
+                pdf_sha256=_pdf_checksum(target),
                 created=False,
             )
         except OfficeLayoutError:
@@ -277,6 +331,7 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
         page_count=_pdf_page_count(target),
         size_bytes=target.stat().st_size,
         source_sha256=checksum,
+        pdf_sha256=_pdf_checksum(target),
         created=True,
     )
 
