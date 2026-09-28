@@ -168,7 +168,8 @@ def test_office_processing_does_not_block_async_routes_and_capabilities_inspect_
 
     assert "semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)" in core_router
     assert "_office_layout_inspection" in capability_router
-    assert "inspect_pdf_capabilities_bytes" in capability_router
+    assert "PdfInspection(" in capability_router
+    assert "source_sha256=derivative.pdf_sha256" in capability_router
     assert 'source_type in {"DOCX", "DOC", "ODT", "RTF"}' in capability_router
     assert '"can_fill": False' in capability_router
     assert '"reader_source_sha256": inspection.source_sha256' in capability_router
