@@ -216,25 +216,28 @@ export function MessagingHub() {
     () => (notificationsQuery.data?.items || []).filter((notification) => notification.kind !== "CHAT_MESSAGE"),
     [notificationsQuery.data?.items],
   );
-  const attentionCount = useMemo(
-    () => visibleNotifications.filter(notificationNeedsAttention).length,
+  const allNotificationGroups = useMemo(
+    () => groupNotifications(visibleNotifications),
     [visibleNotifications],
+  );
+  const attentionCount = useMemo(
+    () => allNotificationGroups.filter((group) => notificationNeedsAttention(group.latest)).length,
+    [allNotificationGroups],
   );
   const notificationGroups = useMemo(() => {
     const search = notificationSearch.trim().toLowerCase();
-    const rows = visibleNotifications.filter((notification) => {
-      if (!notificationMatches(notification, notificationView, notificationFilter)) return false;
+    return allNotificationGroups.filter((group) => {
+      if (!notificationMatches(group.latest, notificationView, notificationFilter)) return false;
       if (!search) return true;
-      return [
+      return [group.latest, ...group.earlier].some((notification) => [
         notification.title,
         notification.body,
         notification.kind,
         notification.entity_type,
         notificationModule(notification),
-      ].some((value) => String(value || "").toLowerCase().includes(search));
+      ].some((value) => String(value || "").toLowerCase().includes(search)));
     });
-    return groupNotifications(rows);
-  }, [notificationFilter, notificationSearch, notificationView, visibleNotifications]);
+  }, [allNotificationGroups, notificationFilter, notificationSearch, notificationView]);
 
   const filteredThreads = useMemo(() => {
     const search = threadSearch.trim().toLowerCase();
