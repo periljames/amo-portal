@@ -508,6 +508,7 @@ export default function PdfReaderCoreV4({
   const dirtyRef = useRef(false);
   const editedPagesRef = useRef<number[]>([]);
   const currentPageRef = useRef(Math.max(1, initialPage));
+  const documentLoadedRef = useRef(false);
   const pendingPageRef = useRef<number | null>(null);
   const navigationTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -702,7 +703,7 @@ export default function PdfReaderCoreV4({
           .filter((index) => index >= 0 && index < pageCount)
           .slice(0, profile.hotPageLimit),
       );
-    }, 140);
+    }, 90);
     schedulePhysicalSync();
   }, [pageCount, profile.hotPageLimit, profile.renderRadius, schedulePhysicalSync]);
 
@@ -976,7 +977,12 @@ export default function PdfReaderCoreV4({
   const loadDocument = useCallback((pdf: PdfDocumentHandle) => {
     pdfRef.current = pdf;
     const count = Math.max(1, Number(pdf.numPages || 1));
-    const restored = clampPdfValue(initialPage, 1, count);
+    const restored = clampPdfValue(
+      documentLoadedRef.current ? currentPageRef.current : initialPage,
+      1,
+      count,
+    );
+    documentLoadedRef.current = true;
     currentPageRef.current = restored;
     setCurrentPage(restored);
     setPageInput(String(restored));
