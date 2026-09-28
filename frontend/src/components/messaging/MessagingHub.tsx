@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { Bell, MessageCircle } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, Clock3, ExternalLink, MessageCircle, Search, Sparkles } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useToast } from "../feedback/ToastProvider";
@@ -289,12 +289,12 @@ export function MessagingHub() {
   return (
     <div className={`messaging-hub${headerTarget ? " messaging-hub--header" : ""}`} aria-live="polite">
       {open ? (
-        <section className="messaging-panel" aria-label="Messages and notifications">
+        <section className={`messaging-panel messaging-panel--${tab}`} aria-label={tab === "chats" ? "Messages" : "Notifications"}>
           <header className="messaging-header">
-            <div><strong>Inbox</strong><span>{unreadTotal ? `${unreadTotal} unread` : "All caught up"}</span></div>
+            <div><strong>{tab === "chats" ? "Messages" : "Notifications"}</strong><span>{tab === "chats" ? (unreadMessages ? `${unreadMessages} unread` : "All caught up") : (unreadNotifications ? `${unreadNotifications} unread` : "All caught up")}</span></div>
             <div className="messaging-header-actions">
-              <button type="button" className="messaging-icon-button" onClick={() => setShowSettings((value) => !value)} aria-label="Notification settings">⚙</button>
-              <button type="button" className="messaging-icon-button" onClick={() => setOpen(false)} aria-label="Close inbox">×</button>
+              {tab === "notifications" ? <button type="button" className="messaging-icon-button" onClick={() => setShowSettings((value) => !value)} aria-label="Notification settings">⚙</button> : null}
+              <button type="button" className="messaging-icon-button" onClick={() => setOpen(false)} aria-label={tab === "chats" ? "Close messages" : "Close notifications"}>×</button>
             </div>
           </header>
 
@@ -312,11 +312,6 @@ export function MessagingHub() {
               <label><input type="checkbox" checked={preferences.marketing_email_enabled} onChange={(event) => updatePreferences.mutate({ marketing_email_enabled: event.target.checked })} /> Product updates and surveys</label>
             </div>
           ) : null}
-
-          <nav className="messaging-tabs" aria-label="Inbox sections">
-            <button type="button" className={tab === "chats" ? "is-active" : ""} onClick={() => setTab("chats")}>Chats <span>{unreadMessages}</span></button>
-            <button type="button" className={tab === "notifications" ? "is-active" : ""} onClick={() => setTab("notifications")}>Notifications <span>{unreadNotifications}</span></button>
-          </nav>
 
           {tab === "notifications" ? (
             <NotificationList notifications={visibleNotifications} loading={notificationsQuery.isLoading} onRead={(notification) => markNotification.mutate(notification.id)} onReadAll={() => markAll.mutate()} />
@@ -420,14 +415,146 @@ function DirectoryPicker({ data, loading, activeTab, onTab, onSelect }: { data?:
   );
 }
 
+type NotificationFilter = "all" | "action" | "due" | "unread";
+
+function metadataString(notification: PortalNotification, key: string): string {
+  const value = notification.metadata?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function notificationRequiresAction(notification: PortalNotification): boolean {
+  if (notification.metadata?.requires_action === true) return true;
+  const text = `${notification.title} ${notification.body}`.toLowerCase();
+  return /(acknowledg|approval|required|respond|review|overdue|expires|expiry|invitation|assigned)/.test(text);
+}
+
+function notificationDueAt(notification: PortalNotification): Date | null {
+  const raw = metadataString(notification, "due_at") || metadataString(notification, "due_date");
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function notificationModule(notification: PortalNotification): string {
+  return metadataString(notification, "module") || notification.entity_type?.split("_")[0]?.toUpperCase() || "PORTAL";
+}
+
+function notificationPriority(notification: PortalNotification): string {
+  return (metadataString(notification, "priority") || metadataString(notification, "severity") || "NORMAL").toUpperCase();
+}
+
+function notificationActionLabel(notification: PortalNotification): string {
+  const explicit = metadataString(notification, "action_label");
+  if (explicit) return explicit;
+  if (notification.kind === "DOCUMENT_WORKFLOW") return "Review document";
+  if (notificationRequiresAction(notification)) return "Review";
+  return notification.action_url ? "Open" : "View";
+}
+
+function notificationGroupKey(notification: PortalNotification): string {
+  return metadataString(notification, "group_key") || (notification.entity_type && notification.entity_id
+    ? `${notification.entity_type}:${notification.entity_id}`
+    : notification.id);
+}
+
+function canAskAi(notification: PortalNotification): boolean {
+  return Boolean(notification.action_url && (
+    notification.metadata?.manual_id
+    || notification.metadata?.revision_id
+    || String(notification.entity_type || "").includes("document")
+  ));
+}
+
+function assistantUrl(notification: PortalNotification): string | null {
+  if (!notification.action_url || typeof window === "undefined") return null;
+  const url = new URL(notification.action_url, window.location.origin);
+  url.searchParams.set("assistant", "1");
+  url.searchParams.set("assistant_query", `Explain what this notification requires, why it matters, and show the controlling authorised sources: ${notification.title}. ${notification.body}`.slice(0, 700));
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function NotificationList({ notifications, loading, onRead, onReadAll }: { notifications: PortalNotification[]; loading: boolean; onRead: (notification: PortalNotification) => void; onReadAll: () => void }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<NotificationFilter>("all");
+  const now = Date.now();
+  const actionCount = notifications.filter(notificationRequiresAction).length;
+  const filtered = notifications.filter((notification) => {
+    const due = notificationDueAt(notification);
+    if (filter === "action" && !notificationRequiresAction(notification)) return false;
+    if (filter === "due" && !(due && due.getTime() >= now && due.getTime() <= now + 14 * 86400000)) return false;
+    if (filter === "unread" && notification.read_at) return false;
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return true;
+    return `${notification.title} ${notification.body} ${notificationModule(notification)}`.toLowerCase().includes(normalized);
+  });
+
+  const grouped = new Map<string, PortalNotification[]>();
+  for (const notification of filtered) {
+    const key = notificationGroupKey(notification);
+    const current = grouped.get(key) || [];
+    current.push(notification);
+    grouped.set(key, current);
+  }
+  const groups = [...grouped.values()].map((items) => items.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+
+  const askAi = async (notification: PortalNotification) => {
+    const target = assistantUrl(notification);
+    if (!target) return;
+    try {
+      await messagingApi.markNotificationReadOnly(notification.id);
+    } finally {
+      window.location.assign(target);
+    }
+  };
+
   return (
     <div className="messaging-notifications">
-      <div className="messaging-notification-toolbar"><span>{notifications.length} recent</span><button type="button" onClick={onReadAll}>Mark all read</button></div>
+      <div className="messaging-notification-summary">
+        <div><strong>{actionCount}</strong><span>need attention</span></div>
+        <div><strong>{notifications.filter((item) => !item.read_at).length}</strong><span>unread</span></div>
+      </div>
+      <div className="messaging-notification-controls">
+        <label className="messaging-notification-search"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notifications" aria-label="Search notifications" /></label>
+        <div className="messaging-notification-filters" role="group" aria-label="Filter notifications">
+          {([["all", "All"], ["action", "Action required"], ["due", "Due soon"], ["unread", "Unread"]] as Array<[NotificationFilter, string]>).map(([value, label]) => (
+            <button type="button" key={value} className={filter === value ? "is-active" : ""} onClick={() => setFilter(value)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="messaging-notification-toolbar"><span>{filtered.length} shown · {notifications.length} recent</span><button type="button" onClick={onReadAll}>Mark all read</button></div>
       <div className="messaging-notification-scroll">
-        {notifications.map((notification) => <button type="button" className={notification.read_at ? "" : "is-unread"} key={notification.id} onClick={() => onRead(notification)}><span className="messaging-notification-dot" /><span><strong>{notification.title}</strong><p>{notification.body}</p><time>{relativeTime(notification.created_at)}</time></span></button>)}
+        {groups.map((items) => {
+          const notification = items[0];
+          const due = notificationDueAt(notification);
+          const requiresAction = notificationRequiresAction(notification);
+          const priority = notificationPriority(notification);
+          const earlier = items.length - 1;
+          return (
+            <article className={`messaging-notification-card${notification.read_at ? "" : " is-unread"}${requiresAction ? " requires-action" : ""}`} key={notificationGroupKey(notification)}>
+              <span className="messaging-notification-dot" aria-hidden="true" />
+              <div className="messaging-notification-card__body">
+                <div className="messaging-notification-card__meta">
+                  <span>{notificationModule(notification)}</span>
+                  {priority !== "NORMAL" ? <span className={`is-priority is-${priority.toLowerCase()}`}><AlertTriangle size={11} />{priority}</span> : null}
+                  {requiresAction ? <span className="is-action"><Clock3 size={11} />Action required</span> : <span className="is-update"><CheckCircle2 size={11} />Update</span>}
+                </div>
+                <strong>{notification.title}</strong>
+                <p>{notification.body}</p>
+                <div className="messaging-notification-card__time">
+                  <time>{relativeTime(notification.created_at)}</time>
+                  {due ? <span>{due.getTime() < now ? `Overdue · ${due.toLocaleDateString()}` : `Due ${due.toLocaleDateString()}`}</span> : null}
+                  {earlier ? <span>{earlier} earlier update{earlier === 1 ? "" : "s"}</span> : null}
+                </div>
+                <div className="messaging-notification-card__actions">
+                  {notification.action_url ? <button type="button" className="is-primary" onClick={() => onRead(notification)}>{notificationActionLabel(notification)} <ExternalLink size={12} /></button> : !notification.read_at ? <button type="button" onClick={() => onRead(notification)}>Mark read</button> : null}
+                  {canAskAi(notification) ? <button type="button" onClick={() => void askAi(notification)}><Sparkles size={12} /> Ask AI</button> : null}
+                </div>
+              </div>
+            </article>
+          );
+        })}
         {loading ? <p className="messaging-empty">Loading notifications…</p> : null}
-        {!loading && notifications.length === 0 ? <p className="messaging-empty is-centered">No notifications.</p> : null}
+        {!loading && groups.length === 0 ? <p className="messaging-empty is-centered">No notifications match this view.</p> : null}
       </div>
     </div>
   );
