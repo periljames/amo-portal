@@ -82,7 +82,12 @@ export function notificationGroupKey(notification: PortalNotification): string {
 }
 
 export function notificationNeedsAttention(notification: PortalNotification): boolean {
-  return notificationRequiresAction(notification) || ACTION_STATES.has(notificationBusinessState(notification));
+  return (
+    notificationRequiresAction(notification)
+    || ACTION_STATES.has(notificationBusinessState(notification))
+    || notificationCategory(notification) === "WARNING"
+    || notificationPriority(notification) === "CRITICAL"
+  );
 }
 
 export function notificationIsDueSoon(notification: PortalNotification, now = Date.now(), horizonDays = 14): boolean {
