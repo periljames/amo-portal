@@ -9,6 +9,7 @@ import {
   notificationModule,
   notificationPriority,
   notificationRequiresAction,
+  notificationAssistantUrl,
 } from "./notificationModel";
 
 function notification(overrides: Partial<PortalNotification> = {}): PortalNotification {
@@ -49,8 +50,21 @@ describe("notification presentation model", () => {
     expect(notificationDueAt(row)?.toISOString()).toBe("2026-10-05T06:44:34.000Z");
   });
 
-  it("only offers AI linking for controlled document context with an action target", () => {
-    expect(canAskAi(notification({ metadata: { manual_id: "manual-1" } }))).toBe(true);
+  it("routes document AI actions to a surface that actually mounts the assistant", () => {
+    const compliance = notification({
+      action_url: "/maintenance/tenant/document-control/compliance?source=external-1",
+      metadata: { manual_id: "manual-1" },
+    });
+    expect(canAskAi(compliance)).toBe(true);
+    expect(notificationAssistantUrl(compliance)).toContain("/maintenance/tenant/document-control/library/manual-1?assistant=1");
+
+    const reader = notification({
+      action_url: "/maintenance/tenant/publications/manual-1/rev/rev-1/read?page=4",
+      metadata: { manual_id: "manual-1", revision_id: "rev-1" },
+    });
+    expect(canAskAi(reader)).toBe(true);
+    expect(notificationAssistantUrl(reader)).toContain("/maintenance/tenant/publications/manual-1/rev/rev-1/read?page=4&assistant=1");
+
     expect(canAskAi(notification({ action_url: null, metadata: { manual_id: "manual-1" } }))).toBe(false);
     expect(canAskAi(notification({ entity_type: "training_event", metadata: {} }))).toBe(false);
   });
