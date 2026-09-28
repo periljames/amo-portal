@@ -120,7 +120,7 @@ export default function DocumentationAssistantPanel({
   const navigate = useNavigate();
   const [open, setOpen] = useState(embedded || defaultOpen);
   const [mode, setMode] = useState<DocumentationAssistMode>(initialMode);
-  const [query, setQuery] = useState(initialQuery.slice(0, 700));
+  const [query, setQuery] = useState(initialQuery.slice(0, 500));
   const [result, setResult] = useState<DocumentationAssistResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -139,7 +139,7 @@ export default function DocumentationAssistantPanel({
 
   useEffect(() => {
     if (!initialQuery) return;
-    setQuery(initialQuery.slice(0, 700));
+    setQuery(initialQuery.slice(0, 500));
     setMode(initialMode);
     if (!embedded) setOpen(true);
   }, [embedded, initialMode, initialQuery]);
