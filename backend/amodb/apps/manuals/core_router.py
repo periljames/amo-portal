@@ -623,7 +623,11 @@ def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str
         handle.flush()
         os.fsync(handle.fileno())
     try:
-        staged_sha256 = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        staged_digest = hashlib.sha256()
+        with temporary.open("rb") as staged:
+            for chunk in iter(lambda: staged.read(1024 * 1024), b""):
+                staged_digest.update(chunk)
+        staged_sha256 = staged_digest.hexdigest()
         if staged_sha256 != source_sha256:
             raise IOError("Stored source verification failed before publication")
         os.replace(temporary, target)
