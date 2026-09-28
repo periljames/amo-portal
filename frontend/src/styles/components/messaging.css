@@ -10,7 +10,6 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  order: 2;
 }
 
 .messaging-header-button {
@@ -88,16 +87,6 @@
   font-size: 17px;
 }
 .messaging-icon-button:hover { border-color: var(--border-color, #cbd5e1); background: var(--surface-muted, #f1f5f9); }
-
-.messaging-settings {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px 16px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-  background: var(--surface-muted, #f8fafc);
-}
-.messaging-settings label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary, #334155); }
 
 .messaging-directory-tabs { display: flex; gap: 2px; padding: 5px; }
 .messaging-directory-tabs button {
