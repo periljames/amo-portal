@@ -1806,11 +1806,21 @@ def get_revision_source(
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
+    checksum = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-Publication-Source": "exact-uploaded-original",
+    }
+    if checksum:
+        headers["ETag"] = f'"{checksum}"'
+        headers["X-Source-SHA256"] = checksum
     return FileResponse(
         path=str(source_path),
         media_type=rev.source_mime_type or "application/octet-stream",
         filename=download_name,
-        headers={"Content-Disposition": f'inline; filename="{download_name}"'},
+        content_disposition_type="attachment",
+        headers=headers,
     )
 
 
