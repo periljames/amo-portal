@@ -431,25 +431,26 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<NotificationFilter>("all");
   const now = Date.now();
-  const actionCount = notifications.filter(notificationRequiresAction).length;
-  const filtered = notifications.filter((notification) => {
-    const due = notificationDueAt(notification);
-    if (filter === "action" && !notificationRequiresAction(notification)) return false;
-    if (filter === "due" && !(due && due.getTime() >= now && due.getTime() <= now + 14 * 86400000)) return false;
-    if (filter === "unread" && notification.read_at) return false;
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return true;
-    return `${notification.title} ${notification.body} ${notificationModule(notification)}`.toLowerCase().includes(normalized);
-  });
-
   const grouped = new Map<string, PortalNotification[]>();
-  for (const notification of filtered) {
+  for (const notification of notifications) {
     const key = notificationGroupKey(notification);
     const current = grouped.get(key) || [];
     current.push(notification);
     grouped.set(key, current);
   }
-  const groups = [...grouped.values()].map((items) => items.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  const allGroups = [...grouped.values()].map((items) => items.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  const actionCount = allGroups.filter((items) => notificationRequiresAction(items[0])).length;
+  const unreadCount = allGroups.filter((items) => items.some((item) => !item.read_at)).length;
+  const normalized = query.trim().toLowerCase();
+  const groups = allGroups.filter((items) => {
+    const notification = items[0];
+    const due = notificationDueAt(notification);
+    if (filter === "action" && !notificationRequiresAction(notification)) return false;
+    if (filter === "due" && !(due && due.getTime() >= now && due.getTime() <= now + 14 * 86400000)) return false;
+    if (filter === "unread" && !items.some((item) => !item.read_at)) return false;
+    if (!normalized) return true;
+    return items.some((item) => `${item.title} ${item.body} ${notificationModule(item)}`.toLowerCase().includes(normalized));
+  });
 
   const askAi = async (notification: PortalNotification) => {
     const target = notificationAssistantUrl(notification);
@@ -465,7 +466,7 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
     <div className="messaging-notifications">
       <div className="messaging-notification-summary">
         <div><strong>{actionCount}</strong><span>need attention</span></div>
-        <div><strong>{notifications.filter((item) => !item.read_at).length}</strong><span>unread</span></div>
+        <div><strong>{unreadCount}</strong><span>unread threads</span></div>
       </div>
       <div className="messaging-notification-controls">
         <label className="messaging-notification-search"><Search size={14} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notifications" aria-label="Search notifications" /></label>
@@ -475,7 +476,7 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
           ))}
         </div>
       </div>
-      <div className="messaging-notification-toolbar"><span>{filtered.length} shown · {notifications.length} recent</span><button type="button" onClick={onReadAll}>Mark all read</button></div>
+      <div className="messaging-notification-toolbar"><span>{groups.length} shown · {allGroups.length} threads</span><button type="button" onClick={onReadAll}>Mark all read</button></div>
       <div className="messaging-notification-scroll">
         {groups.map((items) => {
           const notification = items[0];
@@ -484,7 +485,7 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
           const priority = notificationPriority(notification);
           const earlier = items.length - 1;
           return (
-            <article className={`messaging-notification-card${notification.read_at ? "" : " is-unread"}${requiresAction ? " requires-action" : ""}`} key={notificationGroupKey(notification)}>
+            <article className={`messaging-notification-card${items.some((item) => !item.read_at) ? " is-unread" : ""}${requiresAction ? " requires-action" : ""}`} key={notificationGroupKey(notification)}>
               <span className="messaging-notification-dot" aria-hidden="true" />
               <div className="messaging-notification-card__body">
                 <div className="messaging-notification-card__meta">
