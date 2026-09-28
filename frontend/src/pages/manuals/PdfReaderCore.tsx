@@ -114,6 +114,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     let active = true;
+    let backgroundCacheTimer: number | null = null;
 
     const revokeObjectUrl = () => {
       if (!objectUrlRef.current) return;
@@ -254,6 +255,35 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         cachePdfCapabilities(identity, live);
         setCapabilities(live);
 
+        const alreadyOffline = liveReaderFingerprint
+          ? await hasCachedPdfSource(identity, liveReaderFingerprint, liveReaderUrl)
+          : false;
+        if (active && liveReaderFingerprint && !alreadyOffline) {
+          setOfflineDescriptor({
+            sha256: liveReaderFingerprint,
+            url: liveReaderUrl,
+            byteLength: live.reader_size_bytes || props.sourceByteLength,
+          });
+          setOfflineState("SAVING");
+          backgroundCacheTimer = window.setTimeout(() => {
+            void savePdfSourceOffline(
+              identity,
+              liveReaderFingerprint,
+              liveReaderUrl,
+              live.reader_size_bytes || props.sourceByteLength,
+            ).then(() => {
+              if (!active || generationRef.current !== generation) return;
+              setOfflineState("AVAILABLE");
+              setOfflineError("");
+            }).catch(() => {
+              if (!active || generationRef.current !== generation) return;
+              // Background warming is opportunistic. Range streaming remains
+              // available and the user can retry the explicit offline action.
+              setOfflineState("UNAVAILABLE");
+            });
+          }, 900);
+        }
+
         const initialSourceChanged = !cached && liveReaderUrl !== props.fileUrl;
         if (sourceChanged || readerChanged || sourceUrlChanged || initialSourceChanged || !sourceMountedRef.current) {
           await mount(live, true);
@@ -284,6 +314,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     return () => {
       active = false;
       window.cancelAnimationFrame(initializationFrame);
+      if (backgroundCacheTimer !== null) window.clearTimeout(backgroundCacheTimer);
     };
   }, [
     cachedCapabilities,
@@ -348,6 +379,14 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     setReaderFileUrl(localUrl);
     setReaderKey(`${saved.readerUrl}:${saved.sourceSha256}:network-recovery`);
   }, [identity, readerFileUrl]);
+
+  useEffect(() => {
+    const switchToOfflineSource = () => {
+      void recoverOfflineAfterLoadError();
+    };
+    window.addEventListener("offline", switchToOfflineSource);
+    return () => window.removeEventListener("offline", switchToOfflineSource);
+  }, [recoverOfflineAfterLoadError]);
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
