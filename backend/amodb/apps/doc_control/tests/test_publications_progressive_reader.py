@@ -171,7 +171,8 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "8 * MIB" in performance
     assert "maxCanvasPixels" in performance
     assert "disableRange: false" in service
-    assert "disableStream: false" in service
+    assert "disableAutoFetch: true" in service
+    assert "disableStream: true" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
     assert "fetchPublicationBlob(viewerPdfPath)" not in reader_page
