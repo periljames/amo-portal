@@ -226,6 +226,12 @@ def _deliver(
                     "obligation_type": candidate.obligation_type,
                     "reminder_stage": stage,
                     "due_at": candidate.due_at.isoformat(),
+                    "module": "DMS",
+                    "category": "ACTION",
+                    "priority": "HIGH" if stage.upper() in {"OVERDUE", "ESCALATION", "FINAL"} else "NORMAL",
+                    "requires_action": True,
+                    "action_label": "Review obligation",
+                    "group_key": f"document-obligation:{candidate.obligation_type}:{candidate.obligation_id}",
                 },
             ))
         delivery["portal"] = "QUEUED"
