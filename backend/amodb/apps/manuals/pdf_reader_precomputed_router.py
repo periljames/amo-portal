@@ -7,8 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile
-from amodb.apps.doc_control.pdf_capability_service import inspect_pdf_capabilities_bytes
-from amodb.apps.doc_control.pdfium_service import PdfEngineError
+from amodb.apps.doc_control.pdfium_service import PdfEngineError, PdfInspection
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -36,7 +35,24 @@ def _source_type_value(revision) -> str:
 
 def _office_layout_inspection(revision):
     derivative = prepare_office_layout_pdf(revision)
-    inspection = inspect_pdf_capabilities_bytes(derivative.path.read_bytes())
+    # This PDF is a server-generated, immutable reading derivative. It is not
+    # an uploaded executable/form template, so avoid loading and re-inspecting
+    # the entire proof on every reader open. PDF.js scripting/XFA remain
+    # disabled globally and all working-copy actions stay disabled below.
+    inspection = PdfInspection(
+        engine="LibreOffice Writer PDF proof",
+        engine_version="layout-proof-v1",
+        source_sha256=derivative.pdf_sha256,
+        page_count=derivative.page_count,
+        form_type=0,
+        has_acroform=False,
+        has_javascript=False,
+        is_dynamic_xfa=False,
+        encrypted=False,
+        can_flatten=False,
+        unsupported_reason=None,
+        template_fingerprint=None,
+    )
     return inspection, derivative
 
 
