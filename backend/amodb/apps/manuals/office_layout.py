@@ -51,6 +51,14 @@ def _source_path(revision) -> Path:
     return path
 
 
+def _normalized_docx_cache_root() -> Path:
+    configured = str(os.getenv("OFFICE_NORMALIZED_CACHE_DIR", "") or "").strip()
+    root = Path(configured) if configured else Path("uploads/manuals/normalized-office")
+    root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _source_checksum(revision, source: Path) -> str:
     stored = str(getattr(revision, "source_sha256", "") or "").strip().lower()
     if stored:
@@ -135,6 +143,14 @@ def normalize_office_source_to_docx(content: bytes, filename: str | None, *, tim
     if not content:
         raise OfficeLayoutError("The Office source file is empty")
 
+    digest = hashlib.sha256(content).hexdigest()
+    cache_target = _normalized_docx_cache_root() / f"{digest}.docx"
+    if cache_target.exists() and cache_target.is_file():
+        cached = cache_target.read_bytes()
+        if cached.startswith(b"PK\x03\x04"):
+            return cached
+        cache_target.unlink(missing_ok=True)
+
     binary = _office_binary()
     with tempfile.TemporaryDirectory(prefix="office-normalize-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
@@ -174,6 +190,20 @@ def normalize_office_source_to_docx(content: bytes, filename: str | None, *, tim
         payload = output.read_bytes()
         if not payload.startswith(b"PK\x03\x04"):
             raise OfficeLayoutError("Office source normalization produced an invalid DOCX package")
+        with tempfile.NamedTemporaryFile(
+            prefix=f"{digest}-",
+            suffix=".tmp",
+            dir=cache_target.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name).resolve()
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, cache_target)
+        finally:
+            temporary.unlink(missing_ok=True)
         return payload
 
 
