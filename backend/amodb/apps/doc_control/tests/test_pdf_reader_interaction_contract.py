@@ -148,8 +148,9 @@ def test_office_download_preserves_original_source_and_print_uses_pdf_proof() ->
     layout = _source(LAYOUT)
     core_router = _source(CORE_ROUTER)
 
-    assert "const downloadPath = sourceIsDocx ? docxSourcePath : printablePdfPath" in publications
-    assert "originalDownloadUrl={sourceIsDocx ? docxSourcePath" in publications
+    assert "const downloadPath = sourceIsDocx" in publications
+    assert "metadata?.original_source_url || printablePdfPath" in publications
+    assert "originalDownloadUrl={downloadPath || viewerPdfPath}" in publications
     assert "printUrl={printablePdfPath || viewerPdfPath}" in publications
     assert "Download original" in publications
     assert "originalDownloadUrl?: string" in layout
