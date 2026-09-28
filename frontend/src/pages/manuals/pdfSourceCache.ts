@@ -338,29 +338,44 @@ export async function readCachedPdfSource(
     const row = await documentRow(database, key);
     if (!row || !(await hasCachedPdfSource(identity, sourceSha256, readerUrl))) return null;
     const encryptionKey = await deviceKey(database);
-    const output = new Uint8Array(row.byteLength);
-    let offset = 0;
 
-    for (let index = 0; index < row.chunkCount; index += 1) {
-      const transaction = database.transaction(CHUNK_STORE, "readonly");
-      const chunk = await requestResult<OfflinePdfChunk | undefined>(
-        transaction.objectStore(CHUNK_STORE).get(`${row.blobKey}:${index}`),
-      );
-      await transactionDone(transaction);
-      if (!chunk || chunk.index !== index || chunk.plainLength <= 0) {
-        await deleteDocumentRow(database, row);
-        return null;
-      }
+    // Pull all encrypted chunks in one IndexedDB transaction. The old path
+    // opened one transaction per 4 MiB chunk, which made large cached manuals
+    // unnecessarily slow to reopen after a network loss.
+    const transaction = database.transaction(CHUNK_STORE, "readonly");
+    const chunks = await requestResult<OfflinePdfChunk[]>(
+      transaction.objectStore(CHUNK_STORE).index("byBlobKey").getAll(IDBKeyRange.only(row.blobKey)),
+    );
+    await transactionDone(transaction);
+    chunks.sort((left, right) => left.index - right.index);
+    if (
+      chunks.length !== row.chunkCount
+      || chunks.some((chunk, index) => chunk.index !== index || chunk.plainLength <= 0)
+    ) {
+      await deleteDocumentRow(database, row);
+      return null;
+    }
+
+    const plainChunks = await Promise.all(chunks.map(async (chunk) => {
       const plain = await crypto.subtle.decrypt(
         {
           name: "AES-GCM",
           iv: chunk.iv,
-          additionalData: additionalData(key, row.sourceSha256, index),
+          additionalData: additionalData(key, row.sourceSha256, chunk.index),
         },
         encryptionKey,
         chunk.ciphertext,
       );
-      if (plain.byteLength !== chunk.plainLength || offset + plain.byteLength > output.byteLength) {
+      if (plain.byteLength !== chunk.plainLength) {
+        throw new Error("Cached PDF chunk failed authenticated decryption.");
+      }
+      return plain;
+    }));
+
+    const output = new Uint8Array(row.byteLength);
+    let offset = 0;
+    for (const plain of plainChunks) {
+      if (offset + plain.byteLength > output.byteLength) {
         await deleteDocumentRow(database, row);
         return null;
       }
