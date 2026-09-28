@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -105,7 +106,7 @@ def test_uploaded_source_storage_preserves_exact_bytes(tmp_path: Path, monkeypat
 
     stored = Path(stored_path)
     assert stored.read_bytes() == original
-    assert checksum == __import__("hashlib").sha256(original).hexdigest()
+    assert checksum == hashlib.sha256(original).hexdigest()
     assert not list(stored.parent.glob("*.upload"))
 
 
