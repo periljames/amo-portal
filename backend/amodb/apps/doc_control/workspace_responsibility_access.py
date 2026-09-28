@@ -142,6 +142,13 @@ def can_perform_workflow_action(
         )
 
     if action == "APPROVE_ACCOUNTABLE_MANAGER":
+        # Authority-required documents leave this state through the controlled
+        # authority-submission record; they must not expose a bypass approval.
+        if (
+            workflow.state == "ACCOUNTABLE_MANAGER_APPROVAL"
+            and bool(getattr(workflow, "requires_authority", False))
+        ):
+            return False
         # The Accountable Executive remains the standing authority. A confirmed,
         # governed APPROVER responsibility is the explicit delegation record used
         # when another authorized management approver is assigned to this document.
