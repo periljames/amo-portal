@@ -341,9 +341,13 @@ export function publicationPdfSource(path: string): {
     httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
     rangeChunkSize: performance.rangeChunkSize,
-    disableAutoFetch: false,
+    // The browser reader asks the server only for the byte ranges needed by
+    // visible/navigation work. A separate verified background transfer fills
+    // the encrypted offline cache, so PDF.js must not independently prefetch
+    // the whole file a second time.
+    disableAutoFetch: true,
     disableRange: false,
-    disableStream: false,
+    disableStream: true,
   };
 }
 
