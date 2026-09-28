@@ -15,6 +15,8 @@ PRECOMPUTE = ROOT / "backend/amodb/apps/manuals/pdf_reader_precompute.py"
 PRECOMPUTED_ROUTER = ROOT / "backend/amodb/apps/manuals/pdf_reader_precomputed_router.py"
 UPLOAD_GUARD = ROOT / "backend/amodb/apps/manuals/upload_guard_router.py"
 ROUTER = ROOT / "backend/amodb/apps/manuals/router.py"
+CORE_ROUTER = ROOT / "backend/amodb/apps/manuals/core_router.py"
+FAST_READER = ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 
 
 def _source(path: Path) -> str:
@@ -119,18 +121,45 @@ def test_zoom_is_client_scaled_without_rerasterizing_mounted_pages() -> None:
     assert "visibility: visible !important" not in styles
 
 
-def test_docx_layout_uses_cached_office_pdf_derivative_and_shared_pdf_reader() -> None:
+def test_docx_layout_uses_cached_office_pdf_derivative_and_safe_fallback() -> None:
     renderer = _source(OFFICE_RENDER)
     publications = _source(PUBLICATIONS)
+    fast_reader = _source(FAST_READER)
 
     assert '"--convert-to"' in renderer
     assert '"pdf:writer_pdf_Export"' in renderer
     assert "office_layout_pdf_path" in renderer
-    assert "os.replace(staging, target)" in renderer
+    assert "os.replace(output, target)" in renderer
+    assert "OFFICE_NORMALIZED_CACHE_DIR" in renderer
     assert "sourceIsPdf ? (metadata?.source_url" in publications
     assert "metadata?.rendered_pdf_url" in publications
-    assert "PublicationDocxLayoutViewer" not in publications
-    assert 'aria-label="Document zoom"' not in publications
+    assert "PublicationDocxLayoutViewer" in publications
+    assert 'sourceIsDocx && !officeLayoutProofAvailable' in publications
+    assert 'aria-label="Document zoom"' in publications
+    assert '"layout_proof_available": office_layout_ready' in fast_reader
+    assert '"reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html"' in fast_reader
+
+
+def test_draft_office_downloads_use_marked_rendered_copy() -> None:
+    publications = _source(PUBLICATIONS)
+    layout = _source(LAYOUT)
+
+    assert "const downloadPath = !isPublished ? uncontrolledDownloadPath" in publications
+    assert "originalDownloadUrl={downloadPath || viewerPdfPath}" in publications
+    assert "originalDownloadUrl?: string" in layout
+    assert "originalDownloadUrl={originalDownloadUrl || fileUrl}" in layout
+
+
+def test_office_processing_does_not_block_async_routes_and_capabilities_inspect_proof() -> None:
+    core_router = _source(CORE_ROUTER)
+    capability_router = _source(PRECOMPUTED_ROUTER)
+
+    assert "semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)" in core_router
+    assert "_office_layout_inspection" in capability_router
+    assert "inspect_pdf_capabilities_bytes" in capability_router
+    assert 'source_type in {"DOCX", "DOC", "ODT", "RTF"}' in capability_router
+    assert '"can_fill": False' in capability_router
+    assert '"reader_source_sha256": inspection.source_sha256' in capability_router
 
 
 def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:
