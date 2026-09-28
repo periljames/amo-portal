@@ -999,6 +999,7 @@ def list_notifications(
     portal_query = db.query(models.PortalNotification).filter(
         models.PortalNotification.amo_id == amo_id,
         models.PortalNotification.user_id == str(user.id),
+        models.PortalNotification.kind != "CHAT_MESSAGE",
         models.PortalNotification.archived_at.is_(None),
     )
     quality_query = db.query(quality_models.QMSNotification).filter(
@@ -1128,6 +1129,7 @@ def mark_all_notifications_read(db: Session, *, user: account_models.User) -> di
     portal_updated = db.query(models.PortalNotification).filter(
         models.PortalNotification.amo_id == amo_id,
         models.PortalNotification.user_id == str(user.id),
+        models.PortalNotification.kind != "CHAT_MESSAGE",
         models.PortalNotification.read_at.is_(None),
         models.PortalNotification.archived_at.is_(None),
     ).update({models.PortalNotification.read_at: now}, synchronize_session=False)
