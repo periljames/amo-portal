@@ -101,11 +101,15 @@ export type PublicationReaderMetadata = {
   source_size_bytes: number;
   source_page_count?: number | null;
   source_url?: string | null;
+  original_source_url?: string | null;
+  original_source_filename?: string | null;
+  original_source_sha256?: string | null;
   rendered_pdf_url: string;
   rendered_pdf_size_bytes: number;
   download_filename: string;
   reader_mode: "html" | "pdf";
   layout_renderer?: "PDF_SOURCE" | "OFFICE_PDF_PROOF" | "OFFICE_PDF_PROOF_PENDING" | "SEMANTIC_FALLBACK" | string;
+  layout_proof_supported?: boolean;
   layout_proof_available?: boolean;
   layout_proof_ready?: boolean;
   image_only: boolean;
