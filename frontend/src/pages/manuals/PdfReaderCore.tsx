@@ -285,11 +285,21 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         }
 
         const initialSourceChanged = !cached && liveReaderUrl !== props.fileUrl;
-        if (sourceChanged || readerChanged || sourceUrlChanged || initialSourceChanged || !sourceMountedRef.current) {
+        if (
+          sourceChanged
+          || readerChanged
+          || sourceUrlChanged
+          || initialSourceChanged
+          || !sourceMountedRef.current
+          || alreadyOffline
+        ) {
           await mount(live, true);
         } else if (!cached && liveReaderFingerprint) {
-          setOfflineDescriptor({ sha256: liveReaderFingerprint, url: liveReaderUrl, byteLength: live.reader_size_bytes || props.sourceByteLength });
-          setOfflineState(await hasCachedPdfSource(identity, liveReaderFingerprint, liveReaderUrl) ? "AVAILABLE" : "UNAVAILABLE");
+          setOfflineDescriptor({
+            sha256: liveReaderFingerprint,
+            url: liveReaderUrl,
+            byteLength: live.reader_size_bytes || props.sourceByteLength,
+          });
         }
 
       } catch (error) {
