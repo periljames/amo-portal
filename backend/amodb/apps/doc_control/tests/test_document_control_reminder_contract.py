@@ -90,6 +90,22 @@ def test_duplicate_delivery_claim_uses_savepoint_not_full_cycle_rollback() -> No
     assert 'install_reminder_runtime_guard()' in lifecycle
 
 
+def test_installed_delivery_uses_the_same_governed_notification_metadata() -> None:
+    source = _text(APP / "reminder_service.py")
+    guard = _text(APP / "reminder_runtime_guard.py")
+    assert "def _notification_metadata(" in source
+    for token in (
+        '"module": "DMS"',
+        '"category": "ACTION"',
+        '"requires_action": True',
+        '"action_label": "Review obligation"',
+        '"group_key": f"document-obligation:',
+    ):
+        assert token in source
+    assert "metadata_json=_notification_metadata(candidate=candidate, stage=stage)" in source
+    assert "metadata_json=service._notification_metadata(candidate=candidate, stage=stage)" in guard
+
+
 def test_failed_only_delivery_remains_retryable_until_a_channel_succeeds() -> None:
     guard = _text(APP / "reminder_runtime_guard.py")
     assert 'def _processed_delivery(' in guard
