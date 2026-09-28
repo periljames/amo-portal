@@ -177,6 +177,7 @@ async def precomputed_script_disabled_reader_pdf(
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Disposition": f'inline; filename="{safe_code}_SCRIPT_DISABLED.pdf"',
         "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
         "X-Publication-Source": "script-disabled-working-template",
         "X-AcroForm-Policy": "fillable-no-scripting",
         "X-PDF-Template-SHA256": inspection.source_sha256,
