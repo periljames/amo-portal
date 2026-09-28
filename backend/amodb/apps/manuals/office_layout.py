@@ -236,10 +236,10 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
             raise OfficeLayoutError(f"Office layout conversion failed: {detail[:500]}")
         _validate_pdf(output)
 
-        staging = target.with_name(f".{target.name}.tmp")
-        staging.unlink(missing_ok=True)
-        shutil.copyfile(output, staging)
-        os.replace(staging, target)
+        # The conversion already runs in a unique temporary directory under the
+        # target filesystem. Move that unique output into place atomically so
+        # concurrent upload/read conversions never share a staging filename.
+        os.replace(output, target)
 
     _validate_pdf(target)
     return OfficeLayoutDerivative(
