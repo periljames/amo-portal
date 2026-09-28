@@ -469,6 +469,16 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
     }
   };
 
+  const openNotificationGroup = async (items: PortalNotification[]) => {
+    const latest = items[0];
+    if (!latest) return;
+    const hiddenUnread = items.slice(1).filter((item) => !item.read_at);
+    if (hiddenUnread.length) {
+      await Promise.allSettled(hiddenUnread.map((item) => messagingApi.markNotificationReadOnly(item.id)));
+    }
+    onRead(latest);
+  };
+
   return (
     <div className="messaging-notifications">
       <div className="messaging-notification-summary">
@@ -508,7 +518,7 @@ function NotificationList({ notifications, loading, onRead, onReadAll }: { notif
                   {earlier ? <span>{earlier} earlier update{earlier === 1 ? "" : "s"}</span> : null}
                 </div>
                 <div className="messaging-notification-card__actions">
-                  {notification.action_url ? <button type="button" className="is-primary" onClick={() => onRead(notification)}>{notificationActionLabel(notification)} <ExternalLink size={12} /></button> : !notification.read_at ? <button type="button" onClick={() => onRead(notification)}>Mark read</button> : null}
+                  {notification.action_url ? <button type="button" className="is-primary" onClick={() => void openNotificationGroup(items)}>{notificationActionLabel(notification)} <ExternalLink size={12} /></button> : items.some((item) => !item.read_at) ? <button type="button" onClick={() => void openNotificationGroup(items)}>Mark thread read</button> : null}
                   {canAskAi(notification) ? <button type="button" onClick={() => void askAi(notification)}><Sparkles size={12} /> Ask AI</button> : null}
                 </div>
               </div>
