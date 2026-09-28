@@ -1040,18 +1040,32 @@ def list_notifications(
 
 
 def unread_notification_count(db: Session, *, user: account_models.User) -> dict[str, int]:
+    from amodb.apps.quality import models as quality_models
+
     amo_id = effective_amo_id(user)
-    count = (
+    portal_count = (
         db.query(func.count(models.PortalNotification.id))
         .filter(
             models.PortalNotification.amo_id == amo_id,
             models.PortalNotification.user_id == str(user.id),
+            models.PortalNotification.kind != "CHAT_MESSAGE",
             models.PortalNotification.read_at.is_(None),
             models.PortalNotification.archived_at.is_(None),
         )
         .scalar()
         or 0
     )
+    quality_count = (
+        db.query(func.count(quality_models.QMSNotification.id))
+        .filter(
+            quality_models.QMSNotification.amo_id == amo_id,
+            quality_models.QMSNotification.user_id == str(user.id),
+            quality_models.QMSNotification.read_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    count = int(portal_count) + int(quality_count)
     chat_count = (
         db.query(func.count(models.MessageReceipt.id))
         .filter(
@@ -1062,7 +1076,7 @@ def unread_notification_count(db: Session, *, user: account_models.User) -> dict
         .scalar()
         or 0
     )
-    return {"notifications": int(count), "messages": int(chat_count), "total": int(count) + int(chat_count)}
+    return {"notifications": count, "messages": int(chat_count), "total": count + int(chat_count)}
 
 
 def mark_notification_read(db: Session, *, user: account_models.User, notification_id: str) -> dict[str, Any]:
