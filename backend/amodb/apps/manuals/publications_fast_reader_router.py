@@ -183,7 +183,7 @@ def _reader_metadata(
     image_only = source_type == "PDF" and text_char_count < max(80, page_count * 16)
     is_published = _status_value(revision) == "PUBLISHED"
     office_layout_path = office_layout_pdf_path(revision)
-    office_layout_capable = bool(office_layout_path and source_path)
+    office_layout_supported = bool(office_layout_path and source_path)
     office_layout_ready = bool(
         office_layout_path
         and office_layout_path.exists()
@@ -198,14 +198,19 @@ def _reader_metadata(
         rendered_size = source_size
         source_exact = True
         layout_renderer = "PDF_SOURCE"
-    elif office_layout_capable:
+    elif office_layout_ready:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream-layout.pdf"
             f"?v={cache_key}"
         )
-        rendered_size = office_layout_path.stat().st_size if office_layout_ready else 0
+        rendered_size = office_layout_path.stat().st_size
         source_exact = False
-        layout_renderer = "OFFICE_PDF_PROOF" if office_layout_ready else "OFFICE_PDF_PROOF_PENDING"
+        layout_renderer = "OFFICE_PDF_PROOF"
+    elif office_layout_supported:
+        rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
+        rendered_size = 0
+        source_exact = False
+        layout_renderer = "OFFICE_BROWSER_FALLBACK"
     else:
         rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
         rendered_size = 0
@@ -236,9 +241,10 @@ def _reader_metadata(
         "rendered_pdf_url": rendered_url,
         "rendered_pdf_size_bytes": rendered_size,
         "download_filename": f"{manual.code}_Rev_{revision.rev_number or 'current'}.pdf",
-        "reader_mode": "pdf" if source_type == "PDF" or office_layout_capable else "html",
+        "reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html",
         "layout_renderer": layout_renderer,
-        "layout_proof_available": office_layout_capable,
+        "layout_proof_supported": office_layout_supported,
+        "layout_proof_available": office_layout_ready,
         "layout_proof_ready": office_layout_ready,
         "image_only": image_only,
         "text_char_count": text_char_count,
