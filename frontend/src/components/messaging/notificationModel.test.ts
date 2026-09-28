@@ -43,6 +43,13 @@ describe("notification presentation model", () => {
     expect(grouped[0].earlier.map((item) => item.id)).toEqual(["1"]);
   });
 
+
+  it("keeps warning-only operational notices in the attention view", () => {
+    const item = row({ category: "WARNING", priority: "HIGH", requires_action: false, business_state: "UPDATE" });
+    expect(notificationNeedsAttention(item)).toBe(true);
+    expect(notificationMatches(item, "for-you", "all")).toBe(true);
+  });
+
   it("uses critical treatment for overdue obligations", () => {
     const item = row({ business_state: "OVERDUE", priority: "CRITICAL", requires_action: true });
     expect(notificationTone(item)).toBe("critical");
