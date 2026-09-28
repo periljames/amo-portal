@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 
 import { useToast } from "../feedback/ToastProvider";
 import { getCachedUser, getToken } from "../../services/auth";
@@ -145,6 +146,7 @@ export function MessagingHeaderLaunchers() {
 
 export function MessagingHub() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { pushToast } = useToast();
   const user = getCachedUser();
   const authenticated = Boolean(getToken() && user?.id && user?.amo_id);
@@ -375,8 +377,15 @@ export function MessagingHub() {
     onSuccess: () => void refreshMessaging(),
   });
   const openNotification = useMutation({
-    mutationFn: messagingApi.openNotification,
-    onSuccess: () => void refreshMessaging(),
+    mutationFn: async (notification: PortalNotification) => ({
+      notification,
+      updated: await messagingApi.markNotificationRead(notification.id),
+    }),
+    onSuccess: ({ notification, updated }) => {
+      void refreshMessaging();
+      const target = updated.action_url || notification.action_url;
+      if (target && updated.entity_type !== "chat_thread") navigate(target);
+    },
   });
   const markAll = useMutation({
     mutationFn: messagingApi.markAllNotificationsRead,
