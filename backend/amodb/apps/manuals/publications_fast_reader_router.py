@@ -238,6 +238,13 @@ def _reader_metadata(
         "source_size_bytes": source_size,
         "source_page_count": revision.source_page_count,
         "source_url": rendered_url if source_exact else None,
+        "original_source_url": (
+            f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/source"
+            if source_path
+            else None
+        ),
+        "original_source_filename": revision.source_filename or (source_path.name if source_path else None),
+        "original_source_sha256": str(getattr(revision, "source_sha256", "") or "") or None,
         "rendered_pdf_url": rendered_url,
         "rendered_pdf_size_bytes": rendered_size,
         "download_filename": f"{manual.code}_Rev_{revision.rev_number or 'current'}.pdf",
@@ -568,9 +575,12 @@ def _stream_source(path: Path, request: Request, *, filename: str, cache_key: st
         "Cache-Control": "private, max-age=31536000, immutable",
         "ETag": etag,
         "Content-Disposition": f'inline; filename="{filename}"',
-        "X-Publication-Source": "exact-original",
+        "X-Publication-Source": "reader-source",
         "X-AcroForm-Policy": "read-only",
+        "X-Content-Type-Options": "nosniff",
     }
+    if re.fullmatch(r"[0-9a-fA-F]{64}", str(cache_key or "")):
+        common_headers["X-Reader-SHA256"] = str(cache_key).lower()
     if request.headers.get("if-none-match") == etag and not request.headers.get("range"):
         return Response(status_code=304, headers=common_headers)
     range_header = str(request.headers.get("range") or "").strip()
@@ -628,20 +638,16 @@ def stream_publication_office_layout(
     source_type = _source_type(revision)
     if source_type not in {"DOCX", "DOC", "ODT", "RTF"}:
         raise HTTPException(status_code=409, detail="This revision does not use an Office layout proof")
-    path = office_layout_pdf_path(revision)
-    if not path:
-        raise HTTPException(status_code=409, detail="The Office layout proof path is unavailable")
-    if not path.exists() or not path.is_file():
-        try:
-            derivative = prepare_office_layout_pdf(revision)
-        except OfficeLayoutError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        path = derivative.path
+    try:
+        derivative = prepare_office_layout_pdf(revision)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    path = derivative.path
+    if int(getattr(revision, "source_page_count", 0) or 0) != derivative.page_count:
         revision.source_page_count = derivative.page_count
         db.add(revision)
         db.commit()
-    source = _source_path(revision)
-    cache_key = _cache_key(revision, source)
+    cache_key = derivative.pdf_sha256
     safe_code = re.sub(r"[^A-Za-z0-9._-]+", "_", manual.code or "publication")
     safe_revision = re.sub(r"[^A-Za-z0-9._-]+", "_", revision.rev_number or "current")
     return _stream_source(
