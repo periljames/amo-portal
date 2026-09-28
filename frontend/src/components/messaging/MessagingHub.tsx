@@ -165,6 +165,7 @@ export function MessagingHub() {
   const [aiError, setAiError] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const aiSerial = useRef(0);
   const seenNotificationIds = useRef(new Set<string>());
   const notificationsInitialized = useRef(false);
 
@@ -397,6 +398,7 @@ export function MessagingHub() {
     const manualId = typeof notification.metadata?.manual_id === "string" ? notification.metadata.manual_id : null;
     const revisionId = typeof notification.metadata?.revision_id === "string" ? notification.metadata.revision_id : null;
     if (!tenant || !manualId) return;
+    const request = ++aiSerial.current;
     setAiNotificationId(notification.id);
     setAiResult(null);
     setAiError("");
@@ -409,11 +411,13 @@ export function MessagingHub() {
         revision_id: revisionId || undefined,
         limit: 6,
       });
-      setAiResult(result);
+      if (request === aiSerial.current) setAiResult(result);
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : "Controlled-document assistance is unavailable.");
+      if (request === aiSerial.current) {
+        setAiError(error instanceof Error ? error.message : "Controlled-document assistance is unavailable.");
+      }
     } finally {
-      setAiBusy(false);
+      if (request === aiSerial.current) setAiBusy(false);
     }
   };
 
@@ -631,7 +635,7 @@ export function MessagingHub() {
                       <div className="messaging-notification-ai">
                         <div className="messaging-notification-ai__heading">
                           <span><Bot size={14} /> Controlled-document assistance</span>
-                          <button type="button" onClick={() => { setAiNotificationId(null); setAiResult(null); setAiError(""); }} aria-label="Close AI assistance"><X size={14} /></button>
+                          <button type="button" onClick={() => { aiSerial.current += 1; setAiBusy(false); setAiNotificationId(null); setAiResult(null); setAiError(""); }} aria-label="Close AI assistance"><X size={14} /></button>
                         </div>
                         {aiError ? <p className="messaging-error" role="alert">{aiError}</p> : null}
                         {aiBusy ? <p>Retrieving permission-filtered controlled context…</p> : null}
