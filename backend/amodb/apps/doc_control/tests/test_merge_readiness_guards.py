@@ -149,6 +149,31 @@ def test_assigned_reviewer_authority_is_not_overridden_by_accountable_role_polic
     assert "require_decision_approver(current_user)" not in review_source
 
 
+def test_authority_required_revision_does_not_expose_accountable_bypass_action(monkeypatch) -> None:
+    workflow = SimpleNamespace(
+        state="ACCOUNTABLE_MANAGER_APPROVAL",
+        tenant_id="tenant-1",
+        manual_id="manual-1",
+        revision_id="revision-1",
+        requires_authority=True,
+    )
+    manager = SimpleNamespace(
+        id="accountable-executive",
+        is_superuser=False,
+        is_amo_admin=False,
+        role="ACCOUNTABLE_EXECUTIVE",
+        department_id=None,
+    )
+    monkeypatch.setattr(
+        responsibility_access,
+        "has_confirmed_responsibility",
+        lambda *args, **kwargs: True,
+    )
+    assert responsibility_access.can_perform_workflow_action(
+        object(), workflow=workflow, user=manager, action="APPROVE_ACCOUNTABLE_MANAGER"
+    ) is False
+
+
 def test_quality_manager_is_primary_quality_reviewer_without_extra_assignment(monkeypatch) -> None:
     workflow = SimpleNamespace(
         state="QUALITY_REVIEW",
