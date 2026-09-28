@@ -81,6 +81,9 @@ async def precomputed_pdf_reader_capabilities(
         # keep all working-copy/form actions disabled.
         payload.update(
             {
+                "has_javascript": False,
+                "source_has_javascript": bool(inspection.has_javascript),
+                "javascript_policy": "DISABLED_IN_READER" if inspection.has_javascript else "NONE",
                 "can_fill": False,
                 "can_save_draft": False,
                 "can_download_working": False,
