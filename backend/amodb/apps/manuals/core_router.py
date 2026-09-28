@@ -28,6 +28,7 @@ from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AMO
 from amodb.apps.platform import saas_models, saas_queue
+from amodb.apps.doc_control.workspace_service import can_read_manual, get_profile
 
 from . import models
 from .office_layout import (
@@ -1810,8 +1811,11 @@ def get_revision_source(
     manual_id: str,
     rev_id: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
+    if not getattr(current_user, "is_superuser", False) and str(getattr(current_user, "amo_id", "")) != str(tenant.amo_id):
+        raise HTTPException(status_code=403, detail="The requested source is outside the active AMO context")
     rev = (
         db.query(models.ManualRevision)
         .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
@@ -1820,6 +1824,9 @@ def get_revision_source(
     )
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
+    profile = get_profile(db, tenant, manual_id)
+    if not can_read_manual(current_user, profile):
+        raise HTTPException(status_code=403, detail="The current user is not permitted to download this source")
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
     source_path = Path(rev.source_storage_path)
