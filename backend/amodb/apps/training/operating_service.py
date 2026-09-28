@@ -1027,7 +1027,19 @@ def open_attendance_window(
                 entity_id=str(event.id),
                 action_url=sign_in_path,
                 dedupe_key=f"attendance:{row.id}:{user_id}",
-                metadata_json={"event_id": str(event.id), "attendance_window_id": str(row.id), "expires_at": row.expires_at.isoformat()},
+                metadata_json={
+                    "event_id": str(event.id),
+                    "attendance_window_id": str(row.id),
+                    "expires_at": row.expires_at.isoformat(),
+                    "due_at": row.expires_at.isoformat(),
+                    "module": "TRAINING",
+                    "category": "ACTION",
+                    "priority": "HIGH",
+                    "requires_action": True,
+                    "action_label": "Sign in",
+                    "business_state": "DUE_SOON",
+                    "group_key": f"training-attendance:{row.id}",
+                },
             )
             for user_id in participant_ids
         ])
