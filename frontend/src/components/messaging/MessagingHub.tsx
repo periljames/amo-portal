@@ -595,7 +595,6 @@ export function MessagingHub() {
           <div className="messaging-notification-scroll">
             {notificationGroups.map((group) => {
               const notification = group.latest;
-              const manualId = typeof notification.metadata?.manual_id === "string" ? notification.metadata.manual_id : null;
               const canAskAi = Boolean(tenant);
               const due = dueLabel(notification);
               const aiOpen = aiNotificationId === notification.id;
