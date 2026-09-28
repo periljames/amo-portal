@@ -160,18 +160,22 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 async function markNotificationRead(notificationId: string): Promise<PortalNotification> {
-  const notification = await request<PortalNotification>(
+  return request<PortalNotification>(
     `/api/notifications/${encodeURIComponent(notificationId)}/read`,
     { method: "POST" },
   );
+}
+
+async function openNotification(notification: PortalNotification): Promise<PortalNotification> {
+  const updated = await markNotificationRead(notification.id);
   if (
-    notification.action_url
-    && notification.entity_type !== "chat_thread"
+    updated.action_url
+    && updated.entity_type !== "chat_thread"
     && typeof window !== "undefined"
   ) {
-    window.location.assign(notification.action_url);
+    window.location.assign(updated.action_url);
   }
-  return notification;
+  return updated;
 }
 
 export const messagingApi = {
@@ -225,6 +229,7 @@ export const messagingApi = {
   },
   unreadCount: () => request<{ notifications: number; messages: number; total: number }>("/api/notifications/me/unread-count"),
   markNotificationRead,
+  openNotification,
   markAllNotificationsRead: () => request<{ read_at: string; updated: number }>("/api/notifications/read-all", { method: "POST" }),
   preferences: () => request<NotificationPreferences>("/api/notifications/preferences"),
   updatePreferences: (payload: Partial<NotificationPreferences>) => request<NotificationPreferences>("/api/notifications/preferences", {
