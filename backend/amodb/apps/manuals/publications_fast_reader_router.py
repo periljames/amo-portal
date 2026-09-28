@@ -583,6 +583,9 @@ def _stream_source(path: Path, request: Request, *, filename: str, cache_key: st
         "X-Publication-Source": "reader-source",
         "X-AcroForm-Policy": "read-only",
         "X-Content-Type-Options": "nosniff",
+        # Byte ranges are defined over the stored PDF bytes. Prevent response
+        # compression from changing transfer offsets or cache size semantics.
+        "Content-Encoding": "identity",
     }
     if re.fullmatch(r"[0-9a-fA-F]{64}", str(cache_key or "")):
         common_headers["X-Reader-SHA256"] = str(cache_key).lower()
