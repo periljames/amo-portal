@@ -943,6 +943,7 @@ export default function PdfReaderCoreV4({
     searchControllerRef.current?.abort();
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
     if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    if (scrollSettleTimerRef.current !== null) window.clearTimeout(scrollSettleTimerRef.current);
   }, [clearAutosaveTimer]);
 
   useEffect(() => {
