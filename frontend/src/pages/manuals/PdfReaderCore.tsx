@@ -308,7 +308,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
               // available and the user can retry the explicit offline action.
               setOfflineState("UNAVAILABLE");
             });
-          }, 900);
+          }, 400);
         }
 
         const initialSourceChanged = !cached && liveReaderUrl !== props.fileUrl;
@@ -373,6 +373,17 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         offlineDescriptor.url,
         offlineDescriptor.byteLength,
       );
+      const cachedBytes = await readCachedPdfSource(
+        identity,
+        offlineDescriptor.sha256,
+        offlineDescriptor.url,
+      );
+      if (cachedBytes) {
+        const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = localUrl;
+        setReaderFileUrl(localUrl);
+      }
       setOfflineState("AVAILABLE");
     } catch (error) {
       setOfflineState("ERROR");
@@ -385,12 +396,17 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     setOfflineError("");
     try {
       await deleteCachedPdfSource(identity, offlineDescriptor.sha256, offlineDescriptor.url);
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+        setReaderFileUrl(capabilities.reader_pdf_url || props.fileUrl);
+      }
       setOfflineState("UNAVAILABLE");
     } catch (error) {
       setOfflineState("ERROR");
       setOfflineError(error instanceof Error ? error.message : "The offline copy could not be removed.");
     }
-  }, [identity, offlineDescriptor]);
+  }, [capabilities.reader_pdf_url, identity, offlineDescriptor, props.fileUrl]);
 
   const recoverOfflineAfterLoadError = useCallback(async () => {
     if (readerFileUrl?.startsWith("blob:")) return;
