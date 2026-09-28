@@ -10,6 +10,7 @@ const CHUNK_STORE = "chunks";
 const KEY_STORE = "keys";
 const DEVICE_KEY_ID = "controlled-pdf-device-key-v1";
 const CHUNK_BYTES = 4 * 1024 * 1024;
+const CACHE_REOPEN_BATCH_CHUNKS = 8;
 const MAX_SINGLE_DOCUMENT_BYTES = 512 * 1024 * 1024;
 const MAX_USER_CACHE_BYTES = 1536 * 1024 * 1024;
 const MAX_USER_CACHE_ENTRIES = 6;
@@ -339,48 +340,57 @@ export async function readCachedPdfSource(
     if (!row || !(await hasCachedPdfSource(identity, sourceSha256, readerUrl))) return null;
     const encryptionKey = await deviceKey(database);
 
-    // Pull all encrypted chunks in one IndexedDB transaction. The old path
-    // opened one transaction per 4 MiB chunk, which made large cached manuals
-    // unnecessarily slow to reopen after a network loss.
-    const transaction = database.transaction(CHUNK_STORE, "readonly");
-    const chunks = await requestResult<OfflinePdfChunk[]>(
-      transaction.objectStore(CHUNK_STORE).index("byBlobKey").getAll(IDBKeyRange.only(row.blobKey)),
-    );
-    await transactionDone(transaction);
-    chunks.sort((left, right) => left.index - right.index);
-    if (
-      chunks.length !== row.chunkCount
-      || chunks.some((chunk, index) => chunk.index !== index || chunk.plainLength <= 0)
-    ) {
-      await deleteDocumentRow(database, row);
-      return null;
-    }
-
-    const plainChunks = await Promise.all(chunks.map(async (chunk) => {
-      const plain = await crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: chunk.iv,
-          additionalData: additionalData(key, row.sourceSha256, chunk.index),
-        },
-        encryptionKey,
-        chunk.ciphertext,
-      );
-      if (plain.byteLength !== chunk.plainLength) {
-        throw new Error("Cached PDF chunk failed authenticated decryption.");
-      }
-      return plain;
-    }));
-
+    // Reopen cached manuals in bounded batches. One transaction per chunk was
+    // slow for thousand-page PDFs; loading the entire encrypted file at once
+    // can double/triple memory pressure. Eight 4 MiB chunks balances both.
     const output = new Uint8Array(row.byteLength);
     let offset = 0;
-    for (const plain of plainChunks) {
-      if (offset + plain.byteLength > output.byteLength) {
+    for (let batchStart = 0; batchStart < row.chunkCount; batchStart += CACHE_REOPEN_BATCH_CHUNKS) {
+      const batchEnd = Math.min(row.chunkCount, batchStart + CACHE_REOPEN_BATCH_CHUNKS);
+      const transaction = database.transaction(CHUNK_STORE, "readonly");
+      const store = transaction.objectStore(CHUNK_STORE);
+      const requests: Array<Promise<OfflinePdfChunk | undefined>> = [];
+      for (let index = batchStart; index < batchEnd; index += 1) {
+        requests.push(requestResult<OfflinePdfChunk | undefined>(
+          store.get(`${row.blobKey}:${index}`),
+        ));
+      }
+      const chunks = await Promise.all(requests);
+      await transactionDone(transaction);
+      if (chunks.some((chunk, relativeIndex) => (
+        !chunk
+        || chunk.index !== batchStart + relativeIndex
+        || chunk.plainLength <= 0
+      ))) {
         await deleteDocumentRow(database, row);
         return null;
       }
-      output.set(new Uint8Array(plain), offset);
-      offset += plain.byteLength;
+
+      const plainChunks = await Promise.all(chunks.map(async (chunk) => {
+        if (!chunk) throw new Error("Cached PDF chunk is unavailable.");
+        const plain = await crypto.subtle.decrypt(
+          {
+            name: "AES-GCM",
+            iv: chunk.iv,
+            additionalData: additionalData(key, row.sourceSha256, chunk.index),
+          },
+          encryptionKey,
+          chunk.ciphertext,
+        );
+        if (plain.byteLength !== chunk.plainLength) {
+          throw new Error("Cached PDF chunk failed authenticated decryption.");
+        }
+        return plain;
+      }));
+
+      for (const plain of plainChunks) {
+        if (offset + plain.byteLength > output.byteLength) {
+          await deleteDocumentRow(database, row);
+          return null;
+        }
+        output.set(new Uint8Array(plain), offset);
+        offset += plain.byteLength;
+      }
     }
 
     // Every stored chunk is authenticated with AES-GCM using the controlled
