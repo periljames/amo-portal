@@ -29,14 +29,16 @@ const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", imp
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
 describe("DMS frontend operating-model contract", () => {
-  it("exposes the eight distinct daily Document Control workspaces", () => {
-    for (const label of ["Home", "Library", "Structure", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
+  it("exposes the reader-safe Records workspace alongside controlled Document Control workspaces", () => {
+    for (const label of ["Home", "Library", "Structure", "Records", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
       expect(shell).toContain(`label: "${label}"`);
     }
     expect(shell).not.toContain("Generated records");
     expect(shell).not.toContain("Authority submissions");
     expect(shell).not.toContain("Temporary revisions");
     expect(shell).not.toContain("QMS and module links");
+    expect(shell).toContain('{ id: "records", label: "Records", path: "/reports/records", icon: Archive }');
+    expect(shell).toContain('if (pathname.includes("/reports/records")) return "records";');
   });
 
   it("mounts assisted search only in Library/document context rather than permanent DMS chrome", () => {
