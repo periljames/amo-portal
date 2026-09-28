@@ -139,7 +139,10 @@ def test_docx_layout_uses_cached_office_pdf_derivative_and_safe_fallback() -> No
     assert "sourceIsPdf ? (metadata?.source_url" in publications
     assert "metadata?.rendered_pdf_url" in publications
     assert "PublicationDocxLayoutViewer" in publications
-    assert 'sourceIsDocx && !officeLayoutProofAvailable' in publications
+    assert 'sourceIsOffice && !officeLayoutProofAvailable' in publications
+    assert '["DOCX", "DOC", "ODT", "RTF"].includes(sourceType)' in publications
+    assert "browser-office.docx" in publications
+    assert '"X-Publication-Source": "browser-office-derivative"' in _source(CORE_ROUTER)
     assert 'aria-label="Document zoom"' in publications
     assert '"layout_proof_available": office_layout_ready' in fast_reader
     assert '"reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html"' in fast_reader
@@ -150,7 +153,7 @@ def test_office_download_preserves_original_source_and_print_uses_pdf_proof() ->
     layout = _source(LAYOUT)
     core_router = _source(CORE_ROUTER)
 
-    assert "const downloadPath = sourceIsDocx" in publications
+    assert "const downloadPath = sourceIsOffice" in publications
     assert "metadata?.original_source_url || printablePdfPath" in publications
     assert "originalDownloadUrl={downloadPath || viewerPdfPath}" in publications
     assert "printUrl={printablePdfPath || viewerPdfPath}" in publications
@@ -185,6 +188,9 @@ def test_background_pdf_cache_is_checksum_bound_and_automatic() -> None:
 
     assert "savePdfSourceOffline(" in bridge
     assert "backgroundCacheTimer" in bridge
+    assert "await mount(live, true, true)" in bridge
+    assert "readCachedPdfSource(" in bridge
+    assert "preferCachedBytes" in bridge
     assert 'window.addEventListener("offline"' in bridge
     assert "X-Reader-SHA256" in cache
     assert "AES-GCM" in cache
@@ -193,6 +199,16 @@ def test_background_pdf_cache_is_checksum_bound_and_automatic() -> None:
     assert '"X-Reader-SHA256"' in fast_reader
     assert '"Accept-Ranges": "bytes"' in fast_reader
     assert "max-age=31536000, immutable" in fast_reader
+
+
+def test_local_pdf_handoff_preserves_page_and_fast_scroll_state() -> None:
+    source = _source(CORE)
+
+    assert "documentLoadedRef" in source
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in source
+    assert "overscan: fastScrolling ? 0 : profile.renderRadius" in source
+    assert "deferRender={fastScrolling}" in source
+    assert "}, 90);" in source
 
 
 def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:
