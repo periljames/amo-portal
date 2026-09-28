@@ -193,7 +193,7 @@ function DocumentControlFallback() {
   const { amoCode = "" } = useParams();
   const location = useLocation();
   const basePath = `/maintenance/${encodeURIComponent(amoCode)}/document-control`;
-  const relative = location.pathname.split("/document-control/")[1] || "";
+  const relative = (location.pathname.split("/document-control/")[1] || "").replace(/\/+$/, "");
   if (relative === "records") {
     return <Navigate to={`${basePath}/reports/records${location.search}${location.hash}`} replace />;
   }
