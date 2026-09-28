@@ -151,4 +151,64 @@ describe("messaging API", () => {
     await expect(messagingApi.openGroup("restricted-group"))
       .rejects.toThrow("User is not a member of this group");
   });
+  it("keeps notification read state separate from navigation", async () => {
+    const notification = {
+      id: "notification-1",
+      kind: "DOCUMENT_CONTROL",
+      title: "Acknowledgement due",
+      body: "Review the publication",
+      metadata: {},
+      created_at: "2026-09-28T07:00:00Z",
+      action_url: "/maintenance/demo/document-control/library/manual-1",
+      entity_type: "document_distribution_campaign",
+      entity_id: "campaign-1",
+      read_at: "2026-09-28T07:01:00Z",
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(notification));
+    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+
+    await messagingApi.markNotificationRead(notification.id);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/notifications/notification-1/read",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("opens a notification only through the explicit open action", async () => {
+    const notification = {
+      id: "notification-2",
+      kind: "DOCUMENT_CONTROL",
+      title: "Approval required",
+      body: "Review the document",
+      metadata: {},
+      created_at: "2026-09-28T07:00:00Z",
+      action_url: "/maintenance/demo/document-control/library/manual-2",
+      entity_type: "document_workflow",
+      entity_id: "workflow-2",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(notification));
+    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+
+    await messagingApi.openNotification(notification);
+
+    expect(assign).toHaveBeenCalledWith(notification.action_url);
+  });
+
+  it("supports bounded notification pagination while preserving boolean compatibility", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ items: [], total: 0, limit: 25, offset: 10 }),
+    );
+
+    await messagingApi.notifications({ unreadOnly: true, limit: 25, offset: 10 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/notifications/me?limit=25&offset=10&unread_only=true",
+    );
+
+    fetchMock.mockClear();
+    await messagingApi.notifications(false);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("unread_only=false");
+  });
+
 });
