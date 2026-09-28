@@ -74,7 +74,9 @@ def test_document_source_is_resolved_once_before_pdf_mount() -> None:
     assert "cachedReadOnly" in entry
     assert "reader_pdf_url || props.fileUrl" in entry
     assert "if (!readerFileUrl)" in entry
-    assert "sourceChanged || readerChanged || sourceUrlChanged" in entry
+    assert "sourceChanged" in entry
+    assert "readerChanged" in entry
+    assert "sourceUrlChanged" in entry
     assert "sourceCachePending" not in entry
     assert "Opening cached document" not in entry
 
@@ -190,7 +192,7 @@ def test_background_pdf_cache_is_checksum_bound_and_automatic() -> None:
     assert "CHUNK_BYTES" in cache
     assert '"X-Reader-SHA256"' in fast_reader
     assert '"Accept-Ranges": "bytes"' in fast_reader
-    assert '"immutable"' in fast_reader
+    assert "max-age=31536000, immutable" in fast_reader
 
 
 def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:
