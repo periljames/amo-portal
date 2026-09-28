@@ -92,7 +92,9 @@ The global notification centre does not infer or broaden authorization. A notifi
 
 ## AI assistance
 
-Document notifications containing governed `manual_id` context expose an explicit **Ask AI** action.
+Notifications expose an explicit **Ask AI** action backed only by governed controlled-document retrieval.
+
+When `manual_id` / revision context is present, retrieval is scoped to that controlled document. For QMS, Training and other notification types without a manual binding, the same assistant performs tenant-wide permission-filtered controlled-information retrieval using the notification title/body as the query context.
 
 It reuses the existing Document Control assisted-search endpoint:
 
@@ -102,7 +104,7 @@ Properties:
 
 - permission-filtered controlled-document retrieval;
 - explicit user invocation only;
-- current manual/revision context forwarded where available;
+- current manual/revision context forwarded where available, otherwise tenant-wide controlled-information scope;
 - stale async results rejected by request sequencing;
 - source links returned to the governed reader;
 - no acknowledgement, approval, publication, record mutation or workflow completion by AI;
@@ -189,5 +191,5 @@ Browser acceptance:
 - Marking a notification read does not remove an unresolved action from **For you**.
 - DMS lifecycle messages collapse into one latest-state card with expandable history.
 - QMS action-required records appear in the global bell for the correct user only.
-- Ask AI appears only when controlled-document context is available and cannot mutate the governed record.
+- Ask AI uses permission-filtered controlled information, scopes to the notified manual/revision when available, and cannot mutate the governed record.
 - 720px-and-below layout remains usable without horizontal page overflow.
