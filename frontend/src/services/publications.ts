@@ -365,9 +365,24 @@ export async function getPublicationAcknowledgement(tenantSlug: string, manualId
   return response.json() as Promise<PublicationAcknowledgement>;
 }
 
+async function sha256Blob(blob: Blob): Promise<string> {
+  if (!globalThis.crypto?.subtle) return "";
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function fetchPublicationBlob(path: string): Promise<{ blob: Blob; size: number; filename?: string }> {
   const response = await authenticatedFetch(path);
   const blob = await response.blob();
+  const expectedSourceSha256 = String(response.headers.get("X-Source-SHA256") || "").trim().toLowerCase();
+  if (expectedSourceSha256 && globalThis.crypto?.subtle) {
+    const actualSourceSha256 = await sha256Blob(blob);
+    if (actualSourceSha256 !== expectedSourceSha256) {
+      throw new Error("The downloaded source failed its controlled-file checksum. Nothing was saved.");
+    }
+  }
   const disposition = response.headers.get("Content-Disposition") || "";
   const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
