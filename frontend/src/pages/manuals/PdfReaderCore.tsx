@@ -140,12 +140,27 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         return { url: remoteUrl, key: `${remoteUrl}:${fingerprint || "unverified"}` };
       }
 
-      // The live capability response verifies the fingerprint. Reuse that exact
-      // encrypted source even on a slow-but-online connection.
+      const cachedAvailable = await hasCachedPdfSource(identity, fingerprint, remoteUrl);
+
+      // While online, mount the immutable range-enabled URL immediately. This
+      // lets PDF.js fetch only the byte ranges needed for the first visible
+      // pages instead of blocking reader startup while a 1000-page encrypted
+      // cache is reconstructed into one Blob. The verified cache remains ready
+      // for an offline/network-failure handoff.
+      if (navigator.onLine !== false) {
+        setOfflineState(cachedAvailable ? "AVAILABLE" : "UNAVAILABLE");
+        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}:range` };
+      }
+
+      if (!cachedAvailable) {
+        setOfflineState("UNAVAILABLE");
+        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}:offline-miss` };
+      }
+
       const cachedBytes = await readCachedPdfSource(identity, fingerprint, remoteUrl);
       if (!cachedBytes) {
         setOfflineState("UNAVAILABLE");
-        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
+        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}:offline-invalid` };
       }
 
       const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
