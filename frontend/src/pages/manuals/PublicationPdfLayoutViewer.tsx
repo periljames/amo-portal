@@ -33,6 +33,7 @@ export type PdfOutlineItem = PdfReaderOutlineItem;
 
 type PublicationPdfLayoutViewerProps = {
   fileUrl: string;
+  originalDownloadUrl?: string;
   title: string;
   sourceByteLength?: number | null;
   uncontrolled?: boolean;
@@ -130,6 +131,7 @@ function searchResultPage(button: Element): number | null {
  */
 export default function PublicationPdfLayoutViewer({
   fileUrl,
+  originalDownloadUrl,
   title,
   sourceByteLength,
   uncontrolled = false,
@@ -498,7 +500,7 @@ export default function PublicationPdfLayoutViewer({
         <PdfReaderCore
           key={readerIdentityKey}
           fileUrl={fileUrl}
-          originalDownloadUrl={fileUrl}
+          originalDownloadUrl={originalDownloadUrl || fileUrl}
           title={title}
           sourceByteLength={sourceByteLength}
           filename={`${title}.pdf`}
