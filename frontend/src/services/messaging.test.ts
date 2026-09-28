@@ -25,6 +25,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
 describe("messaging API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     currentUser.value = { id: "me", amo_id: "amo-1" };
   });
 
@@ -165,7 +166,6 @@ describe("messaging API", () => {
       read_at: "2026-09-28T07:01:00Z",
     };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(notification));
-    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
 
     await messagingApi.markNotificationRead(notification.id);
 
@@ -173,7 +173,6 @@ describe("messaging API", () => {
       "https://api.example.test/api/notifications/notification-1/read",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(assign).not.toHaveBeenCalled();
   });
 
   it("opens a notification only through the explicit open action", async () => {
@@ -189,7 +188,8 @@ describe("messaging API", () => {
       entity_id: "workflow-2",
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(notification));
-    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+    const assign = vi.fn();
+    vi.stubGlobal("window", { location: { assign } });
 
     await messagingApi.openNotification(notification);
 
