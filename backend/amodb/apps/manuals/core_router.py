@@ -17,7 +17,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -1867,6 +1867,76 @@ def get_revision_source(
         filename=download_name,
         content_disposition_type="attachment",
         headers=headers,
+    )
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/browser-office.docx", include_in_schema=False)
+def get_browser_office_source(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Return a browser-readable DOCX derivative without replacing the retained original."""
+
+    tenant = _tenant_by_slug(db, tenant_slug)
+    from amodb.apps.doc_control.workspace_service import can_read_manual, get_profile
+
+    if not getattr(current_user, "is_superuser", False) and str(getattr(current_user, "amo_id", "")) != str(tenant.amo_id):
+        raise HTTPException(status_code=403, detail="The requested source is outside the active AMO context")
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    if not can_read_manual(current_user, get_profile(db, tenant, manual_id)):
+        raise HTTPException(status_code=403, detail="The current user is not permitted to read this source")
+    if not rev.source_storage_path:
+        raise HTTPException(status_code=404, detail="Revision source file not available")
+
+    source_path = Path(rev.source_storage_path)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Revision source file missing from storage")
+
+    original_name = rev.source_filename or source_path.name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in SUPPORTED_OFFICE_EXTENSIONS:
+        raise HTTPException(status_code=409, detail="This revision does not contain a supported Office source")
+
+    content = source_path.read_bytes()
+    expected = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    actual = hashlib.sha256(content).hexdigest()
+    if expected and actual != expected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SOURCE_CHECKSUM_MISMATCH",
+                "message": "The retained source no longer matches the uploaded controlled-file checksum.",
+            },
+        )
+
+    try:
+        browser_docx = normalize_office_source_to_docx(content, original_name)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    derivative_sha = hashlib.sha256(browser_docx).hexdigest()
+    return Response(
+        content=browser_docx,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": f'"{derivative_sha}"',
+            "Content-Disposition": f'inline; filename="{Path(original_name).stem}.docx"',
+            "X-Content-Type-Options": "nosniff",
+            "X-Publication-Source": "browser-office-derivative",
+            "X-Original-Source-SHA256": actual,
+            "X-Browser-Source-SHA256": derivative_sha,
+        },
     )
 
 
