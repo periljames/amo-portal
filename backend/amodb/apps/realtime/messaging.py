@@ -872,6 +872,51 @@ def delete_message(db: Session, *, user: account_models.User, message_id: str) -
     return payload
 
 
+def _notification_semantics(row: models.PortalNotification) -> dict[str, Any]:
+    metadata = row.metadata_json or {}
+    requires_action = bool(metadata.get("requires_action", False))
+
+    category = str(metadata.get("category") or ("ACTION" if requires_action else "UPDATE")).upper()
+    if category not in {"ACTION", "WARNING", "UPDATE", "INFORMATION"}:
+        category = "UPDATE"
+
+    priority = str(metadata.get("priority") or "NORMAL").upper()
+    if priority not in {"CRITICAL", "HIGH", "NORMAL", "LOW"}:
+        priority = "NORMAL"
+
+    business_state = str(
+        metadata.get("business_state")
+        or ("ACTION_REQUIRED" if requires_action else "UPDATE")
+    ).upper()
+    if business_state not in {
+        "ACTION_REQUIRED",
+        "DUE_SOON",
+        "OVERDUE",
+        "COMPLETED",
+        "UPDATE",
+        "INFORMATION",
+    }:
+        business_state = "UPDATE"
+
+    module = str(metadata.get("module") or "").strip().upper() or None
+    due_at = metadata.get("due_at")
+    action_label = str(metadata.get("action_label") or "").strip() or None
+    group_key = str(metadata.get("group_key") or "").strip() or None
+    if not group_key and row.entity_type and row.entity_id:
+        group_key = f"{row.entity_type}:{row.entity_id}"
+
+    return {
+        "category": category,
+        "priority": priority,
+        "module": module,
+        "due_at": due_at,
+        "requires_action": requires_action,
+        "action_label": action_label,
+        "group_key": group_key,
+        "business_state": business_state,
+    }
+
+
 def notification_payload(row: models.PortalNotification) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -885,6 +930,7 @@ def notification_payload(row: models.PortalNotification) -> dict[str, Any]:
         "created_at": row.created_at,
         "read_at": row.read_at,
         "archived_at": row.archived_at,
+        **_notification_semantics(row),
     }
 
 
