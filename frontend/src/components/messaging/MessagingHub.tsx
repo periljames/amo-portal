@@ -397,7 +397,7 @@ export function MessagingHub() {
   const askAi = async (notification: PortalNotification) => {
     const manualId = typeof notification.metadata?.manual_id === "string" ? notification.metadata.manual_id : null;
     const revisionId = typeof notification.metadata?.revision_id === "string" ? notification.metadata.revision_id : null;
-    if (!tenant || !manualId) return;
+    if (!tenant) return;
     const request = ++aiSerial.current;
     setAiNotificationId(notification.id);
     setAiResult(null);
@@ -407,7 +407,7 @@ export function MessagingHub() {
       const result = await assistDocumentation(tenant, {
         query: `Explain the controlled-document context for this portal notification: ${notification.title}. ${notification.body}`.slice(0, 500),
         mode: "ASSIST",
-        manual_id: manualId,
+        manual_id: manualId || undefined,
         revision_id: revisionId || undefined,
         limit: 6,
       });
@@ -596,7 +596,7 @@ export function MessagingHub() {
             {notificationGroups.map((group) => {
               const notification = group.latest;
               const manualId = typeof notification.metadata?.manual_id === "string" ? notification.metadata.manual_id : null;
-              const canAskAi = Boolean(tenant && manualId);
+              const canAskAi = Boolean(tenant);
               const due = dueLabel(notification);
               const aiOpen = aiNotificationId === notification.id;
               return (
