@@ -152,6 +152,12 @@ def _pdf_checksum(path: Path) -> str:
     return checksum
 
 
+def office_layout_pdf_checksum(path: Path) -> str:
+    """Return the immutable browser-reader fingerprint for an Office PDF proof."""
+    _validate_pdf(path)
+    return _pdf_checksum(path)
+
+
 def _office_binary() -> str:
     configured = str(os.getenv("OFFICE_LAYOUT_CONVERTER", "") or "").strip()
     if configured:
