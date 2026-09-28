@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
 
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -1008,8 +1009,8 @@ async def preview_docx_upload(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
-    semantic_docx = _office_semantic_docx_bytes(file, content)
-    parsed = _extract_docx_content(semantic_docx, file.filename)
+    semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)
+    parsed = await run_in_threadpool(_extract_docx_content, semantic_docx, file.filename)
     paragraphs = [str(item.get("text") or "") for item in list(parsed.get("paragraphs", []))]
     headings = [str(item.get("heading") or "") for item in list(parsed.get("headings", []))]
     metadata = dict(parsed.get("metadata", {}))
@@ -1080,9 +1081,9 @@ async def upload_docx_revision(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
-    semantic_docx = _office_semantic_docx_bytes(file, content)
+    semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)
 
-    parsed = _extract_docx_content(semantic_docx, file.filename)
+    parsed = await run_in_threadpool(_extract_docx_content, semantic_docx, file.filename)
     metadata = dict(parsed.get("metadata", {}))
     section_specs = _build_manual_sections(parsed)
     paragraph_count = sum(len(list(spec.get("paragraphs") or [])) for spec in section_specs)
