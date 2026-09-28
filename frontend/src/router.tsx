@@ -191,7 +191,13 @@ function ProcurementRouteSurface() {
 
 function DocumentControlFallback() {
   const { amoCode = "" } = useParams();
-  return <Navigate to={`/maintenance/${encodeURIComponent(amoCode)}/document-control`} replace />;
+  const location = useLocation();
+  const basePath = `/maintenance/${encodeURIComponent(amoCode)}/document-control`;
+  const relative = location.pathname.split("/document-control/")[1] || "";
+  if (relative === "records") {
+    return <Navigate to={`${basePath}/reports/records${location.search}${location.hash}`} replace />;
+  }
+  return <Navigate to={`${basePath}${location.search}${location.hash}`} replace />;
 }
 
 function DocumentControlRouteSurface() {
@@ -202,8 +208,8 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
-        <Route path="/maintenance/:amoCode/document-control/records" element={<WorkspaceRequireAuth><DocControlRecordsVaultPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure/records/:recordId" element={<WorkspaceRequireAuth><DocControlGeneratedRecordPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/reports/records" element={<WorkspaceRequireAuth><DocControlRecordsVaultPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
