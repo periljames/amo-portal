@@ -1,3 +1,4 @@
+import PublicationDocxLayoutViewer from "./PublicationDocxLayoutViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck,
@@ -226,6 +227,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [hasAcroForm, setHasAcroForm] = useState(false);
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
   const [readingWidth, setReadingWidth] = useState<ReadingWidth>(() => (window.localStorage.getItem("amo-publication-reader-width") as ReadingWidth) || "fit");
+  const [docxZoom, setDocxZoom] = useState(() => window.localStorage.getItem("amo-publication-docx-zoom") || "fit");
   const [blocksBySection, setBlocksBySection] = useState<Record<string, ExtendedReadPayload["blocks"]>>({});
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -240,6 +242,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
   const sourceIsDocx = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "DOCX";
   const officeLayoutProofAvailable = sourceIsDocx && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url);
+  const docxSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
   const sections = useMemo(() => payload?.sections ?? [], [payload?.sections]);
   const textAvailable = sections.length > 0 && !metadata?.image_only;
   const layoutAvailable = sourceIsDocx || Boolean(metadata?.rendered_pdf_url);
@@ -247,7 +250,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const uncontrolledDownloadPath = tenant && manualId && revId
     ? `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revId)}/rendered.pdf`
     : "";
-  const downloadPath = !isPublished && sourceIsPdf ? uncontrolledDownloadPath : metadata?.rendered_pdf_url || "";
+  const downloadPath = !isPublished ? uncontrolledDownloadPath : metadata?.rendered_pdf_url || "";
 
   const applyBootstrap = useCallback((bootstrap: PublicationReaderBootstrap) => {
     const readPayload = bootstrap.read as ExtendedReadPayload;
@@ -742,6 +745,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
             <div className="publication-reader-controls">
               <select value={readerTheme} onChange={(event) => setTheme(event.target.value as ReaderTheme)} aria-label="Reading theme"><option value="neutral">Neutral</option><option value="warm">Warm</option><option value="sepia">Sepia</option><option value="contrast">High contrast</option></select>
               <select value={readingWidth} onChange={(event) => setWidth(event.target.value as ReadingWidth)} aria-label="Reading width"><option value="fit">Fit</option><option value="focus">Focus</option><option value="wide">Wide</option></select>
+              {sourceIsDocx && viewMode === "layout" && !officeLayoutProofAvailable ? <select value={docxZoom} onChange={(event) => { const value = event.target.value; setDocxZoom(value); window.localStorage.setItem("amo-publication-docx-zoom", value); }} aria-label="Document zoom"><option value="fit">Fit width</option>{[50, 75, 100, 125, 150, 200].map((value) => <option key={value} value={value}>{value}%</option>)}</select> : null}
               <button type="button" className={viewMode === "layout" ? "active" : ""} disabled={!layoutAvailable} onClick={() => setViewMode("layout")}>{layoutLabel}</button>
               <button type="button" className={viewMode === "text" ? "active" : ""} disabled={!textAvailable} onClick={() => setViewMode("text")}>{textLabel}</button>
             </div>
@@ -768,8 +772,9 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsDocx && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={docxSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
+                      originalDownloadUrl={downloadPath || viewerPdfPath}
                       title={metadata.title}
                       sourceByteLength={sourceIsPdf ? metadata.source_size_bytes : metadata.rendered_pdf_size_bytes}
                       uncontrolled={!isPublished}
