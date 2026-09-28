@@ -72,6 +72,7 @@ export function MessagingHub() {
   const [showDirectory, setShowDirectory] = useState(false);
   const [directoryTab, setDirectoryTab] = useState<DirectoryTab>("users");
   const [draft, setDraft] = useState("");
+  const [threadQuery, setThreadQuery] = useState("");
   const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -113,6 +114,11 @@ export function MessagingHub() {
   });
 
   const threads = useMemo(() => threadsQuery.data || [], [threadsQuery.data]);
+  const filteredThreads = useMemo(() => {
+    const normalized = threadQuery.trim().toLowerCase();
+    if (!normalized) return threads;
+    return threads.filter((thread) => `${thread.title || ""} ${thread.last_message_preview || ""} ${targetLabel(thread.kind)}`.toLowerCase().includes(normalized));
+  }, [threadQuery, threads]);
   const effectiveThreadId = selectedThreadId || (open && tab === "chats" ? threads[0]?.id || null : null);
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.id === effectiveThreadId) || null,
@@ -331,16 +337,17 @@ export function MessagingHub() {
             <div className="messaging-chat-layout">
               <aside className="messaging-thread-list">
                 <div className="messaging-thread-toolbar"><span>Conversations</span><button type="button" onClick={() => setShowDirectory((value) => !value)}>New</button></div>
+                <label className="messaging-thread-search"><Search size={13} aria-hidden="true" /><input value={threadQuery} onChange={(event) => setThreadQuery(event.target.value)} placeholder="Search messages" aria-label="Search conversations" /></label>
                 {showDirectory ? <DirectoryPicker data={directoryQuery.data} loading={directoryQuery.isLoading} activeTab={directoryTab} onTab={setDirectoryTab} onSelect={(id) => openTarget.mutate({ kind: directoryTab, id })} /> : null}
                 <div className="messaging-thread-scroll">
-                  {threads.map((thread) => (
+                  {filteredThreads.map((thread) => (
                     <button type="button" className={`messaging-thread ${thread.id === effectiveThreadId ? "is-selected" : ""}`} key={thread.id} onClick={() => selectThread(thread.id)}>
                       <span className="messaging-avatar">{initials(thread.title)}</span>
                       <span className="messaging-thread-copy"><span><strong>{thread.title || "Conversation"}</strong><time>{relativeTime(thread.last_message_at || thread.updated_at)}</time></span><span>{thread.last_message_preview || targetLabel(thread.kind)}</span></span>
                       {thread.unread_count ? <b className="messaging-badge">{badgeLabel(thread.unread_count)}</b> : null}
                     </button>
                   ))}
-                  {!threadsQuery.isLoading && threads.length === 0 ? <p className="messaging-empty">No conversations yet. Start with a person, department or group.</p> : null}
+                  {!threadsQuery.isLoading && threads.length === 0 ? <p className="messaging-empty">No conversations yet. Start with a person, department or group.</p> : null}{!threadsQuery.isLoading && threads.length > 0 && filteredThreads.length === 0 ? <p className="messaging-empty">No conversations match your search.</p> : null}
                 </div>
               </aside>
 
