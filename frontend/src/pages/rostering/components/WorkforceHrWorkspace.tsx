@@ -468,10 +468,7 @@ function LeavePanel({
 }) {
   const [editingType, setEditingType] = useState<LeaveTypeDraft | null>(null);
   const pending = requests.filter((request) => ["SUBMITTED", "SUPERVISOR_APPROVED"].includes(request.status));
-  const actionable = pending.filter((request) => (
-    (request.status === "SUBMITTED" && request.can_approve)
-    || (request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_leave)
-  ));
+  const actionable = pending.filter((request) => request.can_approve);
   const approved = requests.filter((request) => request.status === "HR_APPROVED").length;
   const declined = requests.filter((request) => ["REJECTED", "CANCELLED", "RECALLED"].includes(request.status)).length;
 
@@ -491,7 +488,7 @@ function LeavePanel({
     deducts_balance: false,
     requires_attachment: false,
     supervisor_approval_required: true,
-    hr_approval_required: true,
+    hr_approval_required: false,
     allow_negative_balance: false,
     is_active: true,
     display_order: (leaveTypes[leaveTypes.length - 1]?.display_order || 0) + 10,
@@ -525,8 +522,8 @@ function LeavePanel({
       paid: editingType.paid,
       deducts_balance: editingType.deducts_balance,
       requires_attachment: editingType.requires_attachment,
-      supervisor_approval_required: editingType.supervisor_approval_required,
-      hr_approval_required: editingType.hr_approval_required,
+      supervisor_approval_required: true,
+      hr_approval_required: false,
       allow_negative_balance: editingType.allow_negative_balance,
       is_active: editingType.is_active,
       display_order: Number(editingType.display_order) || 0,
@@ -552,15 +549,15 @@ function LeavePanel({
 
       <section className="wr-panel">
         <div className="wr-section-heading">
-          <div><span className="wr-eyebrow">Approval queue</span><h2>Leave requiring action</h2><p>Supervisor-stage approval is limited to the employee's assigned immediate supervisor or active departmental postholder. Prior decisions remain visible in the history below.</p></div>
+          <div><span className="wr-eyebrow">Approval queue</span><h2>Leave requiring action</h2><p>Approval is limited to the employee's assigned immediate supervisor or active departmental postholder. One approval completes the leave request and protects the approved period in Rostering.</p></div>
           <span className="wr-header-badge"><CalendarDays size={15} /> {actionable.length} for you</span>
         </div>
         {loading ? <RosterLoading label="Loading leave workflow…" /> : null}
         <div className="hr-approval-list">
           {pending.map((request) => {
             const canSupervisorAct = request.status === "SUBMITTED" && request.can_approve;
-            const canHrAct = request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_leave;
-            if (!canSupervisorAct && !canHrAct) return null;
+            const canCompleteLegacy = request.status === "SUPERVISOR_APPROVED" && request.can_approve;
+            if (!canSupervisorAct && !canCompleteLegacy) return null;
             return (
               <article key={request.id}>
                 <div>
@@ -569,17 +566,17 @@ function LeavePanel({
                   {request.reason ? <small>{request.reason}</small> : null}
                   {request.published_roster_conflicts.length ? <small className="is-danger">Published roster conflict requires a controlled roster amendment after approval.</small> : null}
                 </div>
-                <StatusPill value={request.status} />
+                <StatusPill value={request.status === "HR_APPROVED" ? "APPROVED" : request.status} />
                 <div className="wr-actions">
-                  {canSupervisorAct ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Approve</button> : null}
-                  {canHrAct ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-hr", record: request })}>Finalise</button> : null}
-                  {(canSupervisorAct || canHrAct) ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}
+                  {canSupervisorAct ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Approve leave</button> : null}
+                  {canCompleteLegacy ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-hr", record: request })}>Complete legacy approval</button> : null}
+                  {(canSupervisorAct || canCompleteLegacy) ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}
                 </div>
               </article>
             );
           })}
         </div>
-        {!loading && !actionable.length ? <EmptyState title="No leave waiting on you" description="Requests only appear here when your assigned supervisor, departmental postholder, or final-review authority is required." /> : null}
+        {!loading && !actionable.length ? <EmptyState title="No leave waiting on you" description="Requests only appear here when you are the employee's assigned immediate supervisor or active departmental postholder." /> : null}
       </section>
 
       <section className="wr-panel">
@@ -595,13 +592,13 @@ function LeavePanel({
                   <strong>{request.user_full_name || request.user_staff_code || "Employee"}</strong>
                   <span>{request.leave_type_name || request.leave_type_code} · {request.starts_at.slice(0, 10)} → {request.ends_at.slice(0, 10)} · {Math.round(request.requested_minutes / 60 * 10) / 10}h</span>
                 </div>
-                <StatusPill value={request.status} />
+                <StatusPill value={request.status === "HR_APPROVED" ? "APPROVED" : request.status} />
               </div>
               {request.approvals.length ? (
                 <div className="hr-leave-history__trail">
                   {request.approvals.map((approval) => (
                     <small key={approval.id}>
-                      <strong>{approval.stage === "SUPERVISOR" ? "Supervisor / postholder" : "Final review"}:</strong> {approval.decision.toLowerCase()} by {approval.actor_name || "Recorded user"} · {approval.decided_at.slice(0, 16).replace("T", " ")}
+                      <strong>{approval.stage === "SUPERVISOR" ? "Supervisor / postholder" : "Historical final review"}:</strong> {approval.decision.toLowerCase()} by {approval.actor_name || "Recorded user"} · {approval.decided_at.slice(0, 16).replace("T", " ")}
                       {approval.comment ? ` · ${approval.comment}` : ""}
                     </small>
                   ))}
@@ -616,7 +613,7 @@ function LeavePanel({
       {dashboard.can_manage_leave_balances ? (
         <section className="wr-panel">
           <div className="wr-section-heading">
-            <div><span className="wr-eyebrow">Configuration</span><h2>Leave types</h2><p>Tenant administrators configure leave rules here. Maternity and paternity eligibility is system-controlled and the backend revalidates every request.</p></div>
+            <div><span className="wr-eyebrow">Configuration</span><h2>Leave types</h2><p>Tenant administrators configure leave rules here. Approval authority and maternity/paternity eligibility are system-controlled and revalidated by the backend.</p></div>
             <button type="button" className="wr-button wr-button--primary wr-button--small" onClick={startCreate}><Plus size={14} /> Add leave type</button>
           </div>
           <div className="hr-leave-types">
@@ -625,7 +622,7 @@ function LeavePanel({
               <article key={type.id}>
                 <div><strong>{type.name}</strong><span>{type.code} · {type.availability_type.replace(/_/g, " ").toLowerCase()}</span></div>
                 <span>{type.eligible_gender === "ALL" ? "All personnel" : type.eligible_gender === "FEMALE" ? "Female" : "Male"}</span>
-                <span>{type.supervisor_approval_required ? "Supervisor / postholder" : "No supervisor gate"}{type.hr_approval_required ? " + final review" : ""}</span>
+                <span>Immediate supervisor / departmental postholder</span>
                 <span>{type.deducts_balance ? "Deducts balance" : "No deduction"}{type.requires_attachment ? " · evidence required" : ""}</span>
                 <StatusPill value={type.is_active ? "ACTIVE" : "INACTIVE"} />
                 <button type="button" className="wr-icon-button" onClick={() => startEdit(type)} aria-label={`Edit ${type.name}`}><Save size={14} /></button>
@@ -655,15 +652,13 @@ function LeavePanel({
               ["paid", "Paid leave"],
               ["deducts_balance", "Deduct leave balance"],
               ["requires_attachment", "Require evidence / attachment"],
-              ["supervisor_approval_required", "Require supervisor / postholder approval"],
-              ["hr_approval_required", "Require final HR review"],
               ["allow_negative_balance", "Allow negative balance"],
               ["is_active", "Active"],
             ].map(([key, label]) => (
               <label key={key}><input type="checkbox" checked={Boolean(editingType[key as keyof LeaveTypeDraft])} onChange={(event) => setEditingType({ ...editingType, [key]: event.target.checked })} /><span>{label}</span></label>
             ))}
           </div>
-          <p>Gender eligibility is stored in the personnel profile. If a restricted leave type is selected and the profile is missing the required value, the request is blocked instead of guessing from a name or account.</p>
+          <p>Approval is fixed to the employee's assigned immediate supervisor or active departmental postholder. Gender eligibility is stored in the controlled personnel profile; restricted leave is blocked when that profile is missing or does not match.</p>
           <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setEditingType(null)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !editingType.code.trim() || !editingType.name.trim()} onClick={saveType}><Save size={15} /> Save leave type</button></div>
         </div>
       ) : null}
