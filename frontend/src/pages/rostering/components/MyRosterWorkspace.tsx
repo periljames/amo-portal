@@ -298,13 +298,20 @@ export function MyRosterWorkspace() {
 
   const roster = rosterQuery.data || null;
   const leaveTypes = leaveTypesQuery.data || [];
+  const eligibleLeaveTypes = useMemo(
+    () => leaveTypes.filter((type) => type.eligible !== false),
+    [leaveTypes],
+  );
   const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);
   const requests = useMemo(() => requestsQuery.data?.items || [], [requestsQuery.data?.items]);
   const attendance = attendanceQuery.data || null;
   const currentAttendance = currentAttendanceQuery.data || null;
   const timesheets = timesheetsQuery.data?.items || [];
   const calendarSubscription = calendarActive ? calendarQuery.data || null : null;
-  const effectiveLeaveTypeId = leaveTypeId || leaveTypes[0]?.id || "";
+  const requestedLeaveType = leaveTypes.find((type) => type.id === leaveTypeId);
+  const effectiveLeaveTypeId = requestedLeaveType?.eligible !== false
+    ? requestedLeaveType?.id || eligibleLeaveTypes[0]?.id || ""
+    : eligibleLeaveTypes[0]?.id || "";
   const selectedLeaveType = leaveTypes.find((type) => type.id === effectiveLeaveTypeId) || null;
   const mode = useMemo(
     () => localAttendanceMode || currentAttendance?.current_state || attendanceMode(currentAttendance?.events || []),
@@ -461,6 +468,10 @@ export function MyRosterWorkspace() {
   const requestLeave = async () => {
     if (!effectiveLeaveTypeId || !leaveStart || !leaveEnd || leaveEnd < leaveStart) {
       setActionError("Select a leave type and valid dates before submitting.");
+      return;
+    }
+    if (selectedLeaveType?.eligible === false) {
+      setActionError(selectedLeaveType.eligibility_reason || "This leave type is not available for your personnel profile.");
       return;
     }
     if (selectedLeaveType?.requires_attachment && !leaveAttachmentReference.trim()) {
@@ -811,7 +822,9 @@ export function MyRosterWorkspace() {
                 onChange={(event) => setLeaveTypeId(event.target.value)}
               >
                 {leaveTypes.map((type) => (
-                  <option key={type.id} value={type.id}>{type.name}</option>
+                  <option key={type.id} value={type.id} disabled={type.eligible === false}>
+                    {type.name}{type.eligible === false ? " — not eligible" : ""}
+                  </option>
                 ))}
               </select>
             </label>
@@ -820,10 +833,13 @@ export function MyRosterWorkspace() {
             <label className="wr-span-2"><span>Reason</span><input value={leaveReason} onChange={(event) => setLeaveReason(event.target.value)} placeholder="Optional context for approvers" /></label>
             {selectedLeaveType?.requires_attachment ? <label className="wr-span-2"><span>Attachment or document reference</span><input value={leaveAttachmentReference} onChange={(event) => setLeaveAttachmentReference(event.target.value)} placeholder="Document ID, secure file reference or URL" required /></label> : null}
           </div>
+          {leaveTypes.some((type) => type.eligible === false) ? (
+            <p className="wr-form-note">Restricted leave types are shown but cannot be selected. Eligibility comes from the controlled personnel profile; the portal does not infer gender from a name or account.</p>
+          ) : null}
           <p className="wr-form-note">Requested hours are calculated from your effective work pattern and contracted daily hours; off days are not charged as 24-hour leave.</p>
           <div className="wr-actions wr-actions--end">
             <button type="button" className="wr-button wr-button--secondary" onClick={() => setLeaveOpen(false)}>Cancel</button>
-            <button type="button" className="wr-button wr-button--primary" onClick={() => void requestLeave()} disabled={busy === "leave" || !leaveTypes.length}><Send size={16} /> Submit request</button>
+            <button type="button" className="wr-button wr-button--primary" onClick={() => void requestLeave()} disabled={busy === "leave" || !eligibleLeaveTypes.length}><Send size={16} /> Submit request</button>
           </div>
         </section>
       ) : null}
@@ -952,7 +968,17 @@ export function MyRosterWorkspace() {
             <div className="wr-data-list">
               {requests.map((request) => (
                 <article key={request.id} className="wr-data-row wr-data-row--leave">
-                  <div><strong>{request.leave_type_name || request.leave_type_code}</strong><small>{formatDateTime(request.starts_at)} → {formatDateTime(request.ends_at)}</small></div>
+                  <div>
+                    <strong>{request.leave_type_name || request.leave_type_code}</strong>
+                    <small>{formatDateTime(request.starts_at)} → {formatDateTime(request.ends_at)}</small>
+                    {request.approvals.map((approval) => (
+                      <small key={approval.id}>
+                        {approval.stage === "SUPERVISOR" ? "Supervisor / postholder" : "Final review"} {approval.decision.toLowerCase()}
+                        {approval.actor_name ? ` by ${approval.actor_name}` : ""} · {formatDateTime(approval.decided_at)}
+                        {approval.comment ? ` · ${approval.comment}` : ""}
+                      </small>
+                    ))}
+                  </div>
                   <span>{hoursLabel(request.requested_minutes)}</span>
                   <StatusPill value={request.status} />
                   {request.published_roster_conflicts.length ? <span className="wr-pill wr-pill--blocker">Roster conflict</span> : null}
