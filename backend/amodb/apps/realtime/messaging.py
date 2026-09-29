@@ -981,6 +981,13 @@ def _quality_notification_payload(row: Any) -> dict[str, Any]:
     }
 
 
+def _notification_sort_timestamp(value: Any) -> float:
+    if not isinstance(value, datetime):
+        return float("-inf")
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).timestamp()
+
+
 def list_notifications(
     db: Session,
     *,
@@ -1025,7 +1032,7 @@ def list_notifications(
     items.extend(_quality_notification_payload(row) for row in quality_rows)
     items.sort(
         key=lambda item: (
-            item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+            _notification_sort_timestamp(item.get("created_at")),
             str(item.get("id") or ""),
         ),
         reverse=True,
