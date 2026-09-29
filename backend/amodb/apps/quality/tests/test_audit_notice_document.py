@@ -54,10 +54,14 @@ def test_controlled_audit_notice_pdf_contains_populated_governance_record() -> N
     assert "accountability for the process and records remains" in text
     assert "Electronically signed in AMO Portal" in text
     assert "QR identifies the record only" in text
+    assert "QAR/MO/26/004/N02" in text
+    assert "QAR/MO/26/004/N01" in text
+    assert "Audit deferred after operational availability changed." in text
+    assert "Revised notice" in text
 
 
 def test_controlled_notice_filename_is_human_readable_and_not_a_uuid() -> None:
     audit = SimpleNamespace(audit_ref="QAR/MO/26/003", title="Work Pack Audit", id="audit-uuid")
     notice = SimpleNamespace(notice_date=date(2026, 9, 5), revision_no=1)
 
-    assert _safe_pdf_filename(audit, notice) == "(Notice) QAR-MO-26-003 - Work Pack Audit - 2026-09-05 - Rev 01.pdf"
+    assert _safe_pdf_filename(audit, notice) == "(Notice) QAR-MO-26-003 - Work Pack Audit - 2026-09-05 - Notice N01.pdf"
