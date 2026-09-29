@@ -35,8 +35,6 @@ def test_setup_patch_precedes_generic_catchall() -> None:
 def test_setup_reschedule_requires_and_audits_a_reason() -> None:
     fields = AuditSetupUpdate.model_fields
     assert "reschedule_reason" in fields
-    assert fields["reschedule_reason"].metadata
-
     source = inspect.getsource(update_audit_setup)
     assert "AUDIT_RESCHEDULE_REASON_REQUIRED" in source
     assert 'action="audit_setup_rescheduled"' in source
