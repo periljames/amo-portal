@@ -1440,6 +1440,8 @@ async def upload_audit_notice_attachment(
             artifact.signed_at = None
             artifact.created_by_user_id = ctx.user_id
             artifact.created_at = _utcnow()
+        row.audit_snapshot = _notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)[0]
+        row.recipient_snapshot = _recipient_snapshot(audit)
         db.commit()
     except Exception:
         db.rollback()
@@ -1605,6 +1607,16 @@ def prepare_audit_notice_document(
     if row is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.artifact is not None:
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        _require_current_notice_source(
+            row,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
         return _notice_dict(row)
     _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _prepare_notice_document(
