@@ -2185,7 +2185,7 @@ def transition_audit_notice(
     before = _snapshot(row)
     action = payload.action
 
-    if action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
+    if action in {"SUBMIT", "RETURN", "APPROVE", "GENERATE", "DELIVER", "CANCEL"}:
         _require_latest_notice_revision(db, row)
 
     if row.artifact is not None and action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
