@@ -68,6 +68,7 @@ import { BrandContext } from "../Brand/BrandContext";
 import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
+import { MessagingHeaderLaunchers } from "../messaging/MessagingHub";
 
 type Props = {
   amoCode: string;
@@ -670,6 +671,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                 <div className="tenant-shell__topbar-actions">
                   <LiveStatusIndicator compact />
                   <button type="button" className="tenant-shell__icon-button" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Assigned work" title="Assigned work"><ClipboardCheck size={17} /></button>
+                  <MessagingHeaderLaunchers />
                   <div className="tenant-shell__profile" ref={profileRef}>
                     <button type="button" className="tenant-shell__profile-trigger" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-haspopup="menu">
                       <span className="tenant-shell__avatar">

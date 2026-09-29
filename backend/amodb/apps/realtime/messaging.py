@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Iterable
+from uuid import UUID
 
 import msgpack
 from fastapi import HTTPException
@@ -872,6 +873,51 @@ def delete_message(db: Session, *, user: account_models.User, message_id: str) -
     return payload
 
 
+def _notification_semantics(row: models.PortalNotification) -> dict[str, Any]:
+    metadata = row.metadata_json or {}
+    requires_action = bool(metadata.get("requires_action", False))
+
+    category = str(metadata.get("category") or ("ACTION" if requires_action else "UPDATE")).upper()
+    if category not in {"ACTION", "WARNING", "UPDATE", "INFORMATION"}:
+        category = "UPDATE"
+
+    priority = str(metadata.get("priority") or "NORMAL").upper()
+    if priority not in {"CRITICAL", "HIGH", "NORMAL", "LOW"}:
+        priority = "NORMAL"
+
+    business_state = str(
+        metadata.get("business_state")
+        or ("ACTION_REQUIRED" if requires_action else "UPDATE")
+    ).upper()
+    if business_state not in {
+        "ACTION_REQUIRED",
+        "DUE_SOON",
+        "OVERDUE",
+        "COMPLETED",
+        "UPDATE",
+        "INFORMATION",
+    }:
+        business_state = "UPDATE"
+
+    module = str(metadata.get("module") or "").strip().upper() or None
+    due_at = metadata.get("due_at")
+    action_label = str(metadata.get("action_label") or "").strip() or None
+    group_key = str(metadata.get("group_key") or "").strip() or None
+    if not group_key and row.entity_type and row.entity_id:
+        group_key = f"{row.entity_type}:{row.entity_id}"
+
+    return {
+        "category": category,
+        "priority": priority,
+        "module": module,
+        "due_at": due_at,
+        "requires_action": requires_action,
+        "action_label": action_label,
+        "group_key": group_key,
+        "business_state": business_state,
+    }
+
+
 def notification_payload(row: models.PortalNotification) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -885,7 +931,61 @@ def notification_payload(row: models.PortalNotification) -> dict[str, Any]:
         "created_at": row.created_at,
         "read_at": row.read_at,
         "archived_at": row.archived_at,
+        **_notification_semantics(row),
     }
+
+
+def _quality_notification_payload(row: Any) -> dict[str, Any]:
+    severity = str(getattr(getattr(row, "severity", None), "value", getattr(row, "severity", "INFO")) or "INFO").upper()
+    requires_action = severity == "ACTION_REQUIRED"
+    warning = severity == "WARNING"
+    entity_type = getattr(row, "entity_type", None)
+    entity_id = getattr(row, "entity_id", None)
+    action_label = getattr(row, "action_label", None) or ("Review" if requires_action else "Open")
+    title = (
+        "Quality action required"
+        if requires_action
+        else "Quality warning"
+        if warning
+        else "Quality update"
+    )
+    group_key = (
+        f"qms:{entity_type}:{entity_id}"
+        if entity_type and entity_id
+        else f"qms:notification:{row.id}"
+    )
+    return {
+        "id": f"qms:{row.id}",
+        "kind": "QMS",
+        "title": title,
+        "body": row.message,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "action_url": getattr(row, "action_url", None),
+        "metadata": {
+            "source": "qms_notifications",
+            "source_notification_id": str(row.id),
+            "severity": severity,
+        },
+        "created_at": row.created_at,
+        "read_at": row.read_at,
+        "archived_at": None,
+        "category": "ACTION" if requires_action else "WARNING" if warning else "UPDATE",
+        "priority": "HIGH" if (requires_action or warning) else "NORMAL",
+        "module": "QMS",
+        "due_at": None,
+        "requires_action": requires_action,
+        "action_label": action_label,
+        "group_key": group_key,
+        "business_state": "ACTION_REQUIRED" if requires_action else "UPDATE",
+    }
+
+
+def _notification_sort_timestamp(value: Any) -> float:
+    if not isinstance(value, datetime):
+        return float("-inf")
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).timestamp()
 
 
 def list_notifications(
@@ -896,37 +996,83 @@ def list_notifications(
     limit: int = 100,
     offset: int = 0,
 ) -> dict[str, Any]:
+    from amodb.apps.quality import models as quality_models
+
     amo_id = effective_amo_id(user)
-    query = db.query(models.PortalNotification).filter(
+    bounded_limit = max(1, min(limit, 250))
+    bounded_offset = max(0, offset)
+    fetch_limit = bounded_offset + bounded_limit
+
+    portal_query = db.query(models.PortalNotification).filter(
         models.PortalNotification.amo_id == amo_id,
         models.PortalNotification.user_id == str(user.id),
         models.PortalNotification.archived_at.is_(None),
     )
+    quality_query = db.query(quality_models.QMSNotification).filter(
+        quality_models.QMSNotification.amo_id == amo_id,
+        quality_models.QMSNotification.user_id == str(user.id),
+    )
     if unread_only:
-        query = query.filter(models.PortalNotification.read_at.is_(None))
-    total = query.count()
-    rows = (
-        query.order_by(models.PortalNotification.created_at.desc(), models.PortalNotification.id.desc())
-        .offset(max(0, offset))
-        .limit(max(1, min(limit, 250)))
+        portal_query = portal_query.filter(models.PortalNotification.read_at.is_(None))
+        quality_query = quality_query.filter(quality_models.QMSNotification.read_at.is_(None))
+
+    portal_total = portal_query.count()
+    quality_total = quality_query.count()
+    portal_rows = (
+        portal_query.order_by(models.PortalNotification.created_at.desc(), models.PortalNotification.id.desc())
+        .limit(fetch_limit)
         .all()
     )
-    return {"items": [notification_payload(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+    quality_rows = (
+        quality_query.order_by(quality_models.QMSNotification.created_at.desc(), quality_models.QMSNotification.id.desc())
+        .limit(fetch_limit)
+        .all()
+    )
+    items = [notification_payload(row) for row in portal_rows]
+    items.extend(_quality_notification_payload(row) for row in quality_rows)
+    items.sort(
+        key=lambda item: (
+            _notification_sort_timestamp(item.get("created_at")),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    page = items[bounded_offset : bounded_offset + bounded_limit]
+    return {
+        "items": page,
+        "total": int(portal_total) + int(quality_total),
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+    }
 
 
 def unread_notification_count(db: Session, *, user: account_models.User) -> dict[str, int]:
+    from amodb.apps.quality import models as quality_models
+
     amo_id = effective_amo_id(user)
-    count = (
+    portal_count = (
         db.query(func.count(models.PortalNotification.id))
         .filter(
             models.PortalNotification.amo_id == amo_id,
             models.PortalNotification.user_id == str(user.id),
+            models.PortalNotification.kind != "CHAT_MESSAGE",
             models.PortalNotification.read_at.is_(None),
             models.PortalNotification.archived_at.is_(None),
         )
         .scalar()
         or 0
     )
+    quality_count = (
+        db.query(func.count(quality_models.QMSNotification.id))
+        .filter(
+            quality_models.QMSNotification.amo_id == amo_id,
+            quality_models.QMSNotification.user_id == str(user.id),
+            quality_models.QMSNotification.read_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    count = int(portal_count) + int(quality_count)
     chat_count = (
         db.query(func.count(models.MessageReceipt.id))
         .filter(
@@ -937,11 +1083,34 @@ def unread_notification_count(db: Session, *, user: account_models.User) -> dict
         .scalar()
         or 0
     )
-    return {"notifications": int(count), "messages": int(chat_count), "total": int(count) + int(chat_count)}
+    return {"notifications": count, "messages": int(chat_count), "total": count + int(chat_count)}
 
 
 def mark_notification_read(db: Session, *, user: account_models.User, notification_id: str) -> dict[str, Any]:
     amo_id = effective_amo_id(user)
+    if notification_id.startswith("qms:"):
+        from amodb.apps.quality import models as quality_models
+
+        raw_id = notification_id.split(":", 1)[1]
+        try:
+            parsed_id = UUID(raw_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        row = (
+            db.query(quality_models.QMSNotification)
+            .filter(
+                quality_models.QMSNotification.id == parsed_id,
+                quality_models.QMSNotification.amo_id == amo_id,
+                quality_models.QMSNotification.user_id == str(user.id),
+            )
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        row.read_at = row.read_at or utcnow()
+        db.commit()
+        return _quality_notification_payload(row)
+
     row = (
         db.query(models.PortalNotification)
         .filter(
@@ -959,16 +1128,24 @@ def mark_notification_read(db: Session, *, user: account_models.User, notificati
 
 
 def mark_all_notifications_read(db: Session, *, user: account_models.User) -> dict[str, Any]:
+    from amodb.apps.quality import models as quality_models
+
     amo_id = effective_amo_id(user)
     now = utcnow()
-    updated = db.query(models.PortalNotification).filter(
+    portal_updated = db.query(models.PortalNotification).filter(
         models.PortalNotification.amo_id == amo_id,
         models.PortalNotification.user_id == str(user.id),
+        models.PortalNotification.kind != "CHAT_MESSAGE",
         models.PortalNotification.read_at.is_(None),
         models.PortalNotification.archived_at.is_(None),
     ).update({models.PortalNotification.read_at: now}, synchronize_session=False)
+    quality_updated = db.query(quality_models.QMSNotification).filter(
+        quality_models.QMSNotification.amo_id == amo_id,
+        quality_models.QMSNotification.user_id == str(user.id),
+        quality_models.QMSNotification.read_at.is_(None),
+    ).update({quality_models.QMSNotification.read_at: now}, synchronize_session=False)
     db.commit()
-    return {"read_at": now, "updated": int(updated)}
+    return {"read_at": now, "updated": int(portal_updated) + int(quality_updated)}
 
 
 def acknowledge_message(

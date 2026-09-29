@@ -1,83 +1,153 @@
-import type { PortalNotification } from "../../services/messaging";
+import type {
+  PortalNotification,
+  PortalNotificationBusinessState,
+  PortalNotificationCategory,
+  PortalNotificationPriority,
+} from "../../services/messaging";
 
+export type NotificationView = "for-you" | "updates";
 export type NotificationFilter = "all" | "action" | "due" | "unread";
 
-function metadataString(notification: PortalNotification, key: string): string {
+export type NotificationGroup = {
+  key: string;
+  latest: PortalNotification;
+  earlier: PortalNotification[];
+};
+
+const ACTION_STATES = new Set<PortalNotificationBusinessState>([
+  "ACTION_REQUIRED",
+  "DUE_SOON",
+  "OVERDUE",
+]);
+
+function metadataText(notification: PortalNotification, key: string): string | null {
   const value = notification.metadata?.[key];
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function metadataBoolean(notification: PortalNotification, key: string): boolean | null {
+  const value = notification.metadata?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+export function notificationCategory(notification: PortalNotification): PortalNotificationCategory {
+  const value = String(notification.category || metadataText(notification, "category") || "").toUpperCase();
+  if (value === "ACTION" || value === "WARNING" || value === "INFORMATION" || value === "UPDATE") return value;
+  return notificationRequiresAction(notification) ? "ACTION" : "UPDATE";
+}
+
+export function notificationPriority(notification: PortalNotification): PortalNotificationPriority {
+  const value = String(notification.priority || metadataText(notification, "priority") || "NORMAL").toUpperCase();
+  if (value === "CRITICAL" || value === "HIGH" || value === "LOW" || value === "NORMAL") return value;
+  return "NORMAL";
+}
+
+export function notificationBusinessState(notification: PortalNotification): PortalNotificationBusinessState {
+  const value = String(notification.business_state || metadataText(notification, "business_state") || "").toUpperCase();
+  if (
+    value === "ACTION_REQUIRED"
+    || value === "DUE_SOON"
+    || value === "OVERDUE"
+    || value === "COMPLETED"
+    || value === "INFORMATION"
+    || value === "UPDATE"
+  ) return value;
+  return notificationRequiresAction(notification) ? "ACTION_REQUIRED" : "UPDATE";
 }
 
 export function notificationRequiresAction(notification: PortalNotification): boolean {
-  if (typeof notification.metadata?.requires_action === "boolean") return notification.metadata.requires_action;
-  const text = `${notification.title} ${notification.body}`.toLowerCase();
-  return /(acknowledg|approval|required|respond|review|overdue|expires|expiry|invitation|assigned)/.test(text);
+  if (typeof notification.requires_action === "boolean") return notification.requires_action;
+  const fromMetadata = metadataBoolean(notification, "requires_action");
+  if (fromMetadata !== null) return fromMetadata;
+  const state = String(notification.business_state || metadataText(notification, "business_state") || "").toUpperCase();
+  return state === "ACTION_REQUIRED" || state === "DUE_SOON" || state === "OVERDUE";
 }
 
-export function notificationDueAt(notification: PortalNotification): Date | null {
-  const raw = metadataString(notification, "due_at") || metadataString(notification, "due_date");
-  if (!raw) return null;
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+export function notificationDueAt(notification: PortalNotification): string | null {
+  return notification.due_at || metadataText(notification, "due_at");
 }
 
 export function notificationModule(notification: PortalNotification): string {
-  return metadataString(notification, "module") || notification.entity_type?.split("_")[0]?.toUpperCase() || "PORTAL";
-}
-
-export function notificationPriority(notification: PortalNotification): string {
-  return (metadataString(notification, "priority") || metadataString(notification, "severity") || "NORMAL").toUpperCase();
+  return String(notification.module || metadataText(notification, "module") || "PORTAL").toUpperCase();
 }
 
 export function notificationActionLabel(notification: PortalNotification): string {
-  const explicit = metadataString(notification, "action_label");
-  if (explicit) return explicit;
-  if (notification.kind === "DOCUMENT_WORKFLOW") return "Review document";
-  if (notificationRequiresAction(notification)) return "Review";
-  return notification.action_url ? "Open" : "View";
+  return notification.action_label || metadataText(notification, "action_label") || (notificationRequiresAction(notification) ? "Review" : "Open");
 }
 
 export function notificationGroupKey(notification: PortalNotification): string {
-  return metadataString(notification, "group_key") || (notification.entity_type && notification.entity_id
-    ? `${notification.entity_type}:${notification.entity_id}`
-    : notification.id);
+  return notification.group_key
+    || metadataText(notification, "group_key")
+    || (notification.entity_type && notification.entity_id ? `${notification.entity_type}:${notification.entity_id}` : notification.id);
 }
 
-function assistantHostUrl(notification: PortalNotification): URL | null {
-  if (!notification.action_url) return null;
-  let source: URL;
-  try {
-    source = new URL(notification.action_url, "https://amo-portal.invalid");
-  } catch {
-    return null;
-  }
-
-  if (/\/publications\/[^/]+\/rev\/[^/]+\/read\/?$/i.test(source.pathname)) {
-    return source;
-  }
-
-  const manualId = metadataString(notification, "manual_id");
-  const marker = "/document-control/";
-  const markerIndex = source.pathname.indexOf(marker);
-  if (!manualId || markerIndex < 0) return null;
-
-  const prefix = source.pathname.slice(0, markerIndex);
-  source.pathname = `${prefix}/document-control/library/${encodeURIComponent(manualId)}`;
-  source.search = "";
-  source.hash = "";
-  return source;
-}
-
-export function canAskAi(notification: PortalNotification): boolean {
-  return assistantHostUrl(notification) !== null;
-}
-
-export function notificationAssistantUrl(notification: PortalNotification): string | null {
-  const url = assistantHostUrl(notification);
-  if (!url) return null;
-  url.searchParams.set("assistant", "1");
-  url.searchParams.set(
-    "assistant_query",
-    `Explain what this notification requires, why it matters, and show the controlling authorised sources: ${notification.title}. ${notification.body}`.slice(0, 500),
+export function notificationNeedsAttention(notification: PortalNotification): boolean {
+  return (
+    notificationRequiresAction(notification)
+    || ACTION_STATES.has(notificationBusinessState(notification))
+    || notificationCategory(notification) === "WARNING"
+    || notificationPriority(notification) === "CRITICAL"
   );
-  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function notificationIsDueSoon(notification: PortalNotification, now = Date.now(), horizonDays = 14): boolean {
+  const dueAt = notificationDueAt(notification);
+  if (!dueAt) return false;
+  const due = new Date(dueAt).getTime();
+  if (!Number.isFinite(due)) return false;
+  return due >= now && due <= now + horizonDays * 86_400_000;
+}
+
+export function notificationMatches(
+  notification: PortalNotification,
+  view: NotificationView,
+  filter: NotificationFilter,
+): boolean {
+  const attention = notificationNeedsAttention(notification);
+  if (view === "for-you" && !attention) return false;
+  if (view === "updates" && attention) return false;
+  if (filter === "action" && !attention) return false;
+  if (filter === "due" && !notificationIsDueSoon(notification)) return false;
+  if (filter === "unread" && notification.read_at) return false;
+  return true;
+}
+
+export function notificationGroupHasUnread(group: NotificationGroup): boolean {
+  return [group.latest, ...group.earlier].some((notification) => !notification.read_at);
+}
+
+export function notificationGroupMatches(
+  group: NotificationGroup,
+  view: NotificationView,
+  filter: NotificationFilter,
+): boolean {
+  const effectiveFilter = filter === "unread" ? "all" : filter;
+  if (!notificationMatches(group.latest, view, effectiveFilter)) return false;
+  return filter !== "unread" || notificationGroupHasUnread(group);
+}
+
+export function groupNotifications(notifications: PortalNotification[]): NotificationGroup[] {
+  const buckets = new Map<string, PortalNotification[]>();
+  for (const notification of notifications) {
+    const key = notificationGroupKey(notification);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(notification);
+    else buckets.set(key, [notification]);
+  }
+
+  return [...buckets.entries()]
+    .map(([key, values]) => {
+      values.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return { key, latest: values[0], earlier: values.slice(1) };
+    })
+    .sort((a, b) => new Date(b.latest.created_at).getTime() - new Date(a.latest.created_at).getTime());
+}
+
+export function notificationTone(notification: PortalNotification): "critical" | "warning" | "action" | "info" {
+  const priority = notificationPriority(notification);
+  const state = notificationBusinessState(notification);
+  if (priority === "CRITICAL" || state === "OVERDUE") return "critical";
+  if (priority === "HIGH" || notificationCategory(notification) === "WARNING") return "warning";
+  if (notificationNeedsAttention(notification)) return "action";
+  return "info";
 }

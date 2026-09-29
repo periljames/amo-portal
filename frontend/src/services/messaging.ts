@@ -51,6 +51,16 @@ export type ChatDirectory = {
   groups: Array<{ id: string; code: string; name: string; description?: string | null; group_type: string }>;
 };
 
+export type PortalNotificationCategory = "ACTION" | "WARNING" | "UPDATE" | "INFORMATION";
+export type PortalNotificationPriority = "CRITICAL" | "HIGH" | "NORMAL" | "LOW";
+export type PortalNotificationBusinessState =
+  | "ACTION_REQUIRED"
+  | "DUE_SOON"
+  | "OVERDUE"
+  | "COMPLETED"
+  | "UPDATE"
+  | "INFORMATION";
+
 export type PortalNotification = {
   id: string;
   kind: string;
@@ -63,6 +73,14 @@ export type PortalNotification = {
   created_at: string;
   read_at?: string | null;
   archived_at?: string | null;
+  category?: PortalNotificationCategory;
+  priority?: PortalNotificationPriority;
+  module?: string | null;
+  due_at?: string | null;
+  requires_action?: boolean;
+  action_label?: string | null;
+  group_key?: string | null;
+  business_state?: PortalNotificationBusinessState;
 };
 
 export type NotificationPreferences = {
@@ -141,20 +159,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
-async function markNotificationRead(notificationId: string, followAction = true): Promise<PortalNotification> {
-  const notification = await request<PortalNotification>(
+async function markNotificationRead(notificationId: string): Promise<PortalNotification> {
+  return request<PortalNotification>(
     `/api/notifications/${encodeURIComponent(notificationId)}/read`,
     { method: "POST" },
   );
-  if (
-    followAction
-    && notification.action_url
-    && notification.entity_type !== "chat_thread"
-    && typeof window !== "undefined"
-  ) {
-    window.location.assign(notification.action_url);
+}
+
+async function openNotification(notification: PortalNotification): Promise<PortalNotification> {
+  const updated = await markNotificationRead(notification.id);
+  const target = updated.action_url || notification.action_url;
+  const entityType = updated.entity_type || notification.entity_type;
+  if (target && entityType !== "chat_thread" && typeof window !== "undefined") {
+    window.location.assign(target);
   }
-  return notification;
+  return updated;
 }
 
 export const messagingApi = {
@@ -196,10 +215,21 @@ export const messagingApi = {
     `/api/chat/threads/${encodeURIComponent(threadId)}/notifications`,
     { method: "PATCH", body: JSON.stringify({ notification_level: notificationLevel, muted_until: mutedUntil || null }) },
   ),
-  notifications: (unreadOnly = false) => request<{ items: PortalNotification[]; total: number }>(`/api/notifications/me?limit=150&unread_only=${unreadOnly ? "true" : "false"}`),
+  notifications: (params: { unreadOnly?: boolean; limit?: number; offset?: number } | boolean = {}) => {
+    const options = typeof params === "boolean" ? { unreadOnly: params } : params;
+    const search = new URLSearchParams({
+      limit: String(Math.max(1, Math.min(options.limit ?? 150, 250))),
+      offset: String(Math.max(0, options.offset ?? 0)),
+      unread_only: options.unreadOnly ? "true" : "false",
+    });
+    return request<{ items: PortalNotification[]; total: number; limit: number; offset: number }>(
+      `/api/notifications/me?${search.toString()}`,
+    );
+  },
   unreadCount: () => request<{ notifications: number; messages: number; total: number }>("/api/notifications/me/unread-count"),
   markNotificationRead,
-  markNotificationReadOnly: (notificationId: string) => markNotificationRead(notificationId, false),
+  markNotificationReadOnly: markNotificationRead,
+  openNotification,
   markAllNotificationsRead: () => request<{ read_at: string; updated: number }>("/api/notifications/read-all", { method: "POST" }),
   preferences: () => request<NotificationPreferences>("/api/notifications/preferences"),
   updatePreferences: (payload: Partial<NotificationPreferences>) => request<NotificationPreferences>("/api/notifications/preferences", {

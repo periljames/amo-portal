@@ -47,6 +47,7 @@ def notify_workflow_progress(db, *, tenant, manual, workflow) -> None:
                 "priority": "NORMAL",
                 "requires_action": bool(user_actions),
                 "action_label": "Review document" if user_actions else "Open document",
+                "business_state": "ACTION_REQUIRED" if user_actions else "UPDATE",
                 "group_key": f"document-workflow:{workflow.id}",
                 "available_actions": list(user_actions),
             },

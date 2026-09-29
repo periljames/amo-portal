@@ -171,6 +171,7 @@ def _notification_metadata(*, candidate: ReminderCandidate, stage: str) -> dict[
         "priority": _reminder_priority(stage),
         "requires_action": True,
         "action_label": "Review obligation",
+        "business_state": "OVERDUE" if str(stage or "").upper().startswith("OVERDUE") else "DUE_SOON",
         "group_key": f"document-obligation:{candidate.obligation_type}:{candidate.obligation_id}",
     }
 

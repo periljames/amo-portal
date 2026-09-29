@@ -92,6 +92,13 @@ def dispatch_pending_calendar_updates(db: Session, *, limit: int = 500) -> dict[
                             "invitation_id": str(invitation.id),
                             "calendar_path": calendar_path,
                             "cancelled": cancelled,
+                            "module": "TRAINING",
+                            "category": "WARNING" if cancelled else "UPDATE",
+                            "priority": "HIGH" if cancelled else "NORMAL",
+                            "requires_action": False,
+                            "action_label": "Open training",
+                            "business_state": "UPDATE",
+                            "group_key": f"training-event:{event.id}",
                         },
                     ))
                 invitation.delivery_status = "DELIVERED"

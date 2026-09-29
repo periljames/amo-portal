@@ -143,9 +143,10 @@ def notify_distribution_recipients(
                 "due_at": campaign.due_at.isoformat() if campaign.due_at else None,
                 "module": "DMS",
                 "category": "ACTION" if campaign.acknowledgement_required else "UPDATE",
-                "priority": "NORMAL",
+                "priority": "HIGH" if campaign.acknowledgement_required else "NORMAL",
                 "requires_action": bool(campaign.acknowledgement_required),
                 "action_label": "Review & acknowledge" if campaign.acknowledgement_required else "Open publication",
+                "business_state": "ACTION_REQUIRED" if campaign.acknowledgement_required else "UPDATE",
                 "group_key": f"document-publication:{manual.id}:{revision.id}:{campaign.id}",
             },
         )

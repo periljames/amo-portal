@@ -96,6 +96,20 @@ def _queue_notification(
             "source_type": row.source_type,
             "source_label": row.source_label,
             "status": row.status,
+            "due_at": row.retention_until.isoformat() if row.retention_until else None,
+            "module": "DMS",
+            "category": "ACTION",
+            "priority": "HIGH" if event in {"REQUESTED", "REJECTED"} else "NORMAL",
+            "requires_action": True,
+            "action_label": (
+                "Review disposition"
+                if event == "REQUESTED"
+                else "Record disposition"
+                if event == "APPROVED"
+                else "Correct request"
+            ),
+            "business_state": "ACTION_REQUIRED",
+            "group_key": f"document-retention:{row.id}",
         },
     )
     db.add(notification)

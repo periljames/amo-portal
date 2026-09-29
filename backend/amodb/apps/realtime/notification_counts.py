@@ -16,7 +16,9 @@ def unread_notification_count(
     """Return mutually exclusive counts so one chat message is never counted twice."""
 
     amo_id = messaging.effective_amo_id(user)
-    notifications = (
+    from amodb.apps.quality import models as quality_models
+
+    portal_notifications = (
         db.query(func.count(models.PortalNotification.id))
         .filter(
             models.PortalNotification.amo_id == amo_id,
@@ -28,6 +30,17 @@ def unread_notification_count(
         .scalar()
         or 0
     )
+    quality_notifications = (
+        db.query(func.count(quality_models.QMSNotification.id))
+        .filter(
+            quality_models.QMSNotification.amo_id == amo_id,
+            quality_models.QMSNotification.user_id == str(user.id),
+            quality_models.QMSNotification.read_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    notifications = int(portal_notifications) + int(quality_notifications)
     messages = (
         db.query(func.count(models.MessageReceipt.id))
         .filter(

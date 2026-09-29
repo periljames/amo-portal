@@ -2,70 +2,77 @@ import { describe, expect, it } from "vitest";
 
 import type { PortalNotification } from "../../services/messaging";
 import {
-  canAskAi,
-  notificationActionLabel,
-  notificationDueAt,
-  notificationGroupKey,
-  notificationModule,
-  notificationPriority,
-  notificationRequiresAction,
-  notificationAssistantUrl,
+  groupNotifications,
+  notificationGroupHasUnread,
+  notificationGroupMatches,
+  notificationMatches,
+  notificationNeedsAttention,
+  notificationTone,
 } from "./notificationModel";
 
-function notification(overrides: Partial<PortalNotification> = {}): PortalNotification {
+function row(overrides: Partial<PortalNotification> = {}): PortalNotification {
   return {
-    id: "n-1",
+    id: overrides.id || crypto.randomUUID(),
     kind: "DOCUMENT_CONTROL",
-    title: "Document acknowledgement due",
-    body: "Review and acknowledge the controlled publication.",
-    entity_type: "document_distribution_campaign",
-    entity_id: "campaign-1",
-    action_url: "/maintenance/tenant/document-control/library/manual-1",
+    title: "Document update",
+    body: "Body",
     metadata: {},
-    created_at: "2026-09-28T10:00:00Z",
+    created_at: overrides.created_at || "2026-09-28T07:00:00Z",
     ...overrides,
   };
 }
 
 describe("notification presentation model", () => {
-  it("treats explicit requires_action false as authoritative", () => {
-    expect(notificationRequiresAction(notification({ metadata: { requires_action: false } }))).toBe(false);
+  it("keeps read state separate from business action state", () => {
+    const item = row({
+      read_at: "2026-09-28T07:05:00Z",
+      requires_action: true,
+      business_state: "ACTION_REQUIRED",
+    });
+    expect(notificationNeedsAttention(item)).toBe(true);
+    expect(notificationMatches(item, "for-you", "all")).toBe(true);
+    expect(notificationMatches(item, "for-you", "unread")).toBe(false);
   });
 
-  it("uses governed semantic metadata when supplied", () => {
-    const row = notification({
-      metadata: {
-        module: "DMS",
-        priority: "HIGH",
-        requires_action: true,
-        action_label: "Review & acknowledge",
-        group_key: "document-publication:manual-1:rev-1",
-        due_at: "2026-10-05T06:44:34Z",
-      },
-    });
-    expect(notificationModule(row)).toBe("DMS");
-    expect(notificationPriority(row)).toBe("HIGH");
-    expect(notificationActionLabel(row)).toBe("Review & acknowledge");
-    expect(notificationGroupKey(row)).toBe("document-publication:manual-1:rev-1");
-    expect(notificationDueAt(row)?.toISOString()).toBe("2026-10-05T06:44:34.000Z");
+  it("groups lifecycle notifications without deleting history", () => {
+    const grouped = groupNotifications([
+      row({ id: "1", group_key: "doc:abc", created_at: "2026-09-28T06:00:00Z" }),
+      row({ id: "2", group_key: "doc:abc", created_at: "2026-09-28T07:00:00Z" }),
+      row({ id: "3", group_key: "doc:def", created_at: "2026-09-28T05:00:00Z" }),
+    ]);
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].latest.id).toBe("2");
+    expect(grouped[0].earlier.map((item) => item.id)).toEqual(["1"]);
   });
 
-  it("routes document AI actions to a surface that actually mounts the assistant", () => {
-    const compliance = notification({
-      action_url: "/maintenance/tenant/document-control/compliance?source=external-1",
-      metadata: { manual_id: "manual-1" },
-    });
-    expect(canAskAi(compliance)).toBe(true);
-    expect(notificationAssistantUrl(compliance)).toContain("/maintenance/tenant/document-control/library/manual-1?assistant=1");
 
-    const reader = notification({
-      action_url: "/maintenance/tenant/publications/manual-1/rev/rev-1/read?page=4",
-      metadata: { manual_id: "manual-1", revision_id: "rev-1" },
-    });
-    expect(canAskAi(reader)).toBe(true);
-    expect(notificationAssistantUrl(reader)).toContain("/maintenance/tenant/publications/manual-1/rev/rev-1/read?page=4&assistant=1");
+  it("keeps warning-only operational notices in the attention view", () => {
+    const item = row({ category: "WARNING", priority: "HIGH", requires_action: false, business_state: "UPDATE" });
+    expect(notificationNeedsAttention(item)).toBe(true);
+    expect(notificationMatches(item, "for-you", "all")).toBe(true);
+  });
 
-    expect(canAskAi(notification({ action_url: null, metadata: { manual_id: "manual-1" } }))).toBe(false);
-    expect(canAskAi(notification({ entity_type: "training_event", metadata: {} }))).toBe(false);
+  it("uses critical treatment for overdue obligations", () => {
+    const item = row({ business_state: "OVERDUE", priority: "CRITICAL", requires_action: true });
+    expect(notificationTone(item)).toBe("critical");
+  });
+
+  it("does not classify overdue obligations as due soon", () => {
+    const item = row({
+      due_at: "2020-01-01T00:00:00Z",
+      business_state: "OVERDUE",
+      priority: "CRITICAL",
+      requires_action: true,
+    });
+    expect(notificationMatches(item, "for-you", "due")).toBe(false);
+  });
+
+  it("keeps a lifecycle group unread while any earlier record remains unread", () => {
+    const [group] = groupNotifications([
+      row({ id: "older", group_key: "doc:unread", created_at: "2026-09-28T06:00:00Z" }),
+      row({ id: "latest", group_key: "doc:unread", created_at: "2026-09-28T07:00:00Z", read_at: "2026-09-28T07:05:00Z" }),
+    ]);
+    expect(notificationGroupHasUnread(group)).toBe(true);
+    expect(notificationGroupMatches(group, "updates", "unread")).toBe(true);
   });
 });

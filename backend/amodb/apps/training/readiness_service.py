@@ -576,6 +576,7 @@ def send_session_invitations(db: Session, *, actor: account_models.User, event_i
                         "priority": "NORMAL",
                         "requires_action": True,
                         "action_label": "View invitation",
+                        "business_state": "ACTION_REQUIRED",
                         "group_key": f"training-session:{event.id}",
                     },
                 ))
