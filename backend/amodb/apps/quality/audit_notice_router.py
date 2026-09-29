@@ -1200,6 +1200,60 @@ def set_notice_template(
     }
 
 
+def _audit_reschedule_history(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, actor_user_id, action, previous_value, new_value, created_at
+                FROM qms_activity_logs
+                WHERE amo_id = :amo_id
+                  AND entity_type = 'audit'
+                  AND entity_id = :audit_id
+                  AND action IN ('calendar_schedule_rescheduled', 'audit_setup_rescheduled')
+                ORDER BY created_at DESC
+                LIMIT 100
+                """
+            ),
+            {"amo_id": amo_id, "audit_id": str(audit_id)},
+        ).mappings().all()
+    except SQLAlchemyError:
+        # SQLite/unit-test profiles and older upgrade windows may not expose the
+        # canonical QMS activity ledger. The notice history remains available.
+        return []
+
+    actor_ids = {str(row.get("actor_user_id")) for row in rows if row.get("actor_user_id")}
+    actors = {}
+    if actor_ids:
+        actor_rows = db.query(account_models.User).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(actor_ids),
+        ).all()
+        actors = {str(user.id): _display_name(user, str(user.id)) for user in actor_rows}
+
+    history: list[dict[str, Any]] = []
+    for row in rows:
+        before = row.get("previous_value") if isinstance(row.get("previous_value"), dict) else {}
+        after = row.get("new_value") if isinstance(row.get("new_value"), dict) else {}
+        actor_id = str(row.get("actor_user_id") or "") or None
+        history.append({
+            "id": str(row.get("id")),
+            "source": "PLANNER" if row.get("action") == "calendar_schedule_rescheduled" else "SETUP",
+            "reason": str(after.get("reason") or "").strip() or "Reason not recorded in legacy history.",
+            "before": before,
+            "after": after,
+            "actor_user_id": actor_id,
+            "actor_name": actors.get(actor_id or ""),
+            "created_at": row.get("created_at"),
+        })
+    return history
+
+
 @router.get("/audits/{audit_id}/notices")
 def list_audit_notices(
     audit_id: uuid.UUID,
@@ -1207,12 +1261,52 @@ def list_audit_notices(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     rows = _notice_query(db).filter(
         QualityAuditNotice.amo_id == ctx.amo_id,
         QualityAuditNotice.audit_id == audit_id,
     ).order_by(QualityAuditNotice.revision_no.desc()).limit(100).all()
-    return {"items": [_notice_dict(row) for row in rows]}
+    current_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
+    by_id = {str(row.id): row for row in rows}
+    superseded_by: dict[str, QualityAuditNotice] = {
+        str(row.supersedes_notice_id): row
+        for row in rows
+        if row.supersedes_notice_id
+    }
+    latest_id = str(rows[0].id) if rows else None
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        payload = _notice_dict(row)
+        audit_ref = str((row.audit_snapshot or {}).get("audit_ref") or audit.audit_ref or "")
+        changes = _notice_source_changes(
+            row,
+            current_snapshot=current_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
+        prior = by_id.get(str(row.supersedes_notice_id)) if row.supersedes_notice_id else None
+        newer = superseded_by.get(str(row.id))
+        payload.update({
+            "notice_reference": _notice_reference(audit_ref, row.revision_no),
+            "supersedes_reference": (
+                _notice_reference(audit_ref, prior.revision_no) if prior else None
+            ),
+            "superseded_by_reference": (
+                _notice_reference(audit_ref, newer.revision_no) if newer else None
+            ),
+            "revision_reason": _notice_revision_reason(row),
+            "source_changes": changes,
+            "is_current_source": not bool(changes),
+            "requires_revision": str(row.id) == latest_id and bool(changes),
+        })
+        items.append(payload)
+    return {
+        "items": items,
+        "reschedule_history": _audit_reschedule_history(db, amo_id=ctx.amo_id, audit_id=audit_id),
+    }
 
 
 async def _stage_uploaded_pdf(file: UploadFile) -> tuple[Path, str, int, str]:
