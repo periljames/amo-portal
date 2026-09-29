@@ -46,10 +46,12 @@ def upgrade() -> None:
                 """
                 UPDATE leave_types
                 SET eligible_gender = CASE
-                    WHEN availability_type = 'MATERNITY_LEAVE' THEN 'FEMALE'
-                    WHEN availability_type = 'PATERNITY_LEAVE' THEN 'MALE'
-                    ELSE COALESCE(NULLIF(UPPER(eligible_gender), ''), 'ALL')
-                END
+                        WHEN availability_type = 'MATERNITY_LEAVE' THEN 'FEMALE'
+                        WHEN availability_type = 'PATERNITY_LEAVE' THEN 'MALE'
+                        ELSE COALESCE(NULLIF(UPPER(eligible_gender), ''), 'ALL')
+                    END,
+                    supervisor_approval_required = TRUE,
+                    hr_approval_required = FALSE
                 """
             )
         )
