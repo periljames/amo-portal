@@ -61,6 +61,18 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !PUBLISHED_DOCUMENT_ID) {
       throw new Error("Authenticated DMS lifecycle credentials and published document fixture are required");
     }
+    await page.route("**/training/operating/access", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          can_open_operating_system: false,
+          self_service_only: true,
+          tenant_id: AMO_CODE,
+          capabilities: [],
+        }),
+      });
+    });
     watchMaterialBrowserErrors(page);
     await signIn(page);
   });

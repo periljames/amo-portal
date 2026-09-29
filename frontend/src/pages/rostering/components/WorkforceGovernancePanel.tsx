@@ -455,14 +455,42 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
     setter((old) => { const next = new Set(old); rows.forEach((row) => pageChecked ? next.delete(row.user_id) : next.add(row.user_id)); return next; });
   };
 
+  const operationId = operation?.id || null;
   useEffect(() => {
-    if (!operation || TERMINAL.has(operation.status)) return;
-    const timer = window.setInterval(() => void getWorkforceHrBulkOperation(operation.id).then((next) => {
-      setOperation(next);
-      if (TERMINAL.has(next.status)) void queryClient.invalidateQueries({ queryKey: ["workforce"] });
-    }).catch((cause) => setError(errorMessage(cause))), 1500);
-    return () => window.clearInterval(timer);
-  }, [operation, queryClient]);
+    if (!operationId) return;
+    let active = true;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const next = await getWorkforceHrBulkOperation(operationId);
+        if (!active) return;
+        setOperation(next);
+        if (TERMINAL.has(next.status)) {
+          // Keep the terminal operation card mounted. Broadly invalidating every
+          // Workforce query also refreshes the workspace access query and can
+          // transiently tear down this personnel surface before users see the
+          // completed result. Refresh only data that the bulk mutation changes.
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["workforce", "governance", "people"] }),
+            queryClient.invalidateQueries({ queryKey: ["workforce", "hr", "people"] }),
+            queryClient.invalidateQueries({ queryKey: ["workforce", "hr", "bulk"] }),
+          ]);
+          return;
+        }
+      } catch (cause) {
+        if (!active) return;
+        setError(errorMessage(cause));
+      }
+      if (active) timer = window.setTimeout(() => void poll(), 1500);
+    };
+
+    void poll();
+    return () => {
+      active = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [operationId, queryClient]);
 
   const changeFilter = <K extends keyof HrPeopleFilters>(name: K, value: HrPeopleFilters[K]) => {
     clearSelection();

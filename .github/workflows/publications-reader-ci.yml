@@ -96,6 +96,7 @@ jobs:
           amodb/apps/doc_control/tests/test_pdf_capability_service.py
           amodb/apps/manuals/tests/test_pdf_reader_form_override.py
           amodb/apps/manuals/tests/test_pdf_reader_override_route_order.py
+          amodb/apps/manuals/tests/test_manuals_tenant_resolution.py
       - uses: actions/setup-node@v6
         with:
           node-version: "22"

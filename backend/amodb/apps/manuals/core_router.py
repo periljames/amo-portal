@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
@@ -949,23 +949,46 @@ def _render_revision_pdf(revision: models.ManualRevision, sections: list[models.
     return output_path, sha256
 
 def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
-    tenant = db.query(models.Tenant).filter(models.Tenant.slug == tenant_slug).first()
+    tenant_key = str(tenant_slug or "").strip()
+    if not tenant_key:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    normalized_key = tenant_key.lower()
+    tenant = db.query(models.Tenant).filter(func.lower(models.Tenant.slug) == normalized_key).first()
     if tenant:
         return tenant
 
-    amo = db.query(AMO).filter(AMO.login_slug == tenant_slug).first()
+    # Reader/workspace URLs historically used the manuals tenant slug, while the
+    # canonical portal shell now supplies the active AMO code. Treat both the
+    # login slug and AMO code as stable aliases, case-insensitively, then keep the
+    # manuals tenant on the canonical login slug instead of rewriting it to the
+    # alias used by one request.
+    amo = (
+        db.query(AMO)
+        .filter(
+            (func.lower(AMO.login_slug) == normalized_key)
+            | (func.lower(AMO.amo_code) == normalized_key)
+        )
+        .first()
+    )
     if not amo:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    canonical_slug = str(amo.login_slug or amo.amo_code or tenant_key).strip()
     tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
     if tenant:
-        if tenant.slug != tenant_slug:
-            tenant.slug = tenant_slug
+        if canonical_slug and tenant.slug != canonical_slug:
+            tenant.slug = canonical_slug
         if tenant.name != amo.name:
             tenant.name = amo.name
         return tenant
 
-    tenant = models.Tenant(amo_id=amo.id, slug=tenant_slug, name=amo.name, settings_json={"ack_due_days": 10})
+    tenant = models.Tenant(
+        amo_id=amo.id,
+        slug=canonical_slug,
+        name=amo.name,
+        settings_json={"ack_due_days": 10},
+    )
     db.add(tenant)
     try:
         db.flush()
@@ -973,8 +996,8 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
         db.rollback()
         tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
         if tenant:
-            if tenant.slug != tenant_slug:
-                tenant.slug = tenant_slug
+            if canonical_slug and tenant.slug != canonical_slug:
+                tenant.slug = canonical_slug
             if tenant.name != amo.name:
                 tenant.name = amo.name
             return tenant
