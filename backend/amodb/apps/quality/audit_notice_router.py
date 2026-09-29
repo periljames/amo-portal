@@ -1747,6 +1747,7 @@ def submit_and_deliver_audit_notice(
         "content": document_bytes,
         "content_type": "application/pdf",
     }]
+    notice_reference = _notice_reference(audit.audit_ref, row.revision_no)
     dispatch_items: list[dict[str, Any]] = []
     for recipient in recipients:
         recipient_email = str(recipient.get("email") or "").strip()
@@ -1754,7 +1755,7 @@ def submit_and_deliver_audit_notice(
         log = notification_service.send_email(
             template_key="qms_audit_notice_memo",
             recipient=recipient_email,
-            subject=row.subject[:255],
+            subject=f"{notice_reference} · {row.subject}"[:255],
             context={
                 "recipient_name": recipient.get("name") or recipient_email,
                 "recipient_role": recipient.get("role") or "AUDIT_RECIPIENT",
@@ -1765,6 +1766,7 @@ def submit_and_deliver_audit_notice(
                 "planned_start": audit.planned_start.isoformat() if audit.planned_start else "",
                 "planned_end": audit.planned_end.isoformat() if audit.planned_end else "",
                 "notice_revision": row.revision_no,
+                "notice_reference": notice_reference,
                 "notice_document": row.artifact.filename,
                 "document_sha256": row.artifact.sha256,
                 "action_url": _notice_record_url(request, ctx=ctx, audit=audit, notice=row),
