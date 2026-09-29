@@ -183,9 +183,13 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
         QualityAuditMeeting.meeting_type == "OPENING",
     ).one()
     original_title = audit.title
+    original_audit_ref = audit.audit_ref
+    original_external_auditees = audit.external_auditees
     original_opening_start = opening.scheduled_start
     original_opening_end = opening.scheduled_end
     audit.title = "Hangar quality system audit - deferred"
+    audit.audit_ref = "QAR/AC/26/002"
+    audit.external_auditees = [{"name": "External process owner", "email": "external@example.test"}]
     opening.scheduled_start = opening.scheduled_start.replace(hour=7)
     opening.scheduled_end = opening.scheduled_end.replace(hour=8)
     db_session.commit()
@@ -203,10 +207,14 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert stale_notice.value.detail["code"] == "AUDIT_NOTICE_REVISION_REQUIRED"
     changed_labels = {item["label"] for item in stale_notice.value.detail["changes"]}
     assert "Audit title" in changed_labels
+    assert "Audit reference" in changed_labels
+    assert "Notice recipients" in changed_labels
     assert "Opening meeting" in changed_labels
     assert sends == []
 
     audit.title = original_title
+    audit.audit_ref = original_audit_ref
+    audit.external_auditees = original_external_auditees
     opening.scheduled_start = original_opening_start
     opening.scheduled_end = original_opening_end
     db_session.commit()
