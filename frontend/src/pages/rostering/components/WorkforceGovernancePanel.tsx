@@ -467,7 +467,15 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
         if (!active) return;
         setOperation(next);
         if (TERMINAL.has(next.status)) {
-          void queryClient.invalidateQueries({ queryKey: ["workforce"] });
+          // Keep the terminal operation card mounted. Broadly invalidating every
+          // Workforce query also refreshes the workspace access query and can
+          // transiently tear down this personnel surface before users see the
+          // completed result. Refresh only data that the bulk mutation changes.
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["workforce", "governance", "people"] }),
+            queryClient.invalidateQueries({ queryKey: ["workforce", "hr", "people"] }),
+            queryClient.invalidateQueries({ queryKey: ["workforce", "hr", "bulk"] }),
+          ]);
           return;
         }
       } catch (cause) {
