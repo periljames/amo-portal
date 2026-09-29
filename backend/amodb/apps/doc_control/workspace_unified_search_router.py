@@ -275,7 +275,7 @@ def _records(
     return [{
         "kind": "RETAINED_RECORD",
         **_record_payload(row, series, user),
-        "target_path": f"/maintenance/{tenant.slug.upper()}/document-control/records?record={row.id}",
+        "target_path": f"/maintenance/{tenant.slug.upper()}/document-control/reports/records?record={row.id}",
     } for row, series in rows]
 
 

@@ -1,8 +1,8 @@
 /* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
 import { useMemo, type ReactNode } from "react";
 import {
-  BookOpen,
   Archive,
+  BookOpen,
   ClipboardList,
   FileCog,
   FileSearch,
@@ -52,7 +52,7 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
   { id: "home", label: "Home", path: "", icon: Gauge },
   { id: "library", label: "Library", path: "/library", icon: BookOpen },
   { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
-  { id: "records", label: "Records", path: "/records", icon: Archive },
+  { id: "records", label: "Records", path: "/reports/records", icon: Archive },
   { id: "changes", label: "Changes", path: "/changes", icon: ClipboardList, controlOnly: true },
   { id: "distribution", label: "Distribution", path: "/distribution", icon: Send, controlOnly: true },
   { id: "compliance", label: "Compliance", path: "/compliance", icon: ShieldCheck, controlOnly: true },
@@ -61,7 +61,7 @@ const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
 ];
 
 function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
-  if (pathname.includes("/records")) return "records";
+  if (pathname.includes("/reports/records")) return "records";
   if (pathname.includes("/structure")) return "structure";
   if (pathname.includes("/changes")) return "changes";
   if (pathname.includes("/distribution")) return "distribution";
@@ -104,6 +104,9 @@ export default function DocumentControlShell({
   const active = primaryWorkspaceForPath(location.pathname);
   const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
   const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
+  const assistantParams = new URLSearchParams(location.search);
+  const assistantQuery = assistantParams.get("assistant_query") || "";
+  const assistantRequested = assistantParams.get("assistant") === "1";
   const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
@@ -150,6 +153,9 @@ export default function DocumentControlShell({
       {showContextualAssistant ? <DocumentationAssistantPanel
         tenant={tenant}
         manualId={assistantDocumentId}
+        defaultOpen={assistantRequested}
+        initialQuery={assistantQuery}
+        initialMode="ASSIST"
         title={assistantDocumentId ? "Document evidence search" : "Controlled information search"}
       /> : null}
     </div>

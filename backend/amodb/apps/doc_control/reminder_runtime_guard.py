@@ -155,12 +155,7 @@ def _deliver(
                 entity_id=candidate.obligation_id,
                 action_url=candidate.action_url,
                 dedupe_key=dedupe_key,
-                metadata_json={
-                    "manual_id": candidate.manual_id,
-                    "obligation_type": candidate.obligation_type,
-                    "reminder_stage": stage,
-                    "due_at": candidate.due_at.isoformat(),
-                },
+                metadata_json=service._notification_metadata(candidate=candidate, stage=stage),
             ))
         delivery["portal"] = "QUEUED"
         successful_delivery = True

@@ -13,7 +13,7 @@ from . import workspace_schemas as schemas
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
 from .workflow_policy import resolve_document_lifecycle_policy
 from .workspace_integration_router import refresh_integration_link
-from .workspace_responsibility_access import require_workflow_action
+from .workspace_responsibility_access import can_perform_workflow_action, require_workflow_action
 from .workspace_router import _event
 from .workspace_service import (
     audit,
@@ -108,7 +108,18 @@ def _validate_readiness_change(
     if not any(value is not None for value in proposed.values()):
         return
 
-    require_decision_approver(current_user)
+    may_change_readiness = is_decision_approver(current_user) or (
+        payload.action == "APPROVE_ACCOUNTABLE_MANAGER"
+        and not workflow.requires_authority
+        and can_perform_workflow_action(
+            db,
+            workflow=workflow,
+            user=current_user,
+            action=payload.action,
+        )
+    )
+    if not may_change_readiness:
+        require_decision_approver(current_user)
     comments = str(payload.comments or "").strip()
     evidence = list(payload.evidence or [])
 
@@ -357,13 +368,30 @@ def transition_workflow_with_release_guards(
         current_user=current_user,
     )
 
-    if payload.effective_at is not None and not is_decision_approver(current_user):
+    may_set_effectivity = is_decision_approver(current_user) or (
+        payload.action == "APPROVE_ACCOUNTABLE_MANAGER"
+        and not workflow.requires_authority
+        and can_perform_workflow_action(
+            db,
+            workflow=workflow,
+            user=current_user,
+            action=payload.action,
+        )
+    )
+    if payload.effective_at is not None and not may_set_effectivity:
         raise HTTPException(
             status_code=403,
-            detail="Accountable document approval privileges are required to schedule effectivity",
+            detail="Accountable document approval privileges or a governed approver delegation are required to schedule effectivity",
         )
 
-    if payload.action == "SCHEDULE_EFFECTIVITY":
+    scheduling_now = (
+        payload.action == "SCHEDULE_EFFECTIVITY"
+        or (
+            payload.action == "APPROVE_ACCOUNTABLE_MANAGER"
+            and not workflow.requires_authority
+        )
+    )
+    if scheduling_now:
         if payload.effective_at is None and workflow.effective_at is None:
             raise HTTPException(status_code=422, detail="An accountable effectivity date and time is required")
         if workflow.requires_authority and workflow.state != "AUTHORITY_APPROVED":

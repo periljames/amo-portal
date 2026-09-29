@@ -148,6 +148,33 @@ def _notification_dedupe_key(*, amo_id: str, candidate: ReminderCandidate, recip
     return f"docctl:{amo_id}:{candidate.obligation_type}:{candidate.obligation_id}:{recipient_user_id}:{stage}"[:255]
 
 
+def _reminder_priority(stage: str) -> str:
+    normalized = str(stage or "").upper()
+    urgent_prefixes = (
+        "OVERDUE",
+        "OWNER_ESCALATION",
+        "QUALITY_ESCALATION",
+        "ESCALATION",
+        "FINAL",
+    )
+    return "HIGH" if normalized.startswith(urgent_prefixes) else "NORMAL"
+
+
+def _notification_metadata(*, candidate: ReminderCandidate, stage: str) -> dict[str, object]:
+    return {
+        "manual_id": candidate.manual_id,
+        "obligation_type": candidate.obligation_type,
+        "reminder_stage": stage,
+        "due_at": candidate.due_at.isoformat(),
+        "module": "DMS",
+        "category": "ACTION",
+        "priority": _reminder_priority(stage),
+        "requires_action": True,
+        "action_label": "Review obligation",
+        "group_key": f"document-obligation:{candidate.obligation_type}:{candidate.obligation_id}",
+    }
+
+
 def _already_processed(
     db: Session,
     *,
@@ -221,12 +248,7 @@ def _deliver(
                 entity_id=candidate.obligation_id,
                 action_url=candidate.action_url,
                 dedupe_key=dedupe_key,
-                metadata_json={
-                    "manual_id": candidate.manual_id,
-                    "obligation_type": candidate.obligation_type,
-                    "reminder_stage": stage,
-                    "due_at": candidate.due_at.isoformat(),
-                },
+                metadata_json=_notification_metadata(candidate=candidate, stage=stage),
             ))
         delivery["portal"] = "QUEUED"
     elif policy.portal_notifications_enabled:

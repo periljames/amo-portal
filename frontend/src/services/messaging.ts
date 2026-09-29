@@ -141,13 +141,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
-async function markNotificationRead(notificationId: string): Promise<PortalNotification> {
+async function markNotificationRead(notificationId: string, followAction = true): Promise<PortalNotification> {
   const notification = await request<PortalNotification>(
     `/api/notifications/${encodeURIComponent(notificationId)}/read`,
     { method: "POST" },
   );
   if (
-    notification.action_url
+    followAction
+    && notification.action_url
     && notification.entity_type !== "chat_thread"
     && typeof window !== "undefined"
   ) {
@@ -198,6 +199,7 @@ export const messagingApi = {
   notifications: (unreadOnly = false) => request<{ items: PortalNotification[]; total: number }>(`/api/notifications/me?limit=150&unread_only=${unreadOnly ? "true" : "false"}`),
   unreadCount: () => request<{ notifications: number; messages: number; total: number }>("/api/notifications/me/unread-count"),
   markNotificationRead,
+  markNotificationReadOnly: (notificationId: string) => markNotificationRead(notificationId, false),
   markAllNotificationsRead: () => request<{ read_at: string; updated: number }>("/api/notifications/read-all", { method: "POST" }),
   preferences: () => request<NotificationPreferences>("/api/notifications/preferences"),
   updatePreferences: (payload: Partial<NotificationPreferences>) => request<NotificationPreferences>("/api/notifications/preferences", {

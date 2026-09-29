@@ -118,7 +118,8 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
   const serverAllowedActions = new Set(workflow.allowed_actions || []);
   actions = actions.filter((item) => serverAllowedActions.has(item.action));
   const needsDecisionInput = actions.some((item) => DECISION_ACTIONS.has(item.action) || item.action === "REQUEST_CORRECTIONS");
-  const readinessEditable = actions.some((item) => ["SCHEDULE_EFFECTIVITY", "PUBLISH"].includes(item.action));
+  const schedulingActions = new Set(["SCHEDULE_EFFECTIVITY", "APPROVE_ACCOUNTABLE_MANAGER"]);
+  const readinessEditable = actions.some((item) => ["SCHEDULE_EFFECTIVITY", "APPROVE_ACCOUNTABLE_MANAGER", "PUBLISH"].includes(item.action));
 
   const transition = (item: ActionOption) => {
     const comment = comments.trim();
@@ -158,9 +159,9 @@ function ApproverWorkflowActions({ detail, tenant, onChanged }: Omit<Props, "act
     /> : null}
     {readinessEditable && workflow.training_impact_required ? <label><span>Training readiness</span><select value={training} onChange={(event) => setTraining(event.target.value)}><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label> : null}
     {readinessEditable && workflow.qms_readiness_status !== "NOT_REQUIRED" ? <label><span>QMS readiness</span><select value={qms} onChange={(event) => setQms(event.target.value)}><option>PENDING</option><option>BLOCKED</option><option>READY</option><option>WAIVED</option></select></label> : null}
-    {actions.some((item) => item.action === "SCHEDULE_EFFECTIVITY") ? <label><span>Effective date and time</span><input type="datetime-local" required value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label> : null}
+    {actions.some((item) => schedulingActions.has(item.action)) ? <label><span>Effective date and time</span><input type="datetime-local" required value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label> : null}
     <ErrorMessage message={mutation.error} />
-    {actions.length ? <div className="dc-form__actions">{actions.map((item) => <button type="button" key={item.action} className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`} disabled={mutation.busy || (item.action === "SCHEDULE_EFFECTIVITY" && !effectiveAt)} onClick={() => transition(item)}>{item.label}</button>)}</div> : <DocumentControlEmpty title="Awaiting the assigned workflow role" message="No transition is authorized for this account at the current stage." />}
+    {actions.length ? <div className="dc-form__actions">{actions.map((item) => <button type="button" key={item.action} className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`} disabled={mutation.busy || (schedulingActions.has(item.action) && !effectiveAt)} onClick={() => transition(item)}>{item.label}</button>)}</div> : <DocumentControlEmpty title="Awaiting the assigned workflow role" message="No transition is authorized for this account at the current stage." />}
   </div>;
 }
 

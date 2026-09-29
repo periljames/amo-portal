@@ -31,11 +31,9 @@ const CONTROLLER_WORKFLOW_ACTIONS: Record<string, ControllerAction[]> = {
   TECHNICAL_APPROVED: [{ action: "START_QUALITY_REVIEW", label: "Start Quality review" }],
   QUALITY_REVIEW: [{ action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true }],
   QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Executive" }],
-  ACCOUNTABLE_MANAGER_APPROVAL: [],
+  ACCOUNTABLE_MANAGER_APPROVAL: [{ action: "MARK_AUTHORITY_SUBMITTED", label: "Record authority submission" }],
   ACCOUNTABLE_APPROVED: [{ action: "MARK_AUTHORITY_SUBMITTED", label: "Record authority submission" }],
   AUTHORITY_SUBMITTED: [{ action: "MARK_AUTHORITY_APPROVED", label: "Record authority approval" }],
-  SCHEDULED_FOR_EFFECTIVITY: [{ action: "PUBLISH", label: "Release published revision" }],
-  PUBLISHED: [{ action: "ARCHIVE", label: "Archive superseded revision", danger: true }],
 };
 
 function statementsFrom(value: string): string[] {

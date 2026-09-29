@@ -50,3 +50,4 @@ def test_frontend_surfaces_generated_records_in_canonical_reports_and_history() 
     assert "artifact_filename" in backend
     assert "?tab=history&record=" in backend
     assert '/maintenance/:amoCode/document-control/records' not in router
+    assert '/maintenance/:amoCode/document-control/reports/records' in router

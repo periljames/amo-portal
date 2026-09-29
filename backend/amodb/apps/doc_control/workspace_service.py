@@ -55,9 +55,12 @@ WORKFLOW_TRANSITIONS: dict[str, dict[str, str]] = {
         "SUBMIT_ACCOUNTABLE_MANAGER": "ACCOUNTABLE_MANAGER_APPROVAL",
     },
     "ACCOUNTABLE_MANAGER_APPROVAL": {
-        "APPROVE_ACCOUNTABLE_MANAGER": "ACCOUNTABLE_APPROVED",
+        "APPROVE_ACCOUNTABLE_MANAGER": "SCHEDULED_FOR_EFFECTIVITY",
+        "MARK_AUTHORITY_SUBMITTED": "AUTHORITY_SUBMITTED",
         "REQUEST_CORRECTIONS": "CORRECTIONS_REQUIRED",
     },
+    # Legacy compatibility for workflows created before the direct accountable
+    # approval/authority branching contract was enforced.
     "ACCOUNTABLE_APPROVED": {
         "MARK_AUTHORITY_SUBMITTED": "AUTHORITY_SUBMITTED",
         "SCHEDULE_EFFECTIVITY": "SCHEDULED_FOR_EFFECTIVITY",
@@ -467,8 +470,17 @@ def next_workflow_state(
                 "allowed_actions": sorted(allowed),
             },
         )
-    if not workflow.requires_authority and action == "MARK_AUTHORITY_SUBMITTED":
+    if action == "MARK_AUTHORITY_SUBMITTED" and not workflow.requires_authority:
         raise HTTPException(status_code=409, detail="This revision does not require authority approval")
+    if (
+        workflow.state == "ACCOUNTABLE_MANAGER_APPROVAL"
+        and workflow.requires_authority
+        and action == "APPROVE_ACCOUNTABLE_MANAGER"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Authority submission is required before accountable approval can continue.",
+        )
     return next_state
 
 
