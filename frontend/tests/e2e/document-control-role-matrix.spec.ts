@@ -87,10 +87,13 @@ test.describe.serial("DMS authoritative role matrix", () => {
   test("ordinary reader can read current content but cannot mutate workflow", async ({ page }) => {
     await signIn(page, READER_EMAIL, ROLE_PASSWORD);
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
-    await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
-    const row = page.getByRole("row").filter({ hasText: "DMS-CI-MOM" });
-    await expect(row.getByRole("button", { name: "Read", exact: true })).toBeVisible();
-    await row.getByRole("button", { name: "Read", exact: true }).click();
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    const card = library.locator("article.dlibrary-card").filter({ hasText: "DMS-CI-MOM" });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card.getByRole("button", { name: "Read current", exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "Read current", exact: true }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
 
     await openWorkspace(page);
