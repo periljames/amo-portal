@@ -36,6 +36,9 @@ describe("audit notice revision governance", () => {
     expect(workspace).toContain("Full notice & reschedule history");
     expect(workspace).toContain("Controlled notice history");
     expect(workspace).toContain("Audit reschedule history");
+    expect(workspace).toContain("auditHistoryWindow(entry.before)");
+    expect(workspace).toContain("auditHistoryWindow(entry.after)");
+    expect(workspace).toContain("entry.actor_name || entry.actor_user_id");
     expect(workspace).toContain("Lifecycle events");
   });
 
