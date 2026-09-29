@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
+
 from amodb.apps.quality import audit_session_route_order as _audit_session_route_order  # noqa: F401
 from amodb.apps.quality.canonical_router import router
+from amodb.apps.quality.audit_session_router import AuditSetupUpdate, update_audit_setup
 
 
 def _route_index(api_router, predicate) -> int:
@@ -27,3 +30,15 @@ def test_setup_patch_precedes_generic_catchall() -> None:
 
     assert setup_index < catchall_index
     assert getattr(getattr(api_router.routes[setup_index], "endpoint", None), "__name__", "") == "update_audit_setup"
+
+
+def test_setup_reschedule_requires_and_audits_a_reason() -> None:
+    fields = AuditSetupUpdate.model_fields
+    assert "reschedule_reason" in fields
+    assert fields["reschedule_reason"].metadata
+
+    source = inspect.getsource(update_audit_setup)
+    assert "AUDIT_RESCHEDULE_REASON_REQUIRED" in source
+    assert 'action="audit_setup_rescheduled"' in source
+    assert '"reason": reschedule_reason' in source
+    assert "_log_qms_activity(" in source
