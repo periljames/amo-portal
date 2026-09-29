@@ -297,9 +297,7 @@ function VirtualPdfPage({
   const annotationGenerationRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState("");
-  const renderRequestedRef = useRef(!deferRender);
-  if (!deferRender) renderRequestedRef.current = true;
-  const renderRequested = renderRequestedRef.current;
+  const [renderRequested, setRenderRequested] = useState(() => !deferRender);
   const [internalTargets, setInternalTargets] = useState<Record<string, PdfItemClickTarget>>({});
   const [internalPages, setInternalPages] = useState<Record<string, number>>({});
   // Keep the PDF.js raster stable for the lifetime of a mounted virtual page.
@@ -315,6 +313,12 @@ function VirtualPdfPage({
   ), [query, searchOptions]);
   const renderTextLayer = !deferRender && (active || Boolean(query.trim()));
   const renderAnnotationLayer = !deferRender && (active || safeForm);
+
+  useEffect(() => {
+    if (deferRender || renderRequested) return;
+    const frame = window.requestAnimationFrame(() => setRenderRequested(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [deferRender, renderRequested]);
 
   useEffect(() => {
     if (!ready || !pageRef.current) return;
