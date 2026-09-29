@@ -48,6 +48,12 @@ describe("audit notice revision governance", () => {
     expect(workspace).not.toContain("policy_id: row.policy_id || undefined");
   });
 
+  it("does not misattribute an unrelated historical reschedule as the revision reason", () => {
+    expect(workspace).toContain("scheduleFields");
+    expect(workspace).toContain("rescheduleIsRelevant");
+    expect(workspace).toContain("latestNotice.generated_at || latestNotice.artifact?.created_at || latestNotice.created_at");
+  });
+
   it("keeps a cancelled latest notice recoverable by creating the next controlled revision", () => {
     expect(workspace).toContain('latestNotice.status === "CANCELLED"');
     expect(workspace).toContain("latestNoticeNeedsReplacement");
