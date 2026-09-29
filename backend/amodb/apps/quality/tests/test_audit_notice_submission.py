@@ -23,6 +23,7 @@ from amodb.apps.quality.audit_notice_router import (
     NoticeSubmit,
     _normalise_recipient_snapshot,
     _notice_email_correlation,
+    _require_latest_notice_revision,
     prepare_audit_notice_document,
     submit_and_deliver_audit_notice,
 )
@@ -266,6 +267,28 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert sends[0]["correlation_id"] == _notice_email_correlation(notice.id, "auditee@example.test")
     events = [row.event_type for row in db_session.query(QualityAuditNoticeEvent).order_by(QualityAuditNoticeEvent.created_at).all()]
     assert events == ["SUBMITTED", "APPROVED", "GENERATED", "DELIVERED"]
+
+    next_notice = QualityAuditNotice(
+        amo_id=amo.id,
+        audit_id=audit.id,
+        revision_no=2,
+        status="DRAFT",
+        required_notice_days=14,
+        notice_date=date(2026, 9, 2),
+        subject="Revised controlled notice",
+        body="Controlled notice revision",
+        audit_snapshot={"audit_ref": audit.audit_ref},
+        recipient_snapshot=[],
+        supersedes_notice_id=str(notice.id),
+        created_by_user_id=officer.id,
+    )
+    db_session.add(next_notice)
+    db_session.commit()
+    with pytest.raises(HTTPException) as historical_revision:
+        _require_latest_notice_revision(db_session, notice)
+    assert historical_revision.value.status_code == 409
+    assert historical_revision.value.detail["code"] == "AUDIT_NOTICE_NOT_LATEST"
+    assert historical_revision.value.detail["latest_notice_revision"] == 2
 
 
 
