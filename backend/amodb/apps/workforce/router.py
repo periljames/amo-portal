@@ -622,7 +622,6 @@ def hr_approve_leave(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _permission(db, current_user, permissions.PermissionCode.LEAVE_APPROVE)
     row = services.get_leave_request(db, amo_id=_amo(current_user), request_id=request_id)
     if not row:
         raise _error("Leave request not found", error_code="LEAVE_REQUEST_NOT_FOUND", status_code=404)
