@@ -92,6 +92,8 @@ def test_reschedule_contract_rechecks_lifecycle_and_logs_before_commit() -> None
     assert source.index("_log_qms_activity(") < source.index("db.commit()")
     assert '"reason": payload.reason.strip()' in source
     assert '"trace_id": trace_id' in source
+    assert '"start_time": previous_start_time.strftime("%H:%M") if previous_start_time else None' in source
+    assert '"end_time": previous_end_time.strftime("%H:%M") if previous_end_time else None' in source
     assert "_shift_audit_meetings(" in source
     assert "SCHEDULE_STALE" in source
     assert "SCHEDULE_CONFLICT" in module_source
