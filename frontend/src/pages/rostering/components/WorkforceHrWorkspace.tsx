@@ -494,7 +494,7 @@ function LeavePanel({
     hr_approval_required: true,
     allow_negative_balance: false,
     is_active: true,
-    display_order: (leaveTypes.at(-1)?.display_order || 0) + 10,
+    display_order: (leaveTypes[leaveTypes.length - 1]?.display_order || 0) + 10,
   });
 
   const startEdit = (type: LeaveTypeRead) => setEditingType({
