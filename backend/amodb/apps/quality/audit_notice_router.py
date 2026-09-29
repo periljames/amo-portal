@@ -472,6 +472,28 @@ def _default_subject(audit: models.QMSAudit) -> str:
     return f"Audit Notice - {reference} - {audit.title}"
 
 
+def _default_subject_from_snapshot(snapshot: dict[str, Any]) -> str:
+    reference = str(snapshot.get("audit_ref") or "Audit")
+    title = str(snapshot.get("title") or "")
+    return f"Audit Notice - {reference} - {title}"
+
+
+def _default_body_from_snapshot(snapshot: dict[str, Any], notice_date: date) -> str:
+    reference = str(snapshot.get("audit_ref") or "the scheduled audit")
+    title = str(snapshot.get("title") or "")
+    scope = str(snapshot.get("scope") or "As defined in the approved audit scope.")
+    criteria = str(snapshot.get("criteria") or "Applicable approved requirements and procedures.")
+    planned = str(snapshot.get("planned_start") or "To be confirmed")
+    return (
+        f"This is controlled notice of {reference}: {title}.\n\n"
+        f"Planned start: {planned}\n"
+        f"Scope: {scope}\n"
+        f"Criteria: {criteria}\n"
+        f"Notice date: {notice_date.isoformat()}\n\n"
+        "Please ensure requested records, responsible personnel and relevant facilities are available for the audit."
+    )
+
+
 def _default_body(audit: models.QMSAudit, notice_date: date) -> str:
     scope = audit.scope or "As defined in the approved audit scope."
     criteria = audit.criteria or "Applicable approved requirements and procedures."
@@ -1725,6 +1747,12 @@ def _prepare_notice_document(
                 "message": "Add an auditee representative email and enable their notifications before generating the final notice.",
             },
         )
+
+    previous_source_snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    if notice.subject == _default_subject_from_snapshot(previous_source_snapshot):
+        notice.subject = _default_subject(audit)
+    if notice.body == _default_body_from_snapshot(previous_source_snapshot, notice.notice_date):
+        notice.body = _default_body(audit, notice.notice_date)
 
     notice.audit_snapshot = current_source_snapshot
     notice.recipient_snapshot = resolved
