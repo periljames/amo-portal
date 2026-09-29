@@ -114,11 +114,12 @@ test.describe("Document Control daily operating model", () => {
 
     await library.getByRole("button", { name: /External data/i }).click();
     await expect(page).toHaveURL(/type=EXTERNAL_DOCUMENT/);
-    const externalRow = page.getByRole("row").filter({ hasText: "KCAA-CI-EXT-001" });
-    await expect(externalRow).toBeVisible({ timeout: 30_000 });
-    await expect(externalRow).toContainText("Kenya Civil Aviation Authority");
-    await expect(externalRow).toContainText("UNVERIFIED");
-    await expect(externalRow).toContainText("KCAR 2025 CI proof Rev 2");
+    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    const externalCard = library.locator("article.dlibrary-card").filter({ hasText: "KCAA-CI-EXT-001" });
+    await expect(externalCard).toBeVisible({ timeout: 30_000 });
+    await expect(externalCard).toContainText("Kenya Civil Aviation Authority");
+    await expect(externalCard).toContainText("UNVERIFIED");
+    await expect(externalCard).toContainText("KCAR 2025 CI proof Rev 2");
 
     await page.getByRole("button", { name: /Browse hierarchy/i }).click();
     await expect(page).toHaveURL(/\/document-control\/structure/);
