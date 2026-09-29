@@ -112,6 +112,20 @@ export function notificationMatches(
   return true;
 }
 
+export function notificationGroupHasUnread(group: NotificationGroup): boolean {
+  return [group.latest, ...group.earlier].some((notification) => !notification.read_at);
+}
+
+export function notificationGroupMatches(
+  group: NotificationGroup,
+  view: NotificationView,
+  filter: NotificationFilter,
+): boolean {
+  const effectiveFilter = filter === "unread" ? "all" : filter;
+  if (!notificationMatches(group.latest, view, effectiveFilter)) return false;
+  return filter !== "unread" || notificationGroupHasUnread(group);
+}
+
 export function groupNotifications(notifications: PortalNotification[]): NotificationGroup[] {
   const buckets = new Map<string, PortalNotification[]>();
   for (const notification of notifications) {

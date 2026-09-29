@@ -999,7 +999,6 @@ def list_notifications(
     portal_query = db.query(models.PortalNotification).filter(
         models.PortalNotification.amo_id == amo_id,
         models.PortalNotification.user_id == str(user.id),
-        models.PortalNotification.kind != "CHAT_MESSAGE",
         models.PortalNotification.archived_at.is_(None),
     )
     quality_query = db.query(quality_models.QMSNotification).filter(

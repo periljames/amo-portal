@@ -204,6 +204,10 @@ def test_global_notification_projection_includes_qms_without_double_counting_cha
     assert counts == {"notifications": 1, "messages": 1, "total": 2}
 
     page = messaging.list_notifications(db_session, user=second, limit=20)
+    chat_alert = next(item for item in page["items"] if item["kind"] == "CHAT_MESSAGE")
+    assert chat_alert["entity_type"] == "chat_thread"
+    assert chat_alert["entity_id"] == thread["id"]
+
     projected = next(item for item in page["items"] if item["id"] == f"qms:{qms.id}")
     assert projected["module"] == "QMS"
     assert projected["requires_action"] is True

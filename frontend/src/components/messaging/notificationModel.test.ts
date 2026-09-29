@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { PortalNotification } from "../../services/messaging";
 import {
   groupNotifications,
+  notificationGroupHasUnread,
+  notificationGroupMatches,
   notificationMatches,
   notificationNeedsAttention,
   notificationTone,
@@ -63,5 +65,14 @@ describe("notification presentation model", () => {
       requires_action: true,
     });
     expect(notificationMatches(item, "for-you", "due")).toBe(false);
+  });
+
+  it("keeps a lifecycle group unread while any earlier record remains unread", () => {
+    const [group] = groupNotifications([
+      row({ id: "older", group_key: "doc:unread", created_at: "2026-09-28T06:00:00Z" }),
+      row({ id: "latest", group_key: "doc:unread", created_at: "2026-09-28T07:00:00Z", read_at: "2026-09-28T07:05:00Z" }),
+    ]);
+    expect(notificationGroupHasUnread(group)).toBe(true);
+    expect(notificationGroupMatches(group, "updates", "unread")).toBe(true);
   });
 });

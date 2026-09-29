@@ -30,11 +30,13 @@ import {
   notificationActionLabel,
   notificationBusinessState,
   notificationDueAt,
-  notificationMatches,
+  notificationGroupHasUnread,
+  notificationGroupMatches,
   notificationModule,
   notificationNeedsAttention,
   notificationTone,
   type NotificationFilter,
+  type NotificationGroup,
   type NotificationView,
 } from "./notificationModel";
 
@@ -230,7 +232,7 @@ export function MessagingHub() {
   const notificationGroups = useMemo(() => {
     const search = notificationSearch.trim().toLowerCase();
     return allNotificationGroups.filter((group) => {
-      if (!notificationMatches(group.latest, notificationView, notificationFilter)) return false;
+      if (!notificationGroupMatches(group, notificationView, notificationFilter)) return false;
       if (!search) return true;
       return [group.latest, ...group.earlier].some((notification) => [
         notification.title,
@@ -373,14 +375,24 @@ export function MessagingHub() {
   });
 
   const markNotification = useMutation({
-    mutationFn: messagingApi.markNotificationRead,
+    mutationFn: async (group: NotificationGroup) => {
+      const unread = [group.latest, ...group.earlier].filter((notification) => !notification.read_at);
+      await Promise.all(unread.map((notification) => messagingApi.markNotificationRead(notification.id)));
+    },
     onSuccess: () => void refreshMessaging(),
   });
   const openNotification = useMutation({
-    mutationFn: async (notification: PortalNotification) => ({
-      notification,
-      updated: await messagingApi.markNotificationRead(notification.id),
-    }),
+    mutationFn: async (group: NotificationGroup) => {
+      const notification = group.latest;
+      const earlierUnread = group.earlier.filter((item) => !item.read_at);
+      if (earlierUnread.length) {
+        await Promise.allSettled(earlierUnread.map((item) => messagingApi.markNotificationRead(item.id)));
+      }
+      const updated = notification.read_at
+        ? notification
+        : await messagingApi.markNotificationRead(notification.id);
+      return { notification, updated };
+    },
     onSuccess: ({ notification, updated }) => {
       void refreshMessaging();
       const target = updated.action_url || notification.action_url;
@@ -607,8 +619,9 @@ export function MessagingHub() {
               const canAskAi = Boolean(tenant);
               const due = dueLabel(notification);
               const aiOpen = aiNotificationId === notification.id;
+              const groupUnread = notificationGroupHasUnread(group);
               return (
-                <article className={`messaging-notification-card ${notification.read_at ? "" : "is-unread"}`} data-tone={notificationTone(notification)} key={group.key}>
+                <article className={`messaging-notification-card ${groupUnread ? "is-unread" : ""}`} data-tone={notificationTone(notification)} key={group.key}>
                   <div className="messaging-notification-card__marker" aria-hidden="true" />
                   <div className="messaging-notification-card__body">
                     <div className="messaging-notification-card__meta">
@@ -620,9 +633,9 @@ export function MessagingHub() {
                     {due ? <div className="messaging-notification-card__due"><Clock3 size={13} /> {due}</div> : null}
                     <div className="messaging-notification-card__actions">
                       {notification.action_url ? (
-                        <button type="button" className="is-primary" onClick={() => openNotification.mutate(notification)}>{notificationActionLabel(notification)} <ExternalLink size={13} /></button>
-                      ) : !notification.read_at ? (
-                        <button type="button" onClick={() => markNotification.mutate(notification.id)}>Mark read</button>
+                        <button type="button" className="is-primary" onClick={() => openNotification.mutate(group)}>{notificationActionLabel(notification)} <ExternalLink size={13} /></button>
+                      ) : groupUnread ? (
+                        <button type="button" onClick={() => markNotification.mutate(group)}>Mark group read</button>
                       ) : null}
                       {canAskAi ? (
                         <button type="button" onClick={() => void askAi(notification)} disabled={aiBusy && aiOpen}><Sparkles size={13} /> {aiBusy && aiOpen ? "Checking…" : "Ask AI"}</button>
