@@ -14,6 +14,7 @@ import {
   listAuditNoticePolicies,
   prepareAuditNoticeDocument,
   previewAuditNoticePdf,
+  reviseAuditNotice,
   submitAuditNotice,
   updateAuditNoticeTemplate,
   uploadAuditNoticeAttachment,
@@ -280,6 +281,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [closingDraft, setClosingDraft] = useState<MeetingDraft>(emptyMeeting);
   const [openTile, setOpenTile] = useState<SetupTileId | null>("definition");
   const [noticeReason, setNoticeReason] = useState("Final audit notice generated for review before controlled email delivery.");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [revisionReason, setRevisionReason] = useState("");
+  const revisionReasonForNotice = useRef<string | null>(null);
   const [shortNoticeWaiverReason, setShortNoticeWaiverReason] = useState("");
   const [noticePreview, setNoticePreview] = useState<{ url: string; blob: Blob; filename: string; notice: AuditNotice } | null>(null);
   const [guidedField, setGuidedField] = useState<AuditSetupFieldId | null>(null);
@@ -507,11 +511,21 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         notify_auditors: draft.notifyAuditors,
         notify_auditees: draft.notifyAuditees,
         reminder_interval_days: Math.max(1, Math.min(60, Number(draft.reminderIntervalDays) || 7)),
+        reschedule_reason: (() => {
+          const persisted = draftFromAudit(auditQuery.data!);
+          const changed =
+            draft.plannedStart !== persisted.plannedStart ||
+            draft.plannedEnd !== persisted.plannedEnd ||
+            draft.plannedStartTime !== persisted.plannedStartTime ||
+            draft.plannedEndTime !== persisted.plannedEndTime;
+          return changed ? rescheduleReason.trim() || undefined : undefined;
+        })(),
       });
     },
     onSuccess: async (row) => {
       const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       setDraft(draftFromAuditReady(row, now));
+      setRescheduleReason("");
       setLocalError(null);
       setNotice("Definition saved.");
       await refresh();
@@ -612,6 +626,30 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       await refresh();
     },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit notice could not be created."),
+  });
+
+  const reviseNoticeMutation = useMutation({
+    mutationFn: async (row: AuditNotice) => {
+      if (!auditQuery.data) throw new Error("Audit occurrence is unavailable.");
+      if (revisionReason.trim().length < 8) {
+        throw new Error("Enter the reason for the revised notice (at least 8 characters).");
+      }
+      return reviseAuditNotice(amoCode, auditId, row.id, {
+        policy_id: row.policy_id || undefined,
+        template_document_id: templateQuery.data?.selected_document_id || row.template_document_id || undefined,
+        notice_date: new Date().toISOString().slice(0, 10),
+        exception_reason: shortNoticeWaiverReason.trim() || undefined,
+        reason: revisionReason.trim(),
+      });
+    },
+    onSuccess: async (row) => {
+      revisionReasonForNotice.current = null;
+      setRevisionReason("");
+      setLocalError(null);
+      setNotice(`Revised notice ${row.revision_no} created. Generate and review the new controlled PDF before delivery.`);
+      await refresh();
+    },
+    onError: (cause) => setLocalError(errorMessage(cause, "The revised audit notice could not be created.")),
   });
 
   const templateMutation = useMutation({
