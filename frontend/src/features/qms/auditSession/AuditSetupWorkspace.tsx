@@ -768,7 +768,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     activeNoticePolicy?.minimum_notice_days ??
     14;
   const noticeDateForPeriod =
-    latestNotice?.notice_date || new Date().toISOString().slice(0, 10);
+    latestNotice?.requires_revision
+      ? new Date().toISOString().slice(0, 10)
+      : latestNotice?.notice_date || new Date().toISOString().slice(0, 10);
   const noticePeriodShort = auditNoticePeriodInsufficient({
     plannedStart: draft?.plannedStart || auditQuery.data?.planned_start,
     noticeDate: noticeDateForPeriod,
@@ -1533,9 +1535,13 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span className="qms-audit-setup-tile__step" aria-hidden>4</span>
             <span className="qms-audit-setup-tile__title">Audit notice</span>
             <span className="qms-audit-setup-tile__hint">
-              {latestNotice ? latestNotice.status.replaceAll("_", " ") : "Not created"}
+              {latestNotice
+                ? `${latestNotice.notice_reference || `Notice N${String(latestNotice.revision_no).padStart(2, "0")}`} · ${latestNotice.requires_revision ? "revision required" : latestNotice.status.replaceAll("_", " ")}`
+                : "Not created"}
             </span>
-            <span className="qms-audit-setup-tile__state">Governance</span>
+            <span className={`qms-audit-setup-tile__state${latestNotice?.requires_revision ? " is-required" : ""}`}>
+              {latestNotice?.requires_revision ? "Revision required" : "Governance"}
+            </span>
           </summary>
           <div className="qms-audit-setup-tile__body">
             {noticesQuery.isError || policiesQuery.isError || templateQuery.isError ? (
@@ -1581,16 +1587,55 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </small>
               </div>
             ) : null}
+            {!noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending && latestNotice?.requires_revision ? (
+              <div className="qms-audit-notice-revision-required" role="alert">
+                <AlertTriangle size={16} aria-hidden />
+                <div>
+                  <strong>The saved notice no longer matches the current audit setup.</strong>
+                  <p>
+                    {latestNotice.notice_reference || `Notice N${String(latestNotice.revision_no).padStart(2, "0")}`} remains retained as issued history.
+                    Create notice N{String(latestNotice.revision_no + 1).padStart(2, "0")} for the revised definition or meeting arrangement.
+                  </p>
+                  {latestNotice.source_changes?.length ? (
+                    <ul>
+                      {latestNotice.source_changes.map((change) => <li key={change.field}>{change.label}</li>)}
+                    </ul>
+                  ) : null}
+                  {canManageNotice ? (
+                    <label>
+                      <span>Reason for revised notice</span>
+                      <textarea
+                        rows={2}
+                        value={revisionReason}
+                        onChange={(event) => setRevisionReason(event.target.value)}
+                        placeholder="Why a new notice is being issued"
+                      />
+                      {revisionReason.trim().length < 8 ? <small>Enter at least 8 characters.</small> : null}
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {!noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending && latestNotice ? (
               <dl className="qms-audit-setup-stage__notice-meta">
                 <div>
+                  <dt>Notice ID</dt>
+                  <dd>{latestNotice.notice_reference || `${auditQuery.data.audit_ref}/N${String(latestNotice.revision_no).padStart(2, "0")}`}</dd>
+                </div>
+                <div>
                   <dt>Status</dt>
-                  <dd>{latestNotice.status.replaceAll("_", " ")}</dd>
+                  <dd>{latestNotice.requires_revision ? "REVISION REQUIRED" : latestNotice.status.replaceAll("_", " ")}</dd>
                 </div>
                 <div>
                   <dt>Notice revision</dt>
                   <dd>{latestNotice.revision_no}</dd>
                 </div>
+                {latestNotice.supersedes_reference ? (
+                  <div>
+                    <dt>Supersedes</dt>
+                    <dd>{latestNotice.supersedes_reference}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Minimum lead time to audit start</dt>
                   <dd>{latestNotice.required_notice_days} days</dd>
@@ -1667,7 +1712,20 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <CalendarClock size={15} /> Create notice draft
                       </button>
                     ) : null}
-                    {latestNotice ? (
+                    {latestNotice?.requires_revision && canManageNotice ? (
+                      <button
+                        type="button"
+                        className="is-primary"
+                        disabled={
+                          reviseNoticeMutation.isPending ||
+                          revisionReason.trim().length < 8 ||
+                          !shortNoticeWaiverReady
+                        }
+                        onClick={() => reviseNoticeMutation.mutate(latestNotice)}
+                      >
+                        <CalendarClock size={15} /> {reviseNoticeMutation.isPending ? "Creating revised notice…" : `Create revised notice N${String(latestNotice.revision_no + 1).padStart(2, "0")}`}
+                      </button>
+                    ) : latestNotice ? (
                       <button
                         type="button"
                         className="is-primary"
@@ -1707,7 +1765,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     ) : null}
                   </div>
                 </div>
-                {latestNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(latestNotice.status) ? (
+                {latestNotice && !latestNotice.requires_revision && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(latestNotice.status) ? (
                   <p className="qms-audit-notice-guidance">
                     Generate and inspect the final signed document before sending. The stored PDF shown in the preview, including its QR record link and hash, is the exact file attached to the email.
                   </p>
