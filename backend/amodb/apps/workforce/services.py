@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -1430,18 +1430,208 @@ def preview_patterns(
 # ---------------------------------------------------------------------------
 
 
+def _normalized_personnel_gender(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"F", "FEMALE"}:
+        return "FEMALE"
+    if normalized in {"M", "MALE"}:
+        return "MALE"
+    return None
+
+
+def _controlled_leave_gender(availability_type: Any, eligible_gender: Optional[str]) -> str:
+    availability = _enum_value(availability_type)
+    if availability == models.AvailabilityType.MATERNITY_LEAVE.value:
+        return "FEMALE"
+    if availability == models.AvailabilityType.PATERNITY_LEAVE.value:
+        return "MALE"
+    requested = str(eligible_gender or "ALL").strip().upper()
+    return requested if requested in {"ALL", "FEMALE", "MALE"} else "ALL"
+
+
+def _leave_type_eligibility(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    leave_type: models.LeaveType,
+) -> tuple[bool, Optional[str]]:
+    required = _controlled_leave_gender(
+        leave_type.availability_type,
+        getattr(leave_type, "eligible_gender", "ALL"),
+    )
+    if required == "ALL":
+        return True, None
+    profile = personnel_profile_for_user(db, amo_id=amo_id, user_id=user_id)
+    gender = _normalized_personnel_gender(getattr(profile, "gender", None) if profile else None)
+    if gender is None:
+        return False, "Personnel profile gender must be recorded before this leave type can be requested."
+    if gender != required:
+        return False, f"{leave_type.name} is restricted to personnel recorded as {required.lower()}."
+    return True, None
+
+
+def _require_leave_type_eligible(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    leave_type: models.LeaveType,
+) -> None:
+    eligible, reason = _leave_type_eligibility(
+        db,
+        amo_id=amo_id,
+        user_id=user_id,
+        leave_type=leave_type,
+    )
+    if not eligible:
+        raise ValueError(reason or "This leave type is not available for the selected employee")
+
+
+def _postholder_department_ids(db: Session, *, amo_id: str, actor_user_id: str) -> set[str]:
+    connection = db.connection()
+    if not inspect(connection).has_table("auth_postholder_assignments"):
+        return set()
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT COALESCE(a.department_id, u.department_id) AS department_id
+            FROM auth_postholder_assignments AS a
+            LEFT JOIN users AS u
+              ON u.id = COALESCE(a.delegated_to_user_id, a.user_id)
+            WHERE a.amo_id = :amo_id
+              AND COALESCE(a.delegated_to_user_id, a.user_id) = :actor_user_id
+              AND a.status = 'ACTIVE'
+              AND (a.valid_from IS NULL OR a.valid_from <= CURRENT_TIMESTAMP)
+              AND (a.valid_to IS NULL OR a.valid_to >= CURRENT_TIMESTAMP)
+            """
+        ),
+        {"amo_id": amo_id, "actor_user_id": actor_user_id},
+    ).fetchall()
+    return {str(row[0]) for row in rows if row and row[0]}
+
+
+def _department_head_user_ids(db: Session, *, amo_id: str, department_id: Optional[str]) -> set[str]:
+    if not department_id:
+        return set()
+    connection = db.connection()
+    if not inspect(connection).has_table("auth_postholder_assignments"):
+        return set()
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT COALESCE(a.delegated_to_user_id, a.user_id) AS approver_user_id
+            FROM auth_postholder_assignments AS a
+            LEFT JOIN users AS u
+              ON u.id = COALESCE(a.delegated_to_user_id, a.user_id)
+            WHERE a.amo_id = :amo_id
+              AND a.status = 'ACTIVE'
+              AND (a.valid_from IS NULL OR a.valid_from <= CURRENT_TIMESTAMP)
+              AND (a.valid_to IS NULL OR a.valid_to >= CURRENT_TIMESTAMP)
+              AND COALESCE(a.department_id, u.department_id) = :department_id
+            """
+        ),
+        {"amo_id": amo_id, "department_id": department_id},
+    ).fetchall()
+    return {str(row[0]) for row in rows if row and row[0]}
+
+
+def can_actor_supervisor_approve(
+    db: Session,
+    *,
+    row: models.LeaveRequest,
+    actor: account_models.User,
+) -> bool:
+    if row.user_id == actor.id or row.status != models.LeaveRequestStatus.SUBMITTED:
+        return False
+    if not row.leave_type.supervisor_approval_required:
+        return False
+    contract = active_contract_for_user(
+        db,
+        amo_id=row.amo_id,
+        user_id=row.user_id,
+        on_date=row.starts_at.date(),
+    )
+    if contract and contract.supervisor_user_id == actor.id:
+        return True
+    department_id = getattr(row.user, "department_id", None)
+    return str(department_id or "") in _postholder_department_ids(
+        db,
+        amo_id=row.amo_id,
+        actor_user_id=str(actor.id),
+    )
+
+
+def leave_review_user_ids(
+    db: Session,
+    *,
+    amo_id: str,
+    actor: account_models.User,
+) -> set[str]:
+    user_ids = {str(actor.id)}
+    today = date.today()
+    direct_reports = db.query(models.EmploymentContract.user_id).filter(
+        models.EmploymentContract.amo_id == amo_id,
+        models.EmploymentContract.supervisor_user_id == actor.id,
+        models.EmploymentContract.effective_from <= today,
+        or_(
+            models.EmploymentContract.effective_to.is_(None),
+            models.EmploymentContract.effective_to >= today,
+        ),
+        models.EmploymentContract.employment_status.in_([
+            models.EmploymentStatus.ACTIVE,
+            models.EmploymentStatus.ONBOARDING,
+            models.EmploymentStatus.SUSPENDED,
+        ]),
+    ).all()
+    user_ids.update(str(row[0]) for row in direct_reports if row and row[0])
+    department_ids = _postholder_department_ids(db, amo_id=amo_id, actor_user_id=str(actor.id))
+    if department_ids:
+        department_users = db.query(account_models.User.id).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.department_id.in_(list(department_ids)),
+        ).all()
+        user_ids.update(str(row[0]) for row in department_users if row and row[0])
+    prior_approvals = db.query(models.LeaveRequest.user_id).join(
+        models.LeaveRequestApproval,
+        models.LeaveRequestApproval.leave_request_id == models.LeaveRequest.id,
+    ).filter(
+        models.LeaveRequest.amo_id == amo_id,
+        models.LeaveRequestApproval.actor_user_id == actor.id,
+    ).all()
+    user_ids.update(str(row[0]) for row in prior_approvals if row and row[0])
+    return user_ids
+
+
+def actor_has_leave_review_scope(db: Session, *, amo_id: str, actor: account_models.User) -> bool:
+    return len(leave_review_user_ids(db, amo_id=amo_id, actor=actor) - {str(actor.id)}) > 0
+
+
+def can_view_leave_request(
+    db: Session,
+    *,
+    row: models.LeaveRequest,
+    actor: account_models.User,
+) -> bool:
+    if row.user_id == actor.id:
+        return True
+    if permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
+        return True
+    return str(row.user_id) in leave_review_user_ids(db, amo_id=row.amo_id, actor=actor)
+
+
 def seed_default_leave_types(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> None:
     defaults = [
-        ("ANNUAL", "Annual leave", models.AvailabilityType.ANNUAL_LEAVE, True, True),
-        ("SICK", "Sick leave", models.AvailabilityType.SICK_LEAVE, True, False),
-        ("COMPASSIONATE", "Compassionate leave", models.AvailabilityType.COMPASSIONATE_LEAVE, True, False),
-        ("MATERNITY", "Maternity leave", models.AvailabilityType.MATERNITY_LEAVE, True, False),
-        ("PATERNITY", "Paternity leave", models.AvailabilityType.PATERNITY_LEAVE, True, False),
-        ("STUDY", "Study leave", models.AvailabilityType.STUDY_LEAVE, True, True),
-        ("UNPAID", "Unpaid leave", models.AvailabilityType.UNPAID_LEAVE, False, False),
+        ("ANNUAL", "Annual leave", models.AvailabilityType.ANNUAL_LEAVE, True, True, "ALL"),
+        ("SICK", "Sick leave", models.AvailabilityType.SICK_LEAVE, True, False, "ALL"),
+        ("COMPASSIONATE", "Compassionate leave", models.AvailabilityType.COMPASSIONATE_LEAVE, True, False, "ALL"),
+        ("MATERNITY", "Maternity leave", models.AvailabilityType.MATERNITY_LEAVE, True, False, "FEMALE"),
+        ("PATERNITY", "Paternity leave", models.AvailabilityType.PATERNITY_LEAVE, True, False, "MALE"),
+        ("STUDY", "Study leave", models.AvailabilityType.STUDY_LEAVE, True, True, "ALL"),
+        ("UNPAID", "Unpaid leave", models.AvailabilityType.UNPAID_LEAVE, False, False, "ALL"),
     ]
     existing = {row[0] for row in db.query(models.LeaveType.code).filter(models.LeaveType.amo_id == amo_id).all()}
-    for order, (code, name, availability_type, paid, deducts) in enumerate(defaults, start=1):
+    for order, (code, name, availability_type, paid, deducts, eligible_gender) in enumerate(defaults, start=1):
         if code in existing:
             continue
         db.add(models.LeaveType(
@@ -1449,6 +1639,7 @@ def seed_default_leave_types(db: Session, *, amo_id: str, actor_user_id: Optiona
             code=code,
             name=name,
             availability_type=availability_type,
+            eligible_gender=eligible_gender,
             paid=paid,
             deducts_balance=deducts,
             supervisor_approval_required=True,
@@ -1460,37 +1651,90 @@ def seed_default_leave_types(db: Session, *, amo_id: str, actor_user_id: Optiona
     db.flush()
 
 
-def list_leave_types(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.LeaveType]:
+def list_leave_types(
+    db: Session,
+    *,
+    amo_id: str,
+    include_inactive: bool = False,
+    user_id: Optional[str] = None,
+) -> list[models.LeaveType]:
     seed_default_leave_types(db, amo_id=amo_id)
     query = db.query(models.LeaveType).filter(models.LeaveType.amo_id == amo_id)
     if not include_inactive:
         query = query.filter(models.LeaveType.is_active.is_(True))
-    return query.order_by(models.LeaveType.display_order.asc(), models.LeaveType.code.asc()).all()
+    rows = query.order_by(models.LeaveType.display_order.asc(), models.LeaveType.code.asc()).all()
+    if user_id:
+        for row in rows:
+            eligible, reason = _leave_type_eligibility(
+                db,
+                amo_id=amo_id,
+                user_id=user_id,
+                leave_type=row,
+            )
+            setattr(row, "eligible", eligible)
+            setattr(row, "eligibility_reason", reason)
+    return rows
 
 
 def create_leave_type(db: Session, *, amo_id: str, actor_user_id: str, payload: schemas.LeaveTypeCreate) -> models.LeaveType:
+    values = _dump(payload)
+    values["eligible_gender"] = _controlled_leave_gender(
+        payload.availability_type,
+        values.get("eligible_gender"),
+    )
     row = models.LeaveType(
         amo_id=amo_id,
         code=payload.code.strip().upper(),
         name=payload.name.strip(),
-        **{key: value for key, value in _dump(payload).items() if key not in {"code", "name"}},
+        **{key: value for key, value in values.items() if key not in {"code", "name"}},
         created_by_user_id=actor_user_id,
         updated_by_user_id=actor_user_id,
     )
     db.add(row)
     db.flush()
-    _audit(db, amo_id=amo_id, actor_user_id=actor_user_id, entity_type="LeaveType", entity_id=row.id, action="create", after={"code": row.code, "name": row.name})
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="LeaveType",
+        entity_id=row.id,
+        action="create",
+        after={"code": row.code, "name": row.name, "eligible_gender": row.eligible_gender},
+    )
     return row
 
 
 def update_leave_type(db: Session, *, row: models.LeaveType, actor_user_id: str, payload: schemas.LeaveTypeUpdate) -> models.LeaveType:
-    before = {"name": row.name, "availability_type": _enum_value(row.availability_type), "is_active": row.is_active}
-    for key, value in _dump(payload, exclude_unset=True).items():
+    before = {
+        "name": row.name,
+        "availability_type": _enum_value(row.availability_type),
+        "eligible_gender": getattr(row, "eligible_gender", "ALL"),
+        "is_active": row.is_active,
+    }
+    changes = _dump(payload, exclude_unset=True)
+    next_availability = changes.get("availability_type", row.availability_type)
+    next_gender = changes.get("eligible_gender", getattr(row, "eligible_gender", "ALL"))
+    changes["eligible_gender"] = _controlled_leave_gender(next_availability, next_gender)
+    for key, value in changes.items():
         setattr(row, key, value)
     row.updated_by_user_id = actor_user_id
     db.add(row)
     db.flush()
-    _audit(db, amo_id=row.amo_id, actor_user_id=actor_user_id, entity_type="LeaveType", entity_id=row.id, action="update", before=before, after={"name": row.name, "availability_type": _enum_value(row.availability_type), "is_active": row.is_active})
+    _audit(
+        db,
+        amo_id=row.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="LeaveType",
+        entity_id=row.id,
+        action="update",
+        before=before,
+        after={
+            "name": row.name,
+            "availability_type": _enum_value(row.availability_type),
+            "eligible_gender": row.eligible_gender,
+            "is_active": row.is_active,
+        },
+    )
     return row
 
 
@@ -1629,7 +1873,12 @@ def _published_roster_conflicts(db: Session, *, request: models.LeaveRequest) ->
     } for row in rows]
 
 
-def serialize_leave_request(db: Session, row: models.LeaveRequest) -> schemas.LeaveRequestRead:
+def serialize_leave_request(
+    db: Session,
+    row: models.LeaveRequest,
+    *,
+    viewer_actor: Optional[account_models.User] = None,
+) -> schemas.LeaveRequestRead:
     approvals = [schemas.LeaveApprovalRead(
         id=approval.id,
         stage=approval.stage,
@@ -1640,6 +1889,7 @@ def serialize_leave_request(db: Session, row: models.LeaveRequest) -> schemas.Le
         decided_at=approval.decided_at,
     ) for approval in sorted(row.approvals or [], key=lambda item: item.decided_at)]
     return schemas.LeaveRequestRead(
+        can_approve=bool(viewer_actor and can_actor_supervisor_approve(db, row=row, actor=viewer_actor)),
         id=row.id,
         amo_id=row.amo_id,
         user_id=row.user_id,
@@ -1693,8 +1943,16 @@ def list_leave_requests(
     request_status: Optional[models.LeaveRequestStatus] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
+    viewer_actor: Optional[account_models.User] = None,
 ) -> schemas.Page[schemas.LeaveRequestRead]:
     query = _leave_query(db, amo_id=amo_id)
+    if viewer_actor and not permissions.has_permission(
+        db,
+        user=viewer_actor,
+        permission=permissions.PermissionCode.LEAVE_APPROVE,
+    ):
+        allowed_user_ids = leave_review_user_ids(db, amo_id=amo_id, actor=viewer_actor)
+        query = query.filter(models.LeaveRequest.user_id.in_(list(allowed_user_ids)))
     if user_id:
         query = query.filter(models.LeaveRequest.user_id == user_id)
     if department_id:
@@ -1707,7 +1965,12 @@ def list_leave_requests(
         query = query.filter(models.LeaveRequest.starts_at < datetime.combine(to_date + timedelta(days=1), time.min, tzinfo=UTC))
     query = query.order_by(models.LeaveRequest.starts_at.desc(), models.LeaveRequest.id.asc())
     rows, total = _paginate(query, page=page_number, page_size=page_size)
-    return page([serialize_leave_request(db, row) for row in rows], page_number=page_number, page_size=page_size, total=total)
+    return page(
+        [serialize_leave_request(db, row, viewer_actor=viewer_actor) for row in rows],
+        page_number=page_number,
+        page_size=page_size,
+        total=total,
+    )
 
 
 def create_leave_request(
@@ -1724,6 +1987,12 @@ def create_leave_request(
     leave_type = db.query(models.LeaveType).filter(models.LeaveType.amo_id == amo_id, models.LeaveType.id == payload.leave_type_id, models.LeaveType.is_active.is_(True)).first()
     if not leave_type:
         raise ValueError("Active leave type not found")
+    _require_leave_type_eligible(
+        db,
+        amo_id=amo_id,
+        user_id=target_user_id,
+        leave_type=leave_type,
+    )
     if leave_type.requires_attachment and not payload.attachment_reference:
         raise ValueError("This leave type requires an attachment")
     requested = _requested_minutes(
@@ -1779,6 +2048,12 @@ def update_leave_request(db: Session, *, row: models.LeaveRequest, actor: accoun
             ends_at=row.ends_at,
             explicit=None,
         )
+    _require_leave_type_eligible(
+        db,
+        amo_id=row.amo_id,
+        user_id=row.user_id,
+        leave_type=row.leave_type,
+    )
     if row.leave_type.requires_attachment and not row.attachment_reference:
         raise ValueError("This leave type requires an attachment")
     row.updated_by_user_id = actor.id
@@ -1793,6 +2068,12 @@ def submit_leave_request(db: Session, *, row: models.LeaveRequest, actor: accoun
         raise ValueError("Only draft leave requests can be submitted")
     if row.user_id != actor.id and not permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_REVIEW):
         raise ValueError("Leave request submit denied")
+    _require_leave_type_eligible(
+        db,
+        amo_id=row.amo_id,
+        user_id=row.user_id,
+        leave_type=row.leave_type,
+    )
     balance = _leave_balance(db, request=row, create=True)
     if row.leave_type.deducts_balance:
         available = _balance_available(balance)
@@ -1807,17 +2088,37 @@ def submit_leave_request(db: Session, *, row: models.LeaveRequest, actor: accoun
     db.add(row)
     db.flush()
     _audit(db, amo_id=row.amo_id, actor_user_id=actor.id, entity_type="LeaveRequest", entity_id=row.id, action="submit", after={"status": _enum_value(row.status), "pending_minutes": row.requested_minutes})
-    supervisor = active_contract_for_user(db, amo_id=row.amo_id, user_id=row.user_id, on_date=row.starts_at.date())
-    supervisor_user = getattr(supervisor, "supervisor", None)
-    _send_email(
-        db,
-        amo_id=row.amo_id,
-        recipient=getattr(supervisor_user, "email", None),
-        template_key="workforce.leave.submitted",
-        subject=f"Leave request submitted by {row.user.full_name}",
-        context={"request_id": row.id, "employee": row.user.full_name, "starts_at": row.starts_at.isoformat(), "ends_at": row.ends_at.isoformat()},
-        correlation_id=f"leave:{row.id}:submitted",
+    contract = active_contract_for_user(db, amo_id=row.amo_id, user_id=row.user_id, on_date=row.starts_at.date())
+    approver_ids = set()
+    if contract and contract.supervisor_user_id:
+        approver_ids.add(str(contract.supervisor_user_id))
+    approver_ids.update(
+        _department_head_user_ids(
+            db,
+            amo_id=row.amo_id,
+            department_id=getattr(row.user, "department_id", None),
+        )
     )
+    approvers = db.query(account_models.User).filter(
+        account_models.User.amo_id == row.amo_id,
+        account_models.User.id.in_(list(approver_ids)),
+        account_models.User.is_active.is_(True),
+    ).all() if approver_ids else []
+    for approver in approvers:
+        _send_email(
+            db,
+            amo_id=row.amo_id,
+            recipient=getattr(approver, "email", None),
+            template_key="workforce.leave.submitted",
+            subject=f"Leave request submitted by {row.user.full_name}",
+            context={
+                "request_id": row.id,
+                "employee": row.user.full_name,
+                "starts_at": row.starts_at.isoformat(),
+                "ends_at": row.ends_at.isoformat(),
+            },
+            correlation_id=f"leave:{row.id}:submitted:{approver.id}",
+        )
     return row
 
 
@@ -1854,18 +2155,33 @@ def _record_leave_decision(
 def supervisor_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, comment: Optional[str]) -> models.LeaveRequest:
     if row.status != models.LeaveRequestStatus.SUBMITTED:
         raise ValueError("Only submitted leave can receive supervisor approval")
-    if row.user_id == actor.id:
-        raise ValueError("Employees cannot approve their own leave")
-    contract = active_contract_for_user(db, amo_id=row.amo_id, user_id=row.user_id, on_date=row.starts_at.date())
-    if contract and contract.supervisor_user_id and contract.supervisor_user_id != actor.id and not permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
-        raise ValueError("Only the assigned supervisor or HR may approve this request")
-    _record_leave_decision(db, row=row, actor=actor, stage=models.LeaveApprovalStage.SUPERVISOR, decision=models.ApprovalDecision.APPROVED, comment=comment)
+    if not can_actor_supervisor_approve(db, row=row, actor=actor):
+        raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may approve this request")
+    _record_leave_decision(
+        db,
+        row=row,
+        actor=actor,
+        stage=models.LeaveApprovalStage.SUPERVISOR,
+        decision=models.ApprovalDecision.APPROVED,
+        comment=comment,
+    )
     row.status = models.LeaveRequestStatus.SUPERVISOR_APPROVED
     row.supervisor_approved_at = _utcnow()
     row.updated_by_user_id = actor.id
     db.add(row)
     db.flush()
-    _audit(db, amo_id=row.amo_id, actor_user_id=actor.id, entity_type="LeaveRequest", entity_id=row.id, action="supervisor_approve", after={"status": _enum_value(row.status)})
+    _audit(
+        db,
+        amo_id=row.amo_id,
+        actor_user_id=actor.id,
+        entity_type="LeaveRequest",
+        entity_id=row.id,
+        action="supervisor_approve",
+        after={
+            "status": _enum_value(row.status),
+            "approval_authority": "IMMEDIATE_SUPERVISOR_OR_DEPARTMENT_POSTHOLDER",
+        },
+    )
     return row
 
 
@@ -1928,7 +2244,21 @@ def hr_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_mo
 def reject_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, reason: Optional[str]) -> models.LeaveRequest:
     if row.status in {models.LeaveRequestStatus.HR_APPROVED, models.LeaveRequestStatus.REJECTED, models.LeaveRequestStatus.CANCELLED, models.LeaveRequestStatus.RECALLED}:
         raise ValueError("Leave request cannot be rejected in its current state")
-    stage = models.LeaveApprovalStage.HR if permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE) else models.LeaveApprovalStage.SUPERVISOR
+    if row.status == models.LeaveRequestStatus.SUBMITTED:
+        if row.leave_type.supervisor_approval_required:
+            if not can_actor_supervisor_approve(db, row=row, actor=actor):
+                raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may reject this request")
+            stage = models.LeaveApprovalStage.SUPERVISOR
+        elif permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
+            stage = models.LeaveApprovalStage.HR
+        else:
+            raise ValueError("Leave rejection is not authorized for this request")
+    elif row.status == models.LeaveRequestStatus.SUPERVISOR_APPROVED:
+        if not permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
+            raise ValueError("Only the configured final leave reviewer may reject a supervisor-approved request")
+        stage = models.LeaveApprovalStage.HR
+    else:
+        raise ValueError("Leave request cannot be rejected in its current state")
     _record_leave_decision(db, row=row, actor=actor, stage=stage, decision=models.ApprovalDecision.REJECTED, comment=reason)
     if row.status != models.LeaveRequestStatus.DRAFT and row.leave_type.deducts_balance:
         balance = _leave_balance(db, request=row)
