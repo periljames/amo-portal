@@ -269,7 +269,7 @@ def project_audit_session(
 def get_audit_session(
     audit_id: uuid.UUID,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     audit = db.query(models.QMSAudit).filter(

@@ -1,6 +1,6 @@
 /** Live authority must not be resurrected from a persisted or stale cache. */
 export function isQmsLiveAuthority(value: string): boolean {
-  return /(?:assignment[-/]eligibility|auditor[-/]eligibility|preparation[-/]readiness|approval[-/]authority|independence|active[-/]privilege)/i.test(value);
+  return /(?:assignment[-/]eligibility|auditor[-/]eligibility|preparation[-/](?:readiness|context|revisions)|checklist[-/]bindings|live-audit-bindings|audit[-/]session|audits\/[^/]+\/session|approval[-/]authority|independence|active[-/]privilege)/i.test(value);
 }
 
 export function withoutQmsAuthority<T extends { clientState: { queries: Array<{ queryKey: readonly unknown[] }> } }>(client: T | undefined): T | undefined {

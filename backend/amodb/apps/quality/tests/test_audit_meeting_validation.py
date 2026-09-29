@@ -21,7 +21,8 @@ def audit():
 def test_invalid_chronology_is_rejected(kind, start, end):
     with pytest.raises(HTTPException) as error:
         validate_meeting_timeline(audit(), kind, datetime.fromisoformat(start).replace(tzinfo=timezone.utc),
-                                  datetime.fromisoformat(end).replace(tzinfo=timezone.utc), ZoneInfo("Africa/Nairobi"))
+                                  datetime.fromisoformat(end).replace(tzinfo=timezone.utc), ZoneInfo("Africa/Nairobi"),
+                                  now=datetime(2026, 9, 1, tzinfo=timezone.utc))
     assert error.value.status_code == 422
 
 
@@ -31,7 +32,8 @@ def test_invalid_chronology_is_rejected(kind, start, end):
 ])
 def test_valid_tenant_local_boundary(kind, start, end):
     validate_meeting_timeline(audit(), kind, datetime.fromisoformat(start).replace(tzinfo=timezone.utc),
-                              datetime.fromisoformat(end).replace(tzinfo=timezone.utc), ZoneInfo("Africa/Nairobi"))
+                              datetime.fromisoformat(end).replace(tzinfo=timezone.utc), ZoneInfo("Africa/Nairobi"),
+                              now=datetime(2026, 9, 1, tzinfo=timezone.utc))
 
 
 def test_saved_team_id_is_not_enough_for_setup_readiness(monkeypatch):

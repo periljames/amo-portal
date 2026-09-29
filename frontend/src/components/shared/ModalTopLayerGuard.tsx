@@ -163,6 +163,12 @@ export function ModalTopLayerGuard() {
 
       try {
         if (!isPopoverOpen(host)) host.showPopover();
+        // Keep shared action feedback above a newly opened modal as well.
+        const feedback = document.querySelector<PopoverElement>(".toast-stack");
+        if (feedback && isPopoverOpen(feedback)) {
+          feedback.hidePopover?.();
+          feedback.showPopover?.();
+        }
       } catch {
         applyFallbackLayer(host);
       }

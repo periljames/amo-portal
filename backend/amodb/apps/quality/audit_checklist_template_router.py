@@ -165,12 +165,15 @@ def _binding_dict(row: QualityAuditChecklistBinding) -> dict[str, Any]:
     }
 
 
-def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
-    row = db.query(models.QMSAudit).filter(
+def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID, lock: bool = False) -> models.QMSAudit:
+    query = db.query(models.QMSAudit).filter(
         models.QMSAudit.amo_id == amo_id,
         models.QMSAudit.id == audit_id,
         models.QMSAudit.deleted_at.is_(None),
-    ).first()
+    )
+    if lock:
+        query = query.with_for_update()
+    row = query.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit not found.")
     return row
@@ -500,6 +503,8 @@ def _instantiate_binding(
     reason: str,
     allow_existing_items: bool,
 ) -> QualityAuditChecklistBinding:
+    if not revision.items:
+        raise HTTPException(status_code=409, detail="The issued checklist has no questions. Add questions and issue a new revision before binding it.")
     existing_items = db.query(models.QualityAuditChecklistItem).filter(
         models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
         models.QualityAuditChecklistItem.audit_id == audit.id,
@@ -885,7 +890,7 @@ def issue_checklist_revision(
 def list_checklist_bindings(
     audit_id: uuid.UUID,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
@@ -1014,7 +1019,7 @@ def bind_current_dms_checklist(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     _assert_checklist_can_change(audit)
     tenant = _manual_tenant(db, ctx.amo_id)
     if tenant is None:
@@ -1054,7 +1059,9 @@ def bind_current_dms_checklist(
         QualityAuditChecklistBinding.template_revision_id == issued.id,
     ).first()
     if existing:
-        raise HTTPException(status_code=409, detail="The current revision of this DMS checklist is already bound to the audit.")
+        # Retrying a successful selection must recover its persisted result,
+        # without instantiating duplicate fieldwork rows or recording usage again.
+        return _binding_dict(existing)
     binding = _instantiate_binding(
         db,
         ctx=ctx,
@@ -1218,7 +1225,7 @@ def apply_checklist_revision(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     _assert_checklist_can_change(audit)
     revision = db.query(QualityAuditChecklistTemplateRevision).options(selectinload(QualityAuditChecklistTemplateRevision.template)).filter(
         QualityAuditChecklistTemplateRevision.amo_id == ctx.amo_id,
@@ -1233,7 +1240,7 @@ def apply_checklist_revision(
         QualityAuditChecklistBinding.template_revision_id == revision.id,
     ).first()
     if existing_binding is not None:
-        raise HTTPException(status_code=409, detail="This checklist template revision is already bound to the audit.")
+        return _binding_dict(existing_binding)
     binding = _instantiate_binding(
         db,
         ctx=ctx,
@@ -1258,7 +1265,7 @@ def create_realtime_audit_checklist(
     """Create, issue, and bind an audit-scoped checklist as one transaction."""
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     _assert_checklist_can_change(audit)
 
     source_references: list[dict[str, Any] | str] = [{

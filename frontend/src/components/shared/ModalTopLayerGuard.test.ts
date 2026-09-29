@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const guard = readFileSync(new URL("./ModalTopLayerGuard.tsx", import.meta.url), "utf8");
 const guardCss = readFileSync(new URL("../../styles/modal-top-layer.css", import.meta.url), "utf8");
+const toast = readFileSync(new URL("../feedback/ToastProvider.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../../main.tsx", import.meta.url), "utf8");
 const routeGate = readFileSync(new URL("../QMS/QualityEnhancementsRouteGate.tsx", import.meta.url), "utf8");
 const standaloneManuals = readFileSync(new URL("../../standalone/manuals-main.tsx", import.meta.url), "utf8");
@@ -12,6 +13,13 @@ const workforce = readFileSync(
 );
 
 describe("portal-wide modal top layer", () => {
+  it("keeps shared action feedback in the top layer when a dialog opens", () => {
+    expect(toast).toContain('popover="manual"');
+    expect(toast).toContain("createPortal");
+    expect(toast).toContain("stack.showPopover()");
+    expect(guard).toContain('document.querySelector<PopoverElement>(".toast-stack")');
+    expect(guard).toContain("feedback.showPopover?.()");
+  });
   it("promotes every visible ARIA modal instead of relying on route z-index values", () => {
     expect(guard).toContain("'[aria-modal=\"true\"]'");
     expect(guard).toContain("MutationObserver");
