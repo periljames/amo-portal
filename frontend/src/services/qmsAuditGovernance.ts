@@ -34,6 +34,24 @@ export type AuditNoticePolicy = {
   is_active: boolean;
 };
 
+export type AuditNoticeSourceChange = {
+  field: string;
+  label: string;
+  before: unknown;
+  after: unknown;
+};
+
+export type AuditRescheduleHistoryItem = {
+  id: string;
+  source: "PLANNER" | "SETUP";
+  reason: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  actor_user_id?: string | null;
+  actor_name?: string | null;
+  created_at: string;
+};
+
 export type AuditNotice = {
   id: string;
   audit_id: string;
@@ -56,6 +74,13 @@ export type AuditNotice = {
   delivery_channel?: string | null;
   delivery_reference?: string | null;
   supersedes_notice_id?: string | null;
+  notice_reference?: string | null;
+  supersedes_reference?: string | null;
+  superseded_by_reference?: string | null;
+  revision_reason?: string | null;
+  source_changes?: AuditNoticeSourceChange[];
+  is_current_source?: boolean;
+  requires_revision?: boolean;
   approved_at?: string | null;
   generated_at?: string | null;
   delivered_at?: string | null;
@@ -158,8 +183,13 @@ export function createAuditNoticePolicy(
   return apiRequest<AuditNoticePolicy>(qmsPath(amoCode, "/audit-notice-policies"), json("POST", payload));
 }
 
+export type AuditNoticeListResponse = {
+  items: AuditNotice[];
+  reschedule_history: AuditRescheduleHistoryItem[];
+};
+
 export function listAuditNotices(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: AuditNotice[] }>(
+  return apiRequest<AuditNoticeListResponse>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices`),
     { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
