@@ -456,27 +456,33 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
   };
 
   const operationId = operation?.id || null;
-  const operationIsTerminal = operation ? TERMINAL.has(operation.status) : true;
   useEffect(() => {
-    if (!operationId || operationIsTerminal) return;
+    if (!operationId) return;
     let active = true;
+    let timer: number | null = null;
+
     const poll = async () => {
       try {
         const next = await getWorkforceHrBulkOperation(operationId);
         if (!active) return;
         setOperation(next);
-        if (TERMINAL.has(next.status)) void queryClient.invalidateQueries({ queryKey: ["workforce"] });
+        if (TERMINAL.has(next.status)) {
+          void queryClient.invalidateQueries({ queryKey: ["workforce"] });
+          return;
+        }
       } catch (cause) {
-        if (active) setError(errorMessage(cause));
+        if (!active) return;
+        setError(errorMessage(cause));
       }
+      if (active) timer = window.setTimeout(() => void poll(), 1500);
     };
+
     void poll();
-    const timer = window.setInterval(() => void poll(), 1500);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [operationId, operationIsTerminal, queryClient]);
+  }, [operationId, queryClient]);
 
   const changeFilter = <K extends keyof HrPeopleFilters>(name: K, value: HrPeopleFilters[K]) => {
     clearSelection();
