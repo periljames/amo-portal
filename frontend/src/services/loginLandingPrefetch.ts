@@ -133,7 +133,8 @@ async function warmIntelligenceHttp(amoCode: string): Promise<void> {
 }
 
 async function warmTrainingHttp(): Promise<void> {
-  await getTrainingAccess();
+  const access = await getTrainingAccess();
+  if (!access.can_open_operating_system || access.self_service_only) return;
   await getTrainingControlRoom();
 }
 
