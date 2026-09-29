@@ -110,6 +110,17 @@ function formatPlannedWindow(dateValue: string, timeValue: string): string {
   return day === "—" ? day : setupDateLabel(`${day}T${timeValue || "00:00"}`);
 }
 
+function auditHistoryWindow(snapshot: Record<string, unknown>): string {
+  const startDate = String(snapshot.planned_start || snapshot.start_date || "—");
+  const endDate = String(snapshot.planned_end || snapshot.end_date || startDate || "—");
+  const startTime = String(snapshot.planned_start_time || snapshot.start_time || "").slice(0, 5);
+  const endTime = String(snapshot.planned_end_time || snapshot.end_time || "").slice(0, 5);
+  const start = `${startDate}${startTime ? ` ${startTime}` : ""}`;
+  const end = `${endDate}${endTime ? ` ${endTime}` : ""}`;
+  return `${start} → ${end}`;
+}
+
+
 function shiftTime(value: string, minutes: number): string {
   const match = /^(\d{2}):(\d{2})$/.exec(value);
   if (!match) return "";
@@ -1843,14 +1854,14 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                           <article className="qms-audit-notice-history__item is-reschedule" key={entry.id}>
                             <div>
                               <strong>{entry.source === "PLANNER" ? "Planner reschedule" : "Setup reschedule"}</strong>
-                              <span>{setupDateLabel(entry.created_at)}{entry.actor_name ? ` · ${entry.actor_name}` : ""}</span>
+                              <span>
+                                {setupDateLabel(entry.created_at)} · {entry.actor_name || entry.actor_user_id || "System / legacy record"}
+                              </span>
                               <p><b>Reason:</b> {entry.reason}</p>
                               <small>
-                                {String(entry.before.planned_start || entry.before.start_date || "—")}
-                                {entry.before.planned_start_time || entry.before.start_time ? ` ${String(entry.before.planned_start_time || entry.before.start_time)}` : ""}
-                                {" → "}
-                                {String(entry.after.planned_start || entry.after.start_date || "—")}
-                                {entry.after.planned_start_time || entry.after.start_time ? ` ${String(entry.after.planned_start_time || entry.after.start_time)}` : ""}
+                                <b>From:</b> {auditHistoryWindow(entry.before)}
+                                <br />
+                                <b>To:</b> {auditHistoryWindow(entry.after)}
                               </small>
                             </div>
                           </article>
