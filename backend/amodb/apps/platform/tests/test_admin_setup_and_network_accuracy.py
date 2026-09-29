@@ -72,6 +72,50 @@ def test_speedtest_host_accepts_public_https_target() -> None:
     assert network_diagnostics._validated_host("https://speed.cloudflare.com") == "speed.cloudflare.com"
 
 
+def test_speedtest_http_transfer_uses_provider_compatible_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = []
+
+    class FakeResponse:
+        headers = {"cf-ray": "test-NBO"}
+
+        def __init__(self) -> None:
+            self._chunks = [b"abc", b""]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, _size: int) -> bytes:
+            return self._chunks.pop(0)
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr(network_diagnostics.urllib.request, "urlopen", fake_urlopen)
+
+    received, headers = network_diagnostics._http_transfer(
+        "https://speed.cloudflare.com/__down?bytes=3"
+    )
+    assert received == 3
+    assert headers["cf-ray"] == "test-NBO"
+    download_request = requests[-1][0]
+    assert download_request.get_method() == "GET"
+    assert download_request.get_header("Accept") == "*/*"
+    assert download_request.get_header("User-agent") == network_diagnostics.HTTP_USER_AGENT
+    assert download_request.get_header("Content-type") is None
+
+    network_diagnostics._http_transfer(
+        "https://speed.cloudflare.com/__up",
+        payload=b"abc",
+    )
+    upload_request = requests[-1][0]
+    assert upload_request.get_method() == "POST"
+    assert upload_request.get_header("Content-type") == "application/octet-stream"
+
+
 def test_stability_requires_a_settled_sample_window() -> None:
     assert network_diagnostics._is_stable([100, 102, 99, 101]) is True
     assert network_diagnostics._is_stable([100, 160, 90, 145]) is False
