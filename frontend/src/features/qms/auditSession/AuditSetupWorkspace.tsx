@@ -730,6 +730,25 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     [noticesQuery.data?.items],
   );
   const previewedNotice = noticePreview?.notice || null;
+  const latestReschedule = noticesQuery.data?.reschedule_history?.[0] || null;
+
+  /* Seed a revision reason once when a frozen notice first becomes stale. */
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!latestNotice?.requires_revision) {
+      revisionReasonForNotice.current = null;
+      return;
+    }
+    if (revisionReasonForNotice.current === latestNotice.id) return;
+    revisionReasonForNotice.current = latestNotice.id;
+    const sourceReason = latestReschedule?.reason && !latestReschedule.reason.startsWith("Reason not recorded")
+      ? `Audit rescheduled: ${latestReschedule.reason}`
+      : latestNotice.source_changes?.length
+        ? `Revised after ${latestNotice.source_changes.map((item) => item.label).join(", ")} changed.`
+        : "Audit arrangements changed after the previous notice was generated.";
+    setRevisionReason(sourceReason.slice(0, 4000));
+  }, [latestNotice?.id, latestNotice?.requires_revision, latestNotice?.source_changes, latestReschedule?.reason]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /* Mirror the saved notice waiver reason into the editable draft when the governed notice changes. */
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -780,6 +799,12 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const persistedDraft = draftFromAudit(auditQuery.data);
   const definitionDirty = JSON.stringify(draft) !== JSON.stringify(persistedDraft);
+  const definitionScheduleChanged =
+    draft.plannedStart !== persistedDraft.plannedStart ||
+    draft.plannedEnd !== persistedDraft.plannedEnd ||
+    draft.plannedStartTime !== persistedDraft.plannedStartTime ||
+    draft.plannedEndTime !== persistedDraft.plannedEndTime;
+  const rescheduleReasonReady = !definitionScheduleChanged || rescheduleReason.trim().length >= 8;
   const readiness = auditSetupReadiness({
     ...draft,
     leadAuditorUserId: auditQuery.data.lead_auditor_user_id,
@@ -1388,13 +1413,28 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 Notify auditee
               </label>
             </div>
+            {canManage && definitionScheduleChanged ? (
+              <label className="qms-audit-setup-stage__reschedule-reason">
+                <span>Reason for rescheduling</span>
+                <textarea
+                  rows={2}
+                  value={rescheduleReason}
+                  onChange={(event) => setRescheduleReason(event.target.value)}
+                  placeholder="Why the audit date or time is changing"
+                />
+                <small>
+                  Required for the permanent audit history. This reason will also be suggested when a revised notice is required.
+                </small>
+                {rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
+              </label>
+            ) : null}
             {canManage ? (
               <div className="qms-audit-setup-stage__actions">
                 <button
                   type="button"
                   className="is-primary"
                   disabled={
-                    saveMutation.isPending || !readiness.definitionReady || !definitionDirty
+                    saveMutation.isPending || !readiness.definitionReady || !definitionDirty || !rescheduleReasonReady
                   }
                   onClick={() => saveMutation.mutate()}
                 >
