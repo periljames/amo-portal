@@ -257,6 +257,8 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
         "title": audit.title,
         "kind": _enum_value(audit.kind),
         "domain": _enum_value(audit.domain),
+        "audit_scope_id": str(audit.audit_scope_id) if getattr(audit, "audit_scope_id", None) else None,
+        "audit_scope_code": getattr(audit, "audit_scope_code", None),
         "scope": audit.scope,
         "criteria": audit.criteria,
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
@@ -684,14 +686,20 @@ def _notice_source_snapshot(
     return (
         {
             **_audit_snapshot(audit),
-            "source_snapshot_version": 2,
+            "source_snapshot_version": 3,
             "meetings": meetings,
+            "recipients": _recipient_snapshot(audit),
         },
         meeting_rows,
     )
 
 
 _NOTICE_SOURCE_LABELS = {
+    "audit_ref": "Audit reference",
+    "kind": "Audit type",
+    "domain": "Audit domain",
+    "audit_scope_id": "Audit scope identity",
+    "audit_scope_code": "Audit scope code",
     "title": "Audit title",
     "scope": "Audit scope",
     "criteria": "Audit criteria",
@@ -731,6 +739,29 @@ def _notice_source_changes(
         after = current_snapshot.get(field)
         if before != after:
             changes.append({"field": field, "label": label, "before": before, "after": after})
+
+    stored_recipients = stored.get("recipients")
+    current_recipients = current_snapshot.get("recipients")
+    if isinstance(stored_recipients, list):
+        if stored_recipients != current_recipients:
+            changes.append({
+                "field": "recipients",
+                "label": "Notice recipients",
+                "before": stored_recipients,
+                "after": current_recipients,
+            })
+    elif notice.recipient_snapshot:
+        # Legacy frozen notices stored recipient routing in the dedicated
+        # recipient snapshot even before it was mirrored into audit_snapshot.
+        # Compare that immutable delivery set so changed external auditees,
+        # auditors, or primary auditee routing cannot receive a stale notice.
+        if list(notice.recipient_snapshot or []) != list(current_recipients or []):
+            changes.append({
+                "field": "recipients",
+                "label": "Notice recipients",
+                "before": list(notice.recipient_snapshot or []),
+                "after": list(current_recipients or []),
+            })
 
     stored_meetings = stored.get("meetings")
     current_meetings = current_snapshot.get("meetings") or {}
