@@ -377,3 +377,138 @@ def test_historical_notice_return_and_cancel_are_latest_revision_guarded() -> No
     source = inspect.getsource(transition_audit_notice)
     assert '{"SUBMIT", "RETURN", "APPROVE", "GENERATE", "DELIVER", "CANCEL"}' in source
     assert "_require_latest_notice_revision(db, row)" in source
+
+
+def test_stale_uploaded_draft_is_cancelled_and_revised_when_scope_label_changes(db_session) -> None:
+    Base.metadata.create_all(
+        bind=db_session.get_bind(),
+        tables=[
+            QualityAuditNoticePolicy.__table__,
+            QualityAuditNotice.__table__,
+            QualityAuditNoticeArtifact.__table__,
+            QualityAuditNoticeEvent.__table__,
+            QualityAuditMeeting.__table__,
+            quality_models.QMSAuditScope.__table__,
+        ],
+    )
+    amo = account_models.AMO(
+        amo_code="AMO-DRAFT-REV",
+        login_slug="amo-draft-rev",
+        name="Draft Revision AMO",
+        contact_email="quality@example.test",
+        time_zone="Africa/Nairobi",
+    )
+    db_session.add(amo)
+    db_session.flush()
+    officer = account_models.User(
+        amo_id=amo.id,
+        email="officer-draft@example.test",
+        staff_code="QO-DRAFT-001",
+        first_name="Quality",
+        last_name="Officer",
+        full_name="Quality Officer",
+        position_title="Quality Officer",
+        hashed_password="hash",
+        role=account_models.AccountRole.QUALITY_OFFICER,
+        is_active=True,
+    )
+    db_session.add(officer)
+    db_session.flush()
+    scope = quality_models.QMSAuditScope(
+        amo_id=amo.id,
+        code="BASE",
+        name="Base Maintenance",
+        party_level="FIRST_PARTY",
+        default_kind=quality_models.QMSAuditKind.INTERNAL,
+        is_active=True,
+        created_by_user_id=officer.id,
+    )
+    db_session.add(scope)
+    db_session.flush()
+    audit = quality_models.QMSAudit(
+        amo_id=amo.id,
+        domain=quality_models.QMSDomain.AMO,
+        kind=quality_models.QMSAuditKind.INTERNAL,
+        audit_ref="QAR/BASE/26/001",
+        audit_scope_id=scope.id,
+        audit_scope_code=scope.code,
+        reference_family="QAR",
+        unit_code="BASE",
+        ref_year=26,
+        ref_sequence=1,
+        title="Base maintenance audit",
+        scope="Base maintenance process",
+        criteria="Approved AMO procedures",
+        notify_auditors=False,
+        notify_auditees=False,
+        planned_start=date(2026, 10, 20),
+        planned_end=date(2026, 10, 20),
+        created_by_user_id=officer.id,
+    )
+    db_session.add(audit)
+    db_session.flush()
+    frozen_snapshot, _ = _notice_source_snapshot(db_session, amo_id=amo.id, audit=audit)
+    assert frozen_snapshot["audit_area_label"] == "BASE - Base Maintenance"
+
+    prior = QualityAuditNotice(
+        amo_id=amo.id,
+        audit_id=audit.id,
+        revision_no=1,
+        status="DRAFT",
+        required_notice_days=14,
+        notice_date=date(2026, 10, 1),
+        subject="Audit Notice - QAR/BASE/26/001 - Base maintenance audit",
+        body="Controlled notice",
+        audit_snapshot=frozen_snapshot,
+        recipient_snapshot=[],
+        created_by_user_id=officer.id,
+    )
+    db_session.add(prior)
+    db_session.flush()
+    db_session.add(QualityAuditNoticeArtifact(
+        amo_id=amo.id,
+        audit_id=audit.id,
+        notice_id=prior.id,
+        source_type="UPLOADED",
+        storage_ref="local://quality/audit-notices/frozen-draft.pdf",
+        filename="frozen-draft.pdf",
+        content_type="application/pdf",
+        size_bytes=128,
+        sha256="0" * 64,
+        created_by_user_id=officer.id,
+    ))
+    db_session.commit()
+
+    scope.name = "Base & Line Maintenance"
+    db_session.commit()
+
+    context = TenantContext(
+        amo_code=amo.amo_code,
+        amo_id=amo.id,
+        user_id=officer.id,
+        is_superuser=False,
+    )
+    revised = revise_audit_notice(
+        audit_id=audit.id,
+        notice_id=prior.id,
+        payload=NoticeRevisionCreate(
+            notice_date=date(2026, 10, 2),
+            reason="Audit scope label changed after the signed draft was attached.",
+        ),
+        ctx=context,
+        db=db_session,
+    )
+
+    db_session.refresh(prior)
+    assert prior.status == "CANCELLED"
+    assert revised["revision_no"] == 2
+    assert revised["supersedes_notice_id"] == prior.id
+    assert revised["audit_snapshot"]["audit_area_label"] == "BASE - Base & Line Maintenance"
+    event_types = [
+        row.event_type
+        for row in db_session.query(QualityAuditNoticeEvent)
+        .filter(QualityAuditNoticeEvent.audit_id == audit.id)
+        .order_by(QualityAuditNoticeEvent.created_at.asc())
+        .all()
+    ]
+    assert event_types == ["CANCELLED", "REVISED"]
