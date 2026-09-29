@@ -500,6 +500,7 @@ class PersonnelProfile(Base):
     employment_status = Column(String(64), nullable=True)
     status = Column(String(64), nullable=False, default="Active", index=True)
     date_of_birth = Column(Date, nullable=True)
+    gender = Column(String(24), nullable=True)
     birth_place = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

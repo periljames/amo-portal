@@ -3,20 +3,27 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from ..rostering import models as roster_models
+from ..rostering.code_registry import normalize_shift_code
 from . import models as workforce_models
 
 
 def _canonical_rd_id(db: Session, *, amo_id: str) -> str:
-    row = db.query(roster_models.ShiftTemplate.id).filter(
+    rows = db.query(roster_models.ShiftTemplate).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
-        roster_models.ShiftTemplate.code == "RD",
         roster_models.ShiftTemplate.is_active.is_(True),
         roster_models.ShiftTemplate.kind == roster_models.ShiftTemplateKind.OFF,
         roster_models.ShiftTemplate.counts_as_duty.is_(False),
-    ).first()
+    ).order_by(roster_models.ShiftTemplate.code.asc()).all()
+    # Existing tenants use O/OF/RR. Reuse their protected-rest template rather
+    # than requiring a destructive rename or creating another shift code.
+    row = next((item for item in rows if item.code == "RD"), None)
     if row is None:
-        raise ValueError("Canonical RD shift template is required before saving protected OFF days")
-    return str(row[0])
+        row = next((item for item in rows if normalize_shift_code(item.code) == "RD"), None)
+    if row is None and len(rows) == 1:
+        row = rows[0]
+    if row is None:
+        raise ValueError("Configure an active Off duty shift in Setup > Shifts & patterns (RD or O), with Counts as duty disabled, then save the rotation again.")
+    return str(row.id)
 
 
 def canonicalize_pattern_payload(db: Session, *, amo_id: str, payload):

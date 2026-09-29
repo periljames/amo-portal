@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -283,6 +283,7 @@ class PatternPreviewResponse(WorkforceSchema):
 
 
 class LeaveTypeCreate(WorkforceSchema):
+    eligible_gender: Literal["ALL", "FEMALE", "MALE"] = "ALL"
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     availability_type: models.AvailabilityType
@@ -298,6 +299,7 @@ class LeaveTypeCreate(WorkforceSchema):
 
 
 class LeaveTypeUpdate(WorkforceSchema):
+    eligible_gender: Optional[Literal["ALL", "FEMALE", "MALE"]] = None
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     availability_type: Optional[models.AvailabilityType] = None
     description: Optional[str] = None
@@ -312,6 +314,8 @@ class LeaveTypeUpdate(WorkforceSchema):
 
 
 class LeaveTypeRead(LeaveTypeCreate):
+    eligible: bool = True
+    eligibility_reason: Optional[str] = None
     id: str
     amo_id: str
     created_by_user_id: Optional[str] = None
@@ -387,6 +391,7 @@ class LeaveApprovalRead(WorkforceSchema):
 
 
 class LeaveRequestRead(WorkforceSchema):
+    can_approve: bool = False
     id: str
     amo_id: str
     user_id: str
