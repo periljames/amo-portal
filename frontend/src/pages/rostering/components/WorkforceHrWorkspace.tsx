@@ -276,7 +276,7 @@ export function WorkforceHrWorkspace() {
 
 function decisionLabel(kind: DecisionTarget["kind"]): string {
   if (kind === "leave-supervisor") return "Supervisor leave approval";
-  if (kind === "leave-hr") return "HR leave approval";
+  if (kind === "leave-hr") return "Complete legacy leave approval";
   if (kind === "leave-reject") return "Reject leave request";
   if (kind === "timesheet-supervisor") return "Supervisor timesheet approval";
   if (kind === "timesheet-hr") return "HR timesheet approval";
