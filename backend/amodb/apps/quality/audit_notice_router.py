@@ -200,10 +200,7 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "form_issue_date": row.form_issue_date,
         "form_revision": row.form_revision,
         "revision_no": row.revision_no,
-        "notice_reference": _notice_reference(
-            str((row.audit_snapshot or {}).get("audit_ref") or ""),
-            row.revision_no,
-        ),
+        "notice_reference": _notice_reference_for_row(row),
         "revision_reason": _notice_revision_reason(row),
         "status": row.status,
         "required_notice_days": row.required_notice_days,
@@ -278,6 +275,16 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
 
 def _notice_reference(audit_ref: str | None, revision_no: int) -> str:
     return f"{audit_ref or 'AUDIT'}/N{int(revision_no or 0):02d}"
+
+
+def _notice_reference_for_row(
+    notice: QualityAuditNotice,
+    *,
+    fallback_audit_ref: str | None = None,
+) -> str:
+    snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    audit_ref = str(snapshot.get("audit_ref") or fallback_audit_ref or "").strip()
+    return _notice_reference(audit_ref, notice.revision_no)
 
 
 def _notice_revision_reason(notice: QualityAuditNotice) -> str | None:
@@ -636,6 +643,7 @@ def _meetings(db: Session, *, amo_id: str, audit_id: uuid.UUID, zone: ZoneInfo) 
         QualityAuditMeeting.amo_id == amo_id,
         QualityAuditMeeting.audit_id == audit_id,
         QualityAuditMeeting.meeting_type.in_(("OPENING", "CLOSING")),
+        QualityAuditMeeting.status != "CANCELLED",
     ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
     opening = next((row for row in rows if row.meeting_type == "OPENING"), None)
     closing = next((row for row in reversed(rows) if row.meeting_type == "CLOSING"), None)
@@ -676,6 +684,47 @@ def _meeting_source_snapshot(
     )
 
 
+def _normalise_recipient_snapshot(snapshot: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Canonicalise recipient routing so frozen legacy/new snapshots compare consistently."""
+    normalised: list[dict[str, Any]] = []
+    for raw in snapshot or []:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip().upper()
+        user_id = str(raw.get("user_id") or "").strip() or None
+        email = str(raw.get("email") or "").strip().lower() or None
+        if user_id:
+            # User-backed recipients are identified by role + immutable user id,
+            # while email remains material because it controls delivery routing.
+            normalised.append({
+                "role": role,
+                "user_id": user_id,
+                "email": email,
+            })
+            continue
+        normalised.append({
+            "role": role,
+            "user_id": None,
+            "email": email,
+            "name": str(raw.get("name") or "").strip() or None,
+            "first_name": str(raw.get("first_name") or "").strip() or None,
+            "last_name": str(raw.get("last_name") or "").strip() or None,
+            "designation": str(raw.get("designation") or "").strip() or None,
+        })
+    return sorted(
+        normalised,
+        key=lambda item: (
+            str(item.get("role") or ""),
+            str(item.get("user_id") or ""),
+            str(item.get("email") or ""),
+            str(item.get("name") or ""),
+            str(item.get("first_name") or ""),
+            str(item.get("last_name") or ""),
+            str(item.get("designation") or ""),
+        ),
+    )
+
+
 def _notice_source_snapshot(
     db: Session,
     *,
@@ -683,12 +732,17 @@ def _notice_source_snapshot(
     audit: models.QMSAudit,
 ) -> tuple[dict[str, Any], dict[str, QualityAuditMeeting | None]]:
     meetings, meeting_rows = _meeting_source_snapshot(db, amo_id=amo_id, audit_id=audit.id)
+    resolved_recipients, _ = _resolved_recipients(
+        db,
+        amo_id=amo_id,
+        snapshot=_recipient_snapshot(audit),
+    )
     return (
         {
             **_audit_snapshot(audit),
-            "source_snapshot_version": 3,
+            "source_snapshot_version": 4,
             "meetings": meetings,
-            "recipients": _recipient_snapshot(audit),
+            "recipients": _normalise_recipient_snapshot(resolved_recipients),
         },
         meeting_rows,
     )
@@ -741,26 +795,27 @@ def _notice_source_changes(
             changes.append({"field": field, "label": label, "before": before, "after": after})
 
     stored_recipients = stored.get("recipients")
-    current_recipients = current_snapshot.get("recipients")
+    current_recipients = _normalise_recipient_snapshot(current_snapshot.get("recipients") or [])
     if isinstance(stored_recipients, list):
-        if stored_recipients != current_recipients:
+        frozen_recipients = _normalise_recipient_snapshot(stored_recipients)
+        if frozen_recipients != current_recipients:
             changes.append({
                 "field": "recipients",
                 "label": "Notice recipients",
-                "before": stored_recipients,
+                "before": frozen_recipients,
                 "after": current_recipients,
             })
     elif notice.recipient_snapshot:
-        # Legacy frozen notices stored recipient routing in the dedicated
-        # recipient snapshot even before it was mirrored into audit_snapshot.
-        # Compare that immutable delivery set so changed external auditees,
-        # auditors, or primary auditee routing cannot receive a stale notice.
-        if list(notice.recipient_snapshot or []) != list(current_recipients or []):
+        # Legacy frozen notices stored the resolved delivery set in the
+        # dedicated recipient snapshot. Normalize away enrichment-only shape
+        # differences while retaining role, identity and email routing changes.
+        frozen_recipients = _normalise_recipient_snapshot(list(notice.recipient_snapshot or []))
+        if frozen_recipients != current_recipients:
             changes.append({
                 "field": "recipients",
                 "label": "Notice recipients",
-                "before": list(notice.recipient_snapshot or []),
-                "after": list(current_recipients or []),
+                "before": frozen_recipients,
+                "after": current_recipients,
             })
 
     stored_meetings = stored.get("meetings")
@@ -980,7 +1035,7 @@ def _render_notice(
         sequence_window += " on each audit day"
     local_signed = signed_at.astimezone(zone)
     audit_ref = str((notice.audit_snapshot or {}).get("audit_ref") or audit.audit_ref or "")
-    notice_reference = _notice_reference(audit_ref, notice.revision_no)
+    notice_reference = _notice_reference_for_row(notice, fallback_audit_ref=audit.audit_ref)
     supersedes_reference = None
     if notice.supersedes_notice_id:
         prior = db.query(QualityAuditNotice).filter(
@@ -989,7 +1044,7 @@ def _render_notice(
             QualityAuditNotice.id == notice.supersedes_notice_id,
         ).first()
         if prior is not None:
-            supersedes_reference = _notice_reference(audit_ref, prior.revision_no)
+            supersedes_reference = _notice_reference_for_row(prior, fallback_audit_ref=audit.audit_ref)
     return render_audit_notice_pdf(
         amo_name=amo.name,
         contact_email=amo.contact_email,
@@ -1027,8 +1082,9 @@ def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice) -> st
         normalized = _SAFE_FILENAME.sub("-", str(value or "")).strip(" .-_")
         return re.sub(r"\s+", " ", normalized) or fallback
 
-    reference = clean(audit.audit_ref or audit.id, "Audit")
-    title = clean(audit.title, "Untitled")
+    snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    reference = clean(snapshot.get("audit_ref") or audit.audit_ref or audit.id, "Audit")
+    title = clean(snapshot.get("title") or audit.title, "Untitled")
     notice_day = notice.notice_date.isoformat() if notice.notice_date else date.today().isoformat()
     stem = f"(Notice) {reference} - {title} - {notice_day} - Notice N{notice.revision_no:02d}"
     return f"{stem[:251]}.pdf"
@@ -1343,7 +1399,6 @@ def list_audit_notices(
     items: list[dict[str, Any]] = []
     for row in rows:
         payload = _notice_dict(row)
-        audit_ref = str((row.audit_snapshot or {}).get("audit_ref") or audit.audit_ref or "")
         changes = _notice_source_changes(
             row,
             current_snapshot=current_snapshot,
@@ -1353,12 +1408,12 @@ def list_audit_notices(
         newer = superseded_by.get(str(row.id))
         payload.update({
             "is_latest": str(row.id) == latest_id,
-            "notice_reference": _notice_reference(audit_ref, row.revision_no),
+            "notice_reference": _notice_reference_for_row(row, fallback_audit_ref=audit.audit_ref),
             "supersedes_reference": (
-                _notice_reference(audit_ref, prior.revision_no) if prior else None
+                _notice_reference_for_row(prior, fallback_audit_ref=audit.audit_ref) if prior else None
             ),
             "superseded_by_reference": (
-                _notice_reference(audit_ref, newer.revision_no) if newer else None
+                _notice_reference_for_row(newer, fallback_audit_ref=audit.audit_ref) if newer else None
             ),
             "revision_reason": _notice_revision_reason(row),
             "source_changes": changes,
