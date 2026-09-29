@@ -18,6 +18,7 @@ import ipaddress
 import os
 import statistics
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,10 @@ MIN_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MIN_TEST_SECONDS", "8"))
 MAX_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MAX_TEST_SECONDS", "14"))
 MAX_TRANSFER_BYTES = int(os.getenv("PLATFORM_NET_MAX_TRANSFER_BYTES", str(1024 * 1024 * 1024)))
 LATENCY_SAMPLES = int(os.getenv("PLATFORM_NET_LATENCY_SAMPLES", "9"))
+HTTP_USER_AGENT = os.getenv(
+    "PLATFORM_NET_USER_AGENT",
+    "Mozilla/5.0 (compatible; AMO-Portal-NetworkDiagnostics/1.0)",
+)
 
 
 def _now() -> datetime:
@@ -80,11 +85,18 @@ def _validated_host(value: str) -> str:
 
 
 def _http_transfer(url: str, *, payload: bytes | None = None) -> tuple[int, dict[str, str]]:
+    headers = {
+        "Accept": "*/*",
+        "Cache-Control": "no-cache",
+        "User-Agent": HTTP_USER_AGENT,
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/octet-stream"
     request = urllib.request.Request(
         url,
         data=payload,
         method="POST" if payload is not None else "GET",
-        headers={"Cache-Control": "no-cache", "Content-Type": "application/octet-stream"},
+        headers=headers,
     )
     received = 0
     with urllib.request.urlopen(request, timeout=max(2.0, HTTP_TIMEOUT)) as response:
@@ -239,7 +251,14 @@ def run_internet_speedtest(
         })
     except Exception as exc:  # pragma: no cover - network dependent
         result["error"] = str(exc)[:500]
-        logger.warning("server->internet speedtest failed: %s", exc)
+        if isinstance(exc, urllib.error.HTTPError) and exc.code in {403, 429}:
+            result["details"] = {
+                "failure_kind": "provider_rejected",
+                "http_status": exc.code,
+            }
+            logger.info("server->internet speedtest provider rejected probe: HTTP %s", exc.code)
+        else:
+            logger.warning("server->internet speedtest failed: %s", exc)
     return result
 
 
