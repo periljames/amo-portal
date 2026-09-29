@@ -153,10 +153,13 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     expect(await documentTypeFromApi(page, manualId)).toMatchObject({ document_type: "CHECKLIST", source: "OVERRIDE" });
 
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=CHECKLIST&q=${encodeURIComponent(code)}`);
-    const row = page.getByRole("row").filter({ hasText: code });
-    await expect(row).toBeVisible({ timeout: 30_000 });
-    await expect(row).toContainText("CHECKLIST");
-    await row.getByRole("button", { name: "Open workspace", exact: true }).click();
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    const card = library.locator("article.dlibrary-card").filter({ hasText: code });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card).toHaveAttribute("data-document-type", "CHECKLIST");
+    await card.getByRole("button", { name: "Workspace", exact: true }).click();
 
     await expect(page.getByTestId("document-workflow-guide")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("delete-document-button").click();
@@ -168,7 +171,10 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await expect(page).toHaveURL(new RegExp(`/maintenance/${AMO_CODE}/document-control/library(?:\\?|$)`), { timeout: 30_000 });
 
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?q=${encodeURIComponent(code)}`);
-    await expect(page.getByRole("row").filter({ hasText: code })).toHaveCount(0, { timeout: 30_000 });
+    const deletedLibrary = page.getByTestId("integrated-document-library");
+    await expect(deletedLibrary).toBeVisible({ timeout: 30_000 });
+    await deletedLibrary.getByRole("button", { name: "Shelf", exact: true }).click();
+    await expect(deletedLibrary.locator("article.dlibrary-card").filter({ hasText: code })).toHaveCount(0, { timeout: 30_000 });
   });
 
   test("published controlled history cannot be permanently deleted", async ({ page }) => {
