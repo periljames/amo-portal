@@ -36,6 +36,7 @@ class ParsedRow:
     employment_status: Optional[str]
     status: str
     date_of_birth: Optional[date]
+    gender: Optional[str]
     birth_place: Optional[str]
 
 
@@ -74,6 +75,15 @@ def _normalize_status(value: Optional[str]) -> str:
     if lowered == "dormant":
         return STATUS_DORMANT
     return raw
+
+
+def _normalize_gender(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"F", "FEMALE"}:
+        return "FEMALE"
+    if normalized in {"M", "MALE"}:
+        return "MALE"
+    return None
 
 
 def parse_people_sheet(file_bytes: bytes, *, filename: str, sheet_name: str = "People") -> list[dict[str, Any]]:
@@ -143,6 +153,7 @@ def _build_parsed_row(raw: dict[str, Any]) -> ParsedRow:
         employment_status=_to_clean_str(raw.get("Employment_Status")),
         status=status,
         date_of_birth=_parse_date(raw.get("DOB")),
+        gender=_normalize_gender(_to_clean_str(raw.get("Gender")) or _to_clean_str(raw.get("Sex"))),
         birth_place=_to_clean_str(raw.get("birthplace")),
     )
 
@@ -383,6 +394,7 @@ def import_personnel_rows(
         profile.employment_status = parsed.employment_status
         profile.status = parsed.status
         profile.date_of_birth = parsed.date_of_birth
+        profile.gender = parsed.gender
         profile.birth_place = parsed.birth_place
         profile.updated_at = now
 

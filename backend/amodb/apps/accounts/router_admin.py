@@ -258,6 +258,7 @@ def _profile_state(profile: models.PersonnelProfile) -> dict:
         "employment_status": profile.employment_status,
         "status": profile.status,
         "date_of_birth": _jsonable(profile.date_of_birth),
+        "gender": profile.gender,
         "birth_place": profile.birth_place,
     }
 
@@ -2447,7 +2448,7 @@ def undo_last_personnel_import(
         for key in [
             "person_id", "user_id", "first_name", "last_name", "full_name", "national_id", "amel_no",
             "internal_certification_stamp_no", "department", "position_title", "phone_number", "secondary_phone",
-            "email", "employment_status", "status", "birth_place",
+            "email", "employment_status", "status", "gender", "birth_place",
         ]:
             setattr(profile, key, state.get(key))
         profile.initial_authorization_date = _from_iso_date(state.get("initial_authorization_date"))

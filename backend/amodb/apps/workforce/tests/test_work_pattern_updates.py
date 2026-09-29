@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from amodb.apps.rostering import models as roster_models
-from amodb.apps.workforce import models, schemas, services
+from amodb.apps.workforce import models, pattern_rest_policy, schemas, services
 from amodb.database import Base
 
 
@@ -156,3 +156,31 @@ def test_pattern_update_rejects_duplicate_cycle_days_before_persistence() -> Non
                 _day(0, None, models.PatternDayStatus.OFF),
             ],
         )
+
+
+
+def test_protected_rest_policy_accepts_existing_o_off_template() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[roster_models.ShiftTemplate.__table__],
+    )
+    amo_id = _id()
+    off_id = _id()
+
+    with Session(bind=engine, autoflush=False, expire_on_commit=False) as db:
+        db.add(roster_models.ShiftTemplate(
+            id=off_id,
+            amo_id=amo_id,
+            code="O",
+            label="Off duty",
+            kind=roster_models.ShiftTemplateKind.OFF,
+            duration_minutes=0,
+            counts_as_duty=False,
+            is_active=True,
+        ))
+        db.commit()
+
+        assert pattern_rest_policy._canonical_rd_id(db, amo_id=amo_id) == off_id
+
+    engine.dispose()

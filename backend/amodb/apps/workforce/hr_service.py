@@ -554,7 +554,13 @@ def dashboard(
             models.LeaveRequestStatus.SUBMITTED,
             models.LeaveRequestStatus.SUPERVISOR_APPROVED,
         ]),
-    ).order_by(models.LeaveRequest.submitted_at.asc(), models.LeaveRequest.created_at.asc()).limit(50).all()
+    ).order_by(models.LeaveRequest.submitted_at.asc(), models.LeaveRequest.created_at.asc()).limit(200).all()
+    pending_leave_rows = [
+        row
+        for row in pending_leave_rows
+        if services.can_actor_supervisor_approve(db, row=row, actor=current_user)
+    ]
+    pending_counts["leave"] = len(pending_leave_rows)
 
     pending_timesheet_rows = db.query(models.Timesheet).options(
         joinedload(models.Timesheet.user),
@@ -741,12 +747,15 @@ def dashboard(
     can_manage_leave_balances = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.LEAVE_MANAGE_BALANCES
     )
-    can_review_leave = permissions.has_permission(
-        db, user=current_user, permission=permissions.PermissionCode.LEAVE_REVIEW
+    can_review_leave = (
+        services.actor_has_leave_review_scope(db, amo_id=amo_id, actor=current_user)
+        or permissions.has_permission(
+            db,
+            user=current_user,
+            permission=permissions.PermissionCode.LEAVE_REVIEW,
+        )
     )
-    can_approve_leave = permissions.has_permission(
-        db, user=current_user, permission=permissions.PermissionCode.LEAVE_APPROVE
-    )
+    can_approve_leave = services.actor_has_leave_review_scope(db, amo_id=amo_id, actor=current_user)
     can_approve_timesheet_supervisor = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.TIMESHEET_APPROVE
     )
