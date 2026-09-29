@@ -1788,6 +1788,20 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                               {row.supersedes_reference ? <small>Supersedes {row.supersedes_reference}</small> : null}
                               {row.superseded_by_reference ? <small>Superseded by {row.superseded_by_reference}</small> : null}
                               {row.delivered_at ? <small>Delivered {setupDateLabel(row.delivered_at)}</small> : row.generated_at ? <small>Generated {setupDateLabel(row.generated_at)}</small> : null}
+                              {row.events?.length ? (
+                                <details className="qms-audit-notice-history__events">
+                                  <summary>Lifecycle events ({row.events.length})</summary>
+                                  <ol>
+                                    {row.events.map((event) => (
+                                      <li key={event.id}>
+                                        <strong>{event.event_type.replaceAll("_", " ")}</strong>
+                                        <span>{setupDateLabel(event.created_at)}</span>
+                                        {event.reason ? <small>{event.reason}</small> : null}
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </details>
+                              ) : null}
                             </div>
                             {row.artifact ? (
                               <div className="qms-audit-notice-history__actions">
