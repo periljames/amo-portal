@@ -260,8 +260,16 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
         "criteria": audit.criteria,
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
-        "planned_start_time": audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None,
-        "planned_end_time": audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None,
+        "planned_start_time": (
+            (audit.planned_start_time or DEFAULT_START_TIME).strftime("%H:%M")
+            if audit.planned_start
+            else (audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None)
+        ),
+        "planned_end_time": (
+            (audit.planned_end_time or DEFAULT_END_TIME).strftime("%H:%M")
+            if audit.planned_end
+            else (audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None)
+        ),
         "auditee": audit.auditee,
         "auditee_email": getattr(audit, "auditee_email", None),
         "auditee_user_id": audit.auditee_user_id,
@@ -771,6 +779,16 @@ def _notice_source_snapshot(
     )
 
 
+def _normalise_notice_schedule_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Compare effective schedule times rather than storage representation."""
+    normalised = dict(snapshot)
+    if normalised.get("planned_start") and not normalised.get("planned_start_time"):
+        normalised["planned_start_time"] = DEFAULT_START_TIME.strftime("%H:%M")
+    if normalised.get("planned_end") and not normalised.get("planned_end_time"):
+        normalised["planned_end_time"] = DEFAULT_END_TIME.strftime("%H:%M")
+    return normalised
+
+
 _NOTICE_SOURCE_LABELS = {
     "audit_ref": "Audit reference",
     "kind": "Audit type",
@@ -805,7 +823,10 @@ def _notice_source_changes(
     if notice.artifact is None and notice.status == "DRAFT":
         return []
 
-    stored = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    stored = _normalise_notice_schedule_snapshot(
+        notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    )
+    current_snapshot = _normalise_notice_schedule_snapshot(current_snapshot)
     changes: list[dict[str, Any]] = []
     for field, label in _NOTICE_SOURCE_LABELS.items():
         # Older notices did not capture the later-added routing fields. Do not
