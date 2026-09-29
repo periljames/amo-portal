@@ -50,3 +50,12 @@ def test_leave_governance_migration_repairs_columns_used_by_runtime_models():
     assert '"eligible_gender"' in source
     assert "MATERNITY_LEAVE" in source
     assert "PATERNITY_LEAVE" in source
+
+
+
+def test_leave_governance_migration_preserves_tenant_approval_policy_and_repair_columns():
+    source = MIGRATION.read_text(encoding="utf-8")
+
+    assert "supervisor_approval_required = TRUE" not in source
+    assert "hr_approval_required = FALSE" not in source
+    assert "op.drop_column" not in source
