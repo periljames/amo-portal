@@ -45,6 +45,13 @@ describe("audit notice revision governance", () => {
     expect(workspace).not.toContain("policy_id: row.policy_id || undefined");
   });
 
+  it("keeps a cancelled latest notice recoverable by creating the next controlled revision", () => {
+    expect(workspace).toContain('latestNotice.status === "CANCELLED"');
+    expect(workspace).toContain("latestNoticeNeedsReplacement");
+    expect(workspace).toContain("The latest notice was cancelled and cannot be reused.");
+    expect(workspace).toContain("Create revised notice N");
+  });
+
   it("keeps historical notice artifacts view-only across both QMS notice surfaces", () => {
     expect(workspace).toContain("previewedNotice.is_latest !== false");
     expect(governance).toContain("latestNotice && !latestNotice.requires_revision");
