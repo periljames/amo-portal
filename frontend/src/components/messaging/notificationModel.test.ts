@@ -54,4 +54,14 @@ describe("notification presentation model", () => {
     const item = row({ business_state: "OVERDUE", priority: "CRITICAL", requires_action: true });
     expect(notificationTone(item)).toBe("critical");
   });
+
+  it("does not classify overdue obligations as due soon", () => {
+    const item = row({
+      due_at: "2020-01-01T00:00:00Z",
+      business_state: "OVERDUE",
+      priority: "CRITICAL",
+      requires_action: true,
+    });
+    expect(notificationMatches(item, "for-you", "due")).toBe(false);
+  });
 });
