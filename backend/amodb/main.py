@@ -353,7 +353,21 @@ app.add_middleware(
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Retry-After", "X-Request-ID", "X-Error-Code"],
+    expose_headers=[
+        "Retry-After",
+        "X-Request-ID",
+        "X-Error-Code",
+        "Content-Disposition",
+        "X-Reader-SHA256",
+        "X-PDF-Reader-SHA256",
+        "X-Source-SHA256",
+        "X-PDF-Template-SHA256",
+        "X-PDF-Working-SHA256",
+        "X-PDF-Output-SHA256",
+        "X-PDF-Page-Count",
+        "X-PDF-Flattened-Pages",
+        "X-PDF-Selected-Pages",
+    ],
 )
 app.add_middleware(
     GZipMiddleware,

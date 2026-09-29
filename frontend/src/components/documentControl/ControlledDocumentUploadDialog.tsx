@@ -82,11 +82,11 @@ function isoAfterMonths(months: number): string {
 }
 
 function fileStem(filename: string): string {
-  return filename.replace(/\.(docx|pdf)$/i, "").replace(/[_-]+/g, " ").trim();
+  return filename.replace(/\.(docx|doc|odt|rtf|pdf)$/i, "").replace(/[_-]+/g, " ").trim();
 }
 
 function fallbackCode(filename: string): string {
-  return filename.replace(/\.(docx|pdf)$/i, "").toUpperCase().replace(/[^A-Z0-9]+/g, "/").replace(/^\/+|\/+$/g, "").slice(0, 32);
+  return filename.replace(/\.(docx|doc|odt|rtf|pdf)$/i, "").toUpperCase().replace(/[^A-Z0-9]+/g, "/").replace(/^\/+|\/+$/g, "").slice(0, 32);
 }
 
 function initialForm(documentType: ControlledDocumentType): FormState {
@@ -192,8 +192,8 @@ export default function ControlledDocumentUploadDialog({
 
   const chooseFile = async (selected: File | null) => {
     if (!selected) return;
-    if (!/\.(docx|pdf)$/i.test(selected.name)) {
-      setError("Choose a PDF or DOCX file.");
+    if (!/\.(docx|doc|odt|rtf|pdf)$/i.test(selected.name)) {
+      setError("Choose a PDF or supported Word file (DOCX, DOC, ODT, or RTF).");
       return;
     }
     setBusy(true);
@@ -319,9 +319,9 @@ export default function ControlledDocumentUploadDialog({
           <div className="controlled-intake__file-step">
             <label>
               <UploadCloud size={26} />
-              <strong>{busy ? "Inspecting source…" : "Choose a PDF or DOCX document"}</strong>
-              <span>PDF up to 50 MB · DOCX up to 10 MB · original source retained</span>
-              <input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0] || null)} />
+              <strong>{busy ? "Inspecting source…" : "Choose a PDF or Word document"}</strong>
+              <span>PDF up to 50 MB · Word documents up to 10 MB · original source retained</span>
+              <input type="file" accept=".pdf,.docx,.doc,.odt,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,application/rtf" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0] || null)} />
             </label>
           </div>
         ) : (
@@ -330,7 +330,7 @@ export default function ControlledDocumentUploadDialog({
             <fieldset disabled={busy || Boolean(registeredUpload)}>
               <legend><ShieldCheck size={15} /> Required document details</legend>
               <label><span>Document type</span><select value={form.documentType} onChange={(event) => changeType(event.target.value as ControlledDocumentType)}>{permittedTypes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              {allowApprovedIntake ? <label><span>Intake status</span><select value={intakeState} onChange={(event) => setIntakeState(event.target.value as IntakeState)}><option value="DRAFT">Draft for DMS review</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select><small>{preview?.source_type !== "PDF" ? "Already approved intake requires the final PDF to preserve signatures and approval marks. Choose Change above to upload that PDF, or submit this DOCX for review." : "Select Already approved to record existing approval evidence and make the final PDF current."}</small></label> : null}
+              {allowApprovedIntake ? <label><span>Intake status</span><select value={intakeState} onChange={(event) => setIntakeState(event.target.value as IntakeState)}><option value="DRAFT">Draft for DMS review</option><option value="APPROVED" disabled={preview?.source_type !== "PDF"}>Already approved final PDF</option></select><small>{preview?.source_type !== "PDF" ? "Already approved intake requires the final PDF to preserve signatures and approval marks. Choose Change above to upload that PDF, or submit this Word document for review." : "Select Already approved to record existing approval evidence and make the final PDF current."}</small></label> : null}
               <label><span>Document code</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label>
               <label className="is-wide"><span>Title</span><input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
               <label><span>Revision</span><input required value={form.revisionNumber} onChange={(event) => setForm({ ...form, revisionNumber: event.target.value })} /></label>

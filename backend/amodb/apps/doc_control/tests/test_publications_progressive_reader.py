@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,8 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from amodb.apps.manuals import approved_intake_router as approved
+from amodb.apps.manuals import core_router as core
+from amodb.apps.manuals import office_layout as office
 from amodb.apps.manuals import publications_fast_reader_router as reader
 
 
@@ -53,9 +56,26 @@ def test_exact_pdf_stream_honours_single_byte_ranges(tmp_path: Path) -> None:
     assert response.headers["content-range"] == f"bytes 9-12/{source.stat().st_size}"
     assert response.headers["content-length"] == "4"
     assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
-    assert response.headers["x-publication-source"] == "exact-original"
+    assert response.headers["x-publication-source"] == "reader-source"
     assert response.headers["x-acroform-policy"] == "read-only"
     assert b"".join(reader._iter_file(source, 9, 12)) == source.read_bytes()[9:13]
+
+
+def test_checksum_keyed_reader_stream_exposes_verified_fingerprint(tmp_path: Path) -> None:
+    source = tmp_path / "approved.pdf"
+    source.write_bytes(b"%PDF-1.7\nverified-reader")
+    fingerprint = "a" * 64
+
+    response = reader._stream_source(
+        source,
+        _request(),
+        filename="approved.pdf",
+        cache_key=fingerprint,
+    )
+
+    assert response.headers["x-reader-sha256"] == fingerprint
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
 
 
 def test_exact_pdf_stream_rejects_invalid_or_multiple_ranges(tmp_path: Path) -> None:
@@ -71,6 +91,37 @@ def test_exact_pdf_stream_rejects_invalid_or_multiple_ranges(tmp_path: Path) -> 
         )
 
     assert caught.value.status_code == 416
+
+
+def test_uploaded_source_storage_preserves_exact_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "MANUAL_UPLOAD_DIR", tmp_path)
+    original = b"exact-uploaded-office-source\x00\x01\x02"
+
+    stored_path, checksum = core._store_manual_source(
+        tenant_slug="tenant",
+        manual_code="MPM",
+        revision_id="revision-1",
+        filename="original.docx",
+        content=original,
+    )
+
+    stored = Path(stored_path)
+    assert stored.read_bytes() == original
+    assert checksum == hashlib.sha256(original).hexdigest()
+    assert not list(stored.parent.glob("*.upload"))
+
+
+def test_office_layout_rejects_retained_source_checksum_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "manual.docx"
+    source.write_bytes(b"altered-retained-office-bytes")
+    revision = SimpleNamespace(
+        id="revision-1",
+        source_storage_path=str(source),
+        source_sha256=hashlib.sha256(b"original-uploaded-office-bytes").hexdigest(),
+    )
+
+    with pytest.raises(office.OfficeLayoutError, match="controlled-file checksum"):
+        office.office_layout_pdf_path(revision)
 
 
 def test_approved_intake_requires_final_pdf_source(tmp_path: Path) -> None:
@@ -154,11 +205,16 @@ def test_frontend_uses_adaptive_range_streaming_and_non_destructive_watermark() 
     assert "8 * MIB" in performance
     assert "maxCanvasPixels" in performance
     assert "disableRange: false" in service
+    assert "disableAutoFetch: true" in service
+    assert "disableStream: true" in service
     assert "readCachedPublicationBootstrap" in reader_page
     assert "getPublicationReaderBootstrap" in reader_page
     assert "fetchPublicationBlob(viewerPdfPath)" not in reader_page
     assert 'renderMode="canvas"' in core
     assert "renderForms={safeForm}" in core
+    assert "handleViewportScroll" in core
+    assert "overscan: fastScrolling ? 0 : profile.renderRadius" in core
+    assert "deferRender={fastScrolling}" in core
     assert "getFieldObjects" in core
     assert "PdfReaderCoreV5" in bridge
     assert "PdfReaderCoreV4" in shell
@@ -197,7 +253,7 @@ def test_progress_refresh_does_not_clear_an_already_loaded_virtualized_pdf() -> 
     core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
 
     assert "setPageCount(0)" not in core
-    assert "const restored = clampPdfValue(initialPage, 1, count)" in core
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in core
     assert "setPageCount(count)" in core
     assert "setCurrentPage(restored)" in core
     assert "setHotIndexes([restored - 1])" in core

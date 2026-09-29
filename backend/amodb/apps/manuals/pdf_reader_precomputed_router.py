@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control.knowledge_execution_scope import can_execute_profile
-from amodb.apps.doc_control.pdfium_service import PdfEngineError
+from amodb.apps.doc_control.pdfium_service import PdfEngineError, PdfInspection
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -19,12 +19,41 @@ from .pdf_reader_form_override_router import (
     _safe_reader_cache_path,
 )
 from .pdf_reader_precompute import cached_pdf_inspection
+from .office_layout import OfficeLayoutError, prepare_office_layout_pdf
 
 
 router = APIRouter(
     prefix="/manuals",
     tags=["Controlled PDF Reader Precomputed Capabilities"],
 )
+
+
+def _source_type_value(revision) -> str:
+    raw = getattr(revision, "source_type_enum", None)
+    return str(getattr(raw, "value", raw or "")).upper()
+
+
+def _office_layout_inspection(revision):
+    derivative = prepare_office_layout_pdf(revision)
+    # This PDF is a server-generated, immutable reading derivative. It is not
+    # an uploaded executable/form template, so avoid loading and re-inspecting
+    # the entire proof on every reader open. PDF.js scripting/XFA remain
+    # disabled globally and all working-copy actions stay disabled below.
+    inspection = PdfInspection(
+        engine="LibreOffice Writer PDF proof",
+        engine_version="layout-proof-v1",
+        source_sha256=derivative.pdf_sha256,
+        page_count=derivative.page_count,
+        form_type=0,
+        has_acroform=False,
+        has_javascript=False,
+        is_dynamic_xfa=False,
+        encrypted=False,
+        can_flatten=False,
+        unsupported_reason=None,
+        template_fingerprint=None,
+    )
+    return inspection, derivative
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/pdf-capabilities")
@@ -42,6 +71,53 @@ async def precomputed_pdf_reader_capabilities(
         revision_id=revision_id,
         current_user=current_user,
     )
+    source_type = _source_type_value(revision)
+    if source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        try:
+            inspection, derivative = await run_in_threadpool(
+                _office_layout_inspection,
+                revision,
+            )
+        except OfficeLayoutError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PdfEngineError as exc:
+            raise _engine_http_error(exc) from exc
+
+        payload = _safe_form_capabilities(
+            execution,
+            inspection,
+            execution_allowed=(
+                can_execute_profile(current_user, execution)
+                if execution is not None
+                else True
+            ),
+        )
+        # Office layout proofs are immutable reading derivatives, never editable
+        # PDF templates. Inspect the proof itself for trusted reader metadata but
+        # keep all working-copy/form actions disabled.
+        payload.update(
+            {
+                "has_javascript": False,
+                "source_has_javascript": bool(inspection.has_javascript),
+                "javascript_policy": "DISABLED_IN_READER" if inspection.has_javascript else "NONE",
+                "can_fill": False,
+                "can_save_draft": False,
+                "can_download_working": False,
+                "can_flatten": False,
+                "can_submit": False,
+                "automatic_form_execution": False,
+                "form_download_mode": None,
+                "unsupported_reason": inspection.unsupported_reason,
+                "reader_pdf_url": (
+                    f"/manuals/t/{tenant_slug.lower()}/{manual_id}/rev/{revision_id}/stream-layout.pdf"
+                    f"?v={inspection.source_sha256}"
+                ),
+                "reader_source_sha256": inspection.source_sha256,
+                "reader_size_bytes": derivative.size_bytes,
+            }
+        )
+        return payload
+
     try:
         inspection = await run_in_threadpool(
             cached_pdf_inspection,
@@ -117,6 +193,7 @@ async def precomputed_script_disabled_reader_pdf(
         "Cache-Control": "private, max-age=31536000, immutable",
         "Content-Disposition": f'inline; filename="{safe_code}_SCRIPT_DISABLED.pdf"',
         "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
         "X-Publication-Source": "script-disabled-working-template",
         "X-AcroForm-Policy": "fillable-no-scripting",
         "X-PDF-Template-SHA256": inspection.source_sha256,

@@ -98,7 +98,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     cachedCapabilities ? cachedReadOnly(cachedCapabilities) : READ_ONLY_FALLBACK,
   );
   const [readerFileUrl, setReaderFileUrl] = useState<string | null>(null);
-  const [readerKey, setReaderKey] = useState("");
   const [offlineState, setOfflineState] = useState<"CHECKING" | "UNAVAILABLE" | "AVAILABLE" | "SAVING" | "ERROR">("CHECKING");
   const [offlineError, setOfflineError] = useState("");
   const [offlineDescriptor, setOfflineDescriptor] = useState<{
@@ -114,6 +113,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     let active = true;
+    let backgroundCacheTimer: number | null = null;
 
     const revokeObjectUrl = () => {
       if (!objectUrlRef.current) return;
@@ -123,7 +123,8 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     const chooseSource = async (
       resolved: PdfReaderCapabilities,
       allowCachedBytes: boolean,
-    ): Promise<{ url: string; key: string }> => {
+      preferCachedBytes: boolean,
+    ): Promise<{ url: string }> => {
       const remoteUrl = resolved.reader_pdf_url || props.fileUrl;
       const fingerprint = resolved.reader_source_sha256 || resolved.source_sha256;
       if (fingerprint) {
@@ -136,36 +137,52 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       }
       if (!allowCachedBytes || !fingerprint) {
         setOfflineState("UNAVAILABLE");
-        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint || "unverified"}` };
+        return { url: remoteUrl };
       }
 
-      // The live capability response verifies the fingerprint. Reuse that exact
-      // encrypted source even on a slow-but-online connection.
+      const cachedAvailable = await hasCachedPdfSource(identity, fingerprint, remoteUrl);
+
+      // Start from the immutable range-enabled source for first paint. Once a
+      // live capability response has confirmed the current checksum, prefer the
+      // encrypted local copy so page decoding/rasterization no longer depends
+      // on network round-trips. Cached metadata alone never authorizes this
+      // handoff, which prevents a stale browser cache from silently replacing a
+      // newer controlled revision while online.
+      if (navigator.onLine !== false && (!preferCachedBytes || !cachedAvailable)) {
+        setOfflineState(cachedAvailable ? "AVAILABLE" : "UNAVAILABLE");
+        return { url: remoteUrl };
+      }
+
+      if (!cachedAvailable) {
+        setOfflineState("UNAVAILABLE");
+        return { url: remoteUrl };
+      }
+
       const cachedBytes = await readCachedPdfSource(identity, fingerprint, remoteUrl);
       if (!cachedBytes) {
         setOfflineState("UNAVAILABLE");
-        return { url: remoteUrl, key: `${remoteUrl}:${fingerprint}` };
+        return { url: remoteUrl };
       }
 
       const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
       revokeObjectUrl();
       objectUrlRef.current = localUrl;
       setOfflineState("AVAILABLE");
-      return { url: localUrl, key: `${remoteUrl}:${fingerprint}:cached` };
+      return { url: localUrl };
     };
 
     const mount = async (
       resolved: PdfReaderCapabilities,
       allowCachedBytes: boolean,
+      preferCachedBytes = false,
     ): Promise<void> => {
-      const selected = await chooseSource(resolved, allowCachedBytes);
+      const selected = await chooseSource(resolved, allowCachedBytes, preferCachedBytes);
       if (!active || generationRef.current !== generation) {
         if (selected.url.startsWith("blob:")) URL.revokeObjectURL(selected.url);
         return;
       }
       sourceMountedRef.current = true;
       setReaderFileUrl(selected.url);
-      setReaderKey(selected.key);
     };
 
     const mountLatestOffline = async (): Promise<boolean> => {
@@ -193,7 +210,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         can_download_original: false,
       });
       setReaderFileUrl(localUrl);
-      setReaderKey(`${saved.readerUrl}:${saved.sourceSha256}:offline-recovery`);
       return true;
     };
 
@@ -202,13 +218,20 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         const resolved = suppliedCapabilities || READ_ONLY_FALLBACK;
         setCapabilities(resolved);
         if (resolved.source_sha256) cachePdfCapabilities(identity, resolved);
-        await mount(resolved, Boolean(resolved.reader_source_sha256 || resolved.source_sha256));
+        await mount(
+          resolved,
+          Boolean(resolved.reader_source_sha256 || resolved.source_sha256),
+          true,
+        );
         return;
       }
 
       const cached = cachedCapabilities;
       if (cached) {
-        await mount(cached, true);
+        // Cached capability metadata is useful for fast first paint, but the
+        // live server response must confirm its checksum before local bytes are
+        // selected.
+        await mount(cached, true, false);
         if (!active || generationRef.current !== generation) return;
         setCapabilities(cachedReadOnly(cached));
       }
@@ -254,12 +277,56 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         cachePdfCapabilities(identity, live);
         setCapabilities(live);
 
+        const alreadyOffline = liveReaderFingerprint
+          ? await hasCachedPdfSource(identity, liveReaderFingerprint, liveReaderUrl)
+          : false;
+        if (active && liveReaderFingerprint && !alreadyOffline) {
+          setOfflineDescriptor({
+            sha256: liveReaderFingerprint,
+            url: liveReaderUrl,
+            byteLength: live.reader_size_bytes || props.sourceByteLength,
+          });
+          setOfflineState("SAVING");
+          backgroundCacheTimer = window.setTimeout(() => {
+            void savePdfSourceOffline(
+              identity,
+              liveReaderFingerprint,
+              liveReaderUrl,
+              live.reader_size_bytes || props.sourceByteLength,
+            ).then(async () => {
+              if (!active || generationRef.current !== generation) return;
+              setOfflineState("AVAILABLE");
+              setOfflineError("");
+              // The full immutable PDF is now encrypted in IndexedDB. Switch the
+              // live reader to client-local bytes without changing revision
+              // identity. PdfReaderCoreV4 preserves the active page/zoom across
+              // this source handoff.
+              await mount(live, true, true);
+            }).catch(() => {
+              if (!active || generationRef.current !== generation) return;
+              // Background warming is opportunistic. Range streaming remains
+              // available and the user can retry the explicit offline action.
+              setOfflineState("UNAVAILABLE");
+            });
+          }, 400);
+        }
+
         const initialSourceChanged = !cached && liveReaderUrl !== props.fileUrl;
-        if (sourceChanged || readerChanged || sourceUrlChanged || initialSourceChanged || !sourceMountedRef.current) {
-          await mount(live, true);
+        if (
+          sourceChanged
+          || readerChanged
+          || sourceUrlChanged
+          || initialSourceChanged
+          || !sourceMountedRef.current
+          || alreadyOffline
+        ) {
+          await mount(live, true, alreadyOffline);
         } else if (!cached && liveReaderFingerprint) {
-          setOfflineDescriptor({ sha256: liveReaderFingerprint, url: liveReaderUrl, byteLength: live.reader_size_bytes || props.sourceByteLength });
-          setOfflineState(await hasCachedPdfSource(identity, liveReaderFingerprint, liveReaderUrl) ? "AVAILABLE" : "UNAVAILABLE");
+          setOfflineDescriptor({
+            sha256: liveReaderFingerprint,
+            url: liveReaderUrl,
+            byteLength: live.reader_size_bytes || props.sourceByteLength,
+          });
         }
 
       } catch (error) {
@@ -284,6 +351,7 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     return () => {
       active = false;
       window.cancelAnimationFrame(initializationFrame);
+      if (backgroundCacheTimer !== null) window.clearTimeout(backgroundCacheTimer);
     };
   }, [
     cachedCapabilities,
@@ -305,6 +373,17 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
         offlineDescriptor.url,
         offlineDescriptor.byteLength,
       );
+      const cachedBytes = await readCachedPdfSource(
+        identity,
+        offlineDescriptor.sha256,
+        offlineDescriptor.url,
+      );
+      if (cachedBytes) {
+        const localUrl = URL.createObjectURL(new Blob([cachedBytes], { type: "application/pdf" }));
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = localUrl;
+        setReaderFileUrl(localUrl);
+      }
       setOfflineState("AVAILABLE");
     } catch (error) {
       setOfflineState("ERROR");
@@ -317,12 +396,17 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
     setOfflineError("");
     try {
       await deleteCachedPdfSource(identity, offlineDescriptor.sha256, offlineDescriptor.url);
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+        setReaderFileUrl(capabilities.reader_pdf_url || props.fileUrl);
+      }
       setOfflineState("UNAVAILABLE");
     } catch (error) {
       setOfflineState("ERROR");
       setOfflineError(error instanceof Error ? error.message : "The offline copy could not be removed.");
     }
-  }, [identity, offlineDescriptor]);
+  }, [capabilities.reader_pdf_url, identity, offlineDescriptor, props.fileUrl]);
 
   const recoverOfflineAfterLoadError = useCallback(async () => {
     if (readerFileUrl?.startsWith("blob:")) return;
@@ -346,8 +430,15 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
       can_download_original: false,
     });
     setReaderFileUrl(localUrl);
-    setReaderKey(`${saved.readerUrl}:${saved.sourceSha256}:network-recovery`);
   }, [identity, readerFileUrl]);
+
+  useEffect(() => {
+    const switchToOfflineSource = () => {
+      void recoverOfflineAfterLoadError();
+    };
+    window.addEventListener("offline", switchToOfflineSource);
+    return () => window.removeEventListener("offline", switchToOfflineSource);
+  }, [recoverOfflineAfterLoadError]);
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -366,7 +457,6 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
   return (
     <PdfReaderCoreV5
       {...props}
-      key={readerKey}
       identity={identity}
       fileUrl={readerFileUrl}
       originalDownloadUrl={props.originalDownloadUrl || props.fileUrl}

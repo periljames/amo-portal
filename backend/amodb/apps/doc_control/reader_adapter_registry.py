@@ -1,9 +1,11 @@
 """Declarative format negotiation for the governed Publications reader.
 
 The registry describes the bounded rendering path that actually exists in the
-portal. It does not imply native Office editing. PDF and DOCX use client-side
-renderers; legacy Office/image sources use controlled derivatives plus
-semantic/OCR aids where ingestion produced them.
+portal. It does not imply native Office editing. PDF uses the exact source in
+the client reader. Word-family files retain their original source and use a
+stable Office-generated PDF layout proof in that same client reader, with
+semantic text retained for search/accessibility. Other legacy formats use
+controlled derivatives plus semantic/OCR aids where ingestion produced them.
 """
 from __future__ import annotations
 
@@ -52,12 +54,12 @@ DOCX = ReaderAdapter(
     source_types=("DOCX",),
     mime_types=("application/vnd.openxmlformats-officedocument.wordprocessingml.document",),
     extensions=("docx",),
-    renderer="DOCX_PREVIEW_CLIENT",
-    location_adapter="SEMANTIC_SECTION_BLOCK",
-    selection_support="SEMANTIC_TEXT",
+    renderer="OFFICE_PDF_PROOF_CLIENT",
+    location_adapter="PDF_PROOF_PAGE_AND_SEMANTIC_SECTION",
+    selection_support="PDF_TEXT_AND_SEMANTIC_TEXT",
     source_exact=False,
-    derivative=False,
-    search="SEMANTIC_TEXT",
+    derivative=True,
+    search="PDF_TEXT_AND_SEMANTIC_TEXT",
     compare="SEMANTIC_STRUCTURE",
     ocr_mode="NONE",
     supports_layout=True,
