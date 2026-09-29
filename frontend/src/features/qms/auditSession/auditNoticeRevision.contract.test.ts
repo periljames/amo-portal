@@ -39,6 +39,12 @@ describe("audit notice revision governance", () => {
     expect(workspace).toContain("Lifecycle events");
   });
 
+  it("uses the current active applicable policy when creating a revised notice", () => {
+    expect(workspace).toContain("policiesQuery.data?.items.find");
+    expect(workspace).toContain("policy_id: policy?.id");
+    expect(workspace).not.toContain("policy_id: row.policy_id || undefined");
+  });
+
   it("keeps historical notice artifacts view-only across both QMS notice surfaces", () => {
     expect(workspace).toContain("previewedNotice.is_latest !== false");
     expect(governance).toContain("latestNotice && !latestNotice.requires_revision");
