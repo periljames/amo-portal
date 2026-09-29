@@ -95,7 +95,7 @@ export function notificationIsDueSoon(notification: PortalNotification, now = Da
   if (!dueAt) return false;
   const due = new Date(dueAt).getTime();
   if (!Number.isFinite(due)) return false;
-  return due <= now + horizonDays * 86_400_000;
+  return due >= now && due <= now + horizonDays * 86_400_000;
 }
 
 export function notificationMatches(
