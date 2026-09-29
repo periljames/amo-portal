@@ -68,7 +68,11 @@ jobs:
           grep -q 'http://127.0.0.1:8090' frontend/src/services/devProxyRouting.ts
           grep -q 'amodb.platform_ops_main:app' scripts/dev_runtime.py
           grep -q '"8090"' scripts/dev_runtime.py
-          grep -q 'env.setdefault("PLATFORM_NET_PROBE_ENABLED", "false")' scripts/dev_runtime.py
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("scripts/dev_runtime.py").read_text(encoding="utf-8")
+          assert 'env.setdefault("PLATFORM_NET_PROBE_ENABLED", "false")' in source
+          PY
 
       - name: Verify SaaS deployment includes a private Operations gateway
         run: |
