@@ -1,5 +1,12 @@
 .toast-stack {
   position: fixed;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  right: auto;
+  bottom: auto;
   top: max(4.75rem, calc(env(safe-area-inset-top) + 0.75rem));
   left: 50%;
   width: min(42rem, calc(100vw - 2rem));
@@ -163,6 +170,17 @@
   background: currentColor;
   opacity: 0.28;
   animation: toast-timer var(--toast-duration) linear forwards;
+}
+
+@supports selector(:popover-open) {
+  .toast-stack[popover]:not(:popover-open) {
+    display: none;
+  }
+}
+
+.toast-stack::backdrop {
+  background: transparent;
+  pointer-events: none;
 }
 
 .toast--paused .toast__timer {

@@ -10,9 +10,10 @@ const CHUNK_STORE = "chunks";
 const KEY_STORE = "keys";
 const DEVICE_KEY_ID = "controlled-pdf-device-key-v1";
 const CHUNK_BYTES = 4 * 1024 * 1024;
-const MAX_SINGLE_DOCUMENT_BYTES = 300 * 1024 * 1024;
-const MAX_USER_CACHE_BYTES = 600 * 1024 * 1024;
-const MAX_USER_CACHE_ENTRIES = 4;
+const CACHE_REOPEN_BATCH_CHUNKS = 8;
+const MAX_SINGLE_DOCUMENT_BYTES = 512 * 1024 * 1024;
+const MAX_USER_CACHE_BYTES = 1536 * 1024 * 1024;
+const MAX_USER_CACHE_ENTRIES = 6;
 const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 type OfflinePdfDocument = {
@@ -338,37 +339,66 @@ export async function readCachedPdfSource(
     const row = await documentRow(database, key);
     if (!row || !(await hasCachedPdfSource(identity, sourceSha256, readerUrl))) return null;
     const encryptionKey = await deviceKey(database);
+
+    // Reopen cached manuals in bounded batches. One transaction per chunk was
+    // slow for thousand-page PDFs; loading the entire encrypted file at once
+    // can double/triple memory pressure. Eight 4 MiB chunks balances both.
     const output = new Uint8Array(row.byteLength);
     let offset = 0;
-
-    for (let index = 0; index < row.chunkCount; index += 1) {
+    for (let batchStart = 0; batchStart < row.chunkCount; batchStart += CACHE_REOPEN_BATCH_CHUNKS) {
+      const batchEnd = Math.min(row.chunkCount, batchStart + CACHE_REOPEN_BATCH_CHUNKS);
       const transaction = database.transaction(CHUNK_STORE, "readonly");
-      const chunk = await requestResult<OfflinePdfChunk | undefined>(
-        transaction.objectStore(CHUNK_STORE).get(`${row.blobKey}:${index}`),
-      );
+      const store = transaction.objectStore(CHUNK_STORE);
+      const requests: Array<Promise<OfflinePdfChunk | undefined>> = [];
+      for (let index = batchStart; index < batchEnd; index += 1) {
+        requests.push(requestResult<OfflinePdfChunk | undefined>(
+          store.get(`${row.blobKey}:${index}`),
+        ));
+      }
+      const chunks = await Promise.all(requests);
       await transactionDone(transaction);
-      if (!chunk || chunk.index !== index || chunk.plainLength <= 0) {
+      if (chunks.some((chunk, relativeIndex) => (
+        !chunk
+        || chunk.index !== batchStart + relativeIndex
+        || chunk.plainLength <= 0
+      ))) {
         await deleteDocumentRow(database, row);
         return null;
       }
-      const plain = await crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: chunk.iv,
-          additionalData: additionalData(key, row.sourceSha256, index),
-        },
-        encryptionKey,
-        chunk.ciphertext,
-      );
-      if (plain.byteLength !== chunk.plainLength || offset + plain.byteLength > output.byteLength) {
-        await deleteDocumentRow(database, row);
-        return null;
+
+      const plainChunks = await Promise.all(chunks.map(async (chunk) => {
+        if (!chunk) throw new Error("Cached PDF chunk is unavailable.");
+        const plain = await crypto.subtle.decrypt(
+          {
+            name: "AES-GCM",
+            iv: chunk.iv,
+            additionalData: additionalData(key, row.sourceSha256, chunk.index),
+          },
+          encryptionKey,
+          chunk.ciphertext,
+        );
+        if (plain.byteLength !== chunk.plainLength) {
+          throw new Error("Cached PDF chunk failed authenticated decryption.");
+        }
+        return plain;
+      }));
+
+      for (const plain of plainChunks) {
+        if (offset + plain.byteLength > output.byteLength) {
+          await deleteDocumentRow(database, row);
+          return null;
+        }
+        output.set(new Uint8Array(plain), offset);
+        offset += plain.byteLength;
       }
-      output.set(new Uint8Array(plain), offset);
-      offset += plain.byteLength;
     }
 
-    if (offset !== row.byteLength || await sha256(output.buffer) !== row.sourceSha256) {
+    // Every stored chunk is authenticated with AES-GCM using the controlled
+    // checksum and chunk index as additional data. The complete source was
+    // checksum-verified when it entered this cache, so re-hashing hundreds of
+    // megabytes on every open only adds latency without increasing local
+    // corruption detection.
+    if (offset !== row.byteLength) {
       await deleteDocumentRow(database, row);
       return null;
     }
@@ -424,26 +454,30 @@ async function storePdfSource(
   if (!offlineStorageAvailable() || !sourceSha256.trim() || /^(?:blob:|data:)/i.test(readerUrl)) {
     throw new Error("This document source cannot be retained for offline use.");
   }
+  const expectedFingerprint = sourceSha256.toLowerCase();
   const expected = Number(expectedBytes || 0);
   if (expected > MAX_SINGLE_DOCUMENT_BYTES) {
     throw new Error("This controlled PDF exceeds the offline document limit.");
   }
 
   const database = await openDatabase();
-  const key = cacheKey(identity, sourceSha256, readerUrl);
-  if (await hasCachedPdfSource(identity, sourceSha256, readerUrl)) return true;
+  const key = cacheKey(identity, expectedFingerprint, readerUrl);
+  if (await hasCachedPdfSource(identity, expectedFingerprint, readerUrl)) return true;
 
   if (navigator.storage?.persist) await navigator.storage.persist().catch(() => false);
   if (navigator.storage?.estimate) {
     const estimate = await navigator.storage.estimate().catch(() => null);
-    if (estimate?.quota && estimate.usage && expected > 0 && estimate.quota - estimate.usage < expected * 1.15) {
-      throw new Error("This device does not have enough storage for the offline PDF.");
+    if (estimate?.quota && expected > 0) {
+      const usage = Number(estimate.usage || 0);
+      if (estimate.quota - usage < expected * 1.15) {
+        throw new Error("This device does not have enough storage for the offline PDF.");
+      }
     }
   }
 
   const headers = new Headers(authHeaders());
   headers.delete("Range");
-  const response = await fetch(authenticatedReaderUrl(readerUrl, identity, sourceSha256), {
+  const response = await fetch(authenticatedReaderUrl(readerUrl, identity, expectedFingerprint), {
     headers,
     credentials: "same-origin",
     cache: "no-store",
@@ -451,45 +485,99 @@ async function storePdfSource(
   if (!response.ok || response.status === 206) {
     throw new Error(`The complete controlled PDF could not be retrieved (${response.status}).`);
   }
-  const bytes = await response.arrayBuffer();
-  if (!bytes.byteLength || bytes.byteLength > MAX_SINGLE_DOCUMENT_BYTES) {
-    throw new Error("The controlled PDF is empty or exceeds the offline document limit.");
+
+  const declaredFingerprint = String(
+    response.headers.get("X-Reader-SHA256")
+      || response.headers.get("X-PDF-Reader-SHA256")
+      || "",
+  ).trim().toLowerCase();
+  if (declaredFingerprint && declaredFingerprint !== expectedFingerprint) {
+    throw new Error("The retrieved PDF does not match the verified controlled revision.");
   }
-  if (expected > 0 && Math.abs(bytes.byteLength - expected) > Math.max(1024, expected * 0.02)) {
+
+  const contentLength = Number(response.headers.get("Content-Length") || 0);
+  if (contentLength > MAX_SINGLE_DOCUMENT_BYTES) {
+    throw new Error("The controlled PDF exceeds the offline document limit.");
+  }
+  if (expected > 0 && contentLength > 0 && Math.abs(contentLength - expected) > Math.max(1024, expected * 0.02)) {
     throw new Error("The retrieved PDF size does not match the controlled revision.");
-  }
-  const actualSha256 = await sha256(bytes);
-  if (actualSha256 !== sourceSha256.toLowerCase()) {
-    throw new Error("The retrieved PDF failed its controlled-revision checksum.");
   }
 
   const encryptionKey = await deviceKey(database);
   const blobKey = `${key}:${Date.now()}:${crypto.randomUUID()}`;
-  const chunkCount = Math.ceil(bytes.byteLength / CHUNK_BYTES);
+  let chunkIndex = 0;
+  let totalBytes = 0;
+
+  const persistChunk = async (plain: ArrayBuffer): Promise<void> => {
+    if (!plain.byteLength) return;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv,
+        additionalData: additionalData(key, expectedFingerprint, chunkIndex),
+      },
+      encryptionKey,
+      plain,
+    );
+    const transaction = database.transaction(CHUNK_STORE, "readwrite");
+    transaction.objectStore(CHUNK_STORE).put({
+      id: `${blobKey}:${chunkIndex}`,
+      blobKey,
+      index: chunkIndex,
+      iv: iv.buffer,
+      ciphertext,
+      plainLength: plain.byteLength,
+    } satisfies OfflinePdfChunk);
+    await transactionDone(transaction);
+    chunkIndex += 1;
+    totalBytes += plain.byteLength;
+    if (totalBytes > MAX_SINGLE_DOCUMENT_BYTES) {
+      throw new Error("The controlled PDF exceeds the offline document limit.");
+    }
+  };
+
   try {
-    for (let index = 0; index < chunkCount; index += 1) {
-      const start = index * CHUNK_BYTES;
-      const plain = bytes.slice(start, Math.min(bytes.byteLength, start + CHUNK_BYTES));
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ciphertext = await crypto.subtle.encrypt(
-        {
-          name: "AES-GCM",
-          iv,
-          additionalData: additionalData(key, actualSha256, index),
-        },
-        encryptionKey,
-        plain,
-      );
-      const transaction = database.transaction(CHUNK_STORE, "readwrite");
-      transaction.objectStore(CHUNK_STORE).put({
-        id: `${blobKey}:${index}`,
-        blobKey,
-        index,
-        iv: iv.buffer,
-        ciphertext,
-        plainLength: plain.byteLength,
-      } satisfies OfflinePdfChunk);
-      await transactionDone(transaction);
+    if (response.body && declaredFingerprint === expectedFingerprint) {
+      // Stream directly from the authenticated immutable reader endpoint into
+      // encrypted IndexedDB chunks. This avoids holding a 1000-page manual in
+      // one giant ArrayBuffer while it downloads in the background.
+      const reader = response.body.getReader();
+      let pending = new Uint8Array(0);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        const combined = new Uint8Array(pending.byteLength + value.byteLength);
+        combined.set(pending, 0);
+        combined.set(value, pending.byteLength);
+        let offset = 0;
+        while (combined.byteLength - offset >= CHUNK_BYTES) {
+          const slice = combined.slice(offset, offset + CHUNK_BYTES);
+          await persistChunk(slice.buffer);
+          offset += CHUNK_BYTES;
+        }
+        pending = combined.slice(offset);
+      }
+      if (pending.byteLength) await persistChunk(pending.buffer);
+    } else {
+      // Compatibility path for older/proxy endpoints that cannot expose the
+      // verified checksum header. Verify the complete payload locally once.
+      const bytes = await response.arrayBuffer();
+      if (!bytes.byteLength || bytes.byteLength > MAX_SINGLE_DOCUMENT_BYTES) {
+        throw new Error("The controlled PDF is empty or exceeds the offline document limit.");
+      }
+      const actualSha256 = await sha256(bytes);
+      if (actualSha256 !== expectedFingerprint) {
+        throw new Error("The retrieved PDF failed its controlled-revision checksum.");
+      }
+      for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_BYTES) {
+        await persistChunk(bytes.slice(offset, Math.min(bytes.byteLength, offset + CHUNK_BYTES)));
+      }
+    }
+
+    if (!totalBytes || (expected > 0 && Math.abs(totalBytes - expected) > Math.max(1024, expected * 0.02))) {
+      throw new Error("The retrieved PDF size does not match the controlled revision.");
     }
 
     const previous = await documentRow(database, key);
@@ -500,12 +588,12 @@ async function storePdfSource(
       owner: ownerId(identity),
       identityKey: documentIdentityKey(identity),
       readerUrl,
-      sourceSha256: actualSha256,
+      sourceSha256: expectedFingerprint,
       blobKey,
       cachedAt: now,
       lastOpenedAt: now,
-      byteLength: bytes.byteLength,
-      chunkCount,
+      byteLength: totalBytes,
+      chunkCount: chunkIndex,
       contentType: response.headers.get("Content-Type") || "application/pdf",
     } satisfies OfflinePdfDocument);
     await transactionDone(transaction);

@@ -236,6 +236,9 @@ class UserSelfUpdate(BaseModel):
 
 
 class UserRead(UserBase):
+    # Persisted personnel/imported accounts may have placeholder addresses.
+    # Validate email on input (UserBase/UserCreate), not when reading records.
+    email: str
     id: str
     department_code: Optional[str] = None
     amo_code: Optional[str] = None
@@ -1072,7 +1075,7 @@ class AdminUserDirectoryItem(BaseModel):
     department_id: Optional[str] = None
     department_name: Optional[str] = None
     staff_code: str
-    email: EmailStr
+    email: str
     first_name: str
     last_name: str
     full_name: str
@@ -1223,7 +1226,7 @@ class UserGroupMemberRead(BaseModel):
     group_id: str
     user_id: str
     full_name: str
-    email: EmailStr
+    email: str
     staff_code: str
     member_role: str
     added_at: datetime

@@ -101,10 +101,17 @@ export type PublicationReaderMetadata = {
   source_size_bytes: number;
   source_page_count?: number | null;
   source_url?: string | null;
+  original_source_url?: string | null;
+  original_source_filename?: string | null;
+  original_source_sha256?: string | null;
   rendered_pdf_url: string;
   rendered_pdf_size_bytes: number;
   download_filename: string;
   reader_mode: "html" | "pdf";
+  layout_renderer?: "PDF_SOURCE" | "OFFICE_PDF_PROOF" | "OFFICE_PDF_PROOF_PENDING" | "SEMANTIC_FALLBACK" | string;
+  layout_proof_supported?: boolean;
+  layout_proof_available?: boolean;
+  layout_proof_ready?: boolean;
   image_only: boolean;
   text_char_count: number;
   citation_current: number;
@@ -189,9 +196,9 @@ const publicationBootstrapMemory = new Map<string, PublicationReaderBootstrap>()
 
 function extensionOf(file: File): "docx" | "pdf" {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".docx")) return "docx";
+  if (/\.(docx|doc|odt|rtf)$/.test(name)) return "docx";
   if (name.endsWith(".pdf")) return "pdf";
-  throw new Error("Only searchable DOCX and PDF publications are supported.");
+  throw new Error("Choose a PDF or supported Word document (DOCX, DOC, ODT, or RTF).");
 }
 
 function readerCacheKey(tenantSlug: string, manualId: string, revisionId: string): string {
@@ -334,9 +341,13 @@ export function publicationPdfSource(path: string): {
     httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
     rangeChunkSize: performance.rangeChunkSize,
-    disableAutoFetch: false,
+    // The browser reader asks the server only for the byte ranges needed by
+    // visible/navigation work. A separate verified background transfer fills
+    // the encrypted offline cache, so PDF.js must not independently prefetch
+    // the whole file a second time.
+    disableAutoFetch: true,
     disableRange: false,
-    disableStream: false,
+    disableStream: true,
   };
 }
 
@@ -358,9 +369,24 @@ export async function getPublicationAcknowledgement(tenantSlug: string, manualId
   return response.json() as Promise<PublicationAcknowledgement>;
 }
 
+async function sha256Blob(blob: Blob): Promise<string> {
+  if (!globalThis.crypto?.subtle) return "";
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function fetchPublicationBlob(path: string): Promise<{ blob: Blob; size: number; filename?: string }> {
   const response = await authenticatedFetch(path);
   const blob = await response.blob();
+  const expectedSourceSha256 = String(response.headers.get("X-Source-SHA256") || "").trim().toLowerCase();
+  if (expectedSourceSha256 && globalThis.crypto?.subtle) {
+    const actualSourceSha256 = await sha256Blob(blob);
+    if (actualSourceSha256 !== expectedSourceSha256) {
+      throw new Error("The downloaded source failed its controlled-file checksum. Nothing was saved.");
+    }
+  }
   const disposition = response.headers.get("Content-Disposition") || "";
   const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];

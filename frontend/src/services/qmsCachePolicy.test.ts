@@ -4,7 +4,15 @@ import { isPortalCacheablePath } from "./offlineHttp";
 import { collectQmsPrecacheUrls } from "../../scripts/qmsPrecacheGraph";
 
 describe("QMS offline cache boundaries", () => {
+  it.each(["preparation-context", "preparation-revisions", "checklist-bindings", "audit-session"])(
+    "never restores stale %s after an audit mutation", (resource) => {
+      expect(isPortalCacheablePath(`/api/quality/audits/a1/${resource}`)).toBe(false);
+      const cached = { clientState: { queries: [{ queryKey: [`qms-audit-${resource}`, "t", "a1"] }] } };
+      expect(withoutQmsAuthority(cached)?.clientState.queries).toEqual([]);
+    },
+  );
   it("keeps operational records cacheable but rechecks authority live", () => {
+    expect(isPortalCacheablePath("/api/quality/audits/a1/session")).toBe(false);
     expect(isPortalCacheablePath("/api/maintenance/t/quality/audits/a1")).toBe(true);
     expect(isPortalCacheablePath("/api/maintenance/t/quality/audits/a1/assignment-eligibility?user_id=u1")).toBe(false);
     expect(isQmsLiveAuthority("qms-audit-assignment-eligibility:t:a1:LEAD_AUDITOR:u1")).toBe(true);

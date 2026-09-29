@@ -39,6 +39,8 @@ export type DocumentationAssistantPanelProps = {
   pageNumber?: number | null;
   embedded?: boolean;
   defaultOpen?: boolean;
+  initialQuery?: string;
+  initialMode?: DocumentationAssistMode;
   title?: string;
 };
 
@@ -111,12 +113,14 @@ export default function DocumentationAssistantPanel({
   pageNumber,
   embedded = false,
   defaultOpen = false,
+  initialQuery = "",
+  initialMode = "ASSIST",
   title = "Document assistant",
 }: DocumentationAssistantPanelProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(embedded || defaultOpen);
-  const [mode, setMode] = useState<DocumentationAssistMode>("ASSIST");
-  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<DocumentationAssistMode>(initialMode);
+  const [query, setQuery] = useState(initialQuery.slice(0, 500));
   const [result, setResult] = useState<DocumentationAssistResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -132,6 +136,14 @@ export default function DocumentationAssistantPanel({
     setResult(null);
     setError("");
   }, [manualId, revisionId]);
+
+  useEffect(() => {
+    if (!initialQuery) return;
+    setQuery(initialQuery.slice(0, 500));
+    setMode(initialMode);
+    if (!embedded) setOpen(true);
+  }, [embedded, initialMode, initialQuery]);
+
 
   useEffect(() => {
     if (embedded || !open || typeof window === "undefined") return undefined;

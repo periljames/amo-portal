@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, text
 from sqlalchemy.orm import Session
 
-from amodb.database import get_read_db
+from amodb.database import get_write_db
 
 from . import models
 from .assurance_metrics_router import _full_metrics
@@ -150,7 +150,7 @@ def _prior_audits(db: Session, *, current: models.QMSAudit, amo_id: str) -> list
 def get_audit_preparation_context(
     audit_id: uuid.UUID,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     audit = db.query(models.QMSAudit).filter(
@@ -186,7 +186,7 @@ def get_audit_preparation_context(
     checklist_bindings = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == ctx.amo_id,
         QualityAuditChecklistBinding.audit_id == audit.id,
-    ).order_by(QualityAuditChecklistBinding.applied_at.desc()).limit(20).all()
+    ).order_by(QualityAuditChecklistBinding.applied_at.desc()).all()
 
     occurrence = db.query(QMSPlannerScheduleMetadata).filter(
         QMSPlannerScheduleMetadata.amo_id == ctx.amo_id,

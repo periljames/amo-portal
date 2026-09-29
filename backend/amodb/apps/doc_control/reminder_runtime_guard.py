@@ -155,19 +155,7 @@ def _deliver(
                 entity_id=candidate.obligation_id,
                 action_url=candidate.action_url,
                 dedupe_key=dedupe_key,
-                metadata_json={
-                    "manual_id": candidate.manual_id,
-                    "obligation_type": candidate.obligation_type,
-                    "reminder_stage": stage,
-                    "due_at": candidate.due_at.isoformat(),
-                    "module": "DMS",
-                    "category": "WARNING" if stage.startswith("OVERDUE") else "ACTION",
-                    "priority": "CRITICAL" if stage.startswith("OVERDUE") else "HIGH",
-                    "requires_action": True,
-                    "action_label": "Review obligation",
-                    "business_state": "OVERDUE" if stage.startswith("OVERDUE") else "DUE_SOON",
-                    "group_key": f"document-obligation:{candidate.obligation_type}:{candidate.obligation_id}",
-                },
+                metadata_json=service._notification_metadata(candidate=candidate, stage=stage),
             ))
         delivery["portal"] = "QUEUED"
         successful_delivery = True

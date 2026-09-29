@@ -63,6 +63,56 @@ def test_distribution_readiness_cannot_be_marked_ready_manually() -> None:
     assert caught.value.detail["code"] == "DISTRIBUTION_READY_IS_SYSTEM_MANAGED"
 
 
+def test_delegated_accountable_approver_can_record_readiness_during_approval(monkeypatch) -> None:
+    delegated = SimpleNamespace(
+        id="delegated-approver",
+        role="READER",
+        is_superuser=False,
+        is_amo_admin=False,
+    )
+    workflow = _workflow()
+    workflow.state = "ACCOUNTABLE_MANAGER_APPROVAL"
+    monkeypatch.setattr(
+        guards,
+        "can_perform_workflow_action",
+        lambda *args, **kwargs: kwargs.get("action") == "APPROVE_ACCOUNTABLE_MANAGER",
+    )
+    guards._validate_readiness_change(
+        None,
+        tenant=_tenant(),
+        workflow=workflow,
+        payload=_payload(
+            action="APPROVE_ACCOUNTABLE_MANAGER",
+            training_readiness_status="BLOCKED",
+        ),
+        current_user=delegated,
+    )
+
+
+def test_non_delegated_user_cannot_record_readiness_during_accountable_approval(monkeypatch) -> None:
+    user = SimpleNamespace(
+        id="ordinary-user",
+        role="READER",
+        is_superuser=False,
+        is_amo_admin=False,
+    )
+    workflow = _workflow()
+    workflow.state = "ACCOUNTABLE_MANAGER_APPROVAL"
+    monkeypatch.setattr(guards, "can_perform_workflow_action", lambda *args, **kwargs: False)
+    with pytest.raises(HTTPException) as caught:
+        guards._validate_readiness_change(
+            None,
+            tenant=_tenant(),
+            workflow=workflow,
+            payload=_payload(
+                action="APPROVE_ACCOUNTABLE_MANAGER",
+                training_readiness_status="BLOCKED",
+            ),
+            current_user=user,
+        )
+    assert caught.value.status_code == 403
+
+
 def test_training_ready_requires_resolved_training_link(monkeypatch) -> None:
     monkeypatch.setattr(guards, "_resolved_integration_exists", lambda *args, **kwargs: False)
     with pytest.raises(HTTPException) as caught:

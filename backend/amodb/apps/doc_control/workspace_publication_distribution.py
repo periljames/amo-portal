@@ -147,7 +147,7 @@ def notify_distribution_recipients(
                 "requires_action": bool(campaign.acknowledgement_required),
                 "action_label": "Review & acknowledge" if campaign.acknowledgement_required else "Open publication",
                 "business_state": "ACTION_REQUIRED" if campaign.acknowledgement_required else "UPDATE",
-                "group_key": f"document-publication:{revision.id}",
+                "group_key": f"document-publication:{manual.id}:{revision.id}:{campaign.id}",
             },
         )
         db.add(row)

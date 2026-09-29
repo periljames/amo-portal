@@ -15,7 +15,9 @@ from ..audit import services as audit_services
 from ..doc_control import models as doc_control_models
 from ..notifications import service as notification_service
 from ..quality import models as quality_models
+from ..realtime import messaging as realtime_messaging
 from ..realtime import models as realtime_models
+from ..realtime import schemas as realtime_schemas
 from . import compliance
 from . import models as legacy_models
 from . import role_targeting
@@ -573,9 +575,9 @@ def send_session_invitations(db: Session, *, actor: account_models.User, event_i
                         "category": "ACTION",
                         "priority": "NORMAL",
                         "requires_action": True,
-                        "action_label": "Review invitation",
+                        "action_label": "View invitation",
                         "business_state": "ACTION_REQUIRED",
-                        "group_key": f"training-event:{event.id}",
+                        "group_key": f"training-session:{event.id}",
                     },
                 ))
                 row.delivery_status = "DELIVERED"; row.sent_at = _now(); row.delivered_at = _now()
@@ -598,7 +600,44 @@ def send_session_invitations(db: Session, *, actor: account_models.User, event_i
 def invitation_rsvp(db: Session, *, actor: account_models.User, invitation: models.TrainingSessionInvitation, response: str) -> models.TrainingSessionInvitation:
     if str(invitation.user_id) != str(actor.id):
         raise HTTPException(status_code=403, detail="You may respond only to your own invitation.")
-    invitation.rsvp_status = response; invitation.responded_at = _now(); invitation.read_at = invitation.read_at or _now()
+    now = _now()
+    invitation.rsvp_status = response
+    invitation.responded_at = now
+    invitation.read_at = invitation.read_at or now
+
+    notifications = (
+        db.query(realtime_models.PortalNotification)
+        .filter(
+            realtime_models.PortalNotification.amo_id == invitation.amo_id,
+            realtime_models.PortalNotification.user_id == str(actor.id),
+            realtime_models.PortalNotification.kind == "TRAINING_SESSION_INVITATION",
+            realtime_models.PortalNotification.entity_type == "training_event",
+            realtime_models.PortalNotification.entity_id == str(invitation.event_id),
+            realtime_models.PortalNotification.archived_at.is_(None),
+        )
+        .all()
+    )
+    for notification in notifications:
+        metadata = dict(notification.metadata_json or {})
+        metadata.update({
+            "module": "TRAINING",
+            "category": "UPDATE",
+            "requires_action": False,
+            "action_label": "View session",
+            "rsvp_status": response,
+            "group_key": f"training-session:{invitation.event_id}",
+        })
+        notification.metadata_json = metadata
+        notification.read_at = notification.read_at or now
+        db.flush()
+        realtime_messaging._queue_user_event(
+            db,
+            amo_id=invitation.amo_id,
+            user_id=str(actor.id),
+            kind=realtime_schemas.RealtimeKind.NOTIFICATION_CREATED,
+            payload=realtime_messaging.notification_payload(notification),
+        )
+
     db.flush()
     _audit(db, actor=actor, entity_type="training.session_invitation", entity_id=str(invitation.id), action="RSVP", after={"response": response})
     return invitation

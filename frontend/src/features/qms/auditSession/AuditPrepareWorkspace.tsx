@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -19,6 +19,7 @@ import { Link } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import ControlledDocumentUploadDialog from "../../../components/documentControl/ControlledDocumentUploadDialog";
+import { useToast } from "../../../components/feedback/ToastProvider";
 import {
   createAuditPreparationRevision,
   issueAuditPreparationRevision,
@@ -161,6 +162,7 @@ function participantPermissions(draft: ExternalParticipantDraft): string[] {
 
 const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
+  const { pushToast } = useToast();
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [showParticipantForm, setShowParticipantForm] = useState(false);
@@ -172,7 +174,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
   const [checklistMode, setChecklistMode] = useState<"LIBRARY" | "CREATE">("LIBRARY");
   const [checklistSearch, setChecklistSearch] = useState("");
-  const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState("");
+  const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
   const [checklistUploadOpen, setChecklistUploadOpen] = useState(false);
   const [checklistReason, setChecklistReason] = useState("Selected for this audit during governed preparation.");
@@ -183,6 +185,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistDmsSearch, setChecklistDmsSearch] = useState("");
   const [checklistDmsDocumentId, setChecklistDmsDocumentId] = useState("");
   const [requestDmsSearch, setRequestDmsSearch] = useState("");
+
+  useEffect(() => {
+    if (localError) pushToast({ title: "Preparation action needs attention", message: localError, variant: "error" });
+  }, [localError, pushToast]);
+  useEffect(() => {
+    if (localSuccess) pushToast({ title: "Audit preparation updated", message: localSuccess, variant: "success" });
+  }, [localSuccess, pushToast]);
 
   const auditQuery = useQuery({
     queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
@@ -234,7 +243,9 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
-  const effectiveDmsChecklistId = selectedDmsChecklistId || dmsChecklistsQuery.data?.recommendation?.document_id || "";
+  const candidateDmsChecklistId = selectedDmsChecklistId ?? dmsChecklistsQuery.data?.recommendation?.document_id ?? "";
+  const effectiveDmsChecklistId = dmsChecklistsQuery.data?.items.some((item) => item.document_id === candidateDmsChecklistId)
+    ? candidateDmsChecklistId : "";
 
   const cacheChecklistBinding = (binding: ChecklistBinding) => {
     queryClient.setQueryData<AuditPreparationContext>(
@@ -265,11 +276,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const refresh = async (binding?: ChecklistBinding) => {
+    // Cancel older reads before applying the mutation result, then reconcile
+    // every preparation indicator with the authoritative server projection.
+    await queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] });
     if (binding) cacheChecklistBinding(binding);
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ["qms-audit-preparation-context", amoCode, auditId],
-        refetchType: binding ? "none" : "active",
+        refetchType: "active",
       }),
       queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
@@ -300,6 +314,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }),
     onSuccess: async () => {
       setNewRequest(emptyRequest);
+      setLocalSuccess("Document request created.");
       setShowRequestForm(false);
       setLocalError(null);
       await refresh();
@@ -314,6 +329,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         review_note: reviewNotes[request.id]?.trim() || null,
       }),
     onSuccess: async (updated) => {
+      setLocalSuccess(`Document request ${statusLabel(updated.status).toLowerCase()}.`);
       setReviewNotes((current) => ({ ...current, [updated.id]: "" }));
       setLocalError(null);
       await refresh();
@@ -322,20 +338,27 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const participantMutation = useMutation({
-    mutationFn: () => createExternalAuditParticipant(amoCode, auditId, {
-      email: participantDraft.email.trim(),
-      display_name: participantDraft.displayName.trim(),
-      organisation: participantDraft.organisation.trim() || null,
-      participant_type: participantDraft.participantType,
-      role: participantDraft.role.trim(),
-      permissions: participantPermissions(participantDraft),
-      assurance_level: participantDraft.assuranceLevel,
-      expires_at: new Date(participantDraft.expiresAt).toISOString(),
-    }),
+    mutationFn: () => {
+      const expiry = new Date(participantDraft.expiresAt);
+      if (!Number.isFinite(expiry.getTime()) || expiry.getTime() <= Date.now()) {
+        throw new Error("Choose an access expiry date and time in the future.");
+      }
+      return createExternalAuditParticipant(amoCode, auditId, {
+        email: participantDraft.email.trim(),
+        display_name: participantDraft.displayName.trim(),
+        organisation: participantDraft.organisation.trim() || null,
+        participant_type: participantDraft.participantType,
+        role: participantDraft.role.trim(),
+        permissions: participantPermissions(participantDraft),
+        assurance_level: participantDraft.assuranceLevel,
+        expires_at: expiry.toISOString(),
+      });
+    },
     onSuccess: async (participant) => {
       const relative = participant.access_url || null;
       setOneTimeAccessUrl(relative ? `${window.location.origin}${relative}` : null);
       setParticipantDraft(emptyExternalParticipant);
+      setLocalSuccess("Participant access created. Copy the invitation link shown below.");
       setShowParticipantForm(false);
       setLocalError(null);
       await refresh();
@@ -346,6 +369,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const revokeMutation = useMutation({
     mutationFn: (participantId: string) => revokeExternalAuditParticipant(amoCode, auditId, participantId),
     onSuccess: async () => {
+      setLocalSuccess("Participant access revoked.");
       setLocalError(null);
       await refresh();
     },
@@ -362,7 +386,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ),
     onSuccess: async (binding) => {
       setLocalError(null);
-      setLocalSuccess("The current effective DMS checklist has been added to fieldwork.");
+      setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
       setSelectedDmsChecklistId("");
       setChecklistReason("Selected for this audit during governed preparation.");
       setAllowExistingItems(false);
@@ -394,6 +418,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }),
     onSuccess: async (binding) => {
       setLocalError(null);
+      setLocalSuccess("Checklist created and bound to fieldwork.");
       setChecklistTitle("Audit fieldwork checklist");
       setChecklistDescription("");
       setChecklistReason("Created for this audit during governed preparation.");
@@ -630,13 +655,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
 
             {checklistMode === "LIBRARY" ? (
-              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); applyChecklistMutation.mutate(); }}>
+              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!effectiveDmsChecklistId) { setLocalError("Select a current effective DMS checklist first."); return; } if (checklistReason.trim().length < 8) { setLocalError("Enter a selection reason of at least 8 characters."); return; } applyChecklistMutation.mutate(); }}>
                 <label><span>Document type</span><select value={checklistDocumentType} onChange={(event) => { setChecklistDocumentType(event.target.value as "CHECKLIST" | "FORM"); setSelectedDmsChecklistId(""); }}><option value="CHECKLIST">Checklist</option><option value="FORM">Form</option></select></label>
                 <label><span>Search DMS</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Document code or title" /></div></label>
-                <label className="is-wide"><span>Current controlled document</span><select value={effectiveDmsChecklistId} onChange={(event) => setSelectedDmsChecklistId(event.target.value)}><option value="">Select the current effective {checklistDocumentType.toLowerCase()}</option>{dmsChecklists.map((item) => <option key={item.document_id} value={item.document_id}>{item.code} · {item.title} · Rev {item.current_revision.revision_number}</option>)}</select></label>
+                <label className="is-wide"><span>Current controlled document</span><select required value={effectiveDmsChecklistId} onChange={(event) => setSelectedDmsChecklistId(event.target.value)}><option value="">Select the current effective {checklistDocumentType.toLowerCase()}</option>{dmsChecklists.map((item) => <option key={item.document_id} value={item.document_id}>{item.code} · {item.title} · Rev {item.current_revision.revision_number}</option>)}</select></label>
                 {dmsChecklistsQuery.data?.recommendation ? <p className="qms-audit-prepare-stage__notice is-info is-wide"><CheckCircle2 size={14} /> Suggested from a similar audit: {dmsChecklistsQuery.data.recommendation.code} · {dmsChecklistsQuery.data.recommendation.title} ({dmsChecklistsQuery.data.recommendation.reason || "previously used for this audit context"}).</p> : null}
                 {selectedDmsChecklist ? <div className="qms-audit-prepare__current-revision is-wide"><strong>Current effective revision</strong><span>Issue {selectedDmsChecklist.current_revision.issue_number || "—"} · Rev {selectedDmsChecklist.current_revision.revision_number}{selectedDmsChecklist.current_revision.effective_date ? ` · effective ${selectedDmsChecklist.current_revision.effective_date}` : ""}</span><small>{selectedDmsChecklist.hierarchy_path || "DMS controlled-document library"}</small></div> : null}
-                {bindings.length ? <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label> : null}
+                <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label>
                 {dmsChecklistsQuery.error ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> The DMS checklist library could not be loaded. You can upload a controlled checklist or create this audit’s questions in realtime.</p> : null}
                 {!dmsChecklistsQuery.isLoading && !dmsChecklists.length ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> No current effective {checklistDocumentType.toLowerCase()} is available in DMS. Upload one here or create the questions in realtime.</p> : null}
                 {dmsChecklistsQuery.data?.pending?.length ? <section className="qms-audit-prepare__pending-dms is-wide" aria-label="Awaiting DMS approval">
@@ -647,10 +672,10 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     <Link to={item.review_url}>Review document <ArrowRight size={14} /></Link>
                   </article>)}
                 </section> : null}
-                <footer><button type="button" onClick={() => setChecklistUploadOpen(true)}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={!effectiveDmsChecklistId || checklistReason.trim().length < 8 || applyChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
+                <footer><button type="button" onClick={() => setChecklistUploadOpen(true)}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={applyChecklistMutation.isPending || createChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
               </form>
             ) : (
-              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); createChecklistMutation.mutate(); }}>
+              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title (at least 3 characters), a reason (at least 8 characters), and every checklist question. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
                 <label><span>Checklist title</span><input required minLength={3} value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} /></label>
                 <label><span>Creation reason</span><input required minLength={8} value={checklistReason} onChange={(event) => setChecklistReason(event.target.value)} /></label>
                 <label className="is-wide"><span>Description</span><textarea rows={2} value={checklistDescription} onChange={(event) => setChecklistDescription(event.target.value)} placeholder="Audit-specific purpose and coverage" /></label>
@@ -682,7 +707,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </div>
                 <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Append these questions to the existing live checklist</label>
                 {controlledDocumentsQuery.error ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> DMS search is unavailable. Remove the DMS selection to create an audit-specific checklist without a controlled source link.</p> : null}
-                <footer><button type="submit" className="is-primary" disabled={!realtimeChecklistValid || createChecklistMutation.isPending}>{createChecklistMutation.isPending ? "Creating and issuing…" : "Create, issue and bind checklist"}</button></footer>
+                <footer><button type="submit" className="is-primary" disabled={createChecklistMutation.isPending || applyChecklistMutation.isPending}>{createChecklistMutation.isPending ? "Creating and issuing…" : "Create, issue and bind checklist"}</button></footer>
               </form>
             )}
           </> : null}
@@ -708,6 +733,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <label><span>Controlled document</span><select value={newRequest.controlledDocumentId} onChange={(event) => setNewRequest((current) => ({ ...current, controlledDocumentId: event.target.value }))}><option value="">No preselected document</option>{requestDocuments.map((document) => <option key={document.id} value={document.id}>{document.code} · {document.title} · {statusLabel(document.status)}</option>)}</select></label>
                   <div className="qms-audit-prepare__current-revision"><strong>Current effective revision</strong>{selectedRequestDocument?.current_revision ? <span>Issue {selectedRequestDocument.current_revision.issue_number || "—"} · Rev {selectedRequestDocument.current_revision.revision_number} · {statusLabel(selectedRequestDocument.current_revision.status)}</span> : <span>{newRequest.controlledDocumentId ? "This document has no current effective revision." : "Resolved automatically when a document is selected."}</span>}</div>
                 </> : null}
+                {(newRequest.sourceMode === "CONTROLLED_DMS" || newRequest.controlledDocumentId) && !selectedRequestDocument?.current_revision ? <p className="qms-audit-prepare-stage__notice is-warning is-wide" role="status">Select a controlled document with a current effective revision before creating this request, or choose Upload only.</p> : null}
                 <footer><button type="button" onClick={() => { setShowRequestForm(false); setNewRequest(emptyRequest); }}>Cancel</button><button type="submit" className="is-primary" disabled={createMutation.isPending || (newRequest.sourceMode === "CONTROLLED_DMS" && !selectedRequestDocument?.current_revision) || Boolean(newRequest.controlledDocumentId && !selectedRequestDocument?.current_revision)}>{createMutation.isPending ? "Creating…" : "Create governed request"}</button></footer>
               </form>
             ) : null}
@@ -744,7 +770,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}
           </header>
 
-            {oneTimeAccessUrl ? <div className="qms-audit-prepare__one-time-link" role="status"><div><strong>Invitation link ready</strong><small>Copy now — the token is shown once.</small></div><button type="button" onClick={() => void navigator.clipboard.writeText(oneTimeAccessUrl)}><Copy size={14} /> Copy link</button></div> : null}
+            {oneTimeAccessUrl ? <div className="qms-audit-prepare__one-time-link" role="status"><div><strong>Invitation link ready</strong><small>Copy now — the token is shown once.</small></div><button type="button" onClick={() => { void navigator.clipboard.writeText(oneTimeAccessUrl).then(() => pushToast({ title: "Invitation link copied", variant: "success" })).catch(() => setLocalError("The invitation link could not be copied. Allow clipboard access and try again.")); }}><Copy size={14} /> Copy link</button></div> : null}
 
             {showParticipantForm ? <form className="qms-audit-prepare__participant-form" onSubmit={(event) => { event.preventDefault(); participantMutation.mutate(); }}>
               <label><span>Participant type</span><select value={participantDraft.participantType} onChange={(event) => { const participantType = event.target.value as ExternalParticipantType; setParticipantDraft((current) => ({ ...current, participantType, role: participantType === "AUDITEE_GUEST" ? "AUDITEE" : "AUDITOR", assuranceLevel: participantType === "AUDITEE_GUEST" ? "EMAIL_LINK" : current.assuranceLevel })); }}><option value="AUDITEE_GUEST">Auditee guest</option><option value="EXTERNAL_AUDITOR">External auditor</option></select></label>
@@ -756,7 +782,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label><span>Identity assurance</span><select value={participantDraft.assuranceLevel} onChange={(event) => setParticipantDraft((current) => ({ ...current, assuranceLevel: event.target.value as ExternalParticipantDraft["assuranceLevel"] }))}><option value="EMAIL_LINK">Email link</option>{participantDraft.participantType === "EXTERNAL_AUDITOR" ? <option value="PASSKEY">Passkey required</option> : null}</select></label>
               <fieldset className="is-wide"><legend>Scoped access</legend><label><input type="checkbox" checked={participantDraft.readProgress} onChange={(event) => setParticipantDraft((current) => ({ ...current, readProgress: event.target.checked }))} /> View fieldwork progress</label>{participantDraft.participantType === "AUDITEE_GUEST" ? <label><input type="checkbox" checked={participantDraft.readReleasedEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, readReleasedEvidence: event.target.checked }))} /> View evidence explicitly released with findings</label> : <><label><input type="checkbox" checked={participantDraft.executeChecklist} onChange={(event) => setParticipantDraft((current) => ({ ...current, executeChecklist: event.target.checked }))} /> Execute assigned checklist</label><label><input type="checkbox" checked={participantDraft.createEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, createEvidence: event.target.checked }))} /> Add audit evidence</label><label><input type="checkbox" checked={participantDraft.draftFinding} onChange={(event) => setParticipantDraft((current) => ({ ...current, draftFinding: event.target.checked }))} /> Draft findings</label></>}</fieldset>
               <p className="is-wide">Auditees use email-link access. External auditors may require a passkey when configured.</p>
-              <footer><button type="button" onClick={() => setShowParticipantForm(false)}>Cancel</button><button type="submit" className="is-primary" disabled={!participantDraft.expiresAt || participantMutation.isPending}>{participantMutation.isPending ? "Creating access…" : "Create invitation"}</button></footer>
+              <footer><button type="button" onClick={() => setShowParticipantForm(false)}>Cancel</button><button type="submit" className="is-primary" disabled={participantMutation.isPending}>{participantMutation.isPending ? "Creating access…" : "Create invitation"}</button></footer>
             </form> : null}
 
             <div className="qms-audit-prepare__participant-list">

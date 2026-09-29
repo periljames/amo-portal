@@ -19,6 +19,8 @@ export default function ManualReaderPage() {
   const tenant = (params.amoCode || params.tenantSlug || "").toLowerCase();
   const workspaceCode = params.amoCode || params.tenantSlug || "";
   const requestedMode = searchParams.get("readerMode");
+  const assistantRequested = searchParams.get("assistant") === "1";
+  const assistantQuery = searchParams.get("assistant_query") || "";
   const mode: ReaderExperienceMode = requestedMode === "immersive" ? "immersive" : "standard";
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
@@ -66,7 +68,7 @@ export default function ManualReaderPage() {
         {params.manualId && params.revId ? <button type="button" onClick={openReview} title="Review changes against the available baseline"><FileDiff size={14} /><span>Review changes</span></button> : null}
         <button type="button" className={fullscreen ? "active" : ""} aria-pressed={fullscreen} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</span></button>
       </div>
-      {tenant ? <DocumentationAssistantPanel tenant={tenant} manualId={params.manualId} revisionId={params.revId} /> : null}
+      {tenant ? <DocumentationAssistantPanel tenant={tenant} manualId={params.manualId} revisionId={params.revId} defaultOpen={assistantRequested} initialQuery={assistantQuery} initialMode="ASSIST" /> : null}
     </div>} />
     <PublicationAssistedNavigationBridge />
     <PublicationInlineReferenceController />

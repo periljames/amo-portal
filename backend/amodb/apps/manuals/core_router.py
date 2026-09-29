@@ -17,10 +17,11 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
 
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -29,6 +30,12 @@ from amodb.apps.accounts.models import AMO
 from amodb.apps.platform import saas_models, saas_queue
 
 from . import models
+from .office_layout import (
+    OfficeLayoutError,
+    SUPPORTED_OFFICE_EXTENSIONS,
+    normalize_office_source_to_docx,
+    office_mime_type,
+)
 from .schemas import (
     AcknowledgeRequest,
     DiffSummaryOut,
@@ -150,20 +157,43 @@ def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
     filename = (file.filename or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="Missing filename")
-    if not filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_OFFICE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a supported Word document: DOCX, DOC, ODT, or RTF")
     if not content:
-        raise HTTPException(status_code=400, detail="Uploaded DOCX is empty")
+        raise HTTPException(status_code=400, detail="Uploaded Word document is empty")
     if len(content) > MAX_DOCX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"DOCX file is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+        raise HTTPException(status_code=413, detail=f"Word document is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+
+    if suffix == ".docx":
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as zf:
+                if "word/document.xml" not in set(zf.namelist()):
+                    raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
+    elif suffix == ".doc" and not content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise HTTPException(status_code=400, detail="Invalid legacy DOC file")
+    elif suffix == ".rtf" and not content.lstrip().startswith(b"{\\rtf"):
+        raise HTTPException(status_code=400, detail="Invalid RTF file")
+    elif suffix == ".odt":
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as zf:
+                if "content.xml" not in set(zf.namelist()):
+                    raise HTTPException(status_code=400, detail="Invalid ODT structure: content.xml missing")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid ODT file") from exc
+
+
+def _office_semantic_docx_bytes(file: UploadFile, content: bytes) -> bytes:
     try:
-        with zipfile.ZipFile(BytesIO(content)) as zf:
-            if "word/document.xml" not in set(zf.namelist()):
-                raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
+        return normalize_office_source_to_docx(content, file.filename)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _validate_pdf_upload(file: UploadFile, content: bytes) -> None:
@@ -577,9 +607,33 @@ def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
     target_dir = MANUAL_UPLOAD_DIR / tenant_slug / re.sub(r"[^A-Za-z0-9._-]+", "_", manual_code or "manual") / revision_id
     _ensure_upload_dir(target_dir)
-    target = target_dir / safe_name
-    target.write_bytes(content)
-    return str(target), hashlib.sha256(content).hexdigest()
+    target = (target_dir / safe_name).resolve()
+    source_sha256 = hashlib.sha256(content).hexdigest()
+
+    # Never expose a partially-written governed source. Write and fsync a
+    # unique sibling first, verify the staged bytes, then atomically publish it.
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{safe_name}-",
+        suffix=".upload",
+        dir=target_dir,
+        delete=False,
+    ) as handle:
+        temporary = Path(handle.name).resolve()
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        staged_digest = hashlib.sha256()
+        with temporary.open("rb") as staged:
+            for chunk in iter(lambda: staged.read(1024 * 1024), b""):
+                staged_digest.update(chunk)
+        staged_sha256 = staged_digest.hexdigest()
+        if staged_sha256 != source_sha256:
+            raise IOError("Stored source verification failed before publication")
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return str(target), source_sha256
 
 
 def _extract_pdf_content(content: bytes, filename: str | None = None) -> dict[str, object]:
@@ -979,7 +1033,8 @@ async def preview_docx_upload(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
-    parsed = _extract_docx_content(content, file.filename)
+    semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)
+    parsed = await run_in_threadpool(_extract_docx_content, semantic_docx, file.filename)
     paragraphs = [str(item.get("text") or "") for item in list(parsed.get("paragraphs", []))]
     headings = [str(item.get("heading") or "") for item in list(parsed.get("headings", []))]
     metadata = dict(parsed.get("metadata", {}))
@@ -1050,8 +1105,9 @@ async def upload_docx_revision(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
+    semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)
 
-    parsed = _extract_docx_content(content, file.filename)
+    parsed = await run_in_threadpool(_extract_docx_content, semantic_docx, file.filename)
     metadata = dict(parsed.get("metadata", {}))
     section_specs = _build_manual_sections(parsed)
     paragraph_count = sum(len(list(spec.get("paragraphs") or [])) for spec in section_specs)
@@ -1097,7 +1153,7 @@ async def upload_docx_revision(
         manual_uuid=f"manual::{manual.id}::rev::{uuid4().hex[:12]}",
         notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
         source_type_enum=models.ManualSourceType.DOCX,
-        source_mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        source_mime_type=office_mime_type(file.filename),
     )
     db.add(rev)
     db.flush()
@@ -1122,7 +1178,7 @@ async def upload_docx_revision(
             heading=str(spec.get("heading") or f"Section {section_index}")[:255],
             anchor_slug=str(spec.get("anchor_slug") or f"section-{section_index}"),
             level=int(spec.get("level") or 1),
-            metadata_json={"source": "docx-upload", "filename": file.filename, "paragraphs": len(list(spec.get("paragraphs") or []))},
+            metadata_json={"source": "office-upload", "filename": file.filename, "paragraphs": len(list(spec.get("paragraphs") or []))},
         )
         db.add(section)
         db.flush()
@@ -1758,8 +1814,14 @@ def get_revision_source(
     manual_id: str,
     rev_id: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
+    # Import lazily: workspace_service imports _tenant_by_slug from this module.
+    from amodb.apps.doc_control.workspace_service import can_read_manual, get_profile
+
+    if not getattr(current_user, "is_superuser", False) and str(getattr(current_user, "amo_id", "")) != str(tenant.amo_id):
+        raise HTTPException(status_code=403, detail="The requested source is outside the active AMO context")
     rev = (
         db.query(models.ManualRevision)
         .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
@@ -1768,17 +1830,113 @@ def get_revision_source(
     )
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
+    profile = get_profile(db, tenant, manual_id)
+    if not can_read_manual(current_user, profile):
+        raise HTTPException(status_code=403, detail="The current user is not permitted to download this source")
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
     source_path = Path(rev.source_storage_path)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
+    recorded_checksum = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    digest = hashlib.sha256()
+    with source_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    checksum = digest.hexdigest()
+    if recorded_checksum and checksum != recorded_checksum:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SOURCE_CHECKSUM_MISMATCH",
+                "message": "The retained source no longer matches the uploaded controlled-file checksum.",
+            },
+        )
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-Publication-Source": "exact-uploaded-original",
+    }
+    if checksum:
+        headers["ETag"] = f'"{checksum}"'
+        headers["X-Source-SHA256"] = checksum
     return FileResponse(
         path=str(source_path),
         media_type=rev.source_mime_type or "application/octet-stream",
         filename=download_name,
-        headers={"Content-Disposition": f'inline; filename="{download_name}"'},
+        content_disposition_type="attachment",
+        headers=headers,
+    )
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/browser-office.docx", include_in_schema=False)
+def get_browser_office_source(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Return a browser-readable DOCX derivative without replacing the retained original."""
+
+    tenant = _tenant_by_slug(db, tenant_slug)
+    from amodb.apps.doc_control.workspace_service import can_read_manual, get_profile
+
+    if not getattr(current_user, "is_superuser", False) and str(getattr(current_user, "amo_id", "")) != str(tenant.amo_id):
+        raise HTTPException(status_code=403, detail="The requested source is outside the active AMO context")
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    if not can_read_manual(current_user, get_profile(db, tenant, manual_id)):
+        raise HTTPException(status_code=403, detail="The current user is not permitted to read this source")
+    if not rev.source_storage_path:
+        raise HTTPException(status_code=404, detail="Revision source file not available")
+
+    source_path = Path(rev.source_storage_path)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Revision source file missing from storage")
+
+    original_name = rev.source_filename or source_path.name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in SUPPORTED_OFFICE_EXTENSIONS:
+        raise HTTPException(status_code=409, detail="This revision does not contain a supported Office source")
+
+    content = source_path.read_bytes()
+    expected = str(getattr(rev, "source_sha256", "") or "").strip().lower()
+    actual = hashlib.sha256(content).hexdigest()
+    if expected and actual != expected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SOURCE_CHECKSUM_MISMATCH",
+                "message": "The retained source no longer matches the uploaded controlled-file checksum.",
+            },
+        )
+
+    try:
+        browser_docx = normalize_office_source_to_docx(content, original_name)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    derivative_sha = hashlib.sha256(browser_docx).hexdigest()
+    return Response(
+        content=browser_docx,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": f'"{derivative_sha}"',
+            "Content-Disposition": f'inline; filename="{Path(original_name).stem}.docx"',
+            "X-Content-Type-Options": "nosniff",
+            "X-Publication-Source": "browser-office-derivative",
+            "X-Original-Source-SHA256": actual,
+            "X-Browser-Source-SHA256": derivative_sha,
+        },
     )
 
 

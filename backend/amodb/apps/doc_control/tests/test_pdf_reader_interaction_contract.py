@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[5]
 ENTRY = ROOT / "frontend/src/pages/manuals/PdfReaderCore.tsx"
 CORE = ROOT / "frontend/src/pages/manuals/PdfReaderCoreV4.tsx"
 LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
-DOCX_LAYOUT = ROOT / "frontend/src/pages/manuals/PublicationDocxLayoutViewer.tsx"
+OFFICE_RENDER = ROOT / "backend/amodb/apps/manuals/office_layout.py"
 PUBLICATIONS = ROOT / "frontend/src/pages/manuals/PublicationsReaderPage.tsx"
 STYLES = ROOT / "frontend/src/pages/manuals/pdfReaderEngineV3.css"
 LIVE_E2E = ROOT / "frontend/tests/e2e/publications-reader-live.spec.ts"
@@ -15,6 +15,8 @@ PRECOMPUTE = ROOT / "backend/amodb/apps/manuals/pdf_reader_precompute.py"
 PRECOMPUTED_ROUTER = ROOT / "backend/amodb/apps/manuals/pdf_reader_precomputed_router.py"
 UPLOAD_GUARD = ROOT / "backend/amodb/apps/manuals/upload_guard_router.py"
 ROUTER = ROOT / "backend/amodb/apps/manuals/router.py"
+CORE_ROUTER = ROOT / "backend/amodb/apps/manuals/core_router.py"
+FAST_READER = ROOT / "backend/amodb/apps/manuals/publications_fast_reader_router.py"
 
 
 def _source(path: Path) -> str:
@@ -55,7 +57,10 @@ def test_navigation_publishes_only_from_the_confirmed_physical_viewport() -> Non
     assert "virtualizer.scrollToIndex" in jump
     assert "publishPhysicalPage" not in jump
     assert "publishPhysicalPage(closest.index + 1)" in physical
-    assert "onScroll={schedulePhysicalSync}" in source
+    assert "onScroll={handleViewportScroll}" in source
+    assert "fastScrolling" in source
+    assert "overscan: fastScrolling ? 0 : profile.renderRadius" in source
+    assert "deferRender={fastScrolling}" in source
     assert "PAGE_TOP_OFFSET" not in source
     assert "window.scrollBy" not in jump
 
@@ -69,7 +74,9 @@ def test_document_source_is_resolved_once_before_pdf_mount() -> None:
     assert "cachedReadOnly" in entry
     assert "reader_pdf_url || props.fileUrl" in entry
     assert "if (!readerFileUrl)" in entry
-    assert "sourceChanged || readerChanged || sourceUrlChanged" in entry
+    assert "sourceChanged" in entry
+    assert "readerChanged" in entry
+    assert "sourceUrlChanged" in entry
     assert "sourceCachePending" not in entry
     assert "Opening cached document" not in entry
 
@@ -119,21 +126,89 @@ def test_zoom_is_client_scaled_without_rerasterizing_mounted_pages() -> None:
     assert "visibility: visible !important" not in styles
 
 
-def test_docx_layout_is_client_rendered_and_zoom_does_not_reparse_source() -> None:
-    source = _source(DOCX_LAYOUT)
+def test_docx_layout_uses_cached_office_pdf_derivative_and_safe_fallback() -> None:
+    renderer = _source(OFFICE_RENDER)
+    publications = _source(PUBLICATIONS)
+    fast_reader = _source(FAST_READER)
 
-    assert 'import("docx-preview")' in source
-    assert "Promise.all([" in source
-    assert "Laying out Word pages on this device" in source
-    assert "experimental: true" in source
-    assert "useBase64URL: true" in source
-    assert "renderHeaders: true" in source
-    assert "renderFooters: true" in source
-    assert "docx-media-fallback" in source
-    assert "embedded graphic" in source
-    assert "host.style.zoom = String(nextScale)" in source
-    assert 'aria-label="Document zoom"' in _source(PUBLICATIONS)
-    assert "rendered.pdf" not in source
+    assert '"--convert-to"' in renderer
+    assert '"pdf:writer_pdf_Export"' in renderer
+    assert "office_layout_pdf_path" in renderer
+    assert "os.replace(output, target)" in renderer
+    assert "OFFICE_NORMALIZED_CACHE_DIR" in renderer
+    assert "sourceIsPdf ? (metadata?.source_url" in publications
+    assert "metadata?.rendered_pdf_url" in publications
+    assert "PublicationDocxLayoutViewer" in publications
+    assert 'sourceIsOffice && !officeLayoutProofAvailable' in publications
+    assert '["DOCX", "DOC", "ODT", "RTF"].includes(sourceType)' in publications
+    assert "browser-office.docx" in publications
+    assert '"X-Publication-Source": "browser-office-derivative"' in _source(CORE_ROUTER)
+    assert 'aria-label="Document zoom"' in publications
+    assert '"layout_proof_available": office_layout_ready' in fast_reader
+    assert '"reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html"' in fast_reader
+
+
+def test_office_download_preserves_original_source_and_print_uses_pdf_proof() -> None:
+    publications = _source(PUBLICATIONS)
+    layout = _source(LAYOUT)
+    core_router = _source(CORE_ROUTER)
+
+    assert "const downloadPath = sourceIsOffice" in publications
+    assert "metadata?.original_source_url || printablePdfPath" in publications
+    assert "originalDownloadUrl={downloadPath || viewerPdfPath}" in publications
+    assert "printUrl={printablePdfPath || viewerPdfPath}" in publications
+    assert "Download original" in publications
+    assert "originalDownloadUrl?: string" in layout
+    assert "originalDownloadLabel?: string" in layout
+    assert "printUrl?: string" in layout
+    assert "originalDownloadUrl={originalDownloadUrl || fileUrl}" in layout
+    assert "printUrl={printUrl || fileUrl}" in layout
+    assert '"X-Publication-Source": "exact-uploaded-original"' in core_router
+    assert '"X-Source-SHA256"' in core_router
+    assert 'content_disposition_type="attachment"' in core_router
+
+
+def test_office_processing_does_not_block_async_routes_and_capabilities_inspect_proof() -> None:
+    core_router = _source(CORE_ROUTER)
+    capability_router = _source(PRECOMPUTED_ROUTER)
+
+    assert "semantic_docx = await run_in_threadpool(_office_semantic_docx_bytes, file, content)" in core_router
+    assert "_office_layout_inspection" in capability_router
+    assert "PdfInspection(" in capability_router
+    assert "source_sha256=derivative.pdf_sha256" in capability_router
+    assert 'source_type in {"DOCX", "DOC", "ODT", "RTF"}' in capability_router
+    assert '"can_fill": False' in capability_router
+    assert '"reader_source_sha256": inspection.source_sha256' in capability_router
+
+
+def test_background_pdf_cache_is_checksum_bound_and_automatic() -> None:
+    bridge = _source(ENTRY)
+    cache = _source(ROOT / "frontend/src/pages/manuals/pdfSourceCache.ts")
+    fast_reader = _source(FAST_READER)
+
+    assert "savePdfSourceOffline(" in bridge
+    assert "backgroundCacheTimer" in bridge
+    assert "await mount(live, true, true)" in bridge
+    assert "readCachedPdfSource(" in bridge
+    assert "preferCachedBytes" in bridge
+    assert 'window.addEventListener("offline"' in bridge
+    assert "X-Reader-SHA256" in cache
+    assert "AES-GCM" in cache
+    assert "response.body.getReader()" in cache
+    assert "CHUNK_BYTES" in cache
+    assert '"X-Reader-SHA256"' in fast_reader
+    assert '"Accept-Ranges": "bytes"' in fast_reader
+    assert "max-age=31536000, immutable" in fast_reader
+
+
+def test_local_pdf_handoff_preserves_page_and_fast_scroll_state() -> None:
+    source = _source(CORE)
+
+    assert "documentLoadedRef" in source
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in source
+    assert "overscan: fastScrolling ? 0 : profile.renderRadius" in source
+    assert "deferRender={fastScrolling}" in source
+    assert "}, 90);" in source
 
 
 def test_draft_status_is_presented_simply_without_changing_governance_state() -> None:

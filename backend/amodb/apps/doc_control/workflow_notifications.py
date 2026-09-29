@@ -22,10 +22,9 @@ def notify_workflow_progress(db, *, tenant, manual, workflow) -> None:
     for user in users:
         if not can_read_manual(user, profile):
             continue
-        actions = workflow_actions_for_user(db, workflow=workflow, user=user)
-        if str(user.id) != str(workflow.created_by_user_id) and not actions:
+        user_actions = workflow_actions_for_user(db, workflow=workflow, user=user)
+        if str(user.id) != str(workflow.created_by_user_id) and not user_actions:
             continue
-        requires_action = bool(actions)
         key = f"document-workflow:{workflow.id}:{workflow.version or 1}:{user.id}"
         if db.query(PortalNotification.id).filter(
             PortalNotification.amo_id == tenant.amo_id,
@@ -44,13 +43,13 @@ def notify_workflow_progress(db, *, tenant, manual, workflow) -> None:
                 "revision_id": workflow.revision_id,
                 "state": state,
                 "module": "DMS",
-                "category": "ACTION" if requires_action else "UPDATE",
+                "category": "ACTION" if user_actions else "UPDATE",
                 "priority": "NORMAL",
-                "requires_action": requires_action,
-                "action_label": "Review document" if requires_action else "Open document",
-                "business_state": "ACTION_REQUIRED" if requires_action else "UPDATE",
+                "requires_action": bool(user_actions),
+                "action_label": "Review document" if user_actions else "Open document",
+                "business_state": "ACTION_REQUIRED" if user_actions else "UPDATE",
                 "group_key": f"document-workflow:{workflow.id}",
-                "available_actions": list(actions),
+                "available_actions": list(user_actions),
             },
         )
         db.add(notification)

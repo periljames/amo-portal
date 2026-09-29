@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
@@ -19,6 +19,7 @@ from amodb.security import get_current_active_user
 
 from . import models
 from .core_router import _audit, _tenant_by_slug
+from .office_layout import OfficeLayoutError, office_layout_pdf_checksum, office_layout_pdf_path, precompute_office_layout_assets, prepare_office_layout_pdf
 
 
 router = APIRouter(
@@ -181,6 +182,20 @@ def _reader_metadata(
     page_count = max(1, int(getattr(revision, "source_page_count", 0) or 1))
     image_only = source_type == "PDF" and text_char_count < max(80, page_count * 16)
     is_published = _status_value(revision) == "PUBLISHED"
+    office_layout_path = office_layout_pdf_path(revision)
+    office_layout_supported = bool(office_layout_path and source_path)
+    office_layout_ready = bool(
+        office_layout_path
+        and office_layout_path.exists()
+        and office_layout_path.is_file()
+        and office_layout_path.stat().st_size > 0
+    )
+    office_layout_sha256 = ""
+    if office_layout_ready and office_layout_path:
+        try:
+            office_layout_sha256 = office_layout_pdf_checksum(office_layout_path)
+        except (OfficeLayoutError, OSError):
+            office_layout_ready = False
     if source_type == "PDF" and source_path:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream.pdf"
@@ -188,10 +203,25 @@ def _reader_metadata(
         )
         rendered_size = source_size
         source_exact = True
+        layout_renderer = "PDF_SOURCE"
+    elif office_layout_ready:
+        rendered_url = (
+            f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream-layout.pdf"
+            f"?v={office_layout_sha256 or cache_key}"
+        )
+        rendered_size = office_layout_path.stat().st_size
+        source_exact = False
+        layout_renderer = "OFFICE_PDF_PROOF"
+    elif office_layout_supported:
+        rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
+        rendered_size = 0
+        source_exact = False
+        layout_renderer = "OFFICE_BROWSER_FALLBACK"
     else:
         rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
         rendered_size = 0
         source_exact = False
+        layout_renderer = "SEMANTIC_FALLBACK"
     effective_date = revision.effective_date.isoformat() if revision.effective_date else None
     published_date = revision.published_at.date().isoformat() if revision.published_at else None
     created_date = revision.created_at.date().isoformat() if revision.created_at else None
@@ -214,10 +244,21 @@ def _reader_metadata(
         "source_size_bytes": source_size,
         "source_page_count": revision.source_page_count,
         "source_url": rendered_url if source_exact else None,
+        "original_source_url": (
+            f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/source"
+            if source_path
+            else None
+        ),
+        "original_source_filename": revision.source_filename or (source_path.name if source_path else None),
+        "original_source_sha256": str(getattr(revision, "source_sha256", "") or "") or None,
         "rendered_pdf_url": rendered_url,
         "rendered_pdf_size_bytes": rendered_size,
         "download_filename": f"{manual.code}_Rev_{revision.rev_number or 'current'}.pdf",
-        "reader_mode": "pdf" if source_type == "PDF" else "html",
+        "reader_mode": "pdf" if source_type == "PDF" or office_layout_ready else "html",
+        "layout_renderer": layout_renderer,
+        "layout_proof_supported": office_layout_supported,
+        "layout_proof_available": office_layout_ready,
+        "layout_proof_ready": office_layout_ready,
         "image_only": image_only,
         "text_char_count": text_char_count,
         "citation_current": 0,
@@ -237,6 +278,7 @@ def reader_bootstrap(
     revision_id: str,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -254,6 +296,10 @@ def reader_bootstrap(
         .all()
     )
     source_path = _source_path(revision)
+    if _source_type(revision) in {"DOCX", "DOC", "ODT", "RTF"}:
+        proof_path = office_layout_pdf_path(revision)
+        if not proof_path or not proof_path.exists() or not proof_path.is_file():
+            background_tasks.add_task(precompute_office_layout_assets, revision.id)
     cache_key = _cache_key(revision, source_path)
     etag = _etag(cache_key)
     if request.headers.get("if-none-match") == etag:
@@ -540,9 +586,15 @@ def _stream_source(path: Path, request: Request, *, filename: str, cache_key: st
         "Cache-Control": "private, max-age=31536000, immutable",
         "ETag": etag,
         "Content-Disposition": f'inline; filename="{filename}"',
-        "X-Publication-Source": "exact-original",
+        "X-Publication-Source": "reader-source",
         "X-AcroForm-Policy": "read-only",
+        "X-Content-Type-Options": "nosniff",
+        # Byte ranges are defined over the stored PDF bytes. Prevent response
+        # compression from changing transfer offsets or cache size semantics.
+        "Content-Encoding": "identity",
     }
+    if re.fullmatch(r"[0-9a-fA-F]{64}", str(cache_key or "")):
+        common_headers["X-Reader-SHA256"] = str(cache_key).lower()
     if request.headers.get("if-none-match") == etag and not request.headers.get("range"):
         return Response(status_code=304, headers=common_headers)
     range_header = str(request.headers.get("range") or "").strip()
@@ -577,6 +629,46 @@ def _stream_source(path: Path, request: Request, *, filename: str, cache_key: st
         _iter_file(path, 0, max(0, size - 1)),
         media_type="application/pdf",
         headers={**common_headers, "Content-Length": str(size)},
+    )
+
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/stream-layout.pdf")
+def stream_publication_office_layout(
+    tenant_slug: str,
+    manual_id: str,
+    revision_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _tenant, manual, revision, _profile = _load_publication(
+        db,
+        tenant_slug=tenant_slug,
+        manual_id=manual_id,
+        revision_id=revision_id,
+        current_user=current_user,
+    )
+    source_type = _source_type(revision)
+    if source_type not in {"DOCX", "DOC", "ODT", "RTF"}:
+        raise HTTPException(status_code=409, detail="This revision does not use an Office layout proof")
+    try:
+        derivative = prepare_office_layout_pdf(revision)
+    except OfficeLayoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    path = derivative.path
+    if int(getattr(revision, "source_page_count", 0) or 0) != derivative.page_count:
+        revision.source_page_count = derivative.page_count
+        db.add(revision)
+        db.commit()
+    cache_key = derivative.pdf_sha256
+    safe_code = re.sub(r"[^A-Za-z0-9._-]+", "_", manual.code or "publication")
+    safe_revision = re.sub(r"[^A-Za-z0-9._-]+", "_", revision.rev_number or "current")
+    return _stream_source(
+        path,
+        request,
+        filename=f"{safe_code}_Rev_{safe_revision}_layout.pdf",
+        cache_key=f"{cache_key}-office-layout",
     )
 
 

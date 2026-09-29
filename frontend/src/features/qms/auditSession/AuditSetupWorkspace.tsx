@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, Download, Exter
 import { Link, useLocation } from "react-router-dom";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
+import { useToast } from "../../../components/feedback/ToastProvider";
 import { type QMSAuditOut } from "../../../services/qms";
 import {
   createAuditNotice,
@@ -261,6 +262,8 @@ function errorMessage(error: unknown, fallback: string): string {
 const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { pushToast } = useToast();
+  const [deliveryFeedback, setDeliveryFeedback] = useState<{ message: string; complete: boolean } | null>(null);
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const canManageNotice = canManage || hasQmsRolePermission("qms.audit.notice.manage");
   const [draft, setDraft] = useState<SetupDraft | null>(null);
@@ -576,6 +579,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return { row: prepared, ...preview };
     },
     onSuccess: ({ row, blob, filename }) => {
+      setDeliveryFeedback(null);
       setLocalError(null);
       setNoticePreview({
         url: URL.createObjectURL(blob),
@@ -636,21 +640,30 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const submitNoticeMutation = useMutation({
+    onMutate: () => { setDeliveryFeedback(null); setLocalError(null); setNotice(null); },
     mutationFn: (row: AuditNotice) =>
       submitAuditNotice(amoCode, auditId, row.id, noticeReason.trim(), {
         shortNoticeWaiverReason: shortNoticeWaiverReason.trim() || undefined,
       }),
     onSuccess: async (result) => {
       setLocalError(null);
-      setNotice(
-        result.delivery_complete
-          ? `The exact previewed notice was sent as a PDF attachment to ${result.dispatch.sent} email${result.dispatch.sent === 1 ? "" : "s"}.`
-          : `The notice PDF is ready, but ${result.dispatch.failed} of ${result.dispatch.attempted} email deliveries failed. Correct the email configuration and retry.`,
-      );
+      const message = result.delivery_complete
+          ? result.dispatch.attempted === 0
+            ? "This notice was already delivered. No additional emails were sent."
+            : `The exact previewed notice was sent as a PDF attachment to ${result.dispatch.sent} email${result.dispatch.sent === 1 ? "" : "s"}.`
+          : `${result.dispatch.sent} of ${result.dispatch.attempted} emails sent; ${result.dispatch.failed} failed. Delivery is incomplete. Check recipients and email configuration before retrying.`;
+      setNotice(message);
+      setDeliveryFeedback({ message, complete: result.delivery_complete });
+      pushToast({ title: result.delivery_complete ? "Audit notice sent" : "Audit notice delivery incomplete", message, variant: result.delivery_complete ? "success" : "warning" });
       setNoticePreview((current) => current ? { ...current, notice: result.notice } : current);
       await refresh();
     },
-    onError: (cause) => setLocalError(errorMessage(cause, "The audit notice could not be submitted.")),
+    onError: (cause) => {
+      const message = errorMessage(cause, "The audit notice could not be submitted.");
+      setLocalError(message);
+      setDeliveryFeedback({ message, complete: false });
+      pushToast({ title: "Audit notice could not be sent", message, variant: "error" });
+    },
   });
 
   const downloadNoticeMutation = useMutation({
@@ -1652,6 +1665,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 title={`Final audit notice revision ${previewedNotice.revision_no}`}
               />
             </div>
+            {deliveryFeedback ? <div className={`qms-occurrence-stage__message ${deliveryFeedback.complete ? "is-success" : "is-error"}`} role={deliveryFeedback.complete ? "status" : "alert"}>{deliveryFeedback.message}</div> : null}
             <footer>
               <div className="qms-audit-notice-modal__record">
                 <strong>
@@ -1665,6 +1679,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <label className="qms-audit-notice-modal__reason">
                   <span>Issuance record note</span>
                   <textarea rows={2} value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} />
+                  {noticeReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to enable sending.</small> : null}
+                  {!shortNoticeWaiverReady ? <small role="status">Complete the short-notice waiver reason in the Audit notice section before sending.</small> : null}
                 </label>
               ) : null}
               <div className="qms-audit-notice-modal__actions">
@@ -1683,7 +1699,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     }
                     onClick={() => submitNoticeMutation.mutate(previewedNotice)}
                   >
-                    <Send size={15} /> Send notice and email
+                    <Send size={15} /> {submitNoticeMutation.isPending ? "Sending notice…" : "Send notice and email"}
                   </button>
                 ) : null}
               </div>

@@ -199,7 +199,7 @@ export default function DocumentRecordsVaultPage() {
             <tbody>{[...(focusedRecord ? [focusedRecord] : []), ...records.filter((record) => record.id !== focusedRecord?.id)].map((record) => (
               <tr key={record.id}>
                 <td data-label="Record"><strong>{record.title}</strong><small>{record.series_code} · {record.record_number}</small>
-                  <DocumentControlStatus status={record.legal_hold ? "LEGAL HOLD" : record.disposition_status} kind={record.legal_hold ? "danger" : record.disposition_status === "ACTIVE" ? "success" : "neutral"} />
+                  <DocumentControlStatus kind={record.legal_hold ? "danger" : record.disposition_status === "ACTIVE" ? "success" : "neutral"} status={record.legal_hold ? "LEGAL HOLD" : record.disposition_status} />
                 </td>
                 <td data-label="Source">{record.source_module || "—"}<small>{record.source_entity_type || ""}</small></td>
                 <td data-label="File / index">{record.filename || "Restricted"}<small>{humanBytes(record.size_bytes)} · {record.metadata?.text_index?.status || "—"}</small>

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.doc_control import knowledge_models as knowledge_models
 from amodb.apps.manuals import models as manual_models
 from amodb.apps.manuals.pdf_reader_precompute import cached_pdf_inspection
+from amodb.apps.manuals.office_layout import OfficeLayoutError, prepare_office_layout_pdf
 from amodb.apps.platform import saas_models
 
 
@@ -69,6 +70,26 @@ def _process_revision(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
             "has_javascript": inspection.has_javascript,
             "can_flatten": inspection.can_flatten,
         }
+    elif source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+            revision.source_page_count = derivative.page_count
+            result["office_layout"] = {
+                "status": "READY",
+                "path": str(derivative.path),
+                "page_count": derivative.page_count,
+                "size_bytes": derivative.size_bytes,
+                "source_sha256": derivative.source_sha256,
+                "created": derivative.created,
+            }
+        except OfficeLayoutError as exc:
+            # The original source and semantic reader stay available. Production
+            # images include LibreOffice Writer, so this warning is actionable
+            # without turning source ingestion into data loss.
+            result["office_layout"] = {
+                "status": "UNAVAILABLE",
+                "error": str(exc),
+            }
 
     index_job = db.query(knowledge_models.DocumentationIndexJob).filter(
         knowledge_models.DocumentationIndexJob.tenant_id == tenant.amo_id,

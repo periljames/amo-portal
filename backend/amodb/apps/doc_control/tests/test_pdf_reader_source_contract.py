@@ -27,7 +27,6 @@ def _runs_reader_backend_contracts(workflow: str) -> bool:
 def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     shell = _read("frontend/src/pages/manuals/PdfReaderCoreV5.tsx")
     core = _read("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
-    compatibility = _read("frontend/src/pages/manuals/PdfReaderCoreV3.tsx")
     bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
     publication = _read(
         "frontend/src/pages/manuals/PublicationPdfLayoutViewer.tsx"
@@ -43,8 +42,6 @@ def test_one_virtualized_browser_viewer_owns_pdf_loading() -> None:
     assert "<PdfPage" not in shell
     assert "PdfReaderCoreV5" in bridge
     assert 'from "./PdfReaderCoreV5"' in bridge
-    assert 'from "./PdfReaderCoreV4"' in compatibility
-    assert "<PdfDocument" not in compatibility
     assert "PdfReaderCore" in publication
     assert "PdfReaderCore" in linked
 
@@ -109,8 +106,10 @@ def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
     capabilities = _read("frontend/src/services/pdfReader.ts")
     authority = _read("frontend/src/services/pdfWorkingCopyAuthority.ts")
 
-    assert "readerKey" in bridge
     assert "sourceMountedRef" in bridge
+    assert "preferCachedBytes" in bridge
+    assert "reader_source_sha256" in bridge
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in core
     assert "capabilities.source_sha256" in core
     assert "pdf-working-copy:v1" in store
     for partition in ("userId", "tenant", "manualId", "revisionId"):
@@ -121,6 +120,24 @@ def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
     assert "stored !== authoritative" in store
     assert "registerAuthoritativePdfSource" in capabilities
     assert "authoritativeChecksums" in authority
+
+
+def test_verified_reader_source_is_warmed_into_encrypted_browser_storage() -> None:
+    bridge = _read("frontend/src/pages/manuals/PdfReaderCore.tsx")
+    cache = _read("frontend/src/pages/manuals/pdfSourceCache.ts")
+    service = _read("frontend/src/services/publications.ts")
+    stream = _read("backend/amodb/apps/manuals/publications_fast_reader_router.py")
+
+    assert "backgroundCacheTimer" in bridge
+    assert "savePdfSourceOffline(" in bridge
+    assert 'window.addEventListener("offline"' in bridge
+    assert "AES-GCM" in cache
+    assert "response.body.getReader()" in cache
+    assert "expectedFingerprint" in cache
+    assert "X-Reader-SHA256" in cache
+    assert "sha256Blob" in service
+    assert "X-Source-SHA256" in service
+    assert '"X-Reader-SHA256"' in stream
 
 
 def test_pdfjs_runtime_assets_and_security_options_remain_packaged() -> None:

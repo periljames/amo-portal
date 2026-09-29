@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from amodb.apps.doc_control.reminder_policy import DocumentReminderPolicy
-from amodb.apps.doc_control.reminder_service import reminder_stage
+from amodb.apps.doc_control.reminder_service import _reminder_priority, reminder_stage
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -41,6 +41,12 @@ def test_reminder_thresholds_are_staged_and_repeat_overdue_by_policy_bucket() ->
 def test_policy_normalizes_lead_days_and_rejects_empty_valid_window() -> None:
     policy = DocumentReminderPolicy(lead_days=[7, 30, 14, 7])
     assert policy.lead_days == [30, 14, 7]
+
+
+def test_bucketed_overdue_and_escalation_stages_are_high_priority() -> None:
+    for stage in ("OVERDUE_W1", "OVERDUE_W2", "OWNER_ESCALATION_W1", "QUALITY_ESCALATION_W2", "FINAL_W1"):
+        assert _reminder_priority(stage) == "HIGH"
+    assert _reminder_priority("DUE_7") == "NORMAL"
 
 
 def test_reminder_ledger_is_durable_and_idempotent_per_obligation_recipient_stage() -> None:
@@ -90,6 +96,22 @@ def test_duplicate_delivery_claim_uses_savepoint_not_full_cycle_rollback() -> No
     assert 'install_reminder_runtime_guard()' in lifecycle
 
 
+def test_installed_delivery_uses_the_same_governed_notification_metadata() -> None:
+    source = _text(APP / "reminder_service.py")
+    guard = _text(APP / "reminder_runtime_guard.py")
+    assert "def _notification_metadata(" in source
+    for token in (
+        '"module": "DMS"',
+        '"category": "ACTION"',
+        '"requires_action": True',
+        '"action_label": "Review obligation"',
+        '"group_key": f"document-obligation:',
+    ):
+        assert token in source
+    assert "metadata_json=_notification_metadata(candidate=candidate, stage=stage)" in source
+    assert "metadata_json=service._notification_metadata(candidate=candidate, stage=stage)" in guard
+
+
 def test_failed_only_delivery_remains_retryable_until_a_channel_succeeds() -> None:
     guard = _text(APP / "reminder_runtime_guard.py")
     assert 'def _processed_delivery(' in guard
@@ -101,6 +123,12 @@ def test_failed_only_delivery_remains_retryable_until_a_channel_succeeds() -> No
     assert 'if retryable_failure and not successful_delivery:' in guard
     assert 'row.sent_at = None' in guard
     assert 'row.sent_at = now' in guard
+
+
+def test_distribution_notifications_group_by_campaign_obligation() -> None:
+    publication = _text(APP / "workspace_publication_distribution.py")
+    assert '"campaign_id": campaign.id' in publication
+    assert '"group_key": f"document-publication:{manual.id}:{revision.id}:{campaign.id}"' in publication
 
 
 def test_scheduler_is_single_writer_and_escalates_only_after_policy_thresholds() -> None:

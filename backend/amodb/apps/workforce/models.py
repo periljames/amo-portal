@@ -282,6 +282,7 @@ class LeaveType(Base):
     name = Column(String(255), nullable=False)
     availability_type = Column(SAEnum(AvailabilityType, name="availability_type_enum", native_enum=False), nullable=False)
     description = Column(Text, nullable=True)
+    eligible_gender = Column(String(24), nullable=False, default="ALL", server_default="ALL")
     paid = Column(Boolean, nullable=False, default=True)
     deducts_balance = Column(Boolean, nullable=False, default=True)
     requires_attachment = Column(Boolean, nullable=False, default=False)
