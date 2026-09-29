@@ -802,7 +802,8 @@ def _notice_source_snapshot(
     return (
         {
             **_audit_snapshot(audit),
-            "source_snapshot_version": 4,
+            "source_snapshot_version": 5,
+            "audit_area_label": _audit_area_label(db, audit=audit),
             "meetings": meetings,
             "recipients": _normalise_recipient_snapshot(resolved_recipients),
         },
@@ -826,6 +827,7 @@ _NOTICE_SOURCE_LABELS = {
     "domain": "Audit domain",
     "audit_scope_id": "Audit scope identity",
     "audit_scope_code": "Audit scope code",
+    "audit_area_label": "Audit area / process",
     "title": "Audit title",
     "scope": "Audit scope",
     "criteria": "Audit criteria",
@@ -1146,7 +1148,7 @@ def _render_notice(
         audit_title=audit.title,
         audit_date_display=audit_dates,
         auditee_representative=audit.auditee,
-        audit_area=_audit_area_label(db, audit=audit),
+        audit_area=str((notice.audit_snapshot or {}).get("audit_area_label") or _audit_area_label(db, audit=audit)),
         audit_scope=audit.scope or "As defined in the approved audit occurrence.",
         audit_criteria=audit.criteria or "Applicable approved requirements and procedures.",
         subject=notice.subject,
@@ -2156,7 +2158,34 @@ def revise_audit_notice(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     _require_latest_notice_revision(db, prior)
     if prior.status == "DRAFT":
-        raise HTTPException(status_code=409, detail="A DRAFT notice must be completed or cancelled rather than revised into another draft.")
+        if prior.artifact is None:
+            raise HTTPException(status_code=409, detail="A DRAFT notice without a frozen PDF must be completed or cancelled rather than revised.")
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        changes = _notice_source_changes(
+            prior,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
+        if not changes:
+            raise HTTPException(
+                status_code=409,
+                detail="The attached DRAFT notice still matches the current audit setup. Continue, replace the attachment, or cancel it.",
+            )
+        before = _snapshot(prior)
+        prior.status = "CANCELLED"
+        _add_event(
+            db,
+            ctx=ctx,
+            notice=prior,
+            event_type="CANCELLED",
+            reason=f"Replaced by controlled revision: {payload.reason.strip()}",
+            before=before,
+        )
+        db.flush()
     row = _create_notice(db=db, ctx=ctx, audit=audit, payload=payload, supersedes=prior)
     db.commit()
     return _notice_dict(_notice_query(db).filter(QualityAuditNotice.id == row.id).one())
