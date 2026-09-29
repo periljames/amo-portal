@@ -959,6 +959,40 @@
   font-size: 0.7rem !important;
 }
 
+.qms-audit-notice-history__events {
+  margin-top: 0.3rem;
+}
+
+.qms-audit-notice-history__events > summary {
+  cursor: pointer;
+  color: var(--qms-text);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.qms-audit-notice-history__events ol {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.qms-audit-notice-history__events li {
+  padding-left: 0.1rem;
+}
+
+.qms-audit-notice-history__events li > strong,
+.qms-audit-notice-history__events li > span,
+.qms-audit-notice-history__events li > small {
+  display: block;
+}
+
+.qms-audit-notice-history__events li > strong {
+  color: var(--qms-text);
+  font-size: 0.68rem;
+  text-transform: capitalize;
+}
+
 .qms-audit-notice-upload {
   display: inline-flex;
   align-items: center;
