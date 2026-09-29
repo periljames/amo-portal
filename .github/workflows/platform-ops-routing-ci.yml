@@ -63,11 +63,11 @@ jobs:
 
       - name: Verify every browser runtime has an /ops upstream
         run: |
-          grep -A18 'location /ops/' infra/nginx/frontend-default.conf | grep -q 'proxy_pass http://platform-ops-gateway:8090;'
-          grep -q 'PLATFORM_OPS_DEV_PROXY_PATTERN' frontend/vite.config.ts
-          grep -q 'http://127.0.0.1:8090' frontend/src/services/devProxyRouting.ts
-          grep -q 'amodb.platform_ops_main:app' scripts/dev_runtime.py
-          grep -q '"8090"' scripts/dev_runtime.py
+          grep -F -A18 'location ^~ /ops/' infra/nginx/frontend-default.conf | grep -Fq 'proxy_pass http://platform-ops-gateway:8090;'
+          grep -Fq 'PLATFORM_OPS_DEV_PROXY_PATTERN' frontend/vite.config.ts
+          grep -Fq 'http://127.0.0.1:8090' frontend/src/services/devProxyRouting.ts
+          grep -Fq 'amodb.platform_ops_main:app' scripts/dev_runtime.py
+          grep -Fq '"8090"' scripts/dev_runtime.py
           python - <<'PY'
           from pathlib import Path
           source = Path("scripts/dev_runtime.py").read_text(encoding="utf-8")
