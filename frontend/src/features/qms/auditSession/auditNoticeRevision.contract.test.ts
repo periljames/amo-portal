@@ -63,6 +63,14 @@ describe("audit notice revision governance", () => {
     expect(workspace).toContain("Create revised notice N");
   });
 
+
+  it("allows a frozen stale draft to be replaced through both notice surfaces", () => {
+    expect(workspace).toContain("reviseNoticeMutation.mutate(latestNotice)");
+    expect(governance).toContain("latestNotice.requires_revision || latestNotice.status !== \"DRAFT\"");
+    expect(governance).toContain('latestNotice.status !== "DRAFT" || latestNotice.requires_revision');
+    expect(governance).toContain("reviseAuditNotice(amoCode, auditId, latestNotice.id, payload)");
+  });
+
   it("keeps historical notice artifacts view-only across both QMS notice surfaces", () => {
     expect(workspace).toContain("previewedNotice.is_latest !== false");
     expect(governance).toContain("latestNotice && !latestNotice.requires_revision");
