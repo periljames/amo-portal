@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.training.integration import QMS_ADMIN, QMS_INIT, QMS_REF
@@ -94,21 +95,41 @@ def ensure_default_quality_privilege_rules(
         if row is not None:
             ensured.append(row)
             continue
-        row = QualityPrivilegeRule(
-            amo_id=amo_id,
-            privilege_code=code,
-            title=str(spec["title"]),
-            privilege_type=str(spec["privilege_type"]),
-            description=spec.get("description"),
-            required_training_course_codes=list(spec.get("required_training_course_codes") or []),
-            independence_required=bool(spec.get("independence_required", True)),
-            max_concurrent_assignments=spec.get("max_concurrent_assignments"),
-            scope_schema=dict(spec.get("scope_schema") or {}),
-            is_active=True,
-            created_by_user_id=actor_user_id,
-            updated_by_user_id=actor_user_id,
-        )
-        db.add(row)
+        try:
+            # Multiple audit-setup requests can race on first use for a tenant.
+            # Flush each insert inside a savepoint so the database unique
+            # constraint becomes the concurrency arbiter without poisoning the
+            # caller's outer transaction.
+            with db.begin_nested():
+                row = QualityPrivilegeRule(
+                    amo_id=amo_id,
+                    privilege_code=code,
+                    title=str(spec["title"]),
+                    privilege_type=str(spec["privilege_type"]),
+                    description=spec.get("description"),
+                    required_training_course_codes=list(spec.get("required_training_course_codes") or []),
+                    independence_required=bool(spec.get("independence_required", True)),
+                    max_concurrent_assignments=spec.get("max_concurrent_assignments"),
+                    scope_schema=dict(spec.get("scope_schema") or {}),
+                    is_active=True,
+                    created_by_user_id=actor_user_id,
+                    updated_by_user_id=actor_user_id,
+                )
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            # A concurrent request inserted the same default while this request
+            # was waiting on the unique key. Re-read that committed row.
+            row = (
+                db.query(QualityPrivilegeRule)
+                .filter(
+                    QualityPrivilegeRule.amo_id == amo_id,
+                    QualityPrivilegeRule.privilege_code == code,
+                )
+                .first()
+            )
+            if row is None:
+                raise
         ensured.append(row)
     db.flush()
     sync_default_quality_privilege_rule_competence(db, amo_id=amo_id, actor_user_id=actor_user_id)
