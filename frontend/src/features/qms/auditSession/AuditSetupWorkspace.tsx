@@ -1770,6 +1770,60 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     Generate and inspect the final signed document before sending. The stored PDF shown in the preview, including its QR record link and hash, is the exact file attached to the email.
                   </p>
                 ) : null}
+                {(noticesQuery.data?.items.length || noticesQuery.data?.reschedule_history?.length) ? (
+                  <details className="qms-audit-notice-history">
+                    <summary>
+                      Full notice &amp; reschedule history
+                      <span>{noticesQuery.data?.items.length || 0} notice{(noticesQuery.data?.items.length || 0) === 1 ? "" : "s"} · {noticesQuery.data?.reschedule_history?.length || 0} schedule change{(noticesQuery.data?.reschedule_history?.length || 0) === 1 ? "" : "s"}</span>
+                    </summary>
+                    <div className="qms-audit-notice-history__body">
+                      <section>
+                        <h4>Controlled notice history</h4>
+                        {(noticesQuery.data?.items || []).map((row) => (
+                          <article className="qms-audit-notice-history__item" key={row.id}>
+                            <div>
+                              <strong>{row.notice_reference || `${auditQuery.data.audit_ref}/N${String(row.revision_no).padStart(2, "0")}`}</strong>
+                              <span>{row.status.replaceAll("_", " ")} · created {setupDateLabel(row.created_at)}</span>
+                              {row.revision_reason ? <p><b>Reason:</b> {row.revision_reason}</p> : null}
+                              {row.supersedes_reference ? <small>Supersedes {row.supersedes_reference}</small> : null}
+                              {row.superseded_by_reference ? <small>Superseded by {row.superseded_by_reference}</small> : null}
+                              {row.delivered_at ? <small>Delivered {setupDateLabel(row.delivered_at)}</small> : row.generated_at ? <small>Generated {setupDateLabel(row.generated_at)}</small> : null}
+                            </div>
+                            {row.artifact ? (
+                              <div className="qms-audit-notice-history__actions">
+                                <button type="button" onClick={() => previewNoticeMutation.mutate(row)} disabled={previewNoticeMutation.isPending}>
+                                  <Eye size={14} /> View
+                                </button>
+                                <button type="button" onClick={() => downloadNoticeMutation.mutate(row)} disabled={downloadNoticeMutation.isPending}>
+                                  <Download size={14} /> PDF
+                                </button>
+                              </div>
+                            ) : null}
+                          </article>
+                        ))}
+                      </section>
+                      <section>
+                        <h4>Audit reschedule history</h4>
+                        {(noticesQuery.data?.reschedule_history || []).length ? (noticesQuery.data?.reschedule_history || []).map((entry) => (
+                          <article className="qms-audit-notice-history__item is-reschedule" key={entry.id}>
+                            <div>
+                              <strong>{entry.source === "PLANNER" ? "Planner reschedule" : "Setup reschedule"}</strong>
+                              <span>{setupDateLabel(entry.created_at)}{entry.actor_name ? ` · ${entry.actor_name}` : ""}</span>
+                              <p><b>Reason:</b> {entry.reason}</p>
+                              <small>
+                                {String(entry.before.planned_start || entry.before.start_date || "—")}
+                                {entry.before.planned_start_time || entry.before.start_time ? ` ${String(entry.before.planned_start_time || entry.before.start_time)}` : ""}
+                                {" → "}
+                                {String(entry.after.planned_start || entry.after.start_date || "—")}
+                                {entry.after.planned_start_time || entry.after.start_time ? ` ${String(entry.after.planned_start_time || entry.after.start_time)}` : ""}
+                              </small>
+                            </div>
+                          </article>
+                        )) : <p className="qms-audit-setup-stage__empty">No reschedule has been recorded for this audit.</p>}
+                      </section>
+                    </div>
+                  </details>
+                ) : null}
               </>
             ) : null}
           </div>
