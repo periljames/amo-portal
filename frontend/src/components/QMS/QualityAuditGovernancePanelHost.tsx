@@ -120,8 +120,10 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
         exception_reason: exceptionType ? exceptionReason : undefined,
         reason: noticeReason,
       } as const;
-      return latestNotice && latestNotice.status !== "DRAFT"
-        ? reviseAuditNotice(amoCode, auditId, latestNotice.id, payload)
+      return latestNotice
+        ? (latestNotice.requires_revision || latestNotice.status !== "DRAFT"
+            ? reviseAuditNotice(amoCode, auditId, latestNotice.id, payload)
+            : Promise.reject(new Error("The current draft still matches the audit setup. Continue its lifecycle or cancel it before creating another notice.")))
         : createAuditNotice(amoCode, auditId, payload);
     },
     onSuccess: () => void refresh(),
@@ -256,7 +258,7 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
                   <p className="qms-audit-governance-hint">If the notice falls inside the configured lead time, provide an Emergency / short-notice waiver reason instead of blocking the notice.</p>
                 )}
                 <label>Lifecycle reason<textarea value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} /></label>
-                {(!latestNotice || latestNotice.status !== "DRAFT") ? <button type="button" onClick={() => saveNotice.mutate()} disabled={saveNotice.isPending || noticeReason.trim().length < 8 || Boolean(exceptionType && exceptionReason.trim().length < 8)}>{latestNotice ? `Create revised notice N${String(latestNotice.revision_no + 1).padStart(2, "0")}` : "Create notice draft"}</button> : null}
+                {(!latestNotice || latestNotice.status !== "DRAFT" || latestNotice.requires_revision) ? <button type="button" onClick={() => saveNotice.mutate()} disabled={saveNotice.isPending || noticeReason.trim().length < 8 || Boolean(exceptionType && exceptionReason.trim().length < 8)}>{latestNotice ? `Create revised notice N${String(latestNotice.revision_no + 1).padStart(2, "0")}` : "Create notice draft"}</button> : null}
               </section>
 
               {latestNotice ? (
