@@ -1402,7 +1402,6 @@ def _audit_reschedule_history(
                   AND entity_id = :audit_id
                   AND action IN ('calendar_schedule_rescheduled', 'audit_setup_rescheduled')
                 ORDER BY created_at DESC
-                LIMIT 100
                 """
             ),
             {"amo_id": amo_id, "audit_id": str(audit_id)},
@@ -1450,7 +1449,7 @@ def list_audit_notices(
     rows = _notice_query(db).filter(
         QualityAuditNotice.amo_id == ctx.amo_id,
         QualityAuditNotice.audit_id == audit_id,
-    ).order_by(QualityAuditNotice.revision_no.desc()).limit(100).all()
+    ).order_by(QualityAuditNotice.revision_no.desc()).all()
     current_snapshot, current_meeting_rows = _notice_source_snapshot(
         db,
         amo_id=ctx.amo_id,
