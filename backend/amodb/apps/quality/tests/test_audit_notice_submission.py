@@ -21,14 +21,17 @@ from amodb.apps.quality.audit_notice_models import (
     QualityAuditNoticePolicy,
 )
 from amodb.apps.quality.audit_notice_router import (
+    NoticeRevisionCreate,
     NoticeSubmit,
     _default_body_from_snapshot,
     _default_subject_from_snapshot,
     _normalise_notice_schedule_snapshot,
     _normalise_recipient_snapshot,
     _notice_email_correlation,
+    _notice_source_snapshot,
     _require_latest_notice_revision,
     prepare_audit_notice_document,
+    revise_audit_notice,
     submit_and_deliver_audit_notice,
     transition_audit_notice,
 )
