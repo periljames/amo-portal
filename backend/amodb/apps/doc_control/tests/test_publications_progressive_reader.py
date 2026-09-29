@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from amodb.apps.manuals import approved_intake_router as approved
 from amodb.apps.manuals import core_router as core
+from amodb.apps.manuals import office_layout as office
 from amodb.apps.manuals import publications_fast_reader_router as reader
 
 
@@ -108,6 +109,19 @@ def test_uploaded_source_storage_preserves_exact_bytes(tmp_path: Path, monkeypat
     assert stored.read_bytes() == original
     assert checksum == hashlib.sha256(original).hexdigest()
     assert not list(stored.parent.glob("*.upload"))
+
+
+def test_office_layout_rejects_retained_source_checksum_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "manual.docx"
+    source.write_bytes(b"altered-retained-office-bytes")
+    revision = SimpleNamespace(
+        id="revision-1",
+        source_storage_path=str(source),
+        source_sha256=hashlib.sha256(b"original-uploaded-office-bytes").hexdigest(),
+    )
+
+    with pytest.raises(office.OfficeLayoutError, match="controlled-file checksum"):
+        office.office_layout_pdf_path(revision)
 
 
 def test_approved_intake_requires_final_pdf_source(tmp_path: Path) -> None:
@@ -239,7 +253,7 @@ def test_progress_refresh_does_not_clear_an_already_loaded_virtualized_pdf() -> 
     core = _frontend("frontend/src/pages/manuals/PdfReaderCoreV4.tsx")
 
     assert "setPageCount(0)" not in core
-    assert "const restored = clampPdfValue(initialPage, 1, count)" in core
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in core
     assert "setPageCount(count)" in core
     assert "setCurrentPage(restored)" in core
     assert "setHotIndexes([restored - 1])" in core
