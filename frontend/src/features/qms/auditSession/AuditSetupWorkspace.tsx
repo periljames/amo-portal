@@ -1865,7 +1865,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </strong>
                 <span>Status: {previewedNotice.status.replaceAll("_", " ")}</span>
               </div>
-              {canManageNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
+              {canManageNotice && !previewedNotice.requires_revision && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
                 <label className="qms-audit-notice-modal__reason">
                   <span>Issuance record note</span>
                   <textarea rows={2} value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} />
@@ -1878,7 +1878,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <button type="button" onClick={() => downloadBlob(noticePreview.blob, noticePreview.filename)}>
                   <Download size={15} /> Download PDF
                 </button>
-                {canManageNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
+                {canManageNotice && !previewedNotice.requires_revision && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
                   <button
                     type="button"
                     className="is-primary"
