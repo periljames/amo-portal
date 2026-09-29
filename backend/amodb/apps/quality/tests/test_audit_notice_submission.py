@@ -21,6 +21,8 @@ from amodb.apps.quality.audit_notice_models import (
 )
 from amodb.apps.quality.audit_notice_router import (
     NoticeSubmit,
+    _default_body_from_snapshot,
+    _default_subject_from_snapshot,
     _normalise_notice_schedule_snapshot,
     _normalise_recipient_snapshot,
     _notice_email_correlation,
@@ -347,3 +349,22 @@ def test_notice_schedule_snapshot_treats_implicit_default_times_as_effective_def
 
     assert _normalise_notice_schedule_snapshot(implicit) == explicit
     assert _normalise_notice_schedule_snapshot(implicit) == _normalise_notice_schedule_snapshot(explicit)
+
+
+
+def test_default_notice_text_can_be_reconstructed_from_frozen_snapshot() -> None:
+    snapshot = {
+        "audit_ref": "QAR/MO/26/004",
+        "title": "Original audit",
+        "planned_start": "2026-10-01",
+        "scope": "Original scope",
+        "criteria": "Original criteria",
+    }
+    notice_date = date(2026, 9, 20)
+
+    assert _default_subject_from_snapshot(snapshot) == "Audit Notice - QAR/MO/26/004 - Original audit"
+    body = _default_body_from_snapshot(snapshot, notice_date)
+    assert "QAR/MO/26/004: Original audit" in body
+    assert "Original scope" in body
+    assert "Original criteria" in body
+    assert "2026-10-01" in body
