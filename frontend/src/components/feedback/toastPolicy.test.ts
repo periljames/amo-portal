@@ -26,6 +26,10 @@ const app = readFileSync(
   fileURLToPath(new URL("../../App.tsx", import.meta.url)),
   "utf8",
 );
+const offlineIndicator = readFileSync(
+  fileURLToPath(new URL("../offline/OfflineSyncIndicator.tsx", import.meta.url)),
+  "utf8",
+);
 const auxiliaryBoundary = readFileSync(
   fileURLToPath(new URL("./PortalAuxiliaryBoundary.tsx", import.meta.url)),
   "utf8",
@@ -63,13 +67,22 @@ describe("portal notification policy", () => {
 
   it("places every root notification consumer under the single toast provider", () => {
     expect(main.match(/<ToastProvider>/g)).toHaveLength(1);
-    expect(main).toMatch(/<ToastProvider>[\s\S]*<OfflineSyncIndicator \/>[\s\S]*<\/ToastProvider>/);
+    expect(main).toMatch(/<ToastProvider>[\s\S]*<MessagingHub \/>[\s\S]*<OfflineSyncIndicator \/>[\s\S]*<\/ToastProvider>/);
     expect(app).not.toContain("<ToastProvider>");
     expect(app).not.toContain("components/feedback/ToastProvider");
   });
 
+  it("mounts router-dependent messaging inside BrowserRouter and keeps offline sync router-agnostic", () => {
+    expect(main).toMatch(/<BrowserRouter>[\s\S]*<PortalAuxiliaryBoundary surface="Messaging controls">[\s\S]*<MessagingHub \/>[\s\S]*<\/PortalAuxiliaryBoundary>[\s\S]*<\/BrowserRouter>/);
+    expect(main).toMatch(/<PortalAuxiliaryBoundary surface="Connection and sync controls">[\s\S]*<OfflineSyncIndicator \/>[\s\S]*<\/PortalAuxiliaryBoundary>/);
+    expect(messaging).toContain("useNavigate()");
+    expect(offlineIndicator).not.toContain("MessagingHub");
+    expect(offlineIndicator).not.toContain("react-router-dom");
+  });
+
   it("isolates auxiliary messaging and sync failures from the main portal", () => {
-    expect(main).toMatch(/<PortalAuxiliaryBoundary[\s\S]*<OfflineSyncIndicator \/>[\s\S]*<\/PortalAuxiliaryBoundary>/);
+    expect(main).toContain('<PortalAuxiliaryBoundary surface="Messaging controls">');
+    expect(main).toContain('<PortalAuxiliaryBoundary surface="Connection and sync controls">');
     expect(auxiliaryBoundary).toContain("getDerivedStateFromError");
     expect(auxiliaryBoundary).toContain("return this.state.failed ? null : this.props.children");
   });

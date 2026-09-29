@@ -25,6 +25,7 @@ import type {
   NotificationPreferences,
   PortalNotification,
 } from "../../services/messaging";
+import "../../styles/components/messaging.css";
 import {
   groupNotifications,
   notificationActionLabel,
