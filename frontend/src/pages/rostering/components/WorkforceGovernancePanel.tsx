@@ -455,14 +455,28 @@ function PersonnelMutations({ canManage, orgUnits, positions }: { canManage: boo
     setter((old) => { const next = new Set(old); rows.forEach((row) => pageChecked ? next.delete(row.user_id) : next.add(row.user_id)); return next; });
   };
 
+  const operationId = operation?.id || null;
+  const operationIsTerminal = operation ? TERMINAL.has(operation.status) : true;
   useEffect(() => {
-    if (!operation || TERMINAL.has(operation.status)) return;
-    const timer = window.setInterval(() => void getWorkforceHrBulkOperation(operation.id).then((next) => {
-      setOperation(next);
-      if (TERMINAL.has(next.status)) void queryClient.invalidateQueries({ queryKey: ["workforce"] });
-    }).catch((cause) => setError(errorMessage(cause))), 1500);
-    return () => window.clearInterval(timer);
-  }, [operation, queryClient]);
+    if (!operationId || operationIsTerminal) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const next = await getWorkforceHrBulkOperation(operationId);
+        if (!active) return;
+        setOperation(next);
+        if (TERMINAL.has(next.status)) void queryClient.invalidateQueries({ queryKey: ["workforce"] });
+      } catch (cause) {
+        if (active) setError(errorMessage(cause));
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [operationId, operationIsTerminal, queryClient]);
 
   const changeFilter = <K extends keyof HrPeopleFilters>(name: K, value: HrPeopleFilters[K]) => {
     clearSelection();
