@@ -21,6 +21,7 @@ from amodb.apps.quality.audit_notice_models import (
 )
 from amodb.apps.quality.audit_notice_router import (
     NoticeSubmit,
+    _normalise_notice_schedule_snapshot,
     _normalise_recipient_snapshot,
     _notice_email_correlation,
     _require_latest_notice_revision,
@@ -313,3 +314,22 @@ def test_legacy_and_current_recipient_snapshots_compare_by_governed_routing() ->
         "email": "new-quality@example.test",
     }]
     assert _normalise_recipient_snapshot(legacy) != _normalise_recipient_snapshot(changed_email)
+
+
+
+def test_notice_schedule_snapshot_treats_implicit_default_times_as_effective_defaults() -> None:
+    implicit = {
+        "planned_start": "2026-09-30",
+        "planned_end": "2026-09-30",
+        "planned_start_time": None,
+        "planned_end_time": None,
+    }
+    explicit = {
+        "planned_start": "2026-09-30",
+        "planned_end": "2026-09-30",
+        "planned_start_time": "09:00",
+        "planned_end_time": "17:00",
+    }
+
+    assert _normalise_notice_schedule_snapshot(implicit) == explicit
+    assert _normalise_notice_schedule_snapshot(implicit) == _normalise_notice_schedule_snapshot(explicit)
