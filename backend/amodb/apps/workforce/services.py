@@ -1536,15 +1536,13 @@ def _department_head_user_ids(db: Session, *, amo_id: str, department_id: Option
     return {str(row[0]) for row in rows if row and row[0]}
 
 
-def can_actor_supervisor_approve(
+def _actor_is_leave_approval_authority(
     db: Session,
     *,
     row: models.LeaveRequest,
     actor: account_models.User,
 ) -> bool:
-    if row.user_id == actor.id or row.status != models.LeaveRequestStatus.SUBMITTED:
-        return False
-    if not row.leave_type.supervisor_approval_required:
+    if row.user_id == actor.id:
         return False
     contract = active_contract_for_user(
         db,
@@ -1560,6 +1558,22 @@ def can_actor_supervisor_approve(
         amo_id=row.amo_id,
         actor_user_id=str(actor.id),
     )
+
+
+def can_actor_supervisor_approve(
+    db: Session,
+    *,
+    row: models.LeaveRequest,
+    actor: account_models.User,
+) -> bool:
+    if row.status not in {
+        models.LeaveRequestStatus.SUBMITTED,
+        models.LeaveRequestStatus.SUPERVISOR_APPROVED,
+    }:
+        return False
+    if not row.leave_type.supervisor_approval_required:
+        return False
+    return _actor_is_leave_approval_authority(db, row=row, actor=actor)
 
 
 def leave_review_user_ids(
@@ -1643,7 +1657,7 @@ def seed_default_leave_types(db: Session, *, amo_id: str, actor_user_id: Optiona
             paid=paid,
             deducts_balance=deducts,
             supervisor_approval_required=True,
-            hr_approval_required=True,
+            hr_approval_required=False,
             display_order=order * 10,
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
@@ -1682,6 +1696,8 @@ def create_leave_type(db: Session, *, amo_id: str, actor_user_id: str, payload: 
         payload.availability_type,
         values.get("eligible_gender"),
     )
+    values["supervisor_approval_required"] = True
+    values["hr_approval_required"] = False
     row = models.LeaveType(
         amo_id=amo_id,
         code=payload.code.strip().upper(),
@@ -1715,6 +1731,8 @@ def update_leave_type(db: Session, *, row: models.LeaveType, actor_user_id: str,
     next_availability = changes.get("availability_type", row.availability_type)
     next_gender = changes.get("eligible_gender", getattr(row, "eligible_gender", "ALL"))
     changes["eligible_gender"] = _controlled_leave_gender(next_availability, next_gender)
+    changes["supervisor_approval_required"] = True
+    changes["hr_approval_required"] = False
     for key, value in changes.items():
         setattr(row, key, value)
     row.updated_by_user_id = actor_user_id
@@ -2074,20 +2092,6 @@ def submit_leave_request(db: Session, *, row: models.LeaveRequest, actor: accoun
         user_id=row.user_id,
         leave_type=row.leave_type,
     )
-    balance = _leave_balance(db, request=row, create=True)
-    if row.leave_type.deducts_balance:
-        available = _balance_available(balance)
-        if available < row.requested_minutes and not row.leave_type.allow_negative_balance:
-            raise ValueError(f"Insufficient leave balance: {available} minutes available")
-        balance.pending_minutes += row.requested_minutes
-        balance.updated_by_user_id = actor.id
-        db.add(balance)
-    row.status = models.LeaveRequestStatus.SUBMITTED
-    row.submitted_at = _utcnow()
-    row.updated_by_user_id = actor.id
-    db.add(row)
-    db.flush()
-    _audit(db, amo_id=row.amo_id, actor_user_id=actor.id, entity_type="LeaveRequest", entity_id=row.id, action="submit", after={"status": _enum_value(row.status), "pending_minutes": row.requested_minutes})
     contract = active_contract_for_user(db, amo_id=row.amo_id, user_id=row.user_id, on_date=row.starts_at.date())
     approver_ids = set()
     if contract and contract.supervisor_user_id:
@@ -2104,6 +2108,24 @@ def submit_leave_request(db: Session, *, row: models.LeaveRequest, actor: accoun
         account_models.User.id.in_(list(approver_ids)),
         account_models.User.is_active.is_(True),
     ).all() if approver_ids else []
+    if not approvers:
+        raise ValueError(
+            "No leave approver is configured. Assign an immediate supervisor or an active departmental postholder before submitting leave."
+        )
+    balance = _leave_balance(db, request=row, create=True)
+    if row.leave_type.deducts_balance:
+        available = _balance_available(balance)
+        if available < row.requested_minutes and not row.leave_type.allow_negative_balance:
+            raise ValueError(f"Insufficient leave balance: {available} minutes available")
+        balance.pending_minutes += row.requested_minutes
+        balance.updated_by_user_id = actor.id
+        db.add(balance)
+    row.status = models.LeaveRequestStatus.SUBMITTED
+    row.submitted_at = _utcnow()
+    row.updated_by_user_id = actor.id
+    db.add(row)
+    db.flush()
+    _audit(db, amo_id=row.amo_id, actor_user_id=actor.id, entity_type="LeaveRequest", entity_id=row.id, action="submit", after={"status": _enum_value(row.status), "pending_minutes": row.requested_minutes})
     for approver in approvers:
         _send_email(
             db,
@@ -2152,54 +2174,20 @@ def _record_leave_decision(
         ))
 
 
-def supervisor_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, comment: Optional[str]) -> models.LeaveRequest:
-    if row.status != models.LeaveRequestStatus.SUBMITTED:
-        raise ValueError("Only submitted leave can receive supervisor approval")
-    if not can_actor_supervisor_approve(db, row=row, actor=actor):
-        raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may approve this request")
-    _record_leave_decision(
-        db,
-        row=row,
-        actor=actor,
-        stage=models.LeaveApprovalStage.SUPERVISOR,
-        decision=models.ApprovalDecision.APPROVED,
-        comment=comment,
-    )
-    row.status = models.LeaveRequestStatus.SUPERVISOR_APPROVED
-    row.supervisor_approved_at = _utcnow()
-    row.updated_by_user_id = actor.id
-    db.add(row)
-    db.flush()
-    _audit(
-        db,
-        amo_id=row.amo_id,
-        actor_user_id=actor.id,
-        entity_type="LeaveRequest",
-        entity_id=row.id,
-        action="supervisor_approve",
-        after={
-            "status": _enum_value(row.status),
-            "approval_authority": "IMMEDIATE_SUPERVISOR_OR_DEPARTMENT_POSTHOLDER",
-        },
-    )
-    return row
-
-
-def hr_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, comment: Optional[str]) -> models.LeaveRequest:
-    allowed = {models.LeaveRequestStatus.SUBMITTED, models.LeaveRequestStatus.SUPERVISOR_APPROVED}
-    if row.status not in allowed:
-        raise ValueError("Leave is not ready for HR approval")
-    if row.leave_type.supervisor_approval_required and row.status != models.LeaveRequestStatus.SUPERVISOR_APPROVED:
-        raise ValueError("Supervisor approval is required before HR approval")
-    if row.user_id == actor.id:
-        raise ValueError("Employees cannot approve their own leave")
-    _record_leave_decision(db, row=row, actor=actor, stage=models.LeaveApprovalStage.HR, decision=models.ApprovalDecision.APPROVED, comment=comment)
+def _finalize_leave_approval(
+    db: Session,
+    *,
+    row: models.LeaveRequest,
+    actor: account_models.User,
+    audit_action: str,
+) -> models.LeaveRequest:
     balance = _leave_balance(db, request=row, create=True)
     if row.leave_type.deducts_balance:
         balance.pending_minutes = max(balance.pending_minutes - row.requested_minutes, 0)
         balance.used_minutes += row.requested_minutes
         balance.updated_by_user_id = actor.id
         db.add(balance)
+
     event = db.query(models.EmployeeAvailabilityEvent).filter(
         models.EmployeeAvailabilityEvent.amo_id == row.amo_id,
         models.EmployeeAvailabilityEvent.source_type == "LEAVE_REQUEST",
@@ -2222,23 +2210,86 @@ def hr_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_mo
             updated_by_user_id=actor.id,
         )
         db.add(event)
+
+    # HR_APPROVED remains the terminal enum value for backward-compatible data/API
+    # semantics. The approval authority is now the supervisor/postholder recorded
+    # in the SUPERVISOR decision, not a second HR approver.
     row.status = models.LeaveRequestStatus.HR_APPROVED
     row.hr_approved_at = _utcnow()
     row.updated_by_user_id = actor.id
     db.add(row)
     db.flush()
+
     conflicts = _published_roster_conflicts(db, request=row)
-    _audit(db, amo_id=row.amo_id, actor_user_id=actor.id, entity_type="LeaveRequest", entity_id=row.id, action="hr_approve", after={"status": _enum_value(row.status), "published_roster_conflicts": conflicts}, critical=True)
+    _audit(
+        db,
+        amo_id=row.amo_id,
+        actor_user_id=actor.id,
+        entity_type="LeaveRequest",
+        entity_id=row.id,
+        action=audit_action,
+        after={
+            "status": _enum_value(row.status),
+            "approval_authority": "IMMEDIATE_SUPERVISOR_OR_DEPARTMENT_POSTHOLDER",
+            "published_roster_conflicts": conflicts,
+        },
+        critical=True,
+    )
     _send_email(
         db,
         amo_id=row.amo_id,
         recipient=getattr(row.user, "email", None),
         template_key="workforce.leave.approved",
         subject="Your leave request was approved",
-        context={"request_id": row.id, "starts_at": row.starts_at.isoformat(), "ends_at": row.ends_at.isoformat(), "roster_amendment_required": bool(conflicts)},
+        context={
+            "request_id": row.id,
+            "starts_at": row.starts_at.isoformat(),
+            "ends_at": row.ends_at.isoformat(),
+            "roster_amendment_required": bool(conflicts),
+        },
         correlation_id=f"leave:{row.id}:approved",
     )
     return row
+
+
+def supervisor_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, comment: Optional[str]) -> models.LeaveRequest:
+    if row.status != models.LeaveRequestStatus.SUBMITTED:
+        raise ValueError("Only submitted leave can receive supervisor approval")
+    if not can_actor_supervisor_approve(db, row=row, actor=actor):
+        raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may approve this request")
+    _record_leave_decision(
+        db,
+        row=row,
+        actor=actor,
+        stage=models.LeaveApprovalStage.SUPERVISOR,
+        decision=models.ApprovalDecision.APPROVED,
+        comment=comment,
+    )
+    row.supervisor_approved_at = _utcnow()
+    return _finalize_leave_approval(
+        db,
+        row=row,
+        actor=actor,
+        audit_action="supervisor_approve_and_finalize",
+    )
+
+
+def hr_approve_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, comment: Optional[str]) -> models.LeaveRequest:
+    """Compatibility finalizer for legacy SUPERVISOR_APPROVED rows.
+
+    New requests are finalized by supervisor_approve_leave. This endpoint no
+    longer grants HR a separate approval authority.
+    """
+    if row.status != models.LeaveRequestStatus.SUPERVISOR_APPROVED:
+        raise ValueError("Separate HR approval is disabled for leave requests")
+    if not _actor_is_leave_approval_authority(db, row=row, actor=actor):
+        raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may complete this legacy approval")
+    return _finalize_leave_approval(
+        db,
+        row=row,
+        actor=actor,
+        audit_action="legacy_supervisor_approval_finalize",
+    )
 
 
 def reject_leave(db: Session, *, row: models.LeaveRequest, actor: account_models.User, reason: Optional[str]) -> models.LeaveRequest:
@@ -2254,9 +2305,9 @@ def reject_leave(db: Session, *, row: models.LeaveRequest, actor: account_models
         else:
             raise ValueError("Leave rejection is not authorized for this request")
     elif row.status == models.LeaveRequestStatus.SUPERVISOR_APPROVED:
-        if not permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
-            raise ValueError("Only the configured final leave reviewer may reject a supervisor-approved request")
-        stage = models.LeaveApprovalStage.HR
+        if not _actor_is_leave_approval_authority(db, row=row, actor=actor):
+            raise ValueError("Only the employee's assigned immediate supervisor or active departmental postholder may reject this request")
+        stage = models.LeaveApprovalStage.SUPERVISOR
     else:
         raise ValueError("Leave request cannot be rejected in its current state")
     _record_leave_decision(db, row=row, actor=actor, stage=stage, decision=models.ApprovalDecision.REJECTED, comment=reason)
