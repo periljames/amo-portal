@@ -79,6 +79,7 @@ export type AuditNotice = {
   superseded_by_reference?: string | null;
   revision_reason?: string | null;
   source_changes?: AuditNoticeSourceChange[];
+  is_latest?: boolean;
   is_current_source?: boolean;
   requires_revision?: boolean;
   approved_at?: string | null;
