@@ -733,14 +733,23 @@ def _normalise_recipient_snapshot(snapshot: list[dict[str, Any]] | None) -> list
                 "email": email,
             })
             continue
+        first_name = str(raw.get("first_name") or "").strip() or None
+        last_name = str(raw.get("last_name") or "").strip() or None
+        designation = str(raw.get("designation") or "").strip() or None
+        contact_name = (
+            str(raw.get("name") or "").strip()
+            or " ".join(part for part in (first_name, last_name) if part).strip()
+            or designation
+            or None
+        )
         normalised.append({
             "role": role,
             "user_id": None,
             "email": email,
-            "name": str(raw.get("name") or "").strip() or None,
-            "first_name": str(raw.get("first_name") or "").strip() or None,
-            "last_name": str(raw.get("last_name") or "").strip() or None,
-            "designation": str(raw.get("designation") or "").strip() or None,
+            "name": contact_name,
+            "first_name": first_name,
+            "last_name": last_name,
+            "designation": designation,
         })
     return sorted(
         normalised,
@@ -948,7 +957,20 @@ def _resolved_recipients(
                 account_models.User.amo_id == amo_id,
                 account_models.User.is_active.is_(True),
             ).first()
-        name = str(item.get("name") or "").strip() or _display_name(user)
+        contact_name = " ".join(
+            part
+            for part in (
+                str(item.get("first_name") or "").strip(),
+                str(item.get("last_name") or "").strip(),
+            )
+            if part
+        ).strip()
+        name = (
+            str(item.get("name") or "").strip()
+            or _display_name(user)
+            or contact_name
+            or str(item.get("designation") or "").strip()
+        )
         email = str(item.get("email") or "").strip() or str(getattr(user, "email", "") or "").strip()
         current = {**item, "user_id": user_id, "name": name or None, "email": email or None}
         resolved.append(current)
