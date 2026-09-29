@@ -4,7 +4,7 @@ import uuid
 from datetime import date, time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -13,8 +13,9 @@ from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_closure_models import QualityAuditClosureState
+from .canonical_core_router import _log_qms_activity
 from .audit_preparation_models import QualityAuditPreparationRevision
-from .audit_schedule_rules import time_text, validate_planned_window
+from .audit_schedule_rules import DEFAULT_END_TIME, DEFAULT_START_TIME, time_text, validate_planned_window
 from .audit_workflow_contract import build_authoritative_audit_workflow
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -55,6 +56,7 @@ class AuditSetupUpdate(BaseModel):
     notify_auditors: bool | None = None
     notify_auditees: bool | None = None
     reminder_interval_days: int | None = Field(default=None, ge=1, le=60)
+    reschedule_reason: str | None = Field(default=None, max_length=1000)
 
 
 def _workflow_stage(workflow: Any, stage_id: str) -> Any | None:
@@ -157,6 +159,7 @@ def resolve_audit_occurrence(
 def update_audit_setup(
     audit_id: uuid.UUID,
     payload: AuditSetupUpdate,
+    request: Request,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
@@ -186,12 +189,48 @@ def update_audit_setup(
     next_end = update.get("planned_end", audit.planned_end)
     next_start_time = update.get("planned_start_time", audit.planned_start_time)
     next_end_time = update.get("planned_end_time", audit.planned_end_time)
-    effective_start_time, effective_end_time = validate_planned_window(
-        planned_start=next_start,
-        planned_end=next_end,
-        planned_start_time=next_start_time,
-        planned_end_time=next_end_time,
+    schedule_fields_present = any(
+        field in update
+        for field in ("planned_start", "planned_end", "planned_start_time", "planned_end_time")
     )
+    if schedule_fields_present:
+        effective_start_time, effective_end_time = validate_planned_window(
+            planned_start=next_start,
+            planned_end=next_end,
+            planned_start_time=next_start_time,
+            planned_end_time=next_end_time,
+        )
+    else:
+        effective_start_time = audit.planned_start_time
+        effective_end_time = audit.planned_end_time
+
+    def historical_time_text(date_value, time_value, fallback):
+        if date_value is not None and time_value is None:
+            return time_text(fallback)
+        return time_text(time_value)
+
+    before_schedule = {
+        "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
+        "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
+        "planned_start_time": historical_time_text(audit.planned_start, audit.planned_start_time, DEFAULT_START_TIME),
+        "planned_end_time": historical_time_text(audit.planned_end, audit.planned_end_time, DEFAULT_END_TIME),
+    }
+    after_schedule = {
+        "planned_start": next_start.isoformat() if next_start else None,
+        "planned_end": next_end.isoformat() if next_end else None,
+        "planned_start_time": time_text(effective_start_time),
+        "planned_end_time": time_text(effective_end_time),
+    }
+    schedule_changed = schedule_fields_present and before_schedule != after_schedule
+    reschedule_reason = str(update.get("reschedule_reason") or "").strip()
+    if schedule_changed and len(reschedule_reason) < 8:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AUDIT_RESCHEDULE_REASON_REQUIRED",
+                "message": "Explain why the audit date or time is being changed (at least 8 characters).",
+            },
+        )
     if "planned_start" in update:
         audit.planned_start = update["planned_start"]
     if "planned_end" in update:
@@ -204,6 +243,20 @@ def update_audit_setup(
     for field_name in ("notify_auditors", "notify_auditees", "reminder_interval_days"):
         if field_name in update and update[field_name] is not None:
             setattr(audit, field_name, update[field_name])
+
+    if schedule_changed:
+        _log_qms_activity(
+            db,
+            amo_id=ctx.amo_id,
+            actor_user_id=ctx.user_id,
+            action="audit_setup_rescheduled",
+            module="audits",
+            entity_type="audit",
+            entity_id=str(audit.id),
+            previous_value=before_schedule,
+            new_value={**after_schedule, "reason": reschedule_reason},
+            request=request,
+        )
 
     db.commit()
     db.refresh(audit)

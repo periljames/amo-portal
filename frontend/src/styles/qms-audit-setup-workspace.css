@@ -816,6 +816,183 @@
   margin: 0.6rem 0 0;
 }
 
+.qms-audit-setup-stage__reschedule-reason,
+.qms-audit-notice-revision-required label {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.55rem 0 0.75rem;
+}
+
+.qms-audit-setup-stage__reschedule-reason > span,
+.qms-audit-notice-revision-required label > span {
+  color: var(--qms-muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-audit-setup-stage__reschedule-reason small,
+.qms-audit-notice-revision-required small {
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.qms-audit-notice-revision-required {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, #d97706 40%, var(--qms-line));
+  border-radius: var(--qms-radius);
+  background: color-mix(in srgb, #fffbeb 72%, var(--qms-panel));
+  color: #92400e;
+}
+
+.qms-audit-notice-revision-required > svg {
+  margin-top: 0.12rem;
+}
+
+.qms-audit-notice-revision-required strong {
+  display: block;
+}
+
+.qms-audit-notice-revision-required p {
+  margin: 0.25rem 0;
+  line-height: 1.4;
+}
+
+.qms-audit-notice-revision-required ul {
+  margin: 0.35rem 0 0.45rem;
+  padding-left: 1.1rem;
+  font-size: 0.76rem;
+}
+
+.qms-audit-notice-history {
+  margin-top: 0.7rem;
+  border: 1px solid var(--qms-line-soft);
+  border-radius: var(--qms-radius);
+  background: var(--qms-panel);
+}
+
+.qms-audit-notice-history > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.qms-audit-notice-history > summary span {
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.qms-audit-notice-history__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--qms-line-soft);
+}
+
+.qms-audit-notice-history__body section {
+  min-width: 0;
+}
+
+.qms-audit-notice-history__body h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.76rem;
+}
+
+.qms-audit-notice-history__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--qms-line-soft);
+}
+
+.qms-audit-notice-history__item:first-of-type {
+  border-top: 0;
+}
+
+.qms-audit-notice-history__item > div:first-child {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.qms-audit-notice-history__item strong {
+  font-size: 0.78rem;
+}
+
+.qms-audit-notice-history__item span,
+.qms-audit-notice-history__item small,
+.qms-audit-notice-history__item p {
+  margin: 0;
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-notice-history__item p b {
+  color: var(--qms-text);
+}
+
+.qms-audit-notice-history__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+}
+
+.qms-audit-notice-history__actions button {
+  min-height: 1.8rem !important;
+  padding: 0.3rem 0.45rem !important;
+  font-size: 0.7rem !important;
+}
+
+.qms-audit-notice-history__events {
+  margin-top: 0.3rem;
+}
+
+.qms-audit-notice-history__events > summary {
+  cursor: pointer;
+  color: var(--qms-text);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.qms-audit-notice-history__events ol {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.qms-audit-notice-history__events li {
+  padding-left: 0.1rem;
+}
+
+.qms-audit-notice-history__events li > strong,
+.qms-audit-notice-history__events li > span,
+.qms-audit-notice-history__events li > small {
+  display: block;
+}
+
+.qms-audit-notice-history__events li > strong {
+  color: var(--qms-text);
+  font-size: 0.68rem;
+  text-transform: capitalize;
+}
+
 .qms-audit-notice-upload {
   display: inline-flex;
   align-items: center;
@@ -1232,6 +1409,10 @@
   .qms-audit-notice-summary {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .qms-audit-notice-history__body {
+    grid-template-columns: 1fr;
   }
 
   .qms-audit-notice-modal__dialog > footer {

@@ -14,6 +14,7 @@ import {
   listAuditNoticePolicies,
   prepareAuditNoticeDocument,
   previewAuditNoticePdf,
+  reviseAuditNotice,
   submitAuditNotice,
   updateAuditNoticeTemplate,
   uploadAuditNoticeAttachment,
@@ -108,6 +109,17 @@ function formatPlannedWindow(dateValue: string, timeValue: string): string {
   const day = formatPlannedDisplay(dateValue);
   return day === "—" ? day : setupDateLabel(`${day}T${timeValue || "00:00"}`);
 }
+
+function auditHistoryWindow(snapshot: Record<string, unknown>): string {
+  const startDate = String(snapshot.planned_start || snapshot.start_date || "—");
+  const endDate = String(snapshot.planned_end || snapshot.end_date || startDate || "—");
+  const startTime = String(snapshot.planned_start_time || snapshot.start_time || "").slice(0, 5);
+  const endTime = String(snapshot.planned_end_time || snapshot.end_time || "").slice(0, 5);
+  const start = `${startDate}${startTime ? ` ${startTime}` : ""}`;
+  const end = `${endDate}${endTime ? ` ${endTime}` : ""}`;
+  return `${start} → ${end}`;
+}
+
 
 function shiftTime(value: string, minutes: number): string {
   const match = /^(\d{2}):(\d{2})$/.exec(value);
@@ -280,6 +292,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [closingDraft, setClosingDraft] = useState<MeetingDraft>(emptyMeeting);
   const [openTile, setOpenTile] = useState<SetupTileId | null>("definition");
   const [noticeReason, setNoticeReason] = useState("Final audit notice generated for review before controlled email delivery.");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [revisionReason, setRevisionReason] = useState("");
+  const revisionReasonForNotice = useRef<string | null>(null);
   const [shortNoticeWaiverReason, setShortNoticeWaiverReason] = useState("");
   const [noticePreview, setNoticePreview] = useState<{ url: string; blob: Blob; filename: string; notice: AuditNotice } | null>(null);
   const [guidedField, setGuidedField] = useState<AuditSetupFieldId | null>(null);
@@ -507,11 +522,21 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         notify_auditors: draft.notifyAuditors,
         notify_auditees: draft.notifyAuditees,
         reminder_interval_days: Math.max(1, Math.min(60, Number(draft.reminderIntervalDays) || 7)),
+        reschedule_reason: (() => {
+          const persisted = draftFromAudit(auditQuery.data!);
+          const changed =
+            draft.plannedStart !== persisted.plannedStart ||
+            draft.plannedEnd !== persisted.plannedEnd ||
+            draft.plannedStartTime !== persisted.plannedStartTime ||
+            draft.plannedEndTime !== persisted.plannedEndTime;
+          return changed ? rescheduleReason.trim() || undefined : undefined;
+        })(),
       });
     },
     onSuccess: async (row) => {
       const now = localDateTime(new Date(currentTime + 60_000).toISOString(), meetingsQuery.data?.timezone_name);
       setDraft(draftFromAuditReady(row, now));
+      setRescheduleReason("");
       setLocalError(null);
       setNotice("Definition saved.");
       await refresh();
@@ -595,9 +620,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const createNoticeMutation = useMutation({
     mutationFn: async () => {
       if (!auditQuery.data || !draft) throw new Error("Save the audit occurrence before creating its notice.");
+      const policyItems = (await policiesQuery.refetch()).data?.items || policiesQuery.data?.items || [];
       const policy =
-        policiesQuery.data?.items.find((item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind) ||
-        policiesQuery.data?.items[0];
+        policyItems.find((item) => item.audit_kind === auditQuery.data?.kind) ||
+        policyItems.find((item) => !item.audit_kind) ||
+        policyItems[0];
       return createAuditNotice(amoCode, auditId, {
         policy_id: policy?.id,
         template_document_id: templateQuery.data?.selected_document_id || undefined,
@@ -612,6 +639,35 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       await refresh();
     },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit notice could not be created."),
+  });
+
+  const reviseNoticeMutation = useMutation({
+    mutationFn: async (row: AuditNotice) => {
+      if (!auditQuery.data) throw new Error("Audit occurrence is unavailable.");
+      if (revisionReason.trim().length < 8) {
+        throw new Error("Enter the reason for the revised notice (at least 8 characters).");
+      }
+      const policyItems = (await policiesQuery.refetch()).data?.items || policiesQuery.data?.items || [];
+      const policy =
+        policyItems.find((item) => item.audit_kind === auditQuery.data?.kind) ||
+        policyItems.find((item) => !item.audit_kind) ||
+        policyItems[0];
+      return reviseAuditNotice(amoCode, auditId, row.id, {
+        policy_id: policy?.id,
+        template_document_id: templateQuery.data?.selected_document_id || row.template_document_id || undefined,
+        notice_date: new Date().toISOString().slice(0, 10),
+        exception_reason: shortNoticeWaiverReason.trim() || undefined,
+        reason: revisionReason.trim(),
+      });
+    },
+    onSuccess: async (row) => {
+      revisionReasonForNotice.current = null;
+      setRevisionReason("");
+      setLocalError(null);
+      setNotice(`Revised notice ${row.revision_no} created. Generate and review the new controlled PDF before delivery.`);
+      await refresh();
+    },
+    onError: (cause) => setLocalError(errorMessage(cause, "The revised audit notice could not be created.")),
   });
 
   const templateMutation = useMutation({
@@ -692,26 +748,88 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     [noticesQuery.data?.items],
   );
   const previewedNotice = noticePreview?.notice || null;
+  const latestReschedule = noticesQuery.data?.reschedule_history?.[0] || null;
+  const latestNoticeNeedsReplacement = Boolean(
+    latestNotice && (latestNotice.requires_revision || latestNotice.status === "CANCELLED"),
+  );
+
+  /* Seed a revision reason once when the latest notice must be replaced. */
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!latestNoticeNeedsReplacement || !latestNotice) {
+      revisionReasonForNotice.current = null;
+      return;
+    }
+    if (revisionReasonForNotice.current === latestNotice.id) return;
+    revisionReasonForNotice.current = latestNotice.id;
+    const scheduleFields = new Set([
+      "planned_start",
+      "planned_end",
+      "planned_start_time",
+      "planned_end_time",
+    ]);
+    const scheduleChanged = Boolean(
+      latestNotice.source_changes?.some((item) => scheduleFields.has(item.field)),
+    );
+    const frozenAt = latestNotice.generated_at || latestNotice.artifact?.created_at || latestNotice.created_at;
+    const rescheduleIsRelevant = Boolean(
+      scheduleChanged &&
+      latestReschedule?.reason &&
+      !latestReschedule.reason.startsWith("Reason not recorded") &&
+      (!frozenAt || new Date(latestReschedule.created_at).getTime() >= new Date(frozenAt).getTime()),
+    );
+    const sourceReason = latestNotice.status === "CANCELLED"
+      ? `Replacement for cancelled notice ${latestNotice.notice_reference || `N${String(latestNotice.revision_no).padStart(2, "0")}`}.`
+      : rescheduleIsRelevant && latestReschedule
+        ? `Audit rescheduled: ${latestReschedule.reason}`
+        : latestNotice.source_changes?.length
+          ? `Revised after ${latestNotice.source_changes.map((item) => item.label).join(", ")} changed.`
+          : "Audit arrangements changed after the previous notice was generated.";
+    setRevisionReason(sourceReason.slice(0, 4000));
+  }, [
+    latestNotice?.id,
+    latestNotice?.status,
+    latestNotice?.notice_reference,
+    latestNotice?.revision_no,
+    latestNotice?.requires_revision,
+    latestNotice?.source_changes,
+    latestNotice?.generated_at,
+    latestNotice?.artifact?.created_at,
+    latestNotice?.created_at,
+    latestNoticeNeedsReplacement,
+    latestReschedule?.reason,
+    latestReschedule?.created_at,
+  ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /* Mirror the saved notice waiver reason into the editable draft when the governed notice changes. */
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (latestNotice?.exception_reason) {
+    if (!latestNotice) return;
+    if (latestNoticeNeedsReplacement) {
+      setShortNoticeWaiverReason((current) => (
+        current === (latestNotice.exception_reason || "") ? "" : current
+      ));
+      return;
+    }
+    if (latestNotice.exception_reason) {
       setShortNoticeWaiverReason(latestNotice.exception_reason);
     }
-  }, [latestNotice?.id, latestNotice?.exception_reason]);
+  }, [latestNotice?.id, latestNotice?.exception_reason, latestNotice?.requires_revision, latestNoticeNeedsReplacement]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const activeNoticePolicy =
-    policiesQuery.data?.items.find(
-      (item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind,
-    ) || policiesQuery.data?.items[0];
+    policiesQuery.data?.items.find((item) => item.audit_kind === auditQuery.data?.kind) ||
+    policiesQuery.data?.items.find((item) => !item.audit_kind) ||
+    policiesQuery.data?.items[0];
   const requiredNoticeDays =
     latestNotice?.required_notice_days ??
     activeNoticePolicy?.minimum_notice_days ??
     14;
   const noticeDateForPeriod =
-    latestNotice?.notice_date || new Date().toISOString().slice(0, 10);
+    latestNoticeNeedsReplacement
+      ? new Date().toISOString().slice(0, 10)
+      : latestNotice?.notice_date || new Date().toISOString().slice(0, 10);
   const noticePeriodShort = auditNoticePeriodInsufficient({
     plannedStart: draft?.plannedStart || auditQuery.data?.planned_start,
     noticeDate: noticeDateForPeriod,
@@ -742,6 +860,12 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const persistedDraft = draftFromAudit(auditQuery.data);
   const definitionDirty = JSON.stringify(draft) !== JSON.stringify(persistedDraft);
+  const definitionScheduleChanged =
+    draft.plannedStart !== persistedDraft.plannedStart ||
+    draft.plannedEnd !== persistedDraft.plannedEnd ||
+    draft.plannedStartTime !== persistedDraft.plannedStartTime ||
+    draft.plannedEndTime !== persistedDraft.plannedEndTime;
+  const rescheduleReasonReady = !definitionScheduleChanged || rescheduleReason.trim().length >= 8;
   const readiness = auditSetupReadiness({
     ...draft,
     leadAuditorUserId: auditQuery.data.lead_auditor_user_id,
@@ -1350,13 +1474,28 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 Notify auditee
               </label>
             </div>
+            {canManage && definitionScheduleChanged ? (
+              <label className="qms-audit-setup-stage__reschedule-reason">
+                <span>Reason for rescheduling</span>
+                <textarea
+                  rows={2}
+                  value={rescheduleReason}
+                  onChange={(event) => setRescheduleReason(event.target.value)}
+                  placeholder="Why the audit date or time is changing"
+                />
+                <small>
+                  Required for the permanent audit history. This reason will also be suggested when a revised notice is required.
+                </small>
+                {rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
+              </label>
+            ) : null}
             {canManage ? (
               <div className="qms-audit-setup-stage__actions">
                 <button
                   type="button"
                   className="is-primary"
                   disabled={
-                    saveMutation.isPending || !readiness.definitionReady || !definitionDirty
+                    saveMutation.isPending || !readiness.definitionReady || !definitionDirty || !rescheduleReasonReady
                   }
                   onClick={() => saveMutation.mutate()}
                 >
@@ -1455,9 +1594,13 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span className="qms-audit-setup-tile__step" aria-hidden>4</span>
             <span className="qms-audit-setup-tile__title">Audit notice</span>
             <span className="qms-audit-setup-tile__hint">
-              {latestNotice ? latestNotice.status.replaceAll("_", " ") : "Not created"}
+              {latestNotice
+                ? `${latestNotice.notice_reference || `Notice N${String(latestNotice.revision_no).padStart(2, "0")}`} · ${latestNoticeNeedsReplacement ? "replacement required" : latestNotice.status.replaceAll("_", " ")}`
+                : "Not created"}
             </span>
-            <span className="qms-audit-setup-tile__state">Governance</span>
+            <span className={`qms-audit-setup-tile__state${latestNoticeNeedsReplacement ? " is-required" : ""}`}>
+              {latestNoticeNeedsReplacement ? "Revision required" : "Governance"}
+            </span>
           </summary>
           <div className="qms-audit-setup-tile__body">
             {noticesQuery.isError || policiesQuery.isError || templateQuery.isError ? (
@@ -1503,16 +1646,59 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </small>
               </div>
             ) : null}
+            {!noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending && latestNoticeNeedsReplacement && latestNotice ? (
+              <div className="qms-audit-notice-revision-required" role="alert">
+                <AlertTriangle size={16} aria-hidden />
+                <div>
+                  <strong>
+                    {latestNotice.status === "CANCELLED"
+                      ? "The latest notice was cancelled and cannot be reused."
+                      : "The saved notice no longer matches the current audit setup."}
+                  </strong>
+                  <p>
+                    {latestNotice.notice_reference || `Notice N${String(latestNotice.revision_no).padStart(2, "0")}`} remains retained as history.
+                    Create notice N{String(latestNotice.revision_no + 1).padStart(2, "0")} before continuing.
+                  </p>
+                  {latestNotice.source_changes?.length ? (
+                    <ul>
+                      {latestNotice.source_changes.map((change) => <li key={change.field}>{change.label}</li>)}
+                    </ul>
+                  ) : null}
+                  {canManageNotice ? (
+                    <label>
+                      <span>Reason for revised notice</span>
+                      <textarea
+                        rows={2}
+                        value={revisionReason}
+                        onChange={(event) => setRevisionReason(event.target.value)}
+                        placeholder="Why a new notice is being issued"
+                      />
+                      {revisionReason.trim().length < 8 ? <small>Enter at least 8 characters.</small> : null}
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {!noticesQuery.isError && !policiesQuery.isError && !noticesQuery.isPending && !policiesQuery.isPending && latestNotice ? (
               <dl className="qms-audit-setup-stage__notice-meta">
                 <div>
+                  <dt>Notice ID</dt>
+                  <dd>{latestNotice.notice_reference || `${auditQuery.data.audit_ref}/N${String(latestNotice.revision_no).padStart(2, "0")}`}</dd>
+                </div>
+                <div>
                   <dt>Status</dt>
-                  <dd>{latestNotice.status.replaceAll("_", " ")}</dd>
+                  <dd>{latestNoticeNeedsReplacement ? "REVISION REQUIRED" : latestNotice.status.replaceAll("_", " ")}</dd>
                 </div>
                 <div>
                   <dt>Notice revision</dt>
                   <dd>{latestNotice.revision_no}</dd>
                 </div>
+                {latestNotice.supersedes_reference ? (
+                  <div>
+                    <dt>Supersedes</dt>
+                    <dd>{latestNotice.supersedes_reference}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Minimum lead time to audit start</dt>
                   <dd>{latestNotice.required_notice_days} days</dd>
@@ -1589,7 +1775,20 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <CalendarClock size={15} /> Create notice draft
                       </button>
                     ) : null}
-                    {latestNotice ? (
+                    {latestNoticeNeedsReplacement && latestNotice && canManageNotice ? (
+                      <button
+                        type="button"
+                        className="is-primary"
+                        disabled={
+                          reviseNoticeMutation.isPending ||
+                          revisionReason.trim().length < 8 ||
+                          !shortNoticeWaiverReady
+                        }
+                        onClick={() => reviseNoticeMutation.mutate(latestNotice)}
+                      >
+                        <CalendarClock size={15} /> {reviseNoticeMutation.isPending ? "Creating revised notice…" : `Create revised notice N${String(latestNotice.revision_no + 1).padStart(2, "0")}`}
+                      </button>
+                    ) : latestNotice ? (
                       <button
                         type="button"
                         className="is-primary"
@@ -1629,10 +1828,78 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     ) : null}
                   </div>
                 </div>
-                {latestNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(latestNotice.status) ? (
+                {latestNotice && !latestNoticeNeedsReplacement && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(latestNotice.status) ? (
                   <p className="qms-audit-notice-guidance">
                     Generate and inspect the final signed document before sending. The stored PDF shown in the preview, including its QR record link and hash, is the exact file attached to the email.
                   </p>
+                ) : null}
+                {(noticesQuery.data?.items.length || noticesQuery.data?.reschedule_history?.length) ? (
+                  <details className="qms-audit-notice-history">
+                    <summary>
+                      Full notice &amp; reschedule history
+                      <span>{noticesQuery.data?.items.length || 0} notice{(noticesQuery.data?.items.length || 0) === 1 ? "" : "s"} · {noticesQuery.data?.reschedule_history?.length || 0} schedule change{(noticesQuery.data?.reschedule_history?.length || 0) === 1 ? "" : "s"}</span>
+                    </summary>
+                    <div className="qms-audit-notice-history__body">
+                      <section>
+                        <h4>Controlled notice history</h4>
+                        {(noticesQuery.data?.items || []).map((row) => (
+                          <article className="qms-audit-notice-history__item" key={row.id}>
+                            <div>
+                              <strong>{row.notice_reference || `${auditQuery.data.audit_ref}/N${String(row.revision_no).padStart(2, "0")}`}</strong>
+                              <span>{row.status.replaceAll("_", " ")} · created {setupDateLabel(row.created_at)}</span>
+                              {row.revision_reason ? <p><b>Reason:</b> {row.revision_reason}</p> : null}
+                              {row.supersedes_reference ? <small>Supersedes {row.supersedes_reference}</small> : null}
+                              {row.superseded_by_reference ? <small>Superseded by {row.superseded_by_reference}</small> : null}
+                              {row.delivered_at ? <small>Delivered {setupDateLabel(row.delivered_at)}</small> : row.generated_at ? <small>Generated {setupDateLabel(row.generated_at)}</small> : null}
+                              {row.events?.length ? (
+                                <details className="qms-audit-notice-history__events">
+                                  <summary>Lifecycle events ({row.events.length})</summary>
+                                  <ol>
+                                    {row.events.map((event) => (
+                                      <li key={event.id}>
+                                        <strong>{event.event_type.replaceAll("_", " ")}</strong>
+                                        <span>{setupDateLabel(event.created_at)}</span>
+                                        {event.reason ? <small>{event.reason}</small> : null}
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </details>
+                              ) : null}
+                            </div>
+                            {row.artifact ? (
+                              <div className="qms-audit-notice-history__actions">
+                                <button type="button" onClick={() => previewNoticeMutation.mutate(row)} disabled={previewNoticeMutation.isPending}>
+                                  <Eye size={14} /> View
+                                </button>
+                                <button type="button" onClick={() => downloadNoticeMutation.mutate(row)} disabled={downloadNoticeMutation.isPending}>
+                                  <Download size={14} /> PDF
+                                </button>
+                              </div>
+                            ) : null}
+                          </article>
+                        ))}
+                      </section>
+                      <section>
+                        <h4>Audit reschedule history</h4>
+                        {(noticesQuery.data?.reschedule_history || []).length ? (noticesQuery.data?.reschedule_history || []).map((entry) => (
+                          <article className="qms-audit-notice-history__item is-reschedule" key={entry.id}>
+                            <div>
+                              <strong>{entry.source === "PLANNER" ? "Planner reschedule" : "Setup reschedule"}</strong>
+                              <span>
+                                {setupDateLabel(entry.created_at)} · {entry.actor_name || entry.actor_user_id || "System / legacy record"}
+                              </span>
+                              <p><b>Reason:</b> {entry.reason}</p>
+                              <small>
+                                <b>From:</b> {auditHistoryWindow(entry.before)}
+                                <br />
+                                <b>To:</b> {auditHistoryWindow(entry.after)}
+                              </small>
+                            </div>
+                          </article>
+                        )) : <p className="qms-audit-setup-stage__empty">No reschedule has been recorded for this audit.</p>}
+                      </section>
+                    </div>
+                  </details>
                 ) : null}
               </>
             ) : null}
@@ -1675,7 +1942,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </strong>
                 <span>Status: {previewedNotice.status.replaceAll("_", " ")}</span>
               </div>
-              {canManageNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
+              {canManageNotice && previewedNotice.is_latest !== false && !previewedNotice.requires_revision && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
                 <label className="qms-audit-notice-modal__reason">
                   <span>Issuance record note</span>
                   <textarea rows={2} value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} />
@@ -1688,7 +1955,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <button type="button" onClick={() => downloadBlob(noticePreview.blob, noticePreview.filename)}>
                   <Download size={15} /> Download PDF
                 </button>
-                {canManageNotice && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
+                {canManageNotice && previewedNotice.is_latest !== false && !previewedNotice.requires_revision && ["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"].includes(previewedNotice.status) ? (
                   <button
                     type="button"
                     className="is-primary"

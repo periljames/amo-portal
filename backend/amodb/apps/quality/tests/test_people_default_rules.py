@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from amodb.apps.quality.people_default_rules import (
     DEFAULT_QUALITY_PRIVILEGE_RULES,
     ensure_default_quality_privilege_rules,
@@ -42,6 +44,9 @@ def test_ensure_default_quality_privilege_rules_creates_missing_rows() -> None:
         def query(self, model):
             return _Query()
 
+        def begin_nested(self):
+            return nullcontext()
+
         def add(self, row):
             self.added.append(row)
 
@@ -58,4 +63,4 @@ def test_ensure_default_quality_privilege_rules_creates_missing_rows() -> None:
         "AUDITOR_GLOBAL",
     }
     assert {row.title for row in db.added} == {"Lead auditor", "Observer / Trainee", "Auditor"}
-    assert db.flushed == 1
+    assert db.flushed == 4

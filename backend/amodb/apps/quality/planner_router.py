@@ -693,6 +693,8 @@ def qms_planner_reschedule(
             "event_type": event_type,
             "start_date": old_date.isoformat(),
             "end_date": old_end.isoformat() if old_end else None,
+            "start_time": previous_start_time.strftime("%H:%M") if previous_start_time else None,
+            "end_time": previous_end_time.strftime("%H:%M") if previous_end_time else None,
         },
         new_value={
             "event_id": payload.event_id,

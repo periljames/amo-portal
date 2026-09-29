@@ -95,6 +95,9 @@ def render_audit_notice_pdf(
     amo_name: str,
     contact_email: str | None,
     notice_id: str,
+    notice_reference: str,
+    supersedes_reference: str | None,
+    revision_reason: str | None,
     revision_no: int,
     notice_date_display: str,
     audit_ref: str,
@@ -197,9 +200,46 @@ def render_audit_notice_pdf(
         Paragraph(f"{index})&nbsp;&nbsp;{escape(name)}", compact)
         for index, name in enumerate(representative_names, start=1)
     ]
+    lineage_story: list[Any] = [
+        Table(
+            [[
+                Paragraph(f"<b>Controlled notice:</b> {escape(notice_reference)}", compact),
+                Paragraph(
+                    f"<b>{'Revised notice' if supersedes_reference else 'Initial notice'}</b>",
+                    compact,
+                ),
+            ]],
+            colWidths=[124 * mm, 65 * mm],
+            style=TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#98A2B3")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]),
+        ),
+    ]
+    if supersedes_reference:
+        lineage_story.extend([
+            Paragraph(
+                f"<b>Supersedes:</b> {escape(supersedes_reference)}. "
+                "Use this revised notice for the current audit arrangement.",
+                compact,
+            ),
+            Paragraph(
+                f"<b>Revision reason:</b> {escape(_text(revision_reason, 'Audit arrangement revised.'))}",
+                compact,
+            ),
+        ])
+
     story: list[Any] = [
         header,
-        Spacer(1, 5 * mm),
+        Spacer(1, 3 * mm),
+        *lineage_story,
+        Spacer(1, 2 * mm),
         Table(
             [[Paragraph("From: <b>Quality Department</b>", normal), Paragraph(f"Date: <b>{escape(notice_date_display)}</b>", normal)]],
             colWidths=[124 * mm, 65 * mm],
@@ -296,7 +336,8 @@ def render_audit_notice_pdf(
                     Paragraph(f"<b>{escape(issuer_name)}</b>", signature),
                     Paragraph(escape(issuer_title), signature),
                     Paragraph(f"Signed: {escape(signed_at_display)}", signature),
-                    Paragraph(f"Notice record: {escape(notice_id)} / revision {revision_no}", meta_style),
+                    Paragraph(f"Notice reference: {escape(notice_reference)}", meta_style),
+                    Paragraph(f"Record ID: {escape(notice_id)} / notice revision {revision_no}", meta_style),
                     Paragraph("The stored document hash and issuance history are retained in the controlled digital record.", meta_style),
                 ],
                 [

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
 
 import fitz
 
+from amodb.apps.quality import audit_report_composition
 from amodb.apps.quality.audit_report_composition import _canonical_hash, _render_pdf
 
 
@@ -143,3 +145,17 @@ def test_report_renderer_handles_no_findings_without_inventing_content(tmp_path:
     content = destination.read_bytes()
     assert content.startswith(b"%PDF-")
     assert len(content) > 1000
+
+
+
+def test_report_snapshot_reads_checklist_evidence_from_authoritative_models() -> None:
+    source = inspect.getsource(audit_report_composition.build_report_snapshot)
+    checklist_source = source[
+        source.index("def checklist_snapshot"):
+        source.index("return _json_value")
+    ]
+
+    assert '"objective_evidence": item.objective_evidence if item else None' in checklist_source
+    assert '"evidence_references": row.evidence_references or []' in checklist_source
+    assert '"objective_evidence": row.objective_evidence' not in checklist_source
+    assert "row.evidence_references_json" not in checklist_source

@@ -107,16 +107,23 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
     onError: (cause: Error) => setError(cause.message),
   });
   const saveNotice = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      const policyItems = (await policyQuery.refetch()).data?.items || policyQuery.data?.items || [];
+      const currentPolicy =
+        policyItems.find((item) => item.audit_kind === audit?.kind) ||
+        policyItems.find((item) => !item.audit_kind) ||
+        policyItems[0];
       const payload = {
-        policy_id: activePolicy?.id,
+        policy_id: currentPolicy?.id,
         notice_date: noticeDate,
         exception_type: exceptionType || undefined,
         exception_reason: exceptionType ? exceptionReason : undefined,
         reason: noticeReason,
       } as const;
-      return latestNotice && latestNotice.status !== "DRAFT"
-        ? reviseAuditNotice(amoCode, auditId, latestNotice.id, payload)
+      return latestNotice
+        ? (latestNotice.requires_revision || latestNotice.status !== "DRAFT"
+            ? reviseAuditNotice(amoCode, auditId, latestNotice.id, payload)
+            : Promise.reject(new Error("The current draft still matches the audit setup. Continue its lifecycle or cancel it before creating another notice.")))
         : createAuditNotice(amoCode, auditId, payload);
     },
     onSuccess: () => void refresh(),
@@ -152,7 +159,9 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
   if (!audit && auditQuery.isLoading) return null;
   if (!audit) return null;
 
-  const actions = latestNotice ? nextNoticeActions(latestNotice).filter((item): item is "SUBMIT" | "RETURN" | "APPROVE" | "GENERATE" | "DELIVER" | "ACKNOWLEDGE" | "CANCEL" => !["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED", "DELIVERED", "ACKNOWLEDGED", "SUPERSEDED", "CANCELLED"].includes(item as AuditNotice["status"])) : [];
+  const actions = latestNotice && !latestNotice.requires_revision
+    ? nextNoticeActions(latestNotice).filter((item): item is "SUBMIT" | "RETURN" | "APPROVE" | "GENERATE" | "DELIVER" | "ACKNOWLEDGE" | "CANCEL" => !["DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED", "DELIVERED", "ACKNOWLEDGED", "SUPERSEDED", "CANCELLED"].includes(item as AuditNotice["status"]))
+    : [];
 
   const launcher = (
     <button
@@ -233,14 +242,23 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
               </section>
 
               <section className="qms-audit-governance-card">
-                <div className="qms-audit-governance-card__heading"><div><FileClock size={18} /><strong>{latestNotice ? `Notice revision ${latestNotice.revision_no}` : "Create notice"}</strong></div><span>{latestNotice?.status || "DRAFT"}</span></div>
+                <div className="qms-audit-governance-card__heading"><div><FileClock size={18} /><strong>{latestNotice ? (latestNotice.notice_reference || `Notice N${String(latestNotice.revision_no).padStart(2, "0")}`) : "Create notice"}</strong></div><span>{latestNotice?.requires_revision ? "REVISION REQUIRED" : latestNotice?.status || "DRAFT"}</span></div>
+                {latestNotice?.requires_revision ? (
+                  <div className="qms-audit-governance-error" role="alert">
+                    <ShieldAlert size={17} />
+                    <div>
+                      <strong>The audit arrangement changed after this notice was frozen.</strong>
+                      <span>Create a revised notice before any further approval, generation or delivery.</span>
+                    </div>
+                  </div>
+                ) : null}
                 <label>Notice date<input type="date" value={noticeDate} onChange={(event) => setNoticeDate(event.target.value)} /></label>
                 <label>Exception<select value={exceptionType} onChange={(event) => setExceptionType(event.target.value as typeof exceptionType)}><option value="">None — enforce notice period</option><option value="EMERGENCY">Emergency / short-notice waiver</option><option value="UNANNOUNCED">Unannounced audit</option></select></label>
                 {exceptionType ? <label>Exception reason<textarea value={exceptionReason} onChange={(event) => setExceptionReason(event.target.value)} placeholder="State the controlled justification and approval basis." /></label> : (
                   <p className="qms-audit-governance-hint">If the notice falls inside the configured lead time, provide an Emergency / short-notice waiver reason instead of blocking the notice.</p>
                 )}
                 <label>Lifecycle reason<textarea value={noticeReason} onChange={(event) => setNoticeReason(event.target.value)} /></label>
-                {(!latestNotice || latestNotice.status !== "DRAFT") ? <button type="button" onClick={() => saveNotice.mutate()} disabled={saveNotice.isPending || noticeReason.trim().length < 8 || Boolean(exceptionType && exceptionReason.trim().length < 8)}>{latestNotice ? "Create revised notice" : "Create notice draft"}</button> : null}
+                {(!latestNotice || latestNotice.status !== "DRAFT" || latestNotice.requires_revision) ? <button type="button" onClick={() => saveNotice.mutate()} disabled={saveNotice.isPending || noticeReason.trim().length < 8 || Boolean(exceptionType && exceptionReason.trim().length < 8)}>{latestNotice ? `Create revised notice N${String(latestNotice.revision_no + 1).padStart(2, "0")}` : "Create notice draft"}</button> : null}
               </section>
 
               {latestNotice ? (

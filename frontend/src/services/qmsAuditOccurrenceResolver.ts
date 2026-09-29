@@ -14,6 +14,7 @@ export type AuditOccurrenceSetupUpdate = {
   notify_auditors?: boolean | null;
   notify_auditees?: boolean | null;
   reminder_interval_days?: number | null;
+  reschedule_reason?: string | null;
 };
 
 export function auditOccurrenceResolverKey(auditKey: string): string {

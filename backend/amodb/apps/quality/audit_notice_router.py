@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from amodb import storage
@@ -199,6 +200,8 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "form_issue_date": row.form_issue_date,
         "form_revision": row.form_revision,
         "revision_no": row.revision_no,
+        "notice_reference": _notice_reference_for_row(row),
+        "revision_reason": _notice_revision_reason(row),
         "status": row.status,
         "required_notice_days": row.required_notice_days,
         "notice_date": row.notice_date,
@@ -223,7 +226,13 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "artifact": _artifact_dict(row.artifact),
-        "events": [_event_dict(item) for item in list(row.events or [])],
+        "events": [
+            _event_dict(item)
+            for item in sorted(
+                list(row.events or []),
+                key=lambda event: event.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            )
+        ],
     }
 
 
@@ -245,18 +254,58 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
         "title": audit.title,
         "kind": _enum_value(audit.kind),
         "domain": _enum_value(audit.domain),
+        "audit_scope_id": str(audit.audit_scope_id) if getattr(audit, "audit_scope_id", None) else None,
+        "audit_scope_code": getattr(audit, "audit_scope_code", None),
         "scope": audit.scope,
         "criteria": audit.criteria,
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
-        "planned_start_time": audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None,
-        "planned_end_time": audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None,
+        "planned_start_time": (
+            (audit.planned_start_time or DEFAULT_START_TIME).strftime("%H:%M")
+            if audit.planned_start
+            else (audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None)
+        ),
+        "planned_end_time": (
+            (audit.planned_end_time or DEFAULT_END_TIME).strftime("%H:%M")
+            if audit.planned_end
+            else (audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None)
+        ),
         "auditee": audit.auditee,
+        "auditee_email": getattr(audit, "auditee_email", None),
         "auditee_user_id": audit.auditee_user_id,
+        "notify_auditors": bool(audit.notify_auditors),
+        "notify_auditees": bool(audit.notify_auditees),
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
     }
+
+
+def _notice_reference(audit_ref: str | None, revision_no: int) -> str:
+    return f"{audit_ref or 'AUDIT'}/N{int(revision_no or 0):02d}"
+
+
+def _notice_reference_for_row(
+    notice: QualityAuditNotice,
+    *,
+    fallback_audit_ref: str | None = None,
+) -> str:
+    snapshot_value = getattr(notice, "audit_snapshot", None)
+    snapshot = snapshot_value if isinstance(snapshot_value, dict) else {}
+    audit_ref = str(snapshot.get("audit_ref") or fallback_audit_ref or "").strip()
+    return _notice_reference(audit_ref, notice.revision_no)
+
+
+def _notice_revision_reason(notice: QualityAuditNotice) -> str | None:
+    events = sorted(
+        list(notice.events or []),
+        key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    event = next((item for item in events if item.event_type in {"REVISED", "CREATED"}), None)
+    if event is None:
+        return None
+    return (event.reason or "").strip() or None
 
 
 def _recipient_snapshot(audit: models.QMSAudit) -> list[dict[str, Any]]:
@@ -423,6 +472,28 @@ def _default_subject(audit: models.QMSAudit) -> str:
     return f"Audit Notice - {reference} - {audit.title}"
 
 
+def _default_subject_from_snapshot(snapshot: dict[str, Any]) -> str:
+    reference = str(snapshot.get("audit_ref") or "Audit")
+    title = str(snapshot.get("title") or "")
+    return f"Audit Notice - {reference} - {title}"
+
+
+def _default_body_from_snapshot(snapshot: dict[str, Any], notice_date: date) -> str:
+    reference = str(snapshot.get("audit_ref") or "the scheduled audit")
+    title = str(snapshot.get("title") or "")
+    scope = str(snapshot.get("scope") or "As defined in the approved audit scope.")
+    criteria = str(snapshot.get("criteria") or "Applicable approved requirements and procedures.")
+    planned = str(snapshot.get("planned_start") or "To be confirmed")
+    return (
+        f"This is controlled notice of {reference}: {title}.\n\n"
+        f"Planned start: {planned}\n"
+        f"Scope: {scope}\n"
+        f"Criteria: {criteria}\n"
+        f"Notice date: {notice_date.isoformat()}\n\n"
+        "Please ensure requested records, responsible personnel and relevant facilities are available for the audit."
+    )
+
+
 def _default_body(audit: models.QMSAudit, notice_date: date) -> str:
     scope = audit.scope or "As defined in the approved audit scope."
     criteria = audit.criteria or "Applicable approved requirements and procedures."
@@ -441,6 +512,28 @@ def _notice_query(db: Session):
     return db.query(QualityAuditNotice).options(
         selectinload(QualityAuditNotice.events),
         selectinload(QualityAuditNotice.artifact),
+    )
+
+
+def _require_latest_notice_revision(db: Session, notice: QualityAuditNotice) -> None:
+    latest = db.query(QualityAuditNotice).filter(
+        QualityAuditNotice.amo_id == notice.amo_id,
+        QualityAuditNotice.audit_id == notice.audit_id,
+    ).order_by(QualityAuditNotice.revision_no.desc()).first()
+    if latest is None or str(latest.id) == str(notice.id):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "AUDIT_NOTICE_NOT_LATEST",
+            "message": (
+                "This audit notice is retained as history. Continue only from the latest controlled notice revision."
+            ),
+            "notice_id": str(notice.id),
+            "notice_revision": notice.revision_no,
+            "latest_notice_id": str(latest.id),
+            "latest_notice_revision": latest.revision_no,
+        },
     )
 
 
@@ -603,10 +696,270 @@ def _meetings(db: Session, *, amo_id: str, audit_id: uuid.UUID, zone: ZoneInfo) 
         QualityAuditMeeting.amo_id == amo_id,
         QualityAuditMeeting.audit_id == audit_id,
         QualityAuditMeeting.meeting_type.in_(("OPENING", "CLOSING")),
+        QualityAuditMeeting.status != "CANCELLED",
     ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
     opening = next((row for row in rows if row.meeting_type == "OPENING"), None)
     closing = next((row for row in reversed(rows) if row.meeting_type == "CLOSING"), None)
     return _meeting_payload(opening, zone=zone), _meeting_payload(closing, zone=zone)
+
+
+def _meeting_source_value(row: QualityAuditMeeting | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "scheduled_start": row.scheduled_start.isoformat() if row.scheduled_start else None,
+        "scheduled_end": row.scheduled_end.isoformat() if row.scheduled_end else None,
+        "location": (row.location or "").strip() or None,
+        "conference_url": (row.conference_url or "").strip() or None,
+    }
+
+
+def _meeting_source_snapshot(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> tuple[dict[str, Any], dict[str, QualityAuditMeeting | None]]:
+    rows = db.query(QualityAuditMeeting).filter(
+        QualityAuditMeeting.amo_id == amo_id,
+        QualityAuditMeeting.audit_id == audit_id,
+        QualityAuditMeeting.meeting_type.in_(("OPENING", "CLOSING")),
+        QualityAuditMeeting.status != "CANCELLED",
+    ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
+    opening = next((row for row in rows if row.meeting_type == "OPENING"), None)
+    closing = next((row for row in reversed(rows) if row.meeting_type == "CLOSING"), None)
+    return (
+        {
+            "opening": _meeting_source_value(opening),
+            "closing": _meeting_source_value(closing),
+        },
+        {"opening": opening, "closing": closing},
+    )
+
+
+def _normalise_recipient_snapshot(snapshot: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Canonicalise recipient routing so frozen legacy/new snapshots compare consistently."""
+    normalised: list[dict[str, Any]] = []
+    for raw in snapshot or []:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip().upper()
+        user_id = str(raw.get("user_id") or "").strip() or None
+        email = str(raw.get("email") or "").strip().lower() or None
+        if user_id:
+            # User-backed recipients are identified by role + immutable user id,
+            # while email remains material because it controls delivery routing.
+            normalised.append({
+                "role": role,
+                "user_id": user_id,
+                "email": email,
+            })
+            continue
+        first_name = str(raw.get("first_name") or "").strip() or None
+        last_name = str(raw.get("last_name") or "").strip() or None
+        designation = str(raw.get("designation") or "").strip() or None
+        contact_name = (
+            str(raw.get("name") or "").strip()
+            or " ".join(part for part in (first_name, last_name) if part).strip()
+            or designation
+            or None
+        )
+        normalised.append({
+            "role": role,
+            "user_id": None,
+            "email": email,
+            "name": contact_name,
+            "first_name": first_name,
+            "last_name": last_name,
+            "designation": designation,
+        })
+    return sorted(
+        normalised,
+        key=lambda item: (
+            str(item.get("role") or ""),
+            str(item.get("user_id") or ""),
+            str(item.get("email") or ""),
+            str(item.get("name") or ""),
+            str(item.get("first_name") or ""),
+            str(item.get("last_name") or ""),
+            str(item.get("designation") or ""),
+        ),
+    )
+
+
+def _notice_source_snapshot(
+    db: Session,
+    *,
+    amo_id: str,
+    audit: models.QMSAudit,
+) -> tuple[dict[str, Any], dict[str, QualityAuditMeeting | None]]:
+    meetings, meeting_rows = _meeting_source_snapshot(db, amo_id=amo_id, audit_id=audit.id)
+    resolved_recipients, _ = _resolved_recipients(
+        db,
+        amo_id=amo_id,
+        snapshot=_recipient_snapshot(audit),
+    )
+    return (
+        {
+            **_audit_snapshot(audit),
+            "source_snapshot_version": 5,
+            "audit_area_label": _audit_area_label(db, audit=audit),
+            "meetings": meetings,
+            "recipients": _normalise_recipient_snapshot(resolved_recipients),
+        },
+        meeting_rows,
+    )
+
+
+def _normalise_notice_schedule_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Compare effective schedule times rather than storage representation."""
+    normalised = dict(snapshot)
+    if normalised.get("planned_start") and not normalised.get("planned_start_time"):
+        normalised["planned_start_time"] = DEFAULT_START_TIME.strftime("%H:%M")
+    if normalised.get("planned_end") and not normalised.get("planned_end_time"):
+        normalised["planned_end_time"] = DEFAULT_END_TIME.strftime("%H:%M")
+    return normalised
+
+
+_NOTICE_SOURCE_LABELS = {
+    "audit_ref": "Audit reference",
+    "kind": "Audit type",
+    "domain": "Audit domain",
+    "audit_scope_id": "Audit scope identity",
+    "audit_scope_code": "Audit scope code",
+    "audit_area_label": "Audit area / process",
+    "title": "Audit title",
+    "scope": "Audit scope",
+    "criteria": "Audit criteria",
+    "planned_start": "Planned start date",
+    "planned_end": "Planned end date",
+    "planned_start_time": "Planned start time",
+    "planned_end_time": "Planned end time",
+    "auditee": "Auditee representative",
+    "auditee_email": "Auditee email",
+    "auditee_user_id": "Auditee user",
+    "notify_auditors": "Auditor notification routing",
+    "notify_auditees": "Auditee notification routing",
+    "lead_auditor_user_id": "Lead auditor",
+    "observer_auditor_user_id": "Observer auditor",
+    "assistant_auditor_user_id": "Assistant auditor",
+}
+
+
+def _notice_source_changes(
+    notice: QualityAuditNotice,
+    *,
+    current_snapshot: dict[str, Any],
+    current_meeting_rows: dict[str, QualityAuditMeeting | None],
+) -> list[dict[str, Any]]:
+    # A draft without a frozen PDF can still be refreshed safely at generation.
+    if notice.artifact is None and notice.status == "DRAFT":
+        return []
+
+    stored = _normalise_notice_schedule_snapshot(
+        notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    )
+    current_snapshot = _normalise_notice_schedule_snapshot(current_snapshot)
+    changes: list[dict[str, Any]] = []
+    for field, label in _NOTICE_SOURCE_LABELS.items():
+        # Older notices did not capture the later-added routing fields. Do not
+        # manufacture a historical difference that was never recorded.
+        if field not in stored:
+            continue
+        before = stored.get(field)
+        after = current_snapshot.get(field)
+        if before != after:
+            changes.append({"field": field, "label": label, "before": before, "after": after})
+
+    stored_recipients = stored.get("recipients")
+    current_recipients = _normalise_recipient_snapshot(current_snapshot.get("recipients") or [])
+    if isinstance(stored_recipients, list):
+        frozen_recipients = _normalise_recipient_snapshot(stored_recipients)
+        if frozen_recipients != current_recipients:
+            changes.append({
+                "field": "recipients",
+                "label": "Notice recipients",
+                "before": frozen_recipients,
+                "after": current_recipients,
+            })
+    elif notice.recipient_snapshot:
+        # Legacy frozen notices stored the resolved delivery set in the
+        # dedicated recipient snapshot. Normalize away enrichment-only shape
+        # differences while retaining role, identity and email routing changes.
+        frozen_recipients = _normalise_recipient_snapshot(list(notice.recipient_snapshot or []))
+        if frozen_recipients != current_recipients:
+            changes.append({
+                "field": "recipients",
+                "label": "Notice recipients",
+                "before": frozen_recipients,
+                "after": current_recipients,
+            })
+
+    stored_meetings = stored.get("meetings")
+    current_meetings = current_snapshot.get("meetings") or {}
+    if isinstance(stored_meetings, dict):
+        for meeting_key, label in (("opening", "Opening meeting"), ("closing", "Closing meeting")):
+            before = stored_meetings.get(meeting_key)
+            after = current_meetings.get(meeting_key)
+            if before != after:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": before,
+                    "after": after,
+                })
+    elif notice.artifact is not None:
+        # Legacy generated notices predate meeting snapshots. Generation required
+        # both meetings, so a missing current meeting or one changed afterwards
+        # is sufficient evidence that the stored PDF no longer represents Setup.
+        frozen_at = notice.generated_at or notice.artifact.created_at or notice.created_at
+        for meeting_key, label in (("opening", "Opening meeting"), ("closing", "Closing meeting")):
+            row = current_meeting_rows.get(meeting_key)
+            if row is None:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": "Included in generated notice",
+                    "after": None,
+                })
+                continue
+            changed_at = row.updated_at or row.created_at
+            if frozen_at and changed_at and changed_at > frozen_at:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": "Captured when notice was generated",
+                    "after": _meeting_source_value(row),
+                })
+    return changes
+
+
+def _require_current_notice_source(
+    notice: QualityAuditNotice,
+    *,
+    current_snapshot: dict[str, Any],
+    current_meeting_rows: dict[str, QualityAuditMeeting | None],
+) -> None:
+    changes = _notice_source_changes(
+        notice,
+        current_snapshot=current_snapshot,
+        current_meeting_rows=current_meeting_rows,
+    )
+    if not changes:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "AUDIT_NOTICE_REVISION_REQUIRED",
+            "message": (
+                "The audit definition or meeting schedule changed after this notice was frozen. "
+                "Create a new notice revision before generating or sending another controlled notice."
+            ),
+            "notice_id": str(notice.id),
+            "notice_revision": notice.revision_no,
+            "changes": changes,
+        },
+    )
 
 
 def _resolved_recipients(
@@ -628,7 +981,20 @@ def _resolved_recipients(
                 account_models.User.amo_id == amo_id,
                 account_models.User.is_active.is_(True),
             ).first()
-        name = str(item.get("name") or "").strip() or _display_name(user)
+        contact_name = " ".join(
+            part
+            for part in (
+                str(item.get("first_name") or "").strip(),
+                str(item.get("last_name") or "").strip(),
+            )
+            if part
+        ).strip()
+        name = (
+            str(item.get("name") or "").strip()
+            or _display_name(user)
+            or contact_name
+            or str(item.get("designation") or "").strip()
+        )
         email = str(item.get("email") or "").strip() or str(getattr(user, "email", "") or "").strip()
         current = {**item, "user_id": user_id, "name": name or None, "email": email or None}
         resolved.append(current)
@@ -758,17 +1124,31 @@ def _render_notice(
     if audit.planned_start and audit.planned_end and audit.planned_end != audit.planned_start:
         sequence_window += " on each audit day"
     local_signed = signed_at.astimezone(zone)
+    audit_ref = str((notice.audit_snapshot or {}).get("audit_ref") or audit.audit_ref or "")
+    notice_reference = _notice_reference_for_row(notice, fallback_audit_ref=audit.audit_ref)
+    supersedes_reference = None
+    if notice.supersedes_notice_id:
+        prior = db.query(QualityAuditNotice).filter(
+            QualityAuditNotice.amo_id == ctx.amo_id,
+            QualityAuditNotice.audit_id == audit.id,
+            QualityAuditNotice.id == notice.supersedes_notice_id,
+        ).first()
+        if prior is not None:
+            supersedes_reference = _notice_reference_for_row(prior, fallback_audit_ref=audit.audit_ref)
     return render_audit_notice_pdf(
         amo_name=amo.name,
         contact_email=amo.contact_email,
         notice_id=str(notice.id),
+        notice_reference=notice_reference,
+        supersedes_reference=supersedes_reference,
+        revision_reason=_notice_revision_reason(notice),
         revision_no=notice.revision_no,
         notice_date_display=_date_label(notice.notice_date),
         audit_ref=audit.audit_ref,
         audit_title=audit.title,
         audit_date_display=audit_dates,
         auditee_representative=audit.auditee,
-        audit_area=_audit_area_label(db, audit=audit),
+        audit_area=str((notice.audit_snapshot or {}).get("audit_area_label") or _audit_area_label(db, audit=audit)),
         audit_scope=audit.scope or "As defined in the approved audit occurrence.",
         audit_criteria=audit.criteria or "Applicable approved requirements and procedures.",
         subject=notice.subject,
@@ -792,10 +1172,12 @@ def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice) -> st
         normalized = _SAFE_FILENAME.sub("-", str(value or "")).strip(" .-_")
         return re.sub(r"\s+", " ", normalized) or fallback
 
-    reference = clean(audit.audit_ref or audit.id, "Audit")
-    title = clean(audit.title, "Untitled")
+    snapshot_value = getattr(notice, "audit_snapshot", None)
+    snapshot = snapshot_value if isinstance(snapshot_value, dict) else {}
+    reference = clean(snapshot.get("audit_ref") or audit.audit_ref or audit.id, "Audit")
+    title = clean(snapshot.get("title") or audit.title, "Untitled")
     notice_day = notice.notice_date.isoformat() if notice.notice_date else date.today().isoformat()
-    stem = f"(Notice) {reference} - {title} - {notice_day} - Rev {notice.revision_no:02d}"
+    stem = f"(Notice) {reference} - {title} - {notice_day} - Notice N{notice.revision_no:02d}"
     return f"{stem[:251]}.pdf"
 
 
@@ -1027,6 +1409,59 @@ def set_notice_template(
     }
 
 
+def _audit_reschedule_history(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, actor_user_id, action, previous_value, new_value, created_at
+                FROM qms_activity_logs
+                WHERE amo_id = :amo_id
+                  AND entity_type = 'audit'
+                  AND entity_id = :audit_id
+                  AND action IN ('calendar_schedule_rescheduled', 'audit_setup_rescheduled')
+                ORDER BY created_at DESC
+                """
+            ),
+            {"amo_id": amo_id, "audit_id": str(audit_id)},
+        ).mappings().all()
+    except SQLAlchemyError:
+        # SQLite/unit-test profiles and older upgrade windows may not expose the
+        # canonical QMS activity ledger. The notice history remains available.
+        return []
+
+    actor_ids = {str(row.get("actor_user_id")) for row in rows if row.get("actor_user_id")}
+    actors = {}
+    if actor_ids:
+        actor_rows = db.query(account_models.User).filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(actor_ids),
+        ).all()
+        actors = {str(user.id): _display_name(user, str(user.id)) for user in actor_rows}
+
+    history: list[dict[str, Any]] = []
+    for row in rows:
+        before = row.get("previous_value") if isinstance(row.get("previous_value"), dict) else {}
+        after = row.get("new_value") if isinstance(row.get("new_value"), dict) else {}
+        actor_id = str(row.get("actor_user_id") or "") or None
+        history.append({
+            "id": str(row.get("id")),
+            "source": "PLANNER" if row.get("action") == "calendar_schedule_rescheduled" else "SETUP",
+            "reason": str(after.get("reason") or "").strip() or "Reason not recorded in legacy history.",
+            "before": before,
+            "after": after,
+            "actor_user_id": actor_id,
+            "actor_name": actors.get(actor_id or ""),
+            "created_at": row.get("created_at"),
+        })
+    return history
+
+
 @router.get("/audits/{audit_id}/notices")
 def list_audit_notices(
     audit_id: uuid.UUID,
@@ -1034,12 +1469,52 @@ def list_audit_notices(
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     rows = _notice_query(db).filter(
         QualityAuditNotice.amo_id == ctx.amo_id,
         QualityAuditNotice.audit_id == audit_id,
-    ).order_by(QualityAuditNotice.revision_no.desc()).limit(100).all()
-    return {"items": [_notice_dict(row) for row in rows]}
+    ).order_by(QualityAuditNotice.revision_no.desc()).all()
+    current_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
+    by_id = {str(row.id): row for row in rows}
+    superseded_by: dict[str, QualityAuditNotice] = {
+        str(row.supersedes_notice_id): row
+        for row in rows
+        if row.supersedes_notice_id
+    }
+    latest_id = str(rows[0].id) if rows else None
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        payload = _notice_dict(row)
+        changes = _notice_source_changes(
+            row,
+            current_snapshot=current_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
+        prior = by_id.get(str(row.supersedes_notice_id)) if row.supersedes_notice_id else None
+        newer = superseded_by.get(str(row.id))
+        payload.update({
+            "is_latest": str(row.id) == latest_id,
+            "notice_reference": _notice_reference_for_row(row, fallback_audit_ref=audit.audit_ref),
+            "supersedes_reference": (
+                _notice_reference_for_row(prior, fallback_audit_ref=audit.audit_ref) if prior else None
+            ),
+            "superseded_by_reference": (
+                _notice_reference_for_row(newer, fallback_audit_ref=audit.audit_ref) if newer else None
+            ),
+            "revision_reason": _notice_revision_reason(row),
+            "source_changes": changes,
+            "is_current_source": not bool(changes),
+            "requires_revision": str(row.id) == latest_id and bool(changes),
+        })
+        items.append(payload)
+    return {
+        "items": items,
+        "reschedule_history": _audit_reschedule_history(db, amo_id=ctx.amo_id, audit_id=audit_id),
+    }
 
 
 async def _stage_uploaded_pdf(file: UploadFile) -> tuple[Path, str, int, str]:
@@ -1112,8 +1587,17 @@ async def upload_audit_notice_attachment(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.status != "DRAFT":
         raise HTTPException(status_code=409, detail="A notice PDF may only be attached while the notice is in draft.")
+    _require_latest_notice_revision(db, row)
 
     staged, _uploaded_filename, size_bytes, sha256 = await _stage_uploaded_pdf(file)
+    current_source_snapshot, _ = _notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)
+    resolved_snapshot, _ = _resolved_recipients(
+        db,
+        amo_id=ctx.amo_id,
+        snapshot=_recipient_snapshot(audit),
+    )
+    row.audit_snapshot = current_source_snapshot
+    row.recipient_snapshot = resolved_snapshot
     filename = _safe_pdf_filename(audit, row)
     stored = None
     old_ref = row.artifact.storage_ref if row.artifact is not None else None
@@ -1219,7 +1703,17 @@ def _prepare_notice_document(
     issuer: account_models.User,
     reason: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
     if notice.artifact is not None:
+        _require_current_notice_source(
+            notice,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
         resolved, recipients = _resolved_recipients(
             db,
             amo_id=ctx.amo_id,
@@ -1256,7 +1750,13 @@ def _prepare_notice_document(
             },
         )
 
-    notice.audit_snapshot = _audit_snapshot(audit)
+    previous_source_snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    if notice.subject == _default_subject_from_snapshot(previous_source_snapshot):
+        notice.subject = _default_subject(audit)
+    if notice.body == _default_body_from_snapshot(previous_source_snapshot, notice.notice_date):
+        notice.body = _default_body(audit, notice.notice_date)
+
+    notice.audit_snapshot = current_source_snapshot
     notice.recipient_snapshot = resolved
     issued_at = _utcnow()
     if notice.status == "DRAFT":
@@ -1306,7 +1806,18 @@ def prepare_audit_notice_document(
     ).with_for_update().first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
+    _require_latest_notice_revision(db, row)
     if row.artifact is not None:
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        _require_current_notice_source(
+            row,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
         return _notice_dict(row)
     _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _prepare_notice_document(
@@ -1369,6 +1880,7 @@ def submit_and_deliver_audit_notice(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.status in {"DELIVERED", "ACKNOWLEDGED"}:
         return {"notice": _notice_dict(row), "delivery_complete": True, "dispatch": {"attempted": 0, "sent": 0, "failed": 0, "items": []}}
+    _require_latest_notice_revision(db, row)
     if row.status not in {"DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"}:
         raise HTTPException(status_code=409, detail="This notice revision cannot be submitted.")
 
@@ -1381,6 +1893,16 @@ def submit_and_deliver_audit_notice(
             },
         )
 
+    current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
+    _require_current_notice_source(
+        row,
+        current_snapshot=current_source_snapshot,
+        current_meeting_rows=current_meeting_rows,
+    )
     policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=row.policy_id) if row.policy_id else None
     _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _validate_notice_period(audit, row, policy)
@@ -1414,8 +1936,8 @@ def submit_and_deliver_audit_notice(
             },
         )
 
-    row.audit_snapshot = _audit_snapshot(audit)
-    row.recipient_snapshot = resolved_snapshot
+    # audit_snapshot and recipient_snapshot describe the PDF that was actually
+    # frozen at generation. Delivery must not rewrite that historical evidence.
     reason = payload.reason.strip()
     issued_at = _utcnow()
     if row.status == "DRAFT":
@@ -1446,6 +1968,7 @@ def submit_and_deliver_audit_notice(
         "content": document_bytes,
         "content_type": "application/pdf",
     }]
+    notice_reference = _notice_reference_for_row(row, fallback_audit_ref=audit.audit_ref)
     dispatch_items: list[dict[str, Any]] = []
     for recipient in recipients:
         recipient_email = str(recipient.get("email") or "").strip()
@@ -1453,7 +1976,7 @@ def submit_and_deliver_audit_notice(
         log = notification_service.send_email(
             template_key="qms_audit_notice_memo",
             recipient=recipient_email,
-            subject=row.subject[:255],
+            subject=f"{notice_reference} · {row.subject}"[:255],
             context={
                 "recipient_name": recipient.get("name") or recipient_email,
                 "recipient_role": recipient.get("role") or "AUDIT_RECIPIENT",
@@ -1464,6 +1987,7 @@ def submit_and_deliver_audit_notice(
                 "planned_start": audit.planned_start.isoformat() if audit.planned_start else "",
                 "planned_end": audit.planned_end.isoformat() if audit.planned_end else "",
                 "notice_revision": row.revision_no,
+                "notice_reference": notice_reference,
                 "notice_document": row.artifact.filename,
                 "document_sha256": row.artifact.sha256,
                 "action_url": _notice_record_url(request, ctx=ctx, audit=audit, notice=row),
@@ -1553,6 +2077,28 @@ def _create_notice(
     ).order_by(QualityAuditNotice.revision_no.desc()).with_for_update().first()
     if latest is not None and latest.status == "DRAFT":
         raise HTTPException(status_code=409, detail="A draft audit notice already exists for this audit. Submit, cancel or complete it before creating another revision.")
+    if latest is not None and supersedes is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_REVISION_REQUIRED",
+                "message": "An audit notice already exists. Create the next controlled revision from the latest notice.",
+                "latest_notice_id": str(latest.id),
+                "latest_notice_revision": latest.revision_no,
+            },
+        )
+    if supersedes is not None and latest is not None and str(latest.id) != str(supersedes.id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_NOT_LATEST",
+                "message": "A revised notice must supersede the latest controlled notice revision.",
+                "notice_id": str(supersedes.id),
+                "notice_revision": supersedes.revision_no,
+                "latest_notice_id": str(latest.id),
+                "latest_notice_revision": latest.revision_no,
+            },
+        )
     row = QualityAuditNotice(
         amo_id=ctx.amo_id,
         audit_id=audit.id,
@@ -1566,7 +2112,7 @@ def _create_notice(
         exception_reason=(payload.exception_reason or "").strip() or None,
         subject=(payload.subject or _default_subject(audit)).strip(),
         body=(payload.body or _default_body(audit, payload.notice_date)).strip(),
-        audit_snapshot=_audit_snapshot(audit),
+        audit_snapshot=_notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)[0],
         recipient_snapshot=_recipient_snapshot(audit),
         supersedes_notice_id=str(supersedes.id) if supersedes else None,
         created_by_user_id=ctx.user_id,
@@ -1610,8 +2156,36 @@ def revise_audit_notice(
     ).first()
     if prior is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
+    _require_latest_notice_revision(db, prior)
     if prior.status == "DRAFT":
-        raise HTTPException(status_code=409, detail="A DRAFT notice must be completed or cancelled rather than revised into another draft.")
+        if prior.artifact is None:
+            raise HTTPException(status_code=409, detail="A DRAFT notice without a frozen PDF must be completed or cancelled rather than revised.")
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        changes = _notice_source_changes(
+            prior,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
+        if not changes:
+            raise HTTPException(
+                status_code=409,
+                detail="The attached DRAFT notice still matches the current audit setup. Continue, replace the attachment, or cancel it.",
+            )
+        before = _snapshot(prior)
+        prior.status = "CANCELLED"
+        _add_event(
+            db,
+            ctx=ctx,
+            notice=prior,
+            event_type="CANCELLED",
+            reason=f"Replaced by controlled revision: {payload.reason.strip()}",
+            before=before,
+        )
+        db.flush()
     row = _create_notice(db=db, ctx=ctx, audit=audit, payload=payload, supersedes=prior)
     db.commit()
     return _notice_dict(_notice_query(db).filter(QualityAuditNotice.id == row.id).one())
@@ -1639,6 +2213,21 @@ def transition_audit_notice(
     settings = _policy_values(policy)
     before = _snapshot(row)
     action = payload.action
+
+    if action in {"SUBMIT", "RETURN", "APPROVE", "GENERATE", "DELIVER", "CANCEL"}:
+        _require_latest_notice_revision(db, row)
+
+    if row.artifact is not None and action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        _require_current_notice_source(
+            row,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
 
     if action == "SUBMIT":
         if row.status != "DRAFT":
