@@ -1,3 +1,6 @@
+import pytest
+from fastapi import HTTPException
+
 from amodb.apps.accounts.models import AMO
 from amodb.apps.manuals import models
 from amodb.apps.manuals.router import _tenant_by_slug, router
@@ -53,3 +56,15 @@ def test_tenant_by_slug_matches_login_slug_case_insensitively(db_session):
 
     assert resolved.amo_id == amo.id
     assert resolved.slug == "mixed-slug"
+
+
+
+def test_tenant_by_slug_treats_wildcard_characters_as_literal_alias_text(db_session):
+    amo = AMO(amo_code="SAFARILINK", name="Safarilink Aviation", login_slug="safarilink")
+    db_session.add(amo)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        _tenant_by_slug(db_session, "safar_link")
+
+    assert exc_info.value.status_code == 404
