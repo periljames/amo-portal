@@ -316,6 +316,20 @@ def test_legacy_and_current_recipient_snapshots_compare_by_governed_routing() ->
     assert _normalise_recipient_snapshot(legacy) != _normalise_recipient_snapshot(changed_email)
 
 
+    external_legacy = [{
+        "role": "EXTERNAL_AUDITEE",
+        "first_name": "External",
+        "last_name": "Process Owner",
+        "designation": "Process owner",
+        "email": "external@example.test",
+    }]
+    external_resolved = [{
+        **external_legacy[0],
+        "name": "External Process Owner",
+    }]
+    assert _normalise_recipient_snapshot(external_legacy) == _normalise_recipient_snapshot(external_resolved)
+
+
 
 def test_notice_schedule_snapshot_treats_implicit_default_times_as_effective_defaults() -> None:
     implicit = {
