@@ -268,9 +268,15 @@ def _notice_reference(audit_ref: str | None, revision_no: int) -> str:
 
 
 def _notice_revision_reason(notice: QualityAuditNotice) -> str | None:
-    events = sorted(list(notice.events or []), key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    events = sorted(
+        list(notice.events or []),
+        key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
     event = next((item for item in events if item.event_type in {"REVISED", "CREATED"}), None)
-    return (event.reason or "").strip() or None if event else None
+    if event is None:
+        return None
+    return (event.reason or "").strip() or None
 
 
 def _recipient_snapshot(audit: models.QMSAudit) -> list[dict[str, Any]]:
@@ -1304,6 +1310,7 @@ def list_audit_notices(
         prior = by_id.get(str(row.supersedes_notice_id)) if row.supersedes_notice_id else None
         newer = superseded_by.get(str(row.id))
         payload.update({
+            "is_latest": str(row.id) == latest_id,
             "notice_reference": _notice_reference(audit_ref, row.revision_no),
             "supersedes_reference": (
                 _notice_reference(audit_ref, prior.revision_no) if prior else None
