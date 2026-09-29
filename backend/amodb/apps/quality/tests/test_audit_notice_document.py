@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pypdfium2 as pdfium
 
 from amodb.apps.quality.audit_notice_document import render_audit_notice_pdf
-from amodb.apps.quality.audit_notice_router import _safe_pdf_filename
+from amodb.apps.quality.audit_notice_router import _notice_reference_for_row, _safe_pdf_filename
 
 
 def test_controlled_audit_notice_pdf_contains_populated_governance_record() -> None:
@@ -65,3 +65,26 @@ def test_controlled_notice_filename_is_human_readable_and_not_a_uuid() -> None:
     notice = SimpleNamespace(notice_date=date(2026, 9, 5), revision_no=1)
 
     assert _safe_pdf_filename(audit, notice) == "(Notice) QAR-MO-26-003 - Work Pack Audit - 2026-09-05 - Notice N01.pdf"
+
+
+
+def test_notice_lineage_and_filename_preserve_each_frozen_audit_reference() -> None:
+    current_audit = SimpleNamespace(
+        audit_ref="QAR/MO/26/099",
+        title="Renamed current audit",
+        id="audit-uuid",
+    )
+    prior = SimpleNamespace(
+        audit_snapshot={"audit_ref": "QAR/MO/26/004", "title": "Original audit"},
+        revision_no=1,
+        notice_date=date(2026, 9, 5),
+    )
+    revised = SimpleNamespace(
+        audit_snapshot={"audit_ref": "QAR/MO/26/099", "title": "Renamed current audit"},
+        revision_no=2,
+        notice_date=date(2026, 9, 6),
+    )
+
+    assert _notice_reference_for_row(prior, fallback_audit_ref=current_audit.audit_ref) == "QAR/MO/26/004/N01"
+    assert _notice_reference_for_row(revised, fallback_audit_ref=current_audit.audit_ref) == "QAR/MO/26/099/N02"
+    assert _safe_pdf_filename(current_audit, prior) == "(Notice) QAR-MO-26-004 - Original audit - 2026-09-05 - Notice N01.pdf"
