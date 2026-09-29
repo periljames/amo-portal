@@ -278,7 +278,7 @@ const exemption = [{
   role_applicability: null,
   conditions_json: { rule_codes: ["MAX_ASSIGNMENT_DURATION"], conditions_verified: true },
   effective_date: "2026-08-01",
-  expiry_date: "2026-08-31",
+  expiry_date: "2027-08-31",
   supporting_document_id: "doc-1",
   verified_by_user_id: "quality-1",
   verified_at: NOW,
