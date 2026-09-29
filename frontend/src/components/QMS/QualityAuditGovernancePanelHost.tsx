@@ -107,9 +107,14 @@ const QualityAuditGovernancePanelHost: React.FC<Props> = ({ amoCode, auditKey, l
     onError: (cause: Error) => setError(cause.message),
   });
   const saveNotice = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      const policyItems = (await policyQuery.refetch()).data?.items || policyQuery.data?.items || [];
+      const currentPolicy =
+        policyItems.find((item) => item.audit_kind === audit?.kind) ||
+        policyItems.find((item) => !item.audit_kind) ||
+        policyItems[0];
       const payload = {
-        policy_id: activePolicy?.id,
+        policy_id: currentPolicy?.id,
         notice_date: noticeDate,
         exception_type: exceptionType || undefined,
         exception_reason: exceptionType ? exceptionReason : undefined,
