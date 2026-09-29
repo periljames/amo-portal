@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from amodb import storage
@@ -252,11 +253,24 @@ def _audit_snapshot(audit: models.QMSAudit) -> dict[str, Any]:
         "planned_start_time": audit.planned_start_time.strftime("%H:%M") if audit.planned_start_time else None,
         "planned_end_time": audit.planned_end_time.strftime("%H:%M") if audit.planned_end_time else None,
         "auditee": audit.auditee,
+        "auditee_email": getattr(audit, "auditee_email", None),
         "auditee_user_id": audit.auditee_user_id,
+        "notify_auditors": bool(audit.notify_auditors),
+        "notify_auditees": bool(audit.notify_auditees),
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
     }
+
+
+def _notice_reference(audit_ref: str | None, revision_no: int) -> str:
+    return f"{audit_ref or 'AUDIT'}/N{int(revision_no or 0):02d}"
+
+
+def _notice_revision_reason(notice: QualityAuditNotice) -> str | None:
+    events = sorted(list(notice.events or []), key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    event = next((item for item in events if item.event_type in {"REVISED", "CREATED"}), None)
+    return (event.reason or "").strip() or None if event else None
 
 
 def _recipient_snapshot(audit: models.QMSAudit) -> list[dict[str, Any]]:
