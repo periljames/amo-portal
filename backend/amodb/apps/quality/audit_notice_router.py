@@ -623,6 +623,165 @@ def _meetings(db: Session, *, amo_id: str, audit_id: uuid.UUID, zone: ZoneInfo) 
     return _meeting_payload(opening, zone=zone), _meeting_payload(closing, zone=zone)
 
 
+def _meeting_source_value(row: QualityAuditMeeting | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "scheduled_start": row.scheduled_start.isoformat() if row.scheduled_start else None,
+        "scheduled_end": row.scheduled_end.isoformat() if row.scheduled_end else None,
+        "location": (row.location or "").strip() or None,
+        "conference_url": (row.conference_url or "").strip() or None,
+    }
+
+
+def _meeting_source_snapshot(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> tuple[dict[str, Any], dict[str, QualityAuditMeeting | None]]:
+    rows = db.query(QualityAuditMeeting).filter(
+        QualityAuditMeeting.amo_id == amo_id,
+        QualityAuditMeeting.audit_id == audit_id,
+        QualityAuditMeeting.meeting_type.in_(("OPENING", "CLOSING")),
+        QualityAuditMeeting.status != "CANCELLED",
+    ).order_by(QualityAuditMeeting.scheduled_start.asc()).all()
+    opening = next((row for row in rows if row.meeting_type == "OPENING"), None)
+    closing = next((row for row in reversed(rows) if row.meeting_type == "CLOSING"), None)
+    return (
+        {
+            "opening": _meeting_source_value(opening),
+            "closing": _meeting_source_value(closing),
+        },
+        {"opening": opening, "closing": closing},
+    )
+
+
+def _notice_source_snapshot(
+    db: Session,
+    *,
+    amo_id: str,
+    audit: models.QMSAudit,
+) -> tuple[dict[str, Any], dict[str, QualityAuditMeeting | None]]:
+    meetings, meeting_rows = _meeting_source_snapshot(db, amo_id=amo_id, audit_id=audit.id)
+    return (
+        {
+            **_audit_snapshot(audit),
+            "source_snapshot_version": 2,
+            "meetings": meetings,
+        },
+        meeting_rows,
+    )
+
+
+_NOTICE_SOURCE_LABELS = {
+    "title": "Audit title",
+    "scope": "Audit scope",
+    "criteria": "Audit criteria",
+    "planned_start": "Planned start date",
+    "planned_end": "Planned end date",
+    "planned_start_time": "Planned start time",
+    "planned_end_time": "Planned end time",
+    "auditee": "Auditee representative",
+    "auditee_email": "Auditee email",
+    "auditee_user_id": "Auditee user",
+    "notify_auditors": "Auditor notification routing",
+    "notify_auditees": "Auditee notification routing",
+    "lead_auditor_user_id": "Lead auditor",
+    "observer_auditor_user_id": "Observer auditor",
+    "assistant_auditor_user_id": "Assistant auditor",
+}
+
+
+def _notice_source_changes(
+    notice: QualityAuditNotice,
+    *,
+    current_snapshot: dict[str, Any],
+    current_meeting_rows: dict[str, QualityAuditMeeting | None],
+) -> list[dict[str, Any]]:
+    # A draft without a frozen PDF can still be refreshed safely at generation.
+    if notice.artifact is None and notice.status == "DRAFT":
+        return []
+
+    stored = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    changes: list[dict[str, Any]] = []
+    for field, label in _NOTICE_SOURCE_LABELS.items():
+        # Older notices did not capture the later-added routing fields. Do not
+        # manufacture a historical difference that was never recorded.
+        if field not in stored:
+            continue
+        before = stored.get(field)
+        after = current_snapshot.get(field)
+        if before != after:
+            changes.append({"field": field, "label": label, "before": before, "after": after})
+
+    stored_meetings = stored.get("meetings")
+    current_meetings = current_snapshot.get("meetings") or {}
+    if isinstance(stored_meetings, dict):
+        for meeting_key, label in (("opening", "Opening meeting"), ("closing", "Closing meeting")):
+            before = stored_meetings.get(meeting_key)
+            after = current_meetings.get(meeting_key)
+            if before != after:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": before,
+                    "after": after,
+                })
+    elif notice.artifact is not None:
+        # Legacy generated notices predate meeting snapshots. Generation required
+        # both meetings, so a missing current meeting or one changed afterwards
+        # is sufficient evidence that the stored PDF no longer represents Setup.
+        frozen_at = notice.generated_at or notice.artifact.created_at or notice.created_at
+        for meeting_key, label in (("opening", "Opening meeting"), ("closing", "Closing meeting")):
+            row = current_meeting_rows.get(meeting_key)
+            if row is None:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": "Included in generated notice",
+                    "after": None,
+                })
+                continue
+            changed_at = row.updated_at or row.created_at
+            if frozen_at and changed_at and changed_at > frozen_at:
+                changes.append({
+                    "field": f"meetings.{meeting_key}",
+                    "label": label,
+                    "before": "Captured when notice was generated",
+                    "after": _meeting_source_value(row),
+                })
+    return changes
+
+
+def _require_current_notice_source(
+    notice: QualityAuditNotice,
+    *,
+    current_snapshot: dict[str, Any],
+    current_meeting_rows: dict[str, QualityAuditMeeting | None],
+) -> None:
+    changes = _notice_source_changes(
+        notice,
+        current_snapshot=current_snapshot,
+        current_meeting_rows=current_meeting_rows,
+    )
+    if not changes:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "AUDIT_NOTICE_REVISION_REQUIRED",
+            "message": (
+                "The audit definition or meeting schedule changed after this notice was frozen. "
+                "Create a new notice revision before generating or sending another controlled notice."
+            ),
+            "notice_id": str(notice.id),
+            "notice_revision": notice.revision_no,
+            "changes": changes,
+        },
+    )
+
+
 def _resolved_recipients(
     db: Session,
     *,
