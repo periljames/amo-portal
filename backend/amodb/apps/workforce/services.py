@@ -1629,8 +1629,6 @@ def can_view_leave_request(
 ) -> bool:
     if row.user_id == actor.id:
         return True
-    if permissions.has_permission(db, user=actor, permission=permissions.PermissionCode.LEAVE_APPROVE):
-        return True
     return str(row.user_id) in leave_review_user_ids(db, amo_id=row.amo_id, actor=actor)
 
 
@@ -1964,11 +1962,7 @@ def list_leave_requests(
     viewer_actor: Optional[account_models.User] = None,
 ) -> schemas.Page[schemas.LeaveRequestRead]:
     query = _leave_query(db, amo_id=amo_id)
-    if viewer_actor and not permissions.has_permission(
-        db,
-        user=viewer_actor,
-        permission=permissions.PermissionCode.LEAVE_APPROVE,
-    ):
+    if viewer_actor:
         allowed_user_ids = leave_review_user_ids(db, amo_id=amo_id, actor=viewer_actor)
         query = query.filter(models.LeaveRequest.user_id.in_(list(allowed_user_ids)))
     if user_id:
