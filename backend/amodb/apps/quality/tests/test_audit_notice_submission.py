@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from amodb.apps.quality.audit_notice_router import (
     _require_latest_notice_revision,
     prepare_audit_notice_document,
     submit_and_deliver_audit_notice,
+    transition_audit_notice,
 )
 from amodb.apps.quality.audit_occurrence_completion_models import QualityAuditMeeting
 from amodb.apps.quality.tenant_security import TenantContext
@@ -368,3 +370,10 @@ def test_default_notice_text_can_be_reconstructed_from_frozen_snapshot() -> None
     assert "Original scope" in body
     assert "Original criteria" in body
     assert "2026-10-01" in body
+
+
+
+def test_historical_notice_return_and_cancel_are_latest_revision_guarded() -> None:
+    source = inspect.getsource(transition_audit_notice)
+    assert '{"SUBMIT", "RETURN", "APPROVE", "GENERATE", "DELIVER", "CANCEL"}' in source
+    assert "_require_latest_notice_revision(db, row)" in source
