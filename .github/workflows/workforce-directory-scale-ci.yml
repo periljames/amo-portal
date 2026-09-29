@@ -105,6 +105,7 @@ jobs:
           amodb/apps/workforce/tests/test_hr_people_directory_scale.py
           amodb/apps/workforce/tests/test_workforce_governance.py
           amodb/apps/workforce/tests/test_bulk_operations.py
+          amodb/apps/workforce/tests/test_leave_migration_contract.py
       - name: Smoke standalone Workforce worker
         working-directory: backend
         run: python -m amodb.apps.workforce.worker_main --once
