@@ -11,6 +11,7 @@ import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRo
 import PortalAuxiliaryBoundary from "./components/feedback/PortalAuxiliaryBoundary";
 import { ToastProvider } from "./components/feedback/ToastProvider";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
+import { MessagingHub } from "./components/messaging/MessagingHub";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
 import { registerPortalQueryClient } from "./services/portalQueryClient";
@@ -204,8 +205,11 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <BrowserRouter>
             <App />
             <QualityEnhancementsRouteGate />
+            <PortalAuxiliaryBoundary surface="Messaging controls">
+              <MessagingHub />
+            </PortalAuxiliaryBoundary>
           </BrowserRouter>
-          <PortalAuxiliaryBoundary surface="Connection, messaging and sync controls">
+          <PortalAuxiliaryBoundary surface="Connection and sync controls">
             <OfflineSyncIndicator />
           </PortalAuxiliaryBoundary>
         </RealtimeProvider>
