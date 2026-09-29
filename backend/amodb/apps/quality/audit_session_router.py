@@ -15,7 +15,7 @@ from . import models
 from .audit_closure_models import QualityAuditClosureState
 from .canonical_core_router import _log_qms_activity
 from .audit_preparation_models import QualityAuditPreparationRevision
-from .audit_schedule_rules import time_text, validate_planned_window
+from .audit_schedule_rules import DEFAULT_END_TIME, DEFAULT_START_TIME, time_text, validate_planned_window
 from .audit_workflow_contract import build_authoritative_audit_workflow
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
@@ -212,8 +212,8 @@ def update_audit_setup(
     before_schedule = {
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
-        "planned_start_time": historical_time_text(audit.planned_start, audit.planned_start_time, time(9, 0)),
-        "planned_end_time": historical_time_text(audit.planned_end, audit.planned_end_time, time(17, 0)),
+        "planned_start_time": historical_time_text(audit.planned_start, audit.planned_start_time, DEFAULT_START_TIME),
+        "planned_end_time": historical_time_text(audit.planned_end, audit.planned_end_time, DEFAULT_END_TIME),
     }
     after_schedule = {
         "planned_start": next_start.isoformat() if next_start else None,
