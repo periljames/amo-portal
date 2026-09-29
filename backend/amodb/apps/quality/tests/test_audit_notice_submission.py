@@ -176,6 +176,41 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert prepared["status"] == "GENERATED"
     assert prepared["artifact"]["source_type"] == "GENERATED"
 
+    # A generated notice is immutable. If the audit definition or meetings move,
+    # the stored PDF must become historical and delivery must require a revision.
+    opening = db_session.query(QualityAuditMeeting).filter(
+        QualityAuditMeeting.audit_id == audit.id,
+        QualityAuditMeeting.meeting_type == "OPENING",
+    ).one()
+    original_title = audit.title
+    original_opening_start = opening.scheduled_start
+    original_opening_end = opening.scheduled_end
+    audit.title = "Hangar quality system audit - deferred"
+    opening.scheduled_start = opening.scheduled_start.replace(hour=7)
+    opening.scheduled_end = opening.scheduled_end.replace(hour=8)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as stale_notice:
+        submit_and_deliver_audit_notice(
+            audit_id=audit.id,
+            notice_id=notice.id,
+            request=request,
+            payload=NoticeSubmit(reason="Attempted delivery after audit arrangements changed."),
+            ctx=context,
+            db=db_session,
+        )
+    assert stale_notice.value.status_code == 409
+    assert stale_notice.value.detail["code"] == "AUDIT_NOTICE_REVISION_REQUIRED"
+    changed_labels = {item["label"] for item in stale_notice.value.detail["changes"]}
+    assert "Audit title" in changed_labels
+    assert "Opening meeting" in changed_labels
+    assert sends == []
+
+    audit.title = original_title
+    opening.scheduled_start = original_opening_start
+    opening.scheduled_end = original_opening_end
+    db_session.commit()
+
     result = submit_and_deliver_audit_notice(
         audit_id=audit.id,
         notice_id=notice.id,
