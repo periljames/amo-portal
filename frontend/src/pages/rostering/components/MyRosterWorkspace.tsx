@@ -980,7 +980,7 @@ export function MyRosterWorkspace() {
                     ))}
                   </div>
                   <span>{hoursLabel(request.requested_minutes)}</span>
-                  <StatusPill value={request.status} />
+                  <StatusPill value={request.status === "HR_APPROVED" ? "APPROVED" : request.status} />
                   {request.published_roster_conflicts.length ? <span className="wr-pill wr-pill--blocker">Roster conflict</span> : null}
                   {request.status === "DRAFT" ? (
                     <button
