@@ -931,10 +931,24 @@ def _render_notice(
     if audit.planned_start and audit.planned_end and audit.planned_end != audit.planned_start:
         sequence_window += " on each audit day"
     local_signed = signed_at.astimezone(zone)
+    audit_ref = str((notice.audit_snapshot or {}).get("audit_ref") or audit.audit_ref or "")
+    notice_reference = _notice_reference(audit_ref, notice.revision_no)
+    supersedes_reference = None
+    if notice.supersedes_notice_id:
+        prior = db.query(QualityAuditNotice).filter(
+            QualityAuditNotice.amo_id == ctx.amo_id,
+            QualityAuditNotice.audit_id == audit.id,
+            QualityAuditNotice.id == notice.supersedes_notice_id,
+        ).first()
+        if prior is not None:
+            supersedes_reference = _notice_reference(audit_ref, prior.revision_no)
     return render_audit_notice_pdf(
         amo_name=amo.name,
         contact_email=amo.contact_email,
         notice_id=str(notice.id),
+        notice_reference=notice_reference,
+        supersedes_reference=supersedes_reference,
+        revision_reason=_notice_revision_reason(notice),
         revision_no=notice.revision_no,
         notice_date_display=_date_label(notice.notice_date),
         audit_ref=audit.audit_ref,
@@ -968,7 +982,7 @@ def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice) -> st
     reference = clean(audit.audit_ref or audit.id, "Audit")
     title = clean(audit.title, "Untitled")
     notice_day = notice.notice_date.isoformat() if notice.notice_date else date.today().isoformat()
-    stem = f"(Notice) {reference} - {title} - {notice_day} - Rev {notice.revision_no:02d}"
+    stem = f"(Notice) {reference} - {title} - {notice_day} - Notice N{notice.revision_no:02d}"
     return f"{stem[:251]}.pdf"
 
 
@@ -1486,7 +1500,17 @@ def _prepare_notice_document(
     issuer: account_models.User,
     reason: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
     if notice.artifact is not None:
+        _require_current_notice_source(
+            notice,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
         resolved, recipients = _resolved_recipients(
             db,
             amo_id=ctx.amo_id,
@@ -1523,7 +1547,7 @@ def _prepare_notice_document(
             },
         )
 
-    notice.audit_snapshot = _audit_snapshot(audit)
+    notice.audit_snapshot = current_source_snapshot
     notice.recipient_snapshot = resolved
     issued_at = _utcnow()
     if notice.status == "DRAFT":
@@ -1648,6 +1672,16 @@ def submit_and_deliver_audit_notice(
             },
         )
 
+    current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+        db,
+        amo_id=ctx.amo_id,
+        audit=audit,
+    )
+    _require_current_notice_source(
+        row,
+        current_snapshot=current_source_snapshot,
+        current_meeting_rows=current_meeting_rows,
+    )
     policy = _effective_policy(db, amo_id=ctx.amo_id, audit=audit, policy_id=row.policy_id) if row.policy_id else None
     _apply_short_notice_waiver(row, payload.short_notice_waiver_reason)
     _validate_notice_period(audit, row, policy)
@@ -1681,8 +1715,8 @@ def submit_and_deliver_audit_notice(
             },
         )
 
-    row.audit_snapshot = _audit_snapshot(audit)
-    row.recipient_snapshot = resolved_snapshot
+    # audit_snapshot and recipient_snapshot describe the PDF that was actually
+    # frozen at generation. Delivery must not rewrite that historical evidence.
     reason = payload.reason.strip()
     issued_at = _utcnow()
     if row.status == "DRAFT":
@@ -1833,7 +1867,7 @@ def _create_notice(
         exception_reason=(payload.exception_reason or "").strip() or None,
         subject=(payload.subject or _default_subject(audit)).strip(),
         body=(payload.body or _default_body(audit, payload.notice_date)).strip(),
-        audit_snapshot=_audit_snapshot(audit),
+        audit_snapshot=_notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)[0],
         recipient_snapshot=_recipient_snapshot(audit),
         supersedes_notice_id=str(supersedes.id) if supersedes else None,
         created_by_user_id=ctx.user_id,
