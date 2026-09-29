@@ -300,7 +300,9 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
     }
     if (path.endsWith("/workforce/hr/bulk-operations/operation-scale-1")) {
       operationPolls += 1;
-      return json(route, operation(operationPolls > 1 ? "COMPLETED" : "RUNNING", operationPolls > 1 ? 100 : 50));
+      const completed = operationPolls >= 3;
+      const progress = completed ? 100 : operationPolls === 1 ? 40 : 80;
+      return json(route, operation(completed ? "COMPLETED" : "RUNNING", progress));
     }
     if (path.endsWith("/workforce/hr/people/governed")) {
       const pageNumber = Number(url.searchParams.get("page") || "1");
@@ -362,5 +364,5 @@ test("governed Workforce remains bounded and completes a 10,000-person batch", a
 
   await expect(page.locator(".workforce-governance__operation")).toContainText("10000/10000 processed", { timeout: 10_000 });
   await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
-  expect(operationPolls).toBeGreaterThanOrEqual(2);
+  expect(operationPolls).toBeGreaterThanOrEqual(3);
 });
