@@ -189,23 +189,31 @@ def update_audit_setup(
     next_end = update.get("planned_end", audit.planned_end)
     next_start_time = update.get("planned_start_time", audit.planned_start_time)
     next_end_time = update.get("planned_end_time", audit.planned_end_time)
-    current_start_time, current_end_time = validate_planned_window(
-        planned_start=audit.planned_start,
-        planned_end=audit.planned_end,
-        planned_start_time=audit.planned_start_time,
-        planned_end_time=audit.planned_end_time,
+    schedule_fields_present = any(
+        field in update
+        for field in ("planned_start", "planned_end", "planned_start_time", "planned_end_time")
     )
-    effective_start_time, effective_end_time = validate_planned_window(
-        planned_start=next_start,
-        planned_end=next_end,
-        planned_start_time=next_start_time,
-        planned_end_time=next_end_time,
-    )
+    if schedule_fields_present:
+        effective_start_time, effective_end_time = validate_planned_window(
+            planned_start=next_start,
+            planned_end=next_end,
+            planned_start_time=next_start_time,
+            planned_end_time=next_end_time,
+        )
+    else:
+        effective_start_time = audit.planned_start_time
+        effective_end_time = audit.planned_end_time
+
+    def historical_time_text(date_value, time_value, fallback):
+        if date_value is not None and time_value is None:
+            return time_text(fallback)
+        return time_text(time_value)
+
     before_schedule = {
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
-        "planned_start_time": time_text(current_start_time),
-        "planned_end_time": time_text(current_end_time),
+        "planned_start_time": historical_time_text(audit.planned_start, audit.planned_start_time, time(9, 0)),
+        "planned_end_time": historical_time_text(audit.planned_end, audit.planned_end_time, time(17, 0)),
     }
     after_schedule = {
         "planned_start": next_start.isoformat() if next_start else None,
@@ -213,10 +221,6 @@ def update_audit_setup(
         "planned_start_time": time_text(effective_start_time),
         "planned_end_time": time_text(effective_end_time),
     }
-    schedule_fields_present = any(
-        field in update
-        for field in ("planned_start", "planned_end", "planned_start_time", "planned_end_time")
-    )
     schedule_changed = schedule_fields_present and before_schedule != after_schedule
     reschedule_reason = str(update.get("reschedule_reason") or "").strip()
     if schedule_changed and len(reschedule_reason) < 8:
