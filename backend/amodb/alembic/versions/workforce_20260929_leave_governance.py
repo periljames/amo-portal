@@ -49,19 +49,15 @@ def upgrade() -> None:
                         WHEN availability_type = 'MATERNITY_LEAVE' THEN 'FEMALE'
                         WHEN availability_type = 'PATERNITY_LEAVE' THEN 'MALE'
                         ELSE COALESCE(NULLIF(UPPER(eligible_gender), ''), 'ALL')
-                    END,
-                    supervisor_approval_required = TRUE,
-                    hr_approval_required = FALSE
+                    END
                 """
             )
         )
 
 
 def downgrade() -> None:
-    leave_columns = _columns("leave_types")
-    if "eligible_gender" in leave_columns:
-        op.drop_column("leave_types", "eligible_gender")
-
-    personnel_columns = _columns("personnel_profiles")
-    if "gender" in personnel_columns:
-        op.drop_column("personnel_profiles", "gender")
+    # This is a repair migration for columns already required by the parent-version
+    # runtime models. The upgrade is deliberately idempotent because either column
+    # may pre-exist on some databases, so a revision-only downgrade cannot safely
+    # prove ownership of either column. Preserve them to avoid destructive rollback.
+    pass
