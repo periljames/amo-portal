@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
@@ -953,7 +953,8 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     if not tenant_key:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    tenant = db.query(models.Tenant).filter(models.Tenant.slug.ilike(tenant_key)).first()
+    normalized_key = tenant_key.lower()
+    tenant = db.query(models.Tenant).filter(func.lower(models.Tenant.slug) == normalized_key).first()
     if tenant:
         return tenant
 
@@ -964,7 +965,10 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     # alias used by one request.
     amo = (
         db.query(AMO)
-        .filter((AMO.login_slug.ilike(tenant_key)) | (AMO.amo_code.ilike(tenant_key)))
+        .filter(
+            (func.lower(AMO.login_slug) == normalized_key)
+            | (func.lower(AMO.amo_code) == normalized_key)
+        )
         .first()
     )
     if not amo:
