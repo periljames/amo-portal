@@ -124,7 +124,7 @@ The existing tenant AI policy, entitlement, budget and external-processing contr
 
 The messaging component no longer locates the shell with a DOM observer or injects buttons with a React portal. This removes the previous broad `:has()` CSS dependency that could hide unrelated header actions.
 
-The panel host remains under `PortalAuxiliaryBoundary` through `OfflineSyncIndicator`, preserving failure isolation from the main tenant workspace.
+The panel host is mounted directly under `BrowserRouter` inside its own `PortalAuxiliaryBoundary`. This preserves router context for internal notification navigation while still isolating messaging failures from the main tenant workspace. `OfflineSyncIndicator` remains a separate router-agnostic auxiliary control with its own boundary.
 
 ## Current producer coverage
 
