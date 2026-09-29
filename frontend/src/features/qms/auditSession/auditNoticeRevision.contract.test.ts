@@ -45,6 +45,8 @@ describe("audit notice revision governance", () => {
   it("uses the current active applicable policy when creating a revised notice", () => {
     expect(workspace).toContain("policiesQuery.data?.items.find");
     expect(workspace).toContain("policy_id: policy?.id");
+    expect(workspace).toContain("await policiesQuery.refetch()");
+    expect(governance).toContain("await policyQuery.refetch()");
     expect(workspace).not.toContain("policy_id: row.policy_id || undefined");
   });
 
