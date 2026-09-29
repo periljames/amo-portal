@@ -753,10 +753,17 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   /* Mirror the saved notice waiver reason into the editable draft when the governed notice changes. */
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (latestNotice?.exception_reason) {
+    if (!latestNotice) return;
+    if (latestNotice.requires_revision) {
+      setShortNoticeWaiverReason((current) => (
+        current === (latestNotice.exception_reason || "") ? "" : current
+      ));
+      return;
+    }
+    if (latestNotice.exception_reason) {
       setShortNoticeWaiverReason(latestNotice.exception_reason);
     }
-  }, [latestNotice?.id, latestNotice?.exception_reason]);
+  }, [latestNotice?.id, latestNotice?.exception_reason, latestNotice?.requires_revision]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const activeNoticePolicy =
