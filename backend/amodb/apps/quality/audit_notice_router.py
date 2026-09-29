@@ -200,6 +200,11 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "form_issue_date": row.form_issue_date,
         "form_revision": row.form_revision,
         "revision_no": row.revision_no,
+        "notice_reference": _notice_reference(
+            str((row.audit_snapshot or {}).get("audit_ref") or ""),
+            row.revision_no,
+        ),
+        "revision_reason": _notice_revision_reason(row),
         "status": row.status,
         "required_notice_days": row.required_notice_days,
         "notice_date": row.notice_date,
@@ -224,7 +229,13 @@ def _notice_dict(row: QualityAuditNotice) -> dict[str, Any]:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "artifact": _artifact_dict(row.artifact),
-        "events": [_event_dict(item) for item in list(row.events or [])],
+        "events": [
+            _event_dict(item)
+            for item in sorted(
+                list(row.events or []),
+                key=lambda event: event.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            )
+        ],
     }
 
 
