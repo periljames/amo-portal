@@ -150,8 +150,12 @@ def test_report_renderer_handles_no_findings_without_inventing_content(tmp_path:
 
 def test_report_snapshot_reads_checklist_evidence_from_authoritative_models() -> None:
     source = inspect.getsource(audit_report_composition.build_report_snapshot)
+    checklist_source = source[
+        source.index("def checklist_snapshot"):
+        source.index("return _json_value")
+    ]
 
-    assert '"objective_evidence": item.objective_evidence if item else None' in source
-    assert '"evidence_references": row.evidence_references or []' in source
-    assert '"objective_evidence": row.objective_evidence' not in source
-    assert "row.evidence_references_json" not in source
+    assert '"objective_evidence": item.objective_evidence if item else None' in checklist_source
+    assert '"evidence_references": row.evidence_references or []' in checklist_source
+    assert '"objective_evidence": row.objective_evidence' not in checklist_source
+    assert "row.evidence_references_json" not in checklist_source
