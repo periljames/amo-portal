@@ -555,22 +555,10 @@ def dashboard(
             models.LeaveRequestStatus.SUPERVISOR_APPROVED,
         ]),
     ).order_by(models.LeaveRequest.submitted_at.asc(), models.LeaveRequest.created_at.asc()).limit(200).all()
-    can_finalize_leave = permissions.has_permission(
-        db,
-        user=current_user,
-        permission=permissions.PermissionCode.LEAVE_APPROVE,
-    )
     pending_leave_rows = [
         row
         for row in pending_leave_rows
-        if (
-            row.status == models.LeaveRequestStatus.SUBMITTED
-            and services.can_actor_supervisor_approve(db, row=row, actor=current_user)
-        )
-        or (
-            row.status == models.LeaveRequestStatus.SUPERVISOR_APPROVED
-            and can_finalize_leave
-        )
+        if services.can_actor_supervisor_approve(db, row=row, actor=current_user)
     ]
     pending_counts["leave"] = len(pending_leave_rows)
 
@@ -767,7 +755,7 @@ def dashboard(
             permission=permissions.PermissionCode.LEAVE_REVIEW,
         )
     )
-    can_approve_leave = can_finalize_leave
+    can_approve_leave = services.actor_has_leave_review_scope(db, amo_id=amo_id, actor=current_user)
     can_approve_timesheet_supervisor = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.TIMESHEET_APPROVE
     )
