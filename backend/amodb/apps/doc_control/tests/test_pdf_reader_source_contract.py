@@ -106,8 +106,10 @@ def test_source_identity_and_working_copy_custody_remain_partitioned() -> None:
     capabilities = _read("frontend/src/services/pdfReader.ts")
     authority = _read("frontend/src/services/pdfWorkingCopyAuthority.ts")
 
-    assert "readerKey" in bridge
     assert "sourceMountedRef" in bridge
+    assert "preferCachedBytes" in bridge
+    assert "reader_source_sha256" in bridge
+    assert "documentLoadedRef.current ? currentPageRef.current : initialPage" in core
     assert "capabilities.source_sha256" in core
     assert "pdf-working-copy:v1" in store
     for partition in ("userId", "tenant", "manualId", "revisionId"):
