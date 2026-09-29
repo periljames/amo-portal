@@ -62,14 +62,20 @@ def _normalized_docx_cache_root() -> Path:
 
 
 def _source_checksum(revision, source: Path) -> str:
-    stored = str(getattr(revision, "source_sha256", "") or "").strip().lower()
-    if stored:
-        return stored
+    """Hash the retained Office bytes and enforce the governed upload checksum."""
+
     digest = hashlib.sha256()
     with source.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    actual = digest.hexdigest()
+
+    stored = str(getattr(revision, "source_sha256", "") or "").strip().lower()
+    if stored and actual != stored:
+        raise OfficeLayoutError(
+            "The retained Office source no longer matches the uploaded controlled-file checksum"
+        )
+    return actual
 
 
 def office_layout_pdf_path(revision) -> Path | None:
