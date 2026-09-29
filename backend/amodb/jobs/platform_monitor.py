@@ -96,9 +96,12 @@ def run_network_probes_once(*, prune_days: int = 30) -> dict | None:
         network_diagnostics.prune(db, days=prune_days)
         _touch_heartbeat(db, INFRASTRUCTURE_WORKER_NAME)
         db.commit()
+        internet_bps = internet.get("download_bps")
         return {
-            "internet_download_mbps": round((internet.get("download_bps") or 0) / 1_000_000, 2),
+            "internet_download_mbps": round(internet_bps / 1_000_000, 2) if internet_bps is not None else None,
             "internet_ok": internet.get("ok"),
+            "internet_error": internet.get("error"),
+            "internet_failure_kind": (internet.get("details") or {}).get("failure_kind"),
             "database_latency_ms": database.get("latency_ms"),
         }
     except Exception:
