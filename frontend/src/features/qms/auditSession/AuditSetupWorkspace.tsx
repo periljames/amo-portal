@@ -610,7 +610,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     mutationFn: async () => {
       if (!auditQuery.data || !draft) throw new Error("Save the audit occurrence before creating its notice.");
       const policy =
-        policiesQuery.data?.items.find((item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind) ||
+        policiesQuery.data?.items.find((item) => item.audit_kind === auditQuery.data?.kind) ||
+        policiesQuery.data?.items.find((item) => !item.audit_kind) ||
         policiesQuery.data?.items[0];
       return createAuditNotice(amoCode, auditId, {
         policy_id: policy?.id,
@@ -635,7 +636,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         throw new Error("Enter the reason for the revised notice (at least 8 characters).");
       }
       const policy =
-        policiesQuery.data?.items.find((item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind) ||
+        policiesQuery.data?.items.find((item) => item.audit_kind === auditQuery.data?.kind) ||
+        policiesQuery.data?.items.find((item) => !item.audit_kind) ||
         policiesQuery.data?.items[0];
       return reviseAuditNotice(amoCode, auditId, row.id, {
         policy_id: policy?.id,
