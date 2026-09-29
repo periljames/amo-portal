@@ -784,7 +784,20 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           ? `Revised after ${latestNotice.source_changes.map((item) => item.label).join(", ")} changed.`
           : "Audit arrangements changed after the previous notice was generated.";
     setRevisionReason(sourceReason.slice(0, 4000));
-  }, [latestNotice?.id, latestNotice?.status, latestNotice?.requires_revision, latestNotice?.source_changes, latestNoticeNeedsReplacement, latestReschedule?.reason]);
+  }, [
+    latestNotice?.id,
+    latestNotice?.status,
+    latestNotice?.notice_reference,
+    latestNotice?.revision_no,
+    latestNotice?.requires_revision,
+    latestNotice?.source_changes,
+    latestNotice?.generated_at,
+    latestNotice?.artifact?.created_at,
+    latestNotice?.created_at,
+    latestNoticeNeedsReplacement,
+    latestReschedule?.reason,
+    latestReschedule?.created_at,
+  ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   /* Mirror the saved notice waiver reason into the editable draft when the governed notice changes. */
