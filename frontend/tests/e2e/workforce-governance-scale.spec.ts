@@ -176,7 +176,7 @@ async function installSession(page: Page) {
     licence_expires_on: null,
     is_active: true,
     is_superuser: false,
-    is_amo_admin: false,
+    is_amo_admin: true,
     must_change_password: false,
     last_login_at: null,
     last_login_ip: null,
