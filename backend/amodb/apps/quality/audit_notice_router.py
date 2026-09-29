@@ -282,7 +282,8 @@ def _notice_reference_for_row(
     *,
     fallback_audit_ref: str | None = None,
 ) -> str:
-    snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    snapshot_value = getattr(notice, "audit_snapshot", None)
+    snapshot = snapshot_value if isinstance(snapshot_value, dict) else {}
     audit_ref = str(snapshot.get("audit_ref") or fallback_audit_ref or "").strip()
     return _notice_reference(audit_ref, notice.revision_no)
 
@@ -1104,7 +1105,8 @@ def _safe_pdf_filename(audit: models.QMSAudit, notice: QualityAuditNotice) -> st
         normalized = _SAFE_FILENAME.sub("-", str(value or "")).strip(" .-_")
         return re.sub(r"\s+", " ", normalized) or fallback
 
-    snapshot = notice.audit_snapshot if isinstance(notice.audit_snapshot, dict) else {}
+    snapshot_value = getattr(notice, "audit_snapshot", None)
+    snapshot = snapshot_value if isinstance(snapshot_value, dict) else {}
     reference = clean(snapshot.get("audit_ref") or audit.audit_ref or audit.id, "Audit")
     title = clean(snapshot.get("title") or audit.title, "Untitled")
     notice_day = notice.notice_date.isoformat() if notice.notice_date else date.today().isoformat()
