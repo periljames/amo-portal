@@ -634,8 +634,11 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       if (revisionReason.trim().length < 8) {
         throw new Error("Enter the reason for the revised notice (at least 8 characters).");
       }
+      const policy =
+        policiesQuery.data?.items.find((item) => !item.audit_kind || item.audit_kind === auditQuery.data?.kind) ||
+        policiesQuery.data?.items[0];
       return reviseAuditNotice(amoCode, auditId, row.id, {
-        policy_id: row.policy_id || undefined,
+        policy_id: policy?.id,
         template_document_id: templateQuery.data?.selected_document_id || row.template_document_id || undefined,
         notice_date: new Date().toISOString().slice(0, 10),
         exception_reason: shortNoticeWaiverReason.trim() || undefined,
