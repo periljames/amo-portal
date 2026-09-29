@@ -1950,6 +1950,18 @@ def transition_audit_notice(
     before = _snapshot(row)
     action = payload.action
 
+    if row.artifact is not None and action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
+        current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
+            db,
+            amo_id=ctx.amo_id,
+            audit=audit,
+        )
+        _require_current_notice_source(
+            row,
+            current_snapshot=current_source_snapshot,
+            current_meeting_rows=current_meeting_rows,
+        )
+
     if action == "SUBMIT":
         if row.status != "DRAFT":
             raise HTTPException(status_code=409, detail="Only a DRAFT notice may be submitted for review.")
