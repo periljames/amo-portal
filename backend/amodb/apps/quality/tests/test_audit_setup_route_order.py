@@ -40,3 +40,13 @@ def test_setup_reschedule_requires_and_audits_a_reason() -> None:
     assert 'action="audit_setup_rescheduled"' in source
     assert '"reason": reschedule_reason' in source
     assert "_log_qms_activity(" in source
+
+
+
+def test_setup_can_replace_legacy_invalid_schedule_without_validating_old_window() -> None:
+    source = inspect.getsource(update_audit_setup)
+
+    assert "current_start_time, current_end_time = validate_planned_window" not in source
+    assert "if schedule_fields_present:" in source
+    assert "historical_time_text" in source
+    assert "validate_planned_window(" in source
