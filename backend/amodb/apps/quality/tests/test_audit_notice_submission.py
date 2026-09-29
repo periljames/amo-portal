@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from amodb.apps.quality.audit_notice_models import (
 )
 from amodb.apps.quality.audit_notice_router import (
     NoticeSubmit,
+    _normalise_recipient_snapshot,
     _notice_email_correlation,
     prepare_audit_notice_document,
     submit_and_deliver_audit_notice,
@@ -165,6 +167,26 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert preview_required.value.detail["code"] == "AUDIT_NOTICE_FINAL_PREVIEW_REQUIRED"
     assert sends == []
 
+    opening = db_session.query(QualityAuditMeeting).filter(
+        QualityAuditMeeting.audit_id == audit.id,
+        QualityAuditMeeting.meeting_type == "OPENING",
+    ).one()
+    opening.status = "CANCELLED"
+    db_session.commit()
+    with pytest.raises(HTTPException) as cancelled_meeting:
+        prepare_audit_notice_document(
+            audit_id=audit.id,
+            notice_id=notice.id,
+            request=request,
+            payload=NoticeSubmit(reason="Attempted generation with a cancelled opening meeting."),
+            ctx=context,
+            db=db_session,
+        )
+    assert cancelled_meeting.value.status_code == 409
+    assert cancelled_meeting.value.detail["code"] == "AUDIT_NOTICE_MEETINGS_REQUIRED"
+    opening.status = "PLANNED"
+    db_session.commit()
+
     prepared = prepare_audit_notice_document(
         audit_id=audit.id,
         notice_id=notice.id,
@@ -178,18 +200,20 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
 
     # A generated notice is immutable. If the audit definition or meetings move,
     # the stored PDF must become historical and delivery must require a revision.
-    opening = db_session.query(QualityAuditMeeting).filter(
-        QualityAuditMeeting.audit_id == audit.id,
-        QualityAuditMeeting.meeting_type == "OPENING",
-    ).one()
     original_title = audit.title
     original_audit_ref = audit.audit_ref
-    original_external_auditees = audit.external_auditees
+    original_external_auditees_json = audit.external_auditees_json
     original_opening_start = opening.scheduled_start
     original_opening_end = opening.scheduled_end
     audit.title = "Hangar quality system audit - deferred"
     audit.audit_ref = "QAR/AC/26/002"
-    audit.external_auditees = [{"name": "External process owner", "email": "external@example.test"}]
+    audit.external_auditees_json = json.dumps([{
+        "first_name": "External",
+        "last_name": "Process Owner",
+        "email": "external@example.test",
+        "phone_contact": None,
+        "designation": "Process owner",
+    }])
     opening.scheduled_start = opening.scheduled_start.replace(hour=7)
     opening.scheduled_end = opening.scheduled_end.replace(hour=8)
     db_session.commit()
@@ -214,7 +238,7 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
 
     audit.title = original_title
     audit.audit_ref = original_audit_ref
-    audit.external_auditees = original_external_auditees
+    audit.external_auditees_json = original_external_auditees_json
     opening.scheduled_start = original_opening_start
     opening.scheduled_end = original_opening_end
     db_session.commit()
@@ -242,3 +266,27 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert sends[0]["correlation_id"] == _notice_email_correlation(notice.id, "auditee@example.test")
     events = [row.event_type for row in db_session.query(QualityAuditNoticeEvent).order_by(QualityAuditNoticeEvent.created_at).all()]
     assert events == ["SUBMITTED", "APPROVED", "GENERATED", "DELIVERED"]
+
+
+
+def test_legacy_and_current_recipient_snapshots_compare_by_governed_routing() -> None:
+    legacy = [{
+        "role": "LEAD_AUDITOR",
+        "user_id": "user-1",
+        "name": "Quality Officer",
+        "email": "QUALITY@example.test",
+    }]
+    current = [{
+        "role": "lead_auditor",
+        "user_id": "user-1",
+        "email": "quality@example.test",
+    }]
+
+    assert _normalise_recipient_snapshot(legacy) == _normalise_recipient_snapshot(current)
+
+    changed_email = [{
+        "role": "LEAD_AUDITOR",
+        "user_id": "user-1",
+        "email": "new-quality@example.test",
+    }]
+    assert _normalise_recipient_snapshot(legacy) != _normalise_recipient_snapshot(changed_email)
