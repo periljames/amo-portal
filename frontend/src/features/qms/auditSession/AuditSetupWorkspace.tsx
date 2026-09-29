@@ -760,9 +760,25 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }
     if (revisionReasonForNotice.current === latestNotice.id) return;
     revisionReasonForNotice.current = latestNotice.id;
+    const scheduleFields = new Set([
+      "planned_start",
+      "planned_end",
+      "planned_start_time",
+      "planned_end_time",
+    ]);
+    const scheduleChanged = Boolean(
+      latestNotice.source_changes?.some((item) => scheduleFields.has(item.field)),
+    );
+    const frozenAt = latestNotice.generated_at || latestNotice.artifact?.created_at || latestNotice.created_at;
+    const rescheduleIsRelevant = Boolean(
+      scheduleChanged &&
+      latestReschedule?.reason &&
+      !latestReschedule.reason.startsWith("Reason not recorded") &&
+      (!frozenAt || new Date(latestReschedule.created_at).getTime() >= new Date(frozenAt).getTime()),
+    );
     const sourceReason = latestNotice.status === "CANCELLED"
       ? `Replacement for cancelled notice ${latestNotice.notice_reference || `N${String(latestNotice.revision_no).padStart(2, "0")}`}.`
-      : latestReschedule?.reason && !latestReschedule.reason.startsWith("Reason not recorded")
+      : rescheduleIsRelevant && latestReschedule
         ? `Audit rescheduled: ${latestReschedule.reason}`
         : latestNotice.source_changes?.length
           ? `Revised after ${latestNotice.source_changes.map((item) => item.label).join(", ")} changed.`
