@@ -10,8 +10,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { getCachedUser, getToken } from "../../services/auth";
-import { hasTenantMessagingContext } from "../../services/messaging";
 import {
   discardOfflineMutation,
   getOfflineOutboxSummary,
@@ -36,8 +34,6 @@ import {
   probePortalReadiness,
   type PortalConnectivitySnapshot,
 } from "../../services/portalConnectivity";
-import { MessagingHub } from "../messaging/MessagingHub";
-import "../../styles/components/messaging.css";
 
 const EMPTY: OfflineOutboxSummary = { queued: 0, syncing: 0, conflict: 0, failed: 0, total: 0 };
 const EMPTY_PROGRESS: OfflineReplayProgress = {
@@ -227,8 +223,7 @@ export function OfflineSyncIndicator() {
     return "online";
   }, [connectivity.state, manualSync, online, progress.phase, summary]);
 
-  const showMessaging = hasTenantMessagingContext(getCachedUser(), getToken());
-  if (state === "online") return showMessaging ? <MessagingHub /> : null;
+  if (state === "online") return null;
 
   const pending = summary.total;
   const issueCount = summary.conflict + summary.failed;
@@ -256,7 +251,6 @@ export function OfflineSyncIndicator() {
 
   return (
     <>
-      {showMessaging ? <MessagingHub /> : null}
       <button
         type="button"
         className="portal-offline-indicator"
