@@ -484,6 +484,28 @@ def _notice_query(db: Session):
     )
 
 
+def _require_latest_notice_revision(db: Session, notice: QualityAuditNotice) -> None:
+    latest = db.query(QualityAuditNotice).filter(
+        QualityAuditNotice.amo_id == notice.amo_id,
+        QualityAuditNotice.audit_id == notice.audit_id,
+    ).order_by(QualityAuditNotice.revision_no.desc()).first()
+    if latest is None or str(latest.id) == str(notice.id):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "AUDIT_NOTICE_NOT_LATEST",
+            "message": (
+                "This audit notice is retained as history. Continue only from the latest controlled notice revision."
+            ),
+            "notice_id": str(notice.id),
+            "notice_revision": notice.revision_no,
+            "latest_notice_id": str(latest.id),
+            "latest_notice_revision": latest.revision_no,
+        },
+    )
+
+
 def _actor(db: Session, *, ctx: TenantContext) -> account_models.User:
     user = db.query(account_models.User).filter(
         account_models.User.id == ctx.user_id,
@@ -1497,8 +1519,17 @@ async def upload_audit_notice_attachment(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.status != "DRAFT":
         raise HTTPException(status_code=409, detail="A notice PDF may only be attached while the notice is in draft.")
+    _require_latest_notice_revision(db, row)
 
     staged, _uploaded_filename, size_bytes, sha256 = await _stage_uploaded_pdf(file)
+    current_source_snapshot, _ = _notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)
+    resolved_snapshot, _ = _resolved_recipients(
+        db,
+        amo_id=ctx.amo_id,
+        snapshot=_recipient_snapshot(audit),
+    )
+    row.audit_snapshot = current_source_snapshot
+    row.recipient_snapshot = resolved_snapshot
     filename = _safe_pdf_filename(audit, row)
     stored = None
     old_ref = row.artifact.storage_ref if row.artifact is not None else None
@@ -1537,8 +1568,6 @@ async def upload_audit_notice_attachment(
             artifact.signed_at = None
             artifact.created_by_user_id = ctx.user_id
             artifact.created_at = _utcnow()
-        row.audit_snapshot = _notice_source_snapshot(db, amo_id=ctx.amo_id, audit=audit)[0]
-        row.recipient_snapshot = _recipient_snapshot(audit)
         db.commit()
     except Exception:
         db.rollback()
@@ -1703,6 +1732,7 @@ def prepare_audit_notice_document(
     ).with_for_update().first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
+    _require_latest_notice_revision(db, row)
     if row.artifact is not None:
         current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
             db,
@@ -1776,6 +1806,7 @@ def submit_and_deliver_audit_notice(
         raise HTTPException(status_code=404, detail="Audit notice not found.")
     if row.status in {"DELIVERED", "ACKNOWLEDGED"}:
         return {"notice": _notice_dict(row), "delivery_complete": True, "dispatch": {"attempted": 0, "sent": 0, "failed": 0, "items": []}}
+    _require_latest_notice_revision(db, row)
     if row.status not in {"DRAFT", "UNDER_REVIEW", "APPROVED", "GENERATED"}:
         raise HTTPException(status_code=409, detail="This notice revision cannot be submitted.")
 
@@ -1863,7 +1894,7 @@ def submit_and_deliver_audit_notice(
         "content": document_bytes,
         "content_type": "application/pdf",
     }]
-    notice_reference = _notice_reference(audit.audit_ref, row.revision_no)
+    notice_reference = _notice_reference_for_row(row, fallback_audit_ref=audit.audit_ref)
     dispatch_items: list[dict[str, Any]] = []
     for recipient in recipients:
         recipient_email = str(recipient.get("email") or "").strip()
@@ -1972,6 +2003,28 @@ def _create_notice(
     ).order_by(QualityAuditNotice.revision_no.desc()).with_for_update().first()
     if latest is not None and latest.status == "DRAFT":
         raise HTTPException(status_code=409, detail="A draft audit notice already exists for this audit. Submit, cancel or complete it before creating another revision.")
+    if latest is not None and supersedes is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_REVISION_REQUIRED",
+                "message": "An audit notice already exists. Create the next controlled revision from the latest notice.",
+                "latest_notice_id": str(latest.id),
+                "latest_notice_revision": latest.revision_no,
+            },
+        )
+    if supersedes is not None and latest is not None and str(latest.id) != str(supersedes.id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_NOTICE_NOT_LATEST",
+                "message": "A revised notice must supersede the latest controlled notice revision.",
+                "notice_id": str(supersedes.id),
+                "notice_revision": supersedes.revision_no,
+                "latest_notice_id": str(latest.id),
+                "latest_notice_revision": latest.revision_no,
+            },
+        )
     row = QualityAuditNotice(
         amo_id=ctx.amo_id,
         audit_id=audit.id,
@@ -2029,6 +2082,7 @@ def revise_audit_notice(
     ).first()
     if prior is None:
         raise HTTPException(status_code=404, detail="Audit notice not found.")
+    _require_latest_notice_revision(db, prior)
     if prior.status == "DRAFT":
         raise HTTPException(status_code=409, detail="A DRAFT notice must be completed or cancelled rather than revised into another draft.")
     row = _create_notice(db=db, ctx=ctx, audit=audit, payload=payload, supersedes=prior)
@@ -2058,6 +2112,9 @@ def transition_audit_notice(
     settings = _policy_values(policy)
     before = _snapshot(row)
     action = payload.action
+
+    if action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
+        _require_latest_notice_revision(db, row)
 
     if row.artifact is not None and action in {"SUBMIT", "APPROVE", "GENERATE", "DELIVER"}:
         current_source_snapshot, current_meeting_rows = _notice_source_snapshot(
