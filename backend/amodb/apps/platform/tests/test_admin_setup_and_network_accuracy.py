@@ -477,3 +477,32 @@ def test_full_speedtest_never_uses_a_block_larger_than_transfer_cap(
     assert result["ok"] is True
     assert calls
     assert all(block_bytes <= max(1_000_000, network_diagnostics.MAX_TRANSFER_BYTES) for _, block_bytes in calls)
+
+
+@pytest.mark.parametrize(
+    ("direction", "block_bytes"),
+    [("download", 8_000_000), ("upload", 4_000_000)],
+)
+def test_transfer_series_never_exceeds_total_byte_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    direction: str,
+    block_bytes: int,
+) -> None:
+    def fake_transfer(url: str, *, payload: bytes | None = None):
+        if payload is not None:
+            return len(payload), {}
+        size = int(url.rsplit("bytes=", 1)[-1])
+        return size, {}
+
+    monkeypatch.setattr(network_diagnostics, "_http_transfer", fake_transfer)
+
+    result = network_diagnostics._transfer_series(
+        host="speed.cloudflare.com",
+        direction=direction,
+        block_bytes=block_bytes,
+        progress=None,
+    )
+
+    expected_cap = max(block_bytes, network_diagnostics.MAX_TRANSFER_BYTES)
+    assert result["bytes"] == expected_cap
+    assert result["bytes"] <= expected_cap
