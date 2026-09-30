@@ -38,9 +38,7 @@ async function signIn(page: Page, email: string, password: string): Promise<void
 }
 
 async function token(page: Page): Promise<string> {
-  const value = await page.evaluate(() =>
-    sessionStorage.getItem("amo_portal_token") || localStorage.getItem("amo_portal_token"),
-  );
+  const value = await page.evaluate(() => sessionStorage.getItem("amo_portal_token"));
   if (!value) throw new Error("Authenticated DMS role fixture did not receive a bearer token");
   return value;
 }
