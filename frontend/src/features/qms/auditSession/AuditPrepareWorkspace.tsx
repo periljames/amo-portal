@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  DownloadCloud,
+  HardDrive,
   Link2,
   Plus,
   Search,
@@ -49,6 +51,12 @@ import {
 } from "../../../services/qmsAuditOccurrenceCompletion";
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { getAuditPreparationContext, type AuditPreparationContext } from "../../../services/qmsAuditPreparationContext";
+import {
+  auditOfflinePackStatus,
+  prepareAuditOfflinePack,
+  removeAuditOfflinePack,
+  type AuditOfflinePackStatus,
+} from "../../../services/qmsAuditOfflinePack";
 import { getAuditSession } from "../../../services/qmsAuditSession";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
@@ -244,6 +252,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     queryFn: ({ signal }) => listAuditPreparationRevisions(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
+  });
+  const offlinePackQuery = useQuery({
+    queryKey: ["qms-audit-offline-pack-status", amoCode, auditId],
+    queryFn: () => auditOfflinePackStatus(amoCode, auditId),
+    enabled: Boolean(auditId),
+    staleTime: 1_000,
   });
   const candidateDmsChecklistId = selectedDmsChecklistId ?? dmsChecklistsQuery.data?.recommendation?.document_id ?? "";
   const effectiveDmsChecklistId = dmsChecklistsQuery.data?.items.some((item) => item.document_id === candidateDmsChecklistId)
@@ -456,6 +470,32 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Audit preparation could not be issued."),
   });
 
+  const offlinePackMutation = useMutation({
+    mutationFn: () => prepareAuditOfflinePack(amoCode, auditId),
+    onSuccess: ({ status }) => {
+      queryClient.setQueryData<AuditOfflinePackStatus>(
+        ["qms-audit-offline-pack-status", amoCode, auditId],
+        status,
+      );
+      setLocalError(null);
+      setLocalSuccess(`Offline audit package ready on this device · ${status.checklistItems} checklist item(s) · ${status.evidenceRecords} evidence record(s).`);
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "The audit could not be prepared for offline fieldwork."),
+  });
+
+  const removeOfflinePackMutation = useMutation({
+    mutationFn: () => removeAuditOfflinePack(auditId),
+    onSuccess: () => {
+      queryClient.setQueryData<AuditOfflinePackStatus>(
+        ["qms-audit-offline-pack-status", amoCode, auditId],
+        { ready: false, storedAt: null, verifiedAt: null, workPackageSha256: null, checklistItems: 0, evidenceRecords: 0, expiresAt: null },
+      );
+      setLocalError(null);
+      setLocalSuccess("The controlled offline audit package was removed from this device.");
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "The offline audit package could not be removed."),
+  });
+
   const requests = useMemo(() => requestsQuery.data?.items || [], [requestsQuery.data?.items]);
   const participants = participantsQuery.data?.items || [];
   const context = contextQuery.data;
@@ -574,6 +614,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }
 
   const prepRevision = context.controlled_preparation?.latest_revision;
+  const offlinePackStatus = offlinePackQuery.data;
   const bindings = context.controlled_preparation?.checklist_bindings || [];
   const checklistBindings = bindings.length;
   const readinessWarning = readiness.percent != null && readiness.percent < 100;
@@ -623,6 +664,35 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <ShieldAlert size={14} aria-hidden /> {readiness.detail}
         </p>
       ) : null}
+
+      <section className="qms-audit-prepare__offline-pack" aria-label="Offline fieldwork package">
+        <div className="qms-audit-prepare__offline-pack-copy">
+          <DownloadCloud size={18} aria-hidden />
+          <span>
+            <strong>{offlinePackStatus?.ready ? "Offline package ready" : "Make audit available offline"}</strong>
+            <small>
+              {offlinePackStatus?.ready
+                ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
+                : prepRevision?.status === "ISSUED"
+                  ? "Encrypt the issued work package and current fieldwork baseline on this device before unreliable or no-connectivity work."
+                  : "Issue preparation first. Draft preparation is not an offline fieldwork authority."}
+            </small>
+            {offlinePackStatus?.workPackageSha256 ? <small className="qms-audit-prepare__offline-pack-hash">Work package SHA-256 · {offlinePackStatus.workPackageSha256}</small> : null}
+          </span>
+        </div>
+        <div className="qms-audit-prepare__offline-pack-actions">
+          {offlinePackStatus?.ready ? <span className="qms-audit-prepare__offline-pack-device"><HardDrive size={14} aria-hidden /> Stored securely on this device</span> : null}
+          <button
+            type="button"
+            className="is-primary"
+            disabled={prepRevision?.status !== "ISSUED" || offlinePackMutation.isPending}
+            onClick={() => offlinePackMutation.mutate()}
+          >
+            {offlinePackMutation.isPending ? "Preparing…" : offlinePackStatus?.ready ? "Refresh offline package" : "Make available offline"}
+          </button>
+          {offlinePackStatus?.ready ? <button type="button" disabled={removeOfflinePackMutation.isPending} onClick={() => removeOfflinePackMutation.mutate()}>{removeOfflinePackMutation.isPending ? "Removing…" : "Remove offline copy"}</button> : null}
+        </div>
+      </section>
 
       <div className="qms-audit-prepare-stage__stack">
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
