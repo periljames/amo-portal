@@ -266,7 +266,8 @@ def test_adaptive_probe_bootstraps_full_measurement_without_repeating_bulk_work(
     full_query = MagicMock()
     full_query.filter.return_value = full_query
     full_query.order_by.return_value = full_query
-    full_query.first.return_value = None
+    full_query.limit.return_value = full_query
+    full_query.all.return_value = []
     db.query.side_effect = [previous_query, full_query]
 
     sentinel = {
@@ -333,7 +334,8 @@ def test_adaptive_probe_does_not_escalate_provider_rejection(
     full_query = MagicMock()
     full_query.filter.return_value = full_query
     full_query.order_by.return_value = full_query
-    full_query.first.return_value = None
+    full_query.limit.return_value = full_query
+    full_query.all.return_value = []
     db.query.side_effect = [previous_query, full_query]
 
     sentinel = {
