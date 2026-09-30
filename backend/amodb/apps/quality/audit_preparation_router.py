@@ -123,6 +123,7 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             "request_type": metadata.request_type if metadata else "DOCUMENT",
             "linked_criterion": metadata.linked_criterion if metadata else None,
             "is_required": metadata.is_required if metadata else True,
+            "requirement_stage": metadata.requirement_stage if metadata else "REQUIRED_BEFORE_ISSUE",
             "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
             "controlled_source_system": metadata.controlled_source_system if metadata else "QMS_LOCAL",
             "controlled_document_id": str(metadata.controlled_document_id) if metadata and metadata.controlled_document_id else None,
@@ -175,7 +176,17 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             }
             for item in checklist_snapshot
         ],
-        "document_requests": request_snapshot,
+        # Only the governed request definition belongs to the preparation
+        # fingerprint. Submission/review state is execution evidence and may
+        # legitimately change after issue without invalidating fieldwork.
+        "document_requests": [
+            {
+                key: value
+                for key, value in request.items()
+                if key not in {"status", "file_ref", "reviewed_at", "updated_at"}
+            }
+            for request in request_snapshot
+        ],
         "checklist_bindings": [
             {
                 "id": str(binding.id),
@@ -198,20 +209,33 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
     }
 
 
-def _preparation_readiness_blockers(captured: dict[str, Any]) -> list[dict[str, Any]]:
+def _preparation_readiness_blockers(
+    captured: dict[str, Any],
+    *,
+    phase: str = "ISSUE",
+) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     if not captured.get("checklist_snapshot"):
         blockers.append({"type": "CHECKLIST", "reason": "At least one governed checklist item must be prepared before issue."})
+
+    blocking_stages = {"REQUIRED_BEFORE_ISSUE"}
+    if phase == "FIELDWORK":
+        blocking_stages.add("REQUIRED_BEFORE_FIELDWORK")
+
     unresolved_required = [
         request
         for request in captured.get("document_request_snapshot", [])
-        if request.get("is_required", True) and request.get("status") != "ACCEPTED"
+        if request.get("is_required", True)
+        and request.get("requirement_stage", "REQUIRED_BEFORE_ISSUE") in blocking_stages
+        and request.get("status") not in {"ACCEPTED", "WAIVED"}
     ]
     if unresolved_required:
+        stage_label = "fieldwork" if phase == "FIELDWORK" else "preparation issue"
         blockers.append({
             "type": "DOCUMENT_REQUEST",
             "count": len(unresolved_required),
-            "reason": "All required preparation document requests must be accepted before issue.",
+            "request_ids": [request.get("id") for request in unresolved_required],
+            "reason": f"{len(unresolved_required)} governed document request(s) required before {stage_label} remain unresolved.",
         })
     return blockers
 
