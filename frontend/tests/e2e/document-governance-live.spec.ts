@@ -12,7 +12,10 @@ const MAX_READER_JUMP_MS = 15_000;
 const MAX_MOUNTED_PDF_PAGES = 30;
 
 let materialBrowserErrors: string[] = [];
-let cachedAdminStorage: Record<string, string> | null = null;
+let cachedAdminStorage: {
+  local: Record<string, string>;
+  session: Record<string, string>;
+} | null = null;
 
 test.use({
   viewport: { width: 1440, height: 900 },
@@ -45,7 +48,9 @@ async function restoreCachedAdminSession(page: Page): Promise<boolean> {
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.evaluate((storage) => {
     localStorage.clear();
-    for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
+    sessionStorage.clear();
+    for (const [key, value] of Object.entries(storage.local)) localStorage.setItem(key, value);
+    for (const [key, value] of Object.entries(storage.session)) sessionStorage.setItem(key, value);
   }, cachedAdminStorage);
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/document-control`);
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
@@ -63,7 +68,10 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
-  cachedAdminStorage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  cachedAdminStorage = await page.evaluate(() => ({
+    local: Object.fromEntries(Object.entries(localStorage)),
+    session: Object.fromEntries(Object.entries(sessionStorage)),
+  }));
 }
 
 function futureLocalDateTime(hours = 2): string {
