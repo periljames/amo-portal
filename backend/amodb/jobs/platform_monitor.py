@@ -184,9 +184,13 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
     )
     previous_anomalous = bool(first_adaptive.get("anomalous"))
     healthy_run = 1 if current.get("ok") and not anomalous else 0
+    anomaly_run = 1 if anomalous else 0
     for row in previous:
         adaptive = ((getattr(row, "details_json", None) or {}).get("adaptive") or {})
         row_anomalous = bool(adaptive.get("anomalous"))
+        if anomalous and adaptive and row_anomalous:
+            anomaly_run += 1
+            continue
         if adaptive and healthy_run and getattr(row, "ok", False) and not row_anomalous:
             healthy_run += 1
             continue
@@ -199,6 +203,8 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
             noise_cv = statistics.pstdev(download_history) / mean
 
     fast = _float_setting("PLATFORM_NET_INVESTIGATION_INTERVAL_SECONDS", 60.0, minimum=30.0)
+    degraded = _float_setting("PLATFORM_NET_DEGRADED_INTERVAL_SECONDS", 300.0, minimum=60.0)
+    persistent = _float_setting("PLATFORM_NET_PERSISTENT_INTERVAL_SECONDS", 900.0, minimum=300.0)
     recovery = _float_setting("PLATFORM_NET_RECOVERY_INTERVAL_SECONDS", 900.0, minimum=60.0)
     stable = _float_setting("PLATFORM_NET_STABLE_INTERVAL_SECONDS", 3600.0, minimum=300.0)
     deep_stable = _float_setting("PLATFORM_NET_DEEP_STABLE_INTERVAL_SECONDS", 7200.0, minimum=900.0)
@@ -206,9 +212,15 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
     if provider_unavailable:
         state = "provider_unavailable"
         next_delay = stable
-    elif anomalous:
+    elif anomalous and anomaly_run <= 2:
         state = "investigating"
         next_delay = fast
+    elif anomalous and anomaly_run <= 5:
+        state = "degraded"
+        next_delay = degraded
+    elif anomalous:
+        state = "persistent_degradation"
+        next_delay = persistent
     elif previous_anomalous or healthy_run < 6:
         state = "recovery"
         next_delay = recovery
@@ -228,6 +240,7 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
         "reasons": reasons,
         "baseline_count": baseline_count,
         "healthy_run": healthy_run,
+        "anomaly_run": anomaly_run,
         "ema_span": window,
         "ema_download_bps": round(ema_download, 2) if ema_download is not None else None,
         "ema_latency_ms": round(ema_latency, 2) if ema_latency is not None else None,
@@ -290,6 +303,7 @@ def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
         last_full_success = next((row for row in full_history if getattr(row, "ok", False)), None)
         full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 43200.0, minimum=1800.0)
         full_cooldown = _float_setting("PLATFORM_NET_FULL_ANOMALY_COOLDOWN_SECONDS", 900.0, minimum=300.0)
+        incident_cooldown = _float_setting("PLATFORM_NET_FULL_INCIDENT_COOLDOWN_SECONDS", 7200.0, minimum=1800.0)
         failure_backoff = _float_setting("PLATFORM_NET_FULL_FAILURE_BACKOFF_SECONDS", 3600.0, minimum=900.0)
 
         def _age(row) -> float | None:
@@ -300,7 +314,13 @@ def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
         attempt_age = _age(last_full_attempt)
         success_age = _age(last_full_success)
         attempt_ready = attempt_age is None or attempt_age >= failure_backoff
-        anomaly_ready = attempt_age is None or attempt_age >= full_cooldown
+        last_trigger = (
+            ((getattr(last_full_attempt, "details_json", None) or {}).get("trigger"))
+            if last_full_attempt is not None
+            else None
+        )
+        anomaly_wait = incident_cooldown if last_trigger == "confirmed_anomaly" else full_cooldown
+        anomaly_ready = attempt_age is None or attempt_age >= anomaly_wait
 
         full_due = False
         full_reason = None
