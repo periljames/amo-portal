@@ -70,6 +70,25 @@ function governedEvidence(value: Array<Record<string, unknown> | string>) {
   });
 }
 
+function responseRuleError(
+  item: ExternalAuditorFieldworkItem,
+  option: ExternalChecklistResponseOption,
+  note: string,
+): string | null {
+  const status = option.canonical_status;
+  const notePresent = Boolean(note.trim());
+  if (status === "NOT_APPLICABLE" && item.na_justification_required && !notePresent) {
+    return "This governed checklist item requires an auditor reason before it can be marked N/A.";
+  }
+  if ((item.notes_required_when || []).includes(status) && !notePresent) {
+    return `Auditor notes are required before recording ${status.replaceAll("_", " ").toLowerCase()}.`;
+  }
+  if ((item.evidence_required_when || []).includes(status) && !item.my_evidence_references.length) {
+    return "Governed evidence is required for this response. Upload and synchronize the evidence before finalizing the outcome.";
+  }
+  return null;
+}
+
 function scopeOf(model: ExternalAuditorFieldworkModel): ExternalAuditOutboxScope {
   return { auditId: model.audit_id, participantId: model.participant_id };
 }
@@ -196,6 +215,12 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
   const save = async (item: ExternalAuditorFieldworkItem, option: ExternalChecklistResponseOption) => {
     if (!model || !model.can_execute_checklist) return;
+    const itemNote = notes[item.checklist_item_id] ?? item.my_auditor_notes ?? "";
+    const ruleError = responseRuleError(item, option, itemNote);
+    if (ruleError) {
+      setError(ruleError);
+      return;
+    }
     setSaving(true); setError(null); setNotice(null);
     const mutation = buildExternalAuditorMutation(item, {
       canonicalResponseStatus: option.canonical_status,
@@ -299,7 +324,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
           <div className="qms-external-auditor-fieldwork__item">
             <span>{selected.section || "Checklist"}</span>
             <h2>{selected.prompt}</h2>
-            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.response_value || selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div></dl>
+            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.response_value || selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div>{selected.audit_method ? <div><dt>Method</dt><dd>{selected.audit_method.replaceAll("_", " ")}</dd></div> : null}{selected.sampling_requirement ? <div><dt>Sampling</dt><dd>{selected.sampling_requirement}</dd></div> : null}</dl>
+            {selected.expected_evidence || selected.guidance ? <section className="qms-external-auditor-fieldwork__verification"><strong>Verification plan</strong>{selected.expected_evidence ? <p>{selected.expected_evidence}</p> : null}{selected.guidance ? <small>{selected.guidance}</small> : null}</section> : null}
             <div className="qms-external-auditor-fieldwork__responses">
               {selectedResponseOptions.map((option) => {
                 const adverse = option.canonical_status === "NONCOMPLIANT" || option.canonical_status === "OBSERVATION";
