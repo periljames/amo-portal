@@ -65,6 +65,7 @@ type NewRequest = {
   requestType: GovernedAuditDocumentRequest["request_type"];
   linkedCriterion: string;
   isRequired: boolean;
+  requirementStage: GovernedAuditDocumentRequest["requirement_stage"];
   sourceMode: GovernedAuditDocumentRequest["source_mode"];
   controlledDocumentId: string;
 };
@@ -101,6 +102,7 @@ const emptyRequest: NewRequest = {
   requestType: "DOCUMENT",
   linkedCriterion: "",
   isRequired: true,
+  requirementStage: "REQUIRED_BEFORE_FIELDWORK",
   sourceMode: "UPLOAD_OR_CONTROLLED",
   controlledDocumentId: "",
 };
@@ -304,7 +306,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       due_date: newRequest.dueDate || null,
       request_type: newRequest.requestType,
       linked_criterion: newRequest.linkedCriterion.trim() || null,
-      is_required: newRequest.isRequired,
+      is_required: newRequest.requirementStage !== "REQUESTED_NOT_BLOCKING",
+      requirement_stage: newRequest.requirementStage,
       source_mode: newRequest.sourceMode,
       controlled_source_system: "DOCUMENT_CONTROL",
       controlled_document_id: null,
@@ -478,7 +481,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     (!checklistDmsDocumentId || Boolean(documents.find((document) => document.id === checklistDmsDocumentId)?.current_revision)),
   );
   const readiness = useMemo(() => {
-    const required = requests.filter((request) => request.is_required && request.status !== "WAIVED");
+    const required = requests.filter((request) =>
+      request.is_required
+      && request.requirement_stage !== "REQUESTED_NOT_BLOCKING"
+      && request.status !== "WAIVED",
+    );
     const accepted = required.filter((request) => request.status === "ACCEPTED").length;
     const total = required.length;
     // 0 required must never read as 100% success — that invents readiness.
@@ -727,7 +734,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <label className="is-wide"><span>Purpose / records required</span><textarea rows={3} value={newRequest.description} onChange={(event) => setNewRequest((current) => ({ ...current, description: event.target.value }))} /></label>
                 <label className="is-wide"><span>Linked criterion / requirement</span><textarea rows={2} value={newRequest.linkedCriterion} onChange={(event) => setNewRequest((current) => ({ ...current, linkedCriterion: event.target.value }))} placeholder="Exact regulation, manual paragraph, procedure or checklist criterion this evidence supports" /></label>
                 <label><span>Submission source</span><select value={newRequest.sourceMode} onChange={(event) => setNewRequest((current) => ({ ...current, sourceMode: event.target.value as NewRequest["sourceMode"], controlledDocumentId: "" }))}><option value="UPLOAD_OR_CONTROLLED">Upload or controlled DMS record</option><option value="UPLOAD">Upload only</option><option value="CONTROLLED_DMS">Controlled DMS record only</option></select></label>
-                <label className="qms-audit-prepare__check"><input type="checkbox" checked={newRequest.isRequired} onChange={(event) => setNewRequest((current) => ({ ...current, isRequired: event.target.checked }))} /> Required before fieldwork</label>
+                <label><span>Workflow requirement</span><select value={newRequest.requirementStage} onChange={(event) => setNewRequest((current) => ({ ...current, requirementStage: event.target.value as NewRequest["requirementStage"], isRequired: event.target.value !== "REQUESTED_NOT_BLOCKING" }))}><option value="REQUIRED_BEFORE_ISSUE">Required before preparation issue</option><option value="REQUIRED_BEFORE_FIELDWORK">Required before fieldwork</option><option value="REQUIRED_DURING_FIELDWORK">Required during fieldwork</option><option value="REQUESTED_NOT_BLOCKING">Requested · not blocking</option></select></label>
                 {newRequest.sourceMode !== "UPLOAD" ? <>
                   <label className="is-wide"><span>Search controlled DMS</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={requestDmsSearch} onChange={(event) => setRequestDmsSearch(event.target.value)} placeholder="Document code, title or type" /></div></label>
                   <label><span>Controlled document</span><select value={newRequest.controlledDocumentId} onChange={(event) => setNewRequest((current) => ({ ...current, controlledDocumentId: event.target.value }))}><option value="">No preselected document</option>{requestDocuments.map((document) => <option key={document.id} value={document.id}>{document.code} · {document.title} · {statusLabel(document.status)}</option>)}</select></label>
