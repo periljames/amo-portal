@@ -71,7 +71,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           source = Path("scripts/dev_runtime.py").read_text(encoding="utf-8")
-          assert 'env.setdefault("PLATFORM_NET_PROBE_ENABLED", "false")' in source
+          assert 'env.setdefault("PLATFORM_NET_PROBE_ENABLED", "true")' in source
           PY
 
       - name: Verify SaaS deployment includes a private Operations gateway
