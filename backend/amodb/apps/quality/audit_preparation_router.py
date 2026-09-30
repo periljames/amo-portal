@@ -14,8 +14,10 @@ from amodb.database import get_write_db
 
 from . import models
 from .audit_checklist_template_models import QualityAuditChecklistBinding
-from .audit_occurrence_completion_models import QualityAuditDocumentRequestMetadata
-from .audit_preparation_models import QualityAuditPreparationEvent, QualityAuditPreparationRevision
+from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+from .audit_evidence_models import QualityAuditEvidenceArtifact
+from .audit_occurrence_completion_models import QualityAuditDocumentRequestMetadata, QualityAuditMeeting
+from .audit_preparation_models import QualityAuditPreparationEvent, QualityAuditPreparationRevision, QualityAuditWorkPackage
 from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
 
@@ -240,6 +242,156 @@ def _preparation_readiness_blockers(
     return blockers
 
 
+def _work_package_dict(row: QualityAuditWorkPackage) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "audit_id": str(row.audit_id),
+        "preparation_revision_id": str(row.preparation_revision_id),
+        "revision_no": row.revision_no,
+        "package_snapshot": row.package_snapshot or {},
+        "content_sha256": row.content_sha256,
+        "offline_expires_at": row.offline_expires_at,
+        "supersedes_work_package_id": row.supersedes_work_package_id,
+        "issued_by_user_id": row.issued_by_user_id,
+        "issued_at": row.issued_at,
+        "created_at": row.created_at,
+    }
+
+
+def _build_work_package_snapshot(
+    db: Session,
+    *,
+    amo_id: str,
+    audit: models.QMSAudit,
+    preparation: QualityAuditPreparationRevision,
+) -> dict[str, Any]:
+    from .audit_preparation_context_router import _audit_dict, _car_dict, _finding_dict, _prior_audits
+
+    prior_audits = _prior_audits(db, current=audit, amo_id=amo_id)
+    prior_ids = [item.id for item in prior_audits]
+    prior_findings = (
+        db.query(models.QMSAuditFinding)
+        .filter(
+            models.QMSAuditFinding.amo_id == amo_id,
+            models.QMSAuditFinding.audit_id.in_(prior_ids),
+        )
+        .order_by(models.QMSAuditFinding.created_at.desc())
+        .limit(150)
+        .all()
+        if prior_ids
+        else []
+    )
+    prior_finding_ids = [item.id for item in prior_findings]
+    prior_cars = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.finding_id.in_(prior_finding_ids))
+        .limit(250)
+        .all()
+        if prior_finding_ids
+        else []
+    )
+    meetings = (
+        db.query(QualityAuditMeeting)
+        .filter(
+            QualityAuditMeeting.amo_id == amo_id,
+            QualityAuditMeeting.audit_id == audit.id,
+            QualityAuditMeeting.status != "CANCELLED",
+        )
+        .order_by(QualityAuditMeeting.scheduled_start.asc())
+        .all()
+    )
+    request_definitions = [
+        {
+            key: value
+            for key, value in request.items()
+            if key not in {"status", "file_ref", "reviewed_at", "updated_at"}
+        }
+        for request in list(preparation.document_request_snapshot or [])
+    ]
+    return {
+        "schema": "QMS_AUDIT_WORK_PACKAGE_V1",
+        "audit": _audit_dict(audit),
+        "preparation": {
+            "revision_id": str(preparation.id),
+            "revision_no": preparation.revision_no,
+            "source_fingerprint": preparation.source_fingerprint,
+            "preparation_scope": preparation.preparation_scope,
+            "issued_at": preparation.issued_at.isoformat() if preparation.issued_at else None,
+        },
+        "checklist_snapshot": list(preparation.checklist_snapshot or []),
+        "document_request_definitions": request_definitions,
+        "source_references": list(preparation.source_references or []),
+        "prior_audits": [_audit_dict(item) for item in prior_audits],
+        "prior_findings": [_finding_dict(item) for item in prior_findings],
+        "prior_cars": [_car_dict(item) for item in prior_cars],
+        "meetings": [
+            {
+                "id": str(item.id),
+                "meeting_type": item.meeting_type,
+                "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+                "scheduled_end": item.scheduled_end.isoformat() if item.scheduled_end else None,
+                "location": item.location,
+                "conference_url": item.conference_url,
+                "status": item.status,
+            }
+            for item in meetings
+        ],
+    }
+
+
+def _ensure_work_package(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    audit: models.QMSAudit,
+    preparation: QualityAuditPreparationRevision,
+) -> QualityAuditWorkPackage:
+    existing = (
+        db.query(QualityAuditWorkPackage)
+        .filter(
+            QualityAuditWorkPackage.amo_id == amo_id,
+            QualityAuditWorkPackage.preparation_revision_id == preparation.id,
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    snapshot = _build_work_package_snapshot(
+        db,
+        amo_id=amo_id,
+        audit=audit,
+        preparation=preparation,
+    )
+    content_sha256 = hashlib.sha256(
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    previous = (
+        db.query(QualityAuditWorkPackage)
+        .filter(
+            QualityAuditWorkPackage.amo_id == amo_id,
+            QualityAuditWorkPackage.audit_id == audit.id,
+        )
+        .order_by(QualityAuditWorkPackage.revision_no.desc())
+        .first()
+    )
+    package = QualityAuditWorkPackage(
+        amo_id=amo_id,
+        audit_id=audit.id,
+        preparation_revision_id=preparation.id,
+        revision_no=preparation.revision_no,
+        package_snapshot=snapshot,
+        content_sha256=content_sha256,
+        supersedes_work_package_id=str(previous.id) if previous else None,
+        issued_by_user_id=user_id,
+        issued_at=preparation.issued_at or _utcnow(),
+    )
+    db.add(package)
+    db.flush()
+    return package
+
+
 def _event_dict(row: QualityAuditPreparationEvent) -> dict[str, Any]:
     return {
         "id": str(row.id),
@@ -391,6 +543,13 @@ def issue_preparation_revision(
     row.status = "ISSUED"
     row.issued_by_user_id = ctx.user_id
     row.issued_at = _utcnow()
+    work_package = _ensure_work_package(
+        db,
+        amo_id=ctx.amo_id,
+        user_id=ctx.user_id,
+        audit=audit,
+        preparation=row,
+    )
     db.add(QualityAuditPreparationEvent(
         amo_id=ctx.amo_id,
         audit_id=audit.id,
@@ -401,4 +560,141 @@ def issue_preparation_revision(
     ))
     db.commit()
     db.refresh(row)
-    return _revision_dict(row)
+    result = _revision_dict(row)
+    result["work_package"] = _work_package_dict(work_package)
+    return result
+
+@router.get("/audits/{audit_id}/work-package")
+def get_audit_work_package(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    row = (
+        db.query(QualityAuditWorkPackage)
+        .filter(
+            QualityAuditWorkPackage.amo_id == ctx.amo_id,
+            QualityAuditWorkPackage.audit_id == audit_id,
+        )
+        .order_by(QualityAuditWorkPackage.revision_no.desc())
+        .first()
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "AUDIT_WORK_PACKAGE_NOT_ISSUED",
+                "message": "Issue the governed preparation revision before preparing this audit for offline fieldwork.",
+            },
+        )
+    return _work_package_dict(row)
+
+
+@router.get("/audits/{audit_id}/offline-pack")
+def get_audit_offline_pack(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    package = (
+        db.query(QualityAuditWorkPackage)
+        .filter(
+            QualityAuditWorkPackage.amo_id == ctx.amo_id,
+            QualityAuditWorkPackage.audit_id == audit_id,
+        )
+        .order_by(QualityAuditWorkPackage.revision_no.desc())
+        .first()
+    )
+    if package is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "AUDIT_WORK_PACKAGE_NOT_ISSUED",
+                "message": "Issue the governed preparation revision before making this audit available offline.",
+            },
+        )
+
+    execution = (
+        db.query(QualityAuditChecklistExecutionGovernance)
+        .filter(
+            QualityAuditChecklistExecutionGovernance.amo_id == ctx.amo_id,
+            QualityAuditChecklistExecutionGovernance.audit_id == audit_id,
+        )
+        .order_by(QualityAuditChecklistExecutionGovernance.created_at.asc())
+        .all()
+    )
+    findings = (
+        db.query(models.QMSAuditFinding)
+        .filter(
+            models.QMSAuditFinding.amo_id == ctx.amo_id,
+            models.QMSAuditFinding.audit_id == audit_id,
+        )
+        .order_by(models.QMSAuditFinding.created_at.asc())
+        .all()
+    )
+    evidence = (
+        db.query(QualityAuditEvidenceArtifact)
+        .filter(
+            QualityAuditEvidenceArtifact.amo_id == ctx.amo_id,
+            QualityAuditEvidenceArtifact.audit_id == audit_id,
+        )
+        .order_by(QualityAuditEvidenceArtifact.created_at.asc())
+        .all()
+    )
+    return {
+        "schema": "QMS_AUDIT_OFFLINE_PACK_V1",
+        "generated_at": _utcnow().isoformat(),
+        "audit_id": str(audit.id),
+        "work_package": _work_package_dict(package),
+        "execution": [
+            {
+                "checklist_item_id": str(item.checklist_item_id),
+                "canonical_response_status": item.canonical_response_status,
+                "response_value": getattr(item, "response_value", None),
+                "auditor_notes": item.auditor_notes,
+                "evidence_references": item.evidence_references or [],
+                "entity_version": item.entity_version,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            for item in execution
+        ],
+        "findings": [
+            {
+                "id": str(item.id),
+                "finding_ref": item.finding_ref,
+                "finding_type": item.finding_type,
+                "severity": item.severity,
+                "level": item.level,
+                "requirement_ref": item.requirement_ref,
+                "description": item.description,
+                "objective_evidence": item.objective_evidence,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "closed_at": item.closed_at.isoformat() if item.closed_at else None,
+            }
+            for item in findings
+        ],
+        "evidence": [
+            {
+                "id": str(item.id),
+                "checklist_item_id": str(item.checklist_item_id) if item.checklist_item_id else None,
+                "finding_id": str(item.finding_id) if item.finding_id else None,
+                "filename": item.filename,
+                "content_type": item.content_type,
+                "size_bytes": item.size_bytes,
+                "sha256": item.sha256,
+                "description": item.description,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in evidence
+        ],
+        "sync_contract": {
+            "server_authoritative": True,
+            "conflict_strategy": "BASE_VERSION",
+            "idempotency": "CLIENT_MUTATION_ID",
+            "binary_evidence_state": "SEPARATE_DURABLE_QUEUE",
+        },
+    }
