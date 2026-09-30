@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileUp, Paperclip, ShieldCheck } from "lucide-react";
 
@@ -8,6 +8,12 @@ import {
   listAuditEvidence,
   uploadInternalAuditEvidence,
 } from "../../../services/qmsAuditEvidence";
+import {
+  enqueueOfflineAuditEvidence,
+  listOfflineAuditEvidence,
+  onOfflineAuditEvidenceChanged,
+  replayOfflineAuditEvidence,
+} from "../../../services/qmsOfflineAuditEvidence";
 import type { ChecklistExecutionGovernanceRow } from "../../../services/qmsChecklistExecutionGovernance";
 import { saveDownloadedFile } from "../../../utils/downloads";
 
@@ -34,15 +40,74 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
     queryFn: ({ signal }) => listAuditEvidence(amoCode, auditId, item.checklist_item_id, null, signal),
     staleTime: 1_500,
   });
+  const pendingQuery = useQuery({
+    queryKey: ["qms", "offline-audit-evidence", amoCode, auditId, item.checklist_item_id],
+    queryFn: () => listOfflineAuditEvidence(amoCode, auditId, item.checklist_item_id),
+    staleTime: 500,
+    refetchInterval: 2_000,
+  });
   const artifacts = evidenceQuery.data?.items || [];
+  const pending = pendingQuery.data || [];
+
+  const refreshPending = () => void pendingQuery.refetch();
+
+  useEffect(() => onOfflineAuditEvidenceChanged(refreshPending), [auditId, item.checklist_item_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncPending = async () => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    try {
+      const result = await replayOfflineAuditEvidence(amoCode, auditId);
+      await pendingQuery.refetch();
+      if (result.uploaded.length) {
+        await evidenceQuery.refetch();
+        await onChanged();
+        onNotice(`Evidence synchronized · ${result.uploaded.length} file${result.uploaded.length === 1 ? "" : "s"} verified by SHA-256.`);
+      } else if (result.conflicts) {
+        onError(`${result.conflicts} pending evidence file${result.conflicts === 1 ? " requires" : "s require"} review before synchronization.`);
+      }
+    } catch (cause) {
+      // Local encrypted files remain queued. Do not replace a durable local
+      // state with a false "saved" or "synced" indication.
+      onError(cause instanceof Error ? cause.message : "Pending evidence could not be synchronized.");
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onOnline = () => void syncPending();
+    window.addEventListener("online", onOnline);
+    if (pending.length && navigator.onLine !== false) void syncPending();
+    return () => window.removeEventListener("online", onOnline);
+  }, [amoCode, auditId, pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const upload = async () => {
     if (!file || busy) return;
     setBusy(true); onError(null); onNotice(null);
+    const clientMutationId = createEvidenceMutationId();
+    const queueLocal = async () => {
+      await enqueueOfflineAuditEvidence({
+        amoCode,
+        auditId,
+        checklistItemId: item.checklist_item_id,
+        findingId: item.finding_id || null,
+        file,
+        description,
+        clientMutationId,
+        baseVersion: item.entity_version,
+      });
+      setFile(null);
+      setDescription("");
+      onNotice("Evidence saved securely on this device · pending synchronization. The server record is unchanged until upload is accepted and hash-verified.");
+      await pendingQuery.refetch();
+    };
     try {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        await queueLocal();
+        return;
+      }
       const result = await uploadInternalAuditEvidence(amoCode, auditId, item.checklist_item_id, file, {
         baseVersion: item.entity_version,
-        clientMutationId: createEvidenceMutationId(),
+        clientMutationId,
         description,
         findingId: item.finding_id || null,
       });
@@ -51,7 +116,23 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
       await evidenceQuery.refetch();
       await onChanged();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Evidence upload failed.");
+      const message = cause instanceof Error ? cause.message : "Evidence upload failed.";
+      const normalized = message.toLowerCase();
+      const transportFailure = normalized.includes("failed to fetch")
+        || normalized.includes("network")
+        || normalized.includes("connection")
+        || normalized.includes("timed out")
+        || normalized.includes("load failed");
+      if (transportFailure) {
+        try {
+          await queueLocal();
+          return;
+        } catch (queueCause) {
+          onError(queueCause instanceof Error ? queueCause.message : message);
+          return;
+        }
+      }
+      onError(message);
     } finally { setBusy(false); }
   };
 
@@ -75,6 +156,22 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
           ))}
         </ul>
       ) : <p>No governed evidence file is linked to this checklist item yet.</p>}
+      {pending.length ? (
+        <div className="qms-live-audit-focus__evidence-pending" role="status" aria-live="polite">
+          <strong>{pending.length} local evidence file{pending.length === 1 ? "" : "s"} pending</strong>
+          <ul>
+            {pending.map((entry) => (
+              <li key={entry.id}>
+                <span><strong>{entry.filename}</strong><small>{Math.ceil(entry.sizeBytes / 1024)} KB · {entry.state.replaceAll("_", " ")}</small></span>
+                {entry.lastError ? <small>{entry.lastError}</small> : null}
+              </li>
+            ))}
+          </ul>
+          <button type="button" disabled={busy || (typeof navigator !== "undefined" && navigator.onLine === false)} onClick={() => void syncPending()}>
+            Retry pending evidence
+          </button>
+        </div>
+      ) : null}
       {canManage ? (
         <div className="qms-live-audit-focus__evidence-upload">
           <label><span>Attach evidence</span><input type="file" accept={ACCEPT} disabled={busy} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
