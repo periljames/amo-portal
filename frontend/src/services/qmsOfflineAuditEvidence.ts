@@ -1,4 +1,4 @@
-import { currentOfflineScope } from "./offlinePersistence";
+import { currentOfflineScope, listOfflineMutations } from "./offlinePersistence";
 import {
   listChecklistExecutionGovernance,
   type ChecklistExecutionGovernanceRow,
@@ -336,12 +336,12 @@ function errorStatus(error: unknown): number | null {
 export async function replayOfflineAuditEvidence(
   amoCode: string,
   auditId: string,
-): Promise<{ uploaded: AuditEvidenceArtifact[]; failed: number; conflicts: number }> {
+): Promise<{ uploaded: AuditEvidenceArtifact[]; failed: number; conflicts: number; deferred: number }> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return { uploaded: [], failed: 0, conflicts: 0 };
+    return { uploaded: [], failed: 0, conflicts: 0, deferred: 0 };
   }
   const rows = await scopedRows(amoCode, auditId);
-  if (!rows.length) return { uploaded: [], failed: 0, conflicts: 0 };
+  if (!rows.length) return { uploaded: [], failed: 0, conflicts: 0, deferred: 0 };
 
   const governance = await listChecklistExecutionGovernance(amoCode, auditId);
   const byItem = new Map<string, ChecklistExecutionGovernanceRow>(
@@ -350,10 +350,30 @@ export async function replayOfflineAuditEvidence(
   const uploaded: AuditEvidenceArtifact[] = [];
   let failed = 0;
   let conflicts = 0;
+  let deferred = 0;
+  const pendingChecklistMutations = (await listOfflineMutations()).filter((entry) =>
+    entry.entityType === "qms-audit-checklist-item"
+    && (entry.status === "queued" || entry.status === "syncing")
+    && entry.path.includes(`/audits/${encodeURIComponent(auditId)}/checklist-items/`)
+  );
 
   for (let row of rows) {
     if (currentOfflineScope() !== row.scope) break;
     if (row.state === "CORRUPT") { failed += 1; continue; }
+
+    const hasEarlierChecklistMutation = pendingChecklistMutations.some((entry) =>
+      entry.entityId === row.checklistItemId
+      || entry.path.includes(`/checklist-items/${encodeURIComponent(row.checklistItemId)}/`)
+    );
+    if (hasEarlierChecklistMutation) {
+      // Preserve local operation ordering: a queued response/finding is based on
+      // the version that existed before this evidence was captured. Let the
+      // structured mutation commit first, then upload evidence against the new
+      // authoritative version. This prevents the two local queues from
+      // invalidating each other on reconnect.
+      deferred += 1;
+      continue;
+    }
 
     const item = byItem.get(row.checklistItemId);
     if (!item) {
@@ -415,7 +435,7 @@ export async function replayOfflineAuditEvidence(
       }
     }
   }
-  return { uploaded, failed, conflicts };
+  return { uploaded, failed, conflicts, deferred };
 }
 
 export async function discardOfflineAuditEvidence(id: string): Promise<void> {
