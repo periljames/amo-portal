@@ -122,15 +122,19 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
     previous = list(previous_rows[:window])
     chronological = list(reversed(previous))
 
+    def _baseline_eligible(row) -> bool:
+        adaptive = ((getattr(row, "details_json", None) or {}).get("adaptive") or {})
+        return bool(getattr(row, "ok", False)) and not bool(adaptive.get("anomalous"))
+
     download_history = [
         float(row.download_bps)
         for row in chronological
-        if getattr(row, "ok", False) and getattr(row, "download_bps", None) is not None
+        if _baseline_eligible(row) and getattr(row, "download_bps", None) is not None
     ]
     latency_history = [
         float(row.latency_ms)
         for row in chronological
-        if getattr(row, "ok", False) and getattr(row, "latency_ms", None) is not None
+        if _baseline_eligible(row) and getattr(row, "latency_ms", None) is not None
     ]
     ema_download = _ema(download_history, span=window)
     ema_latency = _ema(latency_history, span=window)
