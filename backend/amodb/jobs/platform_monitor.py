@@ -177,17 +177,19 @@ def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
             reasons.append("latency_outlier")
 
     anomalous = bool(reasons)
-    previous_anomalous = False
+    first_adaptive = (
+        ((getattr(previous[0], "details_json", None) or {}).get("adaptive") or {})
+        if previous
+        else {}
+    )
+    previous_anomalous = bool(first_adaptive.get("anomalous"))
     healthy_run = 1 if current.get("ok") and not anomalous else 0
     for row in previous:
         adaptive = ((getattr(row, "details_json", None) or {}).get("adaptive") or {})
         row_anomalous = bool(adaptive.get("anomalous"))
-        if adaptive:
-            if not previous_anomalous:
-                previous_anomalous = row_anomalous
-            if healthy_run and getattr(row, "ok", False) and not row_anomalous:
-                healthy_run += 1
-                continue
+        if adaptive and healthy_run and getattr(row, "ok", False) and not row_anomalous:
+            healthy_run += 1
+            continue
         break
 
     noise_cv = None
