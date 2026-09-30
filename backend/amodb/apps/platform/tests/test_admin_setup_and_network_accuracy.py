@@ -418,3 +418,27 @@ def test_network_history_excludes_sentinels_from_throughput_aggregates() -> None
     assert history["sentinel_samples"] == 1
     assert history["full_samples"] == 1
     assert history["sla_breaches"] == 0
+
+
+def test_persistent_anomaly_does_not_redefine_ema_baseline_and_backs_off() -> None:
+    previous = [
+        _adaptive_row(download_bps=50_000_000.0, anomalous=True)
+        for _ in range(6)
+    ] + [
+        _adaptive_row(download_bps=100_000_000.0, anomalous=False)
+        for _ in range(10)
+    ]
+    current = {
+        "ok": True,
+        "download_bps": 50_000_000.0,
+        "latency_ms": 20.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+
+    policy = platform_monitor._adaptive_network_policy(current, previous)
+
+    assert policy["anomalous"] is True
+    assert policy["anomaly_run"] == 7
+    assert policy["state"] == "persistent_degradation"
+    assert policy["next_delay_seconds"] == 900.0
+    assert policy["ema_download_bps"] == 100_000_000.0
