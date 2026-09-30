@@ -98,7 +98,7 @@ class ChecklistBindingCreate(BaseModel):
 class CurrentDocumentChecklistBindingCreate(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
     allow_existing_items: bool = False
-    response_type: str | None = Field(default=None, max_length=64)
+    response_type: str = Field(min_length=2, max_length=64)
     response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
 
 
@@ -1105,6 +1105,20 @@ def bind_current_dms_checklist(
     revision = _current_effective_revision(db, document)
     if revision is None:
         raise HTTPException(status_code=409, detail="This DMS document has no current effective revision. Complete Document Control approval first.")
+    try:
+        normalise_response_options(
+            payload.response_type,
+            [item.model_dump() for item in payload.response_options],
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_RESPONSE_SCHEME_REQUIRED",
+                "message": "The controlled checklist response scheme is incomplete or ambiguous. Define the source values and their governed workflow meaning before binding this revision.",
+                "detail": str(exc),
+            },
+        ) from exc
     template, issued = _issued_template_for_document(
         db,
         ctx=ctx,
