@@ -6,7 +6,9 @@ export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATI
 export type ChecklistResponseOption = {
   value: string;
   label: string;
-  canonical_status: ChecklistCanonicalStatus;
+  // Empty is permitted only while editing a draft. The backend rejects issue/
+  // revision creation until every source option has an explicit semantic map.
+  canonical_status: ChecklistCanonicalStatus | "";
 };
 
 export type ChecklistTemplateItem = {
