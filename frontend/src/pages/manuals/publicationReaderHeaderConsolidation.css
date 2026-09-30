@@ -9,7 +9,7 @@
 
 .dms-reader-shell--standard .publication-reader-page {
   display: grid;
-  grid-template-columns: minmax(250px, 360px) minmax(390px, 1fr) auto;
+  grid-template-columns: minmax(250px, 360px) minmax(260px, 1fr) minmax(280px, 46rem);
   align-content: start;
   min-height: 100%;
 }
@@ -167,12 +167,17 @@
 
 .dms-reader-shell--standard .publication-document-header__actions {
   grid-column: 3;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 54px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: nowrap;
   gap: 0.28rem;
-  max-width: none;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
   padding: 0.35rem 0.6rem;
   border-left: 1px solid var(--publication-border);
   border-bottom: 1px solid var(--publication-border);
@@ -180,6 +185,13 @@
 
 .dms-reader-shell--standard .publication-cache-state {
   display: none;
+}
+
+.dms-reader-shell--standard .publication-document-header__utilities {
+  order: -1;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .dms-reader-shell--standard .publication-document-header__actions button {
