@@ -24,6 +24,7 @@ import ControlledDocumentUploadDialog from "../../../components/documentControl/
 import { useToast } from "../../../components/feedback/ToastProvider";
 import {
   createAuditPreparationRevision,
+  getAuditPreparationReadiness,
   issueAuditPreparationRevision,
   listAuditPreparationRevisions,
 } from "../../../services/qmsAuditGovernance";
@@ -283,6 +284,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
+  const readinessQuery = useQuery({
+    queryKey: ["qms-audit-preparation-readiness", amoCode, auditId],
+    queryFn: ({ signal }) => getAuditPreparationReadiness(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 1_500,
+  });
   const offlinePackQuery = useQuery({
     queryKey: ["qms-audit-offline-pack-status", amoCode, auditId],
     queryFn: () => auditOfflinePackStatus(amoCode, auditId),
@@ -336,6 +343,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-readiness", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
@@ -568,33 +576,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ) &&
     (!checklistDmsDocumentId || Boolean(documents.find((document) => document.id === checklistDmsDocumentId)?.current_revision)),
   );
-  const readiness = useMemo(() => {
-    const required = requests.filter((request) =>
-      request.is_required
-      && request.requirement_stage !== "REQUESTED_NOT_BLOCKING"
-      && request.status !== "WAIVED",
-    );
-    const accepted = required.filter((request) => request.status === "ACCEPTED").length;
-    const total = required.length;
-    // 0 required must never read as 100% success — that invents readiness.
-    if (!total) {
-      return {
-        accepted: 0,
-        total: 0,
-        percent: null as number | null,
-        label: "Not applicable",
-        detail: "No required requests",
-      };
-    }
-    const percent = Math.round((accepted / total) * 100);
-    return {
-      accepted,
-      total,
-      percent,
-      label: `${percent}%`,
-      detail: `${accepted} of ${total} required requests accepted`,
-    };
-  }, [requests]);
+  const readiness = readinessQuery.data;
   const dependentQueriesLoading =
     Boolean(auditId) &&
     (contextQuery.isLoading ||
@@ -606,7 +588,9 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       sessionQuery.isLoading ||
       sessionQuery.isPending ||
       preparationRevisionsQuery.isLoading ||
-      preparationRevisionsQuery.isPending);
+      preparationRevisionsQuery.isPending ||
+      readinessQuery.isLoading ||
+      readinessQuery.isPending);
 
   if (auditQuery.isLoading || auditQuery.isPending || dependentQueriesLoading) {
     return <div className="qms-occurrence-stage qms-occurrence-stage--loading">Loading preparation workspace…</div>;
@@ -626,7 +610,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || preparationRevisionsQuery.error;
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -642,6 +626,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           void participantsQuery.refetch();
           void sessionQuery.refetch();
           void preparationRevisionsQuery.refetch();
+          void readinessQuery.refetch();
         }}
         exitHref={auditSessionPath(amoCode, auditKey, "setup")}
         exitLabel="Back to Setup"
@@ -665,10 +650,10 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const offlinePackStatus = offlinePackQuery.data;
   const bindings = context.controlled_preparation?.checklist_bindings || [];
   const checklistBindings = bindings.length;
-  const readinessWarning = readiness.percent != null && readiness.percent < 100;
+  const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
-  const preparationReady = checklistBindings > 0 && (readiness.total === 0 || readiness.accepted === readiness.total);
+  const preparationReady = Boolean(readiness?.issue_ready);
 
   return (
     <section className="qms-occurrence-stage qms-audit-prepare-stage" aria-label="Pre-audit preparation workspace" id="audit-occurrence-prepare">
@@ -679,7 +664,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <div id={AUDIT_PREPARE_TOOLBAR_ID} className="qms-audit-prepare-toolbar" />
           <div className="qms-audit-prepare-stage__status" role="status" aria-label="Preparation readiness">
             <span className={`qms-audit-prepare-stage__readiness-chip${readinessWarning ? " is-warning" : ""}`}>
-              Evidence {readiness.label}
+              Readiness {readiness?.percent ?? 0}%
             </span>
             <span className="qms-audit-prepare-stage__meta-chip">{checklistBindings} checklist(s)</span>
             {prepRevision ? <span className="qms-audit-prepare-stage__meta-chip">Prep {prepRevision.status}</span> : null}
@@ -703,13 +688,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       {localSuccess ? <div className="qms-occurrence-stage__message is-success" role="status"><CheckCircle2 size={16} /> {localSuccess}</div> : null}
       {stageBlocked ? (
         <div className={`qms-audit-prepare-stage__release${preparationReady ? " is-ready" : ""}`}>
-          <div><ShieldAlert size={16} aria-hidden /><span><strong>{preparationReady ? "Ready to start fieldwork" : "Preparation is incomplete"}</strong><small>{preparationReady ? "Issue the current controlled snapshot to open fieldwork." : checklistBindings ? "Accept all required evidence requests before issuing preparation." : "Select or create at least one fieldwork checklist."}</small></span></div>
+          <div><ShieldAlert size={16} aria-hidden /><span><strong>{preparationReady ? "Ready to start fieldwork" : "Preparation is incomplete"}</strong><small>{preparationReady ? "Issue the current controlled snapshot to open fieldwork." : readiness?.issue_blockers?.[0]?.reason || "Resolve the identified preparation blockers before issue."}</small></span></div>
           {canManage ? <button type="button" className="is-primary" disabled={!preparationReady || preparationRevisionsQuery.isPending || issuePreparationMutation.isPending} onClick={() => issuePreparationMutation.mutate()}>{issuePreparationMutation.isPending ? "Issuing…" : "Issue preparation & open fieldwork"}</button> : null}
         </div>
       ) : null}
       {readinessWarning ? (
         <p className="qms-audit-prepare-stage__notice is-warning">
-          <ShieldAlert size={14} aria-hidden /> {readiness.detail}
+          <ShieldAlert size={14} aria-hidden /> {readiness?.issue_blockers.map((blocker) => blocker.reason).join(" · ") || "Preparation blockers remain."}
         </p>
       ) : null}
 
@@ -751,6 +736,40 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <div><dt>Checklists</dt><dd>{checklistBindings} revision(s)</dd></div>
             <div><dt>Prep revision</dt><dd>{prepRevision ? `Rev ${prepRevision.revision_no} · ${prepRevision.status}` : "Not issued"}</dd></div>
           </dl>
+        </section>
+
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__intelligence">
+          <header>
+            <div>
+              <h3>Preparation intelligence</h3>
+              <p>Authoritative history, open corrective action exposure and source context assembled for this audit.</p>
+            </div>
+            <span className="qms-audit-prepare-stage__meta-chip">As of {new Date(context.as_of).toLocaleString()}</span>
+          </header>
+          <div className="qms-audit-prepare__intelligence-grid">
+            <article><strong>{context.prior_audit_history.items.length}</strong><span>Comparable prior audits</span><small>{context.prior_audit_history.matching_basis}</small></article>
+            <article><strong>{context.prior_findings.total}</strong><span>Prior findings</span><small>{Object.entries(context.prior_findings.classification_counts || {}).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") || "No prior finding classification counts"}</small></article>
+            <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAPA exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
+            <article><strong>{context.cross_source_assurance_pressure.factors.length}</strong><span>Preparation context factors</span><small>{context.cross_source_assurance_pressure.statement}</small></article>
+          </div>
+          {context.cross_source_assurance_pressure.factors.length ? <div className="qms-audit-prepare__factor-list" aria-label="Preparation context factors">{context.cross_source_assurance_pressure.factors.map((factor) => <div key={factor.code}><span><strong>{factor.label}</strong><small>{factor.source}</small></span><span>{String(factor.value ?? "—")}</span><small>{factor.rationale}</small></div>)}</div> : null}
+          {context.data_quality.warnings.length ? <div className="qms-audit-prepare-stage__notice is-warning"><AlertTriangle size={14} aria-hidden /><span>{context.data_quality.warnings.map((warning) => warning.message).join(" · ")}</span></div> : null}
+        </section>
+
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__readiness">
+          <header>
+            <div><h3>Readiness</h3><p>Deterministic checks from persisted setup, checklist and document-request state.</p></div>
+            <span className="qms-audit-prepare-stage__meta-chip">{readiness?.complete_count || 0}/{readiness?.total_count || 0} complete</span>
+          </header>
+          <div className="qms-audit-prepare__readiness-list">
+            {readiness?.checks.map((check) => <div key={check.code} className={check.complete ? "is-complete" : "is-blocked"}>{check.complete ? <CheckCircle2 size={15} aria-hidden /> : <AlertTriangle size={15} aria-hidden />}<span>{check.label}</span></div>)}
+          </div>
+          {readiness?.fieldwork_blockers.length ? <ul className="qms-audit-prepare__blocker-list">{readiness.fieldwork_blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : <p className="qms-audit-prepare-stage__notice is-info"><CheckCircle2 size={14} aria-hidden /> No fieldwork readiness blockers remain.</p>}
+        </section>
+
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__references">
+          <header><div><h3>Controlled references</h3><p>Sources captured into the governed preparation and work-package fingerprint.</p></div><span className="qms-audit-prepare-stage__meta-chip">{context.regulatory_and_manual_basis.source_references.length} source(s)</span></header>
+          {context.regulatory_and_manual_basis.source_references.length ? <div className="qms-audit-prepare__reference-list">{context.regulatory_and_manual_basis.source_references.map((source, index) => <pre key={index}>{typeof source === "string" ? source : JSON.stringify(source, null, 2)}</pre>)}</div> : <p className="qms-audit-prepare__empty">No structured controlled-source reference has been captured yet.</p>}
         </section>
 
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__checklists">
