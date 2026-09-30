@@ -139,6 +139,15 @@ export type ExternalAuditorFieldworkItem = {
   requirement_ref: string | null;
   prompt: string;
   response_type: string;
+  expected_evidence?: string | null;
+  guidance?: string | null;
+  audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
+  sampling_requirement?: string | null;
+  evidence_types?: string[];
+  evidence_required_when?: ExternalChecklistResponse[];
+  notes_required_when?: ExternalChecklistResponse[];
+  na_justification_required?: boolean;
+  mandatory?: boolean;
   response_options: ExternalChecklistResponseOption[];
   canonical_response_status: ExternalChecklistResponse;
   response_value: string | null;
