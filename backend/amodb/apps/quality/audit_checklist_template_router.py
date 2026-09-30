@@ -98,6 +98,8 @@ class ChecklistBindingCreate(BaseModel):
 class CurrentDocumentChecklistBindingCreate(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
     allow_existing_items: bool = False
+    response_type: str | None = Field(default=None, max_length=64)
+    response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
 
 
 class RealtimeAuditChecklistCreate(BaseModel):
@@ -466,6 +468,8 @@ def _issued_template_for_document(
     revision: manual_models.ManualRevision,
     source_system: str = "DOCUMENT_CONTROL",
     items_override: list[dict[str, Any]] | None = None,
+    response_type_override: str | None = None,
+    response_options_override: list[dict[str, Any]] | None = None,
 ) -> tuple[QualityAuditChecklistTemplate, QualityAuditChecklistTemplateRevision]:
     template = db.query(QualityAuditChecklistTemplate).filter(
         QualityAuditChecklistTemplate.amo_id == ctx.amo_id,
@@ -498,12 +502,35 @@ def _issued_template_for_document(
         QualityAuditChecklistTemplateRevision.amo_id == ctx.amo_id,
         QualityAuditChecklistTemplateRevision.template_id == template.id,
     ).order_by(QualityAuditChecklistTemplateRevision.revision_no.desc()).first()
-    if latest and latest.status == "ISSUED" and any(
-        isinstance(item, dict) and str(item.get("revision_id")) == str(revision.id)
-        for item in list(latest.source_references or [])
-    ):
+    latest_matches_source = bool(
+        latest
+        and latest.status == "ISSUED"
+        and any(
+            isinstance(item, dict) and str(item.get("revision_id")) == str(revision.id)
+            for item in list(latest.source_references or [])
+        )
+    )
+    if latest_matches_source and not response_type_override:
         return template, latest
+    if latest_matches_source and response_type_override:
+        latest_items = list(latest.items or [])
+        latest_type = str(latest_items[0].get("response_type") or "") if latest_items else ""
+        latest_options = list(latest_items[0].get("response_options") or []) if latest_items else []
+        requested_options = normalise_response_options(response_type_override, response_options_override)
+        if latest_type == response_type_override and latest_options == requested_options:
+            return template, latest
+
     raw_items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    if response_type_override:
+        governed_options = normalise_response_options(response_type_override, response_options_override)
+        raw_items = [
+            {
+                **dict(item),
+                "response_type": response_type_override,
+                "response_options": governed_options,
+            }
+            for item in raw_items
+        ]
     items = _normalised_items([ChecklistTemplateItem.model_validate(item) for item in raw_items])
     sources = [_source_reference(document, revision, source_system)]
     issued = QualityAuditChecklistTemplateRevision(
@@ -1084,6 +1111,8 @@ def bind_current_dms_checklist(
         audit=audit,
         document=document,
         revision=revision,
+        response_type_override=payload.response_type,
+        response_options_override=[item.model_dump() for item in payload.response_options],
     )
     existing = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == ctx.amo_id,
