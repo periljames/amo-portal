@@ -501,7 +501,20 @@ def history(
             }
             for r in items[::step]
         ]
-        download_mbps_values = [(r.download_bps or 0) / 1_000_000 for r in items if r.download_bps is not None]
+        throughput_items = [
+            r for r in items
+            if ((r.details_json or {}).get("sample_kind") or "full") != "sentinel"
+        ]
+        download_mbps_values = [
+            (r.download_bps or 0) / 1_000_000
+            for r in throughput_items
+            if r.download_bps is not None
+        ]
+        upload_mbps_values = [
+            (r.upload_bps or 0) / 1_000_000
+            for r in throughput_items
+            if r.upload_bps is not None
+        ]
         breaches = 0
         if sla_download_mbps is not None:
             breaches = sum(1 for v in download_mbps_values if v < sla_download_mbps)
@@ -509,9 +522,13 @@ def history(
             "points": points,
             "latency_ms": _stats([r.latency_ms for r in items]),
             "download_mbps": _stats(download_mbps_values),
-            "upload_mbps": _stats([(r.upload_bps or 0) / 1_000_000 for r in items if r.upload_bps is not None]),
+            "upload_mbps": _stats(upload_mbps_values),
             "failures": sum(1 for r in items if not r.ok),
             "total": len(items),
+            "sentinel_samples": sum(
+                1 for r in items if (r.details_json or {}).get("sample_kind") == "sentinel"
+            ),
+            "full_samples": len(throughput_items),
             "sla_download_mbps": sla_download_mbps,
             "sla_breaches": breaches,
         }
