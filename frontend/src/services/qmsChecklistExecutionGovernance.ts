@@ -14,6 +14,7 @@ export type ChecklistExecutionGovernanceRow = {
   prompt: string;
   legacy_response_status: string;
   canonical_response_status: CanonicalChecklistResponse;
+  response_value?: string | null;
   objective_evidence?: string | null;
   finding_id?: string | null;
   auditor_notes?: string | null;
@@ -54,6 +55,7 @@ export type AtomicFieldworkFindingResult = FieldworkMutationResult & {
 
 export type FieldworkMutationPayload = {
   canonical_response_status: CanonicalChecklistResponse;
+  response_value?: string | null;
   auditor_notes?: string | null;
   evidence_references?: Array<Record<string, unknown> | string>;
   reason: string;
@@ -61,6 +63,7 @@ export type FieldworkMutationPayload = {
 
 export type AtomicFieldworkFindingPayload = {
   canonical_response_status: FieldworkFindingResponse;
+  response_value?: string | null;
   severity: FieldworkFindingSeverity;
   level: FieldworkFindingLevel;
   requirement_ref?: string | null;
@@ -129,22 +132,6 @@ export function listChecklistExecutionGovernance(amoCode: string, auditId: strin
   );
 }
 
-export function updateChecklistExecutionGovernance(
-  amoCode: string,
-  auditId: string,
-  itemId: string,
-  payload: FieldworkMutationPayload,
-) {
-  return apiRequest<ChecklistExecutionGovernanceRow>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(itemId)}/execution-governance`),
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
 export function mutateChecklistFieldwork(
   amoCode: string,
   auditId: string,
@@ -156,6 +143,7 @@ export function mutateChecklistFieldwork(
     ...fieldworkEnvelope(clientMutationId, item.entity_version),
     operation: "CHECKLIST_UPDATE" as const,
     canonical_response_status: payload.canonical_response_status,
+    response_value: payload.response_value ?? null,
     auditor_notes: payload.auditor_notes ?? null,
     evidence_references: payload.evidence_references ?? [],
     reason: payload.reason,
