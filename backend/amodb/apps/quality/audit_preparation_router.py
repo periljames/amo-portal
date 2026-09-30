@@ -308,6 +308,15 @@ def _build_work_package_snapshot(
         }
         for request in list(preparation.document_request_snapshot or [])
     ]
+    frozen_bindings = (
+        db.query(QualityAuditChecklistBinding)
+        .filter(
+            QualityAuditChecklistBinding.amo_id == amo_id,
+            QualityAuditChecklistBinding.audit_id == audit.id,
+        )
+        .order_by(QualityAuditChecklistBinding.applied_at.asc())
+        .all()
+    )
     return {
         "schema": "QMS_AUDIT_WORK_PACKAGE_V1",
         "audit": _audit_dict(audit),
@@ -319,6 +328,22 @@ def _build_work_package_snapshot(
             "issued_at": preparation.issued_at.isoformat() if preparation.issued_at else None,
         },
         "checklist_snapshot": list(preparation.checklist_snapshot or []),
+        "checklist_bindings": [
+            {
+                "id": str(binding.id),
+                "template_id": str(binding.template_id),
+                "template_revision_id": str(binding.template_revision_id),
+                "template_code": binding.template_code,
+                "revision_no": binding.revision_no,
+                "content_sha256": binding.content_sha256,
+                "item_snapshot": list(binding.item_snapshot or []),
+                "source_references": list(binding.source_references or []),
+                "instantiated_item_ids": [str(value) for value in list(binding.instantiated_item_ids or [])],
+                "application_reason": binding.application_reason,
+                "applied_at": binding.applied_at.isoformat() if binding.applied_at else None,
+            }
+            for binding in frozen_bindings
+        ],
         "document_request_definitions": request_definitions,
         "source_references": list(preparation.source_references or []),
         "prior_audits": [_audit_dict(item) for item in prior_audits],
@@ -563,6 +588,93 @@ def issue_preparation_revision(
     result = _revision_dict(row)
     result["work_package"] = _work_package_dict(work_package)
     return result
+
+
+
+@router.get("/audits/{audit_id}/preparation-readiness")
+def get_audit_preparation_readiness(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    captured = _capture_sources(db, amo_id=ctx.amo_id, audit=audit)
+    from .audit_workflow_contract import _audit_setup_ready
+
+    issue_blockers = _preparation_readiness_blockers(captured, phase="ISSUE")
+    fieldwork_blockers = _preparation_readiness_blockers(captured, phase="FIELDWORK")
+    if not _audit_setup_ready(audit, db):
+        setup = {
+            "type": "SETUP",
+            "reason": "Save the audit definition and assign eligible auditors with required independence declarations.",
+        }
+        issue_blockers.append(setup)
+        fieldwork_blockers.append(setup)
+
+    latest = (
+        db.query(QualityAuditPreparationRevision)
+        .filter(
+            QualityAuditPreparationRevision.amo_id == ctx.amo_id,
+            QualityAuditPreparationRevision.audit_id == audit_id,
+        )
+        .order_by(QualityAuditPreparationRevision.revision_no.desc())
+        .first()
+    )
+    issued = latest is not None and latest.status == "ISSUED"
+    stale = bool(issued and latest.source_fingerprint != captured["source_fingerprint"])
+    if not issued:
+        fieldwork_blockers.append({
+            "type": "PREPARATION_REVISION",
+            "reason": "Issue the current governed preparation revision before fieldwork.",
+        })
+    elif stale:
+        fieldwork_blockers.append({
+            "type": "PREPARATION_STALE",
+            "reason": "Preparation inputs changed after issue. Create and issue a new controlled preparation revision.",
+        })
+
+    checks = [
+        {
+            "code": "AUDIT_DEFINITION",
+            "label": "Audit definition and eligible team",
+            "complete": not any(item["type"] == "SETUP" for item in issue_blockers),
+        },
+        {
+            "code": "CHECKLIST",
+            "label": "Governed checklist assigned",
+            "complete": bool(captured.get("checklist_snapshot")),
+        },
+        {
+            "code": "PRE_ISSUE_REQUESTS",
+            "label": "Pre-issue evidence requests resolved",
+            "complete": not any(item["type"] == "DOCUMENT_REQUEST" for item in issue_blockers),
+        },
+        {
+            "code": "FIELDWORK_REQUESTS",
+            "label": "Pre-fieldwork evidence requests resolved",
+            "complete": not any(item["type"] == "DOCUMENT_REQUEST" for item in fieldwork_blockers),
+        },
+        {
+            "code": "CONTROLLED_PREPARATION",
+            "label": "Controlled preparation issued and current",
+            "complete": issued and not stale,
+        },
+    ]
+    complete_count = sum(1 for item in checks if item["complete"])
+    return {
+        "issue_ready": len(issue_blockers) == 0,
+        "fieldwork_ready": len(fieldwork_blockers) == 0,
+        "checks": checks,
+        "issue_blockers": issue_blockers,
+        "fieldwork_blockers": fieldwork_blockers,
+        "complete_count": complete_count,
+        "total_count": len(checks),
+        "percent": round((complete_count / len(checks)) * 100) if checks else 0,
+        "source_fingerprint": captured["source_fingerprint"],
+        "issued_preparation_revision_id": str(latest.id) if issued else None,
+        "issued_preparation_revision_no": latest.revision_no if issued else None,
+    }
 
 @router.get("/audits/{audit_id}/work-package")
 def get_audit_work_package(
