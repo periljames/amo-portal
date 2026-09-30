@@ -45,6 +45,7 @@ export function buildExternalAuditorMutation(
   item: ExternalAuditorFieldworkItem,
   payload: {
     canonicalResponseStatus: ExternalChecklistResponse;
+    responseValue?: string | null;
     auditorNotes?: string | null;
     evidenceReferences?: Array<Record<string, unknown> | string>;
     reason: string;
@@ -60,6 +61,7 @@ export function buildExternalAuditorMutation(
     baseVersion: item.entity_version,
     operation: "CHECKLIST_UPDATE",
     canonicalResponseStatus: payload.canonicalResponseStatus,
+    responseValue: payload.responseValue ?? null,
     auditorNotes: payload.auditorNotes ?? null,
     evidenceReferences: payload.evidenceReferences ?? [],
     reason: payload.reason,
@@ -86,6 +88,7 @@ export async function commitExternalAuditorMutation(
       base_version: mutation.baseVersion,
       operation: mutation.operation,
       canonical_response_status: mutation.canonicalResponseStatus,
+      response_value: mutation.responseValue,
       auditor_notes: mutation.auditorNotes,
       evidence_references: mutation.evidenceReferences,
       reason: mutation.reason,
