@@ -30,6 +30,12 @@ router = APIRouter(tags=["Quality audit occurrence completion"])
 public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
 
 ControlledSourceSystem = Literal["QMS_LOCAL", "DOCUMENT_CONTROL"]
+DocumentRequestRequirementStage = Literal[
+    "REQUIRED_BEFORE_ISSUE",
+    "REQUIRED_BEFORE_FIELDWORK",
+    "REQUIRED_DURING_FIELDWORK",
+    "REQUESTED_NOT_BLOCKING",
+]
 _CANONICAL_CONTROLLED_REVISION_STATUSES = {
     manual_models.ManualRevisionStatus.PUBLISHED,
     manual_models.ManualRevisionStatus.SUPERSEDED,
@@ -69,6 +75,7 @@ class GovernedDocumentRequestCreate(BaseModel):
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] = "DOCUMENT"
     linked_criterion: str | None = Field(default=None, max_length=4000)
     is_required: bool = True
+    requirement_stage: DocumentRequestRequirementStage = "REQUIRED_BEFORE_ISSUE"
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] = "UPLOAD_OR_CONTROLLED"
 
     # QMS_LOCAL is the compatibility default for older API clients. New frontend
@@ -86,6 +93,7 @@ class GovernedDocumentRequestUpdate(BaseModel):
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] | None = None
     linked_criterion: str | None = Field(default=None, max_length=4000)
     is_required: bool | None = None
+    requirement_stage: DocumentRequestRequirementStage | None = None
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] | None = None
     controlled_source_system: ControlledSourceSystem | None = None
     controlled_document_id: uuid.UUID | None = None
@@ -308,6 +316,7 @@ def _doc_request_dict(row: models.QualityAuditDocumentRequest, metadata: Quality
         "request_type": metadata.request_type if metadata else "DOCUMENT",
         "linked_criterion": metadata.linked_criterion if metadata else None,
         "is_required": metadata.is_required if metadata else True,
+        "requirement_stage": metadata.requirement_stage if metadata else "REQUIRED_BEFORE_ISSUE",
         "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
         "controlled_source_system": metadata.controlled_source_system if metadata else "QMS_LOCAL",
         "controlled_document_id": str(metadata.controlled_document_id) if metadata and metadata.controlled_document_id else None,
@@ -522,6 +531,7 @@ def create_governed_document_request(
         request_type=payload.request_type,
         linked_criterion=(payload.linked_criterion or "").strip() or None,
         is_required=payload.is_required,
+        requirement_stage=payload.requirement_stage,
         source_mode=payload.source_mode,
         controlled_source_system=payload.controlled_source_system,
         controlled_document_id=qms_document_id,
@@ -611,7 +621,7 @@ def update_governed_document_request(
         row.reviewed_at = _utcnow()
     if "review_note" in update:
         row.review_note = (update["review_note"] or "").strip() or None
-    for field in ("request_type", "linked_criterion", "is_required"):
+    for field in ("request_type", "linked_criterion", "is_required", "requirement_stage"):
         if field in update:
             value = update[field]
             if isinstance(value, str):
