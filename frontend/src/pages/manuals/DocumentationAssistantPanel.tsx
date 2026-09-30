@@ -7,7 +7,9 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   BookOpen,
@@ -282,7 +284,7 @@ export default function DocumentationAssistantPanel({
     ? ({ "--documentation-assistant-width": `${panelWidth}px` } as CSSProperties)
     : undefined;
 
-  return <aside
+  const panel: ReactNode = <aside
     className={`documentation-assistant ${embedded ? "is-embedded" : "is-floating"} ${busy ? "is-busy" : ""}`}
     aria-label={title}
     style={floatingStyle}
@@ -386,4 +388,9 @@ export default function DocumentationAssistantPanel({
     </div> : null}
     </div>
   </aside>;
+
+  if (!embedded && typeof document !== "undefined") {
+    return createPortal(panel, document.body);
+  }
+  return panel;
 }
