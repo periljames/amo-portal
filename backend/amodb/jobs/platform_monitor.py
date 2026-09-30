@@ -285,7 +285,7 @@ def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
             .order_by(models.PlatformNetworkProbe.captured_at.desc())
             .first()
         )
-        full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 21600.0, minimum=1800.0)
+        full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 43200.0, minimum=1800.0)
         full_cooldown = _float_setting("PLATFORM_NET_FULL_ANOMALY_COOLDOWN_SECONDS", 900.0, minimum=300.0)
         age_seconds = None
         if last_full is not None and getattr(last_full, "captured_at", None) is not None:
