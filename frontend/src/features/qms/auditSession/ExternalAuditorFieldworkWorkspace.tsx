@@ -22,6 +22,12 @@ import {
   removeExternalAuditMutation,
   type ExternalAuditOutboxScope,
 } from "../../../services/qmsExternalAuditOutbox";
+import {
+  clearExternalOfflineEvidence,
+  enqueueExternalOfflineEvidence,
+  listExternalOfflineEvidence,
+  replayExternalOfflineEvidence,
+} from "../../../services/qmsExternalOfflineEvidence";
 import ExternalAuditorFindingDraftPanel from "./ExternalAuditorFindingDraftPanel";
 
 const DEFAULT_RESPONSES: ExternalChecklistResponseOption[] = [
@@ -107,13 +113,17 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [replaying, setReplaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingEvidenceCount, setPendingEvidenceCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const updatePendingCount = async (nextModel: ExternalAuditorFieldworkModel | null = modelRef.current) => {
-    if (!nextModel) { setPendingCount(0); return; }
-    try { setPendingCount((await listExternalAuditMutations(scopeOf(nextModel))).length); }
+    if (!nextModel) { setPendingCount(0); setPendingEvidenceCount(0); return; }
+    const scope = scopeOf(nextModel);
+    try { setPendingCount((await listExternalAuditMutations(scope)).length); }
     catch { setPendingCount(0); }
+    try { setPendingEvidenceCount((await listExternalOfflineEvidence(scope)).length); }
+    catch { setPendingEvidenceCount(0); }
   };
 
   const load = async (): Promise<ExternalAuditorFieldworkModel | null> => {
@@ -124,6 +134,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       const prior = modelRef.current;
       if (prior && (prior.audit_id !== next.audit_id || prior.participant_id !== next.participant_id)) {
         await clearExternalAuditMutations(scopeOf(prior)).catch(() => undefined);
+        await clearExternalOfflineEvidence(scopeOf(prior)).catch(() => undefined);
       }
       modelRef.current = next;
       setModel(next);
@@ -157,8 +168,6 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       setModel(fresh);
       const scope = scopeOf(fresh);
       const queue = await listExternalAuditMutations(scope);
-      if (!queue.length) { setPendingCount(0); return; }
-
       let committed = 0;
       for (const entry of queue) {
         try {
@@ -178,10 +187,21 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
           break;
         }
       }
-      await updatePendingCount(fresh);
-      if (committed > 0) {
-        setNotice(`${committed} queued fieldwork change${committed === 1 ? "" : "s"} synchronized with original mutation identity preserved.`);
+      const currentModel = committed > 0 ? await getExternalAuditorFieldwork() : fresh;
+      modelRef.current = currentModel;
+      setModel(currentModel);
+      const evidenceResult = await replayExternalOfflineEvidence(scope);
+      await updatePendingCount(currentModel);
+      if (committed > 0 || evidenceResult.uploaded.length > 0) {
+        const parts = [];
+        if (committed > 0) parts.push(`${committed} fieldwork change${committed === 1 ? "" : "s"}`);
+        if (evidenceResult.uploaded.length > 0) parts.push(`${evidenceResult.uploaded.length} evidence file${evidenceResult.uploaded.length === 1 ? "" : "s"}`);
+        setNotice(`${parts.join(" and ")} synchronized with original mutation identity and evidence SHA-256 preserved.`);
         await load();
+      } else if (evidenceResult.deferred > 0) {
+        setNotice(`${evidenceResult.deferred} evidence file${evidenceResult.deferred === 1 ? " is" : "s are"} waiting for earlier checklist changes to synchronize first.`);
+      } else if (evidenceResult.conflicts > 0) {
+        setError(`${evidenceResult.conflicts} evidence file${evidenceResult.conflicts === 1 ? " requires" : "s require"} deliberate conflict review.`);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Pending external fieldwork could not be synchronized.");
@@ -264,11 +284,20 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
   const uploadEvidence = async () => {
     if (!model || !model.can_create_evidence || !selected || !evidenceFile || uploading) return;
+    setUploading(true); setError(null); setNotice(null);
+    const queueLocal = async () => {
+      await enqueueExternalOfflineEvidence(model, selected, evidenceFile, evidenceDescription);
+      setEvidenceFile(null);
+      setEvidenceDescription("");
+      await updatePendingCount(model);
+      setNotice("Evidence saved encrypted on this device. No guest credential or CSRF token was stored; upload will revalidate the active external-auditor session.");
+    };
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      setError("Evidence files require an online governed upload. Structured checklist notes and responses remain available through the encrypted offline queue.");
+      try { await queueLocal(); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : "Evidence could not be stored securely offline."); }
+      finally { setUploading(false); }
       return;
     }
-    setUploading(true); setError(null); setNotice(null);
     try {
       const fresh = await getExternalAuditorFieldwork();
       if (fresh.audit_id !== model.audit_id || fresh.participant_id !== model.participant_id) {
@@ -281,7 +310,19 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       setNotice(`Governed evidence uploaded · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "External evidence upload failed.");
+      const message = cause instanceof Error ? cause.message : "External evidence upload failed.";
+      const normalized = message.toLowerCase();
+      const transportFailure = normalized.includes("failed to fetch")
+        || normalized.includes("network")
+        || normalized.includes("connection")
+        || normalized.includes("timed out")
+        || normalized.includes("load failed");
+      if (transportFailure) {
+        try { await queueLocal(); }
+        catch (queueCause) { setError(queueCause instanceof Error ? queueCause.message : message); }
+      } else {
+        setError(message);
+      }
     } finally {
       setUploading(false);
     }
@@ -303,8 +344,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
       <div className="qms-external-auditor-fieldwork__sync" role="status">
         {typeof navigator !== "undefined" && !navigator.onLine ? <CloudOff size={15} /> : <UploadCloud size={15} />}
-        <span>{pendingCount ? `${pendingCount} encrypted change${pendingCount === 1 ? "" : "s"} pending sync` : "No pending fieldwork changes"}</span>
-        {pendingCount ? <button type="button" onClick={() => void replayPending()} disabled={replaying || (typeof navigator !== "undefined" && !navigator.onLine)}>{replaying ? "Synchronizing…" : "Sync now"}</button> : null}
+        <span>{pendingCount || pendingEvidenceCount ? `${pendingCount} fieldwork change${pendingCount === 1 ? "" : "s"} · ${pendingEvidenceCount} evidence file${pendingEvidenceCount === 1 ? "" : "s"} pending sync` : "No pending fieldwork changes"}</span>
+        {pendingCount || pendingEvidenceCount ? <button type="button" onClick={() => void replayPending()} disabled={replaying || (typeof navigator !== "undefined" && !navigator.onLine)}>{replaying ? "Synchronizing…" : "Sync now"}</button> : null}
       </div>
       {error ? <div className="qms-public-audit__error" role="alert"><AlertTriangle size={15} /> {error}</div> : null}
       {notice ? <div className="qms-external-auditor-fieldwork__notice" role="status"><CheckCircle2 size={15} /> {notice}</div> : null}
