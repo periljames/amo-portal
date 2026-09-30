@@ -276,33 +276,47 @@ def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
             data=database,
         )
 
-        last_full = (
+        full_history = (
             db.query(models.PlatformNetworkProbe)
             .filter(
                 models.PlatformNetworkProbe.scenario == "server_internet",
                 models.PlatformNetworkProbe.source == "scheduled_full",
             )
             .order_by(models.PlatformNetworkProbe.captured_at.desc())
-            .first()
+            .limit(20)
+            .all()
         )
+        last_full_attempt = full_history[0] if full_history else None
+        last_full_success = next((row for row in full_history if getattr(row, "ok", False)), None)
         full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 43200.0, minimum=1800.0)
         full_cooldown = _float_setting("PLATFORM_NET_FULL_ANOMALY_COOLDOWN_SECONDS", 900.0, minimum=300.0)
-        age_seconds = None
-        if last_full is not None and getattr(last_full, "captured_at", None) is not None:
-            age_seconds = max(0.0, (network_diagnostics._now() - last_full.captured_at).total_seconds())
+        failure_backoff = _float_setting("PLATFORM_NET_FULL_FAILURE_BACKOFF_SECONDS", 3600.0, minimum=900.0)
+
+        def _age(row) -> float | None:
+            if row is None or getattr(row, "captured_at", None) is None:
+                return None
+            return max(0.0, (network_diagnostics._now() - row.captured_at).total_seconds())
+
+        attempt_age = _age(last_full_attempt)
+        success_age = _age(last_full_success)
+        attempt_ready = attempt_age is None or attempt_age >= failure_backoff
+        anomaly_ready = attempt_age is None or attempt_age >= full_cooldown
 
         full_due = False
         full_reason = None
         if not policy["provider_unavailable"]:
-            if last_full is None and sentinel.get("ok"):
+            if last_full_attempt is None and sentinel.get("ok"):
                 full_due = True
                 full_reason = "bootstrap"
-            elif age_seconds is not None and age_seconds >= full_refresh:
-                full_due = True
-                full_reason = "periodic_refresh"
-            elif policy["confirmed_anomaly"] and (age_seconds is None or age_seconds >= full_cooldown):
+            elif policy["confirmed_anomaly"] and anomaly_ready:
                 full_due = True
                 full_reason = "confirmed_anomaly"
+            elif last_full_success is None and attempt_ready and sentinel.get("ok"):
+                full_due = True
+                full_reason = "retry_after_failed_full"
+            elif success_age is not None and success_age >= full_refresh and attempt_ready:
+                full_due = True
+                full_reason = "periodic_refresh"
 
         full_internet = None
         full_database = None
