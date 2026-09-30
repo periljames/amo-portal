@@ -64,6 +64,8 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
         onNotice(`Evidence synchronized · ${result.uploaded.length} file${result.uploaded.length === 1 ? "" : "s"} verified by SHA-256.`);
       } else if (result.conflicts) {
         onError(`${result.conflicts} pending evidence file${result.conflicts === 1 ? " requires" : "s require"} review before synchronization.`);
+      } else if (result.deferred) {
+        onNotice(`${result.deferred} evidence file${result.deferred === 1 ? " is" : "s are"} waiting for earlier checklist changes to synchronize first.`);
       }
     } catch (cause) {
       // Local encrypted files remain queued. Do not replace a durable local
@@ -75,9 +77,16 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const onOnline = () => void syncPending();
+    const onStructuredSync = () => {
+      if (pending.length && navigator.onLine !== false) void syncPending();
+    };
     window.addEventListener("online", onOnline);
+    window.addEventListener("amo:offline-sync-complete", onStructuredSync);
     if (pending.length && navigator.onLine !== false) void syncPending();
-    return () => window.removeEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("amo:offline-sync-complete", onStructuredSync);
+    };
   }, [amoCode, auditId, pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const upload = async () => {
