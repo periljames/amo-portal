@@ -9,7 +9,6 @@ const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 const EXTERNAL_SOURCE_ID = process.env.E2E_DMS_EXTERNAL_SOURCE_ID || "00000000-0000-4000-8000-000000000494";
 
 let materialBrowserErrors: string[] = [];
-let cachedAdminStorage: Record<string, string> | null = null;
 
 test.use({
   viewport: { width: 1440, height: 900 },
@@ -36,28 +35,24 @@ function watchMaterialBrowserErrors(page: Page): void {
   });
 }
 
-async function restoreCachedAdminSession(page: Page): Promise<boolean> {
-  if (!cachedAdminStorage) return false;
-  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
-  await page.evaluate((storage) => {
-    localStorage.clear();
-    for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
-  }, cachedAdminStorage);
-  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/document-control`);
-  await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
-  return true;
-}
-
 async function signIn(page: Page): Promise<void> {
-  if (await restoreCachedAdminSession(page)) return;
+  await page.context().clearCookies();
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.reload();
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
   if (await continueButton.count()) await continueButton.click();
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
-  cachedAdminStorage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  await expect.poll(
+    () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
+    { timeout: 10_000 },
+  ).toBe(true);
 }
 
 async function openRegisteredCopy(page: Page, copyNumber: string, homeLocation: string): Promise<void> {
