@@ -57,8 +57,21 @@ def main() -> None:
         except (TypeError, ValueError):
             return default
 
-    infra_interval = _interval("PLATFORM_INFRA_SNAPSHOT_INTERVAL_SECONDS", 30.0)
+    infra_healthy_interval = _interval("PLATFORM_INFRA_HEALTHY_INTERVAL_SECONDS", 300.0)
+    infra_degraded_interval = _interval("PLATFORM_INFRA_DEGRADED_INTERVAL_SECONDS", 60.0)
+    infra_critical_interval = _interval("PLATFORM_INFRA_CRITICAL_INTERVAL_SECONDS", 30.0)
+    infra_unknown_interval = _interval("PLATFORM_INFRA_UNKNOWN_INTERVAL_SECONDS", 120.0)
     health_interval = _interval("PLATFORM_HEALTH_PROBE_INTERVAL_SECONDS", 120.0)
+
+    def _next_infrastructure_delay(result: dict | None) -> float:
+        status = str((result or {}).get("status") or "UNKNOWN").upper()
+        if status == "CRITICAL":
+            return infra_critical_interval
+        if status == "DEGRADED":
+            return infra_degraded_interval
+        if status == "OK":
+            return infra_healthy_interval
+        return infra_unknown_interval
     health_probe_network = (os.getenv("PLATFORM_HEALTH_PROBE_INCLUDE_NETWORK", "false") or "").strip().lower() in {"1", "true", "yes", "on"}
     # Network diagnostics use an adaptive low-load scheduler. A small sentinel
     # chooses the next interval, while bounded full throughput tests run only
@@ -86,9 +99,9 @@ def main() -> None:
 
     # Prime the platform monitor immediately so the superadmin Operations and
     # System Infrastructure views have data on first load.
-    platform_monitor.capture_infrastructure_once()
+    initial_infrastructure = platform_monitor.capture_infrastructure_once()
     platform_monitor.capture_health_once(include_network=health_probe_network)
-    next_infra = time.monotonic() + infra_interval
+    next_infra = time.monotonic() + _next_infrastructure_delay(initial_infrastructure)
     next_health = time.monotonic() + health_interval
     next_net = time.monotonic() + (30.0 if net_probe_enabled else float("inf"))
 
@@ -98,8 +111,8 @@ def main() -> None:
                 raise RuntimeError("Scheduled worker stopped unexpectedly")
             now = time.monotonic()
             if now >= next_infra:
-                platform_monitor.capture_infrastructure_once()
-                next_infra = now + infra_interval
+                infrastructure = platform_monitor.capture_infrastructure_once()
+                next_infra = now + _next_infrastructure_delay(infrastructure)
             if now >= next_health:
                 platform_monitor.capture_health_once(include_network=health_probe_network)
                 next_health = now + health_interval
