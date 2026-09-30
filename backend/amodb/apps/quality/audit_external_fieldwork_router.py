@@ -36,6 +36,7 @@ from .audit_checklist_execution_router import (
     _fieldwork_write_blocker,
     _mark_fieldwork_started,
     _require_fieldwork_write_window,
+    _validated_response_value,
 )
 from .audit_external_access_router import _GUEST_COOKIE, _active_grant, _audit_for_tenant, _hash_token
 from .audit_external_access_models import QualityAuditAccessGrant
@@ -103,6 +104,7 @@ def _external_item_dict(
         "requirement_ref": item.requirement_ref,
         "prompt": item.prompt,
         "canonical_response_status": governance.canonical_response_status if governance else _canonical_from_legacy(item.response_status),
+        "response_value": governance.response_value if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
         "finding_id": str(item.finding_id) if item.finding_id else None,
         "my_auditor_notes": contribution.auditor_notes if contribution else None,
@@ -232,6 +234,15 @@ def mutate_external_auditor_checklist(
         governance=governance,
     )
 
+    response_value = _validated_response_value(
+        db,
+        amo_id=grant.amo_id,
+        audit_id=grant.audit_id,
+        item_id=item_id,
+        response_value=payload.response_value,
+        canonical_status=payload.canonical_response_status,
+    )
+
     # External contributions must never replace internal Quality notes/evidence.
     central_notes = governance.auditor_notes if governance else None
     central_evidence = list(governance.evidence_references or []) if governance else []
@@ -242,6 +253,7 @@ def mutate_external_auditor_checklist(
         item=item,
         payload=ChecklistExecutionUpdate(
             canonical_response_status=payload.canonical_response_status,
+            response_value=response_value,
             auditor_notes=central_notes,
             evidence_references=central_evidence,
             reason=f"External auditor participant {participant.id} checklist execution: {payload.reason}",
@@ -275,6 +287,7 @@ def mutate_external_auditor_checklist(
         participant_id=participant.id,
         client_mutation_id=payload.client_mutation_id,
         canonical_response_status=payload.canonical_response_status,
+        response_value=response_value,
         auditor_notes=payload.auditor_notes.strip() if payload.auditor_notes else None,
         evidence_references=list(payload.evidence_references or []),
     )
