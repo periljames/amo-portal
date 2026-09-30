@@ -2,6 +2,12 @@ import { apiRequest, qmsPath } from "./apiClient";
 import type { PublicationUploadPayload } from "./publications";
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
+export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+export type ChecklistResponseOption = {
+  value: string;
+  label: string;
+  canonical_status: ChecklistCanonicalStatus;
+};
 
 export type ChecklistTemplateItem = {
   section?: string | null;
@@ -13,6 +19,7 @@ export type ChecklistTemplateItem = {
   prompt: string;
   expected_evidence?: string | null;
   response_type: string;
+  response_options?: ChecklistResponseOption[];
   applicability: string;
   mandatory?: boolean;
   finding_trigger?: ChecklistFindingTrigger;
