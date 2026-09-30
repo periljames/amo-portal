@@ -97,6 +97,8 @@ export type ScenarioHistory = {
   upload_mbps: NetworkStats;
   failures: number;
   total: number;
+  sentinel_samples?: number;
+  full_samples?: number;
   sla_download_mbps: number | null;
   sla_breaches: number;
 };
