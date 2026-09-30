@@ -233,10 +233,17 @@ export function bindCurrentDmsChecklist(
   documentId: string,
   reason: string,
   allowExistingItems: boolean,
+  responseType: string,
+  responseOptions: ChecklistResponseOption[] = [],
 ) {
   return apiRequest<ChecklistBinding>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/${encodeURIComponent(documentId)}/bind-current`),
-    json("POST", { reason, allow_existing_items: allowExistingItems }),
+    json("POST", {
+      reason,
+      allow_existing_items: allowExistingItems,
+      response_type: responseType,
+      response_options: responseOptions,
+    }),
   );
 }
 
