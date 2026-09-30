@@ -6,6 +6,11 @@ export function deleteAuditMeeting(amoCode: string, auditId: string, meetingId: 
 }
 
 export type AuditControlledSourceSystem = "QMS_LOCAL" | "DOCUMENT_CONTROL";
+export type AuditDocumentRequestRequirementStage =
+  | "REQUIRED_BEFORE_ISSUE"
+  | "REQUIRED_BEFORE_FIELDWORK"
+  | "REQUIRED_DURING_FIELDWORK"
+  | "REQUESTED_NOT_BLOCKING";
 
 export type ControlledDocumentSubmission = {
   id: string;
@@ -52,6 +57,7 @@ export type GovernedAuditDocumentRequest = {
   request_type: "DOCUMENT" | "RECORD" | "MANUAL" | "FORM" | "CERTIFICATE" | "REGISTER" | "OTHER";
   linked_criterion: string | null;
   is_required: boolean;
+  requirement_stage: AuditDocumentRequestRequirementStage;
   source_mode: "UPLOAD" | "CONTROLLED_DMS" | "UPLOAD_OR_CONTROLLED";
   controlled_source_system: AuditControlledSourceSystem;
   controlled_document_id: string | null;
@@ -174,6 +180,7 @@ export function createGovernedAuditDocumentRequest(
     request_type: GovernedAuditDocumentRequest["request_type"];
     linked_criterion?: string | null;
     is_required: boolean;
+    requirement_stage: AuditDocumentRequestRequirementStage;
     source_mode: GovernedAuditDocumentRequest["source_mode"];
     controlled_source_system: AuditControlledSourceSystem;
     controlled_document_id?: string | null;
@@ -190,7 +197,7 @@ export function updateGovernedAuditDocumentRequest(
   auditId: string,
   requestId: string,
   payload: Partial<Pick<GovernedAuditDocumentRequest,
-    "status" | "review_note" | "request_type" | "linked_criterion" | "is_required" | "source_mode" |
+    "status" | "review_note" | "request_type" | "linked_criterion" | "is_required" | "requirement_stage" | "source_mode" |
     "controlled_source_system" | "controlled_document_id" | "controlled_revision_id" |
     "canonical_document_id" | "canonical_revision_id">>,
 ) {
