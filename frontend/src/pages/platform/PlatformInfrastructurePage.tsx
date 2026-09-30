@@ -200,7 +200,7 @@ export default function PlatformInfrastructurePage() {
     >
       {infra.error ? <ErrorState error={infra.error} retry={infra.reload} /> : null}
 
-      {/* ---- Real-time monitor (updates every second) ---- */}
+      {/* ---- Real-time monitor (updates every two seconds) ---- */}
       <section className="platform-section-head">
         <h2>Live monitor</h2>
         <div className="platform-actions">
