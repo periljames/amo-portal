@@ -119,6 +119,8 @@ type Target = {
   credentials?: RequestCredentials;
   downloadBlock: number;
   uploadBlock: number;
+  maxDownloadBytes: number;
+  maxUploadBytes: number;
 };
 
 type DirectionResult = {
@@ -265,7 +267,7 @@ async function runDownload(
       current_mbps: total * 8 / Math.max(1, elapsed) / 1000, elapsed_ms: elapsed, bytes_transferred: total,
       samples: rates.length, stable,
     });
-    if ((elapsed >= targetMs && stable) || elapsed >= targetMs + 6000 || total >= 768 * 1024 * 1024) {
+    if ((elapsed >= targetMs && stable) || elapsed >= targetMs + 6000 || total >= target.maxDownloadBytes) {
       return { mbps: total * 8 / Math.max(1, elapsed) / 1000, bytes: total, elapsedMs: elapsed, samples: rates.length, stable, ray, serverMs: null };
     }
   }
@@ -337,7 +339,7 @@ async function runUpload(
       current_mbps: total * 8 / Math.max(1, elapsed) / 1000, elapsed_ms: elapsed,
       bytes_transferred: total, samples: rates.length, stable,
     });
-    if ((elapsed >= targetMs && stable) || elapsed >= targetMs + 6000 || total >= 512 * 1024 * 1024) {
+    if ((elapsed >= targetMs && stable) || elapsed >= targetMs + 6000 || total >= target.maxUploadBytes) {
       return { mbps: total * 8 / Math.max(1, elapsed) / 1000, bytes: total, elapsedMs: elapsed, samples: rates.length, stable, ray, serverMs };
     }
   }
@@ -413,7 +415,9 @@ const portalTarget = (): Target => ({
   pingUrl: () => `${base()}/platform/diagnostics/ping`,
   downloadUrl: (bytes) => `${base()}/platform/diagnostics/speedtest/download?bytes=${bytes}`,
   uploadUrl: () => `${base()}/platform/diagnostics/speedtest/upload`,
-  headers: () => authHeaders(), credentials: "include", downloadBlock: 8 * 1024 * 1024, uploadBlock: 4 * 1024 * 1024,
+  headers: () => authHeaders(), credentials: "include",
+  downloadBlock: 8 * 1024 * 1024, uploadBlock: 4 * 1024 * 1024,
+  maxDownloadBytes: 64 * 1024 * 1024, maxUploadBytes: 32 * 1024 * 1024,
 });
 
 const internetTarget = (): Target => ({
@@ -421,7 +425,9 @@ const internetTarget = (): Target => ({
   pingUrl: () => `https://${CLOUDFLARE_HOST}/__down?bytes=1000`,
   downloadUrl: (bytes) => `https://${CLOUDFLARE_HOST}/__down?bytes=${bytes}`,
   uploadUrl: () => `https://${CLOUDFLARE_HOST}/__up`,
-  headers: () => ({}), downloadBlock: 16 * 1024 * 1024, uploadBlock: 8 * 1024 * 1024,
+  headers: () => ({}),
+  downloadBlock: 16 * 1024 * 1024, uploadBlock: 8 * 1024 * 1024,
+  maxDownloadBytes: 256 * 1024 * 1024, maxUploadBytes: 128 * 1024 * 1024,
 });
 
 export const platformDiagnostics = {
