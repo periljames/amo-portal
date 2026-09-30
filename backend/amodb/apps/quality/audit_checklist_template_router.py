@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
@@ -23,6 +23,7 @@ from amodb.apps.manuals import models as manual_models
 from amodb.database import get_read_db, get_write_db
 
 from . import models
+from .audit_checklist_response_policy import normalise_response_options
 from .audit_checklist_template_models import (
     QualityAuditChecklistBinding,
     QualityAuditChecklistMemory,
@@ -43,6 +44,12 @@ class ChecklistTemplateCreate(BaseModel):
     audit_kind: str | None = Field(default=None, max_length=32)
 
 
+class ChecklistResponseOption(BaseModel):
+    value: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=80)
+    canonical_status: Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]
+
+
 class ChecklistTemplateItem(BaseModel):
     section: str | None = Field(default=None, max_length=128)
     category: str | None = Field(default=None, max_length=128)
@@ -53,6 +60,7 @@ class ChecklistTemplateItem(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     expected_evidence: str | None = Field(default=None, max_length=4000)
     response_type: str = Field(default="COMPLIANCE", max_length=64)
+    response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
     applicability: str = Field(default="APPLICABLE", max_length=64)
     mandatory: bool = True
     finding_trigger: str = Field(
@@ -104,6 +112,21 @@ class ChecklistAIDraftRequest(BaseModel):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalised_items(items: list[ChecklistTemplateItem]) -> list[dict[str, Any]]:
+    normalised: list[dict[str, Any]] = []
+    for item in items:
+        row = item.model_dump()
+        try:
+            row["response_options"] = normalise_response_options(
+                row.get("response_type"),
+                row.get("response_options"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        normalised.append(row)
+    return normalised
 
 
 def _hash_content(items: list[dict[str, Any]], source_references: list[Any]) -> str:
@@ -472,7 +495,8 @@ def _issued_template_for_document(
         for item in list(latest.source_references or [])
     ):
         return template, latest
-    items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    raw_items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    items = _normalised_items([ChecklistTemplateItem.model_validate(item) for item in raw_items])
     sources = [_source_reference(document, revision, source_system)]
     issued = QualityAuditChecklistTemplateRevision(
         amo_id=ctx.amo_id,
@@ -836,7 +860,7 @@ def create_checklist_revision(
     ).order_by(QualityAuditChecklistTemplateRevision.revision_no.desc()).with_for_update().first()
     if latest is not None and latest.status == "DRAFT":
         raise HTTPException(status_code=409, detail="A DRAFT checklist revision already exists for this template.")
-    items = [item.model_dump() for item in payload.items]
+    items = _normalised_items(payload.items)
     sources = list(payload.source_references)
     row = QualityAuditChecklistTemplateRevision(
         amo_id=ctx.amo_id,
@@ -1316,7 +1340,7 @@ def create_realtime_audit_checklist(
             "source_sha256": revision.source_sha256,
         })
 
-    items = [item.model_dump() for item in payload.items]
+    items = _normalised_items(payload.items)
     now = _utcnow()
     template = QualityAuditChecklistTemplate(
         amo_id=ctx.amo_id,
