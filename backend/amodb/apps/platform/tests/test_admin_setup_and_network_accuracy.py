@@ -162,3 +162,205 @@ def test_scheduled_network_cycle_persists_provider_rejection_and_continues_datab
     ]
     db.commit.assert_called()
     db.close.assert_called_once()
+
+
+def _adaptive_row(
+    *,
+    download_bps: float = 100_000_000.0,
+    latency_ms: float = 20.0,
+    anomalous: bool = False,
+    ok: bool = True,
+):
+    return SimpleNamespace(
+        download_bps=download_bps,
+        latency_ms=latency_ms,
+        ok=ok,
+        details_json={"adaptive": {"anomalous": anomalous}},
+    )
+
+
+def test_adaptive_network_policy_backs_off_to_two_hours_when_deeply_stable() -> None:
+    previous = [
+        _adaptive_row(download_bps=100_000_000.0 + (index % 3) * 500_000.0, latency_ms=20.0 + (index % 2))
+        for index in range(20)
+    ]
+    current = {
+        "ok": True,
+        "download_bps": 100_500_000.0,
+        "latency_ms": 20.5,
+        "details": {"sample_kind": "sentinel"},
+    }
+
+    policy = platform_monitor._adaptive_network_policy(current, previous)
+
+    assert policy["state"] == "deep_stable"
+    assert policy["next_delay_seconds"] == 7200.0
+    assert policy["anomalous"] is False
+    assert policy["ema_span"] == 20
+
+
+def test_adaptive_network_policy_escalates_to_one_minute_on_real_deviation() -> None:
+    previous = [_adaptive_row() for _ in range(10)]
+    current = {
+        "ok": True,
+        "download_bps": 50_000_000.0,
+        "latency_ms": 20.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+
+    policy = platform_monitor._adaptive_network_policy(current, previous)
+
+    assert policy["state"] == "investigating"
+    assert policy["next_delay_seconds"] == 60.0
+    assert policy["anomalous"] is True
+    assert "download_drop" in policy["reasons"]
+    assert policy["confirmed_anomaly"] is False
+
+
+def test_adaptive_network_policy_requires_consecutive_anomalies_before_heavy_confirmation() -> None:
+    previous = [_adaptive_row(download_bps=50_000_000.0, anomalous=True)] + [
+        _adaptive_row() for _ in range(9)
+    ]
+    current = {
+        "ok": True,
+        "download_bps": 50_000_000.0,
+        "latency_ms": 20.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+
+    policy = platform_monitor._adaptive_network_policy(current, previous)
+
+    assert policy["anomalous"] is True
+    assert policy["confirmed_anomaly"] is True
+
+
+def test_provider_rejection_backs_off_without_marking_network_slow() -> None:
+    previous = [_adaptive_row() for _ in range(10)]
+    current = {
+        "ok": False,
+        "download_bps": None,
+        "latency_ms": None,
+        "details": {"sample_kind": "sentinel", "failure_kind": "provider_rejected"},
+    }
+
+    policy = platform_monitor._adaptive_network_policy(current, previous)
+
+    assert policy["state"] == "provider_unavailable"
+    assert policy["next_delay_seconds"] == 3600.0
+    assert policy["provider_unavailable"] is True
+    assert policy["anomalous"] is False
+    assert policy["confirmed_anomaly"] is False
+
+
+def test_adaptive_probe_bootstraps_full_measurement_without_repeating_bulk_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    previous_query = MagicMock()
+    previous_query.filter.return_value = previous_query
+    previous_query.order_by.return_value = previous_query
+    previous_query.limit.return_value = previous_query
+    previous_query.all.return_value = []
+
+    full_query = MagicMock()
+    full_query.filter.return_value = full_query
+    full_query.order_by.return_value = full_query
+    full_query.first.return_value = None
+    db.query.side_effect = [previous_query, full_query]
+
+    sentinel = {
+        "ok": True,
+        "download_bps": 80_000_000.0,
+        "latency_ms": 18.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+    database_sentinel = {
+        "ok": True,
+        "latency_ms": 2.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+    full_internet = {
+        "ok": True,
+        "download_bps": 90_000_000.0,
+        "details": {"sample_kind": "full"},
+    }
+    full_database = {
+        "ok": True,
+        "latency_ms": 1.5,
+        "details": {"sample_kind": "full"},
+    }
+    persisted: list[tuple[str, str, dict]] = []
+
+    monkeypatch.setattr(platform_monitor, "WriteSessionLocal", lambda: db)
+    monkeypatch.setattr(platform_monitor, "_touch_heartbeat", lambda *args, **kwargs: None)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_internet_sentinel", lambda: sentinel)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_database_latency_probe", lambda value: database_sentinel)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_internet_speedtest", lambda: full_internet)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_database_throughput", lambda value: full_database)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "prune", lambda value, *, days: 0)
+    monkeypatch.setattr(
+        platform_monitor.network_diagnostics,
+        "persist_probe",
+        lambda value, *, scenario, source, data: persisted.append((scenario, source, data)),
+    )
+
+    result = platform_monitor.run_adaptive_network_probe_once(prune_days=30)
+
+    assert result is not None
+    assert result["full_probe_ran"] is True
+    assert result["full_probe_reason"] == "bootstrap"
+    assert result["adaptive_state"] == "recovery"
+    assert result["next_delay_seconds"] == 900.0
+    assert [item[:2] for item in persisted] == [
+        ("server_internet", "scheduled_light"),
+        ("server_database", "scheduled_light"),
+        ("server_internet", "scheduled_full"),
+        ("server_database", "scheduled_full"),
+    ]
+
+
+def test_adaptive_probe_does_not_escalate_provider_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    previous_query = MagicMock()
+    previous_query.filter.return_value = previous_query
+    previous_query.order_by.return_value = previous_query
+    previous_query.limit.return_value = previous_query
+    previous_query.all.return_value = []
+
+    full_query = MagicMock()
+    full_query.filter.return_value = full_query
+    full_query.order_by.return_value = full_query
+    full_query.first.return_value = None
+    db.query.side_effect = [previous_query, full_query]
+
+    sentinel = {
+        "ok": False,
+        "download_bps": None,
+        "latency_ms": None,
+        "error": "HTTP Error 403: Forbidden",
+        "details": {"sample_kind": "sentinel", "failure_kind": "provider_rejected"},
+    }
+    database_sentinel = {
+        "ok": True,
+        "latency_ms": 2.0,
+        "details": {"sample_kind": "sentinel"},
+    }
+
+    monkeypatch.setattr(platform_monitor, "WriteSessionLocal", lambda: db)
+    monkeypatch.setattr(platform_monitor, "_touch_heartbeat", lambda *args, **kwargs: None)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_internet_sentinel", lambda: sentinel)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_database_latency_probe", lambda value: database_sentinel)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_internet_speedtest", MagicMock())
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_database_throughput", MagicMock())
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "persist_probe", lambda *args, **kwargs: None)
+
+    result = platform_monitor.run_adaptive_network_probe_once(prune_days=30)
+
+    assert result is not None
+    assert result["adaptive_state"] == "provider_unavailable"
+    assert result["next_delay_seconds"] == 3600.0
+    assert result["full_probe_ran"] is False
+    platform_monitor.network_diagnostics.run_internet_speedtest.assert_not_called()
+    platform_monitor.network_diagnostics.run_database_throughput.assert_not_called()
