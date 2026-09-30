@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from amodb.apps.platform import network_diagnostics, saas_provider_setup, saas_services
+from amodb.jobs import platform_monitor
 
 
 def test_openai_guided_setup_uses_backend_model_allowlists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,3 +121,42 @@ def test_stability_requires_a_settled_sample_window() -> None:
     assert network_diagnostics._is_stable([100, 102, 99, 101]) is True
     assert network_diagnostics._is_stable([100, 160, 90, 145]) is False
     assert network_diagnostics._is_stable([100, 101, 99]) is False
+
+
+def test_scheduled_network_cycle_persists_provider_rejection_and_continues_database_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    internet = {
+        "ok": False,
+        "download_bps": None,
+        "error": "HTTP Error 403: Forbidden",
+        "details": {"failure_kind": "provider_rejected", "http_status": 403},
+    }
+    database = {"ok": True, "latency_ms": 2.5}
+    persisted: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(platform_monitor, "WriteSessionLocal", lambda: db)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_internet_speedtest", lambda: internet)
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "run_database_throughput", lambda value: database)
+    monkeypatch.setattr(
+        platform_monitor.network_diagnostics,
+        "persist_probe",
+        lambda value, *, scenario, source, data: persisted.append((scenario, data)),
+    )
+    monkeypatch.setattr(platform_monitor.network_diagnostics, "prune", lambda value, *, days: 0)
+    monkeypatch.setattr(platform_monitor, "_touch_heartbeat", lambda *args, **kwargs: None)
+
+    result = platform_monitor.run_network_probes_once(prune_days=30)
+
+    assert result == {
+        "internet_download_mbps": 0.0,
+        "internet_ok": False,
+        "database_latency_ms": 2.5,
+    }
+    assert persisted == [
+        ("server_internet", internet),
+        ("server_database", database),
+    ]
+    db.commit.assert_called()
+    db.close.assert_called_once()
