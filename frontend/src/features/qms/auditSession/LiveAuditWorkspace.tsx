@@ -396,10 +396,38 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setSelectedId(items[nextIndex].checklist_item_id);
   };
 
+  const responseRequirementError = (
+    item: ChecklistExecutionGovernanceRow,
+    source: LiveChecklistSourceContext | null,
+    response: CanonicalChecklistResponse,
+    auditorNotes: string,
+  ): string | null => {
+    if (!source) return null;
+    const notePresent = Boolean(auditorNotes.trim());
+    if (response === "NOT_APPLICABLE" && source.na_justification_required && !notePresent) {
+      return "This governed checklist item requires an auditor reason before it can be marked N/A.";
+    }
+    if ((source.notes_required_when || []).includes(response) && !notePresent) {
+      return `Auditor notes are required before recording ${statusLabel(response).toLowerCase()}.`;
+    }
+    if ((source.evidence_required_when || []).includes(response) && !(item.evidence_references || []).length) {
+      return "Governed evidence is required for this response. Attach and synchronize the evidence before finalizing the checklist outcome.";
+    }
+    return null;
+  };
+
   const selectResponse = (item: ChecklistExecutionGovernanceRow, option: ChecklistResponseOption) => {
     if (!canExecute) return;
     setSyncNotice(null);
     const response = option.canonical_status as CanonicalChecklistResponse;
+    const source = sourceContextByItemId.get(item.checklist_item_id) || null;
+    const auditorNotes = noteDrafts[item.checklist_item_id] ?? item.auditor_notes ?? "";
+    const requirementError = responseRequirementError(item, source, response, auditorNotes);
+    if (requirementError) {
+      setLocalError(requirementError);
+      return;
+    }
+    setLocalError(null);
     if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
       setFindingDraft({
         mode: response,
@@ -550,9 +578,23 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <div><dt>Current</dt><dd>{statusLabel(selected.canonical_response_status)} · v{selected.entity_version}</dd></div>
               </dl>
               <section className="qms-live-audit-focus__expected-evidence" aria-label="Expected evidence">
-                <h3>Expected evidence</h3>
+                <h3>Verification plan</h3>
                 <p>{selectedSource?.expected_evidence || "No expected-evidence statement was defined in the applied checklist revision."}</p>
-                <small>{selectedSource?.mandatory === false ? "Optional verification item" : "Mandatory verification item"}{selectedSource?.finding_trigger && selectedSource.finding_trigger !== "NONE" ? ` · governed finding trigger: ${statusLabel(selectedSource.finding_trigger)}` : ""}</small>
+                {selectedSource?.guidance ? <p><strong>Guidance:</strong> {selectedSource.guidance}</p> : null}
+                <small>
+                  {selectedSource?.mandatory === false ? "Optional verification item" : "Mandatory verification item"}
+                  {selectedSource?.audit_method ? ` · method: ${statusLabel(selectedSource.audit_method)}` : ""}
+                  {selectedSource?.sampling_requirement ? ` · sample: ${selectedSource.sampling_requirement}` : ""}
+                  {selectedSource?.finding_trigger && selectedSource.finding_trigger !== "NONE" ? ` · governed finding trigger: ${statusLabel(selectedSource.finding_trigger)}` : ""}
+                </small>
+                {(selectedSource?.na_justification_required || (selectedSource?.notes_required_when || []).length || (selectedSource?.evidence_required_when || []).length) ? (
+                  <small>
+                    Rules:
+                    {selectedSource?.na_justification_required ? " N/A reason required." : ""}
+                    {(selectedSource?.notes_required_when || []).length ? ` Notes required for ${selectedSource?.notes_required_when?.map(statusLabel).join(", ")}.` : ""}
+                    {(selectedSource?.evidence_required_when || []).length ? ` Evidence required for ${selectedSource?.evidence_required_when?.map(statusLabel).join(", ")}.` : ""}
+                  </small>
+                ) : null}
               </section>
 
               <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
