@@ -4,7 +4,6 @@ const LIVE_ENABLED = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
-const ADMIN_STORAGE_STATE = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 const READER_PAGE_CHECKPOINTS = [100, 500, 1000, 1999] as const;
 const MAX_READER_USABLE_MS = 20_000;
@@ -18,7 +17,6 @@ test.use({
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
   screenshot: "on",
-  ...(ADMIN_STORAGE_STATE ? { storageState: ADMIN_STORAGE_STATE } : {}),
 });
 
 function watchMaterialBrowserErrors(page: Page): void {
@@ -72,7 +70,7 @@ test.describe("Document Control daily operating model", () => {
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
-    if (!ADMIN_STORAGE_STATE) await signIn(page);
+    await signIn(page);
     watchMaterialBrowserErrors(page);
   });
 
