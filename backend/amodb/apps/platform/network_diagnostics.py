@@ -138,15 +138,24 @@ def _transfer_series(
     samples: list[float] = []
     last_headers: dict[str, str] = {}
     payload = b"0" * block_bytes if direction == "upload" else None
+    byte_cap = max(block_bytes, MAX_TRANSFER_BYTES)
     while True:
-        sample_started = time.perf_counter()
-        if direction == "download":
-            transferred, last_headers = _http_transfer(_download_url(host, block_bytes))
+        remaining = max(0, byte_cap - total_bytes)
+        if remaining <= 0:
+            transferred = 0
+            sample_elapsed = 0.0
         else:
-            _, last_headers = _http_transfer(_upload_url(host), payload=payload)
-            transferred = block_bytes
-        sample_elapsed = max(1e-3, time.perf_counter() - sample_started)
-        samples.append(transferred * 8 / sample_elapsed)
+            request_bytes = min(block_bytes, remaining)
+            sample_started = time.perf_counter()
+            if direction == "download":
+                transferred, last_headers = _http_transfer(_download_url(host, request_bytes))
+            else:
+                send_payload = payload if request_bytes == block_bytes else (payload or b"")[:request_bytes]
+                _, last_headers = _http_transfer(_upload_url(host), payload=send_payload)
+                transferred = request_bytes
+            sample_elapsed = max(1e-3, time.perf_counter() - sample_started)
+        if transferred > 0:
+            samples.append(transferred * 8 / max(1e-3, sample_elapsed))
         total_bytes += transferred
         elapsed = max(1e-3, time.perf_counter() - started)
         stable = _is_stable(samples)
@@ -160,7 +169,7 @@ def _transfer_series(
                 "stable": stable,
             })
         enough_time = elapsed >= max(3.0, MIN_TEST_SECONDS)
-        capped = elapsed >= max(MIN_TEST_SECONDS, MAX_TEST_SECONDS) or total_bytes >= max(block_bytes, MAX_TRANSFER_BYTES)
+        capped = elapsed >= max(MIN_TEST_SECONDS, MAX_TEST_SECONDS) or total_bytes >= byte_cap
         if (enough_time and stable) or capped:
             return {
                 "bps": round(total_bytes * 8 / elapsed, 2),
