@@ -13,6 +13,8 @@ worker roster reflects the collector as online.
 from __future__ import annotations
 
 import logging
+import os
+import statistics
 
 from amodb.database import WriteSessionLocal
 from amodb.apps.platform import diagnostics, models, network_diagnostics, services
@@ -76,6 +78,282 @@ def capture_health_once(include_network: bool = False) -> dict | None:
         return {"status": result.get("status")}
     except Exception:
         logger.exception("platform health probe failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
+def _float_setting(name: str, default: float, *, minimum: float = 1.0) -> float:
+    try:
+        return max(minimum, float(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _ema(values: list[float], *, span: int = 20) -> float | None:
+    clean = [float(value) for value in values if value is not None]
+    if not clean:
+        return None
+    alpha = 2.0 / (max(2, int(span)) + 1.0)
+    value = clean[0]
+    for sample in clean[1:]:
+        value = alpha * sample + (1.0 - alpha) * value
+    return value
+
+
+def _robust_z(value: float | None, values: list[float]) -> float | None:
+    if value is None or len(values) < 7:
+        return None
+    median = statistics.median(values)
+    deviations = [abs(sample - median) for sample in values]
+    mad = statistics.median(deviations)
+    if mad <= 0:
+        return None
+    return 0.6745 * (value - median) / mad
+
+
+def _adaptive_network_policy(current: dict, previous_rows: list) -> dict:
+    """Classify one cheap sentinel and select the next sampling interval."""
+    window = max(5, int(_float_setting("PLATFORM_NET_ADAPTIVE_WINDOW", 20, minimum=5)))
+    previous = list(previous_rows[:window])
+    chronological = list(reversed(previous))
+
+    download_history = [
+        float(row.download_bps)
+        for row in chronological
+        if getattr(row, "ok", False) and getattr(row, "download_bps", None) is not None
+    ]
+    latency_history = [
+        float(row.latency_ms)
+        for row in chronological
+        if getattr(row, "ok", False) and getattr(row, "latency_ms", None) is not None
+    ]
+    ema_download = _ema(download_history, span=window)
+    ema_latency = _ema(latency_history, span=window)
+
+    details = current.get("details") or {}
+    failure_kind = details.get("failure_kind")
+    provider_unavailable = failure_kind == "provider_rejected"
+    reasons: list[str] = []
+
+    if not current.get("ok") and not provider_unavailable:
+        reasons.append("probe_failure")
+
+    baseline_count = min(len(download_history), len(latency_history))
+    download_drop_pct = None
+    latency_rise_pct = None
+    download_z = None
+    latency_z = None
+    if current.get("ok") and baseline_count >= 5:
+        current_download = current.get("download_bps")
+        current_latency = current.get("latency_ms")
+        if current_download is not None and ema_download and ema_download > 0:
+            download_drop_pct = max(0.0, (ema_download - float(current_download)) / ema_download * 100.0)
+            if download_drop_pct >= _float_setting("PLATFORM_NET_ANOMALY_DOWNLOAD_DROP_PCT", 35.0):
+                reasons.append("download_drop")
+        if current_latency is not None and ema_latency and ema_latency > 0:
+            latency_rise_pct = max(0.0, (float(current_latency) - ema_latency) / ema_latency * 100.0)
+            if (
+                latency_rise_pct >= _float_setting("PLATFORM_NET_ANOMALY_LATENCY_RISE_PCT", 75.0)
+                and float(current_latency) - ema_latency >= _float_setting("PLATFORM_NET_ANOMALY_LATENCY_RISE_MS", 20.0)
+            ):
+                reasons.append("latency_spike")
+
+        download_z = _robust_z(
+            float(current_download) if current_download is not None else None,
+            download_history,
+        )
+        latency_z = _robust_z(
+            float(current_latency) if current_latency is not None else None,
+            latency_history,
+        )
+        if download_z is not None and download_z <= -3.5 and "download_drop" not in reasons:
+            reasons.append("download_outlier")
+        if latency_z is not None and latency_z >= 3.5 and "latency_spike" not in reasons:
+            reasons.append("latency_outlier")
+
+    anomalous = bool(reasons)
+    previous_anomalous = False
+    healthy_run = 1 if current.get("ok") and not anomalous else 0
+    for row in previous:
+        adaptive = ((getattr(row, "details_json", None) or {}).get("adaptive") or {})
+        row_anomalous = bool(adaptive.get("anomalous"))
+        if adaptive:
+            if not previous_anomalous:
+                previous_anomalous = row_anomalous
+            if healthy_run and getattr(row, "ok", False) and not row_anomalous:
+                healthy_run += 1
+                continue
+        break
+
+    noise_cv = None
+    if len(download_history) >= 5:
+        mean = statistics.fmean(download_history)
+        if mean > 0:
+            noise_cv = statistics.pstdev(download_history) / mean
+
+    fast = _float_setting("PLATFORM_NET_INVESTIGATION_INTERVAL_SECONDS", 60.0, minimum=30.0)
+    recovery = _float_setting("PLATFORM_NET_RECOVERY_INTERVAL_SECONDS", 900.0, minimum=60.0)
+    stable = _float_setting("PLATFORM_NET_STABLE_INTERVAL_SECONDS", 3600.0, minimum=300.0)
+    deep_stable = _float_setting("PLATFORM_NET_DEEP_STABLE_INTERVAL_SECONDS", 7200.0, minimum=900.0)
+
+    if provider_unavailable:
+        state = "provider_unavailable"
+        next_delay = stable
+    elif anomalous:
+        state = "investigating"
+        next_delay = fast
+    elif previous_anomalous or healthy_run < 6:
+        state = "recovery"
+        next_delay = recovery
+    elif healthy_run >= window and noise_cv is not None and noise_cv <= 0.15:
+        state = "deep_stable"
+        next_delay = deep_stable
+    else:
+        state = "stable"
+        next_delay = stable
+
+    return {
+        "state": state,
+        "next_delay_seconds": round(next_delay, 2),
+        "anomalous": anomalous,
+        "confirmed_anomaly": anomalous and previous_anomalous,
+        "provider_unavailable": provider_unavailable,
+        "reasons": reasons,
+        "baseline_count": baseline_count,
+        "healthy_run": healthy_run,
+        "ema_span": window,
+        "ema_download_bps": round(ema_download, 2) if ema_download is not None else None,
+        "ema_latency_ms": round(ema_latency, 2) if ema_latency is not None else None,
+        "download_drop_pct": round(download_drop_pct, 2) if download_drop_pct is not None else None,
+        "latency_rise_pct": round(latency_rise_pct, 2) if latency_rise_pct is not None else None,
+        "download_robust_z": round(download_z, 2) if download_z is not None else None,
+        "latency_robust_z": round(latency_z, 2) if latency_z is not None else None,
+        "baseline_cv": round(noise_cv, 4) if noise_cv is not None else None,
+    }
+
+
+def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
+    """Run a cheap sentinel and escalate to a bounded full test only when useful."""
+    db = WriteSessionLocal()
+    try:
+        previous = (
+            db.query(models.PlatformNetworkProbe)
+            .filter(
+                models.PlatformNetworkProbe.scenario == "server_internet",
+                models.PlatformNetworkProbe.source == "scheduled_light",
+            )
+            .order_by(models.PlatformNetworkProbe.captured_at.desc())
+            .limit(max(20, int(_float_setting("PLATFORM_NET_ADAPTIVE_WINDOW", 20, minimum=5))))
+            .all()
+        )
+        sentinel = network_diagnostics.run_internet_sentinel()
+        policy = _adaptive_network_policy(sentinel, previous)
+        sentinel_details = dict(sentinel.get("details") or {})
+        sentinel_details["adaptive"] = policy
+        sentinel["details"] = sentinel_details
+        network_diagnostics.persist_probe(
+            db,
+            scenario="server_internet",
+            source="scheduled_light",
+            data=sentinel,
+        )
+
+        database = network_diagnostics.run_database_latency_probe(db)
+        database_details = dict(database.get("details") or {})
+        database_details["adaptive_state"] = policy["state"]
+        database["details"] = database_details
+        network_diagnostics.persist_probe(
+            db,
+            scenario="server_database",
+            source="scheduled_light",
+            data=database,
+        )
+
+        last_full = (
+            db.query(models.PlatformNetworkProbe)
+            .filter(
+                models.PlatformNetworkProbe.scenario == "server_internet",
+                models.PlatformNetworkProbe.source == "scheduled_full",
+            )
+            .order_by(models.PlatformNetworkProbe.captured_at.desc())
+            .first()
+        )
+        full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 21600.0, minimum=1800.0)
+        full_cooldown = _float_setting("PLATFORM_NET_FULL_ANOMALY_COOLDOWN_SECONDS", 900.0, minimum=300.0)
+        age_seconds = None
+        if last_full is not None and getattr(last_full, "captured_at", None) is not None:
+            age_seconds = max(0.0, (network_diagnostics._now() - last_full.captured_at).total_seconds())
+
+        full_due = False
+        full_reason = None
+        if not policy["provider_unavailable"]:
+            if last_full is None and sentinel.get("ok"):
+                full_due = True
+                full_reason = "bootstrap"
+            elif age_seconds is not None and age_seconds >= full_refresh:
+                full_due = True
+                full_reason = "periodic_refresh"
+            elif policy["confirmed_anomaly"] and (age_seconds is None or age_seconds >= full_cooldown):
+                full_due = True
+                full_reason = "confirmed_anomaly"
+
+        full_internet = None
+        full_database = None
+        if full_due:
+            full_internet = network_diagnostics.run_internet_speedtest()
+            full_details = dict(full_internet.get("details") or {})
+            full_details["trigger"] = full_reason
+            full_internet["details"] = full_details
+            network_diagnostics.persist_probe(
+                db,
+                scenario="server_internet",
+                source="scheduled_full",
+                data=full_internet,
+            )
+
+            full_database = network_diagnostics.run_database_throughput(db)
+            db_details = dict(full_database.get("details") or {})
+            db_details["trigger"] = full_reason
+            full_database["details"] = db_details
+            network_diagnostics.persist_probe(
+                db,
+                scenario="server_database",
+                source="scheduled_full",
+                data=full_database,
+            )
+            network_diagnostics.prune(db, days=prune_days)
+
+        _touch_heartbeat(db, INFRASTRUCTURE_WORKER_NAME)
+        db.commit()
+        return {
+            "adaptive_state": policy["state"],
+            "next_delay_seconds": policy["next_delay_seconds"],
+            "sentinel_ok": sentinel.get("ok"),
+            "sentinel_download_mbps": round(float(sentinel["download_bps"]) / 1_000_000, 2)
+            if sentinel.get("download_bps") is not None
+            else None,
+            "sentinel_latency_ms": sentinel.get("latency_ms"),
+            "anomalous": policy["anomalous"],
+            "confirmed_anomaly": policy["confirmed_anomaly"],
+            "anomaly_reasons": policy["reasons"],
+            "ema_download_mbps": round(float(policy["ema_download_bps"]) / 1_000_000, 2)
+            if policy.get("ema_download_bps") is not None
+            else None,
+            "ema_latency_ms": policy.get("ema_latency_ms"),
+            "full_probe_ran": full_due,
+            "full_probe_reason": full_reason,
+            "full_download_mbps": round(float(full_internet["download_bps"]) / 1_000_000, 2)
+            if full_internet and full_internet.get("download_bps") is not None
+            else None,
+            "database_latency_ms": database.get("latency_ms"),
+        }
+    except Exception:
+        logger.exception("adaptive network probe cycle failed")
         try:
             db.rollback()
         except Exception:
