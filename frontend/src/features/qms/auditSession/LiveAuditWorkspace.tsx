@@ -567,7 +567,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               </div>
 
               <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
-              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, auditorNotes: notes }); }}>Save note</button></div>
+              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes }); }}>Save note</button></div>
 
               <div id="audit-occurrence-evidence">
                 <LiveAuditEvidenceStrip amoCode={amoCode} auditId={auditId} item={selected} canManage={canExecute} onChanged={refreshFieldwork} onError={setLocalError} onNotice={setSyncNotice} />
