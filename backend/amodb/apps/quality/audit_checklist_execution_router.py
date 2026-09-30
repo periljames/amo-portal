@@ -385,6 +385,30 @@ def _locked_governance(
     ).with_for_update().first()
 
 
+def _frozen_response_policy_map(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> dict[str, tuple[str, list[dict[str, Any]]]]:
+    """Resolve frozen response vocabularies for all bound checklist items in one query."""
+    result: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    bindings = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.amo_id == amo_id,
+        QualityAuditChecklistBinding.audit_id == audit_id,
+    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).all()
+    for binding in bindings:
+        ids = [str(value) for value in list(binding.instantiated_item_ids or [])]
+        snapshot = list(binding.item_snapshot or [])
+        for index, item_key in enumerate(ids):
+            row = snapshot[index] if index < len(snapshot) and isinstance(snapshot[index], dict) else {}
+            result[item_key] = (
+                str(row.get("response_type") or "COMPLIANCE"),
+                list(row.get("response_options") or []),
+            )
+    return result
+
+
 def _frozen_response_policy(
     db: Session,
     *,
@@ -393,21 +417,10 @@ def _frozen_response_policy(
     item_id: uuid.UUID,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Resolve the response vocabulary frozen with the checklist binding."""
-    item_key = str(item_id)
-    bindings = db.query(QualityAuditChecklistBinding).filter(
-        QualityAuditChecklistBinding.amo_id == amo_id,
-        QualityAuditChecklistBinding.audit_id == audit_id,
-    ).order_by(QualityAuditChecklistBinding.applied_at.desc()).all()
-    for binding in bindings:
-        ids = [str(value) for value in list(binding.instantiated_item_ids or [])]
-        if item_key not in ids:
-            continue
-        index = ids.index(item_key)
-        snapshot = list(binding.item_snapshot or [])
-        row = snapshot[index] if index < len(snapshot) and isinstance(snapshot[index], dict) else {}
-        return str(row.get("response_type") or "COMPLIANCE"), list(row.get("response_options") or [])
-    # Compatibility for historical/manual checklist rows that predate governed bindings.
-    return "COMPLIANCE", []
+    return _frozen_response_policy_map(db, amo_id=amo_id, audit_id=audit_id).get(
+        str(item_id),
+        ("COMPLIANCE", []),
+    )
 
 
 def _validated_response_value(
