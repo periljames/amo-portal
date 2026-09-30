@@ -61,11 +61,12 @@ export async function uploadExternalAuditorEvidence(
   item: Pick<ExternalAuditorFieldworkItem, "checklist_item_id" | "entity_version">,
   file: File,
   description?: string | null,
+  clientMutationId = createEvidenceMutationId(),
 ) {
   const form = new FormData();
   form.append("file", file);
   form.append("base_version", String(item.entity_version));
-  form.append("client_mutation_id", createEvidenceMutationId());
+  form.append("client_mutation_id", clientMutationId);
   if (description?.trim()) form.append("description", description.trim());
   const response = await fetch(
     `${getApiBaseUrl()}/quality/audit-access/fieldwork/checklist-items/${encodeURIComponent(item.checklist_item_id)}/evidence`,
