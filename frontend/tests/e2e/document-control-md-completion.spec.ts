@@ -229,7 +229,7 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(assessment.getByText("Latest receipt has a recorded applicability assessment.", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     const apiEvidence = await page.evaluate(async ({ amoCode, sourceId }) => {
-      const auth = localStorage.getItem("amo_portal_token");
+      const auth = sessionStorage.getItem("amo_portal_token");
       const response = await fetch(`/doc-control/workspace/t/${encodeURIComponent(amoCode)}/external-sources/${sourceId}/assessment`, { headers: { Authorization: `Bearer ${auth}` } });
       if (!response.ok) throw new Error(`Assessment reload failed: ${response.status}`);
       return response.json();
