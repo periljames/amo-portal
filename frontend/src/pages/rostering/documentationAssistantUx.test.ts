@@ -19,6 +19,7 @@ describe("documentation assistant interaction contract", () => {
     expect(assistantCss).toContain("cursor: col-resize");
     expect(assistantCss).toContain("prefers-reduced-motion");
     expect(assistant).toContain('aria-label="Open assisted search"');
+    expect(assistant).toContain('createPortal(panel, document.body)');
     expect(assistant).toContain("documentation-assistant-launcher__label");
     expect(assistantCss).toContain(".documentation-assistant-launcher__label");
     expect(assistantCss).not.toContain(".documentation-assistant-launcher span");
