@@ -16,7 +16,10 @@ const BACKEND = process.env.E2E_DIRECT_API_URL || "http://127.0.0.1:8080";
 async function clearSession(page: Page): Promise<void> {
   await page.context().clearCookies();
   await page.goto(`/maintenance/${AMO_CODE}/login`);
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
   await page.reload();
 }
 
@@ -28,10 +31,16 @@ async function signIn(page: Page, email: string, password: string): Promise<void
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+  await expect.poll(
+    () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
+    { timeout: 10_000 },
+  ).toBe(true);
 }
 
 async function token(page: Page): Promise<string> {
-  const value = await page.evaluate(() => localStorage.getItem("amo_portal_token"));
+  const value = await page.evaluate(() =>
+    sessionStorage.getItem("amo_portal_token") || localStorage.getItem("amo_portal_token"),
+  );
   if (!value) throw new Error("Authenticated DMS role fixture did not receive a bearer token");
   return value;
 }
