@@ -72,8 +72,8 @@ test.describe("Document Control daily operating model", () => {
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E_AMO_ADMIN_EMAIL, E2E_AMO_ADMIN_PASSWORD and E2E_DOCUMENT_GOVERNANCE_ID are required");
-    watchMaterialBrowserErrors(page);
     if (!ADMIN_STORAGE_STATE) await signIn(page);
+    watchMaterialBrowserErrors(page);
   });
 
   test.afterEach(() => {
