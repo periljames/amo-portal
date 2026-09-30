@@ -13,6 +13,8 @@ branch_labels = None
 depends_on = None
 
 DOC_META = "quality_audit_document_request_metadata"
+EXECUTION = "quality_audit_checklist_execution_governance"
+PARTICIPANT_EXECUTION = "quality_audit_fieldwork_participant_contributions"
 
 
 def _columns(table_name: str) -> set[str]:
@@ -40,8 +42,24 @@ def upgrade() -> None:
             "requirement_stage IN ('REQUIRED_BEFORE_ISSUE','REQUIRED_BEFORE_FIELDWORK','REQUIRED_DURING_FIELDWORK','REQUESTED_NOT_BLOCKING')",
         )
 
+    execution_columns = _columns(EXECUTION)
+    if execution_columns and "response_value" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("response_value", sa.String(length=64), nullable=True))
+
+    participant_columns = _columns(PARTICIPANT_EXECUTION)
+    if participant_columns and "response_value" not in participant_columns:
+        op.add_column(PARTICIPANT_EXECUTION, sa.Column("response_value", sa.String(length=64), nullable=True))
+
 
 def downgrade() -> None:
+    participant_columns = _columns(PARTICIPANT_EXECUTION)
+    if participant_columns and "response_value" in participant_columns:
+        op.drop_column(PARTICIPANT_EXECUTION, "response_value")
+
+    execution_columns = _columns(EXECUTION)
+    if execution_columns and "response_value" in execution_columns:
+        op.drop_column(EXECUTION, "response_value")
+
     columns = _columns(DOC_META)
     if columns and "requirement_stage" in columns:
         op.drop_constraint(
