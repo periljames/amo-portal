@@ -91,10 +91,11 @@ def _load_environment(path: Path) -> dict[str, str]:
     env.setdefault("DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS", "0.5")
     env.setdefault("DOCUMENT_INDEX_WORKER_POLL_SECONDS", "1")
 
-    # Internet SLA speed tests are an operator/production diagnostic. Do not
-    # push large external transfers from every developer machine unless the
-    # local environment explicitly opts in.
-    env.setdefault("PLATFORM_NET_PROBE_ENABLED", "false")
+    # Keep scheduled network diagnostics enabled in development so the
+    # Operations views exercise the same metrics pipeline as production.
+    # Provider-side failures are persisted as failed samples and do not stop
+    # the scheduler or replace earlier valid throughput with a synthetic zero.
+    env.setdefault("PLATFORM_NET_PROBE_ENABLED", "true")
 
     # Runtime counts are consumed by the fail-fast connection budget check.
     env.setdefault("PORTAL_API_PROCESS_COUNT", "1")
