@@ -59,6 +59,14 @@ class ChecklistTemplateItem(BaseModel):
     manual_source_ref: str | None = Field(default=None, max_length=500)
     prompt: str = Field(min_length=1, max_length=8000)
     expected_evidence: str | None = Field(default=None, max_length=4000)
+    guidance: str | None = Field(default=None, max_length=4000)
+    audit_method: Literal["RECORD_REVIEW", "INTERVIEW", "OBSERVATION", "SAMPLE", "TEST"] | None = None
+    sampling_requirement: str | None = Field(default=None, max_length=2000)
+    evidence_types: list[str] = Field(default_factory=list, max_length=12)
+    evidence_required_when: list[Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]] = Field(default_factory=list, max_length=5)
+    notes_required_when: list[Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]] = Field(default_factory=list, max_length=5)
+    na_justification_required: bool = False
+    conditional_logic: dict[str, Any] = Field(default_factory=dict)
     response_type: str = Field(default="COMPLIANCE", max_length=64)
     response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
     applicability: str = Field(default="APPLICABLE", max_length=64)
