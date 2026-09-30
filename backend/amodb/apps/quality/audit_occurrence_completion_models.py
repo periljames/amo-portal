@@ -22,6 +22,7 @@ class QualityAuditDocumentRequestMetadata(Base):
     request_type = Column(String(64), nullable=False, default="DOCUMENT")
     linked_criterion = Column(Text, nullable=True)
     is_required = Column(Boolean, nullable=False, default=True)
+    requirement_stage = Column(String(32), nullable=False, default="REQUIRED_BEFORE_ISSUE", server_default="REQUIRED_BEFORE_ISSUE")
     source_mode = Column(String(32), nullable=False, default="UPLOAD_OR_CONTROLLED")
 
     # Compatibility source: these UUIDs remain explicitly bound to the
