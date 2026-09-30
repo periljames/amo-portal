@@ -198,8 +198,13 @@ export default function PlatformNetworkPage() {
       const latestFull = [...points].reverse().find((point) =>
         point.download_mbps != null && point.details?.sample_kind !== "sentinel"
       );
+      const providerUnavailable = last?.details?.failure_kind === "provider_rejected";
       map[scenario.key] = last
-        ? { download: latestFull?.download_mbps ?? null, latency: last.latency_ms, ok: last.ok }
+        ? {
+            download: latestFull?.download_mbps ?? null,
+            latency: last.latency_ms,
+            ok: providerUnavailable ? (latestFull?.ok ?? true) : last.ok,
+          }
         : { download: null, latency: null, ok: true };
     }
     return map;
@@ -255,7 +260,7 @@ export default function PlatformNetworkPage() {
           upload: point.upload_mbps,
           latency: point.latency_ms,
           source: point.source,
-          sample: typeof point.details?.sample_kind === "string" ? point.details.sample_kind : "measurement",
+          sample: typeof point.details?.sample_kind === "string" ? String(point.details?.sample_kind) : "measurement",
           adaptive: adaptiveState,
           status: point.ok ? "OK" : "FAILED",
         });
