@@ -6,6 +6,7 @@ import {
   type ExternalAuditorFieldworkItem,
   type ExternalAuditorFieldworkModel,
   type ExternalChecklistResponse,
+  type ExternalChecklistResponseOption,
 } from "../../../services/qmsAuditExternalAccess";
 import { uploadExternalAuditorEvidence } from "../../../services/qmsAuditEvidence";
 import {
@@ -23,11 +24,25 @@ import {
 } from "../../../services/qmsExternalAuditOutbox";
 import ExternalAuditorFindingDraftPanel from "./ExternalAuditorFindingDraftPanel";
 
-const ALLOWED_RESPONSES: Array<{ value: ExternalChecklistResponse; label: string }> = [
-  { value: "COMPLIANT", label: "Compliant" },
-  { value: "NOT_APPLICABLE", label: "N/A" },
-  { value: "NOT_VERIFIED", label: "Not verified" },
+const DEFAULT_RESPONSES: ExternalChecklistResponseOption[] = [
+  { value: "COMPLIANT", label: "Compliant", canonical_status: "COMPLIANT" },
+  { value: "NONCOMPLIANT", label: "NCR", canonical_status: "NONCOMPLIANT" },
+  { value: "OBSERVATION", label: "Observation", canonical_status: "OBSERVATION" },
+  { value: "NOT_APPLICABLE", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+  { value: "NOT_VERIFIED", label: "Not verified", canonical_status: "NOT_VERIFIED" },
 ];
+
+function responseOptions(item: ExternalAuditorFieldworkItem): ExternalChecklistResponseOption[] {
+  if (item.response_options?.length) return item.response_options;
+  if (item.response_type === "YES_NO_NA") {
+    return [
+      { value: "YES", label: "Yes", canonical_status: "COMPLIANT" },
+      { value: "NO", label: "No", canonical_status: "NONCOMPLIANT" },
+      { value: "N/A", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+    ];
+  }
+  return DEFAULT_RESPONSES;
+}
 const EVIDENCE_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.mp4,.mov,.m4a,.wav";
 
 function evidenceText(value: Array<Record<string, unknown> | string>): string {
@@ -179,11 +194,12 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
     setEvidenceDescription("");
   }, [effectiveSelectedId]);
 
-  const save = async (item: ExternalAuditorFieldworkItem, response: ExternalChecklistResponse) => {
+  const save = async (item: ExternalAuditorFieldworkItem, option: ExternalChecklistResponseOption) => {
     if (!model || !model.can_execute_checklist) return;
     setSaving(true); setError(null); setNotice(null);
     const mutation = buildExternalAuditorMutation(item, {
-      canonicalResponseStatus: response,
+      canonicalResponseStatus: option.canonical_status,
+      responseValue: option.value,
       auditorNotes: notes[item.checklist_item_id] ?? item.my_auditor_notes ?? null,
       evidenceReferences: [
         ...item.my_evidence_references.filter((entry) => typeof entry === "object"),
@@ -250,6 +266,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   if (!model) return <section className="qms-public-audit__card" role="alert"><AlertTriangle size={18} /> {error || "External auditor fieldwork unavailable."}</section>;
 
   const selectedGovernedEvidence = selected ? governedEvidence(selected.my_evidence_references) : [];
+  const selectedResponseOptions = selected ? responseOptions(selected) : [];
 
   return (
     <section className="qms-public-audit__card qms-external-auditor-fieldwork" aria-label="External auditor fieldwork">
@@ -282,13 +299,45 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
           <div className="qms-external-auditor-fieldwork__item">
             <span>{selected.section || "Checklist"}</span>
             <h2>{selected.prompt}</h2>
-            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div></dl>
+            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.response_value || selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div></dl>
             <div className="qms-external-auditor-fieldwork__responses">
-              {ALLOWED_RESPONSES.map((option) => <button type="button" key={option.value} disabled={!model.can_execute_checklist || saving} className={selected.canonical_response_status === option.value ? "is-active" : ""} onClick={() => void save(selected, option.value)}>{option.value === "COMPLIANT" ? <CheckCircle2 size={15} /> : option.value === "NOT_APPLICABLE" ? <CircleSlash2 size={15} /> : <ShieldAlert size={15} />}{option.label}</button>)}
+              {selectedResponseOptions.map((option) => {
+                const adverse = option.canonical_status === "NONCOMPLIANT" || option.canonical_status === "OBSERVATION";
+                const active = selected.response_value
+                  ? selected.response_value === option.value
+                  : selected.canonical_response_status === option.canonical_status;
+                return <button
+                  type="button"
+                  key={option.value}
+                  disabled={!model.can_execute_checklist || saving}
+                  className={active ? "is-active" : ""}
+                  onClick={() => {
+                    if (adverse) {
+                      setNotice(`${option.label} requires the governed finding-draft workflow below; Quality promotion controls the official adverse response.`);
+                      document.querySelector(".qms-external-finding-drafts")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      return;
+                    }
+                    void save(selected, option);
+                  }}
+                >{option.canonical_status === "COMPLIANT" ? <CheckCircle2 size={15} /> : option.canonical_status === "NOT_APPLICABLE" ? <CircleSlash2 size={15} /> : <ShieldAlert size={15} />}{option.label}</button>;
+              })}
             </div>
             <label><span>My attributable fieldwork note</span><textarea rows={5} value={notes[selected.checklist_item_id] ?? selected.my_auditor_notes ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
             <label><span>Text evidence references · one per line</span><textarea rows={3} value={evidence[selected.checklist_item_id] ?? evidenceText(selected.my_evidence_references)} onChange={(event) => setEvidence((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
-            <button type="button" className="qms-external-auditor-fieldwork__save" disabled={!model.can_execute_checklist || saving} onClick={() => void save(selected, selected.canonical_response_status)}><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
+            <button
+              type="button"
+              className="qms-external-auditor-fieldwork__save"
+              disabled={!model.can_execute_checklist || saving}
+              onClick={() => {
+                const currentOption = selectedResponseOptions.find((option) =>
+                  selected.response_value
+                    ? option.value === selected.response_value
+                    : option.canonical_status === selected.canonical_response_status,
+                );
+                if (currentOption) void save(selected, currentOption);
+                else setError("This checklist item has no governed response option matching the current record.");
+              }}
+            ><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
 
             {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
               <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · participant attribution retained</small></div></header>
