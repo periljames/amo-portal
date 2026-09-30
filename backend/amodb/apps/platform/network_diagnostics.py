@@ -37,14 +37,16 @@ SCENARIOS = ("client_portal", "client_internet", "server_internet", "server_data
 # the same target works from the browser and the server for an apples-to-apples
 # comparison of both legs.
 DEFAULT_SPEEDTEST_HOST = os.getenv("PLATFORM_NET_SPEEDTEST_HOST", "speed.cloudflare.com")
-DEFAULT_DOWNLOAD_BYTES = int(os.getenv("PLATFORM_NET_DOWNLOAD_BYTES", str(25_000_000)))
-DEFAULT_UPLOAD_BYTES = int(os.getenv("PLATFORM_NET_UPLOAD_BYTES", str(10_000_000)))
-DEFAULT_DB_BYTES = int(os.getenv("PLATFORM_NET_DB_BYTES", str(4_000_000)))
+DEFAULT_DOWNLOAD_BYTES = int(os.getenv("PLATFORM_NET_DOWNLOAD_BYTES", str(8_000_000)))
+DEFAULT_UPLOAD_BYTES = int(os.getenv("PLATFORM_NET_UPLOAD_BYTES", str(4_000_000)))
+DEFAULT_DB_BYTES = int(os.getenv("PLATFORM_NET_DB_BYTES", str(512_000)))
+SENTINEL_DOWNLOAD_BYTES = int(os.getenv("PLATFORM_NET_SENTINEL_DOWNLOAD_BYTES", str(512_000)))
+SENTINEL_LATENCY_SAMPLES = int(os.getenv("PLATFORM_NET_SENTINEL_LATENCY_SAMPLES", "3"))
 RETENTION_DAYS = int(os.getenv("PLATFORM_NET_RETENTION_DAYS", "30"))
 HTTP_TIMEOUT = float(os.getenv("PLATFORM_NET_HTTP_TIMEOUT_SEC", "30"))
-MIN_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MIN_TEST_SECONDS", "8"))
-MAX_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MAX_TEST_SECONDS", "14"))
-MAX_TRANSFER_BYTES = int(os.getenv("PLATFORM_NET_MAX_TRANSFER_BYTES", str(1024 * 1024 * 1024)))
+MIN_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MIN_TEST_SECONDS", "2"))
+MAX_TEST_SECONDS = float(os.getenv("PLATFORM_NET_MAX_TEST_SECONDS", "5"))
+MAX_TRANSFER_BYTES = int(os.getenv("PLATFORM_NET_MAX_TRANSFER_BYTES", str(24 * 1024 * 1024)))
 LATENCY_SAMPLES = int(os.getenv("PLATFORM_NET_LATENCY_SAMPLES", "9"))
 HTTP_USER_AGENT = os.getenv(
     "PLATFORM_NET_USER_AGENT",
@@ -171,6 +173,70 @@ def _transfer_series(
             }
 
 
+def run_internet_sentinel(
+    *,
+    download_bytes: int = SENTINEL_DOWNLOAD_BYTES,
+    host: str = DEFAULT_SPEEDTEST_HOST,
+) -> dict[str, Any]:
+    """Run a low-bandwidth trend probe used by the adaptive scheduler.
+
+    This is intentionally not an SLA throughput certification. It measures a
+    few latency samples plus one small download so trend changes can be
+    detected without repeatedly running the heavier bidirectional speed test.
+    """
+    host = _validated_host(host)
+    result: dict[str, Any] = {
+        "scenario": "server_internet",
+        "target": host,
+        "ok": False,
+        "latency_ms": None,
+        "jitter_ms": None,
+        "download_bps": None,
+        "upload_bps": None,
+        "download_bytes": None,
+        "upload_bytes": None,
+        "error": None,
+        "details": {"sample_kind": "sentinel", "engine": "low-bandwidth-sentinel-v1"},
+    }
+    try:
+        _http_transfer(_download_url(host, 1000))
+        latencies: list[float] = []
+        for _ in range(max(2, SENTINEL_LATENCY_SAMPLES)):
+            started = time.perf_counter()
+            _http_transfer(_download_url(host, 1000))
+            latencies.append((time.perf_counter() - started) * 1000.0)
+        result["latency_ms"] = round(statistics.median(latencies), 2)
+        jitter = _jitter(latencies)
+        result["jitter_ms"] = round(jitter, 2) if jitter is not None else None
+
+        sample_bytes = max(64 * 1024, min(int(download_bytes), 4 * 1024 * 1024))
+        started = time.perf_counter()
+        transferred, headers = _http_transfer(_download_url(host, sample_bytes))
+        elapsed = max(1e-3, time.perf_counter() - started)
+        ray = headers.get("cf-ray")
+        result.update({
+            "ok": True,
+            "download_bytes": transferred,
+            "download_bps": round(transferred * 8 / elapsed, 2),
+            "details": {
+                "sample_kind": "sentinel",
+                "engine": "low-bandwidth-sentinel-v1",
+                "edge_location": ray.rsplit("-", 1)[-1].upper() if ray and "-" in ray else None,
+                "duration_seconds": round(elapsed, 3),
+            },
+        })
+    except Exception as exc:  # pragma: no cover - network dependent
+        result["error"] = str(exc)[:500]
+        details = dict(result.get("details") or {})
+        if isinstance(exc, urllib.error.HTTPError) and exc.code in {403, 429}:
+            details.update({"failure_kind": "provider_rejected", "http_status": exc.code})
+        else:
+            details["failure_kind"] = "probe_error"
+        result["details"] = details
+        logger.info("server->internet sentinel failed: %s", exc)
+    return result
+
+
 def run_internet_speedtest(
     *,
     download_bytes: int = DEFAULT_DOWNLOAD_BYTES,
@@ -241,7 +307,8 @@ def run_internet_speedtest(
             "upload_bps": upload["bps"],
             "ok": True,
             "details": {
-                "engine": "adaptive-http-goodput-v2",
+                "engine": "bounded-http-goodput-v3",
+                "sample_kind": "full",
                 "edge_location": location,
                 "packet_loss_percent": round(failures / max(5, LATENCY_SAMPLES) * 100, 2),
                 "download": {key: value for key, value in download.items() if key != "headers"},
@@ -253,12 +320,47 @@ def run_internet_speedtest(
         result["error"] = str(exc)[:500]
         if isinstance(exc, urllib.error.HTTPError) and exc.code in {403, 429}:
             result["details"] = {
+                "sample_kind": "full",
                 "failure_kind": "provider_rejected",
                 "http_status": exc.code,
             }
             logger.info("server->internet speedtest provider rejected probe: HTTP %s", exc.code)
         else:
+            result["details"] = {"sample_kind": "full", "failure_kind": "probe_error"}
             logger.warning("server->internet speedtest failed: %s", exc)
+    return result
+
+
+def run_database_latency_probe(db: Session, *, samples: int = 3) -> dict[str, Any]:
+    """Run a tiny DB latency sentinel without moving synthetic bulk payloads."""
+    result: dict[str, Any] = {
+        "scenario": "server_database",
+        "target": "postgresql",
+        "ok": False,
+        "latency_ms": None,
+        "jitter_ms": None,
+        "download_bps": None,
+        "upload_bps": None,
+        "download_bytes": None,
+        "upload_bytes": None,
+        "error": None,
+        "details": {"sample_kind": "sentinel", "engine": "db-latency-sentinel-v1"},
+    }
+    try:
+        db.execute(text("SELECT 1")).scalar()
+        latencies: list[float] = []
+        for _ in range(max(2, min(int(samples), 9))):
+            started = time.perf_counter()
+            db.execute(text("SELECT 1")).scalar()
+            latencies.append((time.perf_counter() - started) * 1000.0)
+        result["latency_ms"] = round(statistics.median(latencies), 2)
+        jitter = _jitter(latencies)
+        result["jitter_ms"] = round(jitter, 2) if jitter is not None else None
+        result["ok"] = True
+    except Exception as exc:  # pragma: no cover
+        result["error"] = str(exc)[:500]
+        result["details"]["failure_kind"] = "probe_error"
+        logger.info("server<->database latency sentinel failed: %s", exc)
     return result
 
 
@@ -311,6 +413,7 @@ def run_database_throughput(db: Session, *, payload_bytes: int = DEFAULT_DB_BYTE
         result["upload_bps"] = round(statistics.median(upload_rates), 2)
         result["details"] = {
             "engine": "median-db-goodput-v2",
+            "sample_kind": "full",
             "latency_samples": len(latencies),
             "download_samples": len(download_rates),
             "upload_samples": len(upload_rates),
