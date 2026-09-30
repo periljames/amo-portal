@@ -87,8 +87,8 @@ test.describe.serial("DMS MD completion acceptance", () => {
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E credentials and governed document id are required");
-    watchMaterialBrowserErrors(page);
     if (!ADMIN_STORAGE_STATE) await signIn(page);
+    watchMaterialBrowserErrors(page);
   });
 
   test.afterEach(() => {
