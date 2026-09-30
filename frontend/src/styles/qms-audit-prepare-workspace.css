@@ -586,3 +586,91 @@
 .qms-audit-prepare__pending-dms article > div { display: grid; gap: 5px; flex: 1 1 240px; }
 .qms-audit-prepare__pending-dms article span { color: #854d0e; font-size: 12px; font-weight: 700; }
 .qms-audit-prepare__pending-dms a { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+
+.qms-audit-prepare__offline-pack {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.qms-audit-prepare__offline-pack-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.qms-audit-prepare__offline-pack-copy > span {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.qms-audit-prepare__offline-pack-copy small {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-prepare__offline-pack-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-muted);
+}
+
+.qms-audit-prepare__offline-pack-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.qms-audit-prepare__offline-pack-actions button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.qms-audit-prepare__offline-pack-actions button.is-primary {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+  color: var(--brand-accent-contrast);
+}
+
+.qms-audit-prepare__offline-pack-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.qms-audit-prepare__offline-pack-device {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .qms-audit-prepare__offline-pack {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .qms-audit-prepare__offline-pack-actions {
+    justify-content: stretch;
+  }
+
+  .qms-audit-prepare__offline-pack-actions button {
+    flex: 1 1 100%;
+  }
+}
