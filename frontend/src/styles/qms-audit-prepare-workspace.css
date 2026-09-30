@@ -674,3 +674,50 @@
     flex: 1 1 100%;
   }
 }
+
+.qms-audit-prepare__response-options {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__response-options legend {
+  padding: 0 var(--space-1);
+  font-weight: 750;
+}
+
+.qms-audit-prepare__response-options > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.qms-audit-prepare__response-option {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.6fr) minmax(120px, 1fr) minmax(160px, 1.2fr) auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__response-option label {
+  min-width: 0;
+}
+
+.qms-audit-prepare__response-option > button {
+  min-width: 2.2rem;
+  min-height: 2.2rem;
+}
+
+@media (max-width: 760px) {
+  .qms-audit-prepare__response-option {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-prepare__response-option > button {
+    justify-self: start;
+  }
+}
