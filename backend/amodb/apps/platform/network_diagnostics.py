@@ -284,16 +284,17 @@ def run_internet_speedtest(
         jitter = _jitter(latencies)
         result["jitter_ms"] = round(jitter, 2) if jitter is not None else None
 
+        transfer_cap = max(1_000_000, MAX_TRANSFER_BYTES)
         download = _transfer_series(
             host=host,
             direction="download",
-            block_bytes=max(1_000_000, min(int(download_bytes), 64 * 1024 * 1024)),
+            block_bytes=max(1_000_000, min(int(download_bytes), 64 * 1024 * 1024, transfer_cap)),
             progress=progress,
         )
         upload = _transfer_series(
             host=host,
             direction="upload",
-            block_bytes=max(1_000_000, min(int(upload_bytes), 32 * 1024 * 1024)),
+            block_bytes=max(1_000_000, min(int(upload_bytes), 32 * 1024 * 1024, transfer_cap)),
             progress=progress,
         )
         ray = download["headers"].get("cf-ray") or upload["headers"].get("cf-ray")
