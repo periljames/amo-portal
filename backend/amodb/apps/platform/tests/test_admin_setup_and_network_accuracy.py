@@ -442,3 +442,38 @@ def test_persistent_anomaly_does_not_redefine_ema_baseline_and_backs_off() -> No
     assert policy["state"] == "persistent_degradation"
     assert policy["next_delay_seconds"] == 900.0
     assert policy["ema_download_bps"] == 100_000_000.0
+
+
+def test_full_speedtest_never_uses_a_block_larger_than_transfer_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(
+        network_diagnostics,
+        "_http_transfer",
+        lambda *args, **kwargs: (1000, {"cf-ray": "test-NBO"}),
+    )
+
+    def fake_series(*, host, direction, block_bytes, progress):
+        calls.append((direction, block_bytes))
+        return {
+            "bps": 100_000_000.0,
+            "bytes": block_bytes,
+            "duration_seconds": 2.0,
+            "samples": 1,
+            "stable": True,
+            "capped": False,
+            "headers": {"cf-ray": "test-NBO"},
+        }
+
+    monkeypatch.setattr(network_diagnostics, "_transfer_series", fake_series)
+
+    result = network_diagnostics.run_internet_speedtest(
+        download_bytes=128 * 1024 * 1024,
+        upload_bytes=128 * 1024 * 1024,
+    )
+
+    assert result["ok"] is True
+    assert calls
+    assert all(block_bytes <= max(1_000_000, network_diagnostics.MAX_TRANSFER_BYTES) for _, block_bytes in calls)
