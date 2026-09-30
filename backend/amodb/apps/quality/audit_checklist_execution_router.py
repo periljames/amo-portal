@@ -264,8 +264,8 @@ def _fieldwork_write_blocker(db: Session, *, amo_id: str, audit: models.QMSAudit
     from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
 
     current = _capture_sources(db, amo_id=amo_id, audit=audit)
-    if _preparation_readiness_blockers(current):
-        return "Preparation is incomplete. Bind a governed checklist and accept every required document request before fieldwork continues."
+    if _preparation_readiness_blockers(current, phase="FIELDWORK"):
+        return "Preparation is incomplete. Resolve every document request governed as required before fieldwork before checklist execution continues."
     if prepared.source_fingerprint != current["source_fingerprint"]:
         return "Preparation changed after its last issue. Create and issue a fresh controlled preparation revision before fieldwork continues."
     return None
