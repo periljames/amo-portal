@@ -87,6 +87,13 @@ type ChecklistComposerItem = {
   requirementRef: string;
   prompt: string;
   expectedEvidence: string;
+  guidance: string;
+  auditMethod: "" | "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST";
+  samplingRequirement: string;
+  evidenceTypes: string;
+  evidenceRequiredWhen: ChecklistCanonicalStatus[];
+  notesRequiredWhen: ChecklistCanonicalStatus[];
+  naJustificationRequired: boolean;
   responseType: "COMPLIANCE" | "YES_NO_NA" | "CUSTOM";
   responseOptions: ChecklistResponseOption[];
   mandatory: boolean;
@@ -154,6 +161,13 @@ function emptyChecklistItem(): ChecklistComposerItem {
     requirementRef: "",
     prompt: "",
     expectedEvidence: "",
+    guidance: "",
+    auditMethod: "",
+    samplingRequirement: "",
+    evidenceTypes: "",
+    evidenceRequiredWhen: [],
+    notesRequiredWhen: [],
+    naJustificationRequired: false,
     responseType: "COMPLIANCE",
     responseOptions: [],
     mandatory: true,
@@ -439,6 +453,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         requirement_ref: item.requirementRef.trim() || null,
         prompt: item.prompt.trim(),
         expected_evidence: item.expectedEvidence.trim() || null,
+        guidance: item.guidance.trim() || null,
+        audit_method: item.auditMethod || null,
+        sampling_requirement: item.samplingRequirement.trim() || null,
+        evidence_types: item.evidenceTypes.split(",").map((value) => value.trim()).filter(Boolean),
+        evidence_required_when: item.evidenceRequiredWhen,
+        notes_required_when: item.notesRequiredWhen,
+        na_justification_required: item.naJustificationRequired,
+        conditional_logic: {},
         response_type: item.responseType,
         response_options: item.responseType === "CUSTOM" ? item.responseOptions : [],
         applicability: "APPLICABLE",
@@ -802,13 +824,22 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label><span>Checklist reference</span><input value={item.checklistRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, checklistRef: event.target.value } : entry))} /></label>
                         <label><span>Requirement / manual reference</span><input value={item.requirementRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, requirementRef: event.target.value } : entry))} /></label>
                         <label><span>Expected objective evidence</span><input value={item.expectedEvidence} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, expectedEvidence: event.target.value } : entry))} /></label>
+                        <label><span>Audit method</span><select value={item.auditMethod} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, auditMethod: event.target.value as ChecklistComposerItem["auditMethod"] } : entry))}><option value="">Not specified</option><option value="RECORD_REVIEW">Record review</option><option value="INTERVIEW">Interview</option><option value="OBSERVATION">Observation</option><option value="SAMPLE">Sample</option><option value="TEST">Test</option></select></label>
+                        <label className="is-wide"><span>Auditor guidance</span><textarea rows={2} value={item.guidance} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, guidance: event.target.value } : entry))} placeholder="Optional fieldwork guidance without changing the requirement itself" /></label>
+                        <label><span>Sampling requirement</span><input value={item.samplingRequirement} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, samplingRequirement: event.target.value } : entry))} placeholder="e.g. 5 records across relevant work areas" /></label>
+                        <label><span>Permitted evidence types</span><input value={item.evidenceTypes} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, evidenceTypes: event.target.value } : entry))} placeholder="PHOTO, DOCUMENT, RECORD_REF" /></label>
+                        <fieldset className="qms-audit-prepare__response-rules is-wide"><legend>Response rules</legend>
+                          <label><input type="checkbox" checked={item.naJustificationRequired} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, naJustificationRequired: event.target.checked } : entry))} /> Require a reason when marked N/A</label>
+                          <label><input type="checkbox" checked={item.notesRequiredWhen.includes("NONCOMPLIANT")} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, notesRequiredWhen: event.target.checked ? Array.from(new Set([...entry.notesRequiredWhen, "NONCOMPLIANT", "OBSERVATION"])) : entry.notesRequiredWhen.filter((value) => !["NONCOMPLIANT", "OBSERVATION"].includes(value)) } : entry))} /> Require notes for adverse responses</label>
+                          <label><input type="checkbox" checked={item.evidenceRequiredWhen.includes("NONCOMPLIANT")} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, evidenceRequiredWhen: event.target.checked ? Array.from(new Set([...entry.evidenceRequiredWhen, "NONCOMPLIANT", "OBSERVATION"])) : entry.evidenceRequiredWhen.filter((value) => !["NONCOMPLIANT", "OBSERVATION"].includes(value)) } : entry))} /> Require governed evidence for adverse responses</label>
+                        </fieldset>
                         <label><span>Source response scheme</span><select value={item.responseType} onChange={(event) => {
                           const responseType = event.target.value as ChecklistComposerItem["responseType"];
                           setChecklistItems((current) => current.map((entry) => entry.id === item.id
                             ? { ...entry, responseType, responseOptions: responseType === "CUSTOM" ? customResponseOptions() : [] }
                             : entry));
                         }}><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="CUSTOM">Custom governed source vocabulary</option></select></label>
-                        {item.responseType === "CUSTOM" ? <fieldset className="qms-audit-prepare__response-options is-wide"><legend>Custom source responses</legend><p>Map every source value explicitly. The portal will not infer ambiguous abbreviations such as U or S.</p>{item.responseOptions.map((option, optionIndex) => <div key={`${item.id}-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Value</span><input value={option.value} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate) } : entry))} /></label><label><span>Label</span><input value={option.label} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate) } : entry))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistCanonicalStatus } : candidate) } : entry))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove response ${option.label || option.value || optionIndex + 1}`} disabled={item.responseOptions.length <= 2} onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.filter((_, index) => index !== optionIndex) } : entry))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: [...entry.responseOptions, { value: "", label: "", canonical_status: "" }] } : entry))}><Plus size={14} /> Add response</button></fieldset> : null}
+                        {item.responseType === "CUSTOM" ? <fieldset className="qms-audit-prepare__response-options is-wide"><legend>Custom source responses</legend><p>Map every source value explicitly. The portal will not infer ambiguous abbreviations such as U or S.</p>{item.responseOptions.map((option, optionIndex) => <div key={`${item.id}-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Value</span><input value={option.value} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate) } : entry))} /></label><label><span>Label</span><input value={option.label} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate) } : entry))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistResponseOption["canonical_status"] } : candidate) } : entry))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove response ${option.label || option.value || optionIndex + 1}`} disabled={item.responseOptions.length <= 2} onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.filter((_, index) => index !== optionIndex) } : entry))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: [...entry.responseOptions, { value: "", label: "", canonical_status: "" }] } : entry))}><Plus size={14} /> Add response</button></fieldset> : null}
                         <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={item.mandatory} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, mandatory: event.target.checked } : entry))} /> Mandatory fieldwork item</label>
                       </div>
                       <button type="button" aria-label={`Remove checklist question ${index + 1}`} disabled={checklistItems.length === 1} onClick={() => setChecklistItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={15} /></button>
