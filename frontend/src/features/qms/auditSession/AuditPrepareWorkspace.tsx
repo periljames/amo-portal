@@ -217,6 +217,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistSearch, setChecklistSearch] = useState("");
   const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
+  const [dmsResponseType, setDmsResponseType] = useState<"" | "COMPLIANCE" | "YES_NO_NA" | "CUSTOM">("");
+  const [dmsResponseOptions, setDmsResponseOptions] = useState<ChecklistResponseOption[]>([]);
   const [checklistUploadOpen, setChecklistUploadOpen] = useState(false);
   const [checklistReason, setChecklistReason] = useState("Selected for this audit during governed preparation.");
   const [allowExistingItems, setAllowExistingItems] = useState(false);
@@ -438,6 +440,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       effectiveDmsChecklistId,
       checklistReason.trim(),
       allowExistingItems,
+      dmsResponseType,
+      dmsResponseType === "CUSTOM" ? dmsResponseOptions : [],
     ),
     onSuccess: async (binding) => {
       setLocalError(null);
@@ -445,6 +449,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setSelectedDmsChecklistId("");
       setChecklistReason("Selected for this audit during governed preparation.");
       setAllowExistingItems(false);
+      setDmsResponseType("");
+      setDmsResponseOptions([]);
       await refresh(binding);
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The controlled checklist revision could not be applied."),
@@ -560,6 +566,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const selectedDmsChecklist = dmsChecklists.find((item) => item.document_id === effectiveDmsChecklistId) || null;
   const selectedRealtimeDocument = documents.find((document) => document.id === checklistDmsDocumentId) || null;
   const selectedRequestDocument = documents.find((document) => document.id === newRequest.controlledDocumentId) || null;
+  const dmsResponseSchemeValid = Boolean(
+    dmsResponseType
+    && (dmsResponseType !== "CUSTOM"
+      || (dmsResponseOptions.length >= 2
+        && dmsResponseOptions.every((option) => option.value.trim() && option.label.trim() && option.canonical_status))),
+  );
   const realtimeChecklistValid = Boolean(
     checklistTitle.trim().length >= 3 &&
     checklistReason.trim().length >= 8 &&
@@ -799,12 +811,22 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
 
             {checklistMode === "LIBRARY" ? (
-              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!effectiveDmsChecklistId) { setLocalError("Select a current effective DMS checklist first."); return; } if (checklistReason.trim().length < 8) { setLocalError("Enter a selection reason of at least 8 characters."); return; } applyChecklistMutation.mutate(); }}>
+              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!effectiveDmsChecklistId) { setLocalError("Select a current effective DMS checklist first."); return; } if (!dmsResponseSchemeValid) { setLocalError("Define the source checklist response scheme before binding it. The portal will not infer YES/NO/N/A, U or S from the document text."); return; } if (checklistReason.trim().length < 8) { setLocalError("Enter a selection reason of at least 8 characters."); return; } applyChecklistMutation.mutate(); }}>
                 <label><span>Document type</span><select value={checklistDocumentType} onChange={(event) => { setChecklistDocumentType(event.target.value as "CHECKLIST" | "FORM"); setSelectedDmsChecklistId(""); }}><option value="CHECKLIST">Checklist</option><option value="FORM">Form</option></select></label>
                 <label><span>Search DMS</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Document code or title" /></div></label>
                 <label className="is-wide"><span>Current controlled document</span><select required value={effectiveDmsChecklistId} onChange={(event) => setSelectedDmsChecklistId(event.target.value)}><option value="">Select the current effective {checklistDocumentType.toLowerCase()}</option>{dmsChecklists.map((item) => <option key={item.document_id} value={item.document_id}>{item.code} · {item.title} · Rev {item.current_revision.revision_number}</option>)}</select></label>
                 {dmsChecklistsQuery.data?.recommendation ? <p className="qms-audit-prepare-stage__notice is-info is-wide"><CheckCircle2 size={14} /> Suggested from a similar audit: {dmsChecklistsQuery.data.recommendation.code} · {dmsChecklistsQuery.data.recommendation.title} ({dmsChecklistsQuery.data.recommendation.reason || "previously used for this audit context"}).</p> : null}
                 {selectedDmsChecklist ? <div className="qms-audit-prepare__current-revision is-wide"><strong>Current effective revision</strong><span>Issue {selectedDmsChecklist.current_revision.issue_number || "—"} · Rev {selectedDmsChecklist.current_revision.revision_number}{selectedDmsChecklist.current_revision.effective_date ? ` · effective ${selectedDmsChecklist.current_revision.effective_date}` : ""}</span><small>{selectedDmsChecklist.hierarchy_path || "DMS controlled-document library"}</small></div> : null}
+                <fieldset className="qms-audit-prepare__response-options is-wide">
+                  <legend>Source response scheme</legend>
+                  <p>Select the response vocabulary defined by the controlled source. This is a governed mapping, not a conversion of the source document.</p>
+                  <label><span>Response vocabulary</span><select required value={dmsResponseType} onChange={(event) => {
+                    const responseType = event.target.value as typeof dmsResponseType;
+                    setDmsResponseType(responseType);
+                    setDmsResponseOptions(responseType === "CUSTOM" ? customResponseOptions() : []);
+                  }}><option value="">Select source scheme</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="CUSTOM">Custom source vocabulary (including U / S where defined)</option></select></label>
+                  {dmsResponseType === "CUSTOM" ? <div className="qms-audit-prepare__response-options-list">{dmsResponseOptions.map((option, optionIndex) => <div key={`dms-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Source value</span><input value={option.value} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate))} /></label><label><span>Display label</span><input value={option.label} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistResponseOption["canonical_status"] } : candidate))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove source response ${option.label || option.value || optionIndex + 1}`} disabled={dmsResponseOptions.length <= 2} onClick={() => setDmsResponseOptions((current) => current.filter((_, index) => index !== optionIndex))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setDmsResponseOptions((current) => [...current, { value: "", label: "", canonical_status: "" }])}><Plus size={14} /> Add source response</button></div> : null}
+                </fieldset>
                 <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label>
                 {dmsChecklistsQuery.error ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> The DMS checklist library could not be loaded. You can upload a controlled checklist or create this audit’s questions in realtime.</p> : null}
                 {!dmsChecklistsQuery.isLoading && !dmsChecklists.length ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> No current effective {checklistDocumentType.toLowerCase()} is available in DMS. Upload one here or create the questions in realtime.</p> : null}
@@ -816,7 +838,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     <Link to={item.review_url}>Review document <ArrowRight size={14} /></Link>
                   </article>)}
                 </section> : null}
-                <footer><button type="button" onClick={() => setChecklistUploadOpen(true)}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={applyChecklistMutation.isPending || createChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
+                <footer><button type="button" onClick={() => { if (!dmsResponseSchemeValid) { setLocalError("Define the source response scheme before uploading and binding a controlled checklist."); return; } setChecklistUploadOpen(true); }}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={!dmsResponseSchemeValid || applyChecklistMutation.isPending || createChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
               </form>
             ) : (
               <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title, reason and every checklist question. Custom response schemes require at least two source values and an explicit workflow meaning for every value; ambiguous abbreviations are never inferred. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
@@ -977,6 +999,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               result.manual_id,
               "Approved DMS checklist uploaded and selected during audit preparation.",
               allowExistingItems,
+              dmsResponseType,
+              dmsResponseType === "CUSTOM" ? dmsResponseOptions : [],
             );
             setLocalSuccess("The approved checklist is now current in DMS and populated for this audit.");
             setAllowExistingItems(false);
