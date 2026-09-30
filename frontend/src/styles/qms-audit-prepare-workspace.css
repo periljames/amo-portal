@@ -721,3 +721,146 @@
     justify-self: start;
   }
 }
+
+.qms-audit-prepare__intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__intelligence-grid article {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.qms-audit-prepare__intelligence-grid article > strong {
+  font-size: 1.15rem;
+}
+
+.qms-audit-prepare__intelligence-grid article > span {
+  font-weight: 700;
+}
+
+.qms-audit-prepare__intelligence-grid article > small,
+.qms-audit-prepare__factor-list small {
+  color: var(--text-secondary);
+}
+
+.qms-audit-prepare__factor-list {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.qms-audit-prepare__factor-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-3);
+  align-items: start;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.qms-audit-prepare__factor-list > div > span:first-child {
+  display: grid;
+}
+
+.qms-audit-prepare__factor-list > div > small {
+  grid-column: 1 / -1;
+}
+
+.qms-audit-prepare__readiness-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__readiness-list > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__readiness-list .is-complete {
+  color: var(--accent-success);
+}
+
+.qms-audit-prepare__readiness-list .is-blocked {
+  color: var(--accent-warning);
+}
+
+.qms-audit-prepare__blocker-list {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  color: var(--text-secondary);
+}
+
+.qms-audit-prepare__reference-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__reference-list pre {
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-prepare__response-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3);
+  border: 1px dashed var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__response-rules legend {
+  padding: 0 var(--space-1);
+  font-weight: 750;
+}
+
+.qms-audit-prepare__response-rules label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+@media (max-width: 1000px) {
+  .qms-audit-prepare__intelligence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .qms-audit-prepare__intelligence-grid,
+  .qms-audit-prepare__readiness-list {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-prepare__factor-list > div {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-prepare__factor-list > div > small {
+    grid-column: auto;
+  }
+}
