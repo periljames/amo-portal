@@ -33,6 +33,8 @@ import {
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
   type ChecklistBinding,
+  type ChecklistCanonicalStatus,
+  type ChecklistResponseOption,
   type ChecklistTemplateItem,
 } from "../../../services/qmsChecklistTemplates";
 import {
@@ -85,6 +87,8 @@ type ChecklistComposerItem = {
   requirementRef: string;
   prompt: string;
   expectedEvidence: string;
+  responseType: "COMPLIANCE" | "YES_NO_NA" | "CUSTOM";
+  responseOptions: ChecklistResponseOption[];
   mandatory: boolean;
 };
 
@@ -130,6 +134,16 @@ const emptyExternalParticipant: ExternalParticipantDraft = {
   draftFinding: false,
 };
 
+function customResponseOptions(): ChecklistResponseOption[] {
+  return [
+    { value: "YES", label: "Yes", canonical_status: "COMPLIANT" },
+    { value: "NO", label: "No", canonical_status: "NONCOMPLIANT" },
+    { value: "N/A", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+    { value: "U", label: "U", canonical_status: "" },
+    { value: "S", label: "S", canonical_status: "" },
+  ];
+}
+
 function emptyChecklistItem(): ChecklistComposerItem {
   return {
     id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -140,6 +154,8 @@ function emptyChecklistItem(): ChecklistComposerItem {
     requirementRef: "",
     prompt: "",
     expectedEvidence: "",
+    responseType: "COMPLIANCE",
+    responseOptions: [],
     mandatory: true,
   };
 }
@@ -423,7 +439,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         requirement_ref: item.requirementRef.trim() || null,
         prompt: item.prompt.trim(),
         expected_evidence: item.expectedEvidence.trim() || null,
-        response_type: "COMPLIANCE",
+        response_type: item.responseType,
+        response_options: item.responseType === "CUSTOM" ? item.responseOptions : [],
         applicability: "APPLICABLE",
         mandatory: item.mandatory,
         finding_trigger: "ADVERSE_RESPONSE",
@@ -517,7 +534,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     checklistTitle.trim().length >= 3 &&
     checklistReason.trim().length >= 8 &&
     checklistItems.length &&
-    checklistItems.every((item) => item.prompt.trim()) &&
+    checklistItems.every((item) =>
+      item.prompt.trim()
+      && (item.responseType !== "CUSTOM"
+        || (item.responseOptions.length >= 2
+          && item.responseOptions.every((option) =>
+            option.value.trim()
+            && option.label.trim()
+            && option.canonical_status
+          )))
+    ) &&
     (!checklistDmsDocumentId || Boolean(documents.find((document) => document.id === checklistDmsDocumentId)?.current_revision)),
   );
   const readiness = useMemo(() => {
@@ -752,7 +778,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <footer><button type="button" onClick={() => setChecklistUploadOpen(true)}><UploadCloud size={14} /> Upload to DMS</button><button type="submit" className="is-primary" disabled={applyChecklistMutation.isPending || createChecklistMutation.isPending}>{applyChecklistMutation.isPending ? "Applying…" : "Use current revision"}</button></footer>
               </form>
             ) : (
-              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title (at least 3 characters), a reason (at least 8 characters), and every checklist question. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
+              <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title, reason and every checklist question. Custom response schemes require at least two source values and an explicit workflow meaning for every value; ambiguous abbreviations are never inferred. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
                 <label><span>Checklist title</span><input required minLength={3} value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} /></label>
                 <label><span>Creation reason</span><input required minLength={8} value={checklistReason} onChange={(event) => setChecklistReason(event.target.value)} /></label>
                 <label className="is-wide"><span>Description</span><textarea rows={2} value={checklistDescription} onChange={(event) => setChecklistDescription(event.target.value)} placeholder="Audit-specific purpose and coverage" /></label>
@@ -776,6 +802,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label><span>Checklist reference</span><input value={item.checklistRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, checklistRef: event.target.value } : entry))} /></label>
                         <label><span>Requirement / manual reference</span><input value={item.requirementRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, requirementRef: event.target.value } : entry))} /></label>
                         <label><span>Expected objective evidence</span><input value={item.expectedEvidence} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, expectedEvidence: event.target.value } : entry))} /></label>
+                        <label><span>Source response scheme</span><select value={item.responseType} onChange={(event) => {
+                          const responseType = event.target.value as ChecklistComposerItem["responseType"];
+                          setChecklistItems((current) => current.map((entry) => entry.id === item.id
+                            ? { ...entry, responseType, responseOptions: responseType === "CUSTOM" ? customResponseOptions() : [] }
+                            : entry));
+                        }}><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="CUSTOM">Custom governed source vocabulary</option></select></label>
+                        {item.responseType === "CUSTOM" ? <fieldset className="qms-audit-prepare__response-options is-wide"><legend>Custom source responses</legend><p>Map every source value explicitly. The portal will not infer ambiguous abbreviations such as U or S.</p>{item.responseOptions.map((option, optionIndex) => <div key={`${item.id}-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Value</span><input value={option.value} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate) } : entry))} /></label><label><span>Label</span><input value={option.label} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate) } : entry))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistCanonicalStatus } : candidate) } : entry))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove response ${option.label || option.value || optionIndex + 1}`} disabled={item.responseOptions.length <= 2} onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.filter((_, index) => index !== optionIndex) } : entry))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: [...entry.responseOptions, { value: "", label: "", canonical_status: "" }] } : entry))}><Plus size={14} /> Add response</button></fieldset> : null}
                         <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={item.mandatory} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, mandatory: event.target.checked } : entry))} /> Mandatory fieldwork item</label>
                       </div>
                       <button type="button" aria-label={`Remove checklist question ${index + 1}`} disabled={checklistItems.length === 1} onClick={() => setChecklistItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={15} /></button>
