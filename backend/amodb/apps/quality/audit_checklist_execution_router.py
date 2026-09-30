@@ -385,14 +385,14 @@ def _locked_governance(
     ).with_for_update().first()
 
 
-def _frozen_response_policy_map(
+def _frozen_item_definition_map(
     db: Session,
     *,
     amo_id: str,
     audit_id: uuid.UUID,
-) -> dict[str, tuple[str, list[dict[str, Any]]]]:
-    """Resolve frozen response vocabularies for all bound checklist items in one query."""
-    result: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+) -> dict[str, dict[str, Any]]:
+    """Resolve the complete frozen checklist definition for every instantiated item."""
+    result: dict[str, dict[str, Any]] = {}
     bindings = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == amo_id,
         QualityAuditChecklistBinding.audit_id == audit_id,
@@ -402,11 +402,28 @@ def _frozen_response_policy_map(
         snapshot = list(binding.item_snapshot or [])
         for index, item_key in enumerate(ids):
             row = snapshot[index] if index < len(snapshot) and isinstance(snapshot[index], dict) else {}
-            result[item_key] = (
-                str(row.get("response_type") or "COMPLIANCE"),
-                list(row.get("response_options") or []),
-            )
+            result[item_key] = dict(row)
     return result
+
+
+def _frozen_response_policy_map(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> dict[str, tuple[str, list[dict[str, Any]]]]:
+    """Resolve frozen response vocabularies for all bound checklist items in one query."""
+    return {
+        item_key: (
+            str(row.get("response_type") or "COMPLIANCE"),
+            list(row.get("response_options") or []),
+        )
+        for item_key, row in _frozen_item_definition_map(
+            db,
+            amo_id=amo_id,
+            audit_id=audit_id,
+        ).items()
+    }
 
 
 def _frozen_response_policy(
@@ -421,6 +438,59 @@ def _frozen_response_policy(
         str(item_id),
         ("COMPLIANCE", []),
     )
+
+
+def _validate_frozen_item_requirements(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_id: uuid.UUID,
+    canonical_status: str,
+    auditor_notes: str | None,
+    evidence_references: list[dict[str, Any] | str],
+) -> None:
+    item_definition = _frozen_item_definition_map(
+        db,
+        amo_id=amo_id,
+        audit_id=audit_id,
+    ).get(str(item_id), {})
+    status_value = str(canonical_status or "").upper()
+    notes_required = {
+        str(value).upper()
+        for value in list(item_definition.get("notes_required_when") or [])
+    }
+    evidence_required = {
+        str(value).upper()
+        for value in list(item_definition.get("evidence_required_when") or [])
+    }
+    note_present = bool(str(auditor_notes or "").strip())
+    evidence_present = bool(list(evidence_references or []))
+
+    if status_value == "NOT_APPLICABLE" and bool(item_definition.get("na_justification_required")) and not note_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_NA_JUSTIFICATION_REQUIRED",
+                "message": "This governed checklist item requires an auditor reason before it can be marked not applicable.",
+            },
+        )
+    if status_value in notes_required and not note_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_NOTES_REQUIRED",
+                "message": f"This governed checklist item requires auditor notes for {status_value.replace('_', ' ').lower()}.",
+            },
+        )
+    if status_value in evidence_required and not evidence_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_EVIDENCE_REQUIRED",
+                "message": f"This governed checklist item requires linked evidence for {status_value.replace('_', ' ').lower()}.",
+            },
+        )
 
 
 def _validated_response_value(
@@ -597,6 +667,15 @@ def mutate_live_fieldwork(
         governance=governance,
     )
 
+    _validate_frozen_item_requirements(
+        db,
+        amo_id=ctx.amo_id,
+        audit_id=audit_id,
+        item_id=item_id,
+        canonical_status=payload.canonical_response_status,
+        auditor_notes=payload.auditor_notes,
+        evidence_references=payload.evidence_references,
+    )
     response_value = _validated_response_value(
         db,
         amo_id=ctx.amo_id,
@@ -752,6 +831,15 @@ def create_atomic_fieldwork_finding(
             requested_by_user_id=ctx.user_id,
         )
 
+        _validate_frozen_item_requirements(
+            db,
+            amo_id=ctx.amo_id,
+            audit_id=audit_id,
+            item_id=item_id,
+            canonical_status=payload.canonical_response_status,
+            auditor_notes=payload.auditor_notes,
+            evidence_references=payload.evidence_references,
+        )
         response_value = _validated_response_value(
             db,
             amo_id=ctx.amo_id,
