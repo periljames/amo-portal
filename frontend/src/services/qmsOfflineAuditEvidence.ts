@@ -177,14 +177,25 @@ export function onOfflineAuditEvidenceChanged(listener: () => void): () => void 
 }
 
 function publicEntry(row: StoredEntry): OfflineAuditEvidenceEntry {
-  const {
-    metadataIv: _metadataIv,
-    metadataCiphertext: _metadataCiphertext,
-    fileIv: _fileIv,
-    fileCiphertext: _fileCiphertext,
-    ...entry
-  } = row;
-  return entry;
+  return {
+    id: row.id,
+    scope: row.scope,
+    amoCode: row.amoCode,
+    auditId: row.auditId,
+    checklistItemId: row.checklistItemId,
+    findingId: row.findingId,
+    filename: row.filename,
+    contentType: row.contentType,
+    sizeBytes: row.sizeBytes,
+    sha256: row.sha256,
+    description: row.description,
+    clientMutationId: row.clientMutationId,
+    capturedBaseVersion: row.capturedBaseVersion,
+    capturedAt: row.capturedAt,
+    state: row.state,
+    retryCount: row.retryCount,
+    lastError: row.lastError,
+  };
 }
 
 async function putStored(row: StoredEntry): Promise<void> {
@@ -263,12 +274,13 @@ export async function enqueueOfflineAuditEvidence(input: {
       amoCode: input.amoCode,
       auditId: input.auditId,
       checklistItemId: input.checklistItemId,
-      findingId: input.findingId || null,
+      // Sensitive context is retained only inside metadataCiphertext at rest.
+      findingId: null,
       filename: input.file.name,
       contentType: input.file.type || "application/octet-stream",
       sizeBytes: input.file.size,
       sha256: hash,
-      description: input.description?.trim() || null,
+      description: null,
       clientMutationId: input.clientMutationId,
       capturedBaseVersion: input.baseVersion,
       capturedAt,
@@ -284,7 +296,11 @@ export async function enqueueOfflineAuditEvidence(input: {
     tx.objectStore(ENTRY_STORE).put(row);
     await transactionDone(tx);
     notifyChanged();
-    return publicEntry(row);
+    return {
+      ...publicEntry(row),
+      findingId: input.findingId || null,
+      description: input.description?.trim() || null,
+    };
   } finally {
     db.close();
   }
@@ -348,18 +364,16 @@ export async function replayOfflineAuditEvidence(
 
     const db = await openDb();
     let file: File;
+    let metadata: { description?: string | null; findingId?: string | null };
     try {
       const key = await encryptionKey(db);
-      const metadata = await decryptText<{ description?: string | null; findingId?: string | null }>(
+      metadata = await decryptText<{ description?: string | null; findingId?: string | null }>(
         key,
         row.metadataIv,
         row.metadataCiphertext,
       );
-      row.description = metadata.description || null;
-      row.findingId = metadata.findingId || null;
       file = await decryptFile(key, row);
     } catch (error) {
-      db.close();
       await updateState(row, "CORRUPT", error instanceof Error ? error.message : "Local evidence could not be decrypted.");
       failed += 1;
       continue;
@@ -377,8 +391,8 @@ export async function replayOfflineAuditEvidence(
         {
           baseVersion: item.entity_version,
           clientMutationId: row.clientMutationId,
-          description: row.description,
-          findingId: row.findingId,
+          description: metadata.description || null,
+          findingId: metadata.findingId || null,
         },
       );
       if (result.artifact.sha256.toLowerCase() !== row.sha256.toLowerCase()) {
