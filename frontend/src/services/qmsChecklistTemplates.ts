@@ -20,6 +20,14 @@ export type ChecklistTemplateItem = {
   manual_source_ref?: string | null;
   prompt: string;
   expected_evidence?: string | null;
+  guidance?: string | null;
+  audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
+  sampling_requirement?: string | null;
+  evidence_types?: string[];
+  evidence_required_when?: ChecklistCanonicalStatus[];
+  notes_required_when?: ChecklistCanonicalStatus[];
+  na_justification_required?: boolean;
+  conditional_logic?: Record<string, unknown>;
   response_type: string;
   response_options?: ChecklistResponseOption[];
   applicability: string;
