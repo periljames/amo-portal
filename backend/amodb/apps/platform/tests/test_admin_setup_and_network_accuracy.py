@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -364,3 +365,54 @@ def test_adaptive_probe_does_not_escalate_provider_rejection(
     assert result["full_probe_ran"] is False
     platform_monitor.network_diagnostics.run_internet_speedtest.assert_not_called()
     platform_monitor.network_diagnostics.run_database_throughput.assert_not_called()
+
+
+def test_network_history_excludes_sentinels_from_throughput_aggregates() -> None:
+    now = datetime.now(timezone.utc)
+    sentinel = SimpleNamespace(
+        captured_at=now,
+        scenario="server_internet",
+        source="scheduled_light",
+        target="speed.cloudflare.com",
+        ok=True,
+        latency_ms=20.0,
+        jitter_ms=1.0,
+        download_bps=10_000_000.0,
+        upload_bps=None,
+        error=None,
+        details_json={"sample_kind": "sentinel"},
+    )
+    full = SimpleNamespace(
+        captured_at=now,
+        scenario="server_internet",
+        source="scheduled_full",
+        target="speed.cloudflare.com",
+        ok=True,
+        latency_ms=21.0,
+        jitter_ms=1.5,
+        download_bps=100_000_000.0,
+        upload_bps=50_000_000.0,
+        error=None,
+        details_json={"sample_kind": "full"},
+    )
+    query = MagicMock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.all.return_value = [sentinel, full]
+    db = MagicMock()
+    db.query.return_value = query
+
+    payload = network_diagnostics.history(
+        db,
+        window="24h",
+        scenario="server_internet",
+        sla_download_mbps=80.0,
+    )
+
+    history = payload["scenarios"]["server_internet"]
+    assert history["download_mbps"]["avg"] == 100.0
+    assert history["upload_mbps"]["avg"] == 50.0
+    assert history["download_mbps"]["samples"] == 1
+    assert history["sentinel_samples"] == 1
+    assert history["full_samples"] == 1
+    assert history["sla_breaches"] == 0
