@@ -34,6 +34,7 @@ from .audit_checklist_execution_router import (
     _mutation_hash,
     _normalise_client_timestamp,
     _fieldwork_write_blocker,
+    _frozen_response_policy_map,
     _mark_fieldwork_started,
     _require_fieldwork_write_window,
     _validated_response_value,
@@ -96,6 +97,7 @@ def _external_item_dict(
     item: models.QualityAuditChecklistItem,
     governance: QualityAuditChecklistExecutionGovernance | None,
     contribution: QualityAuditFieldworkParticipantContribution | None,
+    response_policy: tuple[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     return {
         "checklist_item_id": str(item.id),
@@ -103,6 +105,8 @@ def _external_item_dict(
         "checklist_ref": item.checklist_ref,
         "requirement_ref": item.requirement_ref,
         "prompt": item.prompt,
+        "response_type": response_policy[0],
+        "response_options": response_policy[1],
         "canonical_response_status": governance.canonical_response_status if governance else _canonical_from_legacy(item.response_status),
         "response_value": governance.response_value if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
@@ -163,6 +167,11 @@ def get_external_auditor_fieldwork(
         audit_id=grant.audit_id,
         participant_id=participant.id,
     )
+    response_policies = _frozen_response_policy_map(
+        db,
+        amo_id=grant.amo_id,
+        audit_id=grant.audit_id,
+    )
     can_execute = fieldwork_blocker is None and "audit:checklist_execute" in scope
     can_create_evidence = fieldwork_blocker is None and "audit:evidence_create" in scope
     can_draft_findings = fieldwork_blocker is None and "audit:finding_draft" in scope
@@ -177,7 +186,12 @@ def get_external_auditor_fieldwork(
         "can_draft_findings": can_draft_findings,
         "finding_draft_blocker": fieldwork_blocker or (None if can_draft_findings else "This external audit assignment does not permit finding drafts."),
         "items": [
-            _external_item_dict(item, by_item.get(item.id), contributions.get(item.id))
+            _external_item_dict(
+                item,
+                by_item.get(item.id),
+                contributions.get(item.id),
+                response_policies.get(str(item.id), ("COMPLIANCE", [])),
+            )
             for item in items
         ],
     }
@@ -294,7 +308,13 @@ def mutate_external_auditor_checklist(
     db.add(contribution)
     committed_version = int(governance.entity_version or 1)
     db.flush()
-    external_row = _external_item_dict(item, governance, contribution)
+    response_policies = _frozen_response_policy_map(db, amo_id=grant.amo_id, audit_id=grant.audit_id)
+    external_row = _external_item_dict(
+        item,
+        governance,
+        contribution,
+        response_policies.get(str(item.id), ("COMPLIANCE", [])),
+    )
 
     db.add(QualityAuditFieldworkMutationReceipt(
         amo_id=grant.amo_id,
