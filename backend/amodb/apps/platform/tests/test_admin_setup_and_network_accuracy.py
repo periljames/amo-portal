@@ -150,8 +150,10 @@ def test_scheduled_network_cycle_persists_provider_rejection_and_continues_datab
     result = platform_monitor.run_network_probes_once(prune_days=30)
 
     assert result == {
-        "internet_download_mbps": 0.0,
+        "internet_download_mbps": None,
         "internet_ok": False,
+        "internet_error": "HTTP Error 403: Forbidden",
+        "internet_failure_kind": "provider_rejected",
         "database_latency_ms": 2.5,
     }
     assert persisted == [
