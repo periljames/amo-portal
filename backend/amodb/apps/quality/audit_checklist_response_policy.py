@@ -35,6 +35,16 @@ _DEFAULT_SCHEMES: dict[str, list[dict[str, str]]] = {
         {"value": "NO", "label": "No", "canonical_status": "NONCOMPLIANT"},
         {"value": "N/A", "label": "N/A", "canonical_status": "NOT_APPLICABLE"},
     ],
+    # TEXT historically used the same governed disposition buttons while the
+    # narrative itself lived in auditor notes. Preserve that behavior rather
+    # than making existing TEXT checklist revisions unexecutable.
+    "TEXT": [
+        {"value": "COMPLIANT", "label": "Compliant", "canonical_status": "COMPLIANT"},
+        {"value": "NONCOMPLIANT", "label": "NCR", "canonical_status": "NONCOMPLIANT"},
+        {"value": "OBSERVATION", "label": "Observation", "canonical_status": "OBSERVATION"},
+        {"value": "NOT_APPLICABLE", "label": "N/A", "canonical_status": "NOT_APPLICABLE"},
+        {"value": "NOT_VERIFIED", "label": "Not verified", "canonical_status": "NOT_VERIFIED"},
+    ],
 }
 
 
@@ -53,8 +63,6 @@ def normalise_response_options(
         default = _DEFAULT_SCHEMES.get(scheme)
         if default is not None:
             return [dict(item) for item in default]
-        if scheme == "TEXT":
-            return []
         raise ValueError(
             f"Response type {scheme!r} has no explicit response_options. "
             "Define each source response value and its canonical_status; ambiguous abbreviations are not inferred."
