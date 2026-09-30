@@ -305,7 +305,7 @@ def run_adaptive_network_probe_once(*, prune_days: int = 30) -> dict | None:
         )
         last_full_attempt = full_history[0] if full_history else None
         last_full_success = next((row for row in full_history if getattr(row, "ok", False)), None)
-        full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 43200.0, minimum=1800.0)
+        full_refresh = _float_setting("PLATFORM_NET_FULL_REFRESH_INTERVAL_SECONDS", 86400.0, minimum=1800.0)
         full_cooldown = _float_setting("PLATFORM_NET_FULL_ANOMALY_COOLDOWN_SECONDS", 900.0, minimum=300.0)
         incident_cooldown = _float_setting("PLATFORM_NET_FULL_INCIDENT_COOLDOWN_SECONDS", 14400.0, minimum=1800.0)
         failure_backoff = _float_setting("PLATFORM_NET_FULL_FAILURE_BACKOFF_SECONDS", 3600.0, minimum=900.0)
