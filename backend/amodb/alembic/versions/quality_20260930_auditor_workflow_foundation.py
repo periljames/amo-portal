@@ -18,6 +18,7 @@ PARTICIPANT_EXECUTION = "quality_audit_fieldwork_participant_contributions"
 WORK_PACKAGE = "quality_audit_work_packages"
 AUDIT = "qms_audits"
 EVIDENCE = "quality_audit_evidence_artifacts"
+FINDING = "qms_audit_findings"
 
 
 def _is_postgresql() -> bool:
@@ -65,6 +66,15 @@ def upgrade() -> None:
     if audit_columns and "entity_version" not in audit_columns:
         op.add_column(AUDIT, sa.Column("entity_version", sa.Integer(), nullable=False, server_default="1"))
         op.create_check_constraint("ck_qms_audits_entity_version", AUDIT, "entity_version >= 1")
+
+    finding_columns = _columns(FINDING)
+    if finding_columns and "entity_version" not in finding_columns:
+        op.add_column(FINDING, sa.Column("entity_version", sa.Integer(), nullable=False, server_default="1"))
+        op.create_check_constraint("ck_qms_audit_findings_entity_version", FINDING, "entity_version >= 1")
+    if finding_columns and "updated_at" not in finding_columns:
+        op.add_column(FINDING, sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
+        op.execute(sa.text("UPDATE qms_audit_findings SET updated_at = created_at WHERE updated_at IS NULL"))
+        op.alter_column(FINDING, "updated_at", nullable=False)
 
     columns = _columns(DOC_META)
     if columns and "requirement_stage" not in columns:
@@ -233,6 +243,13 @@ def downgrade() -> None:
         op.drop_column(EXECUTION, "auditee_comments")
     if execution_columns and "response_value" in execution_columns:
         op.drop_column(EXECUTION, "response_value")
+
+    finding_columns = _columns(FINDING)
+    if finding_columns and "updated_at" in finding_columns:
+        op.drop_column(FINDING, "updated_at")
+    if finding_columns and "entity_version" in finding_columns:
+        op.drop_constraint("ck_qms_audit_findings_entity_version", FINDING, type_="check")
+        op.drop_column(FINDING, "entity_version")
 
     columns = _columns(DOC_META)
     if columns and "requirement_stage" in columns:
