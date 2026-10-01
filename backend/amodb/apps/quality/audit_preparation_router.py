@@ -92,13 +92,21 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         "entity_version": int(audit.entity_version or 1),
         "audit_scope_id": str(audit.audit_scope_id) if audit.audit_scope_id else None,
         "audit_scope_code": audit.audit_scope_code,
+        "location": audit.location,
         "auditee": audit.auditee,
+        "auditee_email": audit.auditee_email,
         "auditee_user_id": audit.auditee_user_id,
+        "external_auditees": audit.external_auditees,
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
         "planned_start": audit.planned_start.isoformat() if audit.planned_start else None,
         "planned_end": audit.planned_end.isoformat() if audit.planned_end else None,
+        "planned_start_time": audit.planned_start_time.isoformat(timespec="minutes") if audit.planned_start_time else None,
+        "planned_end_time": audit.planned_end_time.isoformat(timespec="minutes") if audit.planned_end_time else None,
+        "actual_start": audit.actual_start.isoformat() if audit.actual_start else None,
+        "actual_end": audit.actual_end.isoformat() if audit.actual_end else None,
     }
     checklist_snapshot = [
         {
