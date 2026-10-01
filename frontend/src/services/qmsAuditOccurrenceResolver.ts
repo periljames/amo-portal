@@ -55,6 +55,7 @@ export async function resolveAuditOccurrence(amoCode: string, auditKey: string, 
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();
     if (offline) return offline;
+    throw new Error("This audit is unavailable offline on this device. Reconnect and use Make available offline from Prepare before fieldwork.");
   }
   try {
     return await apiRequest<QMSAuditOut>(
