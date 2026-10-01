@@ -7,7 +7,7 @@ import {
   encryptDeviceValue,
   type EncryptedDeviceValue,
 } from "./offlinePersistence";
-import { savePdfSourceOffline } from "../pages/manuals/pdfSourceCache";
+import { hasCachedPdfSource, savePdfSourceOffline } from "../pages/manuals/pdfSourceCache";
 
 export type AuditOfflinePack = {
   schema: "QMS_AUDIT_OFFLINE_PACK_V1";
@@ -237,9 +237,22 @@ export async function prepareAuditOfflinePack(
       { tenant: amoCode, manualId, revisionId },
       sourceSha256,
       readerUrl,
+      null,
+      { ownerEntryLimit: Math.max(6, offlineReferences.size) },
     );
     if (!cached) {
       throw new Error(`Controlled reference ${String(reference.document_code || manualId)} could not be retained offline. The audit package was not marked ready.`);
+    }
+  }
+
+  for (const reference of offlineReferences.values()) {
+    const manualId = String(reference.document_id);
+    const revisionId = String(reference.revision_id);
+    const sourceSha256 = String(reference.offline_reader_sha256 || reference.source_sha256);
+    const readerUrl = String(reference.offline_reader_url).replace("{tenant}", encodeURIComponent(amoCode));
+    const retained = await hasCachedPdfSource({ tenant: amoCode, manualId, revisionId }, sourceSha256, readerUrl);
+    if (!retained) {
+      throw new Error(`Controlled reference ${String(reference.document_code || manualId)} was evicted before the audit package finished preparing. Free device storage or reduce the offline field reference set.`);
     }
   }
 
