@@ -25,6 +25,7 @@ import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import { listOfflineMutations } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
+import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
   listChecklistExecutionGovernance,
@@ -196,7 +197,25 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const findingsQuery = useQuery({
     queryKey: ["qms", "live-audit-findings", auditId],
-    queryFn: () => qmsListFindings(auditId),
+    queryFn: async () => {
+      const offline = async () => {
+        const pack = await readAuditOfflinePack(amoCode, auditId);
+        return pack ? projectOfflineFindings(pack) : null;
+      };
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const local = await offline();
+        if (local) return local;
+      }
+      try {
+        return await qmsListFindings(auditId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+        const local = await offline();
+        if (local) return local;
+        throw error;
+      }
+    },
     enabled: fieldworkEnabled,
     staleTime: 2_000,
   });
