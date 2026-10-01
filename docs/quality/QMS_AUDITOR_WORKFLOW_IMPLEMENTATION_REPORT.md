@@ -366,6 +366,22 @@ This register is not a waiver for any obvious source-code/runtime defect found b
 - `frontend/src/services/qmsAuditOfflinePack.test.ts`
 - `frontend/package.json`
 
+## Prompt reconciliation — 1 Oct final source pass
+
+The attached implementation mandate was rechecked against the current branch after the initial foundation PR. The following source gaps found in that pass were corrected rather than deferred:
+
+- canonical Setup now exposes and persists the existing audit `location` field;
+- canonical occurrence projection now returns supporting auditor IDs, preserving the complete team;
+- quick opening/closing meeting scheduling preserves agenda, auditee department and responsible auditor;
+- checklist answer provenance is fully mapped in the ORM and API (`answered_by_user_id`, `answered_at`);
+- sampled-record information is preserved even when an adverse response and finding are committed atomically;
+- the Activity workspace now includes checklist execution events, evidence uploads, report events and finding-release events in addition to general/preparation events;
+- governed evidence upload now persists and publishes an audit-scoped realtime event, with durable DB replay as the recovery path;
+- governed internal fieldwork mutations require durable browser storage and fail closed instead of falling back to a volatile in-memory queue;
+- existing stable checklist item/section identity, section hierarchy metadata, revision effective date, evidence request/device/state metadata and response applicability/provenance fields were re-verified in source rather than reimplemented.
+
+At source level, no additional mandate capability is intentionally deferred as a placeholder. Remaining items are executable validation and environment/deployment proof listed below. A failing current-head check must still be investigated before this PR can be called complete.
+
 ## Definition-of-done posture
 
 The branch now materially covers the mandate's required vertical slices using the existing QMS architecture. **It must remain Draft until current-head build/lint/backend/PostgreSQL/browser/security checks are reviewed.** No production-complete claim should be made from source inspection alone.
