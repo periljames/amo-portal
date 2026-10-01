@@ -5,6 +5,7 @@ import { readAuditOfflinePackByKey } from "./qmsAuditOfflinePack";
 export type AuditOccurrenceSetupUpdate = {
   title?: string | null;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
   auditee?: string | null;
   auditee_email?: string | null;
@@ -16,6 +17,7 @@ export type AuditOccurrenceSetupUpdate = {
   notify_auditees?: boolean | null;
   reminder_interval_days?: number | null;
   reschedule_reason?: string | null;
+  base_version?: number | null;
 };
 
 export function auditOccurrenceResolverKey(auditKey: string): string {
