@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { projectOfflineChecklistExecution, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 
 export type CanonicalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
 export type FieldworkFindingResponse = "NONCOMPLIANT" | "OBSERVATION";
@@ -120,16 +121,32 @@ function fieldworkEnvelope(clientMutationId: string, baseVersion: number) {
   };
 }
 
-export function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<ChecklistExecutionGovernanceResponse>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-execution-governance`),
-    {
-      timeoutMs: 15_000,
-      cacheTtlMs: FIELDWORK_CACHE_TTL_MS,
-      staleWhileOfflineMs: FIELDWORK_STALE_OFFLINE_MS,
-      signal,
-    },
-  );
+export async function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
+  const readOffline = async () => {
+    const pack = await readAuditOfflinePack(amoCode, auditId);
+    return pack ? projectOfflineChecklistExecution(pack) as ChecklistExecutionGovernanceResponse : null;
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+  }
+  try {
+    return await apiRequest<ChecklistExecutionGovernanceResponse>(
+      qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-execution-governance`),
+      {
+        timeoutMs: 15_000,
+        cacheTtlMs: FIELDWORK_CACHE_TTL_MS,
+        staleWhileOfflineMs: FIELDWORK_STALE_OFFLINE_MS,
+        signal,
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
 }
 
 export function mutateChecklistFieldwork(
