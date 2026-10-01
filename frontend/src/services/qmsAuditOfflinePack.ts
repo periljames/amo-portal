@@ -10,6 +10,14 @@ export type AuditOfflinePack = {
   schema: "QMS_AUDIT_OFFLINE_PACK_V1";
   generated_at: string;
   audit_id: string;
+  fieldwork_state: {
+    authorized: boolean;
+    blocker?: string | null;
+    audit_status: string;
+    actual_start?: string | null;
+    actual_end?: string | null;
+    captured_at: string;
+  };
   work_package: {
     id: string;
     audit_id: string;
@@ -20,6 +28,19 @@ export type AuditOfflinePack = {
       audit: Record<string, unknown>;
       preparation: Record<string, unknown>;
       checklist_snapshot: Array<Record<string, unknown>>;
+      checklist_bindings: Array<{
+        id: string;
+        template_id: string;
+        template_revision_id: string;
+        template_code: string;
+        revision_no: number;
+        content_sha256: string;
+        item_snapshot: Array<Record<string, unknown>>;
+        source_references: Array<Record<string, unknown> | string>;
+        instantiated_item_ids: string[];
+        application_reason: string;
+        applied_at?: string | null;
+      }>;
       document_request_definitions: Array<Record<string, unknown>>;
       source_references: Array<Record<string, unknown>>;
       prior_audits: Array<Record<string, unknown>>;
@@ -237,6 +258,118 @@ export async function auditOfflinePackStatus(
   } finally {
     db.close();
   }
+}
+
+
+function normalizedAuditKey(value: string): string {
+  return value.trim().toLowerCase().replaceAll("/", "-").replaceAll("_", "-").replaceAll(" ", "-").replaceAll(".", "-").replace(/^-+|-+$/g, "");
+}
+
+async function scopedStoredPacks(): Promise<StoredAuditOfflinePack[]> {
+  const scope = currentOfflineScope();
+  const db = await openDb();
+  try {
+    const transaction = db.transaction(STORE, "readonly");
+    const rows = await requestResult(transaction.objectStore(STORE).index("scope").getAll(IDBKeyRange.only(scope))) as StoredAuditOfflinePack[];
+    await transactionDone(transaction);
+    return rows.filter((row) => row.scope === scope);
+  } finally {
+    db.close();
+  }
+}
+
+export async function readAuditOfflinePackByKey(
+  amoCode: string,
+  auditKey: string,
+): Promise<AuditOfflinePack | null> {
+  const target = normalizedAuditKey(auditKey);
+  if (!target) return null;
+  for (const row of await scopedStoredPacks()) {
+    if (row.amoCode !== amoCode) continue;
+    if (row.expiresAt != null && row.expiresAt <= Date.now()) continue;
+    const pack = await decryptDeviceValue<AuditOfflinePack>(row.encrypted).catch(() => null);
+    if (!pack) continue;
+    const audit = pack.work_package.package_snapshot.audit;
+    const id = String(audit.id || pack.audit_id || "");
+    const ref = String(audit.audit_ref || "");
+    if (target === normalizedAuditKey(id) || target === normalizedAuditKey(ref)) return pack;
+  }
+  return null;
+}
+
+export function projectOfflineChecklistBindings(pack: AuditOfflinePack) {
+  return {
+    items: (pack.work_package.package_snapshot.checklist_bindings || []).map((binding) => ({
+      ...binding,
+      audit_id: pack.audit_id,
+      applied_by_user_id: pack.work_package.issued_by_user_id || null,
+      applied_at: binding.applied_at || pack.work_package.issued_at,
+    })),
+  };
+}
+
+export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
+  const execution = new Map(pack.execution.map((row) => [row.checklist_item_id, row]));
+  const frozenItems = pack.work_package.package_snapshot.checklist_snapshot || [];
+  return {
+    items: frozenItems.map((source, index) => {
+      const checklistItemId = String(source.id || "");
+      const row = execution.get(checklistItemId);
+      return {
+        checklist_item_id: checklistItemId,
+        audit_id: pack.audit_id,
+        section: source.section ?? null,
+        checklist_ref: source.checklist_ref ?? null,
+        requirement_ref: source.requirement_ref ?? null,
+        prompt: String(source.prompt || `Checklist item ${index + 1}`),
+        legacy_response_status: String(source.response_status || "PENDING"),
+        canonical_response_status: String(row?.canonical_response_status || "NOT_VERIFIED"),
+        response_value: row?.response_value ?? null,
+        objective_evidence: source.objective_evidence ?? null,
+        finding_id: source.finding_id ?? null,
+        auditor_notes: row?.auditor_notes ?? null,
+        evidence_references: row?.evidence_references || [],
+        governance_id: null,
+        entity_version: Number(row?.entity_version || 0),
+        updated_by_user_id: null,
+        updated_at: row?.updated_at ?? null,
+        events: [],
+      };
+    }),
+    canonical_response_values: ["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"],
+    legacy_compatibility: {
+      COMPLIANT: "COMPLIANT",
+      NON_CONFORMING: "NONCOMPLIANT",
+      OBSERVATION: "OBSERVATION",
+      NOT_APPLICABLE: "NOT_APPLICABLE",
+      PENDING: "NOT_VERIFIED",
+    },
+  };
+}
+
+export function projectOfflineAuditSession(pack: AuditOfflinePack) {
+  const completed = Boolean(pack.fieldwork_state.actual_end);
+  const stage = completed ? "closing" : "live";
+  return {
+    audit_id: pack.audit_id,
+    current_stage_id: stage,
+    current_stage_label: completed ? "Closing" : "Fieldwork",
+    percent_complete: 0,
+    stages: [
+      { id: "setup", label: "Setup", complete: true, active: false, legacy_tab: "overview", helper: "Downloaded governed work package" },
+      { id: "prepare", label: "Prepare", complete: true, active: false, legacy_tab: "checklist", helper: "Issued governed preparation" },
+      { id: "live", label: "Live", complete: completed, active: !completed, legacy_tab: "checklist", helper: "Offline-capable fieldwork" },
+      { id: "closing", label: "Closing", complete: false, active: completed, legacy_tab: "report", helper: "Reconnect for governed closing actions" },
+      { id: "follow-up", label: "Follow-up", complete: false, active: false, legacy_tab: "findings", helper: "Reconnect required" },
+      { id: "archive", label: "Archive", complete: false, active: false, legacy_tab: "report", helper: "Reconnect required" },
+    ],
+    source_workflow_stage_id: stage,
+    source_workflow_percent_complete: 0,
+    preparation_issued: true,
+    execution_status: pack.fieldwork_state.audit_status,
+    follow_up_status: "OFFLINE",
+    archive_count: 0,
+  };
 }
 
 export async function removeAuditOfflinePack(auditId: string): Promise<void> {
