@@ -103,6 +103,7 @@ type ChecklistComposerItem = {
   responseType: "COMPLIANCE" | "YES_NO_NA" | "CUSTOM";
   responseOptions: ChecklistResponseOption[];
   applicability: string;
+  applicabilityReason: string;
   mandatory: boolean;
 };
 
@@ -180,6 +181,7 @@ function emptyChecklistItem(): ChecklistComposerItem {
     responseType: "COMPLIANCE",
     responseOptions: [],
     applicability: "APPLICABLE",
+    applicabilityReason: "",
     mandatory: true,
   };
 }
@@ -505,6 +507,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         response_type: item.responseType,
         response_options: item.responseType === "CUSTOM" ? item.responseOptions : [],
         applicability: item.applicability.trim() || "APPLICABLE",
+        applicability_reason: item.applicabilityReason.trim() || null,
         mandatory: item.mandatory,
         finding_trigger: "ADVERSE_RESPONSE",
         sort_order: index,
@@ -990,7 +993,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label><span>Audit method</span><select value={item.auditMethod} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, auditMethod: event.target.value as ChecklistComposerItem["auditMethod"] } : entry))}><option value="">Not specified</option><option value="RECORD_REVIEW">Record review</option><option value="INTERVIEW">Interview</option><option value="OBSERVATION">Observation</option><option value="SAMPLE">Sample</option><option value="TEST">Test</option></select></label>
                         <label className="is-wide"><span>Auditor guidance</span><textarea rows={2} value={item.guidance} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, guidance: event.target.value } : entry))} placeholder="Optional fieldwork guidance without changing the requirement itself" /></label>
                         <label><span>Sampling requirement</span><input value={item.samplingRequirement} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, samplingRequirement: event.target.value } : entry))} placeholder="e.g. 5 records across relevant work areas" /></label>
-                        <label><span>Applicability rule</span><input value={item.applicability} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicability: event.target.value } : entry))} placeholder="APPLICABLE or the governed applicability rule" /></label>
+                        <label><span>Applicability rule</span><input value={item.applicability} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicability: event.target.value } : entry))} placeholder="APPLICABLE or the governed applicability rule" /></label><label><span>Applicability reason</span><input value={item.applicabilityReason} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicabilityReason: event.target.value } : entry))} placeholder="Controlled rationale when applicability is restricted or N/A" /></label>
                         <label><span>Permitted evidence types</span><input value={item.evidenceTypes} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, evidenceTypes: event.target.value } : entry))} placeholder="PHOTO, DOCUMENT, RECORD_REF" /></label>
                         <fieldset className="qms-audit-prepare__response-rules is-wide"><legend>Response rules</legend>
                           <label><input type="checkbox" checked={item.naJustificationRequired} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, naJustificationRequired: event.target.checked } : entry))} /> Require a reason when marked N/A</label>
