@@ -4,6 +4,8 @@ import {
   projectOfflineAuditSession,
   projectOfflineChecklistBindings,
   projectOfflineChecklistExecution,
+  projectOfflineEvidence,
+  projectOfflineFindings,
   type AuditOfflinePack,
 } from "./qmsAuditOfflinePack";
 
@@ -114,6 +116,55 @@ describe("QMS downloaded audit work package projections", () => {
       response_value: "NO",
       entity_version: 4,
       auditor_notes: "Traceability identifier missing.",
+    });
+  });
+
+  it("restores findings and evidence metadata after an offline restart", () => {
+    const downloaded = pack();
+    downloaded.findings = [{
+      id: "finding-1",
+      audit_id: "audit-1",
+      finding_ref: "F-001",
+      finding_type: "NON_CONFORMITY",
+      severity: "MAJOR",
+      level: "LEVEL_2",
+      requirement_ref: "MPM 4.7",
+      description: "Traceability identifier missing.",
+      objective_evidence: "Incoming inspection record.",
+      safety_sensitive: false,
+      entity_version: 2,
+      created_at: "2026-10-01T04:06:00Z",
+    }];
+    downloaded.evidence = [{
+      id: "evidence-1",
+      checklist_item_id: "item-1",
+      finding_id: "finding-1",
+      evidence_request_id: null,
+      source_type: "INTERNAL_USER",
+      filename: "incoming-record.pdf",
+      content_type: "application/pdf",
+      size_bytes: 4096,
+      sha256: "c".repeat(64),
+      description: "Sample incoming record.",
+      source_device_id: "device-1",
+      captured_at: "2026-10-01T04:07:00Z",
+      offline_upload_state: "SYNCED",
+      server_processing_state: "AVAILABLE",
+      uploaded_by_user_id: "quality-user-1",
+      uploaded_by_participant_id: null,
+      created_at: "2026-10-01T04:07:00Z",
+    }];
+
+    expect(projectOfflineFindings(downloaded)[0]).toMatchObject({
+      id: "finding-1",
+      audit_id: "audit-1",
+      description: "Traceability identifier missing.",
+    });
+    expect(projectOfflineEvidence(downloaded, "item-1", null)[0]).toMatchObject({
+      id: "evidence-1",
+      audit_id: "audit-1",
+      filename: "incoming-record.pdf",
+      sha256: "c".repeat(64),
     });
   });
 
