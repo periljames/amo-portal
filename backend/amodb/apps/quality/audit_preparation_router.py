@@ -16,8 +16,10 @@ from amodb.database import get_write_db
 
 from . import models
 from .audit_checklist_template_models import QualityAuditChecklistBinding
-from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+from .audit_checklist_execution_models import QualityAuditChecklistExecutionEvent, QualityAuditChecklistExecutionGovernance
 from .audit_evidence_models import QualityAuditEvidenceArtifact
+from .audit_external_access_models import QualityAuditFindingReleaseEvent
+from .audit_report_governance_models import QualityAuditReportEvent
 from .audit_occurrence_completion_models import QualityAuditDocumentRequestMetadata, QualityAuditMeeting
 from .audit_preparation_models import QualityAuditPreparationEvent, QualityAuditPreparationRevision, QualityAuditWorkPackage
 from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
@@ -746,6 +748,131 @@ def get_audit_activity(
             "reason": row.reason,
         }
         for row in preparation_events
+    )
+
+    execution_events = (
+        db.query(QualityAuditChecklistExecutionEvent)
+        .filter(
+            QualityAuditChecklistExecutionEvent.amo_id == ctx.amo_id,
+            QualityAuditChecklistExecutionEvent.audit_id == audit_id,
+        )
+        .order_by(QualityAuditChecklistExecutionEvent.created_at.desc())
+        .limit(500)
+        .all()
+    )
+    evidence_events = (
+        db.query(QualityAuditEvidenceArtifact)
+        .filter(
+            QualityAuditEvidenceArtifact.amo_id == ctx.amo_id,
+            QualityAuditEvidenceArtifact.audit_id == audit_id,
+        )
+        .order_by(QualityAuditEvidenceArtifact.created_at.desc())
+        .limit(500)
+        .all()
+    )
+    report_events = (
+        db.query(QualityAuditReportEvent)
+        .filter(
+            QualityAuditReportEvent.amo_id == ctx.amo_id,
+            QualityAuditReportEvent.audit_id == audit_id,
+        )
+        .order_by(QualityAuditReportEvent.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    release_events = (
+        db.query(QualityAuditFindingReleaseEvent)
+        .filter(
+            QualityAuditFindingReleaseEvent.amo_id == ctx.amo_id,
+            QualityAuditFindingReleaseEvent.audit_id == audit_id,
+        )
+        .order_by(QualityAuditFindingReleaseEvent.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    items.extend(
+        {
+            "id": str(row.id),
+            "source": "CHECKLIST_EXECUTION_EVENT",
+            "entity_type": "qms.audit.checklist_response",
+            "entity_id": str(row.checklist_item_id),
+            "action": f"CHECKLIST_RESPONSE_{row.event_type}",
+            "actor_user_id": row.actor_user_id,
+            "occurred_at": row.created_at,
+            "before": row.before_snapshot,
+            "after": row.after_snapshot,
+            "metadata": {
+                "governanceId": str(row.governance_id),
+                "actorParticipantId": row.actor_participant_id,
+            },
+            "reason": row.reason,
+        }
+        for row in execution_events
+    )
+    items.extend(
+        {
+            "id": str(row.id),
+            "source": "EVIDENCE_EVENT",
+            "entity_type": "qms.audit.evidence",
+            "entity_id": str(row.id),
+            "action": "EVIDENCE_UPLOADED",
+            "actor_user_id": row.uploaded_by_user_id,
+            "occurred_at": row.created_at,
+            "before": None,
+            "after": {
+                "checklist_item_id": str(row.checklist_item_id) if row.checklist_item_id else None,
+                "finding_id": str(row.finding_id) if row.finding_id else None,
+                "evidence_request_id": str(row.evidence_request_id) if row.evidence_request_id else None,
+                "filename": row.filename,
+                "content_type": row.content_type,
+                "size_bytes": row.size_bytes,
+                "sha256": row.sha256,
+                "offline_upload_state": row.offline_upload_state,
+                "server_processing_state": row.server_processing_state,
+            },
+            "metadata": {
+                "sourceType": row.source_type,
+                "actorParticipantId": row.uploaded_by_participant_id,
+                "sourceDeviceId": row.source_device_id,
+            },
+            "reason": row.description or "Governed audit evidence uploaded.",
+        }
+        for row in evidence_events
+    )
+    items.extend(
+        {
+            "id": str(row.id),
+            "source": "REPORT_EVENT",
+            "entity_type": "qms.audit.report",
+            "entity_id": str(row.revision_id),
+            "action": f"REPORT_{row.event_type}",
+            "actor_user_id": row.actor_user_id,
+            "occurred_at": row.created_at,
+            "before": row.before_snapshot,
+            "after": row.after_snapshot,
+            "metadata": {"revisionId": str(row.revision_id)},
+            "reason": row.reason,
+        }
+        for row in report_events
+    )
+    items.extend(
+        {
+            "id": str(row.id),
+            "source": "FINDING_RELEASE_EVENT",
+            "entity_type": "qms.audit.finding",
+            "entity_id": str(row.finding_id),
+            "action": f"FINDING_{row.action}",
+            "actor_user_id": row.actor_user_id,
+            "occurred_at": row.created_at,
+            "before": None,
+            "after": {
+                "include_objective_evidence": row.include_objective_evidence,
+                "released_evidence_refs": row.released_evidence_refs or [],
+            },
+            "metadata": {"findingId": str(row.finding_id)},
+            "reason": row.reason,
+        }
+        for row in release_events
     )
     items.sort(
         key=lambda item: (
