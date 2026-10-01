@@ -13,6 +13,12 @@ export type ChecklistResponseOption = {
 };
 
 export type ChecklistTemplateItem = {
+  item_id?: string;
+  section_id?: string | null;
+  section_code?: string | null;
+  section_title?: string | null;
+  section_description?: string | null;
+  parent_section_id?: string | null;
   section?: string | null;
   category?: string | null;
   checklist_ref?: string | null;
