@@ -403,12 +403,12 @@ def _meeting_dict(row: QualityAuditMeeting, *, public: bool = False) -> dict[str
         "conference_url": row.conference_url,
         "agenda": row.agenda,
         "auditee_department": row.auditee_department,
-        "auditor_user_id": row.auditor_user_id,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
     if not public:
+        payload["auditor_user_id"] = row.auditor_user_id
         payload["notes"] = row.notes
     return payload
 
