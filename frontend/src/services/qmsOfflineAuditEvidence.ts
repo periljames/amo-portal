@@ -413,6 +413,7 @@ export async function replayOfflineAuditEvidence(
           clientMutationId: row.clientMutationId,
           description: metadata.description || null,
           findingId: metadata.findingId || null,
+          capturedAt: row.capturedAt,
         },
       );
       if (result.artifact.sha256.toLowerCase() !== row.sha256.toLowerCase()) {
