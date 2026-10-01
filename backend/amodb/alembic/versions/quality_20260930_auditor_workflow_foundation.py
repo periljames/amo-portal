@@ -85,6 +85,13 @@ def upgrade() -> None:
     execution_columns = _columns(EXECUTION)
     if execution_columns and "response_value" not in execution_columns:
         op.add_column(EXECUTION, sa.Column("response_value", sa.String(length=64), nullable=True))
+    execution_columns = _columns(EXECUTION)
+    if execution_columns and "auditee_comments" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("auditee_comments", sa.Text(), nullable=True))
+    if execution_columns and "sampled_item_information" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("sampled_item_information", sa.Text(), nullable=True))
+    if execution_columns and "applicability" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("applicability", sa.String(length=128), nullable=False, server_default="APPLICABLE"))
 
     participant_columns = _columns(PARTICIPANT_EXECUTION)
     if participant_columns and "response_value" not in participant_columns:
@@ -187,6 +194,12 @@ def downgrade() -> None:
         op.drop_column(PARTICIPANT_EXECUTION, "response_value")
 
     execution_columns = _columns(EXECUTION)
+    if execution_columns and "applicability" in execution_columns:
+        op.drop_column(EXECUTION, "applicability")
+    if execution_columns and "sampled_item_information" in execution_columns:
+        op.drop_column(EXECUTION, "sampled_item_information")
+    if execution_columns and "auditee_comments" in execution_columns:
+        op.drop_column(EXECUTION, "auditee_comments")
     if execution_columns and "response_value" in execution_columns:
         op.drop_column(EXECUTION, "response_value")
 
