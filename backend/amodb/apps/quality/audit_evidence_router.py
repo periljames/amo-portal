@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -50,12 +51,17 @@ def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
         "audit_id": str(row.audit_id),
         "checklist_item_id": str(row.checklist_item_id) if row.checklist_item_id else None,
         "finding_id": str(row.finding_id) if row.finding_id else None,
+        "evidence_request_id": str(row.evidence_request_id) if row.evidence_request_id else None,
         "source_type": row.source_type,
         "filename": row.filename,
         "content_type": row.content_type,
         "size_bytes": int(row.size_bytes or 0),
         "sha256": row.sha256,
         "description": row.description,
+        "source_device_id": row.source_device_id,
+        "captured_at": row.captured_at.isoformat() if row.captured_at else None,
+        "offline_upload_state": row.offline_upload_state,
+        "server_processing_state": row.server_processing_state,
         "uploaded_by_user_id": row.uploaded_by_user_id,
         "uploaded_by_participant_id": row.uploaded_by_participant_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -156,6 +162,9 @@ async def upload_internal_audit_evidence(
     client_mutation_id: str = Form(..., min_length=8, max_length=128),
     description: str | None = Form(default=None, max_length=4000),
     finding_id: uuid.UUID | None = Form(default=None),
+    evidence_request_id: uuid.UUID | None = Form(default=None),
+    source_device_id: str | None = Form(default=None, max_length=128),
+    captured_at: datetime | None = Form(default=None),
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
@@ -178,12 +187,21 @@ async def upload_internal_audit_evidence(
         if finding is None:
             raise HTTPException(status_code=404, detail="Finding not found for this audit.")
 
+    if evidence_request_id is not None:
+        request_row = db.query(models.QualityAuditDocumentRequest).filter(
+            models.QualityAuditDocumentRequest.amo_id == ctx.amo_id,
+            models.QualityAuditDocumentRequest.audit_id == audit_id,
+            models.QualityAuditDocumentRequest.id == evidence_request_id,
+        ).first()
+        if request_row is None:
+            raise HTTPException(status_code=404, detail="Evidence request not found for this audit.")
     stored = await store_audit_evidence(file, amo_id=ctx.amo_id, audit_id=str(audit_id), checklist_item_id=str(item_id))
     artifact = QualityAuditEvidenceArtifact(
         amo_id=ctx.amo_id,
         audit_id=audit_id,
         checklist_item_id=item_id,
         finding_id=finding_id,
+        evidence_request_id=evidence_request_id,
         source_type="INTERNAL_USER",
         client_mutation_id=client_mutation_id,
         file_ref=stored.storage_ref,
@@ -192,6 +210,10 @@ async def upload_internal_audit_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        source_device_id=(source_device_id or "").strip() or None,
+        captured_at=captured_at,
+        offline_upload_state="SYNCED",
+        server_processing_state="AVAILABLE",
         uploaded_by_user_id=ctx.user_id,
     )
     db.add(artifact)
@@ -235,6 +257,8 @@ async def upload_external_auditor_evidence(
     base_version: int = Form(...),
     client_mutation_id: str = Form(..., min_length=8, max_length=128),
     description: str | None = Form(default=None, max_length=4000),
+    source_device_id: str | None = Form(default=None, max_length=128),
+    captured_at: datetime | None = Form(default=None),
     x_qms_csrf: str | None = Header(default=None, alias="X-QMS-CSRF"),
     db: Session = Depends(get_db),
     amo_qms_audit_guest: str | None = Cookie(default=None, alias=_GUEST_COOKIE),
@@ -268,6 +292,10 @@ async def upload_external_auditor_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        source_device_id=(source_device_id or "").strip() or None,
+        captured_at=captured_at,
+        offline_upload_state="SYNCED",
+        server_processing_state="AVAILABLE",
         uploaded_by_participant_id=participant.id,
     )
     db.add(artifact)
