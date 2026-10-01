@@ -58,7 +58,7 @@ describe("audit session routes", () => {
       "evidence",
       "findings",
     ]);
-    expect(auditOccurrenceFunctionalTabsForStage("prepare")).toEqual([]);
+    expect(auditOccurrenceFunctionalTabsForStage("prepare").map((tab) => tab.id)).toEqual(["activity"]);
     expect(auditOccurrenceFunctionalTabsForStage("follow-up")).toEqual([]);
   });
 });
