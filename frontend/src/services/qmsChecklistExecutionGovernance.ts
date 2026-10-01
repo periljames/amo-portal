@@ -19,6 +19,9 @@ export type ChecklistExecutionGovernanceRow = {
   objective_evidence?: string | null;
   finding_id?: string | null;
   auditor_notes?: string | null;
+  auditee_comments?: string | null;
+  sampled_item_information?: string | null;
+  applicability?: string | null;
   evidence_references: Array<Record<string, unknown> | string>;
   governance_id?: string | null;
   entity_version: number;
@@ -58,6 +61,7 @@ export type FieldworkMutationPayload = {
   canonical_response_status: CanonicalChecklistResponse;
   response_value?: string | null;
   auditor_notes?: string | null;
+  sampled_item_information?: string | null;
   evidence_references?: Array<Record<string, unknown> | string>;
   reason: string;
 };
@@ -162,6 +166,7 @@ export function mutateChecklistFieldwork(
     canonical_response_status: payload.canonical_response_status,
     response_value: payload.response_value ?? null,
     auditor_notes: payload.auditor_notes ?? null,
+    sampled_item_information: payload.sampled_item_information ?? null,
     evidence_references: payload.evidence_references ?? [],
     reason: payload.reason,
   };
