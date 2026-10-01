@@ -115,6 +115,11 @@ def upgrade() -> None:
     if execution_columns and "response_value" not in execution_columns:
         op.add_column(EXECUTION, sa.Column("response_value", sa.String(length=64), nullable=True))
     execution_columns = _columns(EXECUTION)
+    if execution_columns and "answered_by_user_id" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("answered_by_user_id", sa.String(length=36), nullable=True))
+        op.create_foreign_key("fk_quality_audit_execution_answered_by", EXECUTION, "users", ["answered_by_user_id"], ["id"], ondelete="SET NULL")
+    if execution_columns and "answered_at" not in execution_columns:
+        op.add_column(EXECUTION, sa.Column("answered_at", sa.DateTime(timezone=True), nullable=True))
     if execution_columns and "auditee_comments" not in execution_columns:
         op.add_column(EXECUTION, sa.Column("auditee_comments", sa.Text(), nullable=True))
     if execution_columns and "sampled_item_information" not in execution_columns:
@@ -264,6 +269,11 @@ def downgrade() -> None:
         op.drop_column(MEETING, "auditee_department")
 
     execution_columns = _columns(EXECUTION)
+    if execution_columns and "answered_at" in execution_columns:
+        op.drop_column(EXECUTION, "answered_at")
+    if execution_columns and "answered_by_user_id" in execution_columns:
+        op.drop_constraint("fk_quality_audit_execution_answered_by", EXECUTION, type_="foreignkey")
+        op.drop_column(EXECUTION, "answered_by_user_id")
     if execution_columns and "applicability" in execution_columns:
         op.drop_column(EXECUTION, "applicability")
     if execution_columns and "sampled_item_information" in execution_columns:
