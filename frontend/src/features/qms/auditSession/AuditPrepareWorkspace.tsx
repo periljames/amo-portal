@@ -99,6 +99,7 @@ type ChecklistComposerItem = {
   naJustificationRequired: boolean;
   responseType: "COMPLIANCE" | "YES_NO_NA" | "CUSTOM";
   responseOptions: ChecklistResponseOption[];
+  applicability: string;
   mandatory: boolean;
 };
 
@@ -173,6 +174,7 @@ function emptyChecklistItem(): ChecklistComposerItem {
     naJustificationRequired: false,
     responseType: "COMPLIANCE",
     responseOptions: [],
+    applicability: "APPLICABLE",
     mandatory: true,
   };
 }
@@ -232,7 +234,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [requestDmsSearch, setRequestDmsSearch] = useState("");
   const [composerSearch, setComposerSearch] = useState("");
   const [composerSection, setComposerSection] = useState("ALL");
-  const [composerFilter, setComposerFilter] = useState<"ALL" | "INCOMPLETE" | "EVIDENCE_REQUIRED">("ALL");
+  const [composerFilter, setComposerFilter] = useState<"ALL" | "INCOMPLETE" | "EVIDENCE_REQUIRED" | "APPLICABILITY_RULE">("ALL");
 
   useEffect(() => {
     if (localError) pushToast({ title: "Preparation action needs attention", message: localError, variant: "error" });
@@ -489,7 +491,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         conditional_logic: {},
         response_type: item.responseType,
         response_options: item.responseType === "CUSTOM" ? item.responseOptions : [],
-        applicability: "APPLICABLE",
+        applicability: item.applicability.trim() || "APPLICABLE",
         mandatory: item.mandatory,
         finding_trigger: "ADVERSE_RESPONSE",
         sort_order: index,
@@ -602,6 +604,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (composerSection !== "ALL" && item.section.trim() !== composerSection) return false;
     if (composerFilter === "INCOMPLETE") return !item.prompt.trim() || (item.mandatory && !item.requirementRef.trim());
     if (composerFilter === "EVIDENCE_REQUIRED") return item.evidenceRequiredWhen.length > 0 || Boolean(item.expectedEvidence.trim());
+    if (composerFilter === "APPLICABILITY_RULE") return Boolean(item.applicability.trim()) && item.applicability.trim().toUpperCase() !== "APPLICABLE";
     return true;
   });
   const preparedComposerCount = checklistItems.filter((item) =>
@@ -895,7 +898,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <div className="qms-audit-prepare__composer-tools" aria-label="Checklist preparation navigation">
                     <label className="is-wide"><span>Search questions</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={composerSearch} onChange={(event) => setComposerSearch(event.target.value)} placeholder="Question, section, reference, evidence or guidance" /></div></label>
                     <label><span>Section</span><select value={composerSection} onChange={(event) => setComposerSection(event.target.value)}><option value="ALL">All sections</option>{composerSections.map((section) => <option key={section} value={section}>{section}</option>)}</select></label>
-                    <label><span>Filter</span><select value={composerFilter} onChange={(event) => setComposerFilter(event.target.value as typeof composerFilter)}><option value="ALL">All questions</option><option value="INCOMPLETE">Incomplete preparation</option><option value="EVIDENCE_REQUIRED">Evidence expected / required</option></select></label>
+                    <label><span>Filter</span><select value={composerFilter} onChange={(event) => setComposerFilter(event.target.value as typeof composerFilter)}><option value="ALL">All questions</option><option value="INCOMPLETE">Incomplete preparation</option><option value="EVIDENCE_REQUIRED">Evidence expected / required</option><option value="APPLICABILITY_RULE">Applicability rule set</option></select></label>
                   </div>
                   {!visibleComposerItems.length ? <p className="qms-audit-prepare__empty">No checklist questions match the current preparation filters.</p> : null}
                   {visibleComposerItems.map((item) => {
@@ -912,6 +915,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label><span>Audit method</span><select value={item.auditMethod} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, auditMethod: event.target.value as ChecklistComposerItem["auditMethod"] } : entry))}><option value="">Not specified</option><option value="RECORD_REVIEW">Record review</option><option value="INTERVIEW">Interview</option><option value="OBSERVATION">Observation</option><option value="SAMPLE">Sample</option><option value="TEST">Test</option></select></label>
                         <label className="is-wide"><span>Auditor guidance</span><textarea rows={2} value={item.guidance} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, guidance: event.target.value } : entry))} placeholder="Optional fieldwork guidance without changing the requirement itself" /></label>
                         <label><span>Sampling requirement</span><input value={item.samplingRequirement} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, samplingRequirement: event.target.value } : entry))} placeholder="e.g. 5 records across relevant work areas" /></label>
+                        <label><span>Applicability rule</span><input value={item.applicability} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicability: event.target.value } : entry))} placeholder="APPLICABLE or the governed applicability rule" /></label>
                         <label><span>Permitted evidence types</span><input value={item.evidenceTypes} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, evidenceTypes: event.target.value } : entry))} placeholder="PHOTO, DOCUMENT, RECORD_REF" /></label>
                         <fieldset className="qms-audit-prepare__response-rules is-wide"><legend>Response rules</legend>
                           <label><input type="checkbox" checked={item.naJustificationRequired} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, naJustificationRequired: event.target.checked } : entry))} /> Require a reason when marked N/A</label>
