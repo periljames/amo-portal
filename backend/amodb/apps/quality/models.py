@@ -472,7 +472,9 @@ class QMSAudit(Base):
     title = Column(String(255), nullable=False)
 
     scope = Column(Text, nullable=True)
+    objectives = Column(Text, nullable=True)
     criteria = Column(Text, nullable=True)
+    entity_version = Column(Integer, nullable=False, default=1, server_default="1")
 
     auditee = Column(String(255), nullable=True)
     auditee_email = Column(String(255), nullable=True)
