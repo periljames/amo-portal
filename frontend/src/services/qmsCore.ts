@@ -82,7 +82,9 @@ export interface QMSAuditOut {
   audit_ref: string;
   title: string;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
+  entity_version?: number;
   auditee?: string | null;
   auditee_email?: string | null;
   auditee_user_id?: string | null;
