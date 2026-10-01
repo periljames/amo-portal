@@ -68,7 +68,7 @@ export type GovernedAuditDocumentRequest = {
   canonical_revision_id: string | null;
 };
 
-export type PublicGovernedAuditDocumentRequest = Omit<GovernedAuditDocumentRequest, "audit_id" | "file_ref" | "uploaded_at" | "created_at" | "updated_at"> & {
+export type PublicGovernedAuditDocumentRequest = Omit<GovernedAuditDocumentRequest, "audit_id" | "file_ref" | "uploaded_at" | "created_at" | "updated_at" | "checklist_item_ids"> & {
   controlled_submission: ControlledDocumentSubmission | null;
 };
 
