@@ -65,6 +65,8 @@ export type AuditOfflinePack = {
     applicability?: string | null;
     evidence_references: Array<Record<string, unknown> | string>;
     entity_version: number;
+    answered_by_user_id?: string | null;
+    answered_at?: string | null;
     updated_at?: string | null;
   }>;
   findings: Array<Record<string, unknown>>;
@@ -342,6 +344,8 @@ export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
         evidence_references: row?.evidence_references || [],
         governance_id: null,
         entity_version: Number(row?.entity_version || 0),
+        answered_by_user_id: row?.answered_by_user_id ?? null,
+        answered_at: row?.answered_at ?? null,
         updated_by_user_id: null,
         updated_at: row?.updated_at ?? null,
         events: [],
