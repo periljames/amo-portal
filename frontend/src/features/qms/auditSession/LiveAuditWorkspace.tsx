@@ -555,7 +555,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <h2>Fieldwork</h2>
           <p className="qms-live-audit-focus__helper">Record checklist responses, findings, and evidence.</p>
         </div>
-        <div className="qms-live-audit-focus__header-meta">
+        <div className="qms-live-audit-focus__header-meta" role="status" aria-live="polite" aria-label="Fieldwork connectivity and synchronization status">
           <span>{canExecute ? "Auditor" : "Read-only"}</span>
           <span>{sessionQuery.data ? `Stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span>
           <span>
@@ -678,7 +678,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               <footer className="qms-live-audit-focus__nav"><button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button><button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= visibleItems.length - 1}>Next <ArrowRight size={16} /></button></footer>
             </>
-          ) : <div className="qms-live-audit-focus__empty">No governed checklist items are bound to this audit.</div>}
+          ) : <div className="qms-live-audit-focus__empty">
+            <strong>No governed checklist is available for fieldwork.</strong>
+            <p>Return to Prepare, bind or create the controlled checklist, resolve readiness blockers, and issue preparation before continuing.</p>
+            <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Prepare</Link>
+          </div>}
         </main>
 
         <aside className="qms-live-audit-focus__summary">
