@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  CloudOff,
+  Cloud,
   CircleSlash2,
   ClipboardCheck,
   Eye,
@@ -13,6 +15,7 @@ import {
   MessageSquareText,
   Search,
   ShieldAlert,
+  RefreshCw,
   Users,
   X,
 } from "lucide-react";
@@ -38,6 +41,7 @@ import {
 } from "../../../services/qmsChecklistTemplates";
 import { heartbeatAuditPresence, listAuditPresence } from "../../../services/qmsAuditPresence";
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
+import { getPortalConnectivity, onPortalConnectivityChange } from "../../../services/portalConnectivity";
 import { completeAuditFieldwork, getAuditSession } from "../../../services/qmsAuditSession";
 import { listExternalFindingDraftsForQuality } from "../../../services/qmsExternalFindingDraftReview";
 import LiveAuditEvidenceStrip from "./LiveAuditEvidenceStrip";
@@ -148,6 +152,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [checklistSearch, setChecklistSearch] = useState("");
   const [checklistFilter, setChecklistFilter] = useState<"ALL" | "UNANSWERED" | "FINDINGS" | "EVIDENCE_REQUIRED">("ALL");
+  const [connectivity, setConnectivity] = useState(() => getPortalConnectivity().state);
 
   const auditQuery = useQuery({
     queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
@@ -217,6 +222,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 500,
     refetchInterval: 2_000,
   });
+
+  useEffect(() => onPortalConnectivityChange((snapshot) => setConnectivity(snapshot.state)), []);
 
   useEffect(() => {
     if (!fieldworkEnabled) return undefined;
@@ -414,9 +421,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const move = (offset: number) => {
-    if (!items.length || selectedIndex < 0) return;
-    const nextIndex = Math.min(items.length - 1, Math.max(0, selectedIndex + offset));
-    setSelectedId(items[nextIndex].checklist_item_id);
+    if (!visibleItems.length || selectedIndex < 0) return;
+    const nextIndex = Math.min(visibleItems.length - 1, Math.max(0, selectedIndex + offset));
+    setSelectedId(visibleItems[nextIndex].checklist_item_id);
   };
 
   const responseRequirementError = (
@@ -553,10 +560,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               : "No checklist items · Not applicable"}
           </span>
           <span><Users size={13} /> {presence.length} active</span>
-          {outbox.queued || outbox.conflicts || outbox.failed ? (
-            <span>Sync · {outbox.queued} pending · {outbox.conflicts} conflict · {outbox.failed} failed</span>
+          <span className="qms-live-audit-focus__connection" data-state={connectivity}>
+            {connectivity === "ONLINE" ? <Cloud size={13} /> : connectivity === "RECOVERING" ? <RefreshCw size={13} /> : <CloudOff size={13} />}
+            {connectivity === "ONLINE" ? "ONLINE" : connectivity === "RECOVERING" ? "SYNCING / RECOVERING" : "OFFLINE"}
+          </span>
+          {outbox.conflicts ? (
+            <span>CONFLICT · {outbox.conflicts} require review</span>
+          ) : outbox.failed ? (
+            <span>SYNC ERROR · {outbox.failed} failed</span>
+          ) : outbox.queued ? (
+            <span>PENDING CHANGES · {outbox.queued}</span>
           ) : (
-            <span>Sync clear</span>
+            <span>SYNCED · no pending changes</span>
           )}
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
