@@ -19,6 +19,7 @@ WORK_PACKAGE = "quality_audit_work_packages"
 AUDIT = "qms_audits"
 EVIDENCE = "quality_audit_evidence_artifacts"
 FINDING = "qms_audit_findings"
+MEETING = "quality_audit_meetings"
 
 
 def _is_postgresql() -> bool:
@@ -77,6 +78,10 @@ def upgrade() -> None:
         op.alter_column(FINDING, "updated_at", nullable=False)
 
     columns = _columns(DOC_META)
+    if columns and "responsible_party" not in columns:
+        op.add_column(DOC_META, sa.Column("responsible_party", sa.String(length=255), nullable=True))
+    if columns and "checklist_item_ids" not in columns:
+        op.add_column(DOC_META, sa.Column("checklist_item_ids", sa.JSON(), nullable=False, server_default="[]"))
     if columns and "requirement_stage" not in columns:
         op.add_column(
             DOC_META,
@@ -92,6 +97,13 @@ def upgrade() -> None:
             DOC_META,
             "requirement_stage IN ('REQUIRED_BEFORE_ISSUE','REQUIRED_BEFORE_FIELDWORK','REQUIRED_DURING_FIELDWORK','REQUESTED_NOT_BLOCKING')",
         )
+
+    meeting_columns = _columns(MEETING)
+    if meeting_columns and "auditee_department" not in meeting_columns:
+        op.add_column(MEETING, sa.Column("auditee_department", sa.String(length=255), nullable=True))
+    if meeting_columns and "auditor_user_id" not in meeting_columns:
+        op.add_column(MEETING, sa.Column("auditor_user_id", sa.String(length=36), nullable=True))
+        op.create_foreign_key("fk_quality_audit_meeting_auditor", MEETING, "users", ["auditor_user_id"], ["id"], ondelete="SET NULL")
 
     execution_columns = _columns(EXECUTION)
     if execution_columns and "response_value" not in execution_columns:
@@ -234,6 +246,13 @@ def downgrade() -> None:
     if participant_columns and "response_value" in participant_columns:
         op.drop_column(PARTICIPANT_EXECUTION, "response_value")
 
+    meeting_columns = _columns(MEETING)
+    if meeting_columns and "auditor_user_id" in meeting_columns:
+        op.drop_constraint("fk_quality_audit_meeting_auditor", MEETING, type_="foreignkey")
+        op.drop_column(MEETING, "auditor_user_id")
+    if meeting_columns and "auditee_department" in meeting_columns:
+        op.drop_column(MEETING, "auditee_department")
+
     execution_columns = _columns(EXECUTION)
     if execution_columns and "applicability" in execution_columns:
         op.drop_column(EXECUTION, "applicability")
@@ -252,6 +271,10 @@ def downgrade() -> None:
         op.drop_column(FINDING, "entity_version")
 
     columns = _columns(DOC_META)
+    if columns and "checklist_item_ids" in columns:
+        op.drop_column(DOC_META, "checklist_item_ids")
+    if columns and "responsible_party" in columns:
+        op.drop_column(DOC_META, "responsible_party")
     if columns and "requirement_stage" in columns:
         op.drop_constraint(
             "ck_quality_audit_doc_meta_requirement_stage",
