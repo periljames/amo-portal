@@ -23,7 +23,7 @@ export type AuditPreparationRevision = {
 
 export type AuditActivityItem = {
   id: string;
-  source: "AUDIT_EVENT" | "PREPARATION_EVENT";
+  source: "AUDIT_EVENT" | "PREPARATION_EVENT" | "CHECKLIST_EXECUTION_EVENT" | "EVIDENCE_EVENT" | "REPORT_EVENT" | "FINDING_RELEASE_EVENT";
   entity_type: string;
   entity_id: string;
   action: string;
