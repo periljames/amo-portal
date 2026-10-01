@@ -56,6 +56,8 @@ export type GovernedAuditDocumentRequest = {
   updated_at: string | null;
   request_type: "DOCUMENT" | "RECORD" | "MANUAL" | "FORM" | "CERTIFICATE" | "REGISTER" | "OTHER";
   linked_criterion: string | null;
+  responsible_party: string | null;
+  checklist_item_ids: string[];
   is_required: boolean;
   requirement_stage: AuditDocumentRequestRequirementStage;
   source_mode: "UPLOAD" | "CONTROLLED_DMS" | "UPLOAD_OR_CONTROLLED";
@@ -78,6 +80,9 @@ export type AuditMeeting = {
   scheduled_end: string | null;
   location: string | null;
   conference_url: string | null;
+  agenda?: string | null;
+  auditee_department?: string | null;
+  auditor_user_id?: string | null;
   status: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
   notes?: string | null;
   created_at: string | null;
@@ -179,6 +184,8 @@ export function createGovernedAuditDocumentRequest(
     due_date?: string | null;
     request_type: GovernedAuditDocumentRequest["request_type"];
     linked_criterion?: string | null;
+    responsible_party?: string | null;
+    checklist_item_ids?: string[];
     is_required: boolean;
     requirement_stage: AuditDocumentRequestRequirementStage;
     source_mode: GovernedAuditDocumentRequest["source_mode"];
@@ -197,7 +204,7 @@ export function updateGovernedAuditDocumentRequest(
   auditId: string,
   requestId: string,
   payload: Partial<Pick<GovernedAuditDocumentRequest,
-    "status" | "review_note" | "request_type" | "linked_criterion" | "is_required" | "requirement_stage" | "source_mode" |
+    "status" | "review_note" | "request_type" | "linked_criterion" | "responsible_party" | "checklist_item_ids" | "is_required" | "requirement_stage" | "source_mode" |
     "controlled_source_system" | "controlled_document_id" | "controlled_revision_id" |
     "canonical_document_id" | "canonical_revision_id">>,
 ) {
@@ -220,6 +227,9 @@ export function createAuditMeeting(
     scheduled_end?: string | null;
     location?: string | null;
     conference_url?: string | null;
+    agenda?: string | null;
+    auditee_department?: string | null;
+    auditor_user_id?: string | null;
     status?: AuditMeeting["status"];
     notes?: string | null;
   },
