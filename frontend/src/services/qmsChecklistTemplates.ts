@@ -38,6 +38,7 @@ export type ChecklistTemplateItem = {
   response_type: string;
   response_options?: ChecklistResponseOption[];
   applicability: string;
+  applicability_reason?: string | null;
   mandatory?: boolean;
   finding_trigger?: ChecklistFindingTrigger;
   sort_order: number;
