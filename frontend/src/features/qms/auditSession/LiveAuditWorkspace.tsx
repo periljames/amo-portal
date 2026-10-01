@@ -107,6 +107,7 @@ type FieldworkUpdateInput = {
   response: CanonicalChecklistResponse;
   responseValue: string;
   auditorNotes: string;
+  sampledItemInformation: string;
 };
 
 const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: FieldworkFindingSeverity }> = [
@@ -147,6 +148,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -292,6 +294,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     [selectedSource],
   );
   const notes = selected ? noteDrafts[selected.checklist_item_id] ?? selected.auditor_notes ?? "" : "";
+  const sampledItems = selected ? sampleDrafts[selected.checklist_item_id] ?? selected.sampled_item_information ?? "" : "";
   const outboxEntries = useMemo(() => outboxQuery.data ?? [], [outboxQuery.data]);
   const outbox = useMemo(() => ({
     queued: outboxEntries.filter((entry) => entry.status === "queued" || entry.status === "syncing").length,
@@ -314,10 +317,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const updateMutation = useMutation({
-    mutationFn: ({ item, response, responseValue, auditorNotes }: FieldworkUpdateInput) => mutateChecklistFieldwork(amoCode, auditId, item, {
+    mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation }: FieldworkUpdateInput) => mutateChecklistFieldwork(amoCode, auditId, item, {
       canonical_response_status: response,
       response_value: responseValue,
       auditor_notes: auditorNotes.trim() || null,
+      sampled_item_information: sampledItemInformation.trim() || null,
       evidence_references: item.evidence_references || [],
       reason: "Live audit fieldwork checklist update.",
     }),
@@ -469,7 +473,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
       return;
     }
-    updateMutation.mutate({ item, response, responseValue: option.value, auditorNotes: notes });
+    updateMutation.mutate({ item, response, responseValue: option.value, auditorNotes: notes, sampledItemInformation: sampledItems });
   };
 
   if (auditQuery.isLoading) {
@@ -664,8 +668,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 }) : <span role="alert">This checklist item has no governed response options. Return to preparation and issue a corrected checklist revision.</span>}
               </div>
 
+              {selectedSource?.sampling_requirement || selectedSource?.audit_method === "SAMPLE" ? <label className="qms-live-audit-focus__notes"><span>Sampled items / records</span><textarea readOnly={!canExecute} value={sampledItems} onChange={(event) => setSampleDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={3} placeholder="Record the sampled records, serials, work packs, dates or other sample identifiers." /></label> : null}
               <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
-              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes }); }}>Save note</button></div>
+              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes, sampledItemInformation: sampledItems }); }}>Save note</button></div>
 
               <div id="audit-occurrence-evidence">
                 <LiveAuditEvidenceStrip amoCode={amoCode} auditId={auditId} item={selected} canManage={canExecute} onChanged={refreshFieldwork} onError={setLocalError} onNotice={setSyncNotice} />
