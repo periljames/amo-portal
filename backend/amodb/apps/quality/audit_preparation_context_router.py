@@ -56,11 +56,18 @@ def _audit_dict(row: models.QMSAudit) -> dict[str, Any]:
         "entity_version": int(row.entity_version or 1),
         "planned_start": _jsonable(row.planned_start),
         "planned_end": _jsonable(row.planned_end),
+        "planned_start_time": _jsonable(getattr(row, "planned_start_time", None)),
+        "planned_end_time": _jsonable(getattr(row, "planned_end_time", None)),
         "actual_start": _jsonable(row.actual_start),
         "actual_end": _jsonable(row.actual_end),
+        "auditee": getattr(row, "auditee", None),
+        "auditee_email": getattr(row, "auditee_email", None),
+        "auditee_user_id": getattr(row, "auditee_user_id", None),
+        "external_auditees": getattr(row, "external_auditees", []),
         "lead_auditor_user_id": getattr(row, "lead_auditor_user_id", None),
         "observer_auditor_user_id": getattr(row, "observer_auditor_user_id", None),
         "assistant_auditor_user_id": getattr(row, "assistant_auditor_user_id", None),
+        "supporting_auditor_user_ids": list(getattr(row, "supporting_auditor_user_ids", None) or []),
         "location": getattr(row, "location", None),
     }
 
