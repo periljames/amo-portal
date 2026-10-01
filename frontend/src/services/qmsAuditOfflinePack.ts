@@ -60,6 +60,9 @@ export type AuditOfflinePack = {
     canonical_response_status: string;
     response_value?: string | null;
     auditor_notes?: string | null;
+    auditee_comments?: string | null;
+    sampled_item_information?: string | null;
+    applicability?: string | null;
     evidence_references: Array<Record<string, unknown> | string>;
     entity_version: number;
     updated_at?: string | null;
@@ -69,11 +72,16 @@ export type AuditOfflinePack = {
     id: string;
     checklist_item_id?: string | null;
     finding_id?: string | null;
+    evidence_request_id?: string | null;
     filename: string;
     content_type?: string | null;
     size_bytes: number;
     sha256: string;
     description?: string | null;
+    source_device_id?: string | null;
+    captured_at?: string | null;
+    offline_upload_state?: string | null;
+    server_processing_state?: string | null;
     created_at?: string | null;
   }>;
   sync_contract: {
@@ -328,6 +336,9 @@ export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
         objective_evidence: source.objective_evidence ?? null,
         finding_id: source.finding_id ?? null,
         auditor_notes: row?.auditor_notes ?? null,
+        auditee_comments: row?.auditee_comments ?? null,
+        sampled_item_information: row?.sampled_item_information ?? null,
+        applicability: row?.applicability ?? "APPLICABLE",
         evidence_references: row?.evidence_references || [],
         governance_id: null,
         entity_version: Number(row?.entity_version || 0),
