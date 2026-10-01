@@ -167,6 +167,26 @@ def _load_audit_context(db: Session, *, amo_id: str, context_type: str | None, c
     return {"context_type": kind, "context_id": context_id}
 
 
+def _table_has_column(db: Session, *, table_name: str, column_name: str) -> bool:
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+                LIMIT 1
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).first()
+        return row is not None
+    except Exception:
+        return False
+
+
 def _work_order_module_connected(db: Session, *, amo_id: str) -> bool:
     """True when Quality can resolve work-order / tasking ownership for conflict checks.
 
@@ -183,7 +203,7 @@ def _work_order_module_connected(db: Session, *, amo_id: str) -> bool:
                     FROM module_subscriptions
                     WHERE amo_id = :amo_id
                       AND lower(module_code) IN ('work_orders', 'work-orders', 'production', 'tasking')
-                      AND upper(coalesce(status, '')) IN ('ACTIVE', 'TRIAL', 'ENABLED')
+                      AND upper(coalesce(status::text, '')) IN ('ACTIVE', 'TRIAL', 'ENABLED')
                     LIMIT 1
                     """
                 ),
@@ -197,28 +217,29 @@ def _work_order_module_connected(db: Session, *, amo_id: str) -> bool:
 def get_independence_policy(db: Session, *, amo_id: str) -> dict[str, Any]:
     enforced = True
     allow_impartiality_form = True
-    try:
-        with db.begin_nested():
-            row = db.execute(
-                text(
-                    """
-                    SELECT workflow_rules
-                    FROM qms_settings
-                    WHERE amo_id = :amo_id
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """
-                ),
-                {"amo_id": amo_id},
-            ).mappings().first()
-            workflow = dict((row or {}).get("workflow_rules") or {})
-            policy = dict(workflow.get("independence_policy") or {})
-            if "enforced" in policy:
-                enforced = bool(policy.get("enforced"))
-            if "allow_impartiality_form" in policy:
-                allow_impartiality_form = bool(policy.get("allow_impartiality_form"))
-    except Exception:
-        pass
+    if _table_has_column(db, table_name="qms_settings", column_name="workflow_rules"):
+        try:
+            with db.begin_nested():
+                row = db.execute(
+                    text(
+                        """
+                        SELECT workflow_rules
+                        FROM qms_settings
+                        WHERE amo_id = :amo_id
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"amo_id": amo_id},
+                ).mappings().first()
+                workflow = dict((row or {}).get("workflow_rules") or {})
+                policy = dict(workflow.get("independence_policy") or {})
+                if "enforced" in policy:
+                    enforced = bool(policy.get("enforced"))
+                if "allow_impartiality_form" in policy:
+                    allow_impartiality_form = bool(policy.get("allow_impartiality_form"))
+        except Exception:
+            pass
     return {
         "enforced": enforced,
         "allow_impartiality_form": allow_impartiality_form,
@@ -237,6 +258,8 @@ def set_independence_policy(
 ) -> dict[str, Any]:
     import json as _json
 
+    if not _table_has_column(db, table_name="qms_settings", column_name="workflow_rules"):
+        raise ValueError("This deployment stores QMS workflow rules outside the legacy qms_settings.workflow_rules column.")
     row = db.execute(
         text(
             """
