@@ -179,7 +179,7 @@ function governedOfflineReferenceCount(pack: AuditOfflinePack): number {
     references.flatMap((reference) => {
       const manualId = String(reference.document_id || "").trim();
       const revisionId = String(reference.revision_id || "").trim();
-      const sourceSha256 = String(reference.source_sha256 || "").trim().toLowerCase();
+      const sourceSha256 = String(reference.offline_reader_sha256 || reference.source_sha256 || "").trim().toLowerCase();
       const readerUrl = String(reference.offline_reader_url || "").trim();
       return manualId && revisionId && sourceSha256 && readerUrl
         ? [`${manualId}:${revisionId}:${sourceSha256}`]
@@ -199,11 +199,26 @@ export async function prepareAuditOfflinePack(
     ...(pack.work_package.package_snapshot.source_references || []),
     ...(pack.work_package.package_snapshot.checklist_bindings || []).flatMap((binding) => binding.source_references || []),
   ].filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
+  const controlledReferences = references.filter((reference) =>
+    String(reference.source_system || "").trim().toUpperCase() === "DOCUMENT_CONTROL"
+    && String(reference.document_id || "").trim()
+    && String(reference.revision_id || "").trim()
+  );
+  const unsupportedControlled = controlledReferences.filter((reference) =>
+    !String(reference.offline_reader_url || "").trim()
+    || !String(reference.offline_reader_sha256 || reference.source_sha256 || "").trim()
+  );
+  if (unsupportedControlled.length) {
+    const labels = unsupportedControlled.slice(0, 3).map((reference) =>
+      String(reference.document_code || reference.document_title || reference.document_id || "controlled reference")
+    );
+    throw new Error(`Offline fieldwork cannot be prepared until these controlled references have a verified offline reading derivative: ${labels.join(", ")}${unsupportedControlled.length > 3 ? "…" : ""}.`);
+  }
   const offlineReferences = new Map<string, Record<string, unknown>>();
   for (const reference of references) {
     const manualId = String(reference.document_id || "").trim();
     const revisionId = String(reference.revision_id || "").trim();
-    const sourceSha256 = String(reference.source_sha256 || "").trim().toLowerCase();
+    const sourceSha256 = String(reference.offline_reader_sha256 || reference.source_sha256 || "").trim().toLowerCase();
     const templateUrl = String(reference.offline_reader_url || "").trim();
     if (!manualId || !revisionId || !sourceSha256 || !templateUrl) continue;
     offlineReferences.set(`${manualId}:${revisionId}:${sourceSha256}`, reference);
