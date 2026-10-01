@@ -895,3 +895,24 @@
   margin: 0;
   color: var(--text-secondary);
 }
+
+
+.qms-audit-prepare__composer-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr) minmax(11rem, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.qms-audit-prepare__composer-tools label {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .qms-audit-prepare__composer-tools {
+    grid-template-columns: 1fr;
+  }
+}
