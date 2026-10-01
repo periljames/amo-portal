@@ -55,6 +55,7 @@ type SetupDraft = {
   scope: string;
   objectives: string;
   criteria: string;
+  location: string;
   auditee: string;
   auditeeEmail: string;
   plannedStart: string;
@@ -230,6 +231,7 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
     scope: audit.scope || "",
     objectives: audit.objectives || "",
     criteria: audit.criteria || "",
+    location: audit.location || "",
     auditee: audit.auditee || "",
     auditeeEmail: audit.auditee_email || "",
     plannedStart: datePart(audit.planned_start || ""),
@@ -525,6 +527,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         scope: draft.scope.trim() || null,
         objectives: draft.objectives.trim() || null,
         criteria: draft.criteria.trim() || null,
+        location: draft.location.trim() || null,
         base_version: auditQuery.data?.entity_version || 1,
         auditee: draft.auditee.trim() || null,
         auditee_email: draft.auditeeEmail.trim() || null,
@@ -1434,6 +1437,15 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   rows={2}
                   value={draft.criteria}
                   onChange={(event) => { clearGuidance("criteria"); setDraft({ ...draft, criteria: event.target.value }); }}
+                />
+              </label>
+              <label>
+                <span>Site / location</span>
+                <input
+                  disabled={!canManage}
+                  value={draft.location}
+                  onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                  placeholder="Base, line station, workshop, supplier site or remote"
                 />
               </label>
             </div>
