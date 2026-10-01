@@ -210,6 +210,7 @@ def _revision_dict(row: QualityAuditChecklistTemplateRevision) -> dict[str, Any]
         "supersedes_revision_id": row.supersedes_revision_id,
         "issued_by_user_id": row.issued_by_user_id,
         "issued_at": row.issued_at,
+        "effective_at": row.effective_at,
         "created_by_user_id": row.created_by_user_id,
         "created_at": row.created_at,
     }
@@ -974,6 +975,7 @@ def issue_checklist_revision(
     row.status = "ISSUED"
     row.issued_by_user_id = ctx.user_id
     row.issued_at = _utcnow()
+    row.effective_at = row.issued_at
     row.change_reason = f"{row.change_reason}\nISSUE: {payload.reason.strip()}"
     db.commit()
     db.refresh(row)
