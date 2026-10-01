@@ -273,7 +273,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       if (!matchesSearch) return false;
       if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED";
       if (checklistFilter === "FINDINGS") return Boolean(item.finding_id) || item.canonical_response_status === "NONCOMPLIANT" || item.canonical_response_status === "OBSERVATION";
-      if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_requirements?.length);
+      if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_required_when?.length);
       return true;
     });
   }, [checklistFilter, checklistSearch, items, sourceContextByItemId]);
