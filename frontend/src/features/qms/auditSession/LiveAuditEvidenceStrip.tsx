@@ -15,6 +15,7 @@ import {
   replayOfflineAuditEvidence,
 } from "../../../services/qmsOfflineAuditEvidence";
 import type { ChecklistExecutionGovernanceRow } from "../../../services/qmsChecklistExecutionGovernance";
+import { projectOfflineEvidence, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
 import { saveDownloadedFile } from "../../../utils/downloads";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.mp4,.mov,.m4a,.wav";
@@ -37,7 +38,25 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
 
   const evidenceQuery = useQuery({
     queryKey: ["qms", "audit-evidence", amoCode, auditId, item.checklist_item_id],
-    queryFn: ({ signal }) => listAuditEvidence(amoCode, auditId, item.checklist_item_id, null, signal),
+    queryFn: async ({ signal }) => {
+      const offline = async () => {
+        const pack = await readAuditOfflinePack(amoCode, auditId);
+        return pack ? { items: projectOfflineEvidence(pack, item.checklist_item_id, null) } : null;
+      };
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const local = await offline();
+        if (local) return local;
+      }
+      try {
+        return await listAuditEvidence(amoCode, auditId, item.checklist_item_id, null, signal);
+      } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+        const local = await offline();
+        if (local) return local;
+        throw error;
+      }
+    },
     staleTime: 1_500,
   });
   const pendingQuery = useQuery({
@@ -160,7 +179,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
           {artifacts.map((artifact) => (
             <li key={artifact.id}>
               <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span></div>
-              <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id}><Download size={14} /> {downloading === artifact.id ? "Opening…" : "Open"}</button>
+              <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (typeof navigator !== "undefined" && navigator.onLine === false)} title={typeof navigator !== "undefined" && navigator.onLine === false ? "Reconnect to open server-retained evidence content." : undefined}><Download size={14} /> {typeof navigator !== "undefined" && navigator.onLine === false ? "Metadata only offline" : downloading === artifact.id ? "Opening…" : "Open"}</button>
             </li>
           ))}
         </ul>
