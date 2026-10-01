@@ -59,6 +59,7 @@ class QualityAuditChecklistTemplateRevision(Base):
     supersedes_revision_id = Column(String(36), ForeignKey("quality_audit_checklist_template_revisions.id", ondelete="SET NULL"), nullable=True)
     issued_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     issued_at = Column(DateTime(timezone=True), nullable=True)
+    effective_at = Column(DateTime(timezone=True), nullable=True)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
