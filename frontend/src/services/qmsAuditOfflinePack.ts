@@ -170,6 +170,24 @@ export async function fetchAuditOfflinePack(
   );
 }
 
+function governedOfflineReferenceCount(pack: AuditOfflinePack): number {
+  const references = [
+    ...(pack.work_package.package_snapshot.source_references || []),
+    ...(pack.work_package.package_snapshot.checklist_bindings || []).flatMap((binding) => binding.source_references || []),
+  ].filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
+  return new Set(
+    references.flatMap((reference) => {
+      const manualId = String(reference.document_id || "").trim();
+      const revisionId = String(reference.revision_id || "").trim();
+      const sourceSha256 = String(reference.source_sha256 || "").trim().toLowerCase();
+      const readerUrl = String(reference.offline_reader_url || "").trim();
+      return manualId && revisionId && sourceSha256 && readerUrl
+        ? [`${manualId}:${revisionId}:${sourceSha256}`]
+        : [];
+    }),
+  ).size;
+}
+
 export async function prepareAuditOfflinePack(
   amoCode: string,
   auditId: string,
@@ -281,10 +299,10 @@ export async function auditOfflinePackStatus(
     ) as StoredAuditOfflinePack | undefined;
     await transactionDone(transaction);
     if (!row || row.scope !== scope || row.amoCode !== amoCode) {
-      return { ready: false, storedAt: null, verifiedAt: null, workPackageSha256: null, checklistItems: 0, evidenceRecords: 0, expiresAt: null };
+      return { ready: false, storedAt: null, verifiedAt: null, workPackageSha256: null, checklistItems: 0, evidenceRecords: 0, offlineReferences: 0, expiresAt: null };
     }
     if (row.expiresAt != null && row.expiresAt <= Date.now()) {
-      return { ready: false, storedAt: row.storedAt, verifiedAt: row.verifiedAt, workPackageSha256: row.workPackageSha256, checklistItems: 0, evidenceRecords: 0, expiresAt: row.expiresAt };
+      return { ready: false, storedAt: row.storedAt, verifiedAt: row.verifiedAt, workPackageSha256: row.workPackageSha256, checklistItems: 0, evidenceRecords: 0, offlineReferences: 0, expiresAt: row.expiresAt };
     }
     const pack = await decryptDeviceValue<AuditOfflinePack>(row.encrypted);
     return {
@@ -294,6 +312,7 @@ export async function auditOfflinePackStatus(
       workPackageSha256: row.workPackageSha256,
       checklistItems: pack.work_package.package_snapshot.checklist_snapshot.length,
       evidenceRecords: pack.evidence.length,
+      offlineReferences: governedOfflineReferenceCount(pack),
       expiresAt: row.expiresAt,
     };
   } finally {
