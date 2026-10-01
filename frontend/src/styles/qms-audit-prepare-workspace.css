@@ -864,3 +864,34 @@
     grid-column: auto;
   }
 }
+
+
+.qms-audit-prepare__activity-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qms-audit-prepare__activity-list li {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__activity-list li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__activity-list p,
+.qms-audit-prepare__activity-list small {
+  margin: 0;
+  color: var(--text-secondary);
+}
