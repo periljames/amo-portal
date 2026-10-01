@@ -190,6 +190,7 @@ export function mutateChecklistFieldwork(
         entityType: "qms-audit-checklist-item",
         entityId: item.checklist_item_id,
         idempotencyKey: clientMutationId,
+        requireDurable: true,
       },
     },
   );
@@ -230,6 +231,7 @@ export function createAtomicChecklistFinding(
         entityType: "qms-audit-checklist-item",
         entityId: item.checklist_item_id,
         idempotencyKey: clientMutationId,
+        requireDurable: true,
       },
     },
   );
