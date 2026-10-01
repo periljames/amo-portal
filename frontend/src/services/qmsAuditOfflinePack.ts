@@ -231,7 +231,7 @@ export async function prepareAuditOfflinePack(
   for (const reference of offlineReferences.values()) {
     const manualId = String(reference.document_id);
     const revisionId = String(reference.revision_id);
-    const sourceSha256 = String(reference.source_sha256);
+    const sourceSha256 = String(reference.offline_reader_sha256 || reference.source_sha256).trim().toLowerCase();
     const readerUrl = String(reference.offline_reader_url).replace("{tenant}", encodeURIComponent(amoCode));
     const cached = await savePdfSourceOffline(
       { tenant: amoCode, manualId, revisionId },
