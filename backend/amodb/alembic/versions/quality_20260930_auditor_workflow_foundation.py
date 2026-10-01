@@ -16,6 +16,7 @@ DOC_META = "quality_audit_document_request_metadata"
 EXECUTION = "quality_audit_checklist_execution_governance"
 PARTICIPANT_EXECUTION = "quality_audit_fieldwork_participant_contributions"
 WORK_PACKAGE = "quality_audit_work_packages"
+AUDIT = "qms_audits"
 
 
 def _is_postgresql() -> bool:
@@ -56,6 +57,14 @@ def _disable_rls(table_name: str) -> None:
 
 
 def upgrade() -> None:
+    audit_columns = _columns(AUDIT)
+    if audit_columns and "objectives" not in audit_columns:
+        op.add_column(AUDIT, sa.Column("objectives", sa.Text(), nullable=True))
+    audit_columns = _columns(AUDIT)
+    if audit_columns and "entity_version" not in audit_columns:
+        op.add_column(AUDIT, sa.Column("entity_version", sa.Integer(), nullable=False, server_default="1"))
+        op.create_check_constraint("ck_qms_audits_entity_version", AUDIT, "entity_version >= 1")
+
     columns = _columns(DOC_META)
     if columns and "requirement_stage" not in columns:
         op.add_column(
@@ -152,6 +161,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    audit_columns = _columns(AUDIT)
+    if audit_columns and "entity_version" in audit_columns:
+        op.drop_constraint("ck_qms_audits_entity_version", AUDIT, type_="check")
+        op.drop_column(AUDIT, "entity_version")
+    audit_columns = _columns(AUDIT)
+    if audit_columns and "objectives" in audit_columns:
+        op.drop_column(AUDIT, "objectives")
+
     if _has_table(WORK_PACKAGE):
         if _is_postgresql():
             op.execute(sa.text(
