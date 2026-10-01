@@ -490,6 +490,5 @@
 .qms-live-audit-focus__empty-filter {
   margin: var(--space-3);
   color: var(--text-secondary);
-  font-size: 0.82rem;
   line-height: 1.45;
 }
