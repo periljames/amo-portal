@@ -106,6 +106,7 @@ type EnqueueOfflineMutationInput = {
   entityId?: string;
   idempotencyKey?: string;
   scope?: string;
+  requireDurable?: boolean;
 };
 
 type DatabaseRead<T> = {
@@ -520,8 +521,11 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
     nextAttemptAt: now,
   };
   if (!(await openDatabase())) {
-    // Memory-only fallback is not persisted at rest, so no plaintext is left
-    // on the device when secure IndexedDB/WebCrypto storage is unavailable.
+    if (input.requireDurable) {
+      throw new Error("Durable offline storage is unavailable on this device. This governed change was not queued; reconnect or enable browser storage before continuing.");
+    }
+    // Memory-only fallback is allowed only for non-governed portal drafts.
+    // Governed audit fieldwork explicitly requires durable device persistence.
     memoryOutbox.set(entry.id, entry);
     notifyOfflineStateChanged();
     return entry;
