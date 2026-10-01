@@ -50,7 +50,7 @@
 .qms-public-audit__released-files li > span,
 .qms-external-auditor-fieldwork__evidence li {
   display: grid;
-  gap: 0.1rem;
+  gap: var(--space-1);
 }
 
 .qms-live-audit-focus__evidence li small,
@@ -140,7 +140,6 @@
 }
 
 .qms-live-audit-focus__evidence-pending li > small {
-  max-width: 36rem;
 }
 
 .qms-live-audit-focus__presence > span {
