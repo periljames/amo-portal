@@ -5148,6 +5148,16 @@ def update_finding(
     _require_finding_owner_access(current_user, finding, audit)
 
     data = payload.model_dump(exclude_unset=True)
+    requested_base_version = data.pop("base_version", None)
+    if requested_base_version is not None and requested_base_version != int(finding.entity_version or 1):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "FINDING_VERSION_CONFLICT",
+                "message": "The finding changed in another session. Refresh before saving.",
+                "server_version": int(finding.entity_version or 1),
+            },
+        )
     if not data:
         return _serialize_finding(finding)
 
@@ -5204,6 +5214,8 @@ def update_finding(
         metadata=_audit_metadata(request),
         critical=finding.level == FindingLevel.LEVEL_1,
     )
+    finding.entity_version = int(finding.entity_version or 1) + 1
+    finding.updated_at = datetime.now(timezone.utc)
     response = _serialize_finding(finding)
     db.commit()
     return response
