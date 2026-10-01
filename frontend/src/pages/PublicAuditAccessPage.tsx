@@ -269,7 +269,7 @@ const PublicAuditAccessPage: React.FC = () => {
   const canAcknowledge = data.permissions.includes("audit:acknowledge");
   const canSubmitDocuments = data.permissions.includes("audit:document_submit");
   const canReadReleasedEvidence = data.permissions.includes("audit:read_released_evidence");
-  const requestRows: PublicGovernedAuditDocumentRequest[] = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, status: row.status as PublicGovernedAuditDocumentRequest["status"], request_type: "DOCUMENT" as const, linked_criterion: null, is_required: true, requirement_stage: "REQUIRED_BEFORE_ISSUE" as const, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, canonical_document_id: null, canonical_revision_id: null, controlled_submission: null }));
+  const requestRows: PublicGovernedAuditDocumentRequest[] = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, status: row.status as PublicGovernedAuditDocumentRequest["status"], request_type: "DOCUMENT" as const, linked_criterion: null, responsible_party: null, is_required: true, requirement_stage: "REQUIRED_BEFORE_ISSUE" as const, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, canonical_document_id: null, canonical_revision_id: null, controlled_submission: null }));
 
   return (
     <main className="qms-public-audit">
