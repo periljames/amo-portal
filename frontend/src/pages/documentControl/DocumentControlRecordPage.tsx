@@ -140,6 +140,9 @@ export default function DocumentControlRecordPage() {
   const document = detail?.document;
   const workflow = useMemo<DocumentWorkflow | null>(() => detail?.workflows[0] || null, [detail?.workflows]);
   const canControl = Boolean(detail?.capabilities.control);
+  const canPreviewWorkflowRevision = Boolean(
+    canControl || workflow?.allowed_actions?.length,
+  );
 
   const selectTab = (tab: DocumentWorkspaceView) => {
     const next = new URLSearchParams(searchParams);
@@ -150,7 +153,7 @@ export default function DocumentControlRecordPage() {
   };
 
   const openReader = () => {
-    if (activeView === "workflow" && workflow?.revision_id && document) {
+    if (activeView === "workflow" && canPreviewWorkflowRevision && workflow?.revision_id && document) {
       navigate(`${readerBasePath}/${document.id}/rev/${workflow.revision_id}/read`);
       return;
     }
@@ -167,7 +170,19 @@ export default function DocumentControlRecordPage() {
       actions={document && detail ? <>
         <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library`)}>Back to library</button>
         <DocumentControlRecordActions detail={detail} onChanged={() => void load()} compact activeView={activeView} />
-        <button type="button" className="dc-button dc-button--primary" disabled={activeView === "workflow" ? !workflow?.revision_id : !document.read_target.revision_id} onClick={openReader}><BookOpen size={15} /> {activeView === "workflow" ? "Preview review revision" : "Read current"}</button>
+        <button
+          type="button"
+          className="dc-button dc-button--primary"
+          disabled={
+            activeView === "workflow" && canPreviewWorkflowRevision
+              ? !workflow?.revision_id
+              : !document.read_target.revision_id
+          }
+          onClick={openReader}
+        >
+          <BookOpen size={15} />
+          {activeView === "workflow" && canPreviewWorkflowRevision ? "Preview review revision" : "Read current"}
+        </button>
       </> : undefined}
     >
       {loading ? <DocumentControlLoading label="Loading unified document workspace…" /> : null}

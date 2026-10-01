@@ -1526,7 +1526,7 @@ async def upload_pdf_revision(
     }
 
 
-@router.get("/t/{tenant_slug}/{manual_id}/revisions", response_model=list[RevisionOut])
+@router.get("/t/{tenant_slug}/{manual_id}/revisions", response_model=list[RevisionOut], operation_id="legacy_manuals_list_revisions")
 def list_revisions(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
 
     tenant = _tenant_by_slug(db, tenant_slug)
@@ -1539,7 +1539,7 @@ def list_revisions(tenant_slug: str, manual_id: str, db: Session = Depends(get_d
     )
     return [RevisionOut(**rev.__dict__, status_enum=rev.status_enum.value) for rev in revisions]
 
-@router.post("/t/{tenant_slug}/{manual_id}/revisions", response_model=RevisionOut)
+@router.post("/t/{tenant_slug}/{manual_id}/revisions", response_model=RevisionOut, operation_id="legacy_manuals_create_revision")
 def create_revision(tenant_slug: str, manual_id: str, payload: RevisionCreate, request: Request, db: Session = Depends(get_db)):
     tenant = _tenant_by_slug(db, tenant_slug)
     manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()

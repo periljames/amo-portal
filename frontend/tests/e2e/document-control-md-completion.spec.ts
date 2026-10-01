@@ -4,19 +4,16 @@ const LIVE_ENABLED = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const AMO_CODE = process.env.E2E_AMO_CODE || "safarilink";
 const ADMIN_EMAIL = process.env.E2E_AMO_ADMIN_EMAIL || "";
 const ADMIN_PASSWORD = process.env.E2E_AMO_ADMIN_PASSWORD || "";
-const ADMIN_STORAGE_STATE = process.env.E2E_DMS_ADMIN_STORAGE_STATE || "";
 const DOCUMENT_ID = process.env.E2E_DOCUMENT_GOVERNANCE_ID || "";
 const EXTERNAL_SOURCE_ID = process.env.E2E_DMS_EXTERNAL_SOURCE_ID || "00000000-0000-4000-8000-000000000494";
 
 let materialBrowserErrors: string[] = [];
-let cachedAdminStorage: Record<string, string> | null = null;
 
 test.use({
   viewport: { width: 1440, height: 900 },
   ignoreHTTPSErrors: true,
   trace: "retain-on-failure",
   screenshot: "on",
-  ...(ADMIN_STORAGE_STATE ? { storageState: ADMIN_STORAGE_STATE } : {}),
 });
 
 function watchMaterialBrowserErrors(page: Page): void {
@@ -36,28 +33,24 @@ function watchMaterialBrowserErrors(page: Page): void {
   });
 }
 
-async function restoreCachedAdminSession(page: Page): Promise<boolean> {
-  if (!cachedAdminStorage) return false;
-  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
-  await page.evaluate((storage) => {
-    localStorage.clear();
-    for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
-  }, cachedAdminStorage);
-  await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/document-control`);
-  await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
-  return true;
-}
-
 async function signIn(page: Page): Promise<void> {
-  if (await restoreCachedAdminSession(page)) return;
+  await page.context().clearCookies();
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.reload();
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
   if (await continueButton.count()) await continueButton.click();
   await page.locator("#password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
-  cachedAdminStorage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  await expect.poll(
+    () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
+    { timeout: 10_000 },
+  ).toBe(true);
 }
 
 async function openRegisteredCopy(page: Page, copyNumber: string, homeLocation: string): Promise<void> {
@@ -92,8 +85,8 @@ test.describe.serial("DMS MD completion acceptance", () => {
 
   test.beforeEach(async ({ page }) => {
     if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !DOCUMENT_ID) throw new Error("E2E credentials and governed document id are required");
+    await signIn(page);
     watchMaterialBrowserErrors(page);
-    if (!ADMIN_STORAGE_STATE) await signIn(page);
   });
 
   test.afterEach(() => {
@@ -234,7 +227,7 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(assessment.getByText("Latest receipt has a recorded applicability assessment.", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     const apiEvidence = await page.evaluate(async ({ amoCode, sourceId }) => {
-      const auth = localStorage.getItem("amo_portal_token");
+      const auth = sessionStorage.getItem("amo_portal_token");
       const response = await fetch(`/doc-control/workspace/t/${encodeURIComponent(amoCode)}/external-sources/${sourceId}/assessment`, { headers: { Authorization: `Bearer ${auth}` } });
       if (!response.ok) throw new Error(`Assessment reload failed: ${response.status}`);
       return response.json();

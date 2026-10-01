@@ -75,7 +75,7 @@ const HISTORY_POINTS = 60;
 
 type LiveHistory = { cpu: number[]; mem: number[]; db: number[]; rx: number[]; tx: number[]; queue: number[] };
 
-function useLiveMetrics(intervalMs = 1000) {
+function useLiveMetrics(intervalMs = 2000) {
   const [latest, setLatest] = useState<LiveMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -150,7 +150,7 @@ export default function PlatformInfrastructurePage() {
   const featureFlags = (flags.data?.items ?? []) as FeatureFlag[];
   const maintenanceWindows = (windows.data?.items ?? []) as MaintenanceWindow[];
 
-  const { latest, history, error: liveError, paused, setPaused } = useLiveMetrics(1000);
+  const { latest, history, error: liveError, paused, setPaused } = useLiveMetrics(2000);
 
   const [dbChecking, setDbChecking] = useState(false);
   const [dbResult, setDbResult] = useState<DbCheckResult | null>(null);
@@ -200,7 +200,7 @@ export default function PlatformInfrastructurePage() {
     >
       {infra.error ? <ErrorState error={infra.error} retry={infra.reload} /> : null}
 
-      {/* ---- Real-time monitor (updates every second) ---- */}
+      {/* ---- Real-time monitor (updates every two seconds) ---- */}
       <section className="platform-section-head">
         <h2>Live monitor</h2>
         <div className="platform-actions">

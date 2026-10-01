@@ -959,7 +959,7 @@ _LIVE_METRIC_STATE: dict[str, Any] = {"net": None, "net_ts": None}
 
 
 def live_system_metrics(db: Session) -> dict[str, Any]:
-    """Instant, cheap host+DB metrics for high-frequency (~1s) polling.
+    """Instant, cheap host+DB metrics for high-frequency (~2s) polling.
 
     Uses non-blocking psutil sampling (CPU delta since the previous call, network
     counter deltas over wall-clock) so the superadmin console can render live,

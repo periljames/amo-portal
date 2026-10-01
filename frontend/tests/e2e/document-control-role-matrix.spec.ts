@@ -16,7 +16,10 @@ const BACKEND = process.env.E2E_DIRECT_API_URL || "http://127.0.0.1:8080";
 async function clearSession(page: Page): Promise<void> {
   await page.context().clearCookies();
   await page.goto(`/maintenance/${AMO_CODE}/login`);
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
   await page.reload();
 }
 
@@ -28,10 +31,14 @@ async function signIn(page: Page, email: string, password: string): Promise<void
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+  await expect.poll(
+    () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
+    { timeout: 10_000 },
+  ).toBe(true);
 }
 
 async function token(page: Page): Promise<string> {
-  const value = await page.evaluate(() => localStorage.getItem("amo_portal_token"));
+  const value = await page.evaluate(() => sessionStorage.getItem("amo_portal_token"));
   if (!value) throw new Error("Authenticated DMS role fixture did not receive a bearer token");
   return value;
 }
@@ -87,10 +94,13 @@ test.describe.serial("DMS authoritative role matrix", () => {
   test("ordinary reader can read current content but cannot mutate workflow", async ({ page }) => {
     await signIn(page, READER_EMAIL, ROLE_PASSWORD);
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
-    await expect(page.getByTestId("integrated-document-library")).toBeVisible({ timeout: 30_000 });
-    const row = page.getByRole("row").filter({ hasText: "DMS-CI-MOM" });
-    await expect(row.getByRole("button", { name: "Read", exact: true })).toBeVisible();
-    await row.getByRole("button", { name: "Read", exact: true }).click();
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    const card = library.locator("article.dlibrary-card").filter({ hasText: "DMS-CI-MOM" });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card.getByRole("button", { name: "Read current", exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "Read current", exact: true }).click();
     await expect(page.locator(".pdfv3-reader")).toBeVisible({ timeout: 30_000 });
 
     await openWorkspace(page);
