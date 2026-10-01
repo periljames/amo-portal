@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import type { QMSFindingOut } from "./qmsCore";
 import {
   currentOfflineScope,
   decryptDeviceValue,
@@ -381,6 +382,13 @@ export function projectOfflineChecklistBindings(pack: AuditOfflinePack) {
       applied_at: binding.applied_at || pack.work_package.issued_at,
     })),
   };
+}
+
+export function projectOfflineFindings(pack: AuditOfflinePack): QMSFindingOut[] {
+  return (pack.findings || []).map((finding) => ({
+    ...finding,
+    audit_id: String(finding.audit_id || pack.audit_id),
+  })) as QMSFindingOut[];
 }
 
 export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
