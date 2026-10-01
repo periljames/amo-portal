@@ -149,6 +149,9 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "canonical_response_status": row.canonical_response_status,
             "response_value": row.response_value,
             "auditor_notes": row.auditor_notes,
+            "auditee_comments": row.auditee_comments,
+            "sampled_item_information": row.sampled_item_information,
+            "applicability": row.applicability,
             "objective_evidence": item.objective_evidence if item else None,
             "evidence_references": row.evidence_references or [],
         }
@@ -163,7 +166,9 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "kind": audit.kind,
             "status": audit.status,
             "scope": audit.scope,
+            "objectives": audit.objectives,
             "criteria": audit.criteria,
+            "entity_version": int(audit.entity_version or 1),
             "auditee": audit.auditee,
             "auditee_email": audit.auditee_email,
             "planned_start": audit.planned_start,
@@ -293,6 +298,7 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     story.extend([
         _p("Scope and criteria", styles["QmsSection"]),
         _p(f"Scope: {_text(audit.get('scope'))}", styles["QmsBody"]),
+        _p(f"Objectives: {_text(audit.get('objectives'))}", styles["QmsBody"]),
         _p(f"Criteria: {_text(audit.get('criteria'))}", styles["QmsBody"]),
         _p("Management summary", styles["QmsSection"]),
         _p(narrative.get("management_summary"), styles["QmsBody"]),
