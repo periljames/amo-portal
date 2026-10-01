@@ -40,6 +40,7 @@ class ChecklistExecutionUpdate(BaseModel):
     canonical_response_status: CanonicalResponse
     response_value: str | None = Field(default=None, max_length=64)
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -54,6 +55,7 @@ class FieldworkMutation(BaseModel):
     canonical_response_status: CanonicalResponse
     response_value: str | None = Field(default=None, max_length=64)
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -75,6 +77,7 @@ class FieldworkFindingMutation(BaseModel):
     safety_sensitive: bool = False
     target_close_date: date | None = None
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -123,6 +126,9 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "canonical_response_status": row.canonical_response_status,
         "response_value": row.response_value,
         "auditor_notes": row.auditor_notes,
+        "auditee_comments": row.auditee_comments,
+        "sampled_item_information": row.sampled_item_information,
+        "applicability": row.applicability,
         "evidence_references": list(row.evidence_references or []),
         "entity_version": int(row.entity_version or 1),
         "updated_by_user_id": row.updated_by_user_id,
@@ -157,6 +163,9 @@ def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditCh
         "objective_evidence": item.objective_evidence,
         "finding_id": str(item.finding_id) if item.finding_id else None,
         "auditor_notes": governance.auditor_notes if governance else None,
+        "auditee_comments": governance.auditee_comments if governance else None,
+        "sampled_item_information": governance.sampled_item_information if governance else None,
+        "applicability": governance.applicability if governance else "APPLICABLE",
         "evidence_references": list(governance.evidence_references or []) if governance else [],
         "governance_id": str(governance.id) if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
@@ -193,6 +202,8 @@ def _apply_execution_update(
             canonical_response_status=payload.canonical_response_status,
             response_value=payload.response_value,
             auditor_notes=payload.auditor_notes.strip() if payload.auditor_notes else None,
+            sampled_item_information=payload.sampled_item_information.strip() if payload.sampled_item_information else None,
+            applicability=str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or "APPLICABLE")[:128],
             evidence_references=list(payload.evidence_references),
             entity_version=1,
             updated_by_user_id=ctx.user_id,
@@ -205,6 +216,8 @@ def _apply_execution_update(
         if payload.response_value is not None:
             governance.response_value = payload.response_value
         governance.auditor_notes = payload.auditor_notes.strip() if payload.auditor_notes else None
+        governance.sampled_item_information = payload.sampled_item_information.strip() if payload.sampled_item_information else None
+        governance.applicability = str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or governance.applicability or "APPLICABLE")[:128]
         governance.evidence_references = list(payload.evidence_references)
         governance.entity_version = int(governance.entity_version or 1) + 1
         governance.updated_by_user_id = ctx.user_id
@@ -838,6 +851,7 @@ def create_atomic_fieldwork_finding(
             item_id=item_id,
             canonical_status=payload.canonical_response_status,
             auditor_notes=payload.auditor_notes,
+            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
         )
         response_value = _validated_response_value(
@@ -852,6 +866,7 @@ def create_atomic_fieldwork_finding(
             canonical_response_status=payload.canonical_response_status,
             response_value=response_value,
             auditor_notes=payload.auditor_notes,
+            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
             reason=payload.reason,
         )
