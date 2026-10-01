@@ -290,7 +290,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  min-height: 2.5rem;
+  min-height: calc(var(--space-6) + var(--space-2));
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--qms-line);
   border-radius: var(--qms-radius);
@@ -490,5 +490,4 @@
 .qms-live-audit-focus__empty-filter {
   margin: var(--space-3);
   color: var(--text-secondary);
-  line-height: 1.45;
 }
