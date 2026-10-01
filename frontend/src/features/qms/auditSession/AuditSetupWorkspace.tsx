@@ -76,6 +76,9 @@ type MeetingDraft = {
   end: string;
   location: string;
   conferenceUrl: string;
+  agenda: string;
+  auditeeDepartment: string;
+  auditorUserId: string;
 };
 
 const emptyMeeting: MeetingDraft = {
@@ -85,6 +88,9 @@ const emptyMeeting: MeetingDraft = {
   end: "",
   location: "",
   conferenceUrl: "",
+  agenda: "",
+  auditeeDepartment: "",
+  auditorUserId: "",
 };
 
 const MODALITY_OPTIONS: Array<{ value: Exclude<MeetingModality, "">; label: string; hint: string }> = [
@@ -193,6 +199,9 @@ function meetingDraftFromRow(
         ? ""
         : locationText,
     conferenceUrl: row.conference_url || "",
+    agenda: row.agenda || "",
+    auditeeDepartment: row.auditee_department || "",
+    auditorUserId: row.auditor_user_id || "",
   };
 }
 
@@ -578,6 +587,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         scheduled_end: snapped.end,
         location,
         conference_url: value.modality === "PHYSICAL" ? null : conferenceUrl || null,
+        agenda: value.agenda.trim() || null,
+        auditee_department: value.auditeeDepartment.trim() || null,
+        auditor_user_id: value.auditorUserId || auditQuery.data?.lead_auditor_user_id || null,
         status: row?.status ?? "PLANNED",
       };
       return row ? updateAuditMeeting(amoCode, auditId, row.id, payload) : createAuditMeeting(amoCode, auditId, payload);
@@ -1194,6 +1206,36 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   </div>
                 </label>
               ) : null}
+            </div>
+
+            <div className="qms-audit-setup-stage__fields">
+              <label>
+                <span>Auditee / department</span>
+                <input
+                  disabled={!canManage}
+                  value={value.auditeeDepartment}
+                  onChange={(event) => setValue((current) => ({ ...current, auditeeDepartment: event.target.value }))}
+                  placeholder="Department, process owner or interview group"
+                />
+              </label>
+              <label>
+                <span>Assigned auditor</span>
+                <input
+                  disabled
+                  value={value.auditorUserId || auditQuery.data?.lead_auditor_user_id || ""}
+                  placeholder="Uses the assigned lead auditor when not otherwise recorded"
+                />
+              </label>
+              <label className="qms-audit-setup-stage__field-span">
+                <span>Agenda / interview plan</span>
+                <textarea
+                  disabled={!canManage}
+                  rows={3}
+                  value={value.agenda}
+                  onChange={(event) => setValue((current) => ({ ...current, agenda: event.target.value }))}
+                  placeholder="Agenda items, interview subjects, records or areas to cover"
+                />
+              </label>
             </div>
 
             {definitionDirty ? (
