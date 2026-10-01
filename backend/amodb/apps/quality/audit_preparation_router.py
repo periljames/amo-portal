@@ -1041,8 +1041,17 @@ def get_audit_offline_pack(
                 "requirement_ref": item.requirement_ref,
                 "description": item.description,
                 "objective_evidence": item.objective_evidence,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "safety_sensitive": bool(item.safety_sensitive),
+                "target_close_date": item.target_close_date.isoformat() if item.target_close_date else None,
                 "closed_at": item.closed_at.isoformat() if item.closed_at else None,
+                "verified_at": item.verified_at.isoformat() if item.verified_at else None,
+                "verified_by_user_id": item.verified_by_user_id,
+                "acknowledged_at": item.acknowledged_at.isoformat() if item.acknowledged_at else None,
+                "acknowledged_by_user_id": item.acknowledged_by_user_id,
+                "created_by_user_id": item.created_by_user_id,
+                "entity_version": int(item.entity_version or 1),
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             }
             for item in findings
         ],
@@ -1052,6 +1061,7 @@ def get_audit_offline_pack(
                 "checklist_item_id": str(item.checklist_item_id) if item.checklist_item_id else None,
                 "finding_id": str(item.finding_id) if item.finding_id else None,
                 "evidence_request_id": str(item.evidence_request_id) if item.evidence_request_id else None,
+                "source_type": item.source_type,
                 "filename": item.filename,
                 "content_type": item.content_type,
                 "size_bytes": item.size_bytes,
@@ -1061,6 +1071,8 @@ def get_audit_offline_pack(
                 "captured_at": item.captured_at.isoformat() if item.captured_at else None,
                 "offline_upload_state": item.offline_upload_state,
                 "server_processing_state": item.server_processing_state,
+                "uploaded_by_user_id": item.uploaded_by_user_id,
+                "uploaded_by_participant_id": item.uploaded_by_participant_id,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
             }
             for item in evidence
