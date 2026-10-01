@@ -7,6 +7,7 @@ export type AuditOccurrenceSetupUpdate = {
   scope?: string | null;
   objectives?: string | null;
   criteria?: string | null;
+  location?: string | null;
   auditee?: string | null;
   auditee_email?: string | null;
   planned_start?: string | null;
