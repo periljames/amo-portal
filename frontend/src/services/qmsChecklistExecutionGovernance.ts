@@ -79,6 +79,7 @@ export type AtomicFieldworkFindingPayload = {
   safety_sensitive?: boolean;
   target_close_date?: string | null;
   auditor_notes?: string | null;
+  sampled_item_information?: string | null;
   evidence_references?: Array<Record<string, unknown> | string>;
   reason: string;
 };
@@ -208,6 +209,7 @@ export function createAtomicChecklistFinding(
     safety_sensitive: payload.safety_sensitive ?? false,
     target_close_date: payload.target_close_date ?? null,
     auditor_notes: payload.auditor_notes ?? null,
+    sampled_item_information: payload.sampled_item_information ?? null,
     evidence_references: payload.evidence_references ?? [],
     reason: payload.reason,
   };
