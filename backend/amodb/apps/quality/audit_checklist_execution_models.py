@@ -38,6 +38,8 @@ class QualityAuditChecklistExecutionGovernance(Base):
     applicability = Column(String(128), nullable=False, default="APPLICABLE", server_default="APPLICABLE")
     evidence_references = Column(JSON, nullable=False, default=list)
     entity_version = Column(Integer, nullable=False, default=1, server_default="1")
+    answered_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
