@@ -391,6 +391,8 @@ def _checklist_items_from_revision(
 
 
 def _source_reference(document: manual_models.Manual, revision: manual_models.ManualRevision, source_system: str = "DOCUMENT_CONTROL") -> dict[str, Any]:
+    source_filename = str(revision.source_filename or "")
+    is_pdf = source_filename.lower().endswith(".pdf")
     return {
         "source_system": source_system,
         "document_id": str(document.id),
@@ -402,7 +404,13 @@ def _source_reference(document: manual_models.Manual, revision: manual_models.Ma
         "revision_number": revision.rev_number,
         "revision_status": str(getattr(revision.status_enum, "value", revision.status_enum)),
         "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
+        "source_filename": revision.source_filename,
         "source_sha256": revision.source_sha256,
+        "offline_reader_url": (
+            f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream.pdf"
+            if is_pdf and revision.source_sha256
+            else None
+        ),
     }
 
 
@@ -1415,19 +1423,7 @@ def create_realtime_audit_checklist(
             )
         if document is None or revision is None:
             raise HTTPException(status_code=422, detail="The selected DMS document has no current effective revision.")
-        source_references.append({
-            "source_system": "DOCUMENT_CONTROL",
-            "document_id": str(document.id),
-            "revision_id": str(revision.id),
-            "document_code": document.code,
-            "document_title": document.title,
-            "manual_type": document.manual_type,
-            "issue_number": revision.issue_number,
-            "revision_number": revision.rev_number,
-            "revision_status": _enum_value(revision.status_enum),
-            "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
-            "source_sha256": revision.source_sha256,
-        })
+        source_references.append(_source_reference(document, revision))
 
     items = _normalised_items(payload.items)
     now = _utcnow()
