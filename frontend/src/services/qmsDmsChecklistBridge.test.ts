@@ -47,6 +47,16 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("registered as a DMS draft");
   });
 
+  it("confirms the persisted fieldwork binding before announcing Prepare success", () => {
+    expect(prepareSource).toContain("const confirmChecklistBinding");
+    expect(prepareSource).toContain("contextQuery.refetch()");
+    expect(prepareSource).toContain("fullBindingsQuery.refetch()");
+    expect(prepareSource).toContain('["qms", "prepare-checklist-bindings", amoCode, auditId]');
+    const confirmIndex = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);");
+    const successIndex = prepareSource.indexOf('setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");');
+    expect(confirmIndex).toBeGreaterThan(-1);
+    expect(successIndex).toBeGreaterThan(confirmIndex);
+  });
   it("does not synchronously set guard state from query-cache render notifications", () => {
     expect(enhancementsSource).not.toContain("getQueryCache().subscribe");
     expect(enhancementsSource).toContain("auditOccurrenceQueryKey");
