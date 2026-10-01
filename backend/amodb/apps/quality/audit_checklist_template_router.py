@@ -76,6 +76,7 @@ class ChecklistTemplateItem(BaseModel):
     response_type: str = Field(default="COMPLIANCE", max_length=64)
     response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
     applicability: str = Field(default="APPLICABLE", max_length=64)
+    applicability_reason: str | None = Field(default=None, max_length=2000)
     mandatory: bool = True
     finding_trigger: str = Field(
         default="NONE",
