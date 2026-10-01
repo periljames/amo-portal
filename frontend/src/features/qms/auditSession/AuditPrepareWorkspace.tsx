@@ -78,6 +78,8 @@ type NewRequest = {
   dueDate: string;
   requestType: GovernedAuditDocumentRequest["request_type"];
   linkedCriterion: string;
+  responsibleParty: string;
+  checklistItemIds: string[];
   isRequired: boolean;
   requirementStage: GovernedAuditDocumentRequest["requirement_stage"];
   sourceMode: GovernedAuditDocumentRequest["source_mode"];
@@ -125,6 +127,8 @@ const emptyRequest: NewRequest = {
   dueDate: "",
   requestType: "DOCUMENT",
   linkedCriterion: "",
+  responsibleParty: "",
+  checklistItemIds: [],
   isRequired: true,
   requirementStage: "REQUIRED_BEFORE_FIELDWORK",
   sourceMode: "UPLOAD_OR_CONTROLLED",
@@ -381,6 +385,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       due_date: newRequest.dueDate || null,
       request_type: newRequest.requestType,
       linked_criterion: newRequest.linkedCriterion.trim() || null,
+      responsible_party: newRequest.responsibleParty.trim() || null,
+      checklist_item_ids: newRequest.checklistItemIds,
       is_required: newRequest.requirementStage !== "REQUESTED_NOT_BLOCKING",
       requirement_stage: newRequest.requirementStage,
       source_mode: newRequest.sourceMode,
@@ -587,6 +593,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const selectedDmsChecklist = dmsChecklists.find((item) => item.document_id === effectiveDmsChecklistId) || null;
   const selectedRealtimeDocument = documents.find((document) => document.id === checklistDmsDocumentId) || null;
   const selectedRequestDocument = documents.find((document) => document.id === newRequest.controlledDocumentId) || null;
+  const requestChecklistOptions = (fullBindingsQuery.data?.items || []).flatMap((binding) =>
+    binding.instantiated_item_ids.map((itemId, index) => {
+      const item = binding.item_snapshot[index];
+      return {
+        id: itemId,
+        label: item?.checklist_ref || item?.requirement_ref || item?.prompt || `Checklist item ${index + 1}`,
+        section: item?.section || null,
+      };
+    }),
+  );
   const dmsResponseSchemeValid = Boolean(
     dmsResponseType
     && (dmsResponseType !== "CUSTOM"
@@ -802,6 +818,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <header><div><h3>Audit basis</h3></div></header>
           <dl>
             <div><dt>Scope</dt><dd>{context.regulatory_and_manual_basis?.audit_scope || auditQuery.data.scope || "—"}</dd></div>
+            <div><dt>Objectives</dt><dd>{auditQuery.data.objectives || "—"}</dd></div>
             <div><dt>Criteria</dt><dd>{context.regulatory_and_manual_basis?.audit_criteria || auditQuery.data.criteria || "—"}</dd></div>
             <div><dt>Checklists</dt><dd>{checklistBindings} revision(s)</dd></div>
             <div><dt>Prep revision</dt><dd>{prepRevision ? `Rev ${prepRevision.revision_no} · ${prepRevision.status}` : "Not issued"}</dd></div>
@@ -822,6 +839,20 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAPA exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
             <article><strong>{context.cross_source_assurance_pressure.factors.length}</strong><span>Preparation context factors</span><small>{context.cross_source_assurance_pressure.statement}</small></article>
           </div>
+          {context.prior_findings.items.length ? (
+            <div className="qms-audit-prepare__prior-findings" aria-label="Relevant prior findings">
+              <strong>Relevant prior findings</strong>
+              <ul>
+                {context.prior_findings.items.slice(0, 12).map((finding) => (
+                  <li key={finding.id}>
+                    <span><strong>{finding.finding_ref || "Finding"}</strong>{finding.requirement_ref ? <small>{finding.requirement_ref}</small> : null}</span>
+                    <p>{finding.description || "No finding description recorded."}</p>
+                    <small>{[finding.classification, finding.severity, finding.status].filter(Boolean).join(" · ") || "Status not recorded"}</small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {context.cross_source_assurance_pressure.factors.length ? <div className="qms-audit-prepare__factor-list" aria-label="Preparation context factors">{context.cross_source_assurance_pressure.factors.map((factor) => <div key={factor.code}><span><strong>{factor.label}</strong><small>{factor.source}</small></span><span>{String(factor.value ?? "—")}</span><small>{factor.rationale}</small></div>)}</div> : null}
           {context.data_quality.warnings.length ? <div className="qms-audit-prepare-stage__notice is-warning"><AlertTriangle size={14} aria-hidden /><span>{context.data_quality.warnings.map((warning) => warning.message).join(" · ")}</span></div> : null}
         </section>
@@ -850,7 +881,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   const type = String(meeting.meeting_type || "MEETING").replaceAll("_", " ");
                   const start = String(meeting.scheduled_start || meeting.scheduled_at || "");
                   const end = String(meeting.scheduled_end || "");
-                  return <li key={String(meeting.id || index)}><strong>{type}</strong><span>{start ? new Date(start).toLocaleString() : "Time not recorded"}{end ? ` – ${new Date(end).toLocaleString()}` : ""}</span><small>{String(meeting.location || meeting.conference_url || meeting.status || "Planned audit coordination")}</small></li>;
+                  return <li key={String(meeting.id || index)}><strong>{type}</strong><span>{start ? new Date(start).toLocaleString() : "Time not recorded"}{end ? ` – ${new Date(end).toLocaleString()}` : ""}</span><small>{String(meeting.auditee_department || "Auditee / department not specified")} · Auditor {String(meeting.auditor_user_id || auditQuery.data.lead_auditor_user_id || "not assigned")}</small>{meeting.agenda ? <p>{String(meeting.agenda)}</p> : null}<small>{String(meeting.location || meeting.conference_url || meeting.status || "Planned audit coordination")}</small></li>;
                 })}</ul>
               )}
             </article>
@@ -1001,6 +1032,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <label className="is-wide"><span>Request title</span><input required minLength={2} value={newRequest.title} onChange={(event) => setNewRequest((current) => ({ ...current, title: event.target.value }))} /></label>
                 <label className="is-wide"><span>Purpose / records required</span><textarea rows={3} value={newRequest.description} onChange={(event) => setNewRequest((current) => ({ ...current, description: event.target.value }))} /></label>
                 <label className="is-wide"><span>Linked criterion / requirement</span><textarea rows={2} value={newRequest.linkedCriterion} onChange={(event) => setNewRequest((current) => ({ ...current, linkedCriterion: event.target.value }))} placeholder="Exact regulation, manual paragraph, procedure or checklist criterion this evidence supports" /></label>
+                <label><span>Responsible party</span><input value={newRequest.responsibleParty} onChange={(event) => setNewRequest((current) => ({ ...current, responsibleParty: event.target.value }))} placeholder="Auditee, department or process owner" /></label>
+                <label><span>Associated checklist items</span><select multiple size={Math.min(5, Math.max(2, requestChecklistOptions.length || 2))} value={newRequest.checklistItemIds} onChange={(event) => setNewRequest((current) => ({ ...current, checklistItemIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{requestChecklistOptions.map((option) => <option key={option.id} value={option.id}>{option.section ? `${option.section} · ` : ""}{option.label}</option>)}</select><small>Use Ctrl/Cmd or touch multi-select where supported. Selected IDs are validated against this audit on the server.</small></label>
                 <label><span>Submission source</span><select value={newRequest.sourceMode} onChange={(event) => setNewRequest((current) => ({ ...current, sourceMode: event.target.value as NewRequest["sourceMode"], controlledDocumentId: "" }))}><option value="UPLOAD_OR_CONTROLLED">Upload or controlled DMS record</option><option value="UPLOAD">Upload only</option><option value="CONTROLLED_DMS">Controlled DMS record only</option></select></label>
                 <label><span>Workflow requirement</span><select value={newRequest.requirementStage} onChange={(event) => setNewRequest((current) => ({ ...current, requirementStage: event.target.value as NewRequest["requirementStage"], isRequired: event.target.value !== "REQUESTED_NOT_BLOCKING" }))}><option value="REQUIRED_BEFORE_ISSUE">Required before preparation issue</option><option value="REQUIRED_BEFORE_FIELDWORK">Required before fieldwork</option><option value="REQUIRED_DURING_FIELDWORK">Required during fieldwork</option><option value="REQUESTED_NOT_BLOCKING">Requested · not blocking</option></select></label>
                 {newRequest.sourceMode !== "UPLOAD" ? <>
@@ -1022,6 +1055,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     <strong>{request.title}</strong>
                     <p>{request.description || "No additional instructions."}</p>
                     <small>{request.request_type.replaceAll("_", " ")} · {request.is_required ? "Required" : "Optional"} · {request.source_mode.replaceAll("_", " ")}</small>
+                    {request.responsible_party ? <small>Responsible: {request.responsible_party}</small> : null}
+                    {request.checklist_item_ids?.length ? <small>Linked to {request.checklist_item_ids.length} checklist item(s)</small> : null}
                     {request.linked_criterion ? <blockquote><strong>Criterion:</strong> {request.linked_criterion}</blockquote> : null}
                     <small>Due {request.due_date || "not specified"}{request.uploaded_at ? ` · submitted ${new Date(request.uploaded_at).toLocaleString()}` : ""}</small>
                     {request.canonical_document_id ? <code><Link2 size={13} /> DMS document {request.canonical_document_id}{request.canonical_revision_id ? ` · revision ${request.canonical_revision_id}` : ""}</code> : null}
