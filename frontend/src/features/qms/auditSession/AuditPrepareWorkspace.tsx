@@ -8,6 +8,7 @@ import {
   Copy,
   DownloadCloud,
   HardDrive,
+  History,
   Link2,
   Plus,
   Search,
@@ -26,6 +27,7 @@ import {
   createAuditPreparationRevision,
   getAuditPreparationReadiness,
   issueAuditPreparationRevision,
+  listAuditActivity,
   listAuditPreparationRevisions,
 } from "../../../services/qmsAuditGovernance";
 import {
@@ -292,6 +294,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 1_500,
   });
+  const activityQuery = useQuery({
+    queryKey: ["qms-audit-activity", amoCode, auditId],
+    queryFn: ({ signal }) => listAuditActivity(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 2_000,
+  });
   const offlinePackQuery = useQuery({
     queryKey: ["qms-audit-offline-pack-status", amoCode, auditId],
     queryFn: () => auditOfflinePackStatus(amoCode, auditId),
@@ -346,6 +354,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-readiness", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-activity", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
@@ -970,6 +979,27 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <div className="qms-audit-prepare__participant-list">
               {!participants.length ? <p className="qms-audit-prepare__empty">No external participants are assigned to this audit.</p> : participants.map((participant) => <article key={participant.id}><div><span>{participant.participant_type.replaceAll("_", " ")}</span><strong>{participant.display_name || participant.email || "External participant"}</strong><small>{participant.organisation || "No organisation"} · {participant.role} · {participant.assurance_level || "EMAIL_LINK"}</small><small>{participant.permissions.join(" · ")}</small><small>Expires {new Date(participant.expires_at).toLocaleString()} · {participant.status}</small></div>{canManage && participant.status !== "REVOKED" ? <button type="button" onClick={() => revokeMutation.mutate(participant.id)} disabled={revokeMutation.isPending}><UserX size={14} /> Revoke</button> : null}</article>)}
             </div>
+        </section>
+
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__activity" id="audit-occurrence-activity">
+          <header>
+            <div><h3><History size={16} /> Activity / audit trail</h3><p>Append-only preparation and audit-domain events for this occurrence.</p></div>
+            <button type="button" onClick={() => void activityQuery.refetch()} disabled={activityQuery.isFetching}>Refresh</button>
+          </header>
+          {activityQuery.isLoading ? <p className="qms-audit-prepare__empty">Loading audit activity…</p> : null}
+          {activityQuery.isError ? <p className="qms-audit-prepare-stage__notice is-warning" role="alert">Audit activity could not be loaded. Retry without leaving this audit.</p> : null}
+          {!activityQuery.isLoading && !activityQuery.isError && !(activityQuery.data?.items.length) ? <p className="qms-audit-prepare__empty">No recorded audit activity is available yet.</p> : null}
+          {activityQuery.data?.items.length ? (
+            <ol className="qms-audit-prepare__activity-list">
+              {activityQuery.data.items.slice(0, 100).map((event) => (
+                <li key={event.id}>
+                  <div><strong>{event.action.replaceAll("_", " ")}</strong><small>{event.entity_type} · {new Date(event.occurred_at).toLocaleString()}</small></div>
+                  <p>{event.reason || "Recorded governed audit event."}</p>
+                  <small>Actor {event.actor_user_id || "system / external participant"} · Record {event.id}</small>
+                </li>
+              ))}
+            </ol>
+          ) : null}
         </section>
       </div>
       <ControlledDocumentUploadDialog
