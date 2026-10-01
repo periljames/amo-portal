@@ -455,3 +455,41 @@
 @media (prefers-reduced-motion: reduce) {
   .qms-live-audit-focus * { scroll-behavior: auto !important; }
 }
+
+
+.qms-live-audit-focus__tools {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.qms-live-audit-focus__tools label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.qms-live-audit-focus__tools input,
+.qms-live-audit-focus__tools select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.qms-live-audit-focus__empty-filter {
+  margin: var(--space-3);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
