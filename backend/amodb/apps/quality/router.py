@@ -3254,6 +3254,7 @@ def create_audit(
         ref_sequence=ref_sequence,
         title=payload.title.strip(),
         scope=payload.scope,
+        objectives=payload.objectives,
         criteria=payload.criteria,
         auditee=derived_auditee,
         auditee_email=derived_email,
@@ -4731,9 +4732,19 @@ def update_audit(
         "planned_start": str(audit.planned_start) if audit.planned_start else None,
     }
     changes = payload.model_dump(exclude_unset=True)
+    requested_base_version = changes.pop("base_version", None)
+    if requested_base_version is not None and requested_base_version != int(audit.entity_version or 1):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_VERSION_CONFLICT",
+                "message": "The audit changed in another session. Refresh before saving.",
+                "server_version": int(audit.entity_version or 1),
+            },
+        )
 
     protected_identity_fields = {
-        "title", "kind", "scope", "criteria", "auditee", "auditee_email", "auditee_user_id",
+        "title", "kind", "scope", "objectives", "criteria", "auditee", "auditee_email", "auditee_user_id",
         "external_auditees", "lead_auditor_user_id", "observer_auditor_user_id", "assistant_auditor_user_id",
         "supporting_auditor_user_ids", "location",
         "planned_start", "planned_end", "audit_scope_id", "audit_scope_code",
@@ -4808,7 +4819,7 @@ def update_audit(
     if "title" in changes and changes["title"] is not None:
         audit.title = changes["title"].strip()
     for field in (
-        "status", "scope", "criteria", "auditee", "auditee_email",
+        "status", "scope", "objectives", "criteria", "auditee", "auditee_email",
         "planned_start", "planned_end", "actual_start", "actual_end",
         "planned_start_time", "planned_end_time",
         "report_file_ref", "checklist_file_ref", "auditee_user_id",
@@ -4911,6 +4922,7 @@ def update_audit(
             metadata=_audit_metadata(request),
             critical=reference_needs_regeneration,
         )
+    audit.entity_version = int(audit.entity_version or 1) + 1
     db.commit()
     db.refresh(audit)
     return audit
