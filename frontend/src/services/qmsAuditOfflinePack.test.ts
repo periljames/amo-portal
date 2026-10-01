@@ -102,7 +102,8 @@ describe("QMS downloaded audit work package projections", () => {
     const projected = projectOfflineChecklistBindings(pack());
     expect(projected.items).toHaveLength(1);
     expect(projected.items[0].template_code).toBe("SL/QMS/29");
-    expect(projected.items[0].item_snapshot[0].response_options?.map((row) => row.value)).toEqual(["YES", "NO", "N/A"]);
+    const responseOptions = projected.items[0].item_snapshot[0].response_options as Array<{ value: string }>;
+    expect(responseOptions.map((row) => row.value)).toEqual(["YES", "NO", "N/A"]);
   });
 
   it("restores the latest captured execution state without inventing a server save", () => {
