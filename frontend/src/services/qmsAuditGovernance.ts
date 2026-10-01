@@ -21,6 +21,20 @@ export type AuditPreparationRevision = {
   events: Array<{ id: string; event_type: string; reason: string; actor_user_id?: string | null; created_at: string }>;
 };
 
+export type AuditActivityItem = {
+  id: string;
+  source: "AUDIT_EVENT" | "PREPARATION_EVENT";
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  actor_user_id?: string | null;
+  occurred_at: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+  reason?: string | null;
+};
+
 export type AuditPreparationReadiness = {
   issue_ready: boolean;
   fieldwork_ready: boolean;
@@ -154,6 +168,13 @@ export function listAuditPreparationRevisions(amoCode: string, auditId: string, 
   return apiRequest<{ items: AuditPreparationRevision[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/preparation-revisions`),
     { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+  );
+}
+
+export function listAuditActivity(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: AuditActivityItem[] }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/activity`),
+    { timeoutMs: 15_000, cacheTtlMs: 2_000, staleWhileOfflineMs: 24 * 60 * 60_000, signal },
   );
 }
 
