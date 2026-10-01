@@ -33,6 +33,7 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
   type ChecklistBinding,
@@ -272,6 +273,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
+  });
+  const fullBindingsQuery = useQuery({
+    queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId],
+    queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 3_000,
   });
   const controlledDocumentsQuery = useQuery({
     queryKey: ["qms-canonical-document-control-documents", amoCode, auditId],
@@ -697,6 +704,18 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     );
   }
 
+  const samplingPlan = (fullBindingsQuery.data?.items || []).flatMap((binding) =>
+    binding.item_snapshot.flatMap((item, index) => item.sampling_requirement?.trim()
+      ? [{
+          key: `${binding.id}:${index}`,
+          section: item.section || "Checklist",
+          reference: item.checklist_ref || item.requirement_ref || `Item ${index + 1}`,
+          requirement: item.sampling_requirement,
+          method: item.audit_method || null,
+        }]
+      : [])
+  );
+  const meetingPlan = context.opening_meeting_records || [];
   const prepRevision = context.controlled_preparation?.latest_revision;
   const offlinePackStatus = offlinePackQuery.data;
   const bindings = context.controlled_preparation?.checklist_bindings || [];
@@ -818,6 +837,31 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {readiness?.fieldwork_blockers.length ? <ul className="qms-audit-prepare__blocker-list">{readiness.fieldwork_blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : <p className="qms-audit-prepare-stage__notice is-info"><CheckCircle2 size={14} aria-hidden /> No fieldwork readiness blockers remain.</p>}
         </section>
 
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__fieldwork-plan">
+          <header>
+            <div><h3>Fieldwork plan</h3><p>Governed agenda/interviews and checklist sampling requirements available before entering Live Audit.</p></div>
+            <span className="qms-audit-prepare-stage__meta-chip">{meetingPlan.length} meeting(s) · {samplingPlan.length} sampling instruction(s)</span>
+          </header>
+          <div className="qms-audit-prepare__fieldwork-plan-grid">
+            <article>
+              <h4>Agenda / interviews</h4>
+              {!meetingPlan.length ? <p className="qms-audit-prepare__empty">No opening, closing, follow-up or other audit meeting is currently scheduled.</p> : (
+                <ul>{meetingPlan.map((meeting, index) => {
+                  const type = String(meeting.meeting_type || "MEETING").replaceAll("_", " ");
+                  const start = String(meeting.scheduled_start || meeting.scheduled_at || "");
+                  const end = String(meeting.scheduled_end || "");
+                  return <li key={String(meeting.id || index)}><strong>{type}</strong><span>{start ? new Date(start).toLocaleString() : "Time not recorded"}{end ? ` – ${new Date(end).toLocaleString()}` : ""}</span><small>{String(meeting.location || meeting.conference_url || meeting.status || "Planned audit coordination")}</small></li>;
+                })}</ul>
+              )}
+            </article>
+            <article>
+              <h4>Sampling plan</h4>
+              {fullBindingsQuery.isLoading ? <p className="qms-audit-prepare__empty">Loading frozen checklist sampling requirements…</p> : fullBindingsQuery.isError ? <p className="qms-audit-prepare-stage__notice is-warning" role="alert">Sampling requirements could not be loaded from the current checklist binding.</p> : !samplingPlan.length ? <p className="qms-audit-prepare__empty">No explicit sampling requirement is defined in the bound checklist revision.</p> : (
+                <ul>{samplingPlan.map((sample) => <li key={sample.key}><strong>{sample.reference}</strong><span>{sample.requirement}</span><small>{sample.section}{sample.method ? ` · ${sample.method.replaceAll("_", " ")}` : ""}</small></li>)}</ul>
+              )}
+            </article>
+          </div>
+        </section>
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__references">
           <header><div><h3>Controlled references</h3><p>Sources captured into the governed preparation and work-package fingerprint.</p></div><span className="qms-audit-prepare-stage__meta-chip">{context.regulatory_and_manual_basis.source_references.length} source(s)</span></header>
           {context.regulatory_and_manual_basis.source_references.length ? <div className="qms-audit-prepare__reference-list">{context.regulatory_and_manual_basis.source_references.map((source, index) => <pre key={index}>{typeof source === "string" ? source : JSON.stringify(source, null, 2)}</pre>)}</div> : <p className="qms-audit-prepare__empty">No structured controlled-source reference has been captured yet.</p>}
