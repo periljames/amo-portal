@@ -74,6 +74,8 @@ class GovernedDocumentRequestCreate(BaseModel):
     due_date: str | None = None
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] = "DOCUMENT"
     linked_criterion: str | None = Field(default=None, max_length=4000)
+    responsible_party: str | None = Field(default=None, max_length=255)
+    checklist_item_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
     is_required: bool = True
     requirement_stage: DocumentRequestRequirementStage = "REQUIRED_BEFORE_ISSUE"
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] = "UPLOAD_OR_CONTROLLED"
@@ -92,6 +94,8 @@ class GovernedDocumentRequestUpdate(BaseModel):
     review_note: str | None = Field(default=None, max_length=8000)
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] | None = None
     linked_criterion: str | None = Field(default=None, max_length=4000)
+    responsible_party: str | None = Field(default=None, max_length=255)
+    checklist_item_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
     is_required: bool | None = None
     requirement_stage: DocumentRequestRequirementStage | None = None
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] | None = None
@@ -108,6 +112,9 @@ class AuditMeetingCreate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
+    agenda: str | None = Field(default=None, max_length=12000)
+    auditee_department: str | None = Field(default=None, max_length=255)
+    auditor_user_id: str | None = Field(default=None, max_length=36)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] = "PLANNED"
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -118,6 +125,9 @@ class AuditMeetingUpdate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
+    agenda: str | None = Field(default=None, max_length=12000)
+    auditee_department: str | None = Field(default=None, max_length=255)
+    auditor_user_id: str | None = Field(default=None, max_length=36)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] | None = None
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -315,6 +325,8 @@ def _doc_request_dict(row: models.QualityAuditDocumentRequest, metadata: Quality
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "request_type": metadata.request_type if metadata else "DOCUMENT",
         "linked_criterion": metadata.linked_criterion if metadata else None,
+        "responsible_party": metadata.responsible_party if metadata else None,
+        "checklist_item_ids": [str(value) for value in list(metadata.checklist_item_ids or [])] if metadata else [],
         "is_required": metadata.is_required if metadata else True,
         "requirement_stage": metadata.requirement_stage if metadata else "REQUIRED_BEFORE_ISSUE",
         "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
@@ -335,6 +347,9 @@ def _meeting_dict(row: QualityAuditMeeting, *, public: bool = False) -> dict[str
         "scheduled_end": row.scheduled_end.isoformat() if row.scheduled_end else None,
         "location": row.location,
         "conference_url": row.conference_url,
+        "agenda": row.agenda,
+        "auditee_department": row.auditee_department,
+        "auditor_user_id": row.auditor_user_id,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -530,6 +545,8 @@ def create_governed_document_request(
         audit_id=audit_id,
         request_type=payload.request_type,
         linked_criterion=(payload.linked_criterion or "").strip() or None,
+        responsible_party=(payload.responsible_party or "").strip() or None,
+        checklist_item_ids=[str(value) for value in payload.checklist_item_ids],
         is_required=payload.is_required,
         requirement_stage=payload.requirement_stage,
         source_mode=payload.source_mode,
@@ -621,7 +638,7 @@ def update_governed_document_request(
         row.reviewed_at = _utcnow()
     if "review_note" in update:
         row.review_note = (update["review_note"] or "").strip() or None
-    for field in ("request_type", "linked_criterion", "is_required", "requirement_stage"):
+    for field in ("request_type", "linked_criterion", "responsible_party", "checklist_item_ids", "is_required", "requirement_stage"):
         if field in update:
             value = update[field]
             if isinstance(value, str):
@@ -696,6 +713,9 @@ def create_audit_meeting(
     row.scheduled_end = end
     row.location = (payload.location or "").strip() or None
     row.conference_url = (payload.conference_url or "").strip() or None
+    row.agenda = (payload.agenda or "").strip() or None
+    row.auditee_department = (payload.auditee_department or "").strip() or None
+    row.auditor_user_id = payload.auditor_user_id or None
     row.status = payload.status
     row.notes = (payload.notes or "").strip() or None
     row.updated_by_user_id = ctx.user_id
