@@ -194,6 +194,9 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
                 "scheduled_end": row.scheduled_end,
                 "location": row.location,
                 "conference_url": row.conference_url,
+                "agenda": row.agenda,
+                "auditee_department": row.auditee_department,
+                "auditor_user_id": row.auditor_user_id,
                 "status": row.status,
             }
             for row in meetings
@@ -313,11 +316,12 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
         meeting_rows = [["Type", "Start", "End", "Location / link"]]
         for row in meetings:
             location = row.get("location") or row.get("conference_url") or "—"
+            agenda_context = " · ".join(value for value in [row.get("auditee_department"), row.get("agenda")] if value) or "—"
             meeting_rows.append([
                 _p(row.get("meeting_type"), styles["QmsSmall"]),
                 _p(row.get("scheduled_start"), styles["QmsSmall"]),
                 _p(row.get("scheduled_end"), styles["QmsSmall"]),
-                _p(location, styles["QmsSmall"]),
+                _p(f"{location} · {agenda_context}", styles["QmsSmall"]),
             ])
         meeting_table = Table(meeting_rows, colWidths=[28 * mm, 48 * mm, 48 * mm, 46 * mm], repeatRows=1)
         meeting_table.setStyle(TableStyle([
