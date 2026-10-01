@@ -20,6 +20,7 @@ from amodb.apps.doc_control import knowledge_models as document_knowledge_models
 from amodb.apps.doc_control.workspace_service import can_read_manual
 from amodb.apps.manuals import core_router as manual_core
 from amodb.apps.manuals import models as manual_models
+from amodb.apps.manuals.office_layout import OfficeLayoutError, prepare_office_layout_pdf
 from amodb.database import get_read_db, get_write_db
 
 from . import models
@@ -391,8 +392,23 @@ def _checklist_items_from_revision(
 
 
 def _source_reference(document: manual_models.Manual, revision: manual_models.ManualRevision, source_system: str = "DOCUMENT_CONTROL") -> dict[str, Any]:
-    source_filename = str(revision.source_filename or "")
-    is_pdf = source_filename.lower().endswith(".pdf")
+    source_type = str(getattr(getattr(revision, "source_type_enum", None), "value", getattr(revision, "source_type_enum", "")) or "").upper()
+    offline_reader_url: str | None = None
+    offline_reader_sha256: str | None = None
+    if source_type == "PDF" and revision.source_sha256:
+        offline_reader_url = f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream.pdf"
+        offline_reader_sha256 = str(revision.source_sha256).lower()
+    elif source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+            offline_reader_url = f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream-layout.pdf"
+            offline_reader_sha256 = str(derivative.pdf_sha256).lower()
+        except (OfficeLayoutError, OSError):
+            # Keep the controlled source identity even when this deployment
+            # cannot produce an offline-safe reading derivative. Offline audit
+            # preparation will fail closed for such a field reference.
+            offline_reader_url = None
+            offline_reader_sha256 = None
     return {
         "source_system": source_system,
         "document_id": str(document.id),
@@ -405,12 +421,10 @@ def _source_reference(document: manual_models.Manual, revision: manual_models.Ma
         "revision_status": str(getattr(revision.status_enum, "value", revision.status_enum)),
         "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
         "source_filename": revision.source_filename,
+        "source_type": source_type or None,
         "source_sha256": revision.source_sha256,
-        "offline_reader_url": (
-            f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream.pdf"
-            if is_pdf and revision.source_sha256
-            else None
-        ),
+        "offline_reader_url": offline_reader_url,
+        "offline_reader_sha256": offline_reader_sha256,
     }
 
 
