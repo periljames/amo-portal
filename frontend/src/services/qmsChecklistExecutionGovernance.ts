@@ -25,6 +25,8 @@ export type ChecklistExecutionGovernanceRow = {
   evidence_references: Array<Record<string, unknown> | string>;
   governance_id?: string | null;
   entity_version: number;
+  answered_by_user_id?: string | null;
+  answered_at?: string | null;
   updated_by_user_id?: string | null;
   updated_at?: string | null;
   events: Array<{
