@@ -131,6 +131,8 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "applicability": row.applicability,
         "evidence_references": list(row.evidence_references or []),
         "entity_version": int(row.entity_version or 1),
+        "answered_by_user_id": row.answered_by_user_id,
+        "answered_at": row.answered_at,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -206,6 +208,8 @@ def _apply_execution_update(
             applicability=str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or "APPLICABLE")[:128],
             evidence_references=list(payload.evidence_references),
             entity_version=1,
+            answered_by_user_id=ctx.user_id if payload.canonical_response_status != "NOT_VERIFIED" else None,
+            answered_at=_utcnow() if payload.canonical_response_status != "NOT_VERIFIED" else None,
             updated_by_user_id=ctx.user_id,
         )
         db.add(governance)
