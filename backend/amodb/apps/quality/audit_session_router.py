@@ -48,6 +48,7 @@ class AuditSetupUpdate(BaseModel):
     scope: str | None = None
     objectives: str | None = None
     criteria: str | None = None
+    location: str | None = Field(default=None, max_length=255)
     auditee: str | None = Field(default=None, max_length=255)
     auditee_email: str | None = Field(default=None, max_length=255)
     planned_start: date | None = None
@@ -78,6 +79,7 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "scope": audit.scope,
         "objectives": audit.objectives,
         "criteria": audit.criteria,
+        "location": audit.location,
         "entity_version": int(audit.entity_version or 1),
         "auditee": audit.auditee,
         "auditee_email": audit.auditee_email,
@@ -194,7 +196,7 @@ def update_audit_setup(
             raise HTTPException(status_code=422, detail="Audit title is required.")
         audit.title = title
 
-    for field_name in ("scope", "objectives", "criteria", "auditee", "auditee_email"):
+    for field_name in ("scope", "objectives", "criteria", "location", "auditee", "auditee_email"):
         if field_name in update:
             value = update[field_name]
             setattr(audit, field_name, value.strip() if isinstance(value, str) and value.strip() else None)
