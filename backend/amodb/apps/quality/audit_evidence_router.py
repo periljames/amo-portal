@@ -9,6 +9,8 @@ from fastapi import APIRouter, Cookie, Depends, File, Form, Header, HTTPExceptio
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from amodb.apps.audit import models as audit_models
+from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.database import get_db, get_read_db, get_write_db
 
 from . import models
@@ -79,6 +81,67 @@ def _reference(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
         "sha256": row.sha256,
         "source_type": row.source_type,
     }
+
+
+def _publish_persisted_evidence_event(row: audit_models.AuditEvent) -> None:
+    try:
+        timestamp = (row.occurred_at or row.created_at or datetime.utcnow()).isoformat()
+        publish_event(EventEnvelope(
+            id=str(row.id),
+            type="qms.audit.evidence",
+            entityType=row.entity_type,
+            entityId=row.entity_id,
+            action=row.action,
+            timestamp=timestamp,
+            actorId=row.actor_user_id,
+            payload={
+                **dict(row.metadata_json or {}),
+                "before": row.before,
+                "after": row.after,
+            },
+        ))
+    except Exception:
+        # Durable AuditEvent polling remains the recovery path if low-latency
+        # broker publication is unavailable after commit.
+        return
+
+
+def _evidence_audit_event(
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    artifact: QualityAuditEvidenceArtifact,
+    actor_user_id: str | None,
+    actor_participant_id: str | None,
+) -> audit_models.AuditEvent:
+    return audit_models.AuditEvent(
+        amo_id=amo_id,
+        entity_type="qms.audit.evidence",
+        entity_id=str(artifact.id),
+        action="UPLOADED",
+        actor_user_id=actor_user_id,
+        after={
+            "checklist_item_id": str(artifact.checklist_item_id) if artifact.checklist_item_id else None,
+            "finding_id": str(artifact.finding_id) if artifact.finding_id else None,
+            "evidence_request_id": str(artifact.evidence_request_id) if artifact.evidence_request_id else None,
+            "filename": artifact.filename,
+            "content_type": artifact.content_type,
+            "size_bytes": int(artifact.size_bytes or 0),
+            "sha256": artifact.sha256,
+            "offline_upload_state": artifact.offline_upload_state,
+            "server_processing_state": artifact.server_processing_state,
+        },
+        correlation_id=artifact.client_mutation_id,
+        metadata_json={
+            "module": "quality",
+            "auditId": str(audit_id),
+            "checklistItemId": str(artifact.checklist_item_id) if artifact.checklist_item_id else None,
+            "findingId": str(artifact.finding_id) if artifact.finding_id else None,
+            "evidenceRequestId": str(artifact.evidence_request_id) if artifact.evidence_request_id else None,
+            "actorParticipantId": actor_participant_id,
+            "sourceDeviceId": artifact.source_device_id,
+        },
+    )
 
 
 def _existing_by_mutation(db: Session, *, amo_id: str, audit_id: uuid.UUID, client_mutation_id: str) -> QualityAuditEvidenceArtifact | None:
@@ -226,7 +289,17 @@ async def upload_internal_audit_evidence(
         artifact=artifact,
         reason="Governed audit evidence attachment uploaded and linked to checklist execution.",
     )
+    realtime_event = _evidence_audit_event(
+        amo_id=ctx.amo_id,
+        audit_id=audit_id,
+        artifact=artifact,
+        actor_user_id=ctx.user_id,
+        actor_participant_id=None,
+    )
+    db.add(realtime_event)
+    db.flush()
     db.commit()
+    _publish_persisted_evidence_event(realtime_event)
     return {"artifact": _artifact_dict(artifact), "committed_version": int(updated.entity_version or 1), "replayed": False}
 
 
@@ -309,7 +382,17 @@ async def upload_external_auditor_evidence(
         reason=f"External auditor participant {participant.id} uploaded governed checklist evidence.",
         participant_id=participant.id,
     )
+    realtime_event = _evidence_audit_event(
+        amo_id=grant.amo_id,
+        audit_id=grant.audit_id,
+        artifact=artifact,
+        actor_user_id=None,
+        actor_participant_id=str(participant.id),
+    )
+    db.add(realtime_event)
+    db.flush()
     db.commit()
+    _publish_persisted_evidence_event(realtime_event)
     return {"artifact": _artifact_dict(artifact), "committed_version": int(updated.entity_version or 1), "replayed": False}
 
 
