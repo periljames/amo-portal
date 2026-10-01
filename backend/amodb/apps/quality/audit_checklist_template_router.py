@@ -51,6 +51,12 @@ class ChecklistResponseOption(BaseModel):
 
 
 class ChecklistTemplateItem(BaseModel):
+    item_id: str = Field(default_factory=lambda: str(uuid.uuid4()), min_length=8, max_length=64)
+    section_id: str | None = Field(default=None, min_length=1, max_length=64)
+    section_code: str | None = Field(default=None, max_length=64)
+    section_title: str | None = Field(default=None, max_length=255)
+    section_description: str | None = Field(default=None, max_length=2000)
+    parent_section_id: str | None = Field(default=None, max_length=64)
     section: str | None = Field(default=None, max_length=128)
     category: str | None = Field(default=None, max_length=128)
     checklist_ref: str | None = Field(default=None, max_length=128)
@@ -126,8 +132,28 @@ def _utcnow() -> datetime:
 
 def _normalised_items(items: list[ChecklistTemplateItem]) -> list[dict[str, Any]]:
     normalised: list[dict[str, Any]] = []
+    section_ids: dict[str, str] = {}
+    item_ids: set[str] = set()
     for item in items:
         row = item.model_dump()
+        item_id = str(row.get("item_id") or "").strip() or str(uuid.uuid4())
+        if item_id in item_ids:
+            raise HTTPException(status_code=422, detail=f"Checklist item id {item_id} is duplicated in this revision.")
+        item_ids.add(item_id)
+        row["item_id"] = item_id
+
+        section_key = str(
+            row.get("section_code")
+            or row.get("section_title")
+            or row.get("section")
+            or "GENERAL"
+        ).strip()
+        if section_key not in section_ids:
+            section_ids[section_key] = str(row.get("section_id") or "").strip() or str(uuid.uuid4())
+        row["section_id"] = str(row.get("section_id") or "").strip() or section_ids[section_key]
+        row["section_title"] = str(row.get("section_title") or row.get("section") or "").strip() or None
+        row["section"] = str(row.get("section") or row.get("section_title") or "").strip() or None
+
         try:
             row["response_options"] = normalise_response_options(
                 row.get("response_type"),
@@ -136,6 +162,15 @@ def _normalised_items(items: list[ChecklistTemplateItem]) -> list[dict[str, Any]
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         normalised.append(row)
+
+    known_sections = {str(row.get("section_id")) for row in normalised if row.get("section_id")}
+    for row in normalised:
+        parent = str(row.get("parent_section_id") or "").strip()
+        if parent and parent not in known_sections:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Checklist parent section {parent} is not part of this revision.",
+            )
     return normalised
 
 
