@@ -359,6 +359,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         objective_evidence: draft.objectiveEvidence.trim() || draft.item.objective_evidence || null,
         safety_sensitive: false,
         auditor_notes: auditorNotes.trim() || null,
+        sampled_item_information: sampleDrafts[draft.item.checklist_item_id] ?? draft.item.sampled_item_information ?? null,
         evidence_references: draft.item.evidence_references || [],
         reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded atomically with the governed checklist response.`,
       });
