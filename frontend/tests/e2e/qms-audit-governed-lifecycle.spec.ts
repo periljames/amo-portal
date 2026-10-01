@@ -128,10 +128,58 @@ async function prepareLifecycle(page: Page): Promise<void> {
       return respond(route, preparation);
     }
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-context`) && method === "GET") return respond(route, {
-      audit_id: AUDIT_ID,
-      regulatory_and_manual_basis: { audit_scope: audit.scope, audit_criteria: audit.criteria },
-      controlled_preparation: { checklist_bindings: [], latest_revision: preparation },
-      prior_audits: [], prior_findings: [], car_exposure: [], document_requests: [], source_lineage: [],
+      as_of: now(),
+      audit: {
+        id: AUDIT_ID,
+        audit_ref: AUDIT_REF,
+        title: audit.title,
+        status: audit.status,
+        kind: audit.kind,
+        domain: "MAINTENANCE",
+        scope: audit.scope,
+        objectives: "Verify controlled assurance implementation.",
+        criteria: audit.criteria,
+        entity_version: 1,
+        planned_start: audit.planned_start,
+        planned_end: audit.planned_end,
+        actual_start: audit.actual_start,
+        actual_end: audit.actual_end,
+        lead_auditor_user_id: audit.lead_auditor_user_id,
+        observer_auditor_user_id: audit.observer_auditor_user_id,
+        assistant_auditor_user_id: audit.assistant_auditor_user_id,
+        location: "Main Base",
+      },
+      prior_audit_history: { items: [], matching_basis: "No comparable prior audit in this acceptance fixture." },
+      prior_findings: { items: [], classification_counts: {}, total: 0 },
+      car_exposure: { items: [], open_count: 0, total: 0 },
+      current_findings: [],
+      document_requests: [],
+      opening_meeting_records: [],
+      controlled_preparation: {
+        checklist_bindings: [],
+        latest_revision: preparation ? {
+          id: preparation.id,
+          revision_no: preparation.revision_no,
+          status: preparation.status,
+          source_fingerprint: preparation.source_fingerprint,
+          issued_at: preparation.issued_at,
+          change_reason: preparation.change_reason,
+        } : null,
+        source_references: [],
+      },
+      source_lineage: { planner_schedule_id: null, items: [] },
+      cross_source_assurance_pressure: {
+        factors: [],
+        authoritative_metrics: {},
+        reliability: {},
+        statement: "No additional assurance pressure factors in this acceptance fixture.",
+      },
+      regulatory_and_manual_basis: {
+        audit_scope: audit.scope,
+        audit_criteria: audit.criteria,
+        source_references: [],
+      },
+      data_quality: { warnings: [], statement: "Acceptance fixture complete." },
     });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
