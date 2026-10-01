@@ -916,3 +916,54 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+.qms-audit-prepare__fieldwork-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.qms-audit-prepare__fieldwork-plan-grid article {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__fieldwork-plan-grid h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-primary);
+}
+
+.qms-audit-prepare__fieldwork-plan-grid ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qms-audit-prepare__fieldwork-plan-grid li {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.qms-audit-prepare__fieldwork-plan-grid li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.qms-audit-prepare__fieldwork-plan-grid span,
+.qms-audit-prepare__fieldwork-plan-grid small {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 760px) {
+  .qms-audit-prepare__fieldwork-plan-grid {
+    grid-template-columns: 1fr;
+  }
+}
