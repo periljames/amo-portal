@@ -523,6 +523,7 @@ class QMSFindingUpdate(BaseModel):
     objective_evidence: Optional[str] = None
     safety_sensitive: Optional[bool] = None
     target_close_date: Optional[date] = None
+    base_version: Optional[int] = Field(default=None, ge=1)
 
 
 class QMSFindingReviewFlag(BaseModel):
@@ -567,8 +568,10 @@ class QMSFindingOut(BaseModel):
     acknowledged_by_name: Optional[str] = None
     acknowledged_by_email: Optional[str] = None
     created_by_user_id: Optional[str] = None
+    entity_version: int = 1
 
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class QMSFindingAttachmentOut(BaseModel):
