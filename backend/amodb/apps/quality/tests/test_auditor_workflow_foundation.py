@@ -7,6 +7,7 @@ from amodb.apps.quality.audit_checklist_response_policy import (
     resolve_response_value,
 )
 from amodb.apps.quality.audit_preparation_router import _preparation_readiness_blockers
+from amodb.apps.quality.audit_checklist_template_router import ChecklistTemplateItem, _normalised_items
 
 
 def _captured_request(*, stage: str, status: str = "REQUESTED", is_required: bool = True) -> dict:
@@ -95,3 +96,25 @@ def test_source_response_cannot_claim_a_different_canonical_outcome() -> None:
             response_value="YES",
             canonical_status="NONCOMPLIANT",
         )
+
+
+def test_checklist_revision_assigns_stable_item_and_section_identity() -> None:
+    rows = _normalised_items([
+        ChecklistTemplateItem(section="Stores", prompt="Verify traceability.", response_type="YES_NO_NA"),
+        ChecklistTemplateItem(section="Stores", prompt="Verify quarantine control.", response_type="YES_NO_NA"),
+        ChecklistTemplateItem(section="Line", prompt="Verify technical log control.", response_type="YES_NO_NA"),
+    ])
+
+    assert len({row["item_id"] for row in rows}) == 3
+    assert rows[0]["section_id"] == rows[1]["section_id"]
+    assert rows[0]["section_id"] != rows[2]["section_id"]
+    assert rows[0]["section_title"] == "Stores"
+
+
+def test_checklist_revision_rejects_duplicate_item_identity() -> None:
+    item_id = "checklist-item-stable-001"
+    with pytest.raises(Exception, match="duplicated"):
+        _normalised_items([
+            ChecklistTemplateItem(item_id=item_id, section="Stores", prompt="Verify traceability."),
+            ChecklistTemplateItem(item_id=item_id, section="Stores", prompt="Verify another control."),
+        ])
