@@ -9,6 +9,8 @@ from amodb.apps.quality.audit_checklist_response_policy import (
 from amodb.apps.quality.audit_preparation_router import _preparation_readiness_blockers
 from amodb.apps.quality.audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
 from amodb.apps.quality.audit_session_router import AuditSetupUpdate
+from amodb.apps.quality.audit_evidence_models import QualityAuditEvidenceArtifact
+from amodb.apps.quality.audit_evidence_router import _evidence_audit_event
 from amodb.apps.quality.audit_checklist_template_router import ChecklistTemplateItem, _normalised_items
 
 
@@ -132,3 +134,31 @@ def test_execution_governance_maps_answer_provenance_columns() -> None:
 def test_setup_contract_accepts_existing_audit_location_field() -> None:
     payload = AuditSetupUpdate(location="Hangar 1")
     assert payload.location == "Hangar 1"
+
+
+
+def test_evidence_upload_event_is_audit_scoped_for_realtime_recovery() -> None:
+    artifact = QualityAuditEvidenceArtifact(
+        id="evidence-1",
+        amo_id="amo-1",
+        audit_id="00000000-0000-0000-0000-000000000001",
+        checklist_item_id="00000000-0000-0000-0000-000000000002",
+        source_type="INTERNAL_USER",
+        client_mutation_id="mutation-12345678",
+        file_ref="opaque/ref",
+        filename="record.pdf",
+        size_bytes=10,
+        sha256="a" * 64,
+        offline_upload_state="SYNCED",
+        server_processing_state="AVAILABLE",
+    )
+    event = _evidence_audit_event(
+        amo_id="amo-1",
+        audit_id=artifact.audit_id,
+        artifact=artifact,
+        actor_user_id="user-1",
+        actor_participant_id=None,
+    )
+    assert event.action == "UPLOADED"
+    assert event.metadata_json["auditId"] == str(artifact.audit_id)
+    assert event.after["sha256"] == "a" * 64
