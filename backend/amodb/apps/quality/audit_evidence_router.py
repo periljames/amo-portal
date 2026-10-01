@@ -93,9 +93,10 @@ def _publish_persisted_evidence_event(row: audit_models.AuditEvent) -> None:
             entityId=row.entity_id,
             action=row.action,
             timestamp=timestamp,
-            actorId=row.actor_user_id,
-            payload={
+            actor={"id": row.actor_user_id} if row.actor_user_id else None,
+            metadata={
                 **dict(row.metadata_json or {}),
+                "amoId": row.amo_id,
                 "before": row.before,
                 "after": row.after,
             },
