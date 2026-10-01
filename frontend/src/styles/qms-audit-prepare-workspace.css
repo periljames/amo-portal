@@ -120,8 +120,7 @@
   border-radius: var(--qms-radius);
   background: var(--surface-subtle);
   color: var(--qms-muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
+    line-height: 1.35;
 }
 
 .qms-audit-prepare-stage__notice.is-warning {
@@ -168,7 +167,7 @@
 
 .qms-audit-prepare-stage__release small { color: var(--qms-muted); }
 .qms-audit-prepare-stage__release button {
-  min-height: 2.2rem;
+  min-height: calc(var(--space-6) + var(--space-2));
   padding: 0.45rem 0.75rem;
   border: 1px solid var(--accent-primary, #2563eb);
   border-radius: var(--qms-radius);
@@ -219,8 +218,7 @@
 
 .qms-audit-prepare-stage .qms-audit-prepare__status {
   color: var(--qms-muted);
-  font-size: 0.72rem;
-}
+  }
 
 .qms-audit-prepare-stage__section button {
   display: inline-flex;
@@ -321,8 +319,7 @@
 }
 
 .qms-audit-prepare__current-revision strong {
-  font-size: 0.72rem;
-}
+  }
 
 .qms-audit-prepare__current-revision span,
 .qms-audit-prepare__current-revision small {
@@ -334,8 +331,7 @@
 .qms-audit-prepare__checklist-form label > span,
 .qms-audit-prepare__dms-source label > span,
 .qms-audit-prepare__composer-fields label > span {
-  font-size: 0.72rem;
-  font-weight: 700;
+    font-weight: 700;
 }
 
 .qms-audit-prepare__checklist-form .is-wide,
@@ -465,8 +461,7 @@
   height: 1.7rem;
   border-radius: 999px;
   background: var(--surface-subtle);
-  font-size: 0.72rem;
-  font-weight: 800;
+    font-weight: 800;
 }
 
 .qms-audit-prepare__composer-fields {
@@ -618,7 +613,6 @@
 }
 
 .qms-audit-prepare__offline-pack-hash {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--text-muted);
 }
 
@@ -631,8 +625,8 @@
 }
 
 .qms-audit-prepare__offline-pack-actions button {
-  min-height: 2.2rem;
-  padding: 0.45rem 0.7rem;
+  min-height: calc(var(--space-6) + var(--space-2));
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -656,11 +650,10 @@
   align-items: center;
   gap: var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-weight: 700;
+    font-weight: 700;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 600px) {
   .qms-audit-prepare__offline-pack {
     align-items: stretch;
     flex-direction: column;
@@ -693,12 +686,11 @@
 .qms-audit-prepare__response-options > p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.72rem;
-}
+  }
 
 .qms-audit-prepare__response-option {
   display: grid;
-  grid-template-columns: minmax(80px, 0.6fr) minmax(120px, 1fr) minmax(160px, 1.2fr) auto;
+  grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
   align-items: end;
   gap: var(--space-2);
 }
@@ -708,11 +700,11 @@
 }
 
 .qms-audit-prepare__response-option > button {
-  min-width: 2.2rem;
-  min-height: 2.2rem;
+  min-width: calc(var(--space-6) + var(--space-2));
+  min-height: calc(var(--space-6) + var(--space-2));
 }
 
-@media (max-width: 760px) {
+@media (max-width: 600px) {
   .qms-audit-prepare__response-option {
     grid-template-columns: 1fr;
   }
@@ -739,8 +731,7 @@
 }
 
 .qms-audit-prepare__intelligence-grid article > strong {
-  font-size: 1.15rem;
-}
+  }
 
 .qms-audit-prepare__intelligence-grid article > span {
   font-weight: 700;
@@ -818,8 +809,7 @@
   border-radius: var(--radius-md);
   background: var(--surface-soft);
   color: var(--text-primary);
-  font-size: 0.72rem;
-  white-space: pre-wrap;
+    white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -844,13 +834,13 @@
   gap: var(--space-1);
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 900px) {
   .qms-audit-prepare__intelligence-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 600px) {
   .qms-audit-prepare__intelligence-grid,
   .qms-audit-prepare__readiness-list {
     grid-template-columns: 1fr;
@@ -899,7 +889,7 @@
 
 .qms-audit-prepare__composer-tools {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr) minmax(11rem, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--surface-border);
@@ -962,7 +952,7 @@
   color: var(--text-secondary);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 600px) {
   .qms-audit-prepare__fieldwork-plan-grid {
     grid-template-columns: 1fr;
   }
