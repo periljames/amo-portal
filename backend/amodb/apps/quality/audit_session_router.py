@@ -87,6 +87,7 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
         "external_auditees": audit.external_auditees,
         "notify_auditors": audit.notify_auditors,
         "notify_auditees": audit.notify_auditees,
