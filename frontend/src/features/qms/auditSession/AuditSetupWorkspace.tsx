@@ -917,6 +917,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       end: openingInherited.end,
       location: modality === "ONLINE" ? "" : openingDraft.location || "",
       conferenceUrl: modality === "PHYSICAL" ? "" : openingDraft.conferenceUrl || "",
+      agenda: openingDraft.agenda || "",
+      auditeeDepartment: openingDraft.auditeeDepartment || "",
+      auditorUserId: openingDraft.auditorUserId || auditQuery.data?.lead_auditor_user_id || "",
     };
     const closingValue: MeetingDraft = {
       modality,
@@ -925,6 +928,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       end: closingInherited.end,
       location: modality === "ONLINE" ? "" : closingDraft.location || "",
       conferenceUrl: modality === "PHYSICAL" ? "" : closingDraft.conferenceUrl || "",
+      agenda: closingDraft.agenda || "",
+      auditeeDepartment: closingDraft.auditeeDepartment || "",
+      auditorUserId: closingDraft.auditorUserId || auditQuery.data?.lead_auditor_user_id || "",
     };
     if (modality !== "ONLINE" && !openingValue.location.trim()) {
       openingValue.location = "Main base";
