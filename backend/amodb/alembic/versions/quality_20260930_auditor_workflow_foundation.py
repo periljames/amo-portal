@@ -17,6 +17,7 @@ EXECUTION = "quality_audit_checklist_execution_governance"
 PARTICIPANT_EXECUTION = "quality_audit_fieldwork_participant_contributions"
 WORK_PACKAGE = "quality_audit_work_packages"
 AUDIT = "qms_audits"
+EVIDENCE = "quality_audit_evidence_artifacts"
 
 
 def _is_postgresql() -> bool:
@@ -92,6 +93,21 @@ def upgrade() -> None:
         op.add_column(EXECUTION, sa.Column("sampled_item_information", sa.Text(), nullable=True))
     if execution_columns and "applicability" not in execution_columns:
         op.add_column(EXECUTION, sa.Column("applicability", sa.String(length=128), nullable=False, server_default="APPLICABLE"))
+
+    evidence_columns = _columns(EVIDENCE)
+    if evidence_columns and "evidence_request_id" not in evidence_columns:
+        op.add_column(EVIDENCE, sa.Column("evidence_request_id", sa.Uuid(), nullable=True))
+        op.create_foreign_key("fk_quality_audit_evidence_request", EVIDENCE, "quality_audit_document_requests", ["evidence_request_id"], ["id"], ondelete="SET NULL")
+    if evidence_columns and "source_device_id" not in evidence_columns:
+        op.add_column(EVIDENCE, sa.Column("source_device_id", sa.String(length=128), nullable=True))
+    if evidence_columns and "captured_at" not in evidence_columns:
+        op.add_column(EVIDENCE, sa.Column("captured_at", sa.DateTime(timezone=True), nullable=True))
+    if evidence_columns and "offline_upload_state" not in evidence_columns:
+        op.add_column(EVIDENCE, sa.Column("offline_upload_state", sa.String(length=16), nullable=False, server_default="SYNCED"))
+        op.create_check_constraint("ck_quality_audit_evidence_upload_state", EVIDENCE, "offline_upload_state IN ('SYNCED','PENDING','FAILED','CONFLICT')")
+    if evidence_columns and "server_processing_state" not in evidence_columns:
+        op.add_column(EVIDENCE, sa.Column("server_processing_state", sa.String(length=16), nullable=False, server_default="AVAILABLE"))
+        op.create_check_constraint("ck_quality_audit_evidence_processing_state", EVIDENCE, "server_processing_state IN ('AVAILABLE','PROCESSING','FAILED')")
 
     participant_columns = _columns(PARTICIPANT_EXECUTION)
     if participant_columns and "response_value" not in participant_columns:
@@ -188,6 +204,21 @@ def downgrade() -> None:
         op.drop_index("ix_quality_audit_work_package_sha", table_name=WORK_PACKAGE)
         op.drop_index("ix_quality_audit_work_package_audit", table_name=WORK_PACKAGE)
         op.drop_table(WORK_PACKAGE)
+
+    evidence_columns = _columns(EVIDENCE)
+    if evidence_columns and "server_processing_state" in evidence_columns:
+        op.drop_constraint("ck_quality_audit_evidence_processing_state", EVIDENCE, type_="check")
+        op.drop_column(EVIDENCE, "server_processing_state")
+    if evidence_columns and "offline_upload_state" in evidence_columns:
+        op.drop_constraint("ck_quality_audit_evidence_upload_state", EVIDENCE, type_="check")
+        op.drop_column(EVIDENCE, "offline_upload_state")
+    if evidence_columns and "captured_at" in evidence_columns:
+        op.drop_column(EVIDENCE, "captured_at")
+    if evidence_columns and "source_device_id" in evidence_columns:
+        op.drop_column(EVIDENCE, "source_device_id")
+    if evidence_columns and "evidence_request_id" in evidence_columns:
+        op.drop_constraint("fk_quality_audit_evidence_request", EVIDENCE, type_="foreignkey")
+        op.drop_column(EVIDENCE, "evidence_request_id")
 
     participant_columns = _columns(PARTICIPANT_EXECUTION)
     if participant_columns and "response_value" in participant_columns:
