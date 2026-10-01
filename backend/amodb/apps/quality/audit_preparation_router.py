@@ -864,6 +864,8 @@ def get_audit_offline_pack(
                 "applicability": item.applicability,
                 "evidence_references": item.evidence_references or [],
                 "entity_version": item.entity_version,
+                "answered_by_user_id": item.answered_by_user_id,
+                "answered_at": item.answered_at.isoformat() if item.answered_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             }
             for item in execution
