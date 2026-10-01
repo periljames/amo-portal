@@ -5,6 +5,7 @@ import {
   encryptDeviceValue,
   type EncryptedDeviceValue,
 } from "./offlinePersistence";
+import { savePdfSourceOffline } from "../pages/manuals/pdfSourceCache";
 
 export type AuditOfflinePack = {
   schema: "QMS_AUDIT_OFFLINE_PACK_V1";
@@ -101,6 +102,7 @@ export type AuditOfflinePackStatus = {
   workPackageSha256: string | null;
   checklistItems: number;
   evidenceRecords: number;
+  offlineReferences: number;
   expiresAt: number | null;
 };
 
@@ -175,6 +177,34 @@ export async function prepareAuditOfflinePack(
   const pack = await fetchAuditOfflinePack(amoCode, auditId);
   const scope = currentOfflineScope();
   if (scope.startsWith("anonymous:")) throw new Error("Sign in before storing a controlled audit package on this device.");
+  const references = [
+    ...(pack.work_package.package_snapshot.source_references || []),
+    ...(pack.work_package.package_snapshot.checklist_bindings || []).flatMap((binding) => binding.source_references || []),
+  ].filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
+  const offlineReferences = new Map<string, Record<string, unknown>>();
+  for (const reference of references) {
+    const manualId = String(reference.document_id || "").trim();
+    const revisionId = String(reference.revision_id || "").trim();
+    const sourceSha256 = String(reference.source_sha256 || "").trim().toLowerCase();
+    const templateUrl = String(reference.offline_reader_url || "").trim();
+    if (!manualId || !revisionId || !sourceSha256 || !templateUrl) continue;
+    offlineReferences.set(`${manualId}:${revisionId}:${sourceSha256}`, reference);
+  }
+  for (const reference of offlineReferences.values()) {
+    const manualId = String(reference.document_id);
+    const revisionId = String(reference.revision_id);
+    const sourceSha256 = String(reference.source_sha256);
+    const readerUrl = String(reference.offline_reader_url).replace("{tenant}", encodeURIComponent(amoCode));
+    const cached = await savePdfSourceOffline(
+      { tenant: amoCode, manualId, revisionId },
+      sourceSha256,
+      readerUrl,
+    );
+    if (!cached) {
+      throw new Error(`Controlled reference ${String(reference.document_code || manualId)} could not be retained offline. The audit package was not marked ready.`);
+    }
+  }
+
   const encrypted = await encryptDeviceValue(pack);
   if (!encrypted) throw new Error("Secure device encryption is unavailable; the audit package was not stored.");
 
@@ -212,6 +242,7 @@ export async function prepareAuditOfflinePack(
       workPackageSha256: row.workPackageSha256,
       checklistItems: pack.work_package.package_snapshot.checklist_snapshot.length,
       evidenceRecords: pack.evidence.length,
+      offlineReferences: offlineReferences.size,
       expiresAt: row.expiresAt,
     },
   };
