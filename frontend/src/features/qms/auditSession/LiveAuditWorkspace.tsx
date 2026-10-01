@@ -9,7 +9,9 @@ import {
   ClipboardCheck,
   Eye,
   FileWarning,
+  Filter,
   MessageSquareText,
+  Search,
   ShieldAlert,
   Users,
   X,
@@ -144,6 +146,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [checklistSearch, setChecklistSearch] = useState("");
+  const [checklistFilter, setChecklistFilter] = useState<"ALL" | "UNANSWERED" | "FINDINGS" | "EVIDENCE_REQUIRED">("ALL");
 
   const auditQuery = useQuery({
     queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
@@ -247,13 +251,32 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }
     return map;
   }, [bindingsQuery.data?.items]);
+  const visibleItems = useMemo(() => {
+    const term = checklistSearch.trim().toLowerCase();
+    return items.filter((item) => {
+      const source = sourceContextByItemId.get(item.checklist_item_id);
+      const matchesSearch = !term || [
+        item.checklist_ref,
+        item.requirement_ref,
+        item.prompt,
+        item.section,
+        source?.regulatory_source_ref,
+        source?.manual_source_ref,
+      ].some((value) => String(value || "").toLowerCase().includes(term));
+      if (!matchesSearch) return false;
+      if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED";
+      if (checklistFilter === "FINDINGS") return Boolean(item.finding_id) || item.canonical_response_status === "NONCOMPLIANT" || item.canonical_response_status === "OBSERVATION";
+      if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_requirements?.length);
+      return true;
+    });
+  }, [checklistFilter, checklistSearch, items, sourceContextByItemId]);
   const effectiveSelectedId = useMemo(() => {
-    if (!items.length) return null;
-    if (selectedId && items.some((item) => item.checklist_item_id === selectedId)) return selectedId;
-    return (items.find((item) => item.canonical_response_status === "NOT_VERIFIED") || items[0]).checklist_item_id;
-  }, [items, selectedId]);
-  const selectedIndex = effectiveSelectedId ? items.findIndex((item) => item.checklist_item_id === effectiveSelectedId) : -1;
-  const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
+    if (!visibleItems.length) return null;
+    if (selectedId && visibleItems.some((item) => item.checklist_item_id === selectedId)) return selectedId;
+    return (visibleItems.find((item) => item.canonical_response_status === "NOT_VERIFIED") || visibleItems[0]).checklist_item_id;
+  }, [selectedId, visibleItems]);
+  const selectedIndex = effectiveSelectedId ? visibleItems.findIndex((item) => item.checklist_item_id === effectiveSelectedId) : -1;
+  const selected = selectedIndex >= 0 ? visibleItems[selectedIndex] : null;
   const selectedSource = selected ? sourceContextByItemId.get(selected.checklist_item_id) || null : null;
   const selectedResponseOptions = useMemo(
     () => selectedSource?.response_options?.length
@@ -554,21 +577,39 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span style={{ width: `${percent ?? 0}%` }} />
           </div>
           <h2 className="qms-live-audit-focus__sections-title">Checklist</h2>
+          <div className="qms-live-audit-focus__tools">
+            <label>
+              <Search size={14} aria-hidden="true" />
+              <span className="sr-only">Search checklist</span>
+              <input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search checklist" />
+            </label>
+            <label>
+              <Filter size={14} aria-hidden="true" />
+              <span className="sr-only">Filter checklist</span>
+              <select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
+                <option value="ALL">All items</option>
+                <option value="UNANSWERED">Unanswered</option>
+                <option value="FINDINGS">Findings / observations</option>
+                <option value="EVIDENCE_REQUIRED">Evidence required</option>
+              </select>
+            </label>
+          </div>
           <div className="qms-live-audit-focus__question-list">
-            {items.map((item, index) => (
+            {visibleItems.map((item, index) => (
               <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} onClick={() => setSelectedId(item.checklist_item_id)}>
                 <span>{index + 1}</span>
                 <div><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.section || "General"}</small></div>
                 <em data-status={item.canonical_response_status}>{statusLabel(item.canonical_response_status)}</em>
               </button>
             ))}
+            {!visibleItems.length ? <p className="qms-live-audit-focus__empty-filter">No checklist items match the current search/filter.</p> : null}
           </div>
         </aside>
 
         <main className="qms-live-audit-focus__question">
           {selected ? (
             <>
-              <div className="qms-live-audit-focus__question-head"><div><span>{selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div><span>{selectedIndex + 1} / {items.length}</span></div>
+              <div className="qms-live-audit-focus__question-head"><div><span>{selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div><span>{selectedIndex + 1} / {visibleItems.length}</span></div>
               <dl className="qms-live-audit-focus__references">
                 <div><dt>Checklist ref</dt><dd>{selected.checklist_ref || selectedSource?.checklist_ref || "—"}</dd></div>
                 <div><dt>Requirement</dt><dd>{selected.requirement_ref || selectedSource?.requirement_ref || "—"}</dd></div>
@@ -615,7 +656,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <LiveAuditEvidenceStrip amoCode={amoCode} auditId={auditId} item={selected} canManage={canExecute} onChanged={refreshFieldwork} onError={setLocalError} onNotice={setSyncNotice} />
               </div>
 
-              <footer className="qms-live-audit-focus__nav"><button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button><button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= items.length - 1}>Next <ArrowRight size={16} /></button></footer>
+              <footer className="qms-live-audit-focus__nav"><button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button><button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= visibleItems.length - 1}>Next <ArrowRight size={16} /></button></footer>
             </>
           ) : <div className="qms-live-audit-focus__empty">No governed checklist items are bound to this audit.</div>}
         </main>
