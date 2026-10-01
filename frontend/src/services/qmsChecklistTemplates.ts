@@ -55,6 +55,7 @@ export type ChecklistTemplateRevision = {
   supersedes_revision_id?: string | null;
   issued_by_user_id?: string | null;
   issued_at?: string | null;
+  effective_at?: string | null;
   created_by_user_id?: string | null;
   created_at: string;
 };
