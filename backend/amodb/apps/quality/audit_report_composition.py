@@ -169,15 +169,19 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "objectives": audit.objectives,
             "criteria": audit.criteria,
             "entity_version": int(audit.entity_version or 1),
+            "location": audit.location,
             "auditee": audit.auditee,
             "auditee_email": audit.auditee_email,
             "planned_start": audit.planned_start,
             "planned_end": audit.planned_end,
+            "planned_start_time": audit.planned_start_time,
+            "planned_end_time": audit.planned_end_time,
             "actual_start": audit.actual_start,
             "actual_end": audit.actual_end,
             "lead_auditor_user_id": audit.lead_auditor_user_id,
             "observer_auditor_user_id": audit.observer_auditor_user_id,
             "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+            "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
         },
         "closing_narrative": {
             "management_summary": narrative.management_summary if narrative else None,
@@ -280,6 +284,7 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     summary_rows = [
         ["Audit reference", _text(audit.get("audit_ref")), "Audit type", _text(audit.get("kind"))],
         ["Auditee", _text(audit.get("auditee")), "Status", _text(audit.get("status"))],
+        ["Site / location", _text(audit.get("location")), "Lead auditor", _text(audit.get("lead_auditor_user_id"))],
         ["Planned start", _text(audit.get("planned_start")), "Planned end", _text(audit.get("planned_end"))],
         ["Actual start", _text(audit.get("actual_start")), "Actual end", _text(audit.get("actual_end"))],
     ]
@@ -298,7 +303,16 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     ]))
     story.extend([summary_table, Spacer(1, 4 * mm)])
 
+    team_members = [
+        _text(audit.get("lead_auditor_user_id"), ""),
+        _text(audit.get("assistant_auditor_user_id"), ""),
+        _text(audit.get("observer_auditor_user_id"), ""),
+        *[_text(value, "") for value in list(audit.get("supporting_auditor_user_ids") or [])],
+    ]
+    team_members = [value for value in team_members if value]
     story.extend([
+        _p("Audit team", styles["QmsSection"]),
+        _p(" · ".join(team_members) if team_members else "No audit team recorded.", styles["QmsBody"]),
         _p("Scope and criteria", styles["QmsSection"]),
         _p(f"Scope: {_text(audit.get('scope'))}", styles["QmsBody"]),
         _p(f"Objectives: {_text(audit.get('objectives'))}", styles["QmsBody"]),
