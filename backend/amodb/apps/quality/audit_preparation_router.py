@@ -210,7 +210,7 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
                 "id": str(binding.id),
                 "template_revision_id": str(binding.template_revision_id),
                 "content_sha256": binding.content_sha256,
-                "source_references": list(binding.source_references or []),
+                "source_references": _offline_enriched_source_references(db, list(binding.source_references or [])),
             }
             for binding in bindings
         ],
@@ -272,6 +272,32 @@ def _work_package_dict(row: QualityAuditWorkPackage) -> dict[str, Any]:
         "issued_at": row.issued_at,
         "created_at": row.created_at,
     }
+
+
+def _offline_enriched_source_references(db: Session, references: list[Any]) -> list[Any]:
+    """Add offline-reader metadata without mutating frozen checklist provenance."""
+    from amodb.apps.manuals import models as manual_models
+    from .audit_checklist_template_router import _source_reference
+
+    enriched: list[Any] = []
+    for raw in list(references or []):
+        if not isinstance(raw, dict):
+            enriched.append(raw)
+            continue
+        source = dict(raw)
+        source_system = str(source.get("source_system") or source.get("source_type") or "").strip().upper()
+        document_id = str(source.get("document_id") or "").strip()
+        revision_id = str(source.get("revision_id") or "").strip()
+        if source_system == "DOCUMENT_CONTROL" and document_id and revision_id:
+            document = db.query(manual_models.Manual).filter(manual_models.Manual.id == document_id).first()
+            revision = db.query(manual_models.ManualRevision).filter(
+                manual_models.ManualRevision.id == revision_id,
+                manual_models.ManualRevision.manual_id == document_id,
+            ).first()
+            if document is not None and revision is not None:
+                source = {**source, **_source_reference(document, revision)}
+        enriched.append(source)
+    return enriched
 
 
 def _build_work_package_snapshot(
@@ -361,7 +387,7 @@ def _build_work_package_snapshot(
             for binding in frozen_bindings
         ],
         "document_request_definitions": request_definitions,
-        "source_references": list(preparation.source_references or []),
+        "source_references": _offline_enriched_source_references(db, list(preparation.source_references or [])),
         "prior_audits": [_audit_dict(item) for item in prior_audits],
         "prior_findings": [_finding_dict(item) for item in prior_findings],
         "prior_cars": [_car_dict(item) for item in prior_cars],
