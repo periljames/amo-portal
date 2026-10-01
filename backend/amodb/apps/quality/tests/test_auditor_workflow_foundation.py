@@ -7,6 +7,8 @@ from amodb.apps.quality.audit_checklist_response_policy import (
     resolve_response_value,
 )
 from amodb.apps.quality.audit_preparation_router import _preparation_readiness_blockers
+from amodb.apps.quality.audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+from amodb.apps.quality.audit_session_router import AuditSetupUpdate
 from amodb.apps.quality.audit_checklist_template_router import ChecklistTemplateItem, _normalised_items
 
 
@@ -118,3 +120,15 @@ def test_checklist_revision_rejects_duplicate_item_identity() -> None:
             ChecklistTemplateItem(item_id=item_id, section="Stores", prompt="Verify traceability."),
             ChecklistTemplateItem(item_id=item_id, section="Stores", prompt="Verify another control."),
         ])
+
+
+
+def test_execution_governance_maps_answer_provenance_columns() -> None:
+    columns = QualityAuditChecklistExecutionGovernance.__table__.columns
+    assert "answered_by_user_id" in columns
+    assert "answered_at" in columns
+
+
+def test_setup_contract_accepts_existing_audit_location_field() -> None:
+    payload = AuditSetupUpdate(location="Hangar 1")
+    assert payload.location == "Hangar 1"
