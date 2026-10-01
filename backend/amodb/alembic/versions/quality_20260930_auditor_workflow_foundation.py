@@ -20,6 +20,7 @@ AUDIT = "qms_audits"
 EVIDENCE = "quality_audit_evidence_artifacts"
 FINDING = "qms_audit_findings"
 MEETING = "quality_audit_meetings"
+CHECKLIST_REVISION = "quality_audit_checklist_template_revisions"
 
 
 def _is_postgresql() -> bool:
@@ -97,6 +98,11 @@ def upgrade() -> None:
             DOC_META,
             "requirement_stage IN ('REQUIRED_BEFORE_ISSUE','REQUIRED_BEFORE_FIELDWORK','REQUIRED_DURING_FIELDWORK','REQUESTED_NOT_BLOCKING')",
         )
+
+    checklist_revision_columns = _columns(CHECKLIST_REVISION)
+    if checklist_revision_columns and "effective_at" not in checklist_revision_columns:
+        op.add_column(CHECKLIST_REVISION, sa.Column("effective_at", sa.DateTime(timezone=True), nullable=True))
+        op.execute(sa.text("UPDATE quality_audit_checklist_template_revisions SET effective_at = issued_at WHERE status = 'ISSUED' AND effective_at IS NULL"))
 
     meeting_columns = _columns(MEETING)
     if meeting_columns and "auditee_department" not in meeting_columns:
@@ -245,6 +251,10 @@ def downgrade() -> None:
     participant_columns = _columns(PARTICIPANT_EXECUTION)
     if participant_columns and "response_value" in participant_columns:
         op.drop_column(PARTICIPANT_EXECUTION, "response_value")
+
+    checklist_revision_columns = _columns(CHECKLIST_REVISION)
+    if checklist_revision_columns and "effective_at" in checklist_revision_columns:
+        op.drop_column(CHECKLIST_REVISION, "effective_at")
 
     meeting_columns = _columns(MEETING)
     if meeting_columns and "auditor_user_id" in meeting_columns:
