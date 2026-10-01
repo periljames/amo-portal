@@ -42,16 +42,20 @@ async function signIn(page: Page): Promise<void> {
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 }
 
-async function documentTypeFromApi(page: Page, manualId: string): Promise<{ document_type: string; source: string }> {
-  return page.evaluate(async ({ amoCode, manualIdValue }) => {
-    const token = sessionStorage.getItem("amo_portal_token");
-    if (!token) throw new Error("Document type reload failed: authenticated session token is unavailable");
-    const response = await fetch(`/doc-control/workspace/t/${encodeURIComponent(amoCode)}/documents/${encodeURIComponent(manualIdValue)}/document-type`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) throw new Error(`Document type reload failed: ${response.status} ${await response.text()}`);
-    return response.json();
-  }, { amoCode: AMO_CODE, manualIdValue: manualId });
+async function documentTypeFromApi(
+  page: Page,
+  manualId: string,
+  token: string,
+): Promise<{ document_type: string; source: string }> {
+  const origin = new URL(page.url()).origin;
+  const response = await page.request.get(
+    `${origin}/doc-control/workspace/t/${encodeURIComponent(AMO_CODE)}/documents/${encodeURIComponent(manualId)}/document-type`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok()) {
+    throw new Error(`Document type reload failed: ${response.status()} ${await response.text()}`);
+  }
+  return response.json();
 }
 
 test.describe.serial("DMS daily document lifecycle controls", () => {
@@ -129,6 +133,8 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await expect(page).toHaveURL(/\/document-control\/library\/[^/?#]+(?:\?|$)/i, { timeout: 30_000 });
     const manualId = page.url().match(/\/document-control\/library\/([^/?#]+)/)?.[1];
     if (!manualId) throw new Error("New document workspace did not expose its manual id in the route");
+    const token = await page.evaluate(() => sessionStorage.getItem("amo_portal_token"));
+    if (!token) throw new Error("Document type reload failed: authenticated session token is unavailable");
 
     const workflowGuide = page.getByTestId("document-workflow-guide");
     await expect(workflowGuide).toBeVisible({ timeout: 30_000 });
@@ -141,7 +147,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
 
     await expect(page.getByTestId("change-document-type-button")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("delete-document-button")).toBeVisible();
-    expect(await documentTypeFromApi(page, manualId)).toMatchObject({ document_type: "FORM", source: "OVERRIDE" });
+    expect(await documentTypeFromApi(page, manualId, token)).toMatchObject({ document_type: "FORM", source: "OVERRIDE" });
 
     await page.getByTestId("change-document-type-button").click();
     const typeDialog = page.getByRole("dialog", { name: "Change document type" });
@@ -150,13 +156,16 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await typeDialog.getByLabel("Document type").selectOption("CHECKLIST");
     await typeDialog.getByRole("button", { name: "Save document type", exact: true }).click();
     await expect(typeDialog).toHaveCount(0, { timeout: 30_000 });
-    expect(await documentTypeFromApi(page, manualId)).toMatchObject({ document_type: "CHECKLIST", source: "OVERRIDE" });
+    expect(await documentTypeFromApi(page, manualId, token)).toMatchObject({ document_type: "CHECKLIST", source: "OVERRIDE" });
 
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=CHECKLIST&q=${encodeURIComponent(code)}`);
-    const row = page.getByRole("row").filter({ hasText: code });
-    await expect(row).toBeVisible({ timeout: 30_000 });
-    await expect(row).toContainText("CHECKLIST");
-    await row.getByRole("button", { name: "Open workspace", exact: true }).click();
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    const card = library.locator("article.dlibrary-card").filter({ hasText: code });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card).toHaveAttribute("data-document-type", "CHECKLIST");
+    await card.getByRole("button", { name: "Workspace", exact: true }).click();
 
     await expect(page.getByTestId("document-workflow-guide")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("delete-document-button").click();
@@ -168,7 +177,10 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await expect(page).toHaveURL(new RegExp(`/maintenance/${AMO_CODE}/document-control/library(?:\\?|$)`), { timeout: 30_000 });
 
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?q=${encodeURIComponent(code)}`);
-    await expect(page.getByRole("row").filter({ hasText: code })).toHaveCount(0, { timeout: 30_000 });
+    const deletedLibrary = page.getByTestId("integrated-document-library");
+    await expect(deletedLibrary).toBeVisible({ timeout: 30_000 });
+    await deletedLibrary.getByRole("button", { name: "Shelf", exact: true }).click();
+    await expect(deletedLibrary.locator("article.dlibrary-card").filter({ hasText: code })).toHaveCount(0, { timeout: 30_000 });
   });
 
   test("published controlled history cannot be permanently deleted", async ({ page }) => {

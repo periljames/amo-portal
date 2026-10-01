@@ -595,7 +595,7 @@ def provider_health(provider_id: str, payload: dict[str, Any] | None = None, db:
 
 @router.get("/infrastructure/live")
 def infrastructure_live(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    """Instant host/DB metrics for ~1s real-time polling (Task-Manager style)."""
+    """Instant host/DB metrics for ~2s real-time polling (Task-Manager style)."""
     return services.live_system_metrics(db)
 
 

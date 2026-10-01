@@ -57,19 +57,28 @@ def main() -> None:
         except (TypeError, ValueError):
             return default
 
-    infra_interval = _interval("PLATFORM_INFRA_SNAPSHOT_INTERVAL_SECONDS", 30.0)
+    infra_healthy_interval = _interval("PLATFORM_INFRA_HEALTHY_INTERVAL_SECONDS", 300.0)
+    infra_degraded_interval = _interval("PLATFORM_INFRA_DEGRADED_INTERVAL_SECONDS", 60.0)
+    infra_critical_interval = _interval("PLATFORM_INFRA_CRITICAL_INTERVAL_SECONDS", 30.0)
+    infra_unknown_interval = _interval("PLATFORM_INFRA_UNKNOWN_INTERVAL_SECONDS", 120.0)
     health_interval = _interval("PLATFORM_HEALTH_PROBE_INTERVAL_SECONDS", 120.0)
+
+    def _next_infrastructure_delay(result: dict | None) -> float:
+        status = str((result or {}).get("status") or "UNKNOWN").upper()
+        if status == "CRITICAL":
+            return infra_critical_interval
+        if status == "DEGRADED":
+            return infra_degraded_interval
+        if status == "OK":
+            return infra_healthy_interval
+        return infra_unknown_interval
     health_probe_network = (os.getenv("PLATFORM_HEALTH_PROBE_INCLUDE_NETWORK", "false") or "").strip().lower() in {"1", "true", "yes", "on"}
-    # Full-burst network SLA probes are spaced randomly across the day (jittered)
-    # so measurements land at varying times, not a fixed minute each hour.
-    import random as _random
-    net_probe_base = _interval("PLATFORM_NET_PROBE_INTERVAL_SECONDS", 3600.0)
+    # Network diagnostics use an adaptive low-load scheduler. A small sentinel
+    # chooses the next interval, while bounded full throughput tests run only
+    # for bootstrap, confirmed anomalies, or a slow periodic refresh.
     net_probe_enabled = (os.getenv("PLATFORM_NET_PROBE_ENABLED", "true") or "").strip().lower() in {"1", "true", "yes", "on"}
     net_retention_days = int(os.getenv("PLATFORM_NET_RETENTION_DAYS", "30"))
-
-    def _next_net_delay() -> float:
-        # Uniform jitter in [0.5x, 1.5x] of the base interval.
-        return net_probe_base * (0.5 + _random.random())
+    net_probe_fallback = _interval("PLATFORM_NET_RECOVERY_INTERVAL_SECONDS", 900.0)
 
     stopping = False
 
@@ -90,9 +99,9 @@ def main() -> None:
 
     # Prime the platform monitor immediately so the superadmin Operations and
     # System Infrastructure views have data on first load.
-    platform_monitor.capture_infrastructure_once()
+    initial_infrastructure = platform_monitor.capture_infrastructure_once()
     platform_monitor.capture_health_once(include_network=health_probe_network)
-    next_infra = time.monotonic() + infra_interval
+    next_infra = time.monotonic() + _next_infrastructure_delay(initial_infrastructure)
     next_health = time.monotonic() + health_interval
     next_net = time.monotonic() + (30.0 if net_probe_enabled else float("inf"))
 
@@ -102,14 +111,15 @@ def main() -> None:
                 raise RuntimeError("Scheduled worker stopped unexpectedly")
             now = time.monotonic()
             if now >= next_infra:
-                platform_monitor.capture_infrastructure_once()
-                next_infra = now + infra_interval
+                infrastructure = platform_monitor.capture_infrastructure_once()
+                next_infra = now + _next_infrastructure_delay(infrastructure)
             if now >= next_health:
                 platform_monitor.capture_health_once(include_network=health_probe_network)
                 next_health = now + health_interval
             if net_probe_enabled and now >= next_net:
-                platform_monitor.run_network_probes_once(prune_days=net_retention_days)
-                next_net = now + _next_net_delay()
+                probe = platform_monitor.run_adaptive_network_probe_once(prune_days=net_retention_days)
+                delay = float((probe or {}).get("next_delay_seconds") or net_probe_fallback)
+                next_net = now + max(30.0, delay)
             time.sleep(1)
     finally:
         supervisor.stop()

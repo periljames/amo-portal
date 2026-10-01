@@ -52,6 +52,12 @@ const SCENARIO_LABEL: Record<string, string> = Object.fromEntries(SCENARIOS.map(
 
 const fmtMbps = (value?: number | null): string => (value == null ? "—" : `${value.toFixed(1)}`);
 const fmtMs = (value?: number | null): string => (value == null ? "—" : `${value.toFixed(1)}`);
+const fmtInterval = (seconds?: number | null): string => {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  if (seconds >= 3600) return `${Math.round(seconds / 3600)} h`;
+  if (seconds >= 60) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds)} s`;
+};
 
 function niceMax(value: number): number {
   for (const step of [50, 100, 250, 500, 1000, 2500, 5000, 10000]) if (value <= step) return step;
@@ -189,7 +195,17 @@ export default function PlatformNetworkPage() {
       }
       const points = history?.scenarios?.[scenario.key]?.points ?? [];
       const last = points[points.length - 1];
-      map[scenario.key] = last ? { download: last.download_mbps, latency: last.latency_ms, ok: last.ok } : { download: null, latency: null, ok: true };
+      const latestFull = [...points].reverse().find((point) =>
+        point.download_mbps != null && point.details?.sample_kind !== "sentinel"
+      );
+      const providerUnavailable = last?.details?.failure_kind === "provider_rejected";
+      map[scenario.key] = last
+        ? {
+            download: latestFull?.download_mbps ?? null,
+            latency: last.latency_ms,
+            ok: providerUnavailable ? (latestFull?.ok ?? true) : last.ok,
+          }
+        : { download: null, latency: null, ok: true };
     }
     return map;
   }, [results, history]);
@@ -203,20 +219,51 @@ export default function PlatformNetworkPage() {
   const scenarioHistory = history?.scenarios?.[chartScenario];
 
   const chartData = useMemo(
-    () => (scenarioHistory?.points ?? []).map((point) => ({
-      at: point.at ? new Date(point.at).getTime() : 0,
-      download: point.download_mbps,
-      upload: point.upload_mbps,
-    })),
+    () => (scenarioHistory?.points ?? [])
+      .filter((point) => point.details?.sample_kind !== "sentinel")
+      .map((point) => ({
+        at: point.at ? new Date(point.at).getTime() : 0,
+        download: point.download_mbps,
+        upload: point.upload_mbps,
+      })),
     [scenarioHistory],
   );
+
+  const adaptiveSampling = useMemo(() => {
+    const points = history?.scenarios?.server_internet?.points ?? [];
+    for (let index = points.length - 1; index >= 0; index -= 1) {
+      const adaptive = points[index].details?.adaptive;
+      if (!adaptive || typeof adaptive !== "object") continue;
+      const data = adaptive as Record<string, unknown>;
+      return {
+        state: typeof data.state === "string" ? data.state : null,
+        nextDelay: typeof data.next_delay_seconds === "number" ? data.next_delay_seconds : null,
+        emaDownload: typeof data.ema_download_bps === "number" ? data.ema_download_bps / 1_000_000 : null,
+      };
+    }
+    return null;
+  }, [history]);
 
   const logRows = useMemo(() => {
     if (!history) return [];
     const rows: Record<string, unknown>[] = [];
     for (const [name, data] of Object.entries(history.scenarios)) {
       for (const point of data.points) {
-        rows.push({ at: point.at, scenario: SCENARIO_LABEL[name] ?? name, download: point.download_mbps, upload: point.upload_mbps, latency: point.latency_ms, source: point.source, status: point.ok ? "OK" : "FAILED" });
+        const adaptive = point.details?.adaptive;
+        const adaptiveState = adaptive && typeof adaptive === "object" && typeof (adaptive as Record<string, unknown>).state === "string"
+          ? String((adaptive as Record<string, unknown>).state)
+          : "—";
+        rows.push({
+          at: point.at,
+          scenario: SCENARIO_LABEL[name] ?? name,
+          download: point.download_mbps,
+          upload: point.upload_mbps,
+          latency: point.latency_ms,
+          source: point.source,
+          sample: typeof point.details?.sample_kind === "string" ? String(point.details?.sample_kind) : "measurement",
+          adaptive: adaptiveState,
+          status: point.ok ? "OK" : "FAILED",
+        });
       }
     }
     return rows.sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
@@ -228,7 +275,9 @@ export default function PlatformNetworkPage() {
     { headerName: "Download (Mbps)", field: "download", flex: 1, minWidth: 130, type: "numericColumn", valueFormatter: (p) => (p.value == null ? "—" : Number(p.value).toFixed(1)) },
     { headerName: "Upload (Mbps)", field: "upload", flex: 1, minWidth: 130, type: "numericColumn", valueFormatter: (p) => (p.value == null ? "—" : Number(p.value).toFixed(1)) },
     { headerName: "Ping (ms)", field: "latency", flex: 0.9, minWidth: 110, type: "numericColumn", valueFormatter: (p) => (p.value == null ? "—" : Number(p.value).toFixed(1)) },
-    { headerName: "Source", field: "source", flex: 0.8, minWidth: 100 },
+    { headerName: "Source", field: "source", flex: 0.9, minWidth: 120 },
+    { headerName: "Sample", field: "sample", flex: 0.8, minWidth: 100 },
+    { headerName: "Adaptive state", field: "adaptive", flex: 1, minWidth: 140 },
     { headerName: "Status", field: "status", flex: 0.7, minWidth: 90 },
   ], []);
 
@@ -338,8 +387,19 @@ export default function PlatformNetworkPage() {
       <section className="platform-grid">
         <MetricCard label="Avg download" value={`${fmtMbps(scenarioHistory?.download_mbps.avg)} Mbps`} caption={`min ${fmtMbps(scenarioHistory?.download_mbps.min)} · p95 ${fmtMbps(scenarioHistory?.download_mbps.p95)}`} />
         <MetricCard label="Avg latency" value={`${fmtMs(scenarioHistory?.latency_ms.avg)} ms`} caption={`max ${fmtMs(scenarioHistory?.latency_ms.max)} ms`} />
-        <MetricCard label="Samples" value={scenarioHistory?.total ?? 0} caption={`${scenarioHistory?.failures ?? 0} failures`} />
+        <MetricCard
+          label="Samples"
+          value={scenarioHistory?.total ?? 0}
+          caption={`${scenarioHistory?.full_samples ?? scenarioHistory?.download_mbps.samples ?? 0} full · ${scenarioHistory?.sentinel_samples ?? 0} sentinel · ${scenarioHistory?.failures ?? 0} failures`}
+        />
         <MetricCard label={`SLA breaches (<${sla})`} value={scenarioHistory?.sla_breaches ?? 0} tone={(scenarioHistory?.sla_breaches ?? 0) > 0 ? "amber" : "green"} caption={`${window} · ${SCENARIO_LABEL[chartScenario]}`} />
+        {chartScenario === "server_internet" ? (
+          <MetricCard
+            label="Adaptive sampling"
+            value={(adaptiveSampling?.state ?? "warming").replaceAll("_", " ")}
+            caption={`next ${fmtInterval(adaptiveSampling?.nextDelay)} · EMA20 ${fmtMbps(adaptiveSampling?.emaDownload)} Mbps`}
+          />
+        ) : null}
       </section>
 
       <section className="platform-card">

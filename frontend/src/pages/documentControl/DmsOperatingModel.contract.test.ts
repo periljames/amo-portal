@@ -205,6 +205,13 @@ describe("DMS frontend operating-model contract", () => {
     expect(recordActions).toContain("?governance=assignments");
   });
 
+  it("keeps review-revision preview behind controller or assigned-reviewer authority", () => {
+    expect(recordPage).toContain("canPreviewWorkflowRevision");
+    expect(recordPage).toContain("canControl || workflow?.allowed_actions?.length");
+    expect(recordPage).toContain('activeView === "workflow" && canPreviewWorkflowRevision');
+    expect(recordPage).toContain('"Preview review revision" : "Read current"');
+  });
+
   it("exposes exactly eight operational document workspace tabs", () => {
     for (const tab of ["Overview", "Content", "Changes", "Workflow", "Distribution", "Compliance", "Relationships", "History"]) expect(recordPage).toContain(`"${tab}"`);
     expect(recordPage).not.toContain("LEGACY_VIEW_TO_TAB");

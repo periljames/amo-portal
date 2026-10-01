@@ -10,6 +10,9 @@ on:
       - "backend/amodb/storage.py"
       - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/jobs/platform_monitor.py"
+      - "backend/amodb/jobs/portal_scheduler_main.py"
+      - "scripts/dev_runtime.py"
       - "backend/amodb/tests/test_observability_operation_span.py"
       - "backend/amodb/database.py"
       - "backend/amodb/alembic/versions/**"
@@ -33,6 +36,9 @@ on:
       - "backend/amodb/storage.py"
       - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/saas_worker_safe.py"
+      - "backend/amodb/jobs/platform_monitor.py"
+      - "backend/amodb/jobs/portal_scheduler_main.py"
+      - "scripts/dev_runtime.py"
       - "backend/amodb/tests/test_observability_operation_span.py"
       - "backend/amodb/database.py"
       - "backend/requirements.txt"
@@ -81,9 +87,13 @@ jobs:
             backend/amodb/apps/platform/ops_management_router.py \
             backend/amodb/apps/platform/ops_product_insights_router.py \
             backend/amodb/apps/platform/product_analytics.py \
+            backend/amodb/apps/platform/network_diagnostics.py \
             backend/amodb/apps/platform/platform_command_queue.py \
             backend/amodb/jobs/saas_worker.py \
             backend/amodb/jobs/saas_worker_safe.py \
+            backend/amodb/jobs/platform_monitor.py \
+            backend/amodb/jobs/portal_scheduler_main.py \
+            scripts/dev_runtime.py \
             backend/amodb/platform_ops_main.py \
             backend/amodb/platform_ops_worker_main.py \
             backend/amodb/observability.py \
@@ -101,6 +111,7 @@ jobs:
           pytest -q \
             backend/amodb/apps/platform/tests/test_ops_query_registry.py \
             backend/amodb/apps/platform/tests/test_product_analytics.py \
+            backend/amodb/apps/platform/tests/test_admin_setup_and_network_accuracy.py \
             backend/amodb/apps/platform/tests/test_shared_storage.py \
             backend/amodb/tests/test_observability_operation_span.py
       - name: Prove mounted console and versioned Operations API contracts
