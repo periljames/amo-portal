@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { QMSFindingOut } from "./qmsCore";
+import type { AuditEvidenceArtifact } from "./qmsAuditEvidence";
 import {
   currentOfflineScope,
   decryptDeviceValue,
@@ -77,6 +78,7 @@ export type AuditOfflinePack = {
     checklist_item_id?: string | null;
     finding_id?: string | null;
     evidence_request_id?: string | null;
+    source_type?: "INTERNAL_USER" | "EXTERNAL_AUDITOR" | "AUDITEE_GUEST";
     filename: string;
     content_type?: string | null;
     size_bytes: number;
@@ -86,6 +88,8 @@ export type AuditOfflinePack = {
     captured_at?: string | null;
     offline_upload_state?: string | null;
     server_processing_state?: string | null;
+    uploaded_by_user_id?: string | null;
+    uploaded_by_participant_id?: string | null;
     created_at?: string | null;
   }>;
   sync_contract: {
@@ -389,6 +393,26 @@ export function projectOfflineFindings(pack: AuditOfflinePack): QMSFindingOut[] 
     ...finding,
     audit_id: String(finding.audit_id || pack.audit_id),
   })) as QMSFindingOut[];
+}
+
+export function projectOfflineEvidence(
+  pack: AuditOfflinePack,
+  checklistItemId?: string | null,
+  findingId?: string | null,
+): AuditEvidenceArtifact[] {
+  return (pack.evidence || [])
+    .filter((artifact) => !checklistItemId || artifact.checklist_item_id === checklistItemId)
+    .filter((artifact) => !findingId || artifact.finding_id === findingId)
+    .map((artifact) => ({
+      ...artifact,
+      audit_id: pack.audit_id,
+      source_type: artifact.source_type || "INTERNAL_USER",
+      content_type: artifact.content_type ?? null,
+      description: artifact.description ?? null,
+      uploaded_by_user_id: artifact.uploaded_by_user_id ?? null,
+      uploaded_by_participant_id: artifact.uploaded_by_participant_id ?? null,
+      created_at: artifact.created_at ?? null,
+    })) as AuditEvidenceArtifact[];
 }
 
 export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
