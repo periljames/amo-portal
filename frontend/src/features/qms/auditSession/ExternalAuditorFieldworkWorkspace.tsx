@@ -5,7 +5,6 @@ import {
   getExternalAuditorFieldwork,
   type ExternalAuditorFieldworkItem,
   type ExternalAuditorFieldworkModel,
-  type ExternalChecklistResponse,
   type ExternalChecklistResponseOption,
 } from "../../../services/qmsAuditExternalAccess";
 import { uploadExternalAuditorEvidence } from "../../../services/qmsAuditEvidence";
