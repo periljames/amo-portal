@@ -757,10 +757,20 @@ def get_audit_offline_pack(
         .order_by(QualityAuditEvidenceArtifact.created_at.asc())
         .all()
     )
+    from .audit_checklist_execution_router import _fieldwork_write_blocker
+    fieldwork_blocker = _fieldwork_write_blocker(db, amo_id=ctx.amo_id, audit=audit)
     return {
         "schema": "QMS_AUDIT_OFFLINE_PACK_V1",
         "generated_at": _utcnow().isoformat(),
         "audit_id": str(audit.id),
+        "fieldwork_state": {
+            "authorized": fieldwork_blocker is None,
+            "blocker": fieldwork_blocker,
+            "audit_status": _enum_value(audit.status),
+            "actual_start": audit.actual_start.isoformat() if audit.actual_start else None,
+            "actual_end": audit.actual_end.isoformat() if audit.actual_end else None,
+            "captured_at": _utcnow().isoformat(),
+        },
         "work_package": _work_package_dict(package),
         "execution": [
             {
