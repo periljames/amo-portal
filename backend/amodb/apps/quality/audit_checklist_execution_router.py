@@ -171,6 +171,8 @@ def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditCh
         "evidence_references": list(governance.evidence_references or []) if governance else [],
         "governance_id": str(governance.id) if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
+        "answered_by_user_id": governance.answered_by_user_id if governance else item.completed_by_user_id,
+        "answered_at": governance.answered_at if governance else item.completed_at,
         "updated_by_user_id": governance.updated_by_user_id if governance else item.completed_by_user_id,
         "updated_at": governance.updated_at if governance else item.updated_at,
         "events": [_event_dict(event) for event in list(governance.events or [])] if governance else [],
@@ -224,6 +226,12 @@ def _apply_execution_update(
         governance.applicability = str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or governance.applicability or "APPLICABLE")[:128]
         governance.evidence_references = list(payload.evidence_references)
         governance.entity_version = int(governance.entity_version or 1) + 1
+        if payload.canonical_response_status == "NOT_VERIFIED":
+            governance.answered_by_user_id = None
+            governance.answered_at = None
+        else:
+            governance.answered_by_user_id = ctx.user_id
+            governance.answered_at = _utcnow()
         governance.updated_by_user_id = ctx.user_id
         governance.updated_at = _utcnow()
 
