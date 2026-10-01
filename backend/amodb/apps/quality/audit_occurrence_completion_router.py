@@ -68,6 +68,60 @@ def _normalise_datetime(value: datetime, *, zone) -> datetime:
     return normalise_tenant_datetime(value, zone=zone)
 
 
+def _validated_checklist_item_ids(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_ids: list[uuid.UUID] | None,
+) -> list[str]:
+    ids = list(dict.fromkeys(item_ids or []))
+    if not ids:
+        return []
+    rows = db.query(models.QualityAuditChecklistItem.id).filter(
+        models.QualityAuditChecklistItem.amo_id == amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit_id,
+        models.QualityAuditChecklistItem.id.in_(ids),
+    ).all()
+    found = {row[0] for row in rows}
+    missing = [str(value) for value in ids if value not in found]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AUDIT_REQUEST_CHECKLIST_ITEM_INVALID",
+                "message": "One or more linked checklist items do not belong to this audit.",
+                "item_ids": missing,
+            },
+        )
+    return [str(value) for value in ids]
+
+
+def _validated_meeting_auditor(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str | None,
+) -> str | None:
+    cleaned = (user_id or "").strip() or None
+    if cleaned is None:
+        return None
+    row = db.query(account_models.User.id).filter(
+        account_models.User.id == cleaned,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AUDIT_MEETING_AUDITOR_INVALID",
+                "message": "The selected meeting auditor is not an active user in this tenant.",
+            },
+        )
+    return cleaned
+
+
 class GovernedDocumentRequestCreate(BaseModel):
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=8000)
@@ -546,7 +600,7 @@ def create_governed_document_request(
         request_type=payload.request_type,
         linked_criterion=(payload.linked_criterion or "").strip() or None,
         responsible_party=(payload.responsible_party or "").strip() or None,
-        checklist_item_ids=[str(value) for value in payload.checklist_item_ids],
+        checklist_item_ids=_validated_checklist_item_ids(db, amo_id=ctx.amo_id, audit_id=audit_id, item_ids=payload.checklist_item_ids),
         is_required=payload.is_required,
         requirement_stage=payload.requirement_stage,
         source_mode=payload.source_mode,
@@ -641,7 +695,14 @@ def update_governed_document_request(
     for field in ("request_type", "linked_criterion", "responsible_party", "checklist_item_ids", "is_required", "requirement_stage"):
         if field in update:
             value = update[field]
-            if isinstance(value, str):
+            if field == "checklist_item_ids":
+                value = _validated_checklist_item_ids(
+                    db,
+                    amo_id=ctx.amo_id,
+                    audit_id=audit_id,
+                    item_ids=value,
+                )
+            elif isinstance(value, str):
                 value = value.strip() or None
             setattr(metadata, field, value)
 
@@ -715,7 +776,7 @@ def create_audit_meeting(
     row.conference_url = (payload.conference_url or "").strip() or None
     row.agenda = (payload.agenda or "").strip() or None
     row.auditee_department = (payload.auditee_department or "").strip() or None
-    row.auditor_user_id = payload.auditor_user_id or None
+    row.auditor_user_id = _validated_meeting_auditor(db, amo_id=ctx.amo_id, user_id=payload.auditor_user_id)
     row.status = payload.status
     row.notes = (payload.notes or "").strip() or None
     row.updated_by_user_id = ctx.user_id
@@ -745,6 +806,12 @@ def update_audit_meeting(
         raise HTTPException(status_code=404, detail="Audit meeting not found.")
     update = payload.model_dump(exclude_unset=True)
     zone = tenant_timezone(db, amo_id=ctx.amo_id)
+    if "auditor_user_id" in update:
+        update["auditor_user_id"] = _validated_meeting_auditor(
+            db,
+            amo_id=ctx.amo_id,
+            user_id=update.get("auditor_user_id"),
+        )
     for field, value in update.items():
         if field in {"scheduled_start", "scheduled_end"} and value is not None:
             value = _normalise_datetime(value, zone=zone)
