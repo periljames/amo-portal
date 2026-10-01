@@ -297,6 +297,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ]);
   };
 
+  const confirmChecklistBinding = async (binding: ChecklistBinding): Promise<boolean> => {
+    await refresh(binding);
+    const confirmation = await contextQuery.refetch();
+    return Boolean(
+      confirmation.data?.controlled_preparation?.checklist_bindings?.some((item) => item.id === binding.id),
+    );
+  };
   const createMutation = useMutation({
     mutationFn: () => createGovernedAuditDocumentRequest(amoCode, auditId, {
       title: newRequest.title.trim(),
@@ -386,11 +393,23 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ),
     onSuccess: async (binding) => {
       setLocalError(null);
-      setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
-      setSelectedDmsChecklistId("");
-      setChecklistReason("Selected for this audit during governed preparation.");
-      setAllowExistingItems(false);
-      await refresh(binding);
+      setLocalSuccess(null);
+      try {
+        const confirmed = await confirmChecklistBinding(binding);
+        if (!confirmed) {
+          setLocalError("The checklist was saved, but Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify the checklist shows as bound before issuing preparation.");
+          return;
+        }
+        setSelectedDmsChecklistId("");
+        setChecklistReason("Selected for this audit during governed preparation.");
+        setAllowExistingItems(false);
+        setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
+      } catch (error) {
+        setLocalSuccess(null);
+        setLocalError(error instanceof Error
+          ? `The checklist was saved, but Prepare could not verify the authoritative binding: ${error.message}`
+          : "The checklist was saved, but Prepare could not verify the authoritative binding. Refresh before continuing.");
+      }
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The controlled checklist revision could not be applied."),
   });
@@ -418,14 +437,26 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }),
     onSuccess: async (binding) => {
       setLocalError(null);
-      setLocalSuccess("Checklist created and bound to fieldwork.");
-      setChecklistTitle("Audit fieldwork checklist");
-      setChecklistDescription("");
-      setChecklistReason("Created for this audit during governed preparation.");
-      setChecklistItems([emptyChecklistItem()]);
-      setChecklistDmsDocumentId("");
-      setAllowExistingItems(false);
-      await refresh(binding);
+      setLocalSuccess(null);
+      try {
+        const confirmed = await confirmChecklistBinding(binding);
+        if (!confirmed) {
+          setLocalError("The checklist was created, but Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify the checklist shows as bound before issuing preparation.");
+          return;
+        }
+        setChecklistTitle("Audit fieldwork checklist");
+        setChecklistDescription("");
+        setChecklistReason("Created for this audit during governed preparation.");
+        setChecklistItems([emptyChecklistItem()]);
+        setChecklistDmsDocumentId("");
+        setAllowExistingItems(false);
+        setLocalSuccess("Checklist created and bound to fieldwork.");
+      } catch (error) {
+        setLocalSuccess(null);
+        setLocalError(error instanceof Error
+          ? `The checklist was created, but Prepare could not verify the authoritative binding: ${error.message}`
+          : "The checklist was created, but Prepare could not verify the authoritative binding. Refresh before continuing.");
+      }
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The realtime checklist could not be created."),
   });
