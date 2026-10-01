@@ -128,6 +128,8 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             "request_type": metadata.request_type if metadata else "DOCUMENT",
             "linked_criterion": metadata.linked_criterion if metadata else None,
+            "responsible_party": metadata.responsible_party if metadata else None,
+            "checklist_item_ids": list(metadata.checklist_item_ids or []) if metadata else [],
             "is_required": metadata.is_required if metadata else True,
             "requirement_stage": metadata.requirement_stage if metadata else "REQUIRED_BEFORE_ISSUE",
             "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
