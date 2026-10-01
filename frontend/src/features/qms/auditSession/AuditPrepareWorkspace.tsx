@@ -230,6 +230,9 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistDmsSearch, setChecklistDmsSearch] = useState("");
   const [checklistDmsDocumentId, setChecklistDmsDocumentId] = useState("");
   const [requestDmsSearch, setRequestDmsSearch] = useState("");
+  const [composerSearch, setComposerSearch] = useState("");
+  const [composerSection, setComposerSection] = useState("ALL");
+  const [composerFilter, setComposerFilter] = useState<"ALL" | "INCOMPLETE" | "EVIDENCE_REQUIRED">("ALL");
 
   useEffect(() => {
     if (localError) pushToast({ title: "Preparation action needs attention", message: localError, variant: "error" });
@@ -581,6 +584,30 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       || (dmsResponseOptions.length >= 2
         && dmsResponseOptions.every((option) => option.value.trim() && option.label.trim() && option.canonical_status))),
   );
+  const composerSections = Array.from(new Set(
+    checklistItems.map((item) => item.section.trim()).filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right));
+  const visibleComposerItems = checklistItems.filter((item) => {
+    const needle = composerSearch.trim().toLowerCase();
+    const matchesSearch = !needle || [
+      item.section,
+      item.checklistRef,
+      item.requirementRef,
+      item.prompt,
+      item.expectedEvidence,
+      item.guidance,
+      item.samplingRequirement,
+    ].some((value) => value.toLowerCase().includes(needle));
+    if (!matchesSearch) return false;
+    if (composerSection !== "ALL" && item.section.trim() !== composerSection) return false;
+    if (composerFilter === "INCOMPLETE") return !item.prompt.trim() || (item.mandatory && !item.requirementRef.trim());
+    if (composerFilter === "EVIDENCE_REQUIRED") return item.evidenceRequiredWhen.length > 0 || Boolean(item.expectedEvidence.trim());
+    return true;
+  });
+  const preparedComposerCount = checklistItems.filter((item) =>
+    item.prompt.trim() && (!item.mandatory || item.requirementRef.trim())
+  ).length;
+
   const realtimeChecklistValid = Boolean(
     checklistTitle.trim().length >= 3 &&
     checklistReason.trim().length >= 8 &&
@@ -864,8 +891,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </fieldset>
 
                 <div className="qms-audit-prepare__composer is-wide">
-                  <header><div><strong>Checklist questions</strong><small>Questions remain editable here; after preparation is issued they become governed fieldwork rows.</small></div><button type="button" onClick={() => setChecklistItems((current) => [...current, emptyChecklistItem()])}><Plus size={14} /> Add question</button></header>
-                  {checklistItems.map((item, index) => (
+                  <header><div><strong>Checklist questions</strong><small>{preparedComposerCount}/{checklistItems.length} prepared · questions remain editable until governed preparation is issued.</small></div><button type="button" onClick={() => setChecklistItems((current) => [...current, emptyChecklistItem()])}><Plus size={14} /> Add question</button></header>
+                  <div className="qms-audit-prepare__composer-tools" aria-label="Checklist preparation navigation">
+                    <label className="is-wide"><span>Search questions</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={composerSearch} onChange={(event) => setComposerSearch(event.target.value)} placeholder="Question, section, reference, evidence or guidance" /></div></label>
+                    <label><span>Section</span><select value={composerSection} onChange={(event) => setComposerSection(event.target.value)}><option value="ALL">All sections</option>{composerSections.map((section) => <option key={section} value={section}>{section}</option>)}</select></label>
+                    <label><span>Filter</span><select value={composerFilter} onChange={(event) => setComposerFilter(event.target.value as typeof composerFilter)}><option value="ALL">All questions</option><option value="INCOMPLETE">Incomplete preparation</option><option value="EVIDENCE_REQUIRED">Evidence expected / required</option></select></label>
+                  </div>
+                  {!visibleComposerItems.length ? <p className="qms-audit-prepare__empty">No checklist questions match the current preparation filters.</p> : null}
+                  {visibleComposerItems.map((item) => {
+                    const index = checklistItems.findIndex((candidate) => candidate.id === item.id);
+                    return (
                     <article key={item.id}>
                       <div className="qms-audit-prepare__composer-number">{index + 1}</div>
                       <div className="qms-audit-prepare__composer-fields">
@@ -894,7 +929,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       </div>
                       <button type="button" aria-label={`Remove checklist question ${index + 1}`} disabled={checklistItems.length === 1} onClick={() => setChecklistItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={15} /></button>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
                 <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Append these questions to the existing live checklist</label>
                 {controlledDocumentsQuery.error ? <p className="qms-audit-prepare-stage__notice is-warning is-wide"><AlertTriangle size={14} /> DMS search is unavailable. Remove the DMS selection to create an audit-specific checklist without a controlled source link.</p> : null}
