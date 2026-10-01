@@ -8,8 +8,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
+from amodb.apps.audit import models as audit_models
 from amodb.database import get_write_db
 
 from . import models
@@ -675,6 +677,81 @@ def get_audit_preparation_readiness(
         "issued_preparation_revision_id": str(latest.id) if issued else None,
         "issued_preparation_revision_no": latest.revision_no if issued else None,
     }
+
+@router.get("/audits/{audit_id}/activity")
+def get_audit_activity(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit_key = str(audit_id)
+    rows = (
+        db.query(audit_models.AuditEvent)
+        .filter(
+            audit_models.AuditEvent.amo_id == ctx.amo_id,
+            or_(
+                audit_models.AuditEvent.entity_id == audit_key,
+                audit_models.AuditEvent.metadata_json["auditId"].as_string() == audit_key,
+                audit_models.AuditEvent.metadata_json["audit_id"].as_string() == audit_key,
+            ),
+        )
+        .order_by(audit_models.AuditEvent.occurred_at.desc(), audit_models.AuditEvent.id.desc())
+        .limit(500)
+        .all()
+    )
+    preparation_events = (
+        db.query(QualityAuditPreparationEvent)
+        .filter(
+            QualityAuditPreparationEvent.amo_id == ctx.amo_id,
+            QualityAuditPreparationEvent.audit_id == audit_id,
+        )
+        .order_by(QualityAuditPreparationEvent.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    items: list[dict[str, Any]] = [
+        {
+            "id": str(row.id),
+            "source": "AUDIT_EVENT",
+            "entity_type": row.entity_type,
+            "entity_id": row.entity_id,
+            "action": row.action,
+            "actor_user_id": row.actor_user_id,
+            "occurred_at": row.occurred_at or row.created_at,
+            "before": row.before,
+            "after": row.after,
+            "metadata": row.metadata_json or {},
+            "reason": (row.metadata_json or {}).get("reason"),
+        }
+        for row in rows
+    ]
+    items.extend(
+        {
+            "id": str(row.id),
+            "source": "PREPARATION_EVENT",
+            "entity_type": "qms.audit.preparation",
+            "entity_id": str(row.revision_id),
+            "action": row.event_type,
+            "actor_user_id": row.actor_user_id,
+            "occurred_at": row.created_at,
+            "before": None,
+            "after": None,
+            "metadata": {"revisionId": str(row.revision_id)},
+            "reason": row.reason,
+        }
+        for row in preparation_events
+    )
+    items.sort(
+        key=lambda item: (
+            item["occurred_at"] or datetime.min.replace(tzinfo=timezone.utc),
+            item["id"],
+        ),
+        reverse=True,
+    )
+    return {"items": items[:500]}
+
 
 @router.get("/audits/{audit_id}/work-package")
 def get_audit_work_package(
