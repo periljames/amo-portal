@@ -53,6 +53,7 @@ type Props = { amoCode: string; auditKey: string };
 type SetupDraft = {
   title: string;
   scope: string;
+  objectives: string;
   criteria: string;
   auditee: string;
   auditeeEmail: string;
@@ -218,6 +219,7 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
   return {
     title: audit.title || "",
     scope: audit.scope || "",
+    objectives: audit.objectives || "",
     criteria: audit.criteria || "",
     auditee: audit.auditee || "",
     auditeeEmail: audit.auditee_email || "",
@@ -512,7 +514,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return updateAuditOccurrenceSetup(amoCode, auditId, {
         title: draft.title.trim(),
         scope: draft.scope.trim() || null,
+        objectives: draft.objectives.trim() || null,
         criteria: draft.criteria.trim() || null,
+        base_version: auditQuery.data?.entity_version || 1,
         auditee: draft.auditee.trim() || null,
         auditee_email: draft.auditeeEmail.trim() || null,
         planned_start: datePart(draft.plannedStart) || null,
@@ -1363,6 +1367,16 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   rows={2}
                   value={draft.scope}
                   onChange={(event) => { clearGuidance("scope"); setDraft({ ...draft, scope: event.target.value }); }}
+                />
+              </label>
+              <label>
+                <span>Objectives</span>
+                <textarea
+                  disabled={!canManage}
+                  rows={2}
+                  value={draft.objectives}
+                  onChange={(event) => setDraft({ ...draft, objectives: event.target.value })}
+                  placeholder="What this audit is intended to verify or achieve"
                 />
               </label>
               <label id="audit-setup-field-criteria" className={guidedClass("criteria")}>
