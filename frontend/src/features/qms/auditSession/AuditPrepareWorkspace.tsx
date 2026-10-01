@@ -561,7 +561,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         status,
       );
       setLocalError(null);
-      setLocalSuccess(`Offline audit package ready on this device · ${status.checklistItems} checklist item(s) · ${status.evidenceRecords} evidence record(s).`);
+      setLocalSuccess(`Offline audit package ready on this device · ${status.checklistItems} checklist item(s) · ${status.evidenceRecords} evidence record(s) · ${status.offlineReferences} controlled reference(s).`);
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The audit could not be prepared for offline fieldwork."),
   });
@@ -571,7 +571,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onSuccess: () => {
       queryClient.setQueryData<AuditOfflinePackStatus>(
         ["qms-audit-offline-pack-status", amoCode, auditId],
-        { ready: false, storedAt: null, verifiedAt: null, workPackageSha256: null, checklistItems: 0, evidenceRecords: 0, expiresAt: null },
+        { ready: false, storedAt: null, verifiedAt: null, workPackageSha256: null, checklistItems: 0, evidenceRecords: 0, offlineReferences: 0, expiresAt: null },
       );
       setLocalError(null);
       setLocalSuccess("The controlled offline audit package was removed from this device.");
@@ -794,7 +794,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <strong>{offlinePackStatus?.ready ? "Offline package ready" : "Make audit available offline"}</strong>
             <small>
               {offlinePackStatus?.ready
-                ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
+                ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · ${offlinePackStatus.offlineReferences} controlled reference(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
                 : prepRevision?.status === "ISSUED"
                   ? "Encrypt the issued work package and current fieldwork baseline on this device before unreliable or no-connectivity work."
                   : "Issue preparation first. Draft preparation is not an offline fieldwork authority."}
