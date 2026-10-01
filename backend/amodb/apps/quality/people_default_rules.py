@@ -83,7 +83,8 @@ def ensure_default_quality_privilege_rules(
     """
 
     ensured: list[QualityPrivilegeRule] = []
-    bind = db.get_bind()
+    get_bind = getattr(db, "get_bind", None)
+    bind = get_bind() if callable(get_bind) else None
     if bind is not None and bind.dialect.name == "postgresql":
         # First-use audit setup can open several concurrent requests. Serialize
         # tenant default provisioning so the normal path never emits duplicate-
