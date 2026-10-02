@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -142,6 +142,7 @@ def list_visible_documents(
     document_class: str | None = None,
     status: str | None = None,
     node_type: str | None = Query(default=None, max_length=48),
+    source_type: str | None = Query(default=None, pattern="^(PDF|DOCX|DOC|ODT|RTF)$"),
     owner_user_id: str | None = Query(default=None, max_length=36),
     department_id: str | None = Query(default=None, max_length=36),
     indexing_status: str | None = Query(default=None, max_length=32),
@@ -207,6 +208,15 @@ def list_visible_documents(
                 km.DocumentationNode.node_type == requested,
                 km.DocumentationNode.status == "ACTIVE",
             )))
+    if source_type:
+        requested_source = source_type.strip().upper()
+        query = query.filter(exists().where(and_(
+            manual_models.ManualRevision.manual_id == manual_models.Manual.id,
+            or_(
+                func.upper(cast(manual_models.ManualRevision.source_type_enum, String)) == requested_source,
+                func.upper(manual_models.ManualRevision.source_filename).like(f"%.{requested_source}"),
+            ),
+        )))
     if owner_user_id or department_id or unresolved_ownership:
         responsibility_conditions = [
             gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
