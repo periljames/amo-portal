@@ -42,6 +42,8 @@ from amodb.apps.quality.audit_occurrence_completion_models import (  # noqa: E40
     QualityAuditClosingNarrative,
     QualityAuditMeeting,
 )
+from amodb.apps.quality.audit_preparation_models import QualityAuditPreparationRevision  # noqa: E402
+from amodb.apps.quality.audit_preparation_router import _capture_sources, _ensure_work_package  # noqa: E402
 from amodb.apps.quality.enums import (  # noqa: E402
     CARPriority,
     CARProgram,
@@ -384,6 +386,38 @@ def seed() -> None:
             entity_version=2,
             updated_by_user_id=user_a.id,
         ))
+        def issue_preparation(audit_row, checklist_owner):
+            captured = _capture_sources(db, amo_id=amo.id, audit=audit_row)
+            revision = QualityAuditPreparationRevision(
+                amo_id=amo.id,
+                audit_id=audit_row.id,
+                revision_no=1,
+                status="ISSUED",
+                preparation_scope="Real-browser acceptance governed preparation baseline.",
+                audit_snapshot=captured["audit_snapshot"],
+                checklist_snapshot=captured["checklist_snapshot"],
+                document_request_snapshot=captured["document_request_snapshot"],
+                source_references=captured["source_references"],
+                source_fingerprint=captured["source_fingerprint"],
+                change_reason="Issue the deterministic browser-acceptance preparation required before fieldwork.",
+                issued_by_user_id=checklist_owner.id,
+                issued_at=now,
+                created_by_user_id=checklist_owner.id,
+            )
+            db.add(revision)
+            db.flush()
+            _ensure_work_package(
+                db,
+                amo_id=amo.id,
+                user_id=checklist_owner.id,
+                audit=audit_row,
+                preparation=revision,
+            )
+            return revision
+
+        issue_preparation(audit, user_a)
+        issue_preparation(realtime_audit, user_a)
+
         db.add(QualityAuditClosingNarrative(
             id=CEREMONY_CLOSING_NARRATIVE_ID,
             amo_id=amo.id,
