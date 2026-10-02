@@ -25,12 +25,24 @@ type Props = {
   auditId: string;
   item: ChecklistExecutionGovernanceRow;
   canManage: boolean;
+  selectedAssessmentEvidenceIds?: string[];
+  onAssessmentEvidenceChange?: (artifactId: string, selected: boolean) => void;
   onChanged: () => Promise<void> | void;
   onError: (message: string | null) => void;
   onNotice: (message: string | null) => void;
 };
 
-const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canManage, onChanged, onError, onNotice }) => {
+const LiveAuditEvidenceStrip: React.FC<Props> = ({
+  amoCode,
+  auditId,
+  item,
+  canManage,
+  selectedAssessmentEvidenceIds = [],
+  onAssessmentEvidenceChange,
+  onChanged,
+  onError,
+  onNotice,
+}) => {
   const [file, setFile] = useState<File | null>(null);
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -176,12 +188,28 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({ amoCode, auditId, item, canMa
       <header><Paperclip size={16} /><div><strong>Governed evidence</strong><small>Immutable file objects · uploader attribution retained</small></div></header>
       {artifacts.length ? (
         <ul>
-          {artifacts.map((artifact) => (
-            <li key={artifact.id}>
-              <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span></div>
-              <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (typeof navigator !== "undefined" && navigator.onLine === false)} title={typeof navigator !== "undefined" && navigator.onLine === false ? "Reconnect to open server-retained evidence content." : undefined}><Download size={14} /> {typeof navigator !== "undefined" && navigator.onLine === false ? "Metadata only offline" : downloading === artifact.id ? "Opening…" : "Open"}</button>
-            </li>
-          ))}
+          {artifacts.map((artifact) => {
+            const reliedUpon = selectedAssessmentEvidenceIds.includes(artifact.id);
+            return (
+              <li key={artifact.id} className={reliedUpon ? "is-assessment-evidence" : ""}>
+                <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span></div>
+                <div className="qms-live-audit-focus__evidence-actions">
+                  {onAssessmentEvidenceChange ? (
+                    <label title="Attaching a file does not automatically make it evidence relied upon for the compliance assessment.">
+                      <input
+                        type="checkbox"
+                        checked={reliedUpon}
+                        disabled={!canManage}
+                        onChange={(event) => onAssessmentEvidenceChange(artifact.id, event.target.checked)}
+                      />
+                      <span>Use in assessment</span>
+                    </label>
+                  ) : null}
+                  <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (typeof navigator !== "undefined" && navigator.onLine === false)} title={typeof navigator !== "undefined" && navigator.onLine === false ? "Reconnect to open server-retained evidence content." : undefined}><Download size={14} /> {typeof navigator !== "undefined" && navigator.onLine === false ? "Metadata only offline" : downloading === artifact.id ? "Opening…" : "Open"}</button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       ) : <p>No governed evidence file is linked to this checklist item yet.</p>}
       {pending.length ? (
