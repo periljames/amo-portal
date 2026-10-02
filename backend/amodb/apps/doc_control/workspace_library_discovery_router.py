@@ -46,7 +46,7 @@ def _serialize_revision(row: manual_models.ManualRevision | None) -> dict | None
 @router.get("/t/{tenant_slug}/library-discovery")
 def library_discovery(
     tenant_slug: str,
-    view: str = Query(default="all", pattern="^(all|my-documents|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"),
+    view: str = Query(default="all", pattern="^(all|my-documents|shared-with-me|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"),
     q: str | None = Query(default=None, max_length=255),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=100),
@@ -182,6 +182,15 @@ def library_discovery(
             gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER"]),
         ))
         query = query.filter(or_(dm.DocumentControlProfile.owner_user_id == str(current_user.id), assigned))
+    elif view == "shared-with-me":
+        distributed_to_user = exists().where(and_(
+            dm.DocumentDistributionRecipient.tenant_id == tenant.amo_id,
+            dm.DocumentDistributionRecipient.recipient_user_id == str(current_user.id),
+            dm.DocumentDistributionRecipient.campaign_id == dm.DocumentDistributionCampaign.id,
+            dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
+            dm.DocumentDistributionCampaign.manual_id == manual_models.Manual.id,
+        ))
+        query = query.filter(distributed_to_user)
     elif view in {"favorites", "recently-opened"}:
         progress_query = db.query(
             manual_models.ManualReaderProgress.manual_id.label("manual_id"),
