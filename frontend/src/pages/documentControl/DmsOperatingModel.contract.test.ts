@@ -159,6 +159,17 @@ describe("DMS frontend operating-model contract", () => {
     expect(libraryPage).toContain("Offline snapshot");
   });
 
+  it("persists harmless personal library views locally and publishes shared views through the audited backend", () => {
+    expect(libraryPage).toContain("readPersonalViews");
+    expect(libraryPage).toContain("savePersonalView");
+    expect(libraryPage).toContain("publishCurrentView");
+    expect(libraryPage).toContain("Save personal");
+    expect(libraryPage).toContain("Publish shared");
+    expect(libraryService).toContain("listSharedLibraryViews");
+    expect(libraryService).toContain("publishSharedLibraryView");
+    expect(libraryService).toContain('"/library-views"');
+  });
+
   it("routes canonical Changes to a bounded paginated portfolio", () => {
     expect(router).toContain("DocControlChangesPortfolioPage");
     expect(router).toContain('path="/maintenance/:amoCode/document-control/changes" element={<WorkspaceRequireAuth><DocControlChangesPortfolioPage />');
