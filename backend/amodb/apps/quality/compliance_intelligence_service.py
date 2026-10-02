@@ -355,7 +355,10 @@ def detect_requirement_conflicts(candidates: Iterable[dict[str, Any]]) -> list[d
 
             detector: str | None = None
             if left.kind == "RETENTION_DURATION" and left.value is not None and right.value is not None:
-                if not math.isclose(left.value, right.value, rel_tol=0.0, abs_tol=0.5):
+                # Treat equivalent calendar expressions such as 2 years vs
+                # 24 months as the same retention period. The tolerance is
+                # bounded so materially different periods still surface.
+                if not math.isclose(left.value, right.value, rel_tol=0.0, abs_tol=15.0):
                     detector = "RETENTION_DURATION"
             elif left.kind == "MODAL_POLARITY" and left.polarity != right.polarity:
                 detector = "MODAL_POLARITY"
