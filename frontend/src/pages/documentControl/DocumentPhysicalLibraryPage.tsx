@@ -15,6 +15,7 @@ export default function DocumentPhysicalLibraryPage() {
   const rawMode = params.get("view") as PhysicalLibraryMode | null;
   const mode = useMemo<PhysicalLibraryMode>(() => MODES.includes(rawMode as PhysicalLibraryMode) ? rawMode as PhysicalLibraryMode : "catalog", [rawMode]);
   const [canControl, setCanControl] = useState(false);
+  const effectiveMode: PhysicalLibraryMode = mode === "inventory" && !canControl ? "catalog" : mode;
 
   useEffect(() => {
     if (!tenant) return;
@@ -36,10 +37,10 @@ export default function DocumentPhysicalLibraryPage() {
     canControl={canControl}
   >
     <LibraryOperationsPanel
-      key={mode}
+      key={effectiveMode}
       tenant={tenant}
       canControl={canControl}
-      initialMode={mode}
+      initialMode={effectiveMode}
       initialScan={params.get("scan")}
       standalone
     />
