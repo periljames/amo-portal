@@ -331,8 +331,8 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     <div className="qms-audit-closing" role="region" aria-label="Audit closing meeting workspace">
       <header className="qms-audit-closing__header">
         <div>
-          <h2>Closing meeting</h2>
-          <p className="qms-audit-closing__helper">Generate the report, get acknowledgement, approve, then issue.</p>
+          <h2>{auditQuery.data?.audit_ref || auditKey} · {auditQuery.data?.title || "Audit closing meeting"}</h2>
+          <p className="qms-audit-closing__helper">Closing meeting · Generate the report, get acknowledgement, approve, then issue.</p>
         </div>
         <div className="qms-audit-closing__header-actions">
           <Link className="qms-audit-closing__continue" to={auditSessionPath(amoCode, auditKey, "follow-up")}>Continue to Follow-up <ArrowRight size={15} aria-hidden /></Link>
