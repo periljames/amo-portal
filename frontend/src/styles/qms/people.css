@@ -686,6 +686,10 @@
   align-items: stretch;
   box-sizing: border-box;
   padding: 24px;
+  /* Fixed overlays use the visual viewport, while the page content box excludes
+     the vertical scrollbar. Compensate for that gutter so the drawer keeps the
+     same 24px content-edge offset at desktop widths. */
+  padding-inline-end: calc(24px + (100vw - 100%));
   background: rgba(15, 23, 42, .36);
   backdrop-filter: blur(2px);
 }
