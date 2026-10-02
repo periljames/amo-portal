@@ -70,7 +70,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
     await setup.getByLabel("Reason for rescheduling", { exact: true }).fill("Move this acceptance audit into the governed preparation window.");
     await setup.getByRole("button", { name: "Save audit definition" }).click();
-    await expect(setup.getByRole("status")).toContainText("Definition saved.", { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
     const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
     await meetingsTile.locator("summary").click();
@@ -84,7 +84,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
     await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText(/opening meeting saved/i, { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/opening meeting saved/i, { timeout: 30_000 });
 
     const closingCard = setup.getByText("Closing", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await closingCard.getByRole("button", { name: "On site", exact: true }).click();
@@ -94,13 +94,13 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
     await closingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText(/closing meeting saved/i, { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
     const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
     await noticeCard.locator("summary").click();
     await expect(noticeCard).toHaveAttribute("open", "");
     await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
-    await expect(setup.getByRole("status")).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
     await noticeCard.getByRole("button", { name: "Generate final preview" }).click();
     const noticePreview = page.getByRole("dialog", { name: /Audit notice - revision 1/i });
     await expect(noticePreview).toBeVisible({ timeout: 30_000 });
@@ -134,7 +134,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const inviteResponse = await inviteResponsePromise;
     const invited = await inviteResponse.json() as { access_url?: string };
     expect(invited.access_url).toBeTruthy();
-    await expect(prepare.getByRole("status")).toContainText("Participant access created. Copy the invitation link shown below.", { timeout: 30_000 });
+    await expect(prepare.locator(".qms-occurrence-stage__message").last()).toContainText("Participant access created. Copy the invitation link shown below.", { timeout: 30_000 });
 
     const guestPage = await guestContext.newPage();
     watchServerFailures(guestPage, guestFailures);
