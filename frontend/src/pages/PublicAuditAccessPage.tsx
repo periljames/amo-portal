@@ -139,8 +139,14 @@ const PublicAuditAccessPage: React.FC = () => {
     if (requestResult.status === "fulfilled") setGovernedRequests(requestResult.value.items);
     else setGovernedRequests([]);
 
-    const firstFailure = [reportResult, closingResult, collaborationResult, requestResult].find((result) => result.status === "rejected");
-    if (firstFailure?.status === "rejected") setError(firstFailure.reason instanceof Error ? firstFailure.reason.message : "Some audit collaboration data could not be loaded.");
+    const firstFailure = [reportResult, closingResult, collaborationResult, requestResult].find((result) => {
+      if (result.status !== "rejected") return false;
+      const status = Number((result.reason as { status?: number } | null)?.status || 0);
+      return status !== 404;
+    });
+    if (firstFailure?.status === "rejected") {
+      setError(firstFailure.reason instanceof Error ? firstFailure.reason.message : "Some audit collaboration data could not be loaded.");
+    }
   };
 
   const exchangeInvitation = async (token: string): Promise<AuditGuestReadModel> => {
