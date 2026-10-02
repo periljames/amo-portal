@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, literal_column, or_
+from sqlalchemy import func, literal_column, or_, text as sql_text
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -326,6 +326,79 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
     return output
 
 
+def _pgvector_available(db: Session) -> bool:
+    """Return whether this PostgreSQL deployment already exposes pgvector.
+
+    The application does not create the extension implicitly. Deployments that
+    provision pgvector get database-side ranking; all others retain the bounded
+    application-side cosine fallback.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return False
+    try:
+        return bool(
+            db.execute(
+                sql_text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+            ).scalar()
+        )
+    except Exception:
+        return False
+
+
+def _pgvector_ranked_embedding_ids(
+    db: Session,
+    *,
+    tenant_id: str,
+    revision_ids: list[str],
+    embedding_model: str,
+    query_vector: tuple[float, ...],
+    limit: int,
+) -> list[tuple[str, float]] | None:
+    """Use pgvector for top-k ranking when the extension is already provisioned.
+
+    Returns None when acceleration is unavailable so callers can use the safe
+    JSON/application fallback. The JSON vector remains the portable persisted
+    representation, which avoids coupling migrations to one provider dimension.
+    """
+    if not revision_ids or not query_vector or not _pgvector_available(db):
+        return None
+    placeholders = ", ".join(f":revision_{index}" for index in range(len(revision_ids)))
+    params: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "embedding_model": embedding_model,
+        "dimensions": len(query_vector),
+        "query_vector": json.dumps([float(value) for value in query_vector], separators=(",", ":")),
+        "limit": max(1, min(int(limit), 200)),
+    }
+    params.update({f"revision_{index}": revision_id for index, revision_id in enumerate(revision_ids)})
+    statement = sql_text(
+        f"""
+        SELECT id,
+               1 - (((vector_json::text)::vector) <=> CAST(:query_vector AS vector)) AS similarity
+          FROM documentation_section_embeddings
+         WHERE tenant_id = :tenant_id
+           AND embedding_model = :embedding_model
+           AND dimensions = :dimensions
+           AND revision_id IN ({placeholders})
+         ORDER BY (((vector_json::text)::vector) <=> CAST(:query_vector AS vector)) ASC
+         LIMIT :limit
+        """
+    )
+    try:
+        # A SAVEPOINT prevents an optional accelerator failure from poisoning
+        # the surrounding read transaction; fallback retrieval must stay usable.
+        with db.begin_nested():
+            rows = db.execute(statement, params).all()
+    except Exception:
+        return None
+    return [
+        (str(row.id), float(row.similarity))
+        for row in rows
+        if row.similarity is not None and float(row.similarity) > 0.0
+    ]
+
+
 def _cosine_similarity(left: list[float] | tuple[float, ...], right: list[float] | tuple[float, ...]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
@@ -359,25 +432,18 @@ def _semantic_results(
     ):
         return []
 
-    rows = (
-        db.query(
-            km.DocumentationSectionEmbedding,
-            manual_models.Manual,
-            manual_models.ManualRevision,
-            manual_models.ManualSection,
-        )
-        .join(manual_models.ManualSection, manual_models.ManualSection.id == km.DocumentationSectionEmbedding.section_id)
-        .join(manual_models.ManualRevision, manual_models.ManualRevision.id == km.DocumentationSectionEmbedding.revision_id)
-        .join(manual_models.Manual, manual_models.Manual.id == km.DocumentationSectionEmbedding.manual_id)
-        .filter(
-            km.DocumentationSectionEmbedding.tenant_id == str(context.tenant.amo_id),
-            km.DocumentationSectionEmbedding.revision_id.in_(revision_ids),
-            km.DocumentationSectionEmbedding.embedding_model == settings.embedding_model,
-        )
-        .limit(5000)
-        .all()
+    base_filter = (
+        km.DocumentationSectionEmbedding.tenant_id == str(context.tenant.amo_id),
+        km.DocumentationSectionEmbedding.revision_id.in_(revision_ids),
+        km.DocumentationSectionEmbedding.embedding_model == settings.embedding_model,
     )
-    if not rows:
+    if (
+        db.query(km.DocumentationSectionEmbedding.id)
+        .filter(*base_filter)
+        .limit(1)
+        .first()
+        is None
+    ):
         return []
 
     try:
@@ -398,17 +464,70 @@ def _semantic_results(
         return []
     if not result.embeddings or not result.embeddings[0]:
         return []
-    query_vector = result.embeddings[0]
+    query_vector = tuple(float(value) for value in result.embeddings[0])
+    candidate_limit = max(40, limit * 8)
+
+    accelerated = _pgvector_ranked_embedding_ids(
+        db,
+        tenant_id=str(context.tenant.amo_id),
+        revision_ids=revision_ids,
+        embedding_model=settings.embedding_model,
+        query_vector=query_vector,
+        limit=candidate_limit,
+    )
 
     ranked: list[tuple[float, Any, Any, Any, Any]] = []
-    for embedding, manual, revision, section in rows:
-        similarity = _cosine_similarity(query_vector, tuple(float(value) for value in (embedding.vector_json or [])))
-        if similarity <= 0:
-            continue
-        ranked.append((similarity, embedding, manual, revision, section))
-    ranked.sort(key=lambda item: item[0], reverse=True)
+    if accelerated is not None:
+        similarity_by_id = dict(accelerated)
+        if similarity_by_id:
+            rows = (
+                db.query(
+                    km.DocumentationSectionEmbedding,
+                    manual_models.Manual,
+                    manual_models.ManualRevision,
+                    manual_models.ManualSection,
+                )
+                .join(manual_models.ManualSection, manual_models.ManualSection.id == km.DocumentationSectionEmbedding.section_id)
+                .join(manual_models.ManualRevision, manual_models.ManualRevision.id == km.DocumentationSectionEmbedding.revision_id)
+                .join(manual_models.Manual, manual_models.Manual.id == km.DocumentationSectionEmbedding.manual_id)
+                .filter(
+                    *base_filter,
+                    km.DocumentationSectionEmbedding.id.in_(list(similarity_by_id)),
+                )
+                .all()
+            )
+            ranked = [
+                (similarity_by_id[str(embedding.id)], embedding, manual, revision, section)
+                for embedding, manual, revision, section in rows
+                if str(embedding.id) in similarity_by_id
+            ]
+            ranked.sort(key=lambda item: item[0], reverse=True)
+    else:
+        rows = (
+            db.query(
+                km.DocumentationSectionEmbedding,
+                manual_models.Manual,
+                manual_models.ManualRevision,
+                manual_models.ManualSection,
+            )
+            .join(manual_models.ManualSection, manual_models.ManualSection.id == km.DocumentationSectionEmbedding.section_id)
+            .join(manual_models.ManualRevision, manual_models.ManualRevision.id == km.DocumentationSectionEmbedding.revision_id)
+            .join(manual_models.Manual, manual_models.Manual.id == km.DocumentationSectionEmbedding.manual_id)
+            .filter(*base_filter)
+            .limit(5000)
+            .all()
+        )
+        for embedding, manual, revision, section in rows:
+            similarity = _cosine_similarity(
+                query_vector,
+                tuple(float(value) for value in (embedding.vector_json or [])),
+            )
+            if similarity <= 0:
+                continue
+            ranked.append((similarity, embedding, manual, revision, section))
+        ranked.sort(key=lambda item: item[0], reverse=True)
 
-    selected = ranked[: max(40, limit * 8)]
+    selected = ranked[:candidate_limit]
     section_ids = [str(section.id) for _similarity, _embedding, _manual, _revision, section in selected]
     first_block_by_section: dict[str, manual_models.ManualBlock] = {}
     if section_ids:
@@ -425,6 +544,7 @@ def _semantic_results(
             first_block_by_section.setdefault(str(block.section_id), block)
 
     output: list[dict[str, Any]] = []
+    semantic_channel = "SEMANTIC_PGVECTOR" if accelerated is not None else "SEMANTIC"
     for similarity, _embedding, manual, revision, section in selected:
         node = context.nodes.get(manual.id)
         metadata = dict(section.metadata_json or {})
@@ -451,8 +571,12 @@ def _semantic_results(
                 "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=page, anchor=section.anchor_slug),
                 "source_type": _source_type(revision),
                 "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
-                "reason": "Semantic match in controlled current-approved section",
-                "retrieval_channels": ["SEMANTIC"],
+                "reason": (
+                    "Semantic match ranked by deployment-provided pgvector"
+                    if accelerated is not None
+                    else "Semantic match in controlled current-approved section"
+                ),
+                "retrieval_channels": [semantic_channel],
             }
         )
     return output
