@@ -981,7 +981,23 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes, sampledItemInformation: sampledItems, assessment: assessment || selected.assessment || emptyAssessment() }); }}>Save note</button></div>
 
               <div id="audit-occurrence-evidence">
-                <LiveAuditEvidenceStrip amoCode={amoCode} auditId={auditId} item={selected} canManage={canExecute} onChanged={refreshFieldwork} onError={setLocalError} onNotice={setSyncNotice} />
+                <LiveAuditEvidenceStrip
+                  amoCode={amoCode}
+                  auditId={auditId}
+                  item={selected}
+                  canManage={canExecute}
+                  selectedAssessmentEvidenceIds={assessment?.evidence_ids || []}
+                  onAssessmentEvidenceChange={(artifactId, checked) => {
+                    if (!assessment) return;
+                    const nextIds = new Set(assessment.evidence_ids);
+                    if (checked) nextIds.add(artifactId);
+                    else nextIds.delete(artifactId);
+                    updateAssessmentDraft({ evidence_ids: Array.from(nextIds) });
+                  }}
+                  onChanged={refreshFieldwork}
+                  onError={setLocalError}
+                  onNotice={setSyncNotice}
+                />
               </div>
 
               <footer className="qms-live-audit-focus__nav"><button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button><button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= visibleItems.length - 1}>Next <ArrowRight size={16} /></button></footer>
