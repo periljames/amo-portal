@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, FileText, RefreshCw, Send, Users } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import { apiRequest } from "../../../services/apiClient";
+import { apiRequest, qmsPath } from "../../../services/apiClient";
 import { qmsListFindings } from "../../../services/qms";
 import {
   listAuditFindingReleases,
@@ -33,9 +33,9 @@ type AuditCar = {
 
 type AuditCarRegister = { items: AuditCar[] };
 
-function listAuditCars(auditId: string, signal?: AbortSignal) {
+function listAuditCars(amoCode: string, auditId: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ audit_id: auditId, limit: "200", offset: "0" });
-  return apiRequest<AuditCarRegister>(`/quality/cars/register?${params.toString()}`, {
+  return apiRequest<AuditCarRegister>(qmsPath(amoCode, `/cars/register?${params.toString()}`), {
     timeoutMs: 15_000,
     cacheTtlMs: 2_000,
     signal,
@@ -65,8 +65,8 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const narrativeQueryKey = ["qms-audit-closing-narrative", amoCode, auditId] as const;
   const narrativeQuery = useQuery({ queryKey: narrativeQueryKey, queryFn: ({ signal }) => getAuditClosingNarrative(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const meetingsQuery = useQuery({ queryKey: ["qms-audit-meetings", amoCode, auditId], queryFn: ({ signal }) => listAuditMeetings(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
-  const findingsQuery = useQuery({ queryKey: ["qms-closing-findings", amoCode, auditId], queryFn: () => qmsListFindings(auditId), enabled: Boolean(auditId), staleTime: 2_000 });
-  const carsQuery = useQuery({ queryKey: ["qms-audit-cars", amoCode, auditId], queryFn: ({ signal }) => listAuditCars(auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
+  const findingsQuery = useQuery({ queryKey: ["qms-closing-findings", amoCode, auditId], queryFn: () => qmsListFindings(auditId, amoCode), enabled: Boolean(auditId), staleTime: 2_000 });
+  const carsQuery = useQuery({ queryKey: ["qms-audit-cars", amoCode, auditId], queryFn: ({ signal }) => listAuditCars(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const releasesQuery = useQuery({ queryKey: ["qms-closing-finding-releases", amoCode, auditId], queryFn: ({ signal }) => listAuditFindingReleases(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const persistedNarrative = narrativeQuery.data ?? emptyNarrative;
   const draft = draftOverride ?? persistedNarrative;
