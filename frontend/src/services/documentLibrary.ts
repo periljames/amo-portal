@@ -70,6 +70,7 @@ export type IntegratedLibraryFilters = {
 export type LibraryDiscoveryView =
   | "all"
   | "my-documents"
+  | "shared-with-me"
   | "favorites"
   | "recently-opened"
   | "recently-revised"
