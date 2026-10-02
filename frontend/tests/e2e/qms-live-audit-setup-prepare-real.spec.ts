@@ -129,7 +129,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const inviteResponse = await inviteResponsePromise;
     const invited = await inviteResponse.json() as { access_url?: string };
     expect(invited.access_url).toBeTruthy();
-    await expect(prepare.getByRole("status")).toContainText("One-time invitation link created", { timeout: 30_000 });
+    await expect(prepare.getByRole("status")).toContainText("Participant access created. Copy the invitation link shown below.", { timeout: 30_000 });
 
     const guestPage = await guestContext.newPage();
     watchServerFailures(guestPage, guestFailures);
