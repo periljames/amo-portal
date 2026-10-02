@@ -1186,14 +1186,22 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               dmsResponseType === "CUSTOM" ? dmsResponseOptions : [],
             );
             setLocalSuccess(null);
-            const confirmed = await confirmChecklistBinding(binding);
-            if (!confirmed) {
-              setLocalError("The approved checklist was saved, but Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify it shows as bound before issuing preparation.");
+            try {
+              const confirmed = await confirmChecklistBinding(binding);
+              if (!confirmed) {
+                throw new Error("Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify it shows as bound before issuing preparation.");
+              }
+              setAllowExistingItems(false);
+              setLocalSuccess("The approved checklist is now current in DMS and populated for this audit.");
               return;
+            } catch (error) {
+              setLocalSuccess(null);
+              const message = error instanceof Error
+                ? `The approved checklist was saved, but Prepare could not verify the authoritative binding: ${error.message}`
+                : "The approved checklist was saved, but Prepare could not verify the authoritative binding. Refresh before continuing.";
+              setLocalError(message);
+              throw error instanceof Error ? error : new Error(message);
             }
-            setAllowExistingItems(false);
-            setLocalSuccess("The approved checklist is now current in DMS and populated for this audit.");
-            return;
           }
           setLocalSuccess("The checklist was registered as a DMS draft. Track it under Awaiting DMS approval below; open Review document to advance its workflow.");
           await refresh();
