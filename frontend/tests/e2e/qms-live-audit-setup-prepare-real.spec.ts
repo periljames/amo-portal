@@ -102,7 +102,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await noticeCard.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
     await expect(setup.getByRole("status")).toContainText("acknowledged", { timeout: 30_000 });
 
-    await setup.getByRole("link", { name: "Open Pre-Audit Room" }).click();
+    await setup.getByRole("link", { name: "Open Prepare" }).click();
     const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
     await expect(prepare).toBeVisible({ timeout: 30_000 });
     await expect(prepare.getByText("Real browser setup scope covering controlled maintenance and Quality records.")).toBeVisible();
