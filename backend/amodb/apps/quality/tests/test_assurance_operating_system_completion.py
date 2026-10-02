@@ -135,6 +135,21 @@ def test_intelligence_contract_is_deterministic_and_source_explainable() -> None
     assert _compare(Decimal("10"), "GTE", Decimal("10")) is True
 
 
+def test_canonical_car_operations_precede_generic_quality_catchall() -> None:
+    required = (
+        ("/api/maintenance/{amo_code}/quality/cars/register", "GET"),
+        ("/api/maintenance/{amo_code}/quality/cars/assignees", "GET"),
+        ("/api/maintenance/{amo_code}/quality/cars/{car_id}/invite", "GET"),
+        ("/api/maintenance/{amo_code}/quality/cars/{car_id}/responses", "GET"),
+        ("/api/maintenance/{amo_code}/quality/cars/{car_id}/review", "POST"),
+    )
+    catchall = _catchall_index(canonical_router.router)
+    for path, method in required:
+        matches = _matching(canonical_router.router, path, method)
+        assert len(matches) == 1, (path, method, matches)
+        assert canonical_router.router.routes.index(matches[0]) < catchall
+
+
 def test_full_audit_governance_contract() -> None:
     assert {
         ("/audits/{audit_id}/preparation-revisions", "GET"),
