@@ -22,6 +22,8 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlSearchPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlSearchPage })));
+const DocControlPhysicalLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlPhysicalLibraryPage })));
 const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
 const DocControlGeneratedRecordPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordPage })));
 const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
@@ -206,6 +208,8 @@ function DocumentControlRouteSurface() {
       <Routes>
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/search" element={<WorkspaceRequireAuth><DocControlSearchPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/physical-library" element={<WorkspaceRequireAuth><DocControlPhysicalLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure/records/:recordId" element={<WorkspaceRequireAuth><DocControlGeneratedRecordPage /></WorkspaceRequireAuth>} />
