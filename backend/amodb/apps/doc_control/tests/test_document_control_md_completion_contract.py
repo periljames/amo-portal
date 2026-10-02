@@ -10,6 +10,17 @@ def _source(name: str) -> str:
     return (ROOT / name).read_text(encoding="utf-8")
 
 
+def test_library_saved_views_are_tenant_authoritative_and_controller_published() -> None:
+    source = _source("workspace_library_discovery_router.py")
+    assert '@router.get("/t/{tenant_slug}/library-views")' in source
+    assert '@router.post("/t/{tenant_slug}/library-views")' in source
+    assert '@router.delete("/t/{tenant_slug}/library-views/{view_id}")' in source
+    assert "require_control_user(current_user)" in source
+    assert "LIBRARY_VIEW_PARAM_KEYS" in source
+    assert "document.library_view.published" in source
+    assert "tenant.settings_json = settings" in source
+
+
 def test_library_discovery_is_permission_filtered_and_bounded() -> None:
     source = _source("workspace_library_discovery_router.py")
     assert 'pattern="^(all|my-documents|shared-with-me|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"' in source
