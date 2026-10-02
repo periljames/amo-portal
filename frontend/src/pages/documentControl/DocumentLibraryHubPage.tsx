@@ -940,7 +940,10 @@ export default function DocumentLibraryHubPage() {
           open={uploadOpen}
           allowApprovedIntake={canControl}
           onClose={() => setUploadOpen(false)}
-          onUploaded={async (result) => { await load(); navigate(`${basePath}/library/${result.manual_id}?tab=workflow`); }}
+          onUploaded={async (result) => {
+            await load();
+            if (!result.batch_upload) navigate(`${basePath}/library/${result.manual_id}?tab=workflow`);
+          }}
         />
       </section>
 
