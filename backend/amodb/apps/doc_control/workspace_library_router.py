@@ -308,6 +308,59 @@ def list_visible_documents(
         .group_by(km.DocumentationNode.node_type)
         .all()
     )
+    owner_facets = [
+        {"id": str(user_id), "name": str(name or "Unnamed user"), "count": int(count)}
+        for user_id, name, count in (
+            db.query(
+                account_models.User.id,
+                account_models.User.full_name,
+                func.count(func.distinct(gm.DocumentResponsibilityAssignment.manual_id)),
+            )
+            .join(
+                gm.DocumentResponsibilityAssignment,
+                gm.DocumentResponsibilityAssignment.assignee_user_id == account_models.User.id,
+            )
+            .join(
+                visible_id_subquery,
+                visible_id_subquery.c.manual_id == gm.DocumentResponsibilityAssignment.manual_id,
+            )
+            .filter(
+                gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
+                gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER"]),
+            )
+            .group_by(account_models.User.id, account_models.User.full_name)
+            .order_by(account_models.User.full_name.asc())
+            .limit(100)
+            .all()
+        )
+    ]
+    department_facets = [
+        {"id": str(department_id), "code": str(code or ""), "name": str(name or code or "Unnamed department"), "count": int(count)}
+        for department_id, code, name, count in (
+            db.query(
+                account_models.Department.id,
+                account_models.Department.code,
+                account_models.Department.name,
+                func.count(func.distinct(gm.DocumentResponsibilityAssignment.manual_id)),
+            )
+            .join(
+                gm.DocumentResponsibilityAssignment,
+                gm.DocumentResponsibilityAssignment.assignee_department_id == account_models.Department.id,
+            )
+            .join(
+                visible_id_subquery,
+                visible_id_subquery.c.manual_id == gm.DocumentResponsibilityAssignment.manual_id,
+            )
+            .filter(
+                gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
+                gm.DocumentResponsibilityAssignment.responsibility_type == "RESPONSIBLE_DEPARTMENT",
+            )
+            .group_by(account_models.Department.id, account_models.Department.code, account_models.Department.name)
+            .order_by(account_models.Department.name.asc())
+            .limit(100)
+            .all()
+        )
+    ]
 
     total = query.count()
     selected = (
@@ -518,6 +571,8 @@ def list_visible_documents(
         "items": items,
         "facets": {
             "node_types": {key: int(facet_counter.get(key, 0)) for key in sorted(CONTENT_NODE_TYPES)},
+            "owners": owner_facets,
+            "departments": department_facets,
             "visible_documents": total,
         },
         "capabilities": {"read": True, "control": controller},
