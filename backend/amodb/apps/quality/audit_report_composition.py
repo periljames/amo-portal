@@ -19,6 +19,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from reportlab.lib import colors
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
 from .audit_occurrence_completion_models import QualityAuditClosingNarrative, QualityAuditMeeting
@@ -137,6 +138,42 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         QualityAuditClosingNarrative.audit_id == audit_id,
     ).first()
 
+    team_role_ids = [
+        ("LEAD", audit.lead_auditor_user_id),
+        ("ASSISTANT", audit.assistant_auditor_user_id),
+        ("OBSERVER", audit.observer_auditor_user_id),
+        *[("SUPPORTING", user_id) for user_id in list(audit.supporting_auditor_user_ids or [])],
+    ]
+    unique_team_ids = list(dict.fromkeys(user_id for _, user_id in team_role_ids if user_id))
+    team_users = (
+        db.query(account_models.User)
+        .filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(unique_team_ids),
+        )
+        .all()
+        if unique_team_ids
+        else []
+    )
+    team_by_id = {user.id: user for user in team_users}
+    audit_team = [
+        {
+            "role": role,
+            "user_id": user_id,
+            "name": (
+                team_by_id[user_id].full_name
+                if user_id in team_by_id and team_by_id[user_id].full_name
+                else team_by_id[user_id].email
+                if user_id in team_by_id
+                else user_id
+            ),
+            "staff_code": team_by_id[user_id].staff_code if user_id in team_by_id else None,
+            "position_title": team_by_id[user_id].position_title if user_id in team_by_id else None,
+        }
+        for role, user_id in team_role_ids
+        if user_id
+    ]
+
     def checklist_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[str, Any]:
         item = checklist_item_by_id.get(row.checklist_item_id)
         return {
@@ -182,6 +219,7 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "observer_auditor_user_id": audit.observer_auditor_user_id,
             "assistant_auditor_user_id": audit.assistant_auditor_user_id,
             "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
+            "team": audit_team,
         },
         "closing_narrative": {
             "management_summary": narrative.management_summary if narrative else None,
@@ -304,15 +342,21 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     story.extend([summary_table, Spacer(1, 4 * mm)])
 
     team_members = [
-        _text(audit.get("lead_auditor_user_id"), ""),
-        _text(audit.get("assistant_auditor_user_id"), ""),
-        _text(audit.get("observer_auditor_user_id"), ""),
-        *[_text(value, "") for value in list(audit.get("supporting_auditor_user_ids") or [])],
+        " · ".join(
+            value
+            for value in [
+                _text(member.get("role"), ""),
+                _text(member.get("name"), ""),
+                _text(member.get("staff_code"), ""),
+                _text(member.get("position_title"), ""),
+            ]
+            if value
+        )
+        for member in list(audit.get("team") or [])
     ]
-    team_members = [value for value in team_members if value]
     story.extend([
         _p("Audit team", styles["QmsSection"]),
-        _p(" · ".join(team_members) if team_members else "No audit team recorded.", styles["QmsBody"]),
+        _p(" | ".join(team_members) if team_members else "No audit team recorded.", styles["QmsBody"]),
         _p("Scope and criteria", styles["QmsSection"]),
         _p(f"Scope: {_text(audit.get('scope'))}", styles["QmsBody"]),
         _p(f"Objectives: {_text(audit.get('objectives'))}", styles["QmsBody"]),
