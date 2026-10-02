@@ -13,6 +13,12 @@ def _is_car_route(route_item) -> bool:
     return path.startswith("/quality/cars")
 
 
+def _is_generic_workflow_route(route_item) -> bool:
+    path = str(getattr(route_item, "path", ""))
+    methods = set(getattr(route_item, "methods", None) or ())
+    return path.endswith("/{module}/{record_id}/{action}") and "POST" in methods
+
+
 def _is_generic_catchall(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
     methods = set(getattr(route_item, "methods", None) or ())
@@ -72,11 +78,15 @@ def _clone_car_routes(api_router: APIRouter) -> None:
 
     car_routes = [item for item in api_router.routes if "/cars" in str(getattr(item, "path", "")) and not _is_generic_catchall(item)]
     remaining = [item for item in api_router.routes if item not in car_routes]
-    catchall_index = next(
-        (index for index, item in enumerate(remaining) if _is_generic_catchall(item)),
+    insertion_index = next(
+        (
+            index
+            for index, item in enumerate(remaining)
+            if _is_generic_workflow_route(item) or _is_generic_catchall(item)
+        ),
         len(remaining),
     )
-    api_router.routes[:] = [*remaining[:catchall_index], *car_routes, *remaining[catchall_index:]]
+    api_router.routes[:] = [*remaining[:insertion_index], *car_routes, *remaining[insertion_index:]]
 
 
 _clone_car_routes(canonical_router)
