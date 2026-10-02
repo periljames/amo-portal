@@ -1139,7 +1139,7 @@ export interface QMSAuditeeBrandOut {
 }
 
 export async function qmsListAuditPersonnelOptions(
-  _amoCode: string,
+  amoCode: string,
   params?: {
     search?: string;
     auditorsOnly?: boolean;
@@ -1153,9 +1153,8 @@ export async function qmsListAuditPersonnelOptions(
     auditors_only: params?.auditorsOnly ?? true,
     limit: Math.min(params?.limit ?? 50, 1000),
   });
-  // Legacy quality route remains authoritative; session carries tenant AMO context.
   return apiRequest<QMSPersonOption[]>(
-    `/quality/audits/personnel/options${suffix}`,
+    qualityPath(amoCode, `/audits/personnel/options${suffix}`),
     {
       cacheTtlMs: params?.bypassCache ? 0 : 30_000,
       signal,
@@ -1725,7 +1724,14 @@ export async function qmsShareAuditReport(
 
 export async function qmsListFindings(
   auditId: string,
+  amoCode?: string,
 ): Promise<QMSFindingOut[]> {
+  if (amoCode) {
+    return apiRequest<QMSFindingOut[]>(
+      qualityPath(amoCode, `/audits/${encodeURIComponent(auditId)}/findings`),
+      { cacheTtlMs: 0 },
+    );
+  }
   return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
 }
 
