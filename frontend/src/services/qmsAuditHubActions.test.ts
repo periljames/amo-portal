@@ -70,7 +70,7 @@ describe("Quality audit hub API helpers", () => {
 
     await expect(qmsListCarActions("car/with spaces")).resolves.toEqual(payload);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.example.test/quality/cars/car%2Fwith%20spaces/actions",
+      "https://api.example.test/api/maintenance/AMO-A/quality/cars/car%2Fwith%20spaces/actions",
       expect.objectContaining({
         method: "GET",
         credentials: "include",
