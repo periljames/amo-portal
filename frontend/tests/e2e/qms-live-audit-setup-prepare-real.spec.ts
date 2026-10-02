@@ -73,18 +73,20 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(setup.getByRole("status")).toContainText("Definition saved.", { timeout: 30_000 });
 
     const openingCard = setup.getByText("Opening meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    await openingCard.getByRole("button", { name: "On site", exact: true }).click();
     await openingCard.getByLabel("Customize", { exact: true }).check();
-    await openingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(1));
-    await openingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(2));
+    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T08:00`);
+    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T09:00`);
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
     await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.getByRole("status")).toContainText(/opening meeting saved/i, { timeout: 30_000 });
 
     const closingCard = setup.getByText("Closing meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    await closingCard.getByRole("button", { name: "On site", exact: true }).click();
     await closingCard.getByLabel("Customize", { exact: true }).check();
-    await closingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(7));
-    await closingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(8));
+    await closingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(31)}T17:00`);
+    await closingCard.getByLabel("End", { exact: true }).fill(`${futureDate(31)}T18:00`);
     await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
     await closingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
