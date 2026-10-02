@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
@@ -15,11 +18,116 @@ from . import domain_models as dm
 from . import governance_models as gm
 from . import knowledge_models as km
 from .workspace_library_router import _scope_match
-from .workspace_service import is_control_user, resolve_tenant, role_value, utcnow
+from .workspace_service import audit, is_control_user, require_control_user, resolve_tenant, role_value, utcnow
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Library Discovery"])
 ACTIVE_REVIEW_STATUSES = {"SCHEDULED", "IN_PROGRESS"}
+LIBRARY_SHARED_VIEWS_KEY = "document_control_library_views"
+LIBRARY_VIEW_PARAM_KEYS = {"q", "view", "type", "class", "status", "sort", "direction", "per_page"}
+
+
+class SharedLibraryViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    params: dict[str, str] = Field(default_factory=dict)
+    presentation: Literal["list", "compact", "cards", "register"] = "list"
+    is_default: bool = False
+
+
+def _shared_library_views(tenant) -> list[dict]:
+    raw = dict(tenant.settings_json or {}).get(LIBRARY_SHARED_VIEWS_KEY)
+    if not isinstance(raw, list):
+        return []
+    return [dict(item) for item in raw if isinstance(item, dict) and item.get("id") and item.get("name")]
+
+
+def _safe_library_view_params(values: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in values.items():
+        if key not in LIBRARY_VIEW_PARAM_KEYS:
+            raise HTTPException(status_code=422, detail=f"Unsupported shared-view filter: {key}")
+        text = str(value or "").strip()
+        if text:
+            normalized[key] = text[:255]
+    return normalized
+
+
+@router.get("/t/{tenant_slug}/library-views")
+def list_shared_library_views(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    return {
+        "items": _shared_library_views(tenant),
+        "capabilities": {"publish": is_control_user(current_user)},
+    }
+
+
+@router.post("/t/{tenant_slug}/library-views")
+def publish_shared_library_view(
+    tenant_slug: str,
+    payload: SharedLibraryViewIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    views = _shared_library_views(tenant)
+    if len(views) >= 32:
+        raise HTTPException(status_code=409, detail="The tenant already has the maximum 32 shared library views.")
+    if any(str(item.get("name", "")).casefold() == payload.name.strip().casefold() for item in views):
+        raise HTTPException(status_code=409, detail="A shared library view with this name already exists.")
+    if payload.is_default:
+        views = [{**item, "is_default": False} for item in views]
+    item = {
+        "id": str(uuid4()),
+        "name": payload.name.strip(),
+        "params": _safe_library_view_params(payload.params),
+        "presentation": payload.presentation,
+        "is_default": payload.is_default,
+        "created_at": utcnow().isoformat(),
+    }
+    views.append(item)
+    settings = dict(tenant.settings_json or {})
+    settings[LIBRARY_SHARED_VIEWS_KEY] = views
+    tenant.settings_json = settings
+    audit(db, tenant, request, "document.library_view.published", "document_library_view", item["id"], {
+        "name": item["name"],
+        "params": item["params"],
+        "presentation": item["presentation"],
+        "is_default": item["is_default"],
+    })
+    db.commit()
+    return item
+
+
+@router.delete("/t/{tenant_slug}/library-views/{view_id}")
+def delete_shared_library_view(
+    tenant_slug: str,
+    view_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    views = _shared_library_views(tenant)
+    target = next((item for item in views if str(item.get("id")) == view_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Shared library view not found.")
+    settings = dict(tenant.settings_json or {})
+    settings[LIBRARY_SHARED_VIEWS_KEY] = [item for item in views if str(item.get("id")) != view_id]
+    tenant.settings_json = settings
+    audit(db, tenant, request, "document.library_view.deleted", "document_library_view", view_id, {
+        "name": target.get("name"),
+    })
+    db.commit()
+    return {"id": view_id, "deleted": True}
+
+
 
 
 def _revision_status(row: manual_models.ManualRevision | None) -> str | None:
