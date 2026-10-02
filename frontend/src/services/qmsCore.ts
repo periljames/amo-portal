@@ -500,6 +500,11 @@ function readStoredNotificationSummaryEtag(): string | null {
   return window.localStorage.getItem(NOTIFICATION_SUMMARY_ETAG_KEY);
 }
 
+function carApiPath(path: string, amoCode?: string): string {
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return amoCode ? qualityPath(amoCode, suffix) : `/quality${suffix}`;
+}
+
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -1960,7 +1965,7 @@ export async function qmsListCars(
   },
   options?: QmsServiceOptions,
 ): Promise<CAROut[]> {
-  return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`, options);
+  return fetchJson<CAROut[]>(carApiPath(`/cars${toQuery(params ?? {})}`, options?.amoCode), options);
 }
 
 export async function qmsListCarRegister(
@@ -1976,7 +1981,7 @@ export async function qmsListCarRegister(
   options?: QmsServiceOptions,
 ): Promise<CARRegisterResponse> {
   return fetchJson<CARRegisterResponse>(
-    `/quality/cars/register${toQuery(params ?? {})}`,
+    carApiPath(`/cars/register${toQuery(params ?? {})}`, options?.amoCode),
     options,
   );
 }
@@ -1995,9 +2000,9 @@ export type CARAssignee = {
 export async function qmsListCarAssignees(params?: {
   department_id?: string;
   search?: string;
-}): Promise<CARAssignee[]> {
+}, amoCode?: string): Promise<CARAssignee[]> {
   return fetchJson<CARAssignee[]>(
-    `/quality/cars/assignees${toQuery(params ?? {})}`,
+    carApiPath(`/cars/assignees${toQuery(params ?? {})}`, amoCode),
   );
 }
 
@@ -2011,8 +2016,8 @@ export async function qmsCreateCar(payload: {
   assigned_to_user_id?: string | null;
   finding_id: string;
   evidence_required?: boolean;
-}): Promise<CAROut> {
-  return sendJson<CAROut>("/quality/cars", "POST", payload);
+}, amoCode?: string): Promise<CAROut> {
+  return sendJson<CAROut>(carApiPath("/cars", amoCode), "POST", payload);
 }
 
 export async function qmsUpdateCar(
@@ -2027,8 +2032,9 @@ export async function qmsUpdateCar(
     assigned_to_user_id?: string | null;
     reminder_interval_days?: number | null;
   },
+  amoCode?: string,
 ): Promise<CAROut> {
-  return sendJson<CAROut>(`/quality/cars/${carId}`, "PATCH", payload);
+  return sendJson<CAROut>(carApiPath(`/cars/${encodeURIComponent(carId)}`, amoCode), "PATCH", payload);
 }
 
 export async function qmsReviewCarResponse(
@@ -2040,16 +2046,17 @@ export async function qmsReviewCarResponse(
     capa_review_note?: string | null;
     message?: string | null;
   },
+  amoCode?: string,
 ): Promise<CAROut> {
   return sendJson<CAROut>(
-    `/quality/cars/${encodeURIComponent(carId)}/review`,
+    carApiPath(`/cars/${encodeURIComponent(carId)}/review`, amoCode),
     "POST",
     payload,
   );
 }
 
-export async function qmsDeleteCar(carId: string): Promise<void> {
-  await sendJson(`/quality/cars/${carId}`, "DELETE", {});
+export async function qmsDeleteCar(carId: string, amoCode?: string): Promise<void> {
+  await sendJson(carApiPath(`/cars/${encodeURIComponent(carId)}`, amoCode), "DELETE", {});
 }
 
 export interface QualityCARExtensionRequestOut {
@@ -2160,8 +2167,8 @@ export interface CARResponseOut {
   recalled_at?: string | null;
 }
 
-export async function qmsGetCarInvite(carId: string): Promise<CARInviteOut> {
-  return fetchJson(`/quality/cars/${carId}/invite`);
+export async function qmsGetCarInvite(carId: string, amoCode?: string): Promise<CARInviteOut> {
+  return fetchJson(carApiPath(`/cars/${encodeURIComponent(carId)}/invite`, amoCode));
 }
 
 export async function qmsRescheduleCarReminder(
@@ -2217,9 +2224,10 @@ export async function qmsRecallCarInviteSubmission(
 export async function qmsListCarResponses(
   carId: string,
   markOpen = true,
+  amoCode?: string,
 ): Promise<CARResponseOut[]> {
   return fetchJson<CARResponseOut[]>(
-    `/quality/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`,
+    carApiPath(`/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`, amoCode),
   );
 }
 
