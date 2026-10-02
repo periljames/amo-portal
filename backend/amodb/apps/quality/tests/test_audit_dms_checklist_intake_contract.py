@@ -41,6 +41,18 @@ def test_only_the_current_effective_dms_revision_is_bound_to_fieldwork() -> None
     assert "_instantiate_binding(" in source
 
 
+def test_dms_bind_returns_201_only_after_committed_binding_is_read_back() -> None:
+    source = inspect.getsource(bind_current_dms_checklist)
+
+    commit_index = source.index("db.commit()")
+    verification_index = source.index("persisted = db.query(QualityAuditChecklistBinding)")
+    return_index = source.index("return _binding_dict(persisted)")
+
+    assert commit_index < verification_index < return_index
+    assert "CHECKLIST_BINDING_COMMIT_NOT_VISIBLE" in source
+    assert "set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)" in source
+
+
 def test_pending_checklists_have_progress_but_cannot_be_selected(monkeypatch):
     document = SimpleNamespace(id="doc-1", code="CHK-1", title="Checklist", manual_type="CHECKLIST")
     hidden = SimpleNamespace(id="hidden", code="HIDDEN", title="Restricted", manual_type="CHECKLIST")
