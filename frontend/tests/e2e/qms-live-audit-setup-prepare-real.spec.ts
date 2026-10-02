@@ -72,7 +72,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("button", { name: "Save audit definition" }).click();
     await expect(setup.getByRole("status")).toContainText("Definition saved.", { timeout: 30_000 });
 
-    const openingCard = setup.getByText("Opening meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await openingCard.getByRole("button", { name: "On site", exact: true }).click();
     await openingCard.getByLabel("Customize", { exact: true }).check();
     await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T08:00`);
@@ -82,7 +82,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.getByRole("status")).toContainText(/opening meeting saved/i, { timeout: 30_000 });
 
-    const closingCard = setup.getByText("Closing meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    const closingCard = setup.getByText("Closing", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await closingCard.getByRole("button", { name: "On site", exact: true }).click();
     await closingCard.getByLabel("Customize", { exact: true }).check();
     await closingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(31)}T17:00`);
