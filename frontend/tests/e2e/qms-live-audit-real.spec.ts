@@ -217,6 +217,10 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     await expect(pageB.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
 
     const note = "Committed by Quality Alpha and delivered to Quality Bravo by the authenticated SSE stream.";
+    await pageA.getByLabel("Applicability").selectOption("APPLICABLE");
+    await pageA.getByLabel("Documentary status").selectOption("DOCUMENTED");
+    await pageA.getByLabel("Implementation status").selectOption("VERIFIED");
+    await pageA.getByLabel("Field verification").selectOption("VERIFIED");
     await pageA.getByLabel("Auditor note").fill(note);
     await pageA.getByRole("button", { name: "Compliant", exact: true }).click();
     await expect(pageA.getByText("Saved to the authoritative audit record.")).toBeVisible({ timeout: 30_000 });
@@ -225,6 +229,10 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     // admissible cause of this change is the authenticated audit-scoped SSE event
     // invalidating its occurrence-scoped React Query cache after A's DB commit.
     await expect(pageB.getByRole("button", { name: "Compliant", exact: true })).toHaveClass(/is-active/, { timeout: 30_000 });
+    await expect(pageB.getByLabel("Applicability")).toHaveValue("APPLICABLE", { timeout: 30_000 });
+    await expect(pageB.getByLabel("Documentary status")).toHaveValue("DOCUMENTED", { timeout: 30_000 });
+    await expect(pageB.getByLabel("Implementation status")).toHaveValue("VERIFIED", { timeout: 30_000 });
+    await expect(pageB.getByLabel("Field verification")).toHaveValue("VERIFIED", { timeout: 30_000 });
     await expect(pageB.getByLabel("Auditor note")).toHaveValue(note, { timeout: 30_000 });
 
     expect(failuresA).toEqual([]);
