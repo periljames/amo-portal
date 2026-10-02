@@ -3,6 +3,7 @@ import { Archive, BookOpen, Boxes, FileSearch, LibraryBig, Search } from "lucide
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  getWarehouseOverview,
   searchTenantWarehouse,
   type WarehouseSearchResponse,
   type WarehouseSearchResult,
@@ -112,8 +113,22 @@ export default function DocumentControlSearchPage() {
   const [loading, setLoading] = useState(Boolean(query.trim()));
   const [error, setError] = useState("");
   const [recent, setRecent] = useState<string[]>(() => recentSearches());
+  const [canControl, setCanControl] = useState(false);
 
   useEffect(() => { setInput(query); }, [query]);
+
+  useEffect(() => {
+    if (!tenant) return;
+    let cancelled = false;
+    void getWarehouseOverview(tenant)
+      .then((overview) => {
+        if (!cancelled) setCanControl(Boolean(overview.capabilities.control));
+      })
+      .catch(() => {
+        if (!cancelled) setCanControl(false);
+      });
+    return () => { cancelled = true; };
+  }, [tenant]);
 
   useEffect(() => {
     if (input === query) return;
@@ -170,7 +185,7 @@ export default function DocumentControlSearchPage() {
     title="Search company information"
     eyebrow="DISCOVERY"
     subtitle="Search authorized controlled documents, indexed content, retained records and physical-library materials from one permission-filtered surface."
-    canControl={Boolean(result?.capabilities.control)}
+    canControl={canControl || Boolean(result?.capabilities.control)}
   >
     <section className="dms-search" aria-busy={loading}>
       <label className="dms-search__box">
