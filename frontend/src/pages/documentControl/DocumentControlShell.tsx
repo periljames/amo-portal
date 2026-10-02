@@ -50,7 +50,7 @@ const READER_NAVIGATION: NavigationItem[] = [
   { id: "recent", label: "Recent", path: "/library?view=recently-opened", icon: Clock3 },
   { id: "libraries", label: "Libraries", path: "/library", icon: LibraryBig },
   { id: "external", label: "External Technical Data", path: "/library?view=external-technical-data", icon: Boxes },
-  { id: "physical", label: "Physical Library", path: "/library?library_services=catalog", icon: BookOpen },
+  { id: "physical", label: "Physical Library", path: "/physical-library", icon: BookOpen },
   { id: "records", label: "Records", path: "/reports/records", icon: Archive },
   { id: "archive", label: "Archive", path: "/library?view=archived", icon: Archive },
 ];
@@ -82,6 +82,7 @@ function activeNavigation(pathname: string, search: string): string {
   if (pathname.includes("/administration")) return "administration";
   if (pathname.includes("/reports/records")) return "records";
   if (pathname.includes("/reports")) return "reports";
+  if (pathname.includes("/physical-library")) return "physical";
   if (pathname.includes("/library")) {
     if (params.get("view") === "my-documents") return "my-documents";
     if (params.get("view") === "shared-with-me") return "shared-with-me";
@@ -124,7 +125,7 @@ export default function DocumentControlShell({
   const assistantParams = new URLSearchParams(location.search);
   const assistantQuery = assistantParams.get("assistant_query") || "";
   const assistantRequested = assistantParams.get("assistant") === "1";
-  const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
+  const showContextualAssistant = Boolean(tenant && (location.pathname.includes("/document-control/library") || location.pathname.includes("/document-control/search")));
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
     : null;
@@ -146,7 +147,7 @@ export default function DocumentControlShell({
     const query = searchText.trim();
     const next = new URLSearchParams();
     if (query) next.set("q", query);
-    navigate(`${basePath}/library${next.size ? `?${next.toString()}` : ""}`);
+    navigate(`${basePath}/search${next.size ? `?${next.toString()}` : ""}`);
   };
 
   const navigateItem = (item: NavigationItem) => {
