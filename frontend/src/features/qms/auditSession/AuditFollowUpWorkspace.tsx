@@ -7,7 +7,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
-import { apiRequest } from "../../../services/apiClient";
+import { apiRequest, qmsPath } from "../../../services/apiClient";
 import {
   getAuditClosureState,
   recordAuditFollowUpComplete,
@@ -42,9 +42,9 @@ type AuditCar = {
 
 type AuditCarRegister = { items: AuditCar[]; total: number; limit: number; offset: number };
 
-function listAuditCars(auditId: string, signal?: AbortSignal) {
+function listAuditCars(amoCode: string, auditId: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ audit_id: auditId, limit: "200", offset: "0" });
-  return apiRequest<AuditCarRegister>(`/quality/cars/register?${params.toString()}`, {
+  return apiRequest<AuditCarRegister>(qmsPath(amoCode, `/cars/register?${params.toString()}`), {
     timeoutMs: 15_000,
     cacheTtlMs: 2_000,
     signal,
@@ -80,7 +80,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const auditId = auditQuery.data?.id || "";
   const carsQuery = useQuery({
     queryKey: ["qms-audit-cars", amoCode, auditId],
-    queryFn: ({ signal }) => listAuditCars(auditId, signal),
+    queryFn: ({ signal }) => listAuditCars(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
