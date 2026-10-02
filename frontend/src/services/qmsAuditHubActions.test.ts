@@ -17,6 +17,7 @@ const {
 
 vi.mock("./auth", () => ({
   getToken: () => "quality-token",
+  getContext: () => ({ amoCode: "AMO-A", amoSlug: null, department: "quality" }),
   handleAuthFailure: authFailure,
 }));
 
