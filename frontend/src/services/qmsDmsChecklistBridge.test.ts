@@ -47,15 +47,19 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("registered as a DMS draft");
   });
 
-  it("fails closed when either live binding authority read cannot confirm persistence", () => {
+  it("uses the immutable checklist-binding endpoint as Prepare authority", () => {
     expect(prepareSource).toContain("const confirmChecklistBinding");
+    expect(prepareSource).toContain("const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);");
+    expect(prepareSource).toContain("const bindings = fullBindingsQuery.data?.items || [];");
     expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
-    expect(prepareSource).toContain("listChecklistBindings(amoCode, auditId)");
     expect(prepareSource).not.toContain("const cacheChecklistBinding");
-    expect(prepareSource).not.toContain("contextQuery.refetch()");
-    expect(prepareSource).not.toContain("fullBindingsQuery.refetch()");
     expect(prepareSource).not.toContain("refresh(binding)");
     expect(prepareSource).toContain('["qms", "prepare-checklist-bindings", amoCode, auditId]');
+    const confirmationStart = prepareSource.indexOf("const confirmChecklistBinding");
+    const confirmationEnd = prepareSource.indexOf("const createMutation", confirmationStart);
+    const confirmationSource = prepareSource.slice(confirmationStart, confirmationEnd);
+    expect(confirmationSource).not.toContain("contextQuery.refetch()");
+    expect(confirmationSource).not.toContain("fullBindingsQuery.refetch()");
     const confirmIndex = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);");
     const successIndex = prepareSource.indexOf('setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");');
     expect(confirmIndex).toBeGreaterThan(-1);
