@@ -854,6 +854,17 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </header>
 
                 {connectivity === "OFFLINE" ? <p className="qms-live-audit-focus__intelligence-note">Controlled-source search is unavailable offline. The frozen checklist, saved structured assessment and downloaded evidence remain available; reconnect before adding new documentary sources.</p> : null}
+                {evidenceCandidatesQuery.data?.applicability_context?.length ? (
+                  <div className="qms-live-audit-focus__scope-context" aria-label="Frozen audit applicability context">
+                    <strong>Audit scope context</strong>
+                    <div>{evidenceCandidatesQuery.data.applicability_context.map((fact) => (
+                      <span key={fact.id} title={fact.reason}>
+                        {statusLabel(fact.target_type)} · {fact.target_value || fact.target_id || "Governed target"}
+                      </span>
+                    ))}</div>
+                    <small>Frozen during Prepare and used only to evaluate governed applicability rules for this audit.</small>
+                  </div>
+                ) : null}
                 {evidenceCandidatesQuery.isLoading ? <p className="qms-live-audit-focus__intelligence-note">Searching current-approved controlled sources…</p> : null}
                 {evidenceCandidatesQuery.isError ? <p className="qms-live-audit-focus__intelligence-warning">Controlled-source retrieval could not be verified. Do not infer documentary compliance from the search failure.</p> : null}
 
@@ -870,6 +881,17 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                           : null,
                         applicability_basis: evidenceCandidatesQuery.data!.applicability_recommendation.basis,
                       })}>Use governed basis</button> : null}
+                    </article>
+                    <article data-status={evidenceCandidatesQuery.data.documentary_recommendation}>
+                      <span>Documentary recommendation</span>
+                      <strong>{statusLabel(evidenceCandidatesQuery.data.documentary_recommendation)}</strong>
+                      <p>This recommendation describes the controlled documentary basis only. It does not decide implementation, field verification or the final audit response.</p>
+                      {canExecute ? <button type="button" onClick={() => updateAssessmentDraft({
+                        documentary_status: evidenceCandidatesQuery.data!.documentary_recommendation,
+                        conflicts: evidenceCandidatesQuery.data!.documentary_recommendation === "CONFLICT"
+                          ? evidenceCandidatesQuery.data!.conflicts
+                          : assessment.conflicts,
+                      })}>Use documentary recommendation</button> : null}
                     </article>
                     <article data-status={evidenceCandidatesQuery.data.conflicts.length ? "CONFLICT" : "UNVERIFIED"}>
                       <span>Document conflict check</span>
