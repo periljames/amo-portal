@@ -43,19 +43,32 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("allowApprovedIntake");
     expect(prepareSource).toContain("result.approved_intake === true");
     expect(prepareSource).toContain("await bindCurrentDmsChecklist");
-    expect(prepareSource).toContain("await refresh(binding)");
+    expect(prepareSource).toContain("const confirmed = await confirmChecklistBinding(binding);");
     expect(prepareSource).toContain("registered as a DMS draft");
   });
 
-  it("confirms the persisted fieldwork binding before announcing Prepare success", () => {
+  it("fails closed when either live binding authority read cannot confirm persistence", () => {
     expect(prepareSource).toContain("const confirmChecklistBinding");
-    expect(prepareSource).toContain("contextQuery.refetch()");
-    expect(prepareSource).toContain("fullBindingsQuery.refetch()");
+    expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
+    expect(prepareSource).toContain("listChecklistBindings(amoCode, auditId)");
+    expect(prepareSource).not.toContain("const cacheChecklistBinding");
+    expect(prepareSource).not.toContain("contextQuery.refetch()");
+    expect(prepareSource).not.toContain("fullBindingsQuery.refetch()");
+    expect(prepareSource).not.toContain("refresh(binding)");
     expect(prepareSource).toContain('["qms", "prepare-checklist-bindings", amoCode, auditId]');
     const confirmIndex = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);");
     const successIndex = prepareSource.indexOf('setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");');
     expect(confirmIndex).toBeGreaterThan(-1);
     expect(successIndex).toBeGreaterThan(confirmIndex);
+  });
+
+  it("uses the same live confirmation after approved DMS intake", () => {
+    const approvedIntake = prepareSource.indexOf("if (result.approved_intake === true)");
+    const confirmation = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);", approvedIntake);
+    const success = prepareSource.indexOf("The approved checklist is now current in DMS and populated for this audit.", approvedIntake);
+    expect(approvedIntake).toBeGreaterThan(-1);
+    expect(confirmation).toBeGreaterThan(approvedIntake);
+    expect(success).toBeGreaterThan(confirmation);
   });
   it("does not synchronously set guard state from query-cache render notifications", () => {
     expect(enhancementsSource).not.toContain("getQueryCache().subscribe");
