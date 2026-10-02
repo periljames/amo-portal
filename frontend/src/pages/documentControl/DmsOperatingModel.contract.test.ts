@@ -7,6 +7,9 @@ const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.u
 const homePage = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
 const libraryDetails = readFileSync(new URL("./DocumentLibraryDetailsPane.tsx", import.meta.url), "utf-8");
+const searchPage = readFileSync(new URL("./DocumentControlSearchPage.tsx", import.meta.url), "utf-8");
+const physicalLibraryPage = readFileSync(new URL("./DocumentPhysicalLibraryPage.tsx", import.meta.url), "utf-8");
+const libraryOperations = readFileSync(new URL("./LibraryOperationsPanel.tsx", import.meta.url), "utf-8");
 const structurePage = readFileSync(new URL("./DocumentControlStructurePage.tsx", import.meta.url), "utf-8");
 const recordDetailPage = readFileSync(new URL("./DocumentControlGeneratedRecordPage.tsx", import.meta.url), "utf-8");
 const documentationService = readFileSync(new URL("../../services/documentation.ts", import.meta.url), "utf-8");
@@ -41,7 +44,7 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).toContain("canControl ? <>");
     expect(shell).toContain('role="search"');
     expect(shell).toContain('placeholder="Search documents, records, codes, owners or indexed text"');
-    expect(shell).toContain('className="dc-workspace__sidebar');
+    expect(shell).toContain('className={`dc-workspace__sidebar');
     expect(shell).not.toContain('label: "Structure"');
     expect(shell).toContain('{ id: "records", label: "Records", path: "/reports/records", icon: Archive }');
     expect(shell).toContain('if (pathname.includes("/reports/records")) return "records";');
@@ -55,10 +58,35 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain('label: "Assistant"');
   });
 
+  it("routes persistent shell search into a permission-filtered DMS search surface", () => {
+    expect(shell).toContain('navigate(`${basePath}/search');
+    expect(searchPage).toContain("searchTenantWarehouse");
+    expect(searchPage).toContain('type WarehouseSearchScope');
+    expect(searchPage).toContain("controlled_documents");
+    expect(searchPage).toContain("retained_records");
+    expect(searchPage).toContain("library_items");
+    expect(searchPage).toContain("governed_resources");
+    expect(searchPage).toContain("Restricted content is not disclosed through result counts or suggestions.");
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/search"');
+  });
+
+  it("makes the physical library a routed surface while reusing its custody engine", () => {
+    expect(shell).toContain('path: "/physical-library"');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/physical-library"');
+    expect(physicalLibraryPage).toContain("LibraryOperationsPanel");
+    expect(physicalLibraryPage).toContain("standalone");
+    expect(libraryOperations).toContain("MARCXML");
+    expect(libraryOperations).toContain("scanLibraryHolding");
+    expect(libraryOperations).toContain("createLibraryInventorySession");
+    expect(libraryOperations).toContain("library-ops--page");
+  });
+
   it("exposes the canonical Document Control workspaces and linked retained-record detail", () => {
     for (const route of [
       "/maintenance/:amoCode/document-control",
       "/maintenance/:amoCode/document-control/library",
+      "/maintenance/:amoCode/document-control/search",
+      "/maintenance/:amoCode/document-control/physical-library",
       "/maintenance/:amoCode/document-control/structure",
       "/maintenance/:amoCode/document-control/structure/records/:recordId",
       "/maintenance/:amoCode/document-control/changes",
