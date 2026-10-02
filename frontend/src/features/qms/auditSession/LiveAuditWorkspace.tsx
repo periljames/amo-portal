@@ -888,9 +888,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       <p>This recommendation describes the controlled documentary basis only. It does not decide implementation, field verification or the final audit response.</p>
                       {canExecute ? <button type="button" onClick={() => updateAssessmentDraft({
                         documentary_status: evidenceCandidatesQuery.data!.documentary_recommendation,
-                        conflicts: evidenceCandidatesQuery.data!.documentary_recommendation === "CONFLICT"
-                          ? evidenceCandidatesQuery.data!.conflicts
-                          : assessment.conflicts,
+                        conflicts: evidenceCandidatesQuery.data!.conflicts,
                       })}>Use documentary recommendation</button> : null}
                     </article>
                     <article data-status={evidenceCandidatesQuery.data.conflicts.length ? "CONFLICT" : "UNVERIFIED"}>
