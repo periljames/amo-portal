@@ -772,3 +772,38 @@
     text-align: left;
   }
 }
+
+
+.qms-live-audit-focus__evidence li.is-assessment-evidence {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 50%, var(--qms-line));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--qms-panel));
+}
+
+.qms-live-audit-focus__evidence-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.qms-live-audit-focus__evidence-actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--qms-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qms-live-audit-focus__evidence-actions label:has(input:checked) {
+  color: var(--qms-text);
+}
+
+@media (max-width: 720px) {
+  .qms-live-audit-focus__evidence-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
