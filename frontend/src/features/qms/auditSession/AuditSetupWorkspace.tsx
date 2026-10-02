@@ -1453,6 +1453,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label id="audit-setup-field-auditee" className={guidedClass("auditee")}>
                 <span>Auditee</span>
                 <input
+                  aria-label="Auditee"
                   disabled={!canManage}
                   value={draft.auditee}
                   onChange={(event) => { clearGuidance("auditee"); setDraft({ ...draft, auditee: event.target.value }); }}
@@ -1462,6 +1463,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label>
                 <span>Auditee email</span>
                 <input
+                  aria-label="Auditee email"
                   type="email"
                   disabled={!canManage}
                   value={draft.auditeeEmail}
