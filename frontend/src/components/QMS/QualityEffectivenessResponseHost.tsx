@@ -92,6 +92,7 @@ const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => 
       queryClient.invalidateQueries({ queryKey: ["qms-effectiveness-responses", resolvedAmo, selectedCaseId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-assurance"] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-closure-state"] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-car-control-loop"] }),
     ]);
   };
 
@@ -130,7 +131,13 @@ const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => 
     mutationFn: ({ responseId, decision }: { responseId: string; decision: "COMPLETE" | "CANCEL" }) => decideEffectivenessResponse(resolvedAmo, selectedCaseId, responseId, decision, decisionReason),
     onSuccess: async (row) => {
       setError("");
-      setSuccess(`${row.action_type} marked ${row.status}.`);
+      if (row.action_type === "REOPEN_CAR" && row.consequence) {
+        setSuccess(
+          `CAR ${row.consequence.car_number || row.consequence.car_id} reopened ${row.consequence.prior_status ? `from ${row.consequence.prior_status} ` : ""}to ${row.consequence.status}; CAPA is ${row.consequence.capa_status || "active"} and requires fresh effectiveness evidence.`,
+        );
+      } else {
+        setSuccess(`${row.action_type} marked ${row.status}.`);
+      }
       await refresh();
     },
     onError: (cause) => setError(errorMessage(cause)),
