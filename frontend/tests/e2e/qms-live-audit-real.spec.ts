@@ -208,8 +208,8 @@ test("two authenticated Quality browsers receive the same committed live-audit c
       pageB.goto(livePath, { waitUntil: "domcontentloaded" }),
     ]);
 
-    await expect(pageA.getByText("Concurrent realtime browser acceptance")).toBeVisible({ timeout: 30_000 });
-    await expect(pageB.getByText("Concurrent realtime browser acceptance")).toBeVisible({ timeout: 30_000 });
+    await expect(pageA.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
+    await expect(pageB.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
     await expect(pageA.getByText("Verify concurrent authenticated browsers receive committed fieldwork updates without manual refresh.")).toBeVisible();
     await expect(pageB.getByText("Verify concurrent authenticated browsers receive committed fieldwork updates without manual refresh.")).toBeVisible();
 
