@@ -121,7 +121,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
     await expect(internalPage.getByRole("status")).toContainText("Staged CAR control initialized", { timeout: 30_000 });
 
-    const rejected = await authenticatedPost(internalPage, `/quality/cars/${data.car_loop_id}/review`, {
+    const rejected = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
       root_cause_status: "REJECTED",
       root_cause_review_note: "Return for rework: identify the missing management-control checkpoint and accountable evidence owner.",
       capa_status: "REJECTED",
@@ -175,7 +175,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       await expect(internalPage.getByRole("status")).toContainText(`${stage} updated`, { timeout: 30_000 });
     }
 
-    const accepted = await authenticatedPost(internalPage, `/quality/cars/${data.car_loop_id}/review`, {
+    const accepted = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
       root_cause_status: "ACCEPTED",
       root_cause_review_note: "RCA accepted after rework identified the management-control and evidence-ownership root cause.",
       capa_status: "ACCEPTED",
