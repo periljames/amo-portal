@@ -222,7 +222,8 @@ def _apply_execution_update(
         if payload.response_value is not None:
             governance.response_value = payload.response_value
         governance.auditor_notes = payload.auditor_notes.strip() if payload.auditor_notes else None
-        governance.sampled_item_information = payload.sampled_item_information.strip() if payload.sampled_item_information else None
+        if payload.sampled_item_information is not None:
+            governance.sampled_item_information = payload.sampled_item_information.strip() or None
         governance.applicability = str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or governance.applicability or "APPLICABLE")[:128]
         governance.evidence_references = list(payload.evidence_references)
         governance.entity_version = int(governance.entity_version or 1) + 1
@@ -713,6 +714,7 @@ def mutate_live_fieldwork(
         canonical_response_status=payload.canonical_response_status,
         response_value=response_value,
         auditor_notes=payload.auditor_notes,
+        sampled_item_information=payload.sampled_item_information,
         evidence_references=payload.evidence_references,
         reason=payload.reason,
     )
@@ -863,7 +865,6 @@ def create_atomic_fieldwork_finding(
             item_id=item_id,
             canonical_status=payload.canonical_response_status,
             auditor_notes=payload.auditor_notes,
-            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
         )
         response_value = _validated_response_value(
