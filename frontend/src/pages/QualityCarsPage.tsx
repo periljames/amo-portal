@@ -360,6 +360,7 @@ const QualityCarsPage: React.FC = () => {
       currentPage,
     ],
     queryFn: ({ signal }) => qmsGetCarRegisterPage({
+      amoCode: amoSlug,
       view: actorView,
       program: directCarId ? undefined : programFilter,
       status: exactStatus,
