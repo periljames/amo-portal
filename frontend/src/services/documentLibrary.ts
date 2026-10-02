@@ -268,6 +268,45 @@ export function discoverLibrary(tenant: string, filters: { view?: LibraryDiscove
   })}`);
 }
 
+export type LibrarySavedPresentation = "list" | "compact" | "cards" | "register";
+
+export type SharedLibraryView = {
+  id: string;
+  name: string;
+  params: Record<string, string>;
+  presentation: LibrarySavedPresentation;
+  is_default: boolean;
+  created_at?: string | null;
+};
+
+export type SharedLibraryViewsResponse = {
+  items: SharedLibraryView[];
+  capabilities: { publish: boolean };
+};
+
+export function listSharedLibraryViews(tenant: string): Promise<SharedLibraryViewsResponse> {
+  return api(workspacePath(tenant, "/library-views"));
+}
+
+export function publishSharedLibraryView(
+  tenant: string,
+  payload: {
+    name: string;
+    params: Record<string, string>;
+    presentation: LibrarySavedPresentation;
+    is_default?: boolean;
+  },
+): Promise<SharedLibraryView> {
+  return api(workspacePath(tenant, "/library-views"), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSharedLibraryView(tenant: string, viewId: string): Promise<{ id: string; deleted: boolean }> {
+  return api(workspacePath(tenant, `/library-views/${encodeURIComponent(viewId)}`), { method: "DELETE" });
+}
+
 export function listPhysicalCopies(
   tenant: string,
   filters: { q?: string; status?: string; custody?: string; overdue?: boolean; page?: number; perPage?: number } = {},
