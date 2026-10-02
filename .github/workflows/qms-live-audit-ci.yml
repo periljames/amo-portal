@@ -21,6 +21,8 @@ on:
       - "backend/amodb/apps/quality/audit_archive_*.py"
       - "backend/amodb/apps/quality/audit_official_finding_service.py"
       - "backend/amodb/apps/quality/audit_checklist_execution_*.py"
+      - "backend/amodb/apps/quality/compliance_intelligence_service.py"
+      - "backend/amodb/alembic/versions/quality_2026100*.py"
       - "backend/amodb/apps/quality/car_control_loop_route_order.py"
       - "backend/amodb/apps/quality/tests/test_audit_*.py"
       - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
@@ -125,6 +127,7 @@ jobs:
           amodb/apps/quality/audit_archive_governance_route_order.py
           amodb/apps/quality/audit_checklist_execution_models.py
           amodb/apps/quality/audit_checklist_execution_router.py
+          amodb/apps/quality/compliance_intelligence_service.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
       - name: Test external access token, scope, CSRF and issued-report receipt contract
@@ -135,6 +138,8 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
       - name: Test deterministic report composition helpers
         run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
+      - name: Test compliance intelligence, applicability, conflict and effectiveness controls
+        run: pytest -q amodb/apps/quality/tests/test_compliance_intelligence_contract.py amodb/apps/quality/tests/test_audit_workflow_enforcement.py
       - name: Test idempotent fieldwork sync contract
         run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
       - name: Test realtime reconnect and tenant replay contract
@@ -247,8 +252,13 @@ jobs:
           src/services/qmsChecklistExecutionGovernance.ts
           src/components/QMS/QualityEnhancementsHost.tsx
           src/components/QMS/QualityDataFreshnessCoordinator.tsx
-      - name: Test route and realtime compatibility
-        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts src/services/qmsAuditRealtime.test.ts
+      - name: Test route, realtime and compliance-intelligence compatibility
+        run: >-
+          npx vitest run
+          src/features/qms/auditSession/auditSessionRoutes.test.ts
+          src/features/qms/auditSession/qmsComplianceIntelligence.contract.test.ts
+          src/services/qmsAuditRealtime.test.ts
+          src/services/qmsAuditOfflinePack.test.ts
       - name: Production frontend build
         run: npm run build
       - name: Start production preview
@@ -268,7 +278,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
+          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts tests/e2e/qms-audit-governed-lifecycle.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             summary=$(tail -n 100 /tmp/qms-live-audit-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
