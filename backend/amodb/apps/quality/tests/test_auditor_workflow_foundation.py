@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
+from amodb.apps.quality import audit_checklist_execution_router as checklist_execution_router
+from amodb.apps.quality import audit_evidence_router as audit_evidence_router
 from amodb.apps.quality.audit_checklist_response_policy import (
     normalise_response_options,
     resolve_response_value,
@@ -162,3 +166,30 @@ def test_evidence_upload_event_is_audit_scoped_for_realtime_recovery() -> None:
     assert event.action == "UPLOADED"
     assert event.metadata_json["auditId"] == str(artifact.audit_id)
     assert event.after["sha256"] == "a" * 64
+
+
+def test_fieldwork_sampled_item_information_is_propagated_and_not_cleared_when_omitted() -> None:
+    mutation_source = inspect.getsource(checklist_execution_router.mutate_live_fieldwork)
+    apply_source = inspect.getsource(checklist_execution_router._apply_execution_update)
+
+    assert "sampled_item_information=payload.sampled_item_information" in mutation_source
+    assert "if payload.sampled_item_information is not None:" in apply_source
+
+
+def test_atomic_finding_does_not_pass_an_unsupported_validator_argument() -> None:
+    source = inspect.getsource(checklist_execution_router.create_atomic_fieldwork_finding)
+    validation_start = source.index("_validate_frozen_item_requirements(")
+    validation_end = source.index("response_value =", validation_start)
+    validation_call = source[validation_start:validation_end]
+
+    assert "sampled_item_information=" not in validation_call
+    assert "sampled_item_information=payload.sampled_item_information" in source[validation_end:]
+
+
+def test_evidence_replay_returns_an_authoritative_committed_version() -> None:
+    internal_source = inspect.getsource(audit_evidence_router.upload_internal_audit_evidence)
+    external_source = inspect.getsource(audit_evidence_router.upload_external_auditor_evidence)
+
+    assert '"committed_version": _replay_committed_version(' in internal_source
+    assert '"committed_version": _replay_committed_version(' in external_source
+
