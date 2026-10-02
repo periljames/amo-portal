@@ -491,3 +491,284 @@
   margin: var(--space-3);
   color: var(--text-secondary);
 }
+
+.qms-live-audit-focus__compliance {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.qms-live-audit-focus__compliance > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.qms-live-audit-focus__compliance > header h3,
+.qms-live-audit-focus__compliance > header span,
+.qms-live-audit-focus__compliance > header small {
+  margin: 0;
+}
+
+.qms-live-audit-focus__compliance > header span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.qms-live-audit-focus__compliance > header h3 {
+  margin-top: var(--space-1);
+  color: var(--text-primary);
+  font-size: 0.96rem;
+}
+
+.qms-live-audit-focus__compliance > header small {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.qms-live-audit-focus__intelligence-note,
+.qms-live-audit-focus__intelligence-warning {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  line-height: 1.45;
+}
+
+.qms-live-audit-focus__intelligence-note {
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.qms-live-audit-focus__intelligence-warning {
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 40%, var(--surface-border));
+  background: color-mix(in srgb, var(--accent-warning) 8%, var(--surface));
+  color: var(--text-primary);
+}
+
+.qms-live-audit-focus__recommendations,
+.qms-live-audit-focus__assessment-grid,
+.qms-live-audit-focus__assessment-notes {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.qms-live-audit-focus__recommendations {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qms-live-audit-focus__recommendations article {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-live-audit-focus__recommendations article[data-status="CONFLICT"],
+.qms-live-audit-focus__recommendations article[data-status="NOT_APPLICABLE"] {
+  border-color: color-mix(in srgb, var(--accent-warning) 45%, var(--surface-border));
+}
+
+.qms-live-audit-focus__recommendations article span,
+.qms-live-audit-focus__recommendations article p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.qms-live-audit-focus__recommendations article strong {
+  color: var(--text-primary);
+}
+
+.qms-live-audit-focus__recommendations article button {
+  justify-self: start;
+  margin-top: var(--space-1);
+}
+
+.qms-live-audit-focus__assessment-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.qms-live-audit-focus__assessment-notes {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qms-live-audit-focus__assessment-grid label,
+.qms-live-audit-focus__assessment-notes label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qms-live-audit-focus__assessment-grid select,
+.qms-live-audit-focus__assessment-notes input,
+.qms-live-audit-focus__assessment-notes textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.62rem 0.68rem;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.qms-live-audit-focus__assessment-notes textarea {
+  resize: vertical;
+}
+
+.qms-live-audit-focus__assessment-notes .is-wide {
+  grid-column: 1 / -1;
+}
+
+.qms-live-audit-focus__na-basis,
+.qms-live-audit-focus__ai-analysis {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-live-audit-focus__na-basis p,
+.qms-live-audit-focus__na-basis small,
+.qms-live-audit-focus__ai-analysis p,
+.qms-live-audit-focus__ai-analysis small {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.qms-live-audit-focus__candidate-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.qms-live-audit-focus__candidate-list > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.qms-live-audit-focus__candidate-list > article {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-live-audit-focus__candidate-list > article.is-selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--surface-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+.qms-live-audit-focus__candidate-list article > label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.qms-live-audit-focus__candidate-list article > label > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.qms-live-audit-focus__candidate-list article strong,
+.qms-live-audit-focus__candidate-list article span,
+.qms-live-audit-focus__candidate-list article small,
+.qms-live-audit-focus__candidate-list article p {
+  overflow-wrap: anywhere;
+}
+
+.qms-live-audit-focus__candidate-list article span,
+.qms-live-audit-focus__candidate-list article small,
+.qms-live-audit-focus__candidate-list article p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.qms-live-audit-focus__candidate-list article footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.qms-live-audit-focus__candidate-list article footer a {
+  color: var(--accent-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.qms-live-audit-focus__document-conflicts {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 42%, var(--surface-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-warning) 6%, var(--surface));
+}
+
+.qms-live-audit-focus__document-conflicts pre {
+  max-height: 14rem;
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1120px) {
+  .qms-live-audit-focus__assessment-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .qms-live-audit-focus__recommendations,
+  .qms-live-audit-focus__assessment-grid,
+  .qms-live-audit-focus__assessment-notes {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-live-audit-focus__assessment-notes .is-wide {
+    grid-column: auto;
+  }
+
+  .qms-live-audit-focus__compliance > header,
+  .qms-live-audit-focus__candidate-list article footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qms-live-audit-focus__compliance > header small {
+    text-align: left;
+  }
+}

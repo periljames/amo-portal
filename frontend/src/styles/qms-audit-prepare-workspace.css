@@ -994,3 +994,106 @@
   margin: 0;
   color: var(--text-secondary);
 }
+
+.qms-audit-prepare__applicability-selected,
+.qms-audit-prepare__applicability-rules {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.qms-audit-prepare__applicability-selected {
+  margin-bottom: var(--space-3);
+}
+
+.qms-audit-prepare__applicability-selected article,
+.qms-audit-prepare__applicability-rules article {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.qms-audit-prepare__applicability-selected article > div,
+.qms-audit-prepare__applicability-rules article > div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.qms-audit-prepare__applicability-selected article span,
+.qms-audit-prepare__applicability-selected article small,
+.qms-audit-prepare__applicability-selected article p,
+.qms-audit-prepare__applicability-rules article span,
+.qms-audit-prepare__applicability-rules article small {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.qms-audit-prepare__applicability-rules article.is-selected {
+  border-color: color-mix(in srgb, var(--accent-success) 45%, var(--surface-border));
+  background: color-mix(in srgb, var(--accent-success) 5%, var(--surface));
+}
+
+.qms-audit-prepare__applicability-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.qms-audit-prepare__applicability-picker > label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.qms-audit-prepare__applicability-picker > label > input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.62rem 0.68rem;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.qms-audit-prepare__applicability-picker .is-wide {
+  grid-column: 1 / -1;
+}
+
+.qms-audit-prepare__applicability-rules {
+  max-height: 26rem;
+  overflow: auto;
+  padding-right: var(--space-1);
+}
+
+.qms-audit-prepare__applicability-rules article button,
+.qms-audit-prepare__applicability-selected article button {
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .qms-audit-prepare__applicability-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-audit-prepare__applicability-picker .is-wide {
+    grid-column: auto;
+  }
+
+  .qms-audit-prepare__applicability-selected article,
+  .qms-audit-prepare__applicability-rules article {
+    flex-direction: column;
+  }
+}

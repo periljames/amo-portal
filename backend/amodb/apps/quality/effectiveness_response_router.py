@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
@@ -7,8 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session, selectinload
 
+from amodb.apps.tasks import services as task_services
 from amodb.database import get_read_db, get_write_db
 
+from . import models
 from .assurance_case_models import QualityAssuranceCase, QualityEffectivenessPlan
 from .audit_source_link_models import QualityAuditSourceLink
 from .effectiveness_response_models import QualityEffectivenessResponseAction, QualityEffectivenessResponseEvent
@@ -245,6 +248,114 @@ def create_effectiveness_response(
     return result
 
 
+def _reopen_car_for_ineffective_action(
+    db: Session,
+    *,
+    ctx: TenantContext,
+    row: QualityEffectivenessResponseAction,
+    reason: str,
+) -> dict[str, Any]:
+    if str(row.target_source_type or "").upper() != "CAR" or not row.target_source_id:
+        raise HTTPException(status_code=422, detail="The effectiveness response has no authoritative CAR target.")
+    try:
+        car_id = uuid.UUID(str(row.target_source_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="The effectiveness response CAR target is invalid.") from exc
+
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(
+            models.CorrectiveActionRequest.amo_id == ctx.amo_id,
+            models.CorrectiveActionRequest.id == car_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if car is None:
+        raise HTTPException(status_code=404, detail="The CAR selected for reopening was not found in this tenant.")
+    if car.status == models.CARStatus.CANCELLED:
+        raise HTTPException(status_code=409, detail="A cancelled CAR cannot be reopened through effectiveness review.")
+
+    prior_status = str(getattr(car.status, "value", car.status))
+    car.status = models.CARStatus.IN_PROGRESS
+    car.closed_at = None
+    car.evidence_verified_at = None
+    car.capa_status = "NEEDS_EVIDENCE"
+    note = (
+        f"Effectiveness review reopened this CAR: {reason.strip()}"
+    )
+    car.capa_review_note = (
+        f"{car.capa_review_note.strip()}\n\n{note}"
+        if car.capa_review_note and car.capa_review_note.strip()
+        else note
+    )
+
+    if car.finding_id:
+        finding = (
+            db.query(models.QMSAuditFinding)
+            .filter(
+                models.QMSAuditFinding.amo_id == ctx.amo_id,
+                models.QMSAuditFinding.id == car.finding_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if finding is not None:
+            finding.closed_at = None
+            finding.verified_at = None
+            finding.verified_by_user_id = None
+
+        cap = (
+            db.query(models.QMSCorrectiveAction)
+            .filter(
+                models.QMSCorrectiveAction.amo_id == ctx.amo_id,
+                models.QMSCorrectiveAction.finding_id == car.finding_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if cap is not None:
+            cap.status = models.QMSCAPStatus.IN_PROGRESS
+            cap.verified_at = None
+            cap.verified_by_user_id = None
+            cap.updated_by_user_id = ctx.user_id
+
+    db.add(models.CARActionLog(
+        car_id=car.id,
+        action_type=models.CARActionType.STATUS_CHANGE,
+        message=f"CAR reopened after ineffective corrective-action effectiveness review. {reason.strip()}",
+        actor_user_id=ctx.user_id,
+    ))
+    due_at = (
+        datetime.combine(car.target_closure_date or car.due_date, datetime.min.time(), tzinfo=timezone.utc)
+        if (car.target_closure_date or car.due_date)
+        else None
+    )
+    task_services.create_task(
+        db,
+        amo_id=ctx.amo_id,
+        title=f"Rework reopened CAR {car.car_number}",
+        description="The prior corrective action did not demonstrate effective resolution. Record additional action and fresh implementation evidence before another effectiveness review.",
+        owner_user_id=car.assigned_to_user_id,
+        due_at=due_at,
+        entity_type="quality_car",
+        entity_id=str(car.id),
+        priority=1 if car.priority == models.CARPriority.CRITICAL else 2,
+        metadata={
+            "source": "INEFFECTIVE_EFFECTIVENESS_REVIEW",
+            "response_action_id": str(row.id),
+            "prior_status": prior_status,
+        },
+    )
+    return {
+        "car_id": str(car.id),
+        "car_number": car.car_number,
+        "prior_status": prior_status,
+        "status": car.status.value,
+        "capa_status": car.capa_status,
+    }
+
+
 @router.post("/assurance-cases/{case_id}/effectiveness-responses/{response_id}/decision")
 def decide_effectiveness_response(
     case_id: str,
@@ -268,12 +379,26 @@ def decide_effectiveness_response(
     plan = db.query(QualityEffectivenessPlan).filter(QualityEffectivenessPlan.amo_id == ctx.amo_id, QualityEffectivenessPlan.id == row.effectiveness_plan_id).first()
     if case is None or plan is None:
         raise HTTPException(status_code=409, detail="Effectiveness response lineage is incomplete.")
+    consequence: dict[str, Any] | None = None
+    if payload.decision == "COMPLETE" and row.action_type == "REOPEN_CAR":
+        consequence = _reopen_car_for_ineffective_action(
+            db,
+            ctx=ctx,
+            row=row,
+            reason=payload.reason,
+        )
+
     row.status = "COMPLETED" if payload.decision == "COMPLETE" else "CANCELLED"
     row.completed_by_user_id = ctx.user_id
     row.completed_at = _utcnow()
     row.completion_reason = payload.reason.strip()
     snapshot = _snapshot(case, plan, row)
+    if consequence is not None:
+        snapshot["consequence"] = consequence
     _add_event(db, ctx=ctx, row=row, event_type=row.status, reason=payload.reason, snapshot=snapshot)
     db.commit()
     db.refresh(row)
-    return _action_dict(row)
+    result = _action_dict(row)
+    if consequence is not None:
+        result["consequence"] = consequence
+    return result

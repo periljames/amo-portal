@@ -67,6 +67,16 @@ class ChecklistTemplateItem(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     expected_evidence: str | None = Field(default=None, max_length=4000)
     guidance: str | None = Field(default=None, max_length=4000)
+    evidence_context: Literal[
+        "GENERAL",
+        "CAPABILITY_SCOPE",
+        "PERSONNEL_AUTHORIZATION",
+        "CONTRACT_SCOPE",
+        "TECHNICAL_DATA",
+        "RECORD_RETENTION",
+        "TOOLING_CALIBRATION",
+        "FACILITY",
+    ] = "GENERAL"
     audit_method: Literal["RECORD_REVIEW", "INTERVIEW", "OBSERVATION", "SAMPLE", "TEST"] | None = None
     sampling_requirement: str | None = Field(default=None, max_length=2000)
     evidence_types: list[str] = Field(default_factory=list, max_length=12)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import uuid
 from dataclasses import dataclass
@@ -226,10 +227,12 @@ def _metadata_results(context: SearchContext, query: str) -> list[dict[str, Any]
                     "page_number": None,
                     "snippet": f"{manual.manual_type.replace('_', ' ').title()} · Revision {revision.rev_number} · {_status_value(revision).title()}",
                     "score": score,
+                    "lexical_score": score,
                     "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=None, anchor=None),
                     "source_type": _source_type(revision),
                     "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
                     "reason": "Exact document code" if exact_code else "Document title, type, or alias match",
+                    "retrieval_channels": ["METADATA"],
                 }
             )
     return results
@@ -312,13 +315,196 @@ def _content_results(db: Session, context: SearchContext, query: str, limit: int
                 "page_number": page,
                 "snippet": _snippet(text or section.heading, query),
                 "score": float(raw_rank or 0.0) * 100 + (45 if exact else 0) + token_hits * 4,
+                "lexical_score": float(raw_rank or 0.0) * 100 + (45 if exact else 0) + token_hits * 4,
                 "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=page, anchor=section.anchor_slug),
                 "source_type": _source_type(revision),
                 "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
                 "reason": "Exact phrase in controlled content" if exact else "Controlled-content keyword match",
+                "retrieval_channels": ["LEXICAL"],
             }
         )
     return output
+
+
+def _cosine_similarity(left: list[float] | tuple[float, ...], right: list[float] | tuple[float, ...]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    numerator = sum(float(a) * float(b) for a, b in zip(left, right, strict=True))
+    left_norm = math.sqrt(sum(float(value) * float(value) for value in left))
+    right_norm = math.sqrt(sum(float(value) * float(value) for value in right))
+    if left_norm <= 0.0 or right_norm <= 0.0:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def _semantic_results(
+    db: Session,
+    context: SearchContext,
+    query: str,
+    limit: int,
+    *,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    revision_ids = list(context.revisions)
+    if not revision_ids:
+        return []
+    try:
+        settings = get_effective_settings(db, tenant_id=str(context.tenant.amo_id))
+    except (ValueError, AIServiceError):
+        return []
+    if (
+        not settings.enabled
+        or "DOCUMENT_INTELLIGENCE" not in settings.enabled_features
+        or not settings.allow_external_document_context
+    ):
+        return []
+
+    rows = (
+        db.query(
+            km.DocumentationSectionEmbedding,
+            manual_models.Manual,
+            manual_models.ManualRevision,
+            manual_models.ManualSection,
+        )
+        .join(manual_models.ManualSection, manual_models.ManualSection.id == km.DocumentationSectionEmbedding.section_id)
+        .join(manual_models.ManualRevision, manual_models.ManualRevision.id == km.DocumentationSectionEmbedding.revision_id)
+        .join(manual_models.Manual, manual_models.Manual.id == km.DocumentationSectionEmbedding.manual_id)
+        .filter(
+            km.DocumentationSectionEmbedding.tenant_id == str(context.tenant.amo_id),
+            km.DocumentationSectionEmbedding.revision_id.in_(revision_ids),
+            km.DocumentationSectionEmbedding.embedding_model == settings.embedding_model,
+        )
+        .limit(5000)
+        .all()
+    )
+    if not rows:
+        return []
+
+    try:
+        result = AIService().embed(
+            db,
+            context=AIRequestContext(
+                tenant_id=str(context.tenant.amo_id),
+                user_id=str(user_id),
+                document_context={},
+                workflow_context={"workflow_type": "DMS_SEMANTIC_SEARCH", "workflow_id": _query_hash(query)},
+            ),
+            request_id=f"dms-search-embedding:{uuid.uuid4()}",
+            feature="DOCUMENT_INTELLIGENCE",
+            input_texts=(query,),
+            model=settings.embedding_model,
+        )
+    except AIServiceError:
+        return []
+    if not result.embeddings or not result.embeddings[0]:
+        return []
+    query_vector = result.embeddings[0]
+
+    ranked: list[tuple[float, Any, Any, Any, Any]] = []
+    for embedding, manual, revision, section in rows:
+        similarity = _cosine_similarity(query_vector, tuple(float(value) for value in (embedding.vector_json or [])))
+        if similarity <= 0:
+            continue
+        ranked.append((similarity, embedding, manual, revision, section))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    selected = ranked[: max(40, limit * 8)]
+    section_ids = [str(section.id) for _similarity, _embedding, _manual, _revision, section in selected]
+    first_block_by_section: dict[str, manual_models.ManualBlock] = {}
+    if section_ids:
+        blocks = (
+            db.query(manual_models.ManualBlock)
+            .filter(manual_models.ManualBlock.section_id.in_(section_ids))
+            .order_by(
+                manual_models.ManualBlock.section_id.asc(),
+                manual_models.ManualBlock.order_index.asc(),
+            )
+            .all()
+        )
+        for block in blocks:
+            first_block_by_section.setdefault(str(block.section_id), block)
+
+    output: list[dict[str, Any]] = []
+    for similarity, _embedding, manual, revision, section in selected:
+        node = context.nodes.get(manual.id)
+        metadata = dict(section.metadata_json or {})
+        page = int(metadata.get("page_start") or 0) or None
+        block = first_block_by_section.get(str(section.id))
+        text_value = str(getattr(block, "text_plain", "") or "")
+        output.append(
+            {
+                "id": f"section:{revision.id}:{section.id}",
+                "kind": "SECTION",
+                "manual_id": manual.id,
+                "revision_id": revision.id,
+                "code": manual.code,
+                "title": manual.title,
+                "node_type": node.node_type if node else "MANUAL",
+                "hierarchy_path": node.path if node else None,
+                "heading": section.heading,
+                "section_id": section.id,
+                "anchor": section.anchor_slug,
+                "page_number": page,
+                "snippet": _snippet(text_value or section.heading, query),
+                "score": max(0.0, min(1.0, similarity)) * 65.0,
+                "semantic_similarity": round(float(similarity), 6),
+                "reader_url": _reader_url(context.tenant, manual.id, revision.id, page=page, anchor=section.anchor_slug),
+                "source_type": _source_type(revision),
+                "executable": bool(node and node.node_type in _EXECUTABLE_TYPES),
+                "reason": "Semantic match in controlled current-approved section",
+                "retrieval_channels": ["SEMANTIC"],
+            }
+        )
+    return output
+
+
+def _hybrid_merge(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str | None, int | None], dict[str, Any]] = {}
+    channels: dict[tuple[str, str | None, int | None], set[str]] = {}
+    for item in items:
+        key = (str(item["revision_id"]), item.get("section_id"), item.get("page_number"))
+        item_channels = set(str(value) for value in item.get("retrieval_channels") or [])
+        if not item_channels:
+            item_channels = {"LEXICAL" if item.get("kind") == "SECTION" else "METADATA"}
+        if key not in grouped:
+            grouped[key] = dict(item)
+            channels[key] = item_channels
+            continue
+        current = grouped[key]
+        channels[key].update(item_channels)
+        lexical_score = max(
+            float(current.get("lexical_score") or 0),
+            float(item.get("lexical_score") or 0),
+        )
+        semantic_score = max(
+            float(current.get("semantic_similarity") or 0),
+            float(item.get("semantic_similarity") or 0),
+        )
+        if float(item.get("score") or 0) > float(current.get("score") or 0):
+            preserved = dict(current)
+            current = dict(item)
+            for field in ("snippet", "reader_url", "heading", "page_number"):
+                if not current.get(field) and preserved.get(field):
+                    current[field] = preserved[field]
+            grouped[key] = current
+        current["lexical_score"] = lexical_score
+        current["semantic_similarity"] = semantic_score or current.get("semantic_similarity")
+
+    merged: list[dict[str, Any]] = []
+    for key, item in grouped.items():
+        item_channels = channels[key]
+        base = float(item.get("lexical_score") or item.get("score") or 0)
+        semantic = float(item.get("semantic_similarity") or 0)
+        if "SEMANTIC" in item_channels and ("LEXICAL" in item_channels or "METADATA" in item_channels):
+            base += max(0.0, min(1.0, semantic)) * 35.0
+        elif "SEMANTIC" in item_channels:
+            base = max(base, max(0.0, min(1.0, semantic)) * 65.0)
+        item["score"] = base
+        item["retrieval_channels"] = sorted(item_channels)
+        if len(item_channels) > 1:
+            item["reason"] = "Hybrid controlled-source match (" + " + ".join(sorted(item_channels)).lower() + ")"
+        merged.append(item)
+    return _deduplicate(merged, limit)
 
 
 def _apply_context_boost(items: list[dict[str, Any]], payload: DocumentationAssistRequest) -> None:
@@ -346,6 +532,42 @@ def _deduplicate(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]
         if len(result) >= limit:
             break
     return result
+
+
+def search_authorised_controlled_sources(
+    db: Session,
+    *,
+    tenant: manual_models.Tenant,
+    user: account_models.User,
+    query: str,
+    limit: int = 10,
+    manual_id: str | None = None,
+    revision_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return permission-filtered current-approved document candidates without AI synthesis."""
+    clean_query = re.sub(r"\s+", " ", str(query or "")).strip()
+    if len(clean_query) < 2:
+        return []
+    bounded_limit = max(1, min(int(limit or 10), 20))
+    context = _search_context(
+        db,
+        tenant=tenant,
+        user=user,
+        requested_manual_id=manual_id,
+        requested_revision_id=revision_id,
+    )
+    candidates = _metadata_results(context, clean_query)
+    candidates.extend(_content_results(db, context, clean_query, bounded_limit))
+    candidates.extend(
+        _semantic_results(
+            db,
+            context,
+            clean_query,
+            bounded_limit,
+            user_id=str(user.id),
+        )
+    )
+    return _hybrid_merge(candidates, bounded_limit)
 
 
 def _deterministic_answer(query: str, sources: list[dict[str, Any]], mode: str) -> str:

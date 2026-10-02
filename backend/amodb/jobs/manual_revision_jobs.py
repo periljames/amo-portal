@@ -1,6 +1,8 @@
 """Lease-owned processing for legacy Manual revision actions."""
 from __future__ import annotations
 
+import hashlib
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ from amodb.apps.platform import saas_models
 
 
 JOB_TYPES = {"MANUAL_REVISION_PROCESS", "MANUAL_REVISION_OCR"}
+_MIN_NATIVE_PAGE_CHARS = 24
 
 
 def _revision(db: Session, job: saas_models.SaaSJob) -> tuple[manual_models.Tenant, manual_models.Manual, manual_models.ManualRevision]:
@@ -53,6 +56,150 @@ def _audit(
     ))
 
 
+def _ocr_runtime_available() -> tuple[bool, str | None]:
+    """Check the optional OCR runtime once, only when a sparse page needs it."""
+    try:
+        import pytesseract  # type: ignore
+        from PIL import Image  # noqa: F401  # type: ignore
+
+        pytesseract.get_tesseract_version()
+        return True, None
+    except Exception as exc:
+        return False, f"OCR runtime unavailable: {exc}"
+
+
+def _ocr_page(page) -> tuple[str, str | None]:
+    """OCR one sparse PDF page after the optional runtime has been verified."""
+    try:
+        import fitz  # type: ignore
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        return str(pytesseract.image_to_string(image) or "").strip(), None
+    except Exception as exc:
+        return "", f"OCR page failed: {exc}"
+
+
+def _refresh_pdf_search_blocks(
+    db: Session,
+    *,
+    revision: manual_models.ManualRevision,
+) -> dict[str, Any]:
+    """Rebuild derived searchable PDF blocks using native text first and OCR only for sparse pages."""
+    source = Path(str(revision.source_storage_path or "")).resolve()
+    if not source.is_file():
+        raise ValueError("The immutable PDF source is unavailable")
+
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:
+        raise ValueError("PyMuPDF is required for PDF text extraction") from exc
+
+    page_text: dict[int, str] = {}
+    page_engine: dict[int, str] = {}
+    warnings: list[dict[str, Any]] = []
+    native_pages = 0
+    ocr_pages = 0
+    unsearchable_pages = 0
+    ocr_runtime_available: bool | None = None
+    ocr_runtime_warning: str | None = None
+
+    with fitz.open(source) as document:
+        revision.source_page_count = document.page_count
+        for page_index in range(document.page_count):
+            page_number = page_index + 1
+            page = document.load_page(page_index)
+            native = str(page.get_text("text") or "").strip()
+            selected = native
+            engine = "PYMUPDF_NATIVE"
+            if len(native) < _MIN_NATIVE_PAGE_CHARS:
+                if ocr_runtime_available is None:
+                    ocr_runtime_available, ocr_runtime_warning = _ocr_runtime_available()
+                    if ocr_runtime_warning:
+                        warnings.append({"page_number": page_number, "warning": ocr_runtime_warning[:500]})
+                ocr_text = ""
+                warning = None
+                if ocr_runtime_available:
+                    ocr_text, warning = _ocr_page(page)
+                    if warning:
+                        warnings.append({"page_number": page_number, "warning": warning[:500]})
+                if len(ocr_text) > len(native):
+                    selected = ocr_text
+                    engine = "PYTESSERACT_OCR"
+                    ocr_pages += 1
+                elif native:
+                    native_pages += 1
+                else:
+                    engine = "UNSEARCHABLE"
+                    unsearchable_pages += 1
+            else:
+                native_pages += 1
+            page_text[page_number] = selected
+            page_engine[page_number] = engine
+
+    sections = (
+        db.query(manual_models.ManualSection)
+        .filter(manual_models.ManualSection.revision_id == revision.id)
+        .order_by(manual_models.ManualSection.order_index.asc())
+        .all()
+    )
+    rebuilt_blocks = 0
+    for section in sections:
+        metadata = dict(section.metadata_json or {})
+        start = int(metadata.get("page_start") or 0)
+        end = int(metadata.get("page_end") or start or 0)
+        if start <= 0:
+            continue
+        end = max(start, end)
+        db.query(manual_models.ManualBlock).filter(
+            manual_models.ManualBlock.section_id == section.id,
+        ).delete(synchronize_session=False)
+        section_ocr_pages: list[int] = []
+        section_native_pages: list[int] = []
+        section_missing_pages: list[int] = []
+        for page_number in range(start, end + 1):
+            text = str(page_text.get(page_number) or "").strip()
+            engine = page_engine.get(page_number, "UNAVAILABLE")
+            if engine == "PYTESSERACT_OCR":
+                section_ocr_pages.append(page_number)
+            elif text:
+                section_native_pages.append(page_number)
+            else:
+                section_missing_pages.append(page_number)
+            digest = hashlib.sha256(
+                f"{revision.id}:{section.id}:{page_number}:{engine}:{text}".encode("utf-8")
+            ).hexdigest()
+            db.add(manual_models.ManualBlock(
+                section_id=section.id,
+                order_index=(page_number - start) + 1,
+                block_type="page-text" if text else "page-empty",
+                html_sanitized=f"<p>{escape(text)}</p>",
+                text_plain=text,
+                change_hash=digest,
+            ))
+            rebuilt_blocks += 1
+        metadata["text_extraction"] = {
+            "policy": "NATIVE_FIRST_PAGE_OCR_FALLBACK",
+            "native_pages": section_native_pages,
+            "ocr_pages": section_ocr_pages,
+            "unsearchable_pages": section_missing_pages,
+        }
+        section.metadata_json = metadata
+
+    db.add(revision)
+    db.flush()
+    return {
+        "policy": "NATIVE_FIRST_PAGE_OCR_FALLBACK",
+        "native_pages": native_pages,
+        "ocr_pages": ocr_pages,
+        "unsearchable_pages": unsearchable_pages,
+        "rebuilt_blocks": rebuilt_blocks,
+        "warnings": warnings[:50],
+    }
+
+
 def _process_revision(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
     tenant, manual, revision = _revision(db, job)
     source_type = str(getattr(revision.source_type_enum, "value", revision.source_type_enum or "")).upper()
@@ -70,6 +217,7 @@ def _process_revision(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
             "has_javascript": inspection.has_javascript,
             "can_flatten": inspection.can_flatten,
         }
+        result["search_text"] = _refresh_pdf_search_blocks(db, revision=revision)
     elif source_type in {"DOCX", "DOC", "ODT", "RTF"}:
         try:
             derivative = prepare_office_layout_pdf(revision)
@@ -129,9 +277,11 @@ def _process_ocr(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
     if not source.is_file():
         raise ValueError("The immutable PDF source is unavailable")
 
+    search_text = _refresh_pdf_search_blocks(db, revision=revision)
+
     # Imported lazily to avoid making router initialization depend on optional
-    # OCR libraries. The extraction routine itself produces a precise failure if
-    # the deployment lacks its OCR adapter.
+    # OCR libraries. Approval-letter detection remains non-authoritative until
+    # a controller completes the verification endpoint.
     from amodb.apps.manuals.core_router import (
         _extract_first_date,
         _extract_kcaa_reference,
@@ -143,11 +293,27 @@ def _process_ocr(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
     detected_date = _extract_first_date(extracted)
     revision.ocr_detected_ref = detected_ref
     revision.ocr_detected_date = detected_date
-    # Detection is an aid. A controller must still use the verify endpoint
-    # before OCR metadata becomes authoritative publication evidence.
     revision.ocr_verified_bool = False
     revision.ocr_verified_at = None
     db.add(revision)
+
+    index_job = db.query(knowledge_models.DocumentationIndexJob).filter(
+        knowledge_models.DocumentationIndexJob.tenant_id == tenant.amo_id,
+        knowledge_models.DocumentationIndexJob.revision_id == revision.id,
+    ).first()
+    if index_job is None:
+        index_job = knowledge_models.DocumentationIndexJob(
+            tenant_id=tenant.amo_id,
+            manual_id=manual.id,
+            revision_id=revision.id,
+        )
+        db.add(index_job)
+    if index_job.status != "RUNNING":
+        index_job.status = "PENDING"
+        index_job.source_sha256 = revision.source_sha256
+        index_job.error_summary = None
+        index_job.completed_at = None
+
     result = {
         "manual_id": manual.id,
         "revision_id": revision.id,
@@ -155,6 +321,8 @@ def _process_ocr(db: Session, job: saas_models.SaaSJob) -> dict[str, Any]:
         "detected_date": detected_date.isoformat() if detected_date else None,
         "text_characters": len(extracted),
         "verification_required": True,
+        "search_text": search_text,
+        "reference_indexing": "PENDING" if index_job.status != "RUNNING" else "RUNNING",
     }
     _audit(
         db,

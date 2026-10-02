@@ -8,7 +8,16 @@ from .canonical_router import router
 
 def _is_execution_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
-    return "checklist-execution-governance" in path or "/execution-governance" in path
+    return any(
+        fragment in path
+        for fragment in (
+            "checklist-execution-governance",
+            "/execution-governance",
+            "/fieldwork-mutations",
+            "/fieldwork-findings",
+            "/evidence-candidates",
+        )
+    )
 
 
 def _is_generic_catchall(route_item) -> bool:

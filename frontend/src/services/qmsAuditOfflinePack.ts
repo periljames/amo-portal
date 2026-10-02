@@ -1,6 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { QMSFindingOut } from "./qmsCore";
 import type { AuditEvidenceArtifact } from "./qmsAuditEvidence";
+import type { ChecklistAssessmentState } from "./qmsChecklistExecutionGovernance";
 import {
   currentOfflineScope,
   decryptDeviceValue,
@@ -45,6 +46,7 @@ export type AuditOfflinePack = {
         applied_at?: string | null;
       }>;
       document_request_definitions: Array<Record<string, unknown>>;
+      applicability_context?: Array<Record<string, unknown>>;
       source_references: Array<Record<string, unknown>>;
       prior_audits: Array<Record<string, unknown>>;
       prior_findings: Array<Record<string, unknown>>;
@@ -67,6 +69,7 @@ export type AuditOfflinePack = {
     sampled_item_information?: string | null;
     applicability?: string | null;
     evidence_references: Array<Record<string, unknown> | string>;
+    assessment?: ChecklistAssessmentState;
     entity_version: number;
     answered_by_user_id?: string | null;
     answered_at?: string | null;
@@ -452,6 +455,24 @@ export function projectOfflineChecklistExecution(pack: AuditOfflinePack) {
         sampled_item_information: row?.sampled_item_information ?? null,
         applicability: row?.applicability ?? "APPLICABLE",
         evidence_references: row?.evidence_references || [],
+        assessment: row?.assessment || {
+          applicability: "UNVERIFIED",
+          applicability_reason: null,
+          applicability_basis: [],
+          documentary_status: "UNVERIFIED",
+          implementation_status: "UNVERIFIED",
+          field_verification_status: "UNVERIFIED",
+          evidence_ids: [],
+          document_revision_ids: [],
+          regulation_refs: [],
+          procedure_refs: [],
+          conflicts: [],
+          missing_evidence: [],
+          fieldwork_requirements: [],
+          ai_analysis: null,
+          human_decision: null,
+          human_override_reason: null,
+        },
         governance_id: null,
         entity_version: Number(row?.entity_version || 0),
         answered_by_user_id: row?.answered_by_user_id ?? null,

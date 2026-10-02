@@ -28,10 +28,16 @@ import { qmsListFindings } from "../../../services/qms";
 import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
+  getChecklistEvidenceCandidates,
   listChecklistExecutionGovernance,
   mutateChecklistFieldwork,
   type CanonicalChecklistResponse,
+  type ChecklistAssessmentState,
   type ChecklistExecutionGovernanceRow,
+  type DocumentaryStatus,
+  type FieldVerificationStatus,
+  type ImplementationStatus,
+  type EvidenceCandidate,
   type FieldworkFindingLevel,
   type FieldworkFindingSeverity,
 } from "../../../services/qmsChecklistExecutionGovernance";
@@ -109,6 +115,7 @@ type FieldworkUpdateInput = {
   responseValue: string;
   auditorNotes: string;
   sampledItemInformation: string;
+  assessment: ChecklistAssessmentState;
 };
 
 const NONCONFORMITY_LEVELS: Array<{ value: NonconformityLevel; label: string; severity: FieldworkFindingSeverity }> = [
@@ -126,6 +133,53 @@ function findingClassification(draft: FindingDraft): { severity: FieldworkFindin
 
 function statusLabel(value: string | null | undefined): string {
   return (value || "NOT_VERIFIED").replaceAll("_", " ");
+}
+
+function emptyAssessment(): ChecklistAssessmentState {
+  return {
+    applicability: "UNVERIFIED",
+    applicability_reason: null,
+    applicability_basis: [],
+    documentary_status: "UNVERIFIED",
+    implementation_status: "UNVERIFIED",
+    field_verification_status: "UNVERIFIED",
+    evidence_ids: [],
+    document_revision_ids: [],
+    regulation_refs: [],
+    procedure_refs: [],
+    conflicts: [],
+    missing_evidence: [],
+    fieldwork_requirements: [],
+    ai_analysis: null,
+    human_decision: null,
+    human_override_reason: null,
+  };
+}
+
+function normalisedAssessment(
+  item: ChecklistExecutionGovernanceRow,
+  response: CanonicalChecklistResponse,
+  draft?: ChecklistAssessmentState,
+): ChecklistAssessmentState {
+  const base = draft || item.assessment || emptyAssessment();
+  const applicability = response === "NOT_APPLICABLE"
+    ? base.applicability
+    : base.applicability === "NOT_APPLICABLE" ? "UNVERIFIED" : base.applicability;
+  return {
+    ...base,
+    applicability,
+    applicability_reason: applicability === "NOT_APPLICABLE" ? base.applicability_reason : null,
+    applicability_basis: applicability === "NOT_APPLICABLE" ? base.applicability_basis : [],
+    human_decision: response,
+  };
+}
+
+function csvValues(value: string): string[] {
+  return Array.from(new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean)));
+}
+
+function lineValues(value: string): string[] {
+  return Array.from(new Set(value.split("\n").map((entry) => entry.trim()).filter(Boolean)));
 }
 
 function fieldworkConflictMessage(error: unknown): string | null {
@@ -150,6 +204,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
+  const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -314,6 +369,41 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   );
   const notes = selected ? noteDrafts[selected.checklist_item_id] ?? selected.auditor_notes ?? "" : "";
   const sampledItems = selected ? sampleDrafts[selected.checklist_item_id] ?? selected.sampled_item_information ?? "" : "";
+  const assessment = selected ? assessmentDrafts[selected.checklist_item_id] ?? selected.assessment ?? emptyAssessment() : null;
+  const evidenceCandidatesQuery = useQuery({
+    queryKey: ["qms", "checklist-evidence-candidates", amoCode, auditId, selected?.checklist_item_id || ""],
+    queryFn: ({ signal }) => getChecklistEvidenceCandidates(amoCode, auditId, selected!.checklist_item_id, signal),
+    enabled: Boolean(fieldworkEnabled && selected?.checklist_item_id && connectivity !== "OFFLINE"),
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const evidenceCandidates = evidenceCandidatesQuery.data?.items || [];
+  const updateAssessmentDraft = (changes: Partial<ChecklistAssessmentState>) => {
+    if (!selected || !assessment) return;
+    setAssessmentDrafts((current) => ({
+      ...current,
+      [selected.checklist_item_id]: { ...assessment, ...changes },
+    }));
+  };
+  const toggleDocumentaryCandidate = (candidate: EvidenceCandidate, checked: boolean) => {
+    if (!selected || !assessment) return;
+    const candidateIds = new Set(evidenceCandidates.map((item) => item.evidence_id));
+    const retainedNonCandidateIds = assessment.evidence_ids.filter((id) => !candidateIds.has(id));
+    const selectedCandidateIds = new Set(
+      assessment.evidence_ids.filter((id) => candidateIds.has(id)),
+    );
+    if (checked) selectedCandidateIds.add(candidate.evidence_id);
+    else selectedCandidateIds.delete(candidate.evidence_id);
+    const selectedCandidateRows = evidenceCandidates.filter((item) => selectedCandidateIds.has(item.evidence_id));
+    setAssessmentDrafts((current) => ({
+      ...current,
+      [selected.checklist_item_id]: {
+        ...assessment,
+        evidence_ids: [...retainedNonCandidateIds, ...Array.from(selectedCandidateIds)],
+        document_revision_ids: Array.from(new Set(selectedCandidateRows.map((item) => item.revision_id).filter(Boolean))),
+      },
+    }));
+  };
   const outboxEntries = useMemo(() => outboxQuery.data ?? [], [outboxQuery.data]);
   const outbox = useMemo(() => ({
     queued: outboxEntries.filter((entry) => entry.status === "queued" || entry.status === "syncing").length,
@@ -328,6 +418,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "checklist-evidence-candidates", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "external-finding-drafts", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
@@ -336,18 +427,20 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const updateMutation = useMutation({
-    mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation }: FieldworkUpdateInput) => mutateChecklistFieldwork(amoCode, auditId, item, {
+    mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation, assessment: assessmentState }: FieldworkUpdateInput) => mutateChecklistFieldwork(amoCode, auditId, item, {
       canonical_response_status: response,
       response_value: responseValue,
       auditor_notes: auditorNotes.trim() || null,
       sampled_item_information: sampledItemInformation.trim() || null,
       evidence_references: item.evidence_references || [],
+      assessment: normalisedAssessment(item, response, assessmentState),
       reason: "Live audit fieldwork checklist update.",
     }),
     onSuccess: async (_result, variables) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
       setNoteDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
+      setAssessmentDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       await refreshFieldwork();
       void outboxQuery.refetch();
     },
@@ -380,6 +473,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         auditor_notes: auditorNotes.trim() || null,
         sampled_item_information: sampleDrafts[draft.item.checklist_item_id] ?? draft.item.sampled_item_information ?? null,
         evidence_references: draft.item.evidence_references || [],
+        assessment: normalisedAssessment(
+          draft.item,
+          draft.mode,
+          assessmentDrafts[draft.item.checklist_item_id] ?? draft.item.assessment ?? emptyAssessment(),
+        ),
         reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded atomically with the governed checklist response.`,
       });
     },
@@ -418,6 +516,25 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const blockers: string[] = [];
     if (!items.length) blockers.push("No governed checklist is bound");
     if (counts.NOT_VERIFIED) blockers.push(`${counts.NOT_VERIFIED} checklist item${counts.NOT_VERIFIED === 1 ? " is" : "s are"} not verified`);
+    const structuredOpen = items.filter((item) => {
+      if (item.canonical_response_status === "NOT_VERIFIED") return false;
+      const structured = item.assessment || emptyAssessment();
+      if (item.canonical_response_status === "NOT_APPLICABLE") {
+        return structured.applicability !== "NOT_APPLICABLE"
+          || !structured.applicability_reason?.trim()
+          || !structured.applicability_basis.length;
+      }
+      return structured.documentary_status === "UNVERIFIED"
+        || structured.implementation_status === "UNVERIFIED"
+        || structured.field_verification_status === "UNVERIFIED"
+        || structured.field_verification_status === "NOT_VERIFIED"
+        || structured.field_verification_status === "FIELD_VERIFICATION_REQUIRED"
+        || structured.missing_evidence.length > 0
+        || (structured.documentary_status === "CONFLICT"
+          && item.canonical_response_status === "COMPLIANT"
+          && !structured.human_override_reason?.trim());
+    }).length;
+    if (structuredOpen) blockers.push(`${structuredOpen} resolved checklist item${structuredOpen === 1 ? " has" : "s have"} incomplete compliance evidence/verification state`);
     const unlinkedAdverse = items.filter((item) => ["NONCOMPLIANT", "OBSERVATION"].includes(item.canonical_response_status) && !item.finding_id).length;
     if (unlinkedAdverse) blockers.push(`${unlinkedAdverse} adverse response${unlinkedAdverse === 1 ? " has" : "s have"} no governed finding`);
     const unresolvedExternalDrafts = (externalDraftsQuery.data?.items || []).filter((draft) => ["CREATED", "SUBMITTED", "RETURNED"].includes(draft.status)).length;
@@ -493,7 +610,23 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
       return;
     }
-    updateMutation.mutate({ item, response, responseValue: option.value, auditorNotes: notes, sampledItemInformation: sampledItems });
+    const assessmentState = assessmentDrafts[item.checklist_item_id] ?? item.assessment;
+    if (response === "NOT_APPLICABLE" && (
+      assessmentState.applicability !== "NOT_APPLICABLE"
+      || !assessmentState.applicability_reason?.trim()
+      || !assessmentState.applicability_basis.length
+    )) {
+      setLocalError("N/A requires an explicit governed applicability basis. Review the applicability recommendation/evidence panel before recording N/A.");
+      return;
+    }
+    updateMutation.mutate({
+      item,
+      response,
+      responseValue: option.value,
+      auditorNotes: notes,
+      sampledItemInformation: sampledItems,
+      assessment: assessmentState,
+    });
   };
 
   if (auditQuery.isLoading) {
@@ -677,6 +810,106 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 ) : null}
               </section>
 
+              <section className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+                <header>
+                  <div><span>Compliance intelligence</span><h3>Evidence, applicability and verification</h3></div>
+                  <small>{evidenceCandidatesQuery.data?.evidence_context || selectedSource?.evidence_context || "GENERAL"} · {evidenceCandidatesQuery.data?.retrieval_mode || (connectivity === "OFFLINE" ? "OFFLINE / FROZEN" : "Loading")}</small>
+                </header>
+
+                {connectivity === "OFFLINE" ? <p className="qms-live-audit-focus__intelligence-note">Controlled-source search is unavailable offline. The frozen checklist, saved structured assessment and downloaded evidence remain available; reconnect before adding new documentary sources.</p> : null}
+                {evidenceCandidatesQuery.isLoading ? <p className="qms-live-audit-focus__intelligence-note">Searching current-approved controlled sources…</p> : null}
+                {evidenceCandidatesQuery.isError ? <p className="qms-live-audit-focus__intelligence-warning">Controlled-source retrieval could not be verified. Do not infer documentary compliance from the search failure.</p> : null}
+
+                {assessment ? <>
+                  {evidenceCandidatesQuery.data ? <div className="qms-live-audit-focus__recommendations">
+                    <article data-status={evidenceCandidatesQuery.data.applicability_recommendation.status}>
+                      <span>Applicability recommendation</span>
+                      <strong>{statusLabel(evidenceCandidatesQuery.data.applicability_recommendation.status)}</strong>
+                      <p>{evidenceCandidatesQuery.data.applicability_recommendation.reason}</p>
+                      {canExecute && evidenceCandidatesQuery.data.applicability_recommendation.status !== "UNVERIFIED" ? <button type="button" onClick={() => updateAssessmentDraft({
+                        applicability: evidenceCandidatesQuery.data!.applicability_recommendation.status,
+                        applicability_reason: evidenceCandidatesQuery.data!.applicability_recommendation.status === "NOT_APPLICABLE"
+                          ? evidenceCandidatesQuery.data!.applicability_recommendation.reason
+                          : null,
+                        applicability_basis: evidenceCandidatesQuery.data!.applicability_recommendation.basis,
+                      })}>Use governed basis</button> : null}
+                    </article>
+                    <article data-status={evidenceCandidatesQuery.data.conflicts.length ? "CONFLICT" : "UNVERIFIED"}>
+                      <span>Document conflict check</span>
+                      <strong>{String(evidenceCandidatesQuery.data.conflicts.length)} {evidenceCandidatesQuery.data.conflicts.length === 1 ? "conflict" : "conflicts"}</strong>
+                      <p>{evidenceCandidatesQuery.data.conflicts.length ? "Competing requirements are preserved; no source was silently selected as the winner." : "No deterministic conflict was found in this retrieved set; that does not prove no contradiction exists elsewhere."}</p>
+                      {canExecute && evidenceCandidatesQuery.data.conflicts.length ? <button type="button" onClick={() => updateAssessmentDraft({
+                        documentary_status: "CONFLICT",
+                        conflicts: evidenceCandidatesQuery.data!.conflicts,
+                      })}>Preserve conflicts in assessment</button> : null}
+                    </article>
+                  </div> : null}
+
+                  <div className="qms-live-audit-focus__assessment-grid">
+                    <label><span>Applicability</span><select disabled={!canExecute} value={assessment.applicability} onChange={(event) => {
+                      const value = event.target.value as ChecklistAssessmentState["applicability"];
+                      updateAssessmentDraft({
+                        applicability: value,
+                        applicability_reason: value === "NOT_APPLICABLE" ? assessment.applicability_reason : null,
+                        applicability_basis: value === "NOT_APPLICABLE" ? assessment.applicability_basis : [],
+                      });
+                    }}><option value="UNVERIFIED">Unverified</option><option value="APPLICABLE">Applicable</option><option value="NOT_APPLICABLE">Not applicable</option></select></label>
+                    <label><span>Documentary status</span><select disabled={!canExecute} value={assessment.documentary_status} onChange={(event) => updateAssessmentDraft({ documentary_status: event.target.value as DocumentaryStatus })}>
+                      <option value="UNVERIFIED">Unverified</option><option value="DOCUMENTED">Documented</option><option value="PARTIALLY_DOCUMENTED">Partially documented</option><option value="NOT_DOCUMENTED">Not documented</option><option value="NOT_EVIDENCED">Not evidenced</option><option value="CONFLICT">Conflict</option>
+                    </select></label>
+                    <label><span>Implementation status</span><select disabled={!canExecute} value={assessment.implementation_status} onChange={(event) => updateAssessmentDraft({ implementation_status: event.target.value as ImplementationStatus })}>
+                      <option value="UNVERIFIED">Unverified</option><option value="OBJECTIVE_EVIDENCE_AVAILABLE">Objective evidence available</option><option value="VERIFIED">Verified</option><option value="NOT_VERIFIED">Not verified</option><option value="NOT_EVIDENCED">Not evidenced</option>
+                    </select></label>
+                    <label><span>Field verification</span><select disabled={!canExecute} value={assessment.field_verification_status} onChange={(event) => updateAssessmentDraft({ field_verification_status: event.target.value as FieldVerificationStatus })}>
+                      <option value="UNVERIFIED">Unverified</option><option value="FIELD_VERIFICATION_REQUIRED">Field verification required</option><option value="VERIFIED">Verified</option><option value="NOT_VERIFIED">Not verified</option><option value="NOT_APPLICABLE">Not applicable</option>
+                    </select></label>
+                  </div>
+
+                  {assessment.applicability === "NOT_APPLICABLE" ? <div className="qms-live-audit-focus__na-basis">
+                    <strong>N/A basis</strong>
+                    <p>{assessment.applicability_reason || "No governed reason has been preserved yet."}</p>
+                    <small>{assessment.applicability_basis.length ? String(assessment.applicability_basis.length) + " governed basis record(s) preserved." : "N/A cannot be finalized until a governed basis is preserved."}</small>
+                  </div> : null}
+
+                  <div className="qms-live-audit-focus__candidate-list">
+                    <header><strong>Current-approved documentary candidates</strong><span>{evidenceCandidates.length}</span></header>
+                    {!evidenceCandidates.length && !evidenceCandidatesQuery.isLoading ? <p>No current-approved controlled source was retrieved for this question.</p> : null}
+                    {evidenceCandidates.map((candidate) => {
+                      const checked = assessment.evidence_ids.includes(candidate.evidence_id);
+                      const outsideScope = candidate.applicability.status === "NOT_APPLICABLE";
+                      return <article key={candidate.evidence_id} className={checked ? "is-selected" : ""}>
+                        <label>
+                          <input type="checkbox" checked={checked} disabled={!canExecute || outsideScope} onChange={(event) => toggleDocumentaryCandidate(candidate, event.target.checked)} />
+                          <div><strong>{candidate.document_code || candidate.document_title || "Controlled source"}{candidate.heading ? " · " + candidate.heading : ""}</strong><span>Rev {candidate.revision || "—"}{candidate.page_number ? " · page " + candidate.page_number : ""}</span><small>{candidate.evidence_role ? statusLabel(candidate.evidence_role) : "Unclassified evidence role"}{candidate.authority_priority != null ? " · authority " + candidate.authority_priority : ""} · {statusLabel(candidate.applicability.status)}</small></div>
+                        </label>
+                        {candidate.snippet ? <p>{candidate.snippet}</p> : null}
+                        <footer><span>{candidate.retrieval_channels.join(" + ") || "CONTROLLED"}</span>{candidate.reader_url ? <a href={candidate.reader_url} target="_blank" rel="noreferrer">Open source</a> : null}</footer>
+                      </article>;
+                    })}
+                  </div>
+
+                  {evidenceCandidatesQuery.data?.conflicts.length ? <div className="qms-live-audit-focus__document-conflicts">
+                    <strong>Competing controlled statements</strong>
+                    {evidenceCandidatesQuery.data.conflicts.map((conflict, index) => <pre key={index}>{JSON.stringify(conflict, null, 2)}</pre>)}
+                  </div> : null}
+
+                  <div className="qms-live-audit-focus__assessment-notes">
+                    <label><span>Regulation references</span><input readOnly={!canExecute} value={assessment.regulation_refs.join(", ")} onChange={(event) => updateAssessmentDraft({ regulation_refs: csvValues(event.target.value) })} placeholder="Only references supported by the frozen checklist or selected current source" /></label>
+                    <label><span>Procedure / manual references</span><input readOnly={!canExecute} value={assessment.procedure_refs.join(", ")} onChange={(event) => updateAssessmentDraft({ procedure_refs: csvValues(event.target.value) })} placeholder="e.g. MPM 2.5.8" /></label>
+                    <label><span>Missing evidence</span><textarea readOnly={!canExecute} rows={2} value={assessment.missing_evidence.join("\n")} onChange={(event) => updateAssessmentDraft({ missing_evidence: lineValues(event.target.value) })} placeholder="One missing evidence item per line" /></label>
+                    <label><span>Fieldwork requirements</span><textarea readOnly={!canExecute} rows={2} value={assessment.fieldwork_requirements.join("\n")} onChange={(event) => {
+                      const requirements = lineValues(event.target.value);
+                      updateAssessmentDraft({
+                        fieldwork_requirements: requirements,
+                        field_verification_status: requirements.length && assessment.field_verification_status === "UNVERIFIED" ? "FIELD_VERIFICATION_REQUIRED" : assessment.field_verification_status,
+                      });
+                    }} placeholder="Inspection, observation, interview or sample still required" /></label>
+                    <label className="is-wide"><span>Auditor decision / override rationale</span><textarea readOnly={!canExecute} rows={2} value={assessment.human_override_reason || ""} onChange={(event) => updateAssessmentDraft({ human_override_reason: event.target.value || null })} placeholder="Required by local procedure where the final human decision differs from the evidence recommendation." /></label>
+                  </div>
+                  {assessment.ai_analysis?.conclusion ? <div className="qms-live-audit-focus__ai-analysis"><strong>Structured AI assistance</strong><p>{assessment.ai_analysis.conclusion}</p><small>{assessment.ai_analysis.confidence_basis || "No confidence basis recorded."}</small></div> : null}
+                </> : null}
+              </section>
+
               <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
                 {selectedResponseOptions.length ? selectedResponseOptions.map((option) => {
                   const canonical = option.canonical_status as CanonicalChecklistResponse;
@@ -690,7 +923,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               {selectedSource?.sampling_requirement || selectedSource?.audit_method === "SAMPLE" ? <label className="qms-live-audit-focus__notes"><span>Sampled items / records</span><textarea readOnly={!canExecute} value={sampledItems} onChange={(event) => setSampleDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={3} placeholder="Record the sampled records, serials, work packs, dates or other sample identifiers." /></label> : null}
               <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
-              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes, sampledItemInformation: sampledItems }); }}>Save note</button></div>
+              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes, sampledItemInformation: sampledItems, assessment: assessment || selected.assessment || emptyAssessment() }); }}>Save note</button></div>
 
               <div id="audit-occurrence-evidence">
                 <LiveAuditEvidenceStrip amoCode={amoCode} auditId={auditId} item={selected} canManage={canExecute} onChanged={refreshFieldwork} onError={setLocalError} onNotice={setSyncNotice} />

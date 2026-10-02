@@ -28,6 +28,7 @@ export type ChecklistTemplateItem = {
   prompt: string;
   expected_evidence?: string | null;
   guidance?: string | null;
+  evidence_context?: "GENERAL" | "CAPABILITY_SCOPE" | "PERSONNEL_AUTHORIZATION" | "CONTRACT_SCOPE" | "TECHNICAL_DATA" | "RECORD_RETENTION" | "TOOLING_CALIBRATION" | "FACILITY";
   audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
   sampling_requirement?: string | null;
   evidence_types?: string[];
