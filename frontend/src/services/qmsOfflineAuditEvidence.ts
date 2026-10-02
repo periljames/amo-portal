@@ -422,7 +422,21 @@ export async function replayOfflineAuditEvidence(
         continue;
       }
       uploaded.push(result.artifact);
-      item.entity_version = result.committed_version;
+      if (result.replayed) {
+        // A retry may be acknowledging a commit whose original response was lost.
+        // Refresh the authoritative checklist row before advancing the next queued
+        // evidence item instead of trusting a missing/stale replay version.
+        const refreshed = await listChecklistExecutionGovernance(amoCode, auditId);
+        const authoritative = refreshed.items.find((entry) => entry.checklist_item_id === row.checklistItemId);
+        if (!authoritative) {
+          await updateState(row, "CONFLICT", "The replayed evidence exists, but the authoritative checklist state could not be refreshed.");
+          conflicts += 1;
+          continue;
+        }
+        item.entity_version = authoritative.entity_version;
+      } else {
+        item.entity_version = result.committed_version;
+      }
       await deleteStored(row.id);
     } catch (error) {
       const status = errorStatus(error);
