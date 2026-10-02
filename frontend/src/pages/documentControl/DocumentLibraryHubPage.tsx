@@ -224,6 +224,7 @@ export default function DocumentLibraryHubPage() {
     return stored === "compact" || stored === "cards" || stored === "register" ? stored : "list";
   });
   const [selectedItem, setSelectedItem] = useState<SelectedLibraryItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [personalViews, setPersonalViews] = useState<PersonalLibraryView[]>([]);
   const [sharedViews, setSharedViews] = useState<SharedLibraryView[]>([]);
   const [savedViewName, setSavedViewName] = useState("");
@@ -444,6 +445,78 @@ export default function DocumentLibraryHubPage() {
     }
   };
 
+  const visibleItems = useMemo<Array<IntegratedLibraryItem | LibraryDiscoveryItem>>(
+    () => discoveryMode ? (discoveryData?.items || []) : (data?.items || []),
+    [data?.items, discoveryData?.items, discoveryMode],
+  );
+  const selectedLoadedItems = useMemo(
+    () => visibleItems.filter((item) => selectedIds.has(item.id)),
+    [selectedIds, visibleItems],
+  );
+
+  const toggleSelection = (id: string, checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+
+  const selectVisiblePage = (checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      visibleItems.forEach((item) => {
+        if (checked) next.add(item.id); else next.delete(item.id);
+      });
+      return next;
+    });
+  };
+
+  const exportSelectedMetadata = () => {
+    if (!selectedLoadedItems.length) return;
+    const payload = selectedLoadedItems.map((item) => {
+      if ("library" in item) {
+        const revision = item.current_revision || item.latest_revision;
+        return {
+          code: item.code,
+          title: item.title,
+          document_type: item.library.node_type,
+          document_class: item.profile.document_class,
+          lifecycle_status: item.status,
+          revision: revision?.revision_number || null,
+          issue: revision?.issue_number || null,
+          effective_date: revision?.effective_date || null,
+          owner: item.library.owner?.assignee?.name || item.profile.owner_department || null,
+          department: item.library.responsible_department?.assignee?.name || item.profile.owner_department || null,
+          hierarchy: item.library.structure_path || null,
+          source_filename: revision?.source_filename || null,
+        };
+      }
+      const revision = item.current_revision || item.latest_revision;
+      return {
+        code: item.code,
+        title: item.title,
+        document_type: item.node.type,
+        document_class: item.document_class,
+        lifecycle_status: item.lifecycle_status,
+        revision: revision?.revision_number || null,
+        issue: revision?.issue_number || null,
+        effective_date: revision?.effective_date || null,
+        owner: item.owner.name || null,
+        department: item.owner.department || null,
+        hierarchy: item.node.path || null,
+        source_filename: revision?.source_filename || null,
+      };
+    });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `dms-library-metadata-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
+
   const pagination = discoveryMode ? discoveryData?.pagination : data?.pagination;
   const offlineSnapshot = discoveryMode ? discoveryData?.offline_snapshot : data?.offline_snapshot;
   const totalPages = pagination ? Math.max(1, Math.ceil(pagination.total / pagination.per_page)) : 1;
@@ -599,6 +672,15 @@ export default function DocumentLibraryHubPage() {
           <button type="button" className="dc-button" disabled={refreshing} onClick={() => void load()}><RefreshCcw size={14} /> Refresh</button>
         </div>
 
+        {!selectingDocumentForJob && visibleItems.length ? <div className="dlibrary__selection-bar" aria-label="Library selection actions">
+          <label><input type="checkbox" checked={visibleItems.length > 0 && visibleItems.every((item) => selectedIds.has(item.id))} onChange={(event) => selectVisiblePage(event.target.checked)} /><span>Select this page</span></label>
+          {selectedIds.size ? <>
+            <strong>{selectedIds.size} selected</strong>
+            <button type="button" className="dc-button" disabled={!selectedLoadedItems.length} onClick={exportSelectedMetadata}>Export metadata</button>
+            <button type="button" className="dc-button" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
+          </> : <span>Select items for bounded bulk actions.</span>}
+        </div> : null}
+
         {canControl && selectedJob ? <div className="dlibrary__queue-filter dlibrary__queue-filter--job" role="status"><span><ClipboardCheck size={15} /><strong>{selectingChangeDocument ? "Select a document for the change request" : selectedJob.label}.</strong> {selectedJob.selectionPrompt} Search or filter the library, then choose {selectedJob.selectLabel}.</span><button type="button" onClick={cancelJobSelection}><FilterX size={14} /> Cancel</button></div> : null}
         {activeQueue ? <div className="dlibrary__queue-filter" role="status"><span><ShieldCheck size={15} /><strong>Governance queue</strong> · {activeQueue}</span><button type="button" onClick={clearGovernanceQueue}><FilterX size={14} /> Clear queue filter</button></div> : null}
         {error && (data || discoveryData) ? <div className="dlibrary__queue-filter" role="alert"><span><strong>The latest library update could not be loaded.</strong> The last available results remain visible.</span><button type="button" onClick={() => void load()}>Retry</button></div> : null}
@@ -696,6 +778,7 @@ export default function DocumentLibraryHubPage() {
             const revision = item.current_revision || item.latest_revision;
             const eligibility = selectedJob ? jobEligibility(item, selectedJob) : { allowed: true };
             return <article key={item.id} className={selectedItem?.item.id === item.id ? "is-selected" : ""}>
+              <label className="dlibrary-row__select" aria-label={`Select ${item.code}`}><input type="checkbox" checked={selectedIds.has(item.id)} onChange={(event) => toggleSelection(item.id, event.target.checked)} /></label>
               <button type="button" className="dlibrary-row__main" onClick={() => selectIntegratedItem(item)}>
                 <span className="dlibrary-row__icon"><TypeIcon size={18} /></span>
                 <span className="dlibrary-row__identity"><small>{item.code}</small><strong>{item.title}</strong><em>{typeLabel} · {item.library.structure_path || "Controlled information"}</em></span>
@@ -717,6 +800,7 @@ export default function DocumentLibraryHubPage() {
             const [, typeLabel, TypeIcon] = categoryVisual(item.node.type);
             const revision = item.current_revision || item.latest_revision;
             return <article key={item.id} className={selectedItem?.item.id === item.id ? "is-selected" : ""}>
+              <label className="dlibrary-row__select" aria-label={`Select ${item.code}`}><input type="checkbox" checked={selectedIds.has(item.id)} onChange={(event) => toggleSelection(item.id, event.target.checked)} /></label>
               <button type="button" className="dlibrary-row__main" onClick={() => selectDiscoveryItem(item)}>
                 <span className="dlibrary-row__icon"><TypeIcon size={18} /></span>
                 <span className="dlibrary-row__identity"><small>{item.code}</small><strong>{item.title}</strong><em>{typeLabel} · {item.node.path || "Controlled information"}</em></span>
@@ -735,6 +819,7 @@ export default function DocumentLibraryHubPage() {
             const revision = item.current_revision || item.latest_revision;
             const eligibility = selectedJob ? jobEligibility(item, selectedJob) : { allowed: true };
             return <article key={`${item.id}:${revision?.id || "none"}`} className={`dlibrary-card${selectedItem?.item.id === item.id ? " is-selected" : ""}`} data-document-type={item.library.node_type}>
+              <label className="dlibrary-card__select" aria-label={`Select ${item.code}`}><input type="checkbox" checked={selectedIds.has(item.id)} onChange={(event) => toggleSelection(item.id, event.target.checked)} /></label>
               <header>
                 <div className="dlibrary-card__cover" aria-hidden="true"><TypeIcon size={22} /><span>{typeLabel}</span></div>
                 <div className="dlibrary-card__identity"><small>{item.code}</small><h2>{item.title}</h2><p>{metadataText(item, "description") || item.library.structure_path || "Controlled company information"}</p></div>
@@ -762,6 +847,7 @@ export default function DocumentLibraryHubPage() {
             const [, typeLabel, TypeIcon] = categoryVisual(item.node.type);
             const revision = item.current_revision || item.latest_revision;
             return <article key={`${item.id}:${revision?.id || "none"}`} className={`dlibrary-card${selectedItem?.item.id === item.id ? " is-selected" : ""}`} data-document-type={item.node.type}>
+              <label className="dlibrary-card__select" aria-label={`Select ${item.code}`}><input type="checkbox" checked={selectedIds.has(item.id)} onChange={(event) => toggleSelection(item.id, event.target.checked)} /></label>
               <header>
                 <div className="dlibrary-card__cover" aria-hidden="true"><TypeIcon size={22} /><span>{typeLabel}</span></div>
                 <div className="dlibrary-card__identity"><small>{item.code}</small><h2>{item.title}</h2><p>{item.node.path || "Controlled company information"}</p></div>
@@ -789,6 +875,7 @@ export default function DocumentLibraryHubPage() {
             columnDefs={integratedColumns}
             defaultColDef={defaultColumn}
             onRowClick={(item) => selectIntegratedItem(item as IntegratedLibraryItem)}
+            onSelectionChange={(items) => setSelectedIds(new Set(items.map((item) => item.id)))}
           />
         </Suspense> : null}
 
@@ -799,6 +886,7 @@ export default function DocumentLibraryHubPage() {
             columnDefs={discoveryColumns}
             defaultColDef={defaultColumn}
             onRowClick={(item) => selectDiscoveryItem(item as LibraryDiscoveryItem)}
+            onSelectionChange={(items) => setSelectedIds(new Set(items.map((item) => item.id)))}
           />
         </Suspense> : null}
 
