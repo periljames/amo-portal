@@ -814,7 +814,8 @@ def _apply_execution_update(
         if payload.response_value is not None:
             governance.response_value = payload.response_value
         governance.auditor_notes = payload.auditor_notes.strip() if payload.auditor_notes else None
-        governance.sampled_item_information = payload.sampled_item_information.strip() if payload.sampled_item_information else None
+        if payload.sampled_item_information is not None:
+            governance.sampled_item_information = payload.sampled_item_information.strip() or None
         governance.applicability = str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or governance.applicability or "APPLICABLE")[:128]
         governance.evidence_references = list(payload.evidence_references)
         _apply_assessment_state(governance, payload.assessment, payload.canonical_response_status)
