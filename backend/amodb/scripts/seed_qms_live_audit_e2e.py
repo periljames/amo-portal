@@ -9,6 +9,7 @@ route mocks or production credentials.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
+from amodb.apps.doc_control import knowledge_models as document_knowledge_models  # noqa: E402
+from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
     QualityAuditRetentionPolicyRevision,
@@ -92,6 +95,12 @@ OUTPUT_POLICY_ID = "00000000-0000-4000-8000-000000000729"
 RETENTION_POLICY_ID = "00000000-0000-4000-8000-000000000730"
 CEREMONY_CLOSING_NARRATIVE_ID = uuid.UUID("00000000-0000-4000-8000-000000000731")
 CEREMONY_CLOSING_MEETING_ID = uuid.UUID("00000000-0000-4000-8000-000000000732")
+DMS_TENANT_ID = "00000000-0000-4000-8000-000000000733"
+DMS_CHECKLIST_ID = "00000000-0000-4000-8000-000000000734"
+DMS_CHECKLIST_REVISION_ID = "00000000-0000-4000-8000-000000000735"
+DMS_CHECKLIST_SECTION_ID = "00000000-0000-4000-8000-000000000736"
+DMS_CHECKLIST_BLOCK_ID = "00000000-0000-4000-8000-000000000737"
+DMS_CHECKLIST_NODE_ID = "00000000-0000-4000-8000-000000000738"
 
 AMO_CODE = "QMSLIVE"
 AMO_SLUG = "qmslive"
@@ -205,6 +214,88 @@ def seed() -> None:
             plan_code="CI-QMS-LIVE",
             metadata_json=json.dumps({"source": "qms_live_audit_real_browser_ci"}),
         ))
+
+        # Real current DMS checklist for the Setup -> Prepare browser journey.
+        dms_tenant = manual_models.Tenant(
+            id=DMS_TENANT_ID,
+            amo_id=amo.id,
+            slug=AMO_SLUG,
+            name="QMS Live Audit Controlled Documents",
+            settings_json={"ack_due_days": 10},
+        )
+        db.add(dms_tenant)
+        db.flush()
+
+        dms_checklist = manual_models.Manual(
+            id=DMS_CHECKLIST_ID,
+            tenant_id=dms_tenant.id,
+            code="QMS-CI-CHK-001",
+            title="Real Browser Audit Fieldwork Checklist",
+            manual_type="CHECKLIST",
+            owner_role="QUALITY",
+            status="ACTIVE",
+        )
+        db.add(dms_checklist)
+        db.flush()
+        dms_revision = manual_models.ManualRevision(
+            id=DMS_CHECKLIST_REVISION_ID,
+            manual_id=dms_checklist.id,
+            rev_number="00",
+            issue_number="01",
+            effective_date=date.today(),
+            status_enum=manual_models.ManualRevisionStatus.PUBLISHED,
+            created_by=user_a.id,
+            created_at=now,
+            published_at=now,
+            immutable_locked=True,
+        )
+        db.add(dms_revision)
+        db.flush()
+        dms_checklist.current_published_rev_id = dms_revision.id
+
+        dms_section = manual_models.ManualSection(
+            id=DMS_CHECKLIST_SECTION_ID,
+            revision_id=dms_revision.id,
+            order_index=1,
+            heading="Fieldwork verification",
+            anchor_slug="fieldwork-verification",
+            level=1,
+            metadata_json={"source": "qms_live_audit_real_browser_ci"},
+        )
+        db.add(dms_section)
+        db.flush()
+        checklist_text = (
+            "Verify the current authorization and competence evidence is available for sampled personnel.\n"
+            "Verify the sampled controlled procedure is the current effective revision."
+        )
+        db.add(manual_models.ManualBlock(
+            id=DMS_CHECKLIST_BLOCK_ID,
+            section_id=dms_section.id,
+            order_index=1,
+            block_type="paragraph",
+            html_sanitized="<p>Verify the current authorization and competence evidence is available for sampled personnel.</p>"
+                           "<p>Verify the sampled controlled procedure is the current effective revision.</p>",
+            text_plain=checklist_text,
+            change_hash=hashlib.sha256(checklist_text.encode("utf-8")).hexdigest(),
+            created_at=now,
+        ))
+        db.add(document_knowledge_models.DocumentationNode(
+            id=DMS_CHECKLIST_NODE_ID,
+            tenant_id=amo.id,
+            parent_id=None,
+            manual_id=dms_checklist.id,
+            node_type="CHECKLIST",
+            code=dms_checklist.code,
+            normalized_code=dms_checklist.code.upper(),
+            title=dms_checklist.title,
+            path=dms_checklist.code,
+            depth=0,
+            order_index=10,
+            status="ACTIVE",
+            metadata_json={"source": "qms_live_audit_real_browser_ci"},
+            created_by_user_id=user_a.id,
+        ))
+        db.flush()
 
         db.add(QualityAuditOutputPolicyRevision(
             id=OUTPUT_POLICY_ID,
@@ -673,6 +764,9 @@ def seed() -> None:
             "realtime_user_b_id": REALTIME_USER_B_ID,
             "realtime_user_b_email": REALTIME_USER_B_EMAIL,
             "realtime_password": REALTIME_PASSWORD,
+            "dms_checklist_id": DMS_CHECKLIST_ID,
+            "dms_checklist_code": "QMS-CI-CHK-001",
+            "dms_checklist_revision_id": DMS_CHECKLIST_REVISION_ID,
             "ceremony_audit_id": str(CEREMONY_AUDIT_ID),
             "ceremony_audit_ref": CEREMONY_AUDIT_REF,
             "ceremony_checklist_item_id": str(CEREMONY_CHECKLIST_ITEM_ID),
