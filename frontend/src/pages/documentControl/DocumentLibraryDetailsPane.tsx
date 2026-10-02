@@ -12,7 +12,6 @@ import {
 import {
   getDocumentControlDocument,
   type DocumentDetailResponse,
-  type DocumentRevisionSummary,
 } from "../../services/documentControl";
 import type { IntegratedLibraryItem, LibraryDiscoveryItem } from "../../services/documentLibrary";
 import { DocumentControlError, DocumentControlLoading, DocumentControlStatus } from "./DocumentControlShell";
@@ -52,11 +51,9 @@ function formatDate(value?: string | null): string {
       : { dateStyle: "medium", timeStyle: "short" });
 }
 
-type RevisionLike = Pick<DocumentRevisionSummary, "id" | "revision_number"> & Partial<Pick<DocumentRevisionSummary, "issue_number" | "status" | "effective_date" | "created_at" | "source_filename" | "source_type">>;
-
-function revisionLabel(revision?: RevisionLike | null): string {
+function revisionLabel(revision?: { issue_number?: string | null; revision_number?: string | null } | null): string {
   if (!revision) return "No revision";
-  return `${revision.issue_number ? `Issue ${revision.issue_number} · ` : ""}Rev ${revision.revision_number}`;
+  return `${revision.issue_number ? `Issue ${revision.issue_number} · ` : ""}Rev ${revision.revision_number || "—"}`;
 }
 
 function selectedFacts(selected: SelectedLibraryItem) {
