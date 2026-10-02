@@ -57,6 +57,7 @@ export type IntegratedLibraryResponse = {
 export type IntegratedLibraryFilters = {
   q?: string;
   nodeType?: string;
+  sourceType?: string;
   documentClass?: string;
   status?: string;
   ownerUserId?: string;
@@ -248,6 +249,7 @@ export function listIntegratedLibrary(tenant: string, filters: IntegratedLibrary
   return cachedLibraryApi(`${workspacePath(tenant, "/documents")}${queryString({
     q: filters.q,
     node_type: filters.nodeType,
+    source_type: filters.sourceType,
     document_class: filters.documentClass,
     status: filters.status,
     owner_user_id: filters.ownerUserId,
