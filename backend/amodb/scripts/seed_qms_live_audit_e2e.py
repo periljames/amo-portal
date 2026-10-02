@@ -417,6 +417,7 @@ def seed() -> None:
 
         issue_preparation(audit, user_a)
         issue_preparation(realtime_audit, user_a)
+        issue_preparation(ceremony_audit, user_a)
 
         db.add(QualityAuditClosingNarrative(
             id=CEREMONY_CLOSING_NARRATIVE_ID,
