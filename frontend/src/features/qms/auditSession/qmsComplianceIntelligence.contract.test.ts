@@ -17,6 +17,16 @@ describe("QMS compliance intelligence frontend contract", () => {
     expect(prepare).toContain("removeAuditApplicabilityFact");
   });
 
+  it("shows the frozen applicability context and documentary recommendation during fieldwork", () => {
+    const live = source("./LiveAuditWorkspace.tsx");
+
+    expect(live).toContain("Audit scope context");
+    expect(live).toContain("applicability_context");
+    expect(live).toContain("Documentary recommendation");
+    expect(live).toContain("Use documentary recommendation");
+    expect(live).toContain("does not decide implementation, field verification or the final audit response");
+  });
+
   it("presents context-specific precedence without claiming a universal legal hierarchy", () => {
     const live = source("./LiveAuditWorkspace.tsx");
 
