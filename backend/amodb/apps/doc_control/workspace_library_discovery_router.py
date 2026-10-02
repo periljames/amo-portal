@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
@@ -15,11 +18,193 @@ from . import domain_models as dm
 from . import governance_models as gm
 from . import knowledge_models as km
 from .workspace_library_router import _scope_match
-from .workspace_service import is_control_user, resolve_tenant, role_value, utcnow
+from .workspace_service import audit, can_read_manual, get_profile, is_control_user, require_control_user, resolve_tenant, role_value, utcnow
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Library Discovery"])
 ACTIVE_REVIEW_STATUSES = {"SCHEDULED", "IN_PROGRESS"}
+LIBRARY_SHARED_VIEWS_KEY = "document_control_library_views"
+LIBRARY_VIEW_PARAM_KEYS = {"q", "view", "type", "format", "owner", "department", "class", "status", "sort", "direction", "per_page", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"}
+
+
+class LibraryFavoriteIn(BaseModel):
+    favorite: bool = True
+
+
+class SharedLibraryViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    params: dict[str, str] = Field(default_factory=dict)
+    presentation: Literal["list", "compact", "cards", "register"] = "list"
+    is_default: bool = False
+
+
+def _shared_library_views(tenant) -> list[dict]:
+    raw = dict(tenant.settings_json or {}).get(LIBRARY_SHARED_VIEWS_KEY)
+    if not isinstance(raw, list):
+        return []
+    return [dict(item) for item in raw if isinstance(item, dict) and item.get("id") and item.get("name")]
+
+
+def _safe_library_view_params(values: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in values.items():
+        if key not in LIBRARY_VIEW_PARAM_KEYS:
+            raise HTTPException(status_code=422, detail=f"Unsupported shared-view filter: {key}")
+        text = str(value or "").strip()
+        if text:
+            normalized[key] = text[:255]
+    return normalized
+
+
+@router.put("/t/{tenant_slug}/library/{manual_id}/favorite")
+def set_library_favorite(
+    tenant_slug: str,
+    manual_id: str,
+    payload: LibraryFavoriteIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    manual = (
+        db.query(manual_models.Manual)
+        .filter(manual_models.Manual.id == manual_id, manual_models.Manual.tenant_id == tenant.id)
+        .first()
+    )
+    if not manual:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    profile = get_profile(db, tenant, manual.id)
+    if not can_read_manual(current_user, profile):
+        raise HTTPException(status_code=403, detail="Document access denied.")
+
+    rows = (
+        db.query(manual_models.ManualReaderProgress)
+        .filter(
+            manual_models.ManualReaderProgress.manual_id == manual.id,
+            manual_models.ManualReaderProgress.user_id == str(current_user.id),
+        )
+        .all()
+    )
+    if not payload.favorite:
+        for row in rows:
+            row.bookmark_label = None
+            row.updated_at = utcnow()
+        db.commit()
+        return {"manual_id": manual.id, "favorite": False}
+
+    revision = None
+    if manual.current_published_rev_id:
+        revision = (
+            db.query(manual_models.ManualRevision)
+            .filter(
+                manual_models.ManualRevision.id == manual.current_published_rev_id,
+                manual_models.ManualRevision.manual_id == manual.id,
+                manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
+            )
+            .first()
+        )
+    if revision is None and is_control_user(current_user):
+        revision = (
+            db.query(manual_models.ManualRevision)
+            .filter(manual_models.ManualRevision.manual_id == manual.id)
+            .order_by(manual_models.ManualRevision.created_at.desc(), manual_models.ManualRevision.id.desc())
+            .first()
+        )
+    if revision is None:
+        raise HTTPException(status_code=409, detail="This document has no readable revision to favorite.")
+
+    row = next((item for item in rows if str(item.revision_id) == str(revision.id)), None)
+    if row is None:
+        row = manual_models.ManualReaderProgress(
+            tenant_id=tenant.id,
+            manual_id=manual.id,
+            revision_id=revision.id,
+            user_id=str(current_user.id),
+        )
+        db.add(row)
+    row.bookmark_label = "DMS_FAVORITE"
+    row.updated_at = utcnow()
+    audit(db, tenant, request, "document.library.favorite.updated", "manual", manual.id, {"favorite": True})
+    db.commit()
+    return {"manual_id": manual.id, "favorite": True}
+
+
+@router.get("/t/{tenant_slug}/library-views")
+def list_shared_library_views(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    return {
+        "items": _shared_library_views(tenant),
+        "capabilities": {"publish": is_control_user(current_user)},
+    }
+
+
+@router.post("/t/{tenant_slug}/library-views")
+def publish_shared_library_view(
+    tenant_slug: str,
+    payload: SharedLibraryViewIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    views = _shared_library_views(tenant)
+    if len(views) >= 32:
+        raise HTTPException(status_code=409, detail="The tenant already has the maximum 32 shared library views.")
+    if any(str(item.get("name", "")).casefold() == payload.name.strip().casefold() for item in views):
+        raise HTTPException(status_code=409, detail="A shared library view with this name already exists.")
+    if payload.is_default:
+        views = [{**item, "is_default": False} for item in views]
+    item = {
+        "id": str(uuid4()),
+        "name": payload.name.strip(),
+        "params": _safe_library_view_params(payload.params),
+        "presentation": payload.presentation,
+        "is_default": payload.is_default,
+        "created_at": utcnow().isoformat(),
+    }
+    views.append(item)
+    settings = dict(tenant.settings_json or {})
+    settings[LIBRARY_SHARED_VIEWS_KEY] = views
+    tenant.settings_json = settings
+    audit(db, tenant, request, "document.library_view.published", "document_library_view", item["id"], {
+        "name": item["name"],
+        "params": item["params"],
+        "presentation": item["presentation"],
+        "is_default": item["is_default"],
+    })
+    db.commit()
+    return item
+
+
+@router.delete("/t/{tenant_slug}/library-views/{view_id}")
+def delete_shared_library_view(
+    tenant_slug: str,
+    view_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    views = _shared_library_views(tenant)
+    target = next((item for item in views if str(item.get("id")) == view_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Shared library view not found.")
+    settings = dict(tenant.settings_json or {})
+    settings[LIBRARY_SHARED_VIEWS_KEY] = [item for item in views if str(item.get("id")) != view_id]
+    tenant.settings_json = settings
+    audit(db, tenant, request, "document.library_view.deleted", "document_library_view", view_id, {
+        "name": target.get("name"),
+    })
+    db.commit()
+    return {"id": view_id, "deleted": True}
+
+
 
 
 def _revision_status(row: manual_models.ManualRevision | None) -> str | None:
@@ -46,7 +231,7 @@ def _serialize_revision(row: manual_models.ManualRevision | None) -> dict | None
 @router.get("/t/{tenant_slug}/library-discovery")
 def library_discovery(
     tenant_slug: str,
-    view: str = Query(default="all", pattern="^(all|my-documents|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"),
+    view: str = Query(default="all", pattern="^(all|my-documents|shared-with-me|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"),
     q: str | None = Query(default=None, max_length=255),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=100),
@@ -182,6 +367,15 @@ def library_discovery(
             gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER"]),
         ))
         query = query.filter(or_(dm.DocumentControlProfile.owner_user_id == str(current_user.id), assigned))
+    elif view == "shared-with-me":
+        distributed_to_user = exists().where(and_(
+            dm.DocumentDistributionRecipient.tenant_id == tenant.amo_id,
+            dm.DocumentDistributionRecipient.recipient_user_id == str(current_user.id),
+            dm.DocumentDistributionRecipient.campaign_id == dm.DocumentDistributionCampaign.id,
+            dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
+            dm.DocumentDistributionCampaign.manual_id == manual_models.Manual.id,
+        ))
+        query = query.filter(distributed_to_user)
     elif view in {"favorites", "recently-opened"}:
         progress_query = db.query(
             manual_models.ManualReaderProgress.manual_id.label("manual_id"),
@@ -189,6 +383,14 @@ def library_discovery(
         ).filter(manual_models.ManualReaderProgress.user_id == str(current_user.id))
         if view == "favorites":
             progress_query = progress_query.filter(manual_models.ManualReaderProgress.bookmark_label.isnot(None))
+        else:
+            progress_query = progress_query.filter(or_(
+                manual_models.ManualReaderProgress.last_page_number.isnot(None),
+                manual_models.ManualReaderProgress.last_section_id.isnot(None),
+                manual_models.ManualReaderProgress.last_anchor_slug.isnot(None),
+                manual_models.ManualReaderProgress.scroll_percent > 0,
+                manual_models.ManualReaderProgress.zoom_percent != 100,
+            ))
         progress_subquery = progress_query.group_by(manual_models.ManualReaderProgress.manual_id).subquery()
         query = query.join(progress_subquery, progress_subquery.c.manual_id == manual_models.Manual.id)
         ordering = (progress_subquery.c.last_opened_at.desc(), manual_models.Manual.code.asc())
@@ -308,7 +510,7 @@ def library_discovery(
             "lifecycle_status": manual.status,
             "document_class": profile.document_class if profile else "INTERNAL",
             "owner": {
-                "id": owner.id if owner else profile.owner_user_id if profile else None,
+                "id": owner.id if controller and owner else None,
                 "name": owner.full_name if owner else None,
                 "department": profile.owner_department if profile else manual.owner_role,
             },

@@ -1,5 +1,7 @@
 export { default as DocControlDashboardPage } from "./documentControl/DocumentGovernanceDashboardPage";
 export { default as DocControlLibraryPage } from "./documentControl/DocumentLibraryHubPage";
+export { default as DocControlSearchPage } from "./documentControl/DocumentControlSearchPage";
+export { default as DocControlPhysicalLibraryPage } from "./documentControl/DocumentPhysicalLibraryPage";
 export { default as DocControlStructurePage } from "./documentControl/DocumentControlStructurePage";
 export { default as DocControlGeneratedRecordPage } from "./documentControl/DocumentControlGeneratedRecordPage";
 export { default as DocControlDocumentDetailPage } from "./documentControl/DocumentControlRecordEntryPage";

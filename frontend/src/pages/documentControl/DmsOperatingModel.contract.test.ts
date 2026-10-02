@@ -6,6 +6,10 @@ const router = readFileSync(new URL("../../router.tsx", import.meta.url), "utf-8
 const pageExports = readFileSync(new URL("../DocControlPages.tsx", import.meta.url), "utf-8");
 const homePage = readFileSync(new URL("./DocumentGovernanceDashboardPage.tsx", import.meta.url), "utf-8");
 const libraryPage = readFileSync(new URL("./DocumentLibraryHubPage.tsx", import.meta.url), "utf-8");
+const libraryDetails = readFileSync(new URL("./DocumentLibraryDetailsPane.tsx", import.meta.url), "utf-8");
+const searchPage = readFileSync(new URL("./DocumentControlSearchPage.tsx", import.meta.url), "utf-8");
+const physicalLibraryPage = readFileSync(new URL("./DocumentPhysicalLibraryPage.tsx", import.meta.url), "utf-8");
+const libraryOperations = readFileSync(new URL("./LibraryOperationsPanel.tsx", import.meta.url), "utf-8");
 const structurePage = readFileSync(new URL("./DocumentControlStructurePage.tsx", import.meta.url), "utf-8");
 const recordDetailPage = readFileSync(new URL("./DocumentControlGeneratedRecordPage.tsx", import.meta.url), "utf-8");
 const documentationService = readFileSync(new URL("../../services/documentation.ts", import.meta.url), "utf-8");
@@ -29,14 +33,19 @@ const manualReader = readFileSync(new URL("../manuals/ManualReaderPage.tsx", imp
 const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.css", import.meta.url), "utf-8");
 
 describe("DMS frontend operating-model contract", () => {
-  it("exposes the reader-safe Records workspace alongside controlled Document Control workspaces", () => {
-    for (const label of ["Home", "Library", "Structure", "Records", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
+  it("uses a library-first shell with reader navigation and capability-gated governance", () => {
+    for (const label of ["Home", "My documents", "Shared with me", "Favorites", "Recent", "Libraries", "External Technical Data", "Physical Library", "Records", "Archive"]) {
       expect(shell).toContain(`label: "${label}"`);
     }
-    expect(shell).not.toContain("Generated records");
-    expect(shell).not.toContain("Authority submissions");
-    expect(shell).not.toContain("Temporary revisions");
-    expect(shell).not.toContain("QMS and module links");
+    for (const label of ["Control Center", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
+      expect(shell).toContain(`label: "${label}"`);
+    }
+    expect(shell).toContain("GOVERNANCE_NAVIGATION");
+    expect(shell).toContain("canControl ? <>");
+    expect(shell).toContain('role="search"');
+    expect(shell).toContain('placeholder="Search documents, records, codes, owners or indexed text"');
+    expect(shell).toContain('className={`dc-workspace__sidebar');
+    expect(shell).not.toContain('label: "Structure"');
     expect(shell).toContain('{ id: "records", label: "Records", path: "/reports/records", icon: Archive }');
     expect(shell).toContain('if (pathname.includes("/reports/records")) return "records";');
   });
@@ -49,10 +58,35 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain('label: "Assistant"');
   });
 
+  it("routes persistent shell search into a permission-filtered DMS search surface", () => {
+    expect(shell).toContain('navigate(`${basePath}/search');
+    expect(searchPage).toContain("searchTenantWarehouse");
+    expect(searchPage).toContain('type WarehouseSearchScope');
+    expect(searchPage).toContain("controlled_documents");
+    expect(searchPage).toContain("retained_records");
+    expect(searchPage).toContain("library_items");
+    expect(searchPage).toContain("governed_resources");
+    expect(searchPage).toContain("Restricted content is not disclosed through result counts or suggestions.");
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/search"');
+  });
+
+  it("makes the physical library a routed surface while reusing its custody engine", () => {
+    expect(shell).toContain('path: "/physical-library"');
+    expect(router).toContain('path="/maintenance/:amoCode/document-control/physical-library"');
+    expect(physicalLibraryPage).toContain("LibraryOperationsPanel");
+    expect(physicalLibraryPage).toContain("standalone");
+    expect(libraryOperations).toContain("MARCXML");
+    expect(libraryOperations).toContain("scanLibraryHolding");
+    expect(libraryOperations).toContain("createLibraryInventorySession");
+    expect(libraryOperations).toContain("library-ops--page");
+  });
+
   it("exposes the canonical Document Control workspaces and linked retained-record detail", () => {
     for (const route of [
       "/maintenance/:amoCode/document-control",
       "/maintenance/:amoCode/document-control/library",
+      "/maintenance/:amoCode/document-control/search",
+      "/maintenance/:amoCode/document-control/physical-library",
       "/maintenance/:amoCode/document-control/structure",
       "/maintenance/:amoCode/document-control/structure/records/:recordId",
       "/maintenance/:amoCode/document-control/changes",
@@ -93,24 +127,47 @@ describe("DMS frontend operating-model contract", () => {
     expect(documentationService).toContain("/knowledge/records/${encodeURIComponent(recordId)}");
   });
 
-  it("gives Library the MD preset views and bounded rich controlled-information discovery", () => {
-    for (const label of ["All Documents", "My Documents", "Favorites", "Recently Opened", "Recently Revised", "Awaiting My Review", "External Technical Data", "Due for Review", "Superseded", "Archived"]) {
+  it("gives Library first-class discovery, four presentations and contextual inspection", () => {
+    for (const label of ["All Documents", "My Documents", "Shared With Me", "Favorites", "Recently Opened", "Recently Revised", "Awaiting My Review", "External Technical Data", "Due for Review", "Superseded", "Archived"]) {
       expect(libraryPage).toContain(`label: "${label}"`);
     }
     expect(libraryPage).toContain("discoverLibrary");
     expect(libraryPage).toContain("Permission-filtered discovery · server-bounded");
     expect(libraryPage).toContain("alias, owner, revision, filename, hierarchy or indexed text");
-    expect(libraryPage).toContain('type LibraryPresentation = "shelf" | "register"');
-    expect(libraryPage).toContain('aria-label="Controlled document shelf"');
-    expect(libraryPage).toContain('data-document-type={item.library.node_type}');
-    expect(libraryPage).toContain("Read current");
+    expect(libraryPage).toContain('type LibraryPresentation = "list" | "compact" | "cards" | "register"');
+    for (const presentation of ['setPresentation("list")', 'setPresentation("compact")', 'setPresentation("cards")', 'setPresentation("register")']) {
+      expect(libraryPage).toContain(presentation);
+    }
+    expect(libraryPage).toContain('aria-label="Controlled document list"');
+    expect(libraryPage).toContain('aria-label="Controlled document cards"');
+    expect(libraryPage).toContain("DocumentLibraryDetailsPane");
+    expect(libraryPage).toContain("onRowClick");
     expect(libraryPage).toContain('lazy(() => import("./DocumentLibraryRegisterGrid"))');
     expect(libraryPage).not.toContain('from "ag-grid-react"');
+    expect(libraryDetails).toContain('label: "Versions"');
+    expect(libraryDetails).toContain('label: "Relationships"');
+    expect(libraryDetails).toContain('label: "Distribution"');
+    expect(libraryDetails).toContain('label: "Read status"');
+    expect(libraryDetails).toContain('label: "Compliance"');
+    expect(libraryDetails).toContain('label: "Activity"');
+    expect(libraryDetails).not.toContain("actor_id");
+    expect(libraryService).toContain('"shared-with-me"');
     expect(libraryService).toContain("library-discovery");
     expect(libraryService).toContain("per_page");
     expect(libraryService).toContain("cachedLibraryApi");
     expect(libraryService).toContain("writeApiCache(path, response, LIBRARY_OFFLINE_TTL_MS)");
     expect(libraryPage).toContain("Offline snapshot");
+  });
+
+  it("persists harmless personal library views locally and publishes shared views through the audited backend", () => {
+    expect(libraryPage).toContain("readPersonalViews");
+    expect(libraryPage).toContain("savePersonalView");
+    expect(libraryPage).toContain("publishCurrentView");
+    expect(libraryPage).toContain("Save personal");
+    expect(libraryPage).toContain("Publish shared");
+    expect(libraryService).toContain("listSharedLibraryViews");
+    expect(libraryService).toContain("publishSharedLibraryView");
+    expect(libraryService).toContain('"/library-views"');
   });
 
   it("routes canonical Changes to a bounded paginated portfolio", () => {

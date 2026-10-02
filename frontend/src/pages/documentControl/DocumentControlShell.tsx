@@ -1,16 +1,25 @@
 /* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Archive,
+  BarChart3,
   BookOpen,
+  Boxes,
   ClipboardList,
+  Clock3,
   FileCog,
   FileSearch,
-  FolderTree,
-  Gauge,
+  Heart,
+  Home,
+  LibraryBig,
+  Menu,
+  Search,
   Send,
   Settings,
+  Share2,
   ShieldCheck,
+  UserRound,
+  X,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -25,53 +34,35 @@ import "./documentControlExperience.css";
 import "./documentControlLibraryExperience.css";
 import "./dmsLibraryDiscovery.css";
 
-type PrimaryWorkspaceId =
-  | "home"
-  | "library"
-  | "structure"
-  | "records"
-  | "changes"
-  | "distribution"
-  | "compliance"
-  | "reports"
-  | "administration";
-
-type PrimaryWorkspaceRoute = {
-  id: PrimaryWorkspaceId;
+type NavigationItem = {
+  id: string;
   label: string;
   path: string;
-  icon: typeof Gauge;
+  icon: typeof Home;
   controlOnly?: boolean;
 };
 
-/**
- * Daily-use DMS information architecture. Structure is a distinct discovery
- * workspace; lifecycle entities remain grouped under their operational owners.
- */
-const PRIMARY_WORKSPACES: PrimaryWorkspaceRoute[] = [
-  { id: "home", label: "Home", path: "", icon: Gauge },
-  { id: "library", label: "Library", path: "/library", icon: BookOpen },
-  { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
+const READER_NAVIGATION: NavigationItem[] = [
+  { id: "home", label: "Home", path: "", icon: Home },
+  { id: "my-documents", label: "My documents", path: "/library?view=my-documents", icon: UserRound },
+  { id: "shared-with-me", label: "Shared with me", path: "/library?view=shared-with-me", icon: Share2 },
+  { id: "favorites", label: "Favorites", path: "/library?view=favorites", icon: Heart },
+  { id: "recent", label: "Recent", path: "/library?view=recently-opened", icon: Clock3 },
+  { id: "libraries", label: "Libraries", path: "/library", icon: LibraryBig },
+  { id: "external", label: "External Technical Data", path: "/library?view=external-technical-data", icon: Boxes },
+  { id: "physical", label: "Physical Library", path: "/physical-library", icon: BookOpen },
   { id: "records", label: "Records", path: "/reports/records", icon: Archive },
+  { id: "archive", label: "Archive", path: "/library?view=archived", icon: Archive },
+];
+
+const GOVERNANCE_NAVIGATION: NavigationItem[] = [
+  { id: "control-center", label: "Control Center", path: "", icon: ShieldCheck, controlOnly: true },
   { id: "changes", label: "Changes", path: "/changes", icon: ClipboardList, controlOnly: true },
   { id: "distribution", label: "Distribution", path: "/distribution", icon: Send, controlOnly: true },
   { id: "compliance", label: "Compliance", path: "/compliance", icon: ShieldCheck, controlOnly: true },
-  { id: "reports", label: "Reports", path: "/reports", icon: FileSearch, controlOnly: true },
+  { id: "reports", label: "Reports", path: "/reports", icon: BarChart3, controlOnly: true },
   { id: "administration", label: "Administration", path: "/administration", icon: Settings, controlOnly: true },
 ];
-
-function primaryWorkspaceForPath(pathname: string): PrimaryWorkspaceId {
-  if (pathname.includes("/reports/records")) return "records";
-  if (pathname.includes("/structure")) return "structure";
-  if (pathname.includes("/changes")) return "changes";
-  if (pathname.includes("/distribution")) return "distribution";
-  if (pathname.includes("/compliance")) return "compliance";
-  if (pathname.includes("/reports")) return "reports";
-  if (pathname.includes("/administration")) return "administration";
-  if (pathname.includes("/library")) return "library";
-
-  return "home";
-}
 
 function libraryDocumentId(pathname: string): string | undefined {
   const match = pathname.match(/\/document-control\/library\/([^/?#]+)/);
@@ -81,6 +72,28 @@ function libraryDocumentId(pathname: string): string | undefined {
   } catch {
     return match[1];
   }
+}
+
+function activeNavigation(pathname: string, search: string): string {
+  const params = new URLSearchParams(search);
+  if (pathname.includes("/changes")) return "changes";
+  if (pathname.includes("/distribution")) return "distribution";
+  if (pathname.includes("/compliance")) return "compliance";
+  if (pathname.includes("/administration")) return "administration";
+  if (pathname.includes("/reports/records")) return "records";
+  if (pathname.includes("/reports")) return "reports";
+  if (pathname.includes("/physical-library")) return "physical";
+  if (pathname.includes("/library")) {
+    if (params.get("view") === "my-documents") return "my-documents";
+    if (params.get("view") === "shared-with-me") return "shared-with-me";
+    if (params.get("view") === "favorites") return "favorites";
+    if (params.get("view") === "recently-opened") return "recent";
+    if (params.get("view") === "external-technical-data") return "external";
+    if (params.get("view") === "archived") return "archive";
+    if (params.get("library_services")) return "physical";
+    return "libraries";
+  }
+  return "home";
 }
 
 export default function DocumentControlShell({
@@ -101,13 +114,18 @@ export default function DocumentControlShell({
   const navigate = useNavigate();
   const location = useLocation();
   const { amoCode, tenant, basePath } = useDocumentControlRoute();
-  const active = primaryWorkspaceForPath(location.pathname);
-  const visibleWorkspaces = PRIMARY_WORKSPACES.filter((workspace) => canControl || !workspace.controlOnly);
-  const assistantDocumentId = active === "library" ? libraryDocumentId(location.pathname) : undefined;
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [searchText, setSearchText] = useState(() => (
+    location.pathname.includes("/document-control/library")
+      ? new URLSearchParams(location.search).get("q") || ""
+      : ""
+  ));
+  const active = activeNavigation(location.pathname, location.search);
+  const assistantDocumentId = libraryDocumentId(location.pathname);
   const assistantParams = new URLSearchParams(location.search);
   const assistantQuery = assistantParams.get("assistant_query") || "";
   const assistantRequested = assistantParams.get("assistant") === "1";
-  const showContextualAssistant = Boolean(tenant && location.pathname.includes("/document-control/library"));
+  const showContextualAssistant = Boolean(tenant && (location.pathname.includes("/document-control/library") || location.pathname.includes("/document-control/search")));
   const lifecycleActions = canControl && tenant
     ? <DocumentLifecycleHeaderActions tenant={tenant} basePath={basePath} manualId={assistantDocumentId} />
     : null;
@@ -117,39 +135,102 @@ export default function DocumentControlShell({
     ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} refreshKey={workflowRefreshKey} />
     : null;
 
+  useEffect(() => {
+    setNavigationOpen(false);
+    if (location.pathname.includes("/document-control/library")) {
+      setSearchText(new URLSearchParams(location.search).get("q") || "");
+    }
+  }, [location.pathname, location.search]);
+
+  const submitSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchText.trim();
+    const next = new URLSearchParams();
+    if (query) next.set("q", query);
+    navigate(`${basePath}/search${next.size ? `?${next.toString()}` : ""}`);
+  };
+
+  const navigateItem = (item: NavigationItem) => {
+    navigate(`${basePath}${item.path}`);
+    setNavigationOpen(false);
+  };
+
+  const renderNavigation = (items: NavigationItem[]) => items
+    .filter((item) => canControl || !item.controlOnly)
+    .map((item) => {
+      const Icon = item.icon;
+      const selected = active === item.id;
+      return (
+        <button
+          type="button"
+          key={item.id}
+          className={selected ? "active" : ""}
+          aria-current={selected ? "page" : undefined}
+          onClick={() => navigateItem(item)}
+        >
+          <Icon size={16} aria-hidden="true" />
+          <span>{item.label}</span>
+        </button>
+      );
+    });
+
   const body = (
     <div className="dc-workspace">
-      <header className="dc-workspace__header">
-        <div>
-          <p>{eyebrow}</p>
-          <h1>{title}</h1>
-          <span>{subtitle}</span>
+      <a className="dc-skip-link" href="#dc-main-content">Skip to document content</a>
+      <header className="dc-workspace__appbar">
+        <button
+          type="button"
+          className="dc-workspace__nav-toggle"
+          aria-label={navigationOpen ? "Close Document Control navigation" : "Open Document Control navigation"}
+          aria-expanded={navigationOpen}
+          onClick={() => setNavigationOpen((open) => !open)}
+        >
+          {navigationOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
+        <div className="dc-workspace__identity">
+          <strong>Document Control</strong>
+          <span>Company knowledge library</span>
         </div>
-        {actions || lifecycleActions || startWork ? <div className="dc-workspace__header-actions">{startWork}{lifecycleActions}{actions}</div> : null}
+        <form className="dc-workspace__global-search" role="search" onSubmit={submitSearch}>
+          <Search size={16} aria-hidden="true" />
+          <input
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            aria-label="Search controlled company information"
+            placeholder="Search documents, records, codes, owners or indexed text"
+          />
+        </form>
+        <div className="dc-workspace__app-actions">{startWork}{lifecycleActions}{actions}</div>
       </header>
 
-      {workflowGuide}
+      <div className="dc-workspace__frame">
+        <aside className={`dc-workspace__sidebar${navigationOpen ? " is-open" : ""}`} aria-label="Document Control navigation">
+          <nav>
+            <div className="dc-workspace__nav-group">{renderNavigation(READER_NAVIGATION)}</div>
+            {canControl ? <>
+              <div className="dc-workspace__nav-separator" />
+              <p className="dc-workspace__nav-label">Governance</p>
+              <div className="dc-workspace__nav-group">{renderNavigation(GOVERNANCE_NAVIGATION)}</div>
+            </> : null}
+          </nav>
+        </aside>
+        {navigationOpen ? <button type="button" className="dc-workspace__nav-backdrop" aria-label="Close navigation" onClick={() => setNavigationOpen(false)} /> : null}
 
-      <nav className="dc-workspace__nav dc-workspace__nav--primary" aria-label="Document Control">
-        {visibleWorkspaces.map((workspace) => {
-          const Icon = workspace.icon;
-          const isActive = active === workspace.id;
-          return (
-            <button
-              type="button"
-              key={workspace.id}
-              className={isActive ? "active" : ""}
-              aria-current={isActive ? "page" : undefined}
-              onClick={() => navigate(`${basePath}${workspace.path}`)}
-            >
-              <Icon size={15} aria-hidden="true" />
-              <span>{workspace.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+        <div className="dc-workspace__main">
+          <header className="dc-workspace__context-header">
+            <div>
+              <p>{eyebrow}</p>
+              <h1>{title}</h1>
+              <span>{subtitle}</span>
+            </div>
+          </header>
 
-      <main className="dc-workspace__content">{children}</main>
+          {workflowGuide}
+
+          <main id="dc-main-content" className="dc-workspace__content" tabIndex={-1}>{children}</main>
+        </div>
+      </div>
+
       {showContextualAssistant ? <DocumentationAssistantPanel
         tenant={tenant}
         manualId={assistantDocumentId}

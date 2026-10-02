@@ -43,7 +43,12 @@ export type IntegratedLibraryItem = DocumentLibraryItem & {
 
 export type IntegratedLibraryResponse = {
   items: IntegratedLibraryItem[];
-  facets: { node_types: Record<string, number>; visible_documents: number };
+  facets: {
+    node_types: Record<string, number>;
+    visible_documents: number;
+    owners?: Array<{ value: string; name: string; count: number }>;
+    departments?: Array<{ value: string; code?: string; name: string; count: number }>;
+  };
   capabilities: { read: boolean; control: boolean };
   pagination: { page: number; per_page: number; total: number; returned: number };
   offline_snapshot?: LibraryOfflineSnapshot;
@@ -52,8 +57,11 @@ export type IntegratedLibraryResponse = {
 export type IntegratedLibraryFilters = {
   q?: string;
   nodeType?: string;
+  sourceType?: string;
   documentClass?: string;
   status?: string;
+  ownerName?: string;
+  departmentCode?: string;
   ownerUserId?: string;
   departmentId?: string;
   indexingStatus?: string;
@@ -70,6 +78,7 @@ export type IntegratedLibraryFilters = {
 export type LibraryDiscoveryView =
   | "all"
   | "my-documents"
+  | "shared-with-me"
   | "favorites"
   | "recently-opened"
   | "recently-revised"
@@ -242,8 +251,11 @@ export function listIntegratedLibrary(tenant: string, filters: IntegratedLibrary
   return cachedLibraryApi(`${workspacePath(tenant, "/documents")}${queryString({
     q: filters.q,
     node_type: filters.nodeType,
+    source_type: filters.sourceType,
     document_class: filters.documentClass,
     status: filters.status,
+    owner: filters.ownerName,
+    department: filters.departmentCode,
     owner_user_id: filters.ownerUserId,
     department_id: filters.departmentId,
     indexing_status: filters.indexingStatus,
@@ -265,6 +277,45 @@ export function discoverLibrary(tenant: string, filters: { view?: LibraryDiscove
     page: filters.page || 1,
     per_page: filters.perPage || 50,
   })}`);
+}
+
+export type LibrarySavedPresentation = "list" | "compact" | "cards" | "register";
+
+export type SharedLibraryView = {
+  id: string;
+  name: string;
+  params: Record<string, string>;
+  presentation: LibrarySavedPresentation;
+  is_default: boolean;
+  created_at?: string | null;
+};
+
+export type SharedLibraryViewsResponse = {
+  items: SharedLibraryView[];
+  capabilities: { publish: boolean };
+};
+
+export function listSharedLibraryViews(tenant: string): Promise<SharedLibraryViewsResponse> {
+  return api(workspacePath(tenant, "/library-views"));
+}
+
+export function publishSharedLibraryView(
+  tenant: string,
+  payload: {
+    name: string;
+    params: Record<string, string>;
+    presentation: LibrarySavedPresentation;
+    is_default?: boolean;
+  },
+): Promise<SharedLibraryView> {
+  return api(workspacePath(tenant, "/library-views"), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSharedLibraryView(tenant: string, viewId: string): Promise<{ id: string; deleted: boolean }> {
+  return api(workspacePath(tenant, `/library-views/${encodeURIComponent(viewId)}`), { method: "DELETE" });
 }
 
 export function listPhysicalCopies(
