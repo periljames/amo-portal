@@ -46,8 +46,8 @@ export type IntegratedLibraryResponse = {
   facets: {
     node_types: Record<string, number>;
     visible_documents: number;
-    owners?: Array<{ id: string; name: string; count: number }>;
-    departments?: Array<{ id: string; code?: string; name: string; count: number }>;
+    owners?: Array<{ value: string; name: string; count: number }>;
+    departments?: Array<{ value: string; code?: string; name: string; count: number }>;
   };
   capabilities: { read: boolean; control: boolean };
   pagination: { page: number; per_page: number; total: number; returned: number };
@@ -60,6 +60,8 @@ export type IntegratedLibraryFilters = {
   sourceType?: string;
   documentClass?: string;
   status?: string;
+  ownerName?: string;
+  departmentCode?: string;
   ownerUserId?: string;
   departmentId?: string;
   indexingStatus?: string;
@@ -252,6 +254,8 @@ export function listIntegratedLibrary(tenant: string, filters: IntegratedLibrary
     source_type: filters.sourceType,
     document_class: filters.documentClass,
     status: filters.status,
+    owner: filters.ownerName,
+    department: filters.departmentCode,
     owner_user_id: filters.ownerUserId,
     department_id: filters.departmentId,
     indexing_status: filters.indexingStatus,
