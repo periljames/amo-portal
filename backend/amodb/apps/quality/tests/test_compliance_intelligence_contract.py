@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from amodb.apps.doc_control.knowledge_assistant_router import _cosine_similarity, _hybrid_merge
+from amodb.apps.doc_control.knowledge_assistant_router import _cosine_similarity, _hybrid_merge, _pgvector_available
 from amodb.apps.quality.audit_checklist_execution_route_order import _is_execution_route
 from amodb.apps.quality.compliance_intelligence_service import (
     detect_requirement_conflicts,
@@ -93,6 +93,23 @@ def test_assessment_accepts_separate_documentary_implementation_and_field_states
 )
 def test_all_checklist_execution_route_families_are_promoted(path: str) -> None:
     assert _is_execution_route(SimpleNamespace(path=path))
+
+
+def test_pgvector_acceleration_is_optional_outside_postgresql() -> None:
+    class _Dialect:
+        name = "sqlite"
+
+    class _Bind:
+        dialect = _Dialect()
+
+    class _Db:
+        def get_bind(self):
+            return _Bind()
+
+        def execute(self, *_args, **_kwargs):
+            raise AssertionError("SQLite fallback must not query pg_extension.")
+
+    assert _pgvector_available(_Db()) is False
 
 
 def test_cosine_similarity_rejects_dimension_mismatch_and_ranks_exact_vector() -> None:
