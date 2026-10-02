@@ -143,8 +143,10 @@ def list_visible_documents(
     status: str | None = None,
     node_type: str | None = Query(default=None, max_length=48),
     source_type: str | None = Query(default=None, pattern="^(PDF|DOCX|DOC|ODT|RTF)$"),
-    owner_user_id: str | None = Query(default=None, max_length=36),
-    department_id: str | None = Query(default=None, max_length=36),
+    owner: str | None = Query(default=None, max_length=160),
+    department: str | None = Query(default=None, max_length=80),
+    owner_user_id: str | None = Query(default=None, max_length=36, include_in_schema=False),
+    department_id: str | None = Query(default=None, max_length=36, include_in_schema=False),
     indexing_status: str | None = Query(default=None, max_length=32),
     unresolved_ownership: bool = False,
     unresolved_relationships: bool = False,
@@ -217,15 +219,31 @@ def list_visible_documents(
                 func.upper(manual_models.ManualRevision.source_filename).like(f"%.{requested_source}"),
             ),
         )))
-    if owner_user_id or department_id or unresolved_ownership:
+    if owner or department or owner_user_id or department_id or unresolved_ownership:
         responsibility_conditions = [
             gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
             gm.DocumentResponsibilityAssignment.manual_id == manual_models.Manual.id,
             gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER", "RESPONSIBLE_DEPARTMENT"]),
         ]
-        if owner_user_id:
+        if owner:
+            responsibility_conditions.append(
+                gm.DocumentResponsibilityAssignment.assignee_user_id.in_(
+                    select(account_models.User.id).where(func.lower(account_models.User.full_name) == owner.strip().lower())
+                )
+            )
+        elif owner_user_id:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_user_id == owner_user_id)
-        if department_id:
+        if department:
+            requested_department = department.strip()
+            responsibility_conditions.append(
+                gm.DocumentResponsibilityAssignment.assignee_department_id.in_(
+                    select(account_models.Department.id).where(or_(
+                        func.upper(account_models.Department.code) == requested_department.upper(),
+                        func.lower(account_models.Department.name) == requested_department.lower(),
+                    ))
+                )
+            )
+        elif department_id:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_department_id == department_id)
         if unresolved_ownership:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.confirmation_status.in_(UNRESOLVED_ASSIGNMENTS))
@@ -319,8 +337,8 @@ def list_visible_documents(
         .all()
     )
     owner_facets = [
-        {"id": str(user_id), "name": str(name or "Unnamed user"), "count": int(count)}
-        for user_id, name, count in (
+        {"value": str(name or ""), "name": str(name or "Unnamed user"), "count": int(count)}
+        for _user_id, name, count in (
             db.query(
                 account_models.User.id,
                 account_models.User.full_name,
@@ -345,8 +363,8 @@ def list_visible_documents(
         )
     ]
     department_facets = [
-        {"id": str(department_id), "code": str(code or ""), "name": str(name or code or "Unnamed department"), "count": int(count)}
-        for department_id, code, name, count in (
+        {"value": str(code or name or ""), "code": str(code or ""), "name": str(name or code or "Unnamed department"), "count": int(count)}
+        for _department_id, code, name, count in (
             db.query(
                 account_models.Department.id,
                 account_models.Department.code,
