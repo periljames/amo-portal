@@ -14,7 +14,10 @@ from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.database import get_db, get_read_db, get_write_db
 
 from . import models
-from .audit_checklist_execution_models import QualityAuditChecklistExecutionEvent
+from .audit_checklist_execution_models import (
+    QualityAuditChecklistExecutionEvent,
+    QualityAuditChecklistExecutionGovernance,
+)
 from .audit_checklist_execution_router import (
     ChecklistExecutionUpdate,
     _apply_execution_update,
