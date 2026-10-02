@@ -72,6 +72,10 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("button", { name: "Save audit definition" }).click();
     await expect(setup.getByRole("status")).toContainText("Definition saved.", { timeout: 30_000 });
 
+    const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
+    await meetingsTile.locator("summary").click();
+    await expect(meetingsTile).toHaveAttribute("open", "");
+
     const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await openingCard.getByRole("button", { name: "On site", exact: true }).click();
     await openingCard.getByLabel("Customize", { exact: true }).check();
@@ -92,18 +96,16 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.getByRole("status")).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
-    const noticeCard = setup.getByText("Audit notice", { exact: true }).locator("xpath=ancestor::article[1]");
-    await noticeCard.getByRole("button", { name: "Create notice" }).click();
-    await expect(setup.getByRole("status")).toContainText("Governed audit notice draft created", { timeout: 30_000 });
-    for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
-      await noticeCard.getByRole("button", { name: action, exact: true }).click();
-      await expect(setup.getByRole("status")).toContainText(action === "SUBMIT" ? "under review" : action === "APPROVE" ? "approved" : "generated", { timeout: 30_000 });
-    }
-    await noticeCard.getByLabel("Delivery reference", { exact: true }).fill("Real-browser governed notice delivery");
-    await noticeCard.getByRole("button", { name: "DELIVER", exact: true }).click();
-    await expect(setup.getByRole("status")).toContainText("delivered", { timeout: 30_000 });
-    await noticeCard.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
-    await expect(setup.getByRole("status")).toContainText("acknowledged", { timeout: 30_000 });
+    const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
+    await noticeCard.locator("summary").click();
+    await expect(noticeCard).toHaveAttribute("open", "");
+    await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
+    await expect(setup.getByRole("status")).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
+    await noticeCard.getByRole("button", { name: "Generate final preview" }).click();
+    const noticePreview = page.getByRole("dialog", { name: /Audit notice - revision 1/i });
+    await expect(noticePreview).toBeVisible({ timeout: 30_000 });
+    await expect(noticePreview).toContainText("Generated and electronically signed notice");
+    await noticePreview.getByRole("button", { name: "Close", exact: true }).click();
 
     await setup.getByRole("link", { name: "Open Prepare" }).click();
     const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
