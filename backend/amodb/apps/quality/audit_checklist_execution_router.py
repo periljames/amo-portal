@@ -22,6 +22,8 @@ from .audit_checklist_execution_models import (
     QualityAuditChecklistExecutionGovernance,
     QualityAuditFieldworkMutationReceipt,
 )
+from .audit_checklist_response_policy import resolve_response_value
+from .audit_checklist_template_models import QualityAuditChecklistBinding
 from .audit_preparation_models import QualityAuditPreparationRevision
 from .enums import FindingLevel, QMSAuditStatus, QMSFindingSeverity, QMSFindingType
 from .service import compute_target_close_date, normalize_finding_level
@@ -36,7 +38,9 @@ FindingResponse = Literal["NONCOMPLIANT", "OBSERVATION"]
 
 class ChecklistExecutionUpdate(BaseModel):
     canonical_response_status: CanonicalResponse
+    response_value: str | None = Field(default=None, max_length=64)
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -49,7 +53,9 @@ class FieldworkMutation(BaseModel):
     base_version: int = Field(ge=0)
     operation: Literal["CHECKLIST_UPDATE"] = "CHECKLIST_UPDATE"
     canonical_response_status: CanonicalResponse
+    response_value: str | None = Field(default=None, max_length=64)
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -62,6 +68,7 @@ class FieldworkFindingMutation(BaseModel):
     base_version: int = Field(ge=0)
     operation: Literal["CREATE_FINDING"] = "CREATE_FINDING"
     canonical_response_status: FindingResponse
+    response_value: str | None = Field(default=None, max_length=64)
     severity: QMSFindingSeverity
     level: FindingLevel
     requirement_ref: str | None = Field(default=None, max_length=255)
@@ -70,6 +77,7 @@ class FieldworkFindingMutation(BaseModel):
     safety_sensitive: bool = False
     target_close_date: date | None = None
     auditor_notes: str | None = Field(default=None, max_length=12000)
+    sampled_item_information: str | None = Field(default=None, max_length=12000)
     evidence_references: list[dict[str, Any] | str] = Field(default_factory=list, max_length=200)
     reason: str = Field(min_length=8, max_length=4000)
 
@@ -116,9 +124,15 @@ def _item(db: Session, *, amo_id: str, audit_id: uuid.UUID, item_id: uuid.UUID, 
 def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[str, Any]:
     return {
         "canonical_response_status": row.canonical_response_status,
+        "response_value": row.response_value,
         "auditor_notes": row.auditor_notes,
+        "auditee_comments": row.auditee_comments,
+        "sampled_item_information": row.sampled_item_information,
+        "applicability": row.applicability,
         "evidence_references": list(row.evidence_references or []),
         "entity_version": int(row.entity_version or 1),
+        "answered_by_user_id": row.answered_by_user_id,
+        "answered_at": row.answered_at,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -147,12 +161,18 @@ def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditCh
         "prompt": item.prompt,
         "legacy_response_status": item.response_status,
         "canonical_response_status": canonical,
+        "response_value": governance.response_value if governance else None,
         "objective_evidence": item.objective_evidence,
         "finding_id": str(item.finding_id) if item.finding_id else None,
         "auditor_notes": governance.auditor_notes if governance else None,
+        "auditee_comments": governance.auditee_comments if governance else None,
+        "sampled_item_information": governance.sampled_item_information if governance else None,
+        "applicability": governance.applicability if governance else "APPLICABLE",
         "evidence_references": list(governance.evidence_references or []) if governance else [],
         "governance_id": str(governance.id) if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
+        "answered_by_user_id": governance.answered_by_user_id if governance else item.completed_by_user_id,
+        "answered_at": governance.answered_at if governance else item.completed_at,
         "updated_by_user_id": governance.updated_by_user_id if governance else item.completed_by_user_id,
         "updated_at": governance.updated_at if governance else item.updated_at,
         "events": [_event_dict(event) for event in list(governance.events or [])] if governance else [],
@@ -173,6 +193,7 @@ def _apply_execution_update(
         event_type = "CREATED"
         before_snapshot = {
             "canonical_response_status": _canonical_from_legacy(item.response_status),
+            "response_value": None,
             "auditor_notes": None,
             "evidence_references": [],
             "entity_version": 0,
@@ -183,9 +204,14 @@ def _apply_execution_update(
             audit_id=item.audit_id,
             checklist_item_id=item.id,
             canonical_response_status=payload.canonical_response_status,
+            response_value=payload.response_value,
             auditor_notes=payload.auditor_notes.strip() if payload.auditor_notes else None,
+            sampled_item_information=payload.sampled_item_information.strip() if payload.sampled_item_information else None,
+            applicability=str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or "APPLICABLE")[:128],
             evidence_references=list(payload.evidence_references),
             entity_version=1,
+            answered_by_user_id=ctx.user_id if payload.canonical_response_status != "NOT_VERIFIED" else None,
+            answered_at=_utcnow() if payload.canonical_response_status != "NOT_VERIFIED" else None,
             updated_by_user_id=ctx.user_id,
         )
         db.add(governance)
@@ -193,9 +219,20 @@ def _apply_execution_update(
     else:
         before_snapshot = _governance_snapshot(governance)
         governance.canonical_response_status = payload.canonical_response_status
+        if payload.response_value is not None:
+            governance.response_value = payload.response_value
         governance.auditor_notes = payload.auditor_notes.strip() if payload.auditor_notes else None
+        if payload.sampled_item_information is not None:
+            governance.sampled_item_information = payload.sampled_item_information.strip() or None
+        governance.applicability = str(_frozen_item_definition_map(db, amo_id=ctx.amo_id, audit_id=item.audit_id).get(str(item.id), {}).get("applicability") or governance.applicability or "APPLICABLE")[:128]
         governance.evidence_references = list(payload.evidence_references)
         governance.entity_version = int(governance.entity_version or 1) + 1
+        if payload.canonical_response_status == "NOT_VERIFIED":
+            governance.answered_by_user_id = None
+            governance.answered_at = None
+        else:
+            governance.answered_by_user_id = ctx.user_id
+            governance.answered_at = _utcnow()
         governance.updated_by_user_id = ctx.user_id
         governance.updated_at = _utcnow()
 
@@ -264,8 +301,8 @@ def _fieldwork_write_blocker(db: Session, *, amo_id: str, audit: models.QMSAudit
     from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
 
     current = _capture_sources(db, amo_id=amo_id, audit=audit)
-    if _preparation_readiness_blockers(current):
-        return "Preparation is incomplete. Bind a governed checklist and accept every required document request before fieldwork continues."
+    if _preparation_readiness_blockers(current, phase="FIELDWORK"):
+        return "Preparation is incomplete. Resolve every document request governed as required before fieldwork before checklist execution continues."
     if prepared.source_fingerprint != current["source_fingerprint"]:
         return "Preparation changed after its last issue. Create and issue a fresh controlled preparation revision before fieldwork continues."
     return None
@@ -374,6 +411,140 @@ def _locked_governance(
     ).with_for_update().first()
 
 
+def _frozen_item_definition_map(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> dict[str, dict[str, Any]]:
+    """Resolve the complete frozen checklist definition for every instantiated item."""
+    result: dict[str, dict[str, Any]] = {}
+    bindings = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.amo_id == amo_id,
+        QualityAuditChecklistBinding.audit_id == audit_id,
+    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).all()
+    for binding in bindings:
+        ids = [str(value) for value in list(binding.instantiated_item_ids or [])]
+        snapshot = list(binding.item_snapshot or [])
+        for index, item_key in enumerate(ids):
+            row = snapshot[index] if index < len(snapshot) and isinstance(snapshot[index], dict) else {}
+            result[item_key] = dict(row)
+    return result
+
+
+def _frozen_response_policy_map(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+) -> dict[str, tuple[str, list[dict[str, Any]]]]:
+    """Resolve frozen response vocabularies for all bound checklist items in one query."""
+    return {
+        item_key: (
+            str(row.get("response_type") or "COMPLIANCE"),
+            list(row.get("response_options") or []),
+        )
+        for item_key, row in _frozen_item_definition_map(
+            db,
+            amo_id=amo_id,
+            audit_id=audit_id,
+        ).items()
+    }
+
+
+def _frozen_response_policy(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_id: uuid.UUID,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Resolve the response vocabulary frozen with the checklist binding."""
+    return _frozen_response_policy_map(db, amo_id=amo_id, audit_id=audit_id).get(
+        str(item_id),
+        ("COMPLIANCE", []),
+    )
+
+
+def _validate_frozen_item_requirements(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_id: uuid.UUID,
+    canonical_status: str,
+    auditor_notes: str | None,
+    evidence_references: list[dict[str, Any] | str],
+) -> None:
+    item_definition = _frozen_item_definition_map(
+        db,
+        amo_id=amo_id,
+        audit_id=audit_id,
+    ).get(str(item_id), {})
+    status_value = str(canonical_status or "").upper()
+    notes_required = {
+        str(value).upper()
+        for value in list(item_definition.get("notes_required_when") or [])
+    }
+    evidence_required = {
+        str(value).upper()
+        for value in list(item_definition.get("evidence_required_when") or [])
+    }
+    note_present = bool(str(auditor_notes or "").strip())
+    evidence_present = bool(list(evidence_references or []))
+
+    if status_value == "NOT_APPLICABLE" and bool(item_definition.get("na_justification_required")) and not note_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_NA_JUSTIFICATION_REQUIRED",
+                "message": "This governed checklist item requires an auditor reason before it can be marked not applicable.",
+            },
+        )
+    if status_value in notes_required and not note_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_NOTES_REQUIRED",
+                "message": f"This governed checklist item requires auditor notes for {status_value.replace('_', ' ').lower()}.",
+            },
+        )
+    if status_value in evidence_required and not evidence_present:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_EVIDENCE_REQUIRED",
+                "message": f"This governed checklist item requires linked evidence for {status_value.replace('_', ' ').lower()}.",
+            },
+        )
+
+
+def _validated_response_value(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_id: uuid.UUID,
+    response_value: str | None,
+    canonical_status: str,
+) -> str:
+    response_type, response_options = _frozen_response_policy(
+        db,
+        amo_id=amo_id,
+        audit_id=audit_id,
+        item_id=item_id,
+    )
+    try:
+        return resolve_response_value(
+            response_type=response_type,
+            response_options=response_options,
+            response_value=response_value,
+            canonical_status=canonical_status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _assert_base_version(
     *,
     payload_base_version: int,
@@ -473,17 +644,18 @@ def update_checklist_execution_governance(
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    # Compatibility route retained only to produce an explicit migration signal.
+    # All authoritative checklist writes must carry base_version + idempotency
+    # through the guarded fieldwork mutation command.
     assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
-    item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
-    governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
-    governance = _apply_execution_update(db, ctx=ctx, item=item, payload=payload, governance=governance)
-    db.commit()
-    governance = db.query(QualityAuditChecklistExecutionGovernance).options(
-        selectinload(QualityAuditChecklistExecutionGovernance.events)
-    ).filter(QualityAuditChecklistExecutionGovernance.id == governance.id).one()
-    return _row_dict(item, governance)
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "FIELDWORK_LEGACY_WRITE_RETIRED",
+            "message": "Use the guarded fieldwork-mutations endpoint with base_version and an idempotency key.",
+        },
+    )
 
 
 @router.post("/audits/{audit_id}/checklist-items/{item_id}/fieldwork-mutations")
@@ -521,9 +693,28 @@ def mutate_live_fieldwork(
         governance=governance,
     )
 
+    _validate_frozen_item_requirements(
+        db,
+        amo_id=ctx.amo_id,
+        audit_id=audit_id,
+        item_id=item_id,
+        canonical_status=payload.canonical_response_status,
+        auditor_notes=payload.auditor_notes,
+        evidence_references=payload.evidence_references,
+    )
+    response_value = _validated_response_value(
+        db,
+        amo_id=ctx.amo_id,
+        audit_id=audit_id,
+        item_id=item_id,
+        response_value=payload.response_value,
+        canonical_status=payload.canonical_response_status,
+    )
     update = ChecklistExecutionUpdate(
         canonical_response_status=payload.canonical_response_status,
+        response_value=response_value,
         auditor_notes=payload.auditor_notes,
+        sampled_item_information=payload.sampled_item_information,
         evidence_references=payload.evidence_references,
         reason=payload.reason,
     )
@@ -667,9 +858,28 @@ def create_atomic_fieldwork_finding(
             requested_by_user_id=ctx.user_id,
         )
 
+        _validate_frozen_item_requirements(
+            db,
+            amo_id=ctx.amo_id,
+            audit_id=audit_id,
+            item_id=item_id,
+            canonical_status=payload.canonical_response_status,
+            auditor_notes=payload.auditor_notes,
+            evidence_references=payload.evidence_references,
+        )
+        response_value = _validated_response_value(
+            db,
+            amo_id=ctx.amo_id,
+            audit_id=audit_id,
+            item_id=item_id,
+            response_value=payload.response_value,
+            canonical_status=payload.canonical_response_status,
+        )
         execution_update = ChecklistExecutionUpdate(
             canonical_response_status=payload.canonical_response_status,
+            response_value=response_value,
             auditor_notes=payload.auditor_notes,
+            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
             reason=payload.reason,
         )

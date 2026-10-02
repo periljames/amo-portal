@@ -19,14 +19,21 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from reportlab.lib import colors
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts import models as account_models
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
 from .audit_occurrence_completion_models import QualityAuditClosingNarrative, QualityAuditMeeting
 from .audit_report_composition_models import QualityAuditReportArtifact
+from .storage_replication import (
+    configured_replication_targets,
+    replicate_file,
+    restore_replicated_file,
+    successful_configured_targets,
+)
 
 
-TEMPLATE_VERSION = "QMS_AUDIT_REPORT_V2"
-RENDERER_VERSION = "REPORTLAB_V1"
+TEMPLATE_VERSION = "QMS_AUDIT_REPORT_V3"
+RENDERER_VERSION = "REPORTLAB_V2"
 _STORAGE_ROOT = Path(os.getenv("QMS_GENERATED_AUDIT_REPORT_DIR", "uploads/qms-generated-audit-reports")).resolve()
 
 
@@ -62,13 +69,24 @@ def _storage_root() -> Path:
     return _STORAGE_ROOT
 
 
-def resolve_report_artifact(storage_ref: str) -> Path:
+def _replication_key(storage_ref: str) -> str:
+    return (Path("qms") / "generated-audit-reports" / str(storage_ref)).as_posix()
+
+
+def resolve_report_artifact(storage_ref: str, *, expected_sha256: str | None = None) -> Path:
     root = _storage_root()
     target = (root / str(storage_ref)).resolve()
     if root != target and root not in target.parents:
         raise HTTPException(status_code=404, detail="Generated audit report not found.")
     if not target.is_file():
-        raise HTTPException(status_code=404, detail="Generated audit report not found.")
+        restored = restore_replicated_file(_replication_key(storage_ref), str(target))
+        if not restored:
+            raise HTTPException(status_code=404, detail="Generated audit report not found in local or configured durable storage.")
+    if expected_sha256:
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        if digest.lower() != expected_sha256.lower():
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail="Generated audit report no longer matches its governed checksum.")
     return target
 
 
@@ -120,6 +138,42 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         QualityAuditClosingNarrative.audit_id == audit_id,
     ).first()
 
+    team_role_ids = [
+        ("LEAD", audit.lead_auditor_user_id),
+        ("ASSISTANT", audit.assistant_auditor_user_id),
+        ("OBSERVER", audit.observer_auditor_user_id),
+        *[("SUPPORTING", user_id) for user_id in list(audit.supporting_auditor_user_ids or [])],
+    ]
+    unique_team_ids = list(dict.fromkeys(user_id for _, user_id in team_role_ids if user_id))
+    team_users = (
+        db.query(account_models.User)
+        .filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.id.in_(unique_team_ids),
+        )
+        .all()
+        if unique_team_ids
+        else []
+    )
+    team_by_id = {user.id: user for user in team_users}
+    audit_team = [
+        {
+            "role": role,
+            "user_id": user_id,
+            "name": (
+                team_by_id[user_id].full_name
+                if user_id in team_by_id and team_by_id[user_id].full_name
+                else team_by_id[user_id].email
+                if user_id in team_by_id
+                else user_id
+            ),
+            "staff_code": team_by_id[user_id].staff_code if user_id in team_by_id else None,
+            "position_title": team_by_id[user_id].position_title if user_id in team_by_id else None,
+        }
+        for role, user_id in team_role_ids
+        if user_id
+    ]
+
     def checklist_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[str, Any]:
         item = checklist_item_by_id.get(row.checklist_item_id)
         return {
@@ -130,13 +184,17 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "prompt": item.prompt if item else None,
             "sort_order": item.sort_order if item else None,
             "canonical_response_status": row.canonical_response_status,
+            "response_value": row.response_value,
             "auditor_notes": row.auditor_notes,
+            "auditee_comments": row.auditee_comments,
+            "sampled_item_information": row.sampled_item_information,
+            "applicability": row.applicability,
             "objective_evidence": item.objective_evidence if item else None,
             "evidence_references": row.evidence_references or [],
         }
 
     return _json_value({
-        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V2",
+        "schema": "QMS_AUDIT_REPORT_SNAPSHOT_V3",
         "audit": {
             "id": audit.id,
             "audit_ref": audit.audit_ref,
@@ -145,16 +203,23 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             "kind": audit.kind,
             "status": audit.status,
             "scope": audit.scope,
+            "objectives": audit.objectives,
             "criteria": audit.criteria,
+            "entity_version": int(audit.entity_version or 1),
+            "location": audit.location,
             "auditee": audit.auditee,
             "auditee_email": audit.auditee_email,
             "planned_start": audit.planned_start,
             "planned_end": audit.planned_end,
+            "planned_start_time": audit.planned_start_time,
+            "planned_end_time": audit.planned_end_time,
             "actual_start": audit.actual_start,
             "actual_end": audit.actual_end,
             "lead_auditor_user_id": audit.lead_auditor_user_id,
             "observer_auditor_user_id": audit.observer_auditor_user_id,
             "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+            "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
+            "team": audit_team,
         },
         "closing_narrative": {
             "management_summary": narrative.management_summary if narrative else None,
@@ -171,6 +236,9 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
                 "scheduled_end": row.scheduled_end,
                 "location": row.location,
                 "conference_url": row.conference_url,
+                "agenda": row.agenda,
+                "auditee_department": row.auditee_department,
+                "auditor_user_id": row.auditor_user_id,
                 "status": row.status,
             }
             for row in meetings
@@ -254,6 +322,7 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     summary_rows = [
         ["Audit reference", _text(audit.get("audit_ref")), "Audit type", _text(audit.get("kind"))],
         ["Auditee", _text(audit.get("auditee")), "Status", _text(audit.get("status"))],
+        ["Site / location", _text(audit.get("location")), "Lead auditor", _text(audit.get("lead_auditor_user_id"))],
         ["Planned start", _text(audit.get("planned_start")), "Planned end", _text(audit.get("planned_end"))],
         ["Actual start", _text(audit.get("actual_start")), "Actual end", _text(audit.get("actual_end"))],
     ]
@@ -272,9 +341,25 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
     ]))
     story.extend([summary_table, Spacer(1, 4 * mm)])
 
+    team_members = [
+        " · ".join(
+            value
+            for value in [
+                _text(member.get("role"), ""),
+                _text(member.get("name"), ""),
+                _text(member.get("staff_code"), ""),
+                _text(member.get("position_title"), ""),
+            ]
+            if value
+        )
+        for member in list(audit.get("team") or [])
+    ]
     story.extend([
+        _p("Audit team", styles["QmsSection"]),
+        _p(" | ".join(team_members) if team_members else "No audit team recorded.", styles["QmsBody"]),
         _p("Scope and criteria", styles["QmsSection"]),
         _p(f"Scope: {_text(audit.get('scope'))}", styles["QmsBody"]),
+        _p(f"Objectives: {_text(audit.get('objectives'))}", styles["QmsBody"]),
         _p(f"Criteria: {_text(audit.get('criteria'))}", styles["QmsBody"]),
         _p("Management summary", styles["QmsSection"]),
         _p(narrative.get("management_summary"), styles["QmsBody"]),
@@ -289,11 +374,12 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
         meeting_rows = [["Type", "Start", "End", "Location / link"]]
         for row in meetings:
             location = row.get("location") or row.get("conference_url") or "—"
+            agenda_context = " · ".join(value for value in [row.get("auditee_department"), row.get("agenda")] if value) or "—"
             meeting_rows.append([
                 _p(row.get("meeting_type"), styles["QmsSmall"]),
                 _p(row.get("scheduled_start"), styles["QmsSmall"]),
                 _p(row.get("scheduled_end"), styles["QmsSmall"]),
-                _p(location, styles["QmsSmall"]),
+                _p(f"{location} · {agenda_context}", styles["QmsSmall"]),
             ])
         meeting_table = Table(meeting_rows, colWidths=[28 * mm, 48 * mm, 48 * mm, 46 * mm], repeatRows=1)
         meeting_table.setStyle(TableStyle([
@@ -359,7 +445,12 @@ def _render_pdf(snapshot: dict[str, Any], destination: Path) -> None:
                 str(index),
                 _p(" · ".join(references) or "—", styles["QmsSmall"]),
                 _p(row.get("prompt"), styles["QmsSmall"]),
-                _p(row.get("canonical_response_status"), styles["QmsSmall"]),
+                _p(
+                    f"{row.get('response_value')} · {row.get('canonical_response_status')}"
+                    if row.get("response_value")
+                    else row.get("canonical_response_status"),
+                    styles["QmsSmall"],
+                ),
                 _p(" | ".join(evidence_parts) or "—", styles["QmsSmall"]),
             ])
         table = Table(checklist_rows, colWidths=[10 * mm, 36 * mm, 58 * mm, 28 * mm, 46 * mm], repeatRows=1)
@@ -414,6 +505,13 @@ def generate_report_artifact(
         raise HTTPException(status_code=409, detail=f"Complete the governed closing narrative before report generation: {', '.join(missing_narrative)}.")
 
     source_hash = _canonical_hash(snapshot)
+    configured_targets = configured_replication_targets()
+    if os.getenv("APP_ENV", "").strip().lower() in {"production", "prod"} and not configured_targets:
+        raise HTTPException(
+            status_code=503,
+            detail="Production audit report generation requires at least one configured durable replication target.",
+        )
+
     root = _storage_root()
     relative_dir = Path(str(amo_id)) / str(audit_id)
     destination_dir = (root / relative_dir).resolve()
@@ -424,9 +522,30 @@ def generate_report_artifact(
     safe_ref = "".join(character if character.isalnum() or character in "-_" else "-" for character in _text(audit.get("audit_ref"), "audit"))[:100]
     filename = f"{safe_ref}-closing-report-{source_hash[:12]}.pdf"
     destination = destination_dir / filename
-    _render_pdf(snapshot, destination)
-    content = destination.read_bytes()
-    artifact_hash = hashlib.sha256(content).hexdigest()
+    temporary = destination_dir / f".{filename}.{uuid.uuid4().hex}.tmp"
+    try:
+        _render_pdf(snapshot, temporary)
+        content = temporary.read_bytes()
+        artifact_hash = hashlib.sha256(content).hexdigest()
+        if destination.is_file():
+            current_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
+            if current_hash != artifact_hash:
+                raise HTTPException(status_code=409, detail="A generated report path already exists with different content.")
+            temporary.unlink(missing_ok=True)
+        else:
+            os.replace(temporary, destination)
+
+        storage_ref = (relative_dir / filename).as_posix()
+        replication = replicate_file(str(destination), _replication_key(storage_ref))
+        replicated_targets = successful_configured_targets(replication)
+        if configured_targets and not replicated_targets:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Generated report could not be committed to any configured durable storage target.",
+            )
+    finally:
+        temporary.unlink(missing_ok=True)
 
     artifact = QualityAuditReportArtifact(
         amo_id=amo_id,
@@ -438,7 +557,7 @@ def generate_report_artifact(
         content_type="application/pdf",
         size_bytes=len(content),
         sha256=artifact_hash,
-        storage_ref=(relative_dir / filename).as_posix(),
+        storage_ref=storage_ref,
         generated_by_user_id=actor_user_id,
     )
     db.add(artifact)

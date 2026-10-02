@@ -21,6 +21,34 @@ export type AuditPreparationRevision = {
   events: Array<{ id: string; event_type: string; reason: string; actor_user_id?: string | null; created_at: string }>;
 };
 
+export type AuditActivityItem = {
+  id: string;
+  source: "AUDIT_EVENT" | "PREPARATION_EVENT" | "CHECKLIST_EXECUTION_EVENT" | "EVIDENCE_EVENT" | "REPORT_EVENT" | "FINDING_RELEASE_EVENT";
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  actor_user_id?: string | null;
+  occurred_at: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+  reason?: string | null;
+};
+
+export type AuditPreparationReadiness = {
+  issue_ready: boolean;
+  fieldwork_ready: boolean;
+  checks: Array<{ code: string; label: string; complete: boolean }>;
+  issue_blockers: Array<{ type: string; reason: string; count?: number; request_ids?: Array<string | null> }>;
+  fieldwork_blockers: Array<{ type: string; reason: string; count?: number; request_ids?: Array<string | null> }>;
+  complete_count: number;
+  total_count: number;
+  percent: number;
+  source_fingerprint: string;
+  issued_preparation_revision_id?: string | null;
+  issued_preparation_revision_no?: number | null;
+};
+
 export type AuditNoticePolicy = {
   id: string;
   policy_code: string;
@@ -139,6 +167,20 @@ function json(method: string, body: unknown): RequestInit {
 export function listAuditPreparationRevisions(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditPreparationRevision[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/preparation-revisions`),
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+  );
+}
+
+export function listAuditActivity(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: AuditActivityItem[] }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/activity`),
+    { timeoutMs: 15_000, cacheTtlMs: 2_000, staleWhileOfflineMs: 24 * 60 * 60_000, signal },
+  );
+}
+
+export function getAuditPreparationReadiness(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<AuditPreparationReadiness>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/preparation-readiness`),
     { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }

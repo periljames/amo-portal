@@ -30,6 +30,12 @@ router = APIRouter(tags=["Quality audit occurrence completion"])
 public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
 
 ControlledSourceSystem = Literal["QMS_LOCAL", "DOCUMENT_CONTROL"]
+DocumentRequestRequirementStage = Literal[
+    "REQUIRED_BEFORE_ISSUE",
+    "REQUIRED_BEFORE_FIELDWORK",
+    "REQUIRED_DURING_FIELDWORK",
+    "REQUESTED_NOT_BLOCKING",
+]
 _CANONICAL_CONTROLLED_REVISION_STATUSES = {
     manual_models.ManualRevisionStatus.PUBLISHED,
     manual_models.ManualRevisionStatus.SUPERSEDED,
@@ -62,13 +68,70 @@ def _normalise_datetime(value: datetime, *, zone) -> datetime:
     return normalise_tenant_datetime(value, zone=zone)
 
 
+def _validated_checklist_item_ids(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    item_ids: list[uuid.UUID] | None,
+) -> list[str]:
+    ids = list(dict.fromkeys(item_ids or []))
+    if not ids:
+        return []
+    rows = db.query(models.QualityAuditChecklistItem.id).filter(
+        models.QualityAuditChecklistItem.amo_id == amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit_id,
+        models.QualityAuditChecklistItem.id.in_(ids),
+    ).all()
+    found = {row[0] for row in rows}
+    missing = [str(value) for value in ids if value not in found]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AUDIT_REQUEST_CHECKLIST_ITEM_INVALID",
+                "message": "One or more linked checklist items do not belong to this audit.",
+                "item_ids": missing,
+            },
+        )
+    return [str(value) for value in ids]
+
+
+def _validated_meeting_auditor(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str | None,
+) -> str | None:
+    cleaned = (user_id or "").strip() or None
+    if cleaned is None:
+        return None
+    row = db.query(account_models.User.id).filter(
+        account_models.User.id == cleaned,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AUDIT_MEETING_AUDITOR_INVALID",
+                "message": "The selected meeting auditor is not an active user in this tenant.",
+            },
+        )
+    return cleaned
+
+
 class GovernedDocumentRequestCreate(BaseModel):
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=8000)
     due_date: str | None = None
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] = "DOCUMENT"
     linked_criterion: str | None = Field(default=None, max_length=4000)
+    responsible_party: str | None = Field(default=None, max_length=255)
+    checklist_item_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
     is_required: bool = True
+    requirement_stage: DocumentRequestRequirementStage = "REQUIRED_BEFORE_ISSUE"
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] = "UPLOAD_OR_CONTROLLED"
 
     # QMS_LOCAL is the compatibility default for older API clients. New frontend
@@ -85,7 +148,10 @@ class GovernedDocumentRequestUpdate(BaseModel):
     review_note: str | None = Field(default=None, max_length=8000)
     request_type: Literal["DOCUMENT", "RECORD", "MANUAL", "FORM", "CERTIFICATE", "REGISTER", "OTHER"] | None = None
     linked_criterion: str | None = Field(default=None, max_length=4000)
+    responsible_party: str | None = Field(default=None, max_length=255)
+    checklist_item_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
     is_required: bool | None = None
+    requirement_stage: DocumentRequestRequirementStage | None = None
     source_mode: Literal["UPLOAD", "CONTROLLED_DMS", "UPLOAD_OR_CONTROLLED"] | None = None
     controlled_source_system: ControlledSourceSystem | None = None
     controlled_document_id: uuid.UUID | None = None
@@ -100,6 +166,9 @@ class AuditMeetingCreate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
+    agenda: str | None = Field(default=None, max_length=12000)
+    auditee_department: str | None = Field(default=None, max_length=255)
+    auditor_user_id: str | None = Field(default=None, max_length=36)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] = "PLANNED"
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -110,6 +179,9 @@ class AuditMeetingUpdate(BaseModel):
     scheduled_end: datetime | None = None
     location: str | None = Field(default=None, max_length=255)
     conference_url: str | None = Field(default=None, max_length=1024)
+    agenda: str | None = Field(default=None, max_length=12000)
+    auditee_department: str | None = Field(default=None, max_length=255)
+    auditor_user_id: str | None = Field(default=None, max_length=36)
     status: Literal["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] | None = None
     notes: str | None = Field(default=None, max_length=12000)
 
@@ -307,7 +379,10 @@ def _doc_request_dict(row: models.QualityAuditDocumentRequest, metadata: Quality
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "request_type": metadata.request_type if metadata else "DOCUMENT",
         "linked_criterion": metadata.linked_criterion if metadata else None,
+        "responsible_party": metadata.responsible_party if metadata else None,
+        "checklist_item_ids": [str(value) for value in list(metadata.checklist_item_ids or [])] if metadata else [],
         "is_required": metadata.is_required if metadata else True,
+        "requirement_stage": metadata.requirement_stage if metadata else "REQUIRED_BEFORE_ISSUE",
         "source_mode": metadata.source_mode if metadata else "UPLOAD_OR_CONTROLLED",
         "controlled_source_system": metadata.controlled_source_system if metadata else "QMS_LOCAL",
         "controlled_document_id": str(metadata.controlled_document_id) if metadata and metadata.controlled_document_id else None,
@@ -326,11 +401,14 @@ def _meeting_dict(row: QualityAuditMeeting, *, public: bool = False) -> dict[str
         "scheduled_end": row.scheduled_end.isoformat() if row.scheduled_end else None,
         "location": row.location,
         "conference_url": row.conference_url,
+        "agenda": row.agenda,
+        "auditee_department": row.auditee_department,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
     if not public:
+        payload["auditor_user_id"] = row.auditor_user_id
         payload["notes"] = row.notes
     return payload
 
@@ -521,7 +599,10 @@ def create_governed_document_request(
         audit_id=audit_id,
         request_type=payload.request_type,
         linked_criterion=(payload.linked_criterion or "").strip() or None,
+        responsible_party=(payload.responsible_party or "").strip() or None,
+        checklist_item_ids=_validated_checklist_item_ids(db, amo_id=ctx.amo_id, audit_id=audit_id, item_ids=payload.checklist_item_ids),
         is_required=payload.is_required,
+        requirement_stage=payload.requirement_stage,
         source_mode=payload.source_mode,
         controlled_source_system=payload.controlled_source_system,
         controlled_document_id=qms_document_id,
@@ -611,10 +692,17 @@ def update_governed_document_request(
         row.reviewed_at = _utcnow()
     if "review_note" in update:
         row.review_note = (update["review_note"] or "").strip() or None
-    for field in ("request_type", "linked_criterion", "is_required"):
+    for field in ("request_type", "linked_criterion", "responsible_party", "checklist_item_ids", "is_required", "requirement_stage"):
         if field in update:
             value = update[field]
-            if isinstance(value, str):
+            if field == "checklist_item_ids":
+                value = _validated_checklist_item_ids(
+                    db,
+                    amo_id=ctx.amo_id,
+                    audit_id=audit_id,
+                    item_ids=value,
+                )
+            elif isinstance(value, str):
                 value = value.strip() or None
             setattr(metadata, field, value)
 
@@ -686,6 +774,9 @@ def create_audit_meeting(
     row.scheduled_end = end
     row.location = (payload.location or "").strip() or None
     row.conference_url = (payload.conference_url or "").strip() or None
+    row.agenda = (payload.agenda or "").strip() or None
+    row.auditee_department = (payload.auditee_department or "").strip() or None
+    row.auditor_user_id = _validated_meeting_auditor(db, amo_id=ctx.amo_id, user_id=payload.auditor_user_id)
     row.status = payload.status
     row.notes = (payload.notes or "").strip() or None
     row.updated_by_user_id = ctx.user_id
@@ -715,6 +806,12 @@ def update_audit_meeting(
         raise HTTPException(status_code=404, detail="Audit meeting not found.")
     update = payload.model_dump(exclude_unset=True)
     zone = tenant_timezone(db, amo_id=ctx.amo_id)
+    if "auditor_user_id" in update:
+        update["auditor_user_id"] = _validated_meeting_auditor(
+            db,
+            amo_id=ctx.amo_id,
+            user_id=update.get("auditor_user_id"),
+        )
     for field, value in update.items():
         if field in {"scheduled_start", "scheduled_end"} and value is not None:
             value = _normalise_datetime(value, zone=zone)

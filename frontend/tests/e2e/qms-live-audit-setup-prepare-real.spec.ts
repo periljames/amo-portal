@@ -9,6 +9,9 @@ type Fixture = {
   realtime_audit_ref: string;
   realtime_user_a_email: string;
   realtime_password: string;
+  dms_checklist_id: string;
+  dms_checklist_code: string;
+  dms_checklist_revision_id: string;
 };
 
 function fixture(): Fixture {
@@ -65,45 +68,74 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
-    await setup.getByLabel("Planned start", { exact: true }).fill(futureDate(30));
-    await setup.getByLabel("Planned end", { exact: true }).fill(futureDate(31));
-    await setup.getByLabel("Reminder interval (days)", { exact: true }).fill("5");
+    await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
+    await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
+    await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
+    await setup.getByLabel("Reason for rescheduling", { exact: true }).fill("Move this acceptance audit into the governed preparation window.");
     await setup.getByRole("button", { name: "Save audit definition" }).click();
-    await expect(setup.getByRole("status")).toContainText("Audit definition and notification settings saved", { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
-    const openingCard = setup.getByText("Opening meeting", { exact: true }).locator("xpath=ancestor::article[1]");
-    await openingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(1));
-    await openingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(2));
+    const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
+    await meetingsTile.locator("summary").click();
+    await expect(meetingsTile).toHaveAttribute("open", "");
+
+    const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
+    await openingCard.getByRole("button", { name: "On site", exact: true }).click();
+    await openingCard.getByLabel("Customize", { exact: true }).check();
+    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T08:00`);
+    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T09:00`);
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
-    await openingCard.getByLabel("Agenda", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
+    await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText("opening meeting saved", { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/opening meeting saved/i, { timeout: 30_000 });
 
-    const closingCard = setup.getByText("Closing meeting", { exact: true }).locator("xpath=ancestor::article[1]");
-    await closingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(7));
-    await closingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(8));
+    const closingCard = setup.getByText("Closing", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
+    await closingCard.getByRole("button", { name: "On site", exact: true }).click();
+    await closingCard.getByLabel("Customize", { exact: true }).check();
+    await closingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(31)}T17:00`);
+    await closingCard.getByLabel("End", { exact: true }).fill(`${futureDate(31)}T18:00`);
     await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
-    await closingCard.getByLabel("Agenda", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
+    await closingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText("closing meeting saved", { timeout: 30_000 });
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
-    const noticeCard = setup.getByText("Audit notice", { exact: true }).locator("xpath=ancestor::article[1]");
-    await noticeCard.getByRole("button", { name: "Create notice" }).click();
-    await expect(setup.getByRole("status")).toContainText("Governed audit notice draft created", { timeout: 30_000 });
-    for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
-      await noticeCard.getByRole("button", { name: action, exact: true }).click();
-      await expect(setup.getByRole("status")).toContainText(action === "SUBMIT" ? "under review" : action === "APPROVE" ? "approved" : "generated", { timeout: 30_000 });
-    }
-    await noticeCard.getByLabel("Delivery reference", { exact: true }).fill("Real-browser governed notice delivery");
-    await noticeCard.getByRole("button", { name: "DELIVER", exact: true }).click();
-    await expect(setup.getByRole("status")).toContainText("delivered", { timeout: 30_000 });
-    await noticeCard.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
-    await expect(setup.getByRole("status")).toContainText("acknowledged", { timeout: 30_000 });
+    const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
+    await noticeCard.locator("summary").click();
+    await expect(noticeCard).toHaveAttribute("open", "");
+    await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
+    await noticeCard.getByRole("button", { name: "Generate final preview" }).click();
+    const noticePreview = page.getByRole("dialog", { name: /Audit notice - revision 1/i });
+    await expect(noticePreview).toBeVisible({ timeout: 30_000 });
+    await expect(noticePreview).toContainText("Generated and electronically signed notice");
+    await noticePreview.getByRole("button", { name: "Close", exact: true }).click();
 
-    await setup.getByRole("link", { name: "Open Pre-Audit Room" }).click();
+    await setup.getByRole("link", { name: "Open Prepare" }).click();
     const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
     await expect(prepare).toBeVisible({ timeout: 30_000 });
     await expect(prepare.getByText("Real browser setup scope covering controlled maintenance and Quality records.")).toBeVisible();
+
+    const controlledChecklist = prepare.getByLabel("Current controlled document", { exact: true });
+    await expect(controlledChecklist).toBeVisible({ timeout: 30_000 });
+    await controlledChecklist.selectOption(data.dms_checklist_id);
+    await prepare.getByLabel("Response vocabulary", { exact: true }).selectOption("YES_NO_NA");
+    await prepare.getByLabel("Add to the existing checklist", { exact: true }).check();
+    await expect(prepare.getByText("Current effective revision", { exact: true })).toBeVisible();
+
+    const bindResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === "POST"
+      && response.url().includes(`/checklist-library/${data.dms_checklist_id}/bind-current`),
+    );
+    await prepare.getByRole("button", { name: "Use current revision", exact: true }).click();
+    const bindResponse = await bindResponsePromise;
+    expect(bindResponse.status()).toBe(201);
+    const persistedBinding = await bindResponse.json() as { id: string; audit_id: string; instantiated_item_ids: string[] };
+    expect(persistedBinding.id).toBeTruthy();
+    expect(persistedBinding.instantiated_item_ids.length).toBeGreaterThan(0);
+    await expect(prepare.getByText("1 bound", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(prepare.getByText(new RegExp(`${data.dms_checklist_code}.*Rev 1`, "i"))).toBeVisible();
+    await expect(prepare.getByText("The current effective DMS checklist is bound to fieldwork.", { exact: true })).toBeVisible();
+    await expect(prepare.getByText(/has not confirmed the authoritative fieldwork binding/i)).toHaveCount(0);
 
     await prepare.getByRole("button", { name: "New request" }).click();
     await prepare.getByLabel("Due date", { exact: true }).fill(futureDate(20));
@@ -127,7 +159,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const inviteResponse = await inviteResponsePromise;
     const invited = await inviteResponse.json() as { access_url?: string };
     expect(invited.access_url).toBeTruthy();
-    await expect(prepare.getByRole("status")).toContainText("One-time invitation link created", { timeout: 30_000 });
+    await expect(prepare.locator(".qms-occurrence-stage__message").last()).toContainText("Participant access created. Copy the invitation link shown below.", { timeout: 30_000 });
 
     const guestPage = await guestContext.newPage();
     watchServerFailures(guestPage, guestFailures);

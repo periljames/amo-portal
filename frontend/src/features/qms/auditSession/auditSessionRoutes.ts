@@ -27,7 +27,8 @@ export type AuditOccurrenceFunctionalTab =
   | "evidence"
   | "findings"
   | "team"
-  | "report";
+  | "report"
+  | "activity";
 
 export const AUDIT_OCCURRENCE_FUNCTIONAL_TABS: readonly {
   id: AuditOccurrenceFunctionalTab;
@@ -41,6 +42,7 @@ export const AUDIT_OCCURRENCE_FUNCTIONAL_TABS: readonly {
   { id: "findings", label: "Findings", stage: "live", hash: "findings" },
   { id: "team", label: "Team", stage: "setup", hash: "team" },
   { id: "report", label: "Report", stage: "closing", hash: "report" },
+  { id: "activity", label: "Activity", stage: "prepare", hash: "activity" },
 ] as const;
 
 /** Keep secondary navigation inside the stage currently being viewed. */
@@ -86,7 +88,7 @@ export function auditOccurrenceFunctionalTabFromLocation(
     if (byHash) return byHash.id;
     if (fragment === "team" && (stage === "setup" || stage === "prepare")) return "team";
   }
-  if (stage === "setup" || stage === "prepare") return fragment === "team" ? "team" : "overview";
+  if (stage === "setup" || stage === "prepare") return fragment === "team" ? "team" : fragment === "activity" ? "activity" : "overview";
   if (stage === "live") return "checklist";
   if (stage === "closing" || stage === "archive") return "report";
   return null;

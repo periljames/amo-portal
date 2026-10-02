@@ -51,14 +51,23 @@ def _audit_dict(row: models.QMSAudit) -> dict[str, Any]:
         "domain": _enum(getattr(row, "domain", None)),
         "audit_scope_id": str(getattr(row, "audit_scope_id", "") or "") or None,
         "scope": row.scope,
+        "objectives": row.objectives,
         "criteria": row.criteria,
+        "entity_version": int(row.entity_version or 1),
         "planned_start": _jsonable(row.planned_start),
         "planned_end": _jsonable(row.planned_end),
+        "planned_start_time": _jsonable(getattr(row, "planned_start_time", None)),
+        "planned_end_time": _jsonable(getattr(row, "planned_end_time", None)),
         "actual_start": _jsonable(row.actual_start),
         "actual_end": _jsonable(row.actual_end),
+        "auditee": getattr(row, "auditee", None),
+        "auditee_email": getattr(row, "auditee_email", None),
+        "auditee_user_id": getattr(row, "auditee_user_id", None),
+        "external_auditees": getattr(row, "external_auditees", []),
         "lead_auditor_user_id": getattr(row, "lead_auditor_user_id", None),
         "observer_auditor_user_id": getattr(row, "observer_auditor_user_id", None),
         "assistant_auditor_user_id": getattr(row, "assistant_auditor_user_id", None),
+        "supporting_auditor_user_ids": list(getattr(row, "supporting_auditor_user_ids", None) or []),
         "location": getattr(row, "location", None),
     }
 
@@ -210,7 +219,7 @@ def get_audit_preparation_context(
         table_names=("qms_audit_opening_meetings", "qms_audit_meetings", "quality_audit_meetings"),
         amo_id=ctx.amo_id,
         audit_id=audit.id,
-        preferred_fields=("id", "meeting_type", "status", "scheduled_at", "held_at", "attendees", "notes", "minutes", "created_at"),
+        preferred_fields=("id", "meeting_type", "status", "scheduled_start", "scheduled_end", "scheduled_at", "held_at", "location", "conference_url", "agenda", "auditee_department", "auditor_user_id", "attendees", "notes", "minutes", "created_at"),
         limit=25,
     )
 

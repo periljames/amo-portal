@@ -139,10 +139,23 @@ const QmsCarControlLoopPage: React.FC = () => {
 
   const control = controlQuery.data;
   const assignees = useMemo(() => assigneesQuery.data ?? [], [assigneesQuery.data]);
-  const assigneeOptions = useMemo(
-    () => [...assignees].sort((left, right) => (left.full_name || left.email || "").localeCompare(right.full_name || right.email || "")),
-    [assignees],
-  );
+  const assigneeOptions = useMemo(() => {
+    const next = [...assignees];
+    const governedOwnerId = control?.profile?.accountable_owner_user_id || control?.car.assigned_to_user_id || null;
+    if (governedOwnerId && !next.some((person) => person.id === governedOwnerId)) {
+      next.push({
+        id: governedOwnerId,
+        full_name: "Current assigned owner",
+        email: null,
+        staff_code: null,
+        role: "ASSIGNED_OWNER",
+        department_id: null,
+        department_code: null,
+        department_name: null,
+      });
+    }
+    return next.sort((left, right) => (left.full_name || left.email || "").localeCompare(right.full_name || right.email || ""));
+  }, [assignees, control?.car.assigned_to_user_id, control?.profile?.accountable_owner_user_id]);
 
   useEffect(() => {
     if (!control) return;

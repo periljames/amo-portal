@@ -279,7 +279,7 @@ async function deleteDocumentRow(database: IDBDatabase, row: OfflinePdfDocument)
   await deleteBlobChunks(database, row.blobKey);
 }
 
-async function pruneOwner(database: IDBDatabase, owner: string, protectedKey?: string): Promise<void> {
+async function pruneOwner(database: IDBDatabase, owner: string, protectedKey?: string, ownerEntryLimit = MAX_USER_CACHE_ENTRIES): Promise<void> {
   const transaction = database.transaction(DOCUMENT_STORE, "readonly");
   const rows = await requestResult<OfflinePdfDocument[]>(
     transaction.objectStore(DOCUMENT_STORE).index("byOwner").getAll(owner),
@@ -292,7 +292,7 @@ async function pruneOwner(database: IDBDatabase, owner: string, protectedKey?: s
   for (const row of rows) {
     const keepProtected = row.key === protectedKey;
     const expired = Date.now() - row.cachedAt > CACHE_MAX_AGE_MS;
-    const exceedsEntryLimit = retainedEntries >= MAX_USER_CACHE_ENTRIES;
+    const exceedsEntryLimit = retainedEntries >= Math.max(MAX_USER_CACHE_ENTRIES, ownerEntryLimit);
     const exceedsByteLimit = retainedBytes + row.byteLength > MAX_USER_CACHE_BYTES;
     if (!keepProtected && (expired || exceedsEntryLimit || exceedsByteLimit)) {
       await deleteDocumentRow(database, row);
@@ -445,11 +445,16 @@ export async function readLatestCachedPdfSource(
   }
 }
 
+export type PdfOfflineRetentionOptions = {
+  ownerEntryLimit?: number;
+};
+
 async function storePdfSource(
   identity: PdfWorkingCopyIdentity,
   sourceSha256: string,
   readerUrl: string,
   expectedBytes?: number | null,
+  retention?: PdfOfflineRetentionOptions,
 ): Promise<boolean> {
   if (!offlineStorageAvailable() || !sourceSha256.trim() || /^(?:blob:|data:)/i.test(readerUrl)) {
     throw new Error("This document source cannot be retained for offline use.");
@@ -600,7 +605,7 @@ async function storePdfSource(
     if (previous?.blobKey && previous.blobKey !== blobKey) {
       await deleteBlobChunks(database, previous.blobKey);
     }
-    await pruneOwner(database, ownerId(identity), key);
+    await pruneOwner(database, ownerId(identity), key, retention?.ownerEntryLimit);
     return true;
   } catch (error) {
     await deleteBlobChunks(database, blobKey).catch(() => undefined);
@@ -613,11 +618,12 @@ export function savePdfSourceOffline(
   sourceSha256: string,
   readerUrl: string,
   expectedBytes?: number | null,
+  retention?: PdfOfflineRetentionOptions,
 ): Promise<boolean> {
   const key = cacheKey(identity, sourceSha256, readerUrl);
   const existing = inFlight.get(key);
   if (existing) return existing;
-  const task = storePdfSource(identity, sourceSha256, readerUrl, expectedBytes)
+  const task = storePdfSource(identity, sourceSha256, readerUrl, expectedBytes, retention)
     .finally(() => {
       if (inFlight.get(key) === task) inFlight.delete(key);
     });

@@ -50,7 +50,7 @@
 .qms-public-audit__released-files li > span,
 .qms-external-auditor-fieldwork__evidence li {
   display: grid;
-  gap: 0.1rem;
+  gap: var(--space-1);
 }
 
 .qms-live-audit-focus__evidence li small,
@@ -60,6 +60,7 @@
   font-size: 0.72rem;
 }
 
+.qms-live-audit-focus__evidence-pending,
 .qms-live-audit-focus__evidence-upload,
 .qms-external-auditor-fieldwork__evidence,
 .qms-public-audit__closing-form,
@@ -103,6 +104,7 @@
   font: inherit;
 }
 
+.qms-live-audit-focus__evidence-pending button,
 .qms-live-audit-focus__evidence-upload button,
 .qms-external-auditor-fieldwork__evidence button,
 .qms-public-audit__closing-form button,
@@ -121,6 +123,23 @@
   background: var(--qms-panel);
   color: inherit;
   font-weight: 750;
+}
+
+.qms-live-audit-focus__evidence-pending > strong {
+  display: block;
+}
+
+.qms-live-audit-focus__evidence-pending li {
+  align-items: flex-start;
+}
+
+.qms-live-audit-focus__evidence-pending li > span {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.qms-live-audit-focus__evidence-pending li > small {
 }
 
 .qms-live-audit-focus__presence > span {

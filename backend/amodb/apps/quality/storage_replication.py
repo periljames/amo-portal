@@ -146,3 +146,140 @@ def _replicate_onprem(local_path: str, storage_key: str) -> bool:
     except Exception as exc:
         logger.warning("AeroDoc on-prem mirror replication failed", extra={"error": str(exc), "storage_key": storage_key})
         return False
+
+
+def configured_replication_targets() -> set[str]:
+    """Return storage targets that are explicitly configured for durable copies."""
+    targets: set[str] = set()
+    if os.getenv("AERODOC_AWS_S3_BUCKET", "").strip() or os.getenv("AERODOC_AWS_MIRROR_PATH", "").strip():
+        targets.add("aws")
+    if (
+        os.getenv("AERODOC_AZURE_CONTAINER", "").strip()
+        and os.getenv("AERODOC_AZURE_CONNECTION_STRING", "").strip()
+    ) or os.getenv("AERODOC_AZURE_MIRROR_PATH", "").strip():
+        targets.add("azure")
+    if (
+        os.getenv("AERODOC_ONPREM_SFTP_HOST", "").strip()
+        and os.getenv("AERODOC_ONPREM_SFTP_USER", "").strip()
+        and os.getenv("AERODOC_ONPREM_SFTP_PASSWORD", "").strip()
+    ) or os.getenv("AERODOC_ONPREM_MIRROR_PATH", "").strip():
+        targets.add("onprem")
+    return targets
+
+
+def successful_configured_targets(result: ReplicationResult) -> set[str]:
+    configured = configured_replication_targets()
+    success: set[str] = set()
+    if "aws" in configured and result.aws_ok:
+        success.add("aws")
+    if "azure" in configured and result.azure_ok:
+        success.add("azure")
+    if "onprem" in configured and result.onprem_ok:
+        success.add("onprem")
+    return success
+
+
+def restore_replicated_file(storage_key: str, destination: str) -> bool:
+    """Restore a replicated artifact into a local cache path.
+
+    Each target is attempted independently. A temporary file is atomically moved
+    into place only after a backend reports a complete download/copy.
+    """
+    target = Path(destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{int(time.time() * 1000)}.restore")
+    temporary.unlink(missing_ok=True)
+    try:
+        if _restore_aws(storage_key, temporary):
+            os.replace(temporary, target)
+            return True
+        if _restore_azure(storage_key, temporary):
+            os.replace(temporary, target)
+            return True
+        if _restore_onprem(storage_key, temporary):
+            os.replace(temporary, target)
+            return True
+        return False
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _restore_aws(storage_key: str, destination: Path) -> bool:
+    bucket = os.getenv("AERODOC_AWS_S3_BUCKET", "").strip()
+    if bucket:
+        try:
+            import boto3  # type: ignore
+
+            boto3.client("s3").download_file(bucket, storage_key, str(destination))
+            return destination.is_file()
+        except Exception as exc:
+            logger.warning("AeroDoc AWS S3 restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    mirror = os.getenv("AERODOC_AWS_MIRROR_PATH", "").strip()
+    if mirror:
+        try:
+            source = Path(mirror).joinpath(storage_key)
+            if source.is_file():
+                shutil.copy2(source, destination)
+                return True
+        except Exception as exc:
+            logger.warning("AeroDoc AWS mirror restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    return False
+
+
+def _restore_azure(storage_key: str, destination: Path) -> bool:
+    container = os.getenv("AERODOC_AZURE_CONTAINER", "").strip()
+    conn_string = os.getenv("AERODOC_AZURE_CONNECTION_STRING", "").strip()
+    if container and conn_string:
+        try:
+            from azure.storage.blob import BlobServiceClient  # type: ignore
+
+            service = BlobServiceClient.from_connection_string(conn_string)
+            client = service.get_blob_client(container=container, blob=storage_key)
+            with destination.open("wb") as handle:
+                handle.write(client.download_blob().readall())
+            return destination.is_file()
+        except Exception as exc:
+            destination.unlink(missing_ok=True)
+            logger.warning("AeroDoc Azure Blob restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    mirror = os.getenv("AERODOC_AZURE_MIRROR_PATH", "").strip()
+    if mirror:
+        try:
+            source = Path(mirror).joinpath(storage_key)
+            if source.is_file():
+                shutil.copy2(source, destination)
+                return True
+        except Exception as exc:
+            logger.warning("AeroDoc Azure mirror restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    return False
+
+
+def _restore_onprem(storage_key: str, destination: Path) -> bool:
+    sftp_host = os.getenv("AERODOC_ONPREM_SFTP_HOST", "").strip()
+    sftp_user = os.getenv("AERODOC_ONPREM_SFTP_USER", "").strip()
+    sftp_pass = os.getenv("AERODOC_ONPREM_SFTP_PASSWORD", "").strip()
+    sftp_root = os.getenv("AERODOC_ONPREM_SFTP_ROOT", "").strip() or "/"
+    if sftp_host and sftp_user and sftp_pass:
+        try:
+            import paramiko  # type: ignore
+
+            transport = paramiko.Transport((sftp_host, int(os.getenv("AERODOC_ONPREM_SFTP_PORT", "22") or "22")))
+            transport.connect(username=sftp_user, password=sftp_pass)
+            sftp = paramiko.SFTPClient.from_transport(transport)
+            remote_path = str(Path(sftp_root).joinpath(storage_key)).replace("\\", "/")
+            sftp.get(remote_path, str(destination))
+            sftp.close()
+            transport.close()
+            return destination.is_file()
+        except Exception as exc:
+            destination.unlink(missing_ok=True)
+            logger.warning("AeroDoc on-prem SFTP restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    mirror = os.getenv("AERODOC_ONPREM_MIRROR_PATH", "").strip()
+    if mirror:
+        try:
+            source = Path(mirror).joinpath(storage_key)
+            if source.is_file():
+                shutil.copy2(source, destination)
+                return True
+        except Exception as exc:
+            logger.warning("AeroDoc on-prem mirror restore failed", extra={"error": str(exc), "storage_key": storage_key})
+    return False

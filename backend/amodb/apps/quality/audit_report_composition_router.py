@@ -86,5 +86,5 @@ def download_closing_report_artifact(
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Generated audit report artifact not found.")
-    path = resolve_report_artifact(row.storage_ref)
+    path = resolve_report_artifact(row.storage_ref, expected_sha256=row.sha256)
     return FileResponse(path, filename=row.filename, media_type=row.content_type)

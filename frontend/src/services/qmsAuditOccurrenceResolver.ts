@@ -1,10 +1,13 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { QMSAuditOut } from "./qms";
+import { readAuditOfflinePackByKey } from "./qmsAuditOfflinePack";
 
 export type AuditOccurrenceSetupUpdate = {
   title?: string | null;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
+  location?: string | null;
   auditee?: string | null;
   auditee_email?: string | null;
   planned_start?: string | null;
@@ -15,6 +18,7 @@ export type AuditOccurrenceSetupUpdate = {
   notify_auditees?: boolean | null;
   reminder_interval_days?: number | null;
   reschedule_reason?: string | null;
+  base_version?: number | null;
 };
 
 export function auditOccurrenceResolverKey(auditKey: string): string {
@@ -39,13 +43,33 @@ export function auditOccurrenceQueryKey(amoCode: string, auditKey: string) {
   return ["qms", "audit-occurrence", amoCode.trim().toLowerCase(), auditOccurrenceResolverKey(auditKey)] as const;
 }
 
-export function resolveAuditOccurrence(amoCode: string, auditKey: string, signal?: AbortSignal): Promise<QMSAuditOut> {
+export async function resolveAuditOccurrence(amoCode: string, auditKey: string, signal?: AbortSignal): Promise<QMSAuditOut> {
   const key = auditOccurrenceResolverKey(auditKey);
-  if (!key) return Promise.reject(new Error("Audit occurrence key is required."));
-  return apiRequest<QMSAuditOut>(
-    qmsPath(amoCode, `/audits/resolve/${encodeURIComponent(key)}`),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
-  );
+  if (!key) throw new Error("Audit occurrence key is required.");
+  const readOffline = async () => {
+    const pack = await readAuditOfflinePackByKey(amoCode, key);
+    if (!pack?.fieldwork_state.authorized) return null;
+    const audit = pack.work_package.package_snapshot.audit;
+    if (!audit.id || !audit.audit_ref || !audit.title) return null;
+    return audit as unknown as QMSAuditOut;
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw new Error("This audit is unavailable offline on this device. Reconnect and use Make available offline from Prepare before fieldwork.");
+  }
+  try {
+    return await apiRequest<QMSAuditOut>(
+      qmsPath(amoCode, `/audits/resolve/${encodeURIComponent(key)}`),
+      { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
 }
 
 export function updateAuditOccurrenceSetup(

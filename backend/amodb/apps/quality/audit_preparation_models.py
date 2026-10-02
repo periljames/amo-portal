@@ -68,3 +68,36 @@ class QualityAuditPreparationEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     revision = relationship("QualityAuditPreparationRevision", back_populates="events", lazy="joined")
+
+class QualityAuditWorkPackage(Base):
+    """Immutable issued preparation baseline used for online and offline fieldwork."""
+
+    __tablename__ = "quality_audit_work_packages"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "audit_id", "revision_no", name="uq_quality_audit_work_package_revision"),
+        UniqueConstraint("amo_id", "preparation_revision_id", name="uq_quality_audit_work_package_preparation"),
+        CheckConstraint("revision_no >= 1", name="ck_quality_audit_work_package_revision_no"),
+        Index("ix_quality_audit_work_package_audit", "amo_id", "audit_id", "revision_no"),
+        Index("ix_quality_audit_work_package_sha", "amo_id", "content_sha256"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
+    preparation_revision_id = Column(
+        String(36),
+        ForeignKey("quality_audit_preparation_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    revision_no = Column(Integer, nullable=False)
+    package_snapshot = Column(JSON, nullable=False, default=dict)
+    content_sha256 = Column(String(64), nullable=False)
+    offline_expires_at = Column(DateTime(timezone=True), nullable=True)
+    supersedes_work_package_id = Column(
+        String(36),
+        ForeignKey("quality_audit_work_packages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    issued_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

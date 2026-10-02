@@ -20,7 +20,9 @@ import {
   issueChecklistRevision,
   listChecklistTemplates,
   retireChecklistTemplate,
+  type ChecklistCanonicalStatus,
   type ChecklistFindingTrigger,
+  type ChecklistResponseOption,
   type ChecklistTemplateItem,
   type ChecklistAIDraft,
 } from "../../services/qmsChecklistTemplates";
@@ -40,6 +42,7 @@ const EMPTY_ITEM: ChecklistTemplateItem = {
   prompt: "",
   expected_evidence: "",
   response_type: "COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED",
+  response_options: [],
   applicability: "ALL",
   mandatory: true,
   finding_trigger: "NONCOMPLIANT",
@@ -52,6 +55,31 @@ const FINDING_TRIGGER_OPTIONS: Array<{ value: ChecklistFindingTrigger; label: st
   { value: "OBSERVATION", label: "Observation response" },
   { value: "ADVERSE_RESPONSE", label: "Noncompliant or observation" },
 ];
+
+
+const CANONICAL_RESPONSE_OPTIONS: Array<{ value: ChecklistCanonicalStatus; label: string }> = [
+  { value: "COMPLIANT", label: "Compliant" },
+  { value: "NONCOMPLIANT", label: "Noncompliant" },
+  { value: "OBSERVATION", label: "Observation" },
+  { value: "NOT_APPLICABLE", label: "Not applicable" },
+  { value: "NOT_VERIFIED", label: "Not verified" },
+];
+
+function validResponseScheme(item: ChecklistTemplateItem): boolean {
+  if (item.response_type !== "CUSTOM_SOURCE_SCHEME") return true;
+  const options = item.response_options || [];
+  if (!options.length) return false;
+  const seen = new Set<string>();
+  for (const option of options) {
+    const value = option.value.trim();
+    const label = option.label.trim();
+    if (!value || !label || !option.canonical_status) return false;
+    const key = value.toUpperCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
 
 const AUDIT_KIND_OPTIONS = ["INTERNAL", "EXTERNAL", "SUPPLIER", "REGULATORY", "PROCESS", "PRODUCT"];
 const CATEGORY_OPTIONS = ["QUALITY_SYSTEM", "MAINTENANCE", "AIRWORTHINESS", "TRAINING", "FACILITIES", "TOOLS_EQUIPMENT", "SUPPLIER", "DOCUMENT_CONTROL", "SAFETY"];
@@ -391,8 +419,21 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "" }) => {
   if (!libraryRoute || !resolvedAmo) return null;
 
   const pending = createTemplateMutation.isPending || createRevisionMutation.isPending || issueMutation.isPending || generateMutation.isPending || saveAiDraftMutation.isPending || deleteDmsMutation.isPending || retireTemplateMutation.isPending;
-  const validItems = items.length > 0 && items.every((item) => item.prompt.trim().length >= 3);
+  const validItems = items.length > 0 && items.every((item) => item.prompt.trim().length >= 3 && validResponseScheme(item));
   const patchItem = (index: number, patch: Partial<ChecklistTemplateItem>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  const patchResponseOption = (itemIndex: number, optionIndex: number, patch: Partial<ChecklistResponseOption>) => {
+    const options = [...(items[itemIndex]?.response_options || [])];
+    options[optionIndex] = { ...options[optionIndex], ...patch };
+    patchItem(itemIndex, { response_options: options });
+  };
+  const setResponseType = (itemIndex: number, responseType: string) => {
+    patchItem(itemIndex, {
+      response_type: responseType,
+      response_options: responseType === "CUSTOM_SOURCE_SCHEME"
+        ? (items[itemIndex]?.response_options?.length ? items[itemIndex].response_options : [{ value: "", label: "", canonical_status: "" }])
+        : [],
+    });
+  };
   const showCreateForm = creatingTemplate || !selectedTemplateId;
   const showRevisionEditor = Boolean(selectedTemplateId);
   const auditsWorkspaceHref = `/maintenance/${encodeURIComponent(resolvedAmo)}/quality/audits/workspace`;
@@ -573,11 +614,22 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "" }) => {
                     <label>Expected evidence<textarea rows={2} value={item.expected_evidence || ""} onChange={(event) => patchItem(index, { expected_evidence: event.target.value })} title={item.expected_evidence || undefined} /></label>
                   </div>
                   <div className="qms-checklist-template-group qms-checklist-template-group--response">
-                    <div className="qms-checklist-template-grid"><label>Response type<select value={item.response_type} onChange={(event) => patchItem(index, { response_type: event.target.value })}><option value="COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED">Compliance / observation / N/A / not verified</option><option value="COMPLIANT_NONCOMPLIANT_NA">Compliant / Noncompliant / N/A</option><option value="YES_NO_NA">Yes / No / N/A</option><option value="TEXT">Text evidence</option></select></label><label>Applicability<select value={item.applicability} onChange={(event) => patchItem(index, { applicability: event.target.value })}><option value="ALL">All audit scopes</option><option value="APPLICABLE">Applicable requirements</option><option value="CONDITIONAL">Conditional</option></select></label></div>
+                    <div className="qms-checklist-template-grid"><label>Response type<select value={item.response_type} onChange={(event) => setResponseType(index, event.target.value)}><option value="COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED">Compliance / observation / N/A / not verified</option><option value="COMPLIANT_NONCOMPLIANT_NA">Compliant / Noncompliant / N/A</option><option value="YES_NO_NA">Yes / No / N/A</option><option value="CUSTOM_SOURCE_SCHEME">Custom / source-defined (e.g. YES / NO / N/A / U / S)</option><option value="TEXT">Text evidence</option></select></label><label>Applicability<select value={item.applicability} onChange={(event) => patchItem(index, { applicability: event.target.value })}><option value="ALL">All audit scopes</option><option value="APPLICABLE">Applicable requirements</option><option value="CONDITIONAL">Conditional</option></select></label></div>
+                    {item.response_type === "CUSTOM_SOURCE_SCHEME" ? <div className="qms-checklist-template-response-options">
+                      <p>Define every source response explicitly. Ambiguous abbreviations are not interpreted by the system.</p>
+                      {(item.response_options || []).map((option, optionIndex) => <div className="qms-checklist-template-response-option" key={`${index}-response-${optionIndex}`}>
+                        <label>Source value<input value={option.value} maxLength={64} onChange={(event) => patchResponseOption(index, optionIndex, { value: event.target.value })} placeholder="e.g. U" /></label>
+                        <label>Display label<input value={option.label} maxLength={80} onChange={(event) => patchResponseOption(index, optionIndex, { label: event.target.value })} placeholder="Exact form wording" /></label>
+                        <label>Workflow meaning<select value={option.canonical_status} onChange={(event) => patchResponseOption(index, optionIndex, { canonical_status: event.target.value as ChecklistCanonicalStatus })}><option value="">Select meaning</option>{CANONICAL_RESPONSE_OPTIONS.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
+                        <button type="button" onClick={() => patchItem(index, { response_options: (item.response_options || []).filter((_, rowIndex) => rowIndex !== optionIndex) })} aria-label={`Remove response option ${optionIndex + 1}`}><Trash2 size={14} /></button>
+                      </div>)}
+                      <button type="button" onClick={() => patchItem(index, { response_options: [...(item.response_options || []), { value: "", label: "", canonical_status: "" }] })}><Plus size={14} /> Add source response</button>
+                    </div> : null}
                     <div className="qms-checklist-template-grid">
                       <label className="qms-checklist-template-checkbox"><input type="checkbox" checked={item.mandatory ?? true} onChange={(event) => patchItem(index, { mandatory: event.target.checked })} /> Mandatory item</label>
                       <label>Finding trigger<select value={item.finding_trigger || "NONE"} onChange={(event) => patchItem(index, { finding_trigger: event.target.value as ChecklistFindingTrigger })}>{FINDING_TRIGGER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                     </div>
+                    {item.response_type === "CUSTOM_SOURCE_SCHEME" && !validResponseScheme(item) ? <small role="alert">Complete each source value, label and workflow meaning before creating the revision.</small> : null}
                   </div>
                 </article>)}</div>
                 <div className="qms-checklist-template-actions"><button type="button" onClick={() => setItems((current) => [...current, { ...EMPTY_ITEM, sort_order: (current.length + 1) * 10 }])}><Plus size={15} /> Add item</button><button type="button" className="is-primary" onClick={() => createRevisionMutation.mutate()} disabled={pending || !selectedTemplateId || !validItems || revisionReason.trim().length < 8}>Create draft revision</button>{latestDraft ? <button type="button" className="is-primary" onClick={() => issueMutation.mutate()} disabled={pending || revisionReason.trim().length < 8}>Issue revision {latestDraft.revision_no}</button> : null}</div>

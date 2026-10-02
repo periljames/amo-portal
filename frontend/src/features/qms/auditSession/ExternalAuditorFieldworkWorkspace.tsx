@@ -5,7 +5,7 @@ import {
   getExternalAuditorFieldwork,
   type ExternalAuditorFieldworkItem,
   type ExternalAuditorFieldworkModel,
-  type ExternalChecklistResponse,
+  type ExternalChecklistResponseOption,
 } from "../../../services/qmsAuditExternalAccess";
 import { uploadExternalAuditorEvidence } from "../../../services/qmsAuditEvidence";
 import {
@@ -21,13 +21,33 @@ import {
   removeExternalAuditMutation,
   type ExternalAuditOutboxScope,
 } from "../../../services/qmsExternalAuditOutbox";
+import {
+  clearExternalOfflineEvidence,
+  enqueueExternalOfflineEvidence,
+  listExternalOfflineEvidence,
+  replayExternalOfflineEvidence,
+} from "../../../services/qmsExternalOfflineEvidence";
 import ExternalAuditorFindingDraftPanel from "./ExternalAuditorFindingDraftPanel";
 
-const ALLOWED_RESPONSES: Array<{ value: ExternalChecklistResponse; label: string }> = [
-  { value: "COMPLIANT", label: "Compliant" },
-  { value: "NOT_APPLICABLE", label: "N/A" },
-  { value: "NOT_VERIFIED", label: "Not verified" },
+const DEFAULT_RESPONSES: ExternalChecklistResponseOption[] = [
+  { value: "COMPLIANT", label: "Compliant", canonical_status: "COMPLIANT" },
+  { value: "NONCOMPLIANT", label: "NCR", canonical_status: "NONCOMPLIANT" },
+  { value: "OBSERVATION", label: "Observation", canonical_status: "OBSERVATION" },
+  { value: "NOT_APPLICABLE", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+  { value: "NOT_VERIFIED", label: "Not verified", canonical_status: "NOT_VERIFIED" },
 ];
+
+function responseOptions(item: ExternalAuditorFieldworkItem): ExternalChecklistResponseOption[] {
+  if (item.response_options?.length) return item.response_options;
+  if (item.response_type === "YES_NO_NA") {
+    return [
+      { value: "YES", label: "Yes", canonical_status: "COMPLIANT" },
+      { value: "NO", label: "No", canonical_status: "NONCOMPLIANT" },
+      { value: "N/A", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+    ];
+  }
+  return DEFAULT_RESPONSES;
+}
 const EVIDENCE_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.mp4,.mov,.m4a,.wav";
 
 function evidenceText(value: Array<Record<string, unknown> | string>): string {
@@ -55,6 +75,25 @@ function governedEvidence(value: Array<Record<string, unknown> | string>) {
   });
 }
 
+function responseRuleError(
+  item: ExternalAuditorFieldworkItem,
+  option: ExternalChecklistResponseOption,
+  note: string,
+): string | null {
+  const status = option.canonical_status;
+  const notePresent = Boolean(note.trim());
+  if (status === "NOT_APPLICABLE" && item.na_justification_required && !notePresent) {
+    return "This governed checklist item requires an auditor reason before it can be marked N/A.";
+  }
+  if ((item.notes_required_when || []).includes(status) && !notePresent) {
+    return `Auditor notes are required before recording ${status.replaceAll("_", " ").toLowerCase()}.`;
+  }
+  if ((item.evidence_required_when || []).includes(status) && !item.my_evidence_references.length) {
+    return "Governed evidence is required for this response. Upload and synchronize the evidence before finalizing the outcome.";
+  }
+  return null;
+}
+
 function scopeOf(model: ExternalAuditorFieldworkModel): ExternalAuditOutboxScope {
   return { auditId: model.audit_id, participantId: model.participant_id };
 }
@@ -73,13 +112,17 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [replaying, setReplaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingEvidenceCount, setPendingEvidenceCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const updatePendingCount = async (nextModel: ExternalAuditorFieldworkModel | null = modelRef.current) => {
-    if (!nextModel) { setPendingCount(0); return; }
-    try { setPendingCount((await listExternalAuditMutations(scopeOf(nextModel))).length); }
+    if (!nextModel) { setPendingCount(0); setPendingEvidenceCount(0); return; }
+    const scope = scopeOf(nextModel);
+    try { setPendingCount((await listExternalAuditMutations(scope)).length); }
     catch { setPendingCount(0); }
+    try { setPendingEvidenceCount((await listExternalOfflineEvidence(scope)).length); }
+    catch { setPendingEvidenceCount(0); }
   };
 
   const load = async (): Promise<ExternalAuditorFieldworkModel | null> => {
@@ -90,6 +133,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       const prior = modelRef.current;
       if (prior && (prior.audit_id !== next.audit_id || prior.participant_id !== next.participant_id)) {
         await clearExternalAuditMutations(scopeOf(prior)).catch(() => undefined);
+        await clearExternalOfflineEvidence(scopeOf(prior)).catch(() => undefined);
       }
       modelRef.current = next;
       setModel(next);
@@ -123,8 +167,6 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       setModel(fresh);
       const scope = scopeOf(fresh);
       const queue = await listExternalAuditMutations(scope);
-      if (!queue.length) { setPendingCount(0); return; }
-
       let committed = 0;
       for (const entry of queue) {
         try {
@@ -144,10 +186,21 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
           break;
         }
       }
-      await updatePendingCount(fresh);
-      if (committed > 0) {
-        setNotice(`${committed} queued fieldwork change${committed === 1 ? "" : "s"} synchronized with original mutation identity preserved.`);
+      const currentModel = committed > 0 ? await getExternalAuditorFieldwork() : fresh;
+      modelRef.current = currentModel;
+      setModel(currentModel);
+      const evidenceResult = await replayExternalOfflineEvidence(scope);
+      await updatePendingCount(currentModel);
+      if (committed > 0 || evidenceResult.uploaded.length > 0) {
+        const parts = [];
+        if (committed > 0) parts.push(`${committed} fieldwork change${committed === 1 ? "" : "s"}`);
+        if (evidenceResult.uploaded.length > 0) parts.push(`${evidenceResult.uploaded.length} evidence file${evidenceResult.uploaded.length === 1 ? "" : "s"}`);
+        setNotice(`${parts.join(" and ")} synchronized with original mutation identity and evidence SHA-256 preserved.`);
         await load();
+      } else if (evidenceResult.deferred > 0) {
+        setNotice(`${evidenceResult.deferred} evidence file${evidenceResult.deferred === 1 ? " is" : "s are"} waiting for earlier checklist changes to synchronize first.`);
+      } else if (evidenceResult.conflicts > 0) {
+        setError(`${evidenceResult.conflicts} evidence file${evidenceResult.conflicts === 1 ? " requires" : "s require"} deliberate conflict review.`);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Pending external fieldwork could not be synchronized.");
@@ -179,11 +232,18 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
     setEvidenceDescription("");
   }, [effectiveSelectedId]);
 
-  const save = async (item: ExternalAuditorFieldworkItem, response: ExternalChecklistResponse) => {
+  const save = async (item: ExternalAuditorFieldworkItem, option: ExternalChecklistResponseOption) => {
     if (!model || !model.can_execute_checklist) return;
+    const itemNote = notes[item.checklist_item_id] ?? item.my_auditor_notes ?? "";
+    const ruleError = responseRuleError(item, option, itemNote);
+    if (ruleError) {
+      setError(ruleError);
+      return;
+    }
     setSaving(true); setError(null); setNotice(null);
     const mutation = buildExternalAuditorMutation(item, {
-      canonicalResponseStatus: response,
+      canonicalResponseStatus: option.canonical_status,
+      responseValue: option.value,
       auditorNotes: notes[item.checklist_item_id] ?? item.my_auditor_notes ?? null,
       evidenceReferences: [
         ...item.my_evidence_references.filter((entry) => typeof entry === "object"),
@@ -223,11 +283,20 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
   const uploadEvidence = async () => {
     if (!model || !model.can_create_evidence || !selected || !evidenceFile || uploading) return;
+    setUploading(true); setError(null); setNotice(null);
+    const queueLocal = async () => {
+      await enqueueExternalOfflineEvidence(model, selected, evidenceFile, evidenceDescription);
+      setEvidenceFile(null);
+      setEvidenceDescription("");
+      await updatePendingCount(model);
+      setNotice("Evidence saved encrypted on this device. No guest credential or CSRF token was stored; upload will revalidate the active external-auditor session.");
+    };
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      setError("Evidence files require an online governed upload. Structured checklist notes and responses remain available through the encrypted offline queue.");
+      try { await queueLocal(); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : "Evidence could not be stored securely offline."); }
+      finally { setUploading(false); }
       return;
     }
-    setUploading(true); setError(null); setNotice(null);
     try {
       const fresh = await getExternalAuditorFieldwork();
       if (fresh.audit_id !== model.audit_id || fresh.participant_id !== model.participant_id) {
@@ -240,7 +309,19 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       setNotice(`Governed evidence uploaded · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "External evidence upload failed.");
+      const message = cause instanceof Error ? cause.message : "External evidence upload failed.";
+      const normalized = message.toLowerCase();
+      const transportFailure = normalized.includes("failed to fetch")
+        || normalized.includes("network")
+        || normalized.includes("connection")
+        || normalized.includes("timed out")
+        || normalized.includes("load failed");
+      if (transportFailure) {
+        try { await queueLocal(); }
+        catch (queueCause) { setError(queueCause instanceof Error ? queueCause.message : message); }
+      } else {
+        setError(message);
+      }
     } finally {
       setUploading(false);
     }
@@ -250,6 +331,7 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   if (!model) return <section className="qms-public-audit__card" role="alert"><AlertTriangle size={18} /> {error || "External auditor fieldwork unavailable."}</section>;
 
   const selectedGovernedEvidence = selected ? governedEvidence(selected.my_evidence_references) : [];
+  const selectedResponseOptions = selected ? responseOptions(selected) : [];
 
   return (
     <section className="qms-public-audit__card qms-external-auditor-fieldwork" aria-label="External auditor fieldwork">
@@ -261,8 +343,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
       <div className="qms-external-auditor-fieldwork__sync" role="status">
         {typeof navigator !== "undefined" && !navigator.onLine ? <CloudOff size={15} /> : <UploadCloud size={15} />}
-        <span>{pendingCount ? `${pendingCount} encrypted change${pendingCount === 1 ? "" : "s"} pending sync` : "No pending fieldwork changes"}</span>
-        {pendingCount ? <button type="button" onClick={() => void replayPending()} disabled={replaying || (typeof navigator !== "undefined" && !navigator.onLine)}>{replaying ? "Synchronizing…" : "Sync now"}</button> : null}
+        <span>{pendingCount || pendingEvidenceCount ? `${pendingCount} fieldwork change${pendingCount === 1 ? "" : "s"} · ${pendingEvidenceCount} evidence file${pendingEvidenceCount === 1 ? "" : "s"} pending sync` : "No pending fieldwork changes"}</span>
+        {pendingCount || pendingEvidenceCount ? <button type="button" onClick={() => void replayPending()} disabled={replaying || (typeof navigator !== "undefined" && !navigator.onLine)}>{replaying ? "Synchronizing…" : "Sync now"}</button> : null}
       </div>
       {error ? <div className="qms-public-audit__error" role="alert"><AlertTriangle size={15} /> {error}</div> : null}
       {notice ? <div className="qms-external-auditor-fieldwork__notice" role="status"><CheckCircle2 size={15} /> {notice}</div> : null}
@@ -282,13 +364,46 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
           <div className="qms-external-auditor-fieldwork__item">
             <span>{selected.section || "Checklist"}</span>
             <h2>{selected.prompt}</h2>
-            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div></dl>
+            <dl><div><dt>Requirement</dt><dd>{selected.requirement_ref || "—"}</dd></div><div><dt>Current response</dt><dd>{selected.response_value || selected.canonical_response_status.replaceAll("_", " ")} · v{selected.entity_version}</dd></div>{selected.audit_method ? <div><dt>Method</dt><dd>{selected.audit_method.replaceAll("_", " ")}</dd></div> : null}{selected.sampling_requirement ? <div><dt>Sampling</dt><dd>{selected.sampling_requirement}</dd></div> : null}</dl>
+            {selected.expected_evidence || selected.guidance ? <section className="qms-external-auditor-fieldwork__verification"><strong>Verification plan</strong>{selected.expected_evidence ? <p>{selected.expected_evidence}</p> : null}{selected.guidance ? <small>{selected.guidance}</small> : null}</section> : null}
             <div className="qms-external-auditor-fieldwork__responses">
-              {ALLOWED_RESPONSES.map((option) => <button type="button" key={option.value} disabled={!model.can_execute_checklist || saving} className={selected.canonical_response_status === option.value ? "is-active" : ""} onClick={() => void save(selected, option.value)}>{option.value === "COMPLIANT" ? <CheckCircle2 size={15} /> : option.value === "NOT_APPLICABLE" ? <CircleSlash2 size={15} /> : <ShieldAlert size={15} />}{option.label}</button>)}
+              {selectedResponseOptions.map((option) => {
+                const adverse = option.canonical_status === "NONCOMPLIANT" || option.canonical_status === "OBSERVATION";
+                const active = selected.response_value
+                  ? selected.response_value === option.value
+                  : selected.canonical_response_status === option.canonical_status;
+                return <button
+                  type="button"
+                  key={option.value}
+                  disabled={!model.can_execute_checklist || saving}
+                  className={active ? "is-active" : ""}
+                  onClick={() => {
+                    if (adverse) {
+                      setNotice(`${option.label} requires the governed finding-draft workflow below; Quality promotion controls the official adverse response.`);
+                      document.querySelector(".qms-external-finding-drafts")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      return;
+                    }
+                    void save(selected, option);
+                  }}
+                >{option.canonical_status === "COMPLIANT" ? <CheckCircle2 size={15} /> : option.canonical_status === "NOT_APPLICABLE" ? <CircleSlash2 size={15} /> : <ShieldAlert size={15} />}{option.label}</button>;
+              })}
             </div>
             <label><span>My attributable fieldwork note</span><textarea rows={5} value={notes[selected.checklist_item_id] ?? selected.my_auditor_notes ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
             <label><span>Text evidence references · one per line</span><textarea rows={3} value={evidence[selected.checklist_item_id] ?? evidenceText(selected.my_evidence_references)} onChange={(event) => setEvidence((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} /></label>
-            <button type="button" className="qms-external-auditor-fieldwork__save" disabled={!model.can_execute_checklist || saving} onClick={() => void save(selected, selected.canonical_response_status)}><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
+            <button
+              type="button"
+              className="qms-external-auditor-fieldwork__save"
+              disabled={!model.can_execute_checklist || saving}
+              onClick={() => {
+                const currentOption = selectedResponseOptions.find((option) =>
+                  selected.response_value
+                    ? option.value === selected.response_value
+                    : option.canonical_status === selected.canonical_response_status,
+                );
+                if (currentOption) void save(selected, currentOption);
+                else setError("This checklist item has no governed response option matching the current record.");
+              }}
+            ><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
 
             {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
               <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · participant attribution retained</small></div></header>

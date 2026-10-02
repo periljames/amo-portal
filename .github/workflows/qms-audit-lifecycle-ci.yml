@@ -71,6 +71,8 @@ jobs:
           exit 1
       - name: Audit lifecycle Playwright — governed acceptance
         shell: bash
+        env:
+          E2E_BLOCK_SERVICE_WORKERS: "1"
         run: |
           set +e
           npx playwright test \

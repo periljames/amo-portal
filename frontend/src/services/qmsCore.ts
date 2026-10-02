@@ -82,7 +82,9 @@ export interface QMSAuditOut {
   audit_ref: string;
   title: string;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
+  entity_version?: number;
   auditee?: string | null;
   auditee_email?: string | null;
   auditee_user_id?: string | null;
@@ -318,7 +320,9 @@ export interface QMSFindingOut {
   acknowledged_by_name?: string | null;
   acknowledged_by_email?: string | null;
   created_by_user_id?: string | null;
+  entity_version?: number;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export interface QMSFindingAttachmentOut {
@@ -377,7 +381,7 @@ export type QMSFindingCreatePayload = {
   target_close_date?: string | null;
 };
 
-export type QMSFindingUpdatePayload = Partial<QMSFindingCreatePayload>;
+export type QMSFindingUpdatePayload = Partial<QMSFindingCreatePayload> & { base_version?: number | null };
 
 export interface QMSAuditRegisterRowOut {
   audit: QMSAuditOut;
