@@ -1072,8 +1072,26 @@ def bind_current_dms_checklist(
         allow_existing_items=payload.allow_existing_items,
     )
     db.commit()
-    db.refresh(binding)
-    return _binding_dict(binding)
+    # Commit success is not enough for this workflow: re-open an authoritative
+    # tenant-scoped transaction and prove the immutable binding row is readable
+    # before returning HTTP 201 to the browser.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    persisted = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.id == binding.id,
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id,
+        QualityAuditChecklistBinding.audit_id == audit.id,
+    ).first()
+    if persisted is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "CHECKLIST_BINDING_COMMIT_NOT_VISIBLE",
+                "message": "The checklist transaction committed but the authoritative binding row could not be read back.",
+                "audit_id": str(audit.id),
+                "binding_id": str(binding.id),
+            },
+        )
+    return _binding_dict(persisted)
 
 
 @router.post("/audits/{audit_id}/checklist-library/upload", status_code=status.HTTP_201_CREATED)
