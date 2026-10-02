@@ -592,7 +592,15 @@ def _validate_assessment_citations(
         for section, manual, revision in sections:
             if (str(revision.id), str(section.id)) not in allowed_pairs:
                 continue
-            corpus_parts.extend([manual.code or "", manual.title or "", section.heading or ""])
+            metadata = dict(section.metadata_json or {})
+            section_number = str(metadata.get("section_number") or "").strip()
+            corpus_parts.extend([
+                manual.code or "",
+                manual.title or "",
+                section.heading or "",
+                f"{manual.code or ''} {section.heading or ''}".strip(),
+                f"{manual.code or ''} {section_number}".strip() if section_number else "",
+            ])
         blocks = (
             db.query(manual_models.ManualBlock)
             .filter(manual_models.ManualBlock.section_id.in_([pair[1] for pair in valid_pairs]))
@@ -618,10 +626,22 @@ def _validate_assessment_citations(
             continue
         manual, revision = row
         corpus_parts.extend([manual.code or "", manual.title or "", revision.rev_number or ""])
-        headings = db.query(manual_models.ManualSection.heading).filter(
+        headings = db.query(
+            manual_models.ManualSection.heading,
+            manual_models.ManualSection.metadata_json,
+        ).filter(
             manual_models.ManualSection.revision_id == revision.id
         ).limit(500).all()
-        corpus_parts.extend(str(value or "") for (value,) in headings if str(value or "").strip())
+        for heading, metadata_json in headings:
+            heading_value = str(heading or "").strip()
+            section_number = str(dict(metadata_json or {}).get("section_number") or "").strip()
+            if heading_value:
+                corpus_parts.extend([
+                    heading_value,
+                    f"{manual.code or ''} {heading_value}".strip(),
+                ])
+            if section_number:
+                corpus_parts.append(f"{manual.code or ''} {section_number}".strip())
 
     corpus = _normalise_citation_token(" ".join(corpus_parts))
     unsupported = [
