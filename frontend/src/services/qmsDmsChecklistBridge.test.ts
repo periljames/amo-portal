@@ -68,6 +68,7 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(approvedIntake).toBeGreaterThan(-1);
     expect(confirmation).toBeGreaterThan(approvedIntake);
     expect(success).toBeGreaterThan(confirmation);
+    expect(prepareSource).toContain("throw error instanceof Error ? error : new Error(message);");
   });
   it("does not synchronously set guard state from query-cache render notifications", () => {
     expect(enhancementsSource).not.toContain("getQueryCache().subscribe");
