@@ -153,6 +153,37 @@ def _existing_by_mutation(db: Session, *, amo_id: str, audit_id: uuid.UUID, clie
     ).first()
 
 
+def _replay_committed_version(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    checklist_item_id: uuid.UUID | None,
+) -> int:
+    if checklist_item_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "EVIDENCE_REPLAY_CHECKLIST_LINK_MISSING",
+                "message": "The persisted evidence replay is missing its governed checklist link.",
+            },
+        )
+    governance = db.query(QualityAuditChecklistExecutionGovernance).filter(
+        QualityAuditChecklistExecutionGovernance.amo_id == amo_id,
+        QualityAuditChecklistExecutionGovernance.audit_id == audit_id,
+        QualityAuditChecklistExecutionGovernance.checklist_item_id == checklist_item_id,
+    ).first()
+    if governance is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "EVIDENCE_REPLAY_GOVERNANCE_MISSING",
+                "message": "The persisted evidence replay has no authoritative checklist execution state.",
+            },
+        )
+    return int(governance.entity_version or 1)
+
+
 def _append_reference(
     db: Session,
     *,
@@ -237,7 +268,16 @@ async def upload_internal_audit_evidence(
     _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     existing = _existing_by_mutation(db, amo_id=ctx.amo_id, audit_id=audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
-        return {"artifact": _artifact_dict(existing), "replayed": True}
+        return {
+            "artifact": _artifact_dict(existing),
+            "committed_version": _replay_committed_version(
+                db,
+                amo_id=ctx.amo_id,
+                audit_id=audit_id,
+                checklist_item_id=existing.checklist_item_id,
+            ),
+            "replayed": True,
+        }
 
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
@@ -347,7 +387,16 @@ async def upload_external_auditor_evidence(
     _mark_fieldwork_started(audit)
     existing = _existing_by_mutation(db, amo_id=grant.amo_id, audit_id=grant.audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
-        return {"artifact": _artifact_dict(existing), "replayed": True}
+        return {
+            "artifact": _artifact_dict(existing),
+            "committed_version": _replay_committed_version(
+                db,
+                amo_id=grant.amo_id,
+                audit_id=grant.audit_id,
+                checklist_item_id=existing.checklist_item_id,
+            ),
+            "replayed": True,
+        }
 
     actor_ctx = SimpleNamespace(amo_id=grant.amo_id, user_id=None)
     item = _item(db, amo_id=grant.amo_id, audit_id=grant.audit_id, item_id=item_id, lock=True)
