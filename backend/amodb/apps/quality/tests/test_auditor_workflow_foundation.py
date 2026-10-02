@@ -5,6 +5,7 @@ import inspect
 import pytest
 
 from amodb.apps.quality import audit_checklist_execution_router as checklist_execution_router
+from amodb.apps.quality import audit_checklist_template_router as checklist_template_router
 from amodb.apps.quality import audit_evidence_router as audit_evidence_router
 from amodb.apps.quality.audit_checklist_response_policy import (
     normalise_response_options,
@@ -192,4 +193,15 @@ def test_evidence_replay_returns_an_authoritative_committed_version() -> None:
 
     assert '"committed_version": _replay_committed_version(' in internal_source
     assert '"committed_version": _replay_committed_version(' in external_source
+
+
+
+def test_dms_binding_success_requires_post_commit_authoritative_readback() -> None:
+    source = inspect.getsource(checklist_template_router.bind_current_dms_checklist)
+    commit_index = source.index("db.commit()")
+    readback_index = source.index("persisted = db.query(QualityAuditChecklistBinding)")
+    return_index = source.index("return _binding_dict(persisted)")
+
+    assert commit_index < readback_index < return_index
+    assert "CHECKLIST_BINDING_COMMIT_NOT_VISIBLE" in source
 
