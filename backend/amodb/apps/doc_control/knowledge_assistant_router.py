@@ -619,9 +619,10 @@ def _hybrid_merge(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any
         item_channels = channels[key]
         base = float(item.get("lexical_score") or item.get("score") or 0)
         semantic = float(item.get("semantic_similarity") or 0)
-        if "SEMANTIC" in item_channels and ("LEXICAL" in item_channels or "METADATA" in item_channels):
+        has_semantic = any(channel.startswith("SEMANTIC") for channel in item_channels)
+        if has_semantic and ("LEXICAL" in item_channels or "METADATA" in item_channels):
             base += max(0.0, min(1.0, semantic)) * 35.0
-        elif "SEMANTIC" in item_channels:
+        elif has_semantic:
             base = max(base, max(0.0, min(1.0, semantic)) * 65.0)
         item["score"] = base
         item["retrieval_channels"] = sorted(item_channels)
