@@ -43,7 +43,12 @@ export type IntegratedLibraryItem = DocumentLibraryItem & {
 
 export type IntegratedLibraryResponse = {
   items: IntegratedLibraryItem[];
-  facets: { node_types: Record<string, number>; visible_documents: number };
+  facets: {
+    node_types: Record<string, number>;
+    visible_documents: number;
+    owners?: Array<{ id: string; name: string; count: number }>;
+    departments?: Array<{ id: string; code?: string; name: string; count: number }>;
+  };
   capabilities: { read: boolean; control: boolean };
   pagination: { page: number; per_page: number; total: number; returned: number };
   offline_snapshot?: LibraryOfflineSnapshot;
