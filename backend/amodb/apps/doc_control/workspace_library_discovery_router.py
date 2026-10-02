@@ -18,13 +18,17 @@ from . import domain_models as dm
 from . import governance_models as gm
 from . import knowledge_models as km
 from .workspace_library_router import _scope_match
-from .workspace_service import audit, is_control_user, require_control_user, resolve_tenant, role_value, utcnow
+from .workspace_service import audit, can_read_manual, get_profile, is_control_user, require_control_user, resolve_tenant, role_value, utcnow
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Library Discovery"])
 ACTIVE_REVIEW_STATUSES = {"SCHEDULED", "IN_PROGRESS"}
 LIBRARY_SHARED_VIEWS_KEY = "document_control_library_views"
 LIBRARY_VIEW_PARAM_KEYS = {"q", "view", "type", "format", "owner", "department", "class", "status", "sort", "direction", "per_page", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"}
+
+
+class LibraryFavoriteIn(BaseModel):
+    favorite: bool = True
 
 
 class SharedLibraryViewIn(BaseModel):
@@ -50,6 +54,79 @@ def _safe_library_view_params(values: dict[str, str]) -> dict[str, str]:
         if text:
             normalized[key] = text[:255]
     return normalized
+
+
+@router.put("/t/{tenant_slug}/library/{manual_id}/favorite")
+def set_library_favorite(
+    tenant_slug: str,
+    manual_id: str,
+    payload: LibraryFavoriteIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    manual = (
+        db.query(manual_models.Manual)
+        .filter(manual_models.Manual.id == manual_id, manual_models.Manual.tenant_id == tenant.id)
+        .first()
+    )
+    if not manual:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    profile = get_profile(db, tenant, manual.id)
+    if not can_read_manual(current_user, profile):
+        raise HTTPException(status_code=403, detail="Document access denied.")
+
+    rows = (
+        db.query(manual_models.ManualReaderProgress)
+        .filter(
+            manual_models.ManualReaderProgress.manual_id == manual.id,
+            manual_models.ManualReaderProgress.user_id == str(current_user.id),
+        )
+        .all()
+    )
+    if not payload.favorite:
+        for row in rows:
+            row.bookmark_label = None
+            row.updated_at = utcnow()
+        db.commit()
+        return {"manual_id": manual.id, "favorite": False}
+
+    revision = None
+    if manual.current_published_rev_id:
+        revision = (
+            db.query(manual_models.ManualRevision)
+            .filter(
+                manual_models.ManualRevision.id == manual.current_published_rev_id,
+                manual_models.ManualRevision.manual_id == manual.id,
+                manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
+            )
+            .first()
+        )
+    if revision is None and is_control_user(current_user):
+        revision = (
+            db.query(manual_models.ManualRevision)
+            .filter(manual_models.ManualRevision.manual_id == manual.id)
+            .order_by(manual_models.ManualRevision.created_at.desc(), manual_models.ManualRevision.id.desc())
+            .first()
+        )
+    if revision is None:
+        raise HTTPException(status_code=409, detail="This document has no readable revision to favorite.")
+
+    row = next((item for item in rows if str(item.revision_id) == str(revision.id)), None)
+    if row is None:
+        row = manual_models.ManualReaderProgress(
+            tenant_id=tenant.id,
+            manual_id=manual.id,
+            revision_id=revision.id,
+            user_id=str(current_user.id),
+        )
+        db.add(row)
+    row.bookmark_label = "DMS_FAVORITE"
+    row.updated_at = utcnow()
+    audit(db, tenant, request, "document.library.favorite.updated", "manual", manual.id, {"favorite": True})
+    db.commit()
+    return {"manual_id": manual.id, "favorite": True}
 
 
 @router.get("/t/{tenant_slug}/library-views")
@@ -306,6 +383,14 @@ def library_discovery(
         ).filter(manual_models.ManualReaderProgress.user_id == str(current_user.id))
         if view == "favorites":
             progress_query = progress_query.filter(manual_models.ManualReaderProgress.bookmark_label.isnot(None))
+        else:
+            progress_query = progress_query.filter(or_(
+                manual_models.ManualReaderProgress.last_page_number.isnot(None),
+                manual_models.ManualReaderProgress.last_section_id.isnot(None),
+                manual_models.ManualReaderProgress.last_anchor_slug.isnot(None),
+                manual_models.ManualReaderProgress.scroll_percent > 0,
+                manual_models.ManualReaderProgress.zoom_percent != 100,
+            ))
         progress_subquery = progress_query.group_by(manual_models.ManualReaderProgress.manual_id).subquery()
         query = query.join(progress_subquery, progress_subquery.c.manual_id == manual_models.Manual.id)
         ordering = (progress_subquery.c.last_opened_at.desc(), manual_models.Manual.code.asc())
