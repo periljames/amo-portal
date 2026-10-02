@@ -369,25 +369,29 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const confirmChecklistBinding = async (binding: ChecklistBinding): Promise<boolean> => {
+    const bindingQueryKey = ["qms", "prepare-checklist-bindings", amoCode, auditId] as const;
     await Promise.all([
       queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
-      queryClient.cancelQueries({ queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId] }),
+      queryClient.cancelQueries({ queryKey: bindingQueryKey }),
     ]);
-    // Both reads are QMS live authority. Direct service calls throw on transport/backend
-    // errors and cannot reuse retained TanStack/offline cache as confirmation.
-    const [contextConfirmation, bindingsConfirmation] = await Promise.all([
-      getAuditPreparationContext(amoCode, auditId),
-      listChecklistBindings(amoCode, auditId),
-    ]);
-    const contextHasBinding = Boolean(
-      contextConfirmation.controlled_preparation?.checklist_bindings?.some((item) => item.id === binding.id),
-    );
-    const bindingListHasBinding = Boolean(
-      bindingsConfirmation.items?.some((item) => item.id === binding.id),
-    );
-    if (!contextHasBinding || !bindingListHasBinding) return false;
-    queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], contextConfirmation);
-    queryClient.setQueryData(["qms", "prepare-checklist-bindings", amoCode, auditId], bindingsConfirmation);
+
+    // Checklist binding authority is the immutable binding table used by the
+    // preparation/fieldwork backend. The aggregate context is a secondary projection
+    // and must never erase or veto a binding already confirmed by canonical authority.
+    const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);
+    const confirmed = Boolean(bindingsConfirmation.items?.some((item) => item.id === binding.id));
+    if (!confirmed) return false;
+    queryClient.setQueryData(bindingQueryKey, bindingsConfirmation);
+
+    try {
+      const contextConfirmation = await getAuditPreparationContext(amoCode, auditId);
+      queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], contextConfirmation);
+    } catch {
+      void queryClient.invalidateQueries({
+        queryKey: ["qms-audit-preparation-context", amoCode, auditId],
+        refetchType: "active",
+      });
+    }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
@@ -745,6 +749,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       sessionQuery.isPending ||
       applicabilityQuery.isLoading ||
       applicabilityQuery.isPending ||
+      fullBindingsQuery.isLoading ||
+      fullBindingsQuery.isPending ||
       preparationRevisionsQuery.isLoading ||
       preparationRevisionsQuery.isPending ||
       readinessQuery.isLoading ||
@@ -768,7 +774,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || applicabilityQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || applicabilityQuery.error || fullBindingsQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -784,6 +790,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           void participantsQuery.refetch();
           void sessionQuery.refetch();
           void applicabilityQuery.refetch();
+          void fullBindingsQuery.refetch();
           void preparationRevisionsQuery.refetch();
           void readinessQuery.refetch();
         }}
@@ -819,7 +826,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const meetingPlan = context.opening_meeting_records || [];
   const prepRevision = context.controlled_preparation?.latest_revision;
   const offlinePackStatus = offlinePackQuery.data;
-  const bindings = context.controlled_preparation?.checklist_bindings || [];
+  const bindings = fullBindingsQuery.data?.items || [];
   const checklistBindings = bindings.length;
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
