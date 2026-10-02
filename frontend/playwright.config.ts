@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 const liveDocumentGovernance = process.env.E2E_LIVE_DOCUMENT_GOVERNANCE === "1";
 const useStableChromiumChannel = process.env.E2E_CHROMIUM_CHANNEL === "1";
+const blockServiceWorkers = process.env.E2E_BLOCK_SERVICE_WORKERS === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -27,6 +28,7 @@ export default defineConfig({
     // in. Jobs that explicitly select --project=chromium use the same regular
     // Chromium channel below so they never fall back to chromium-headless-shell.
     channel: useStableChromiumChannel ? "chromium" : undefined,
+    serviceWorkers: blockServiceWorkers ? "block" : "allow",
   },
   projects: [
     {
