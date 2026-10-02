@@ -143,6 +143,43 @@ def test_hybrid_merge_boosts_same_controlled_section_without_losing_provenance()
 
 
 
+
+def test_hybrid_merge_treats_pgvector_channel_as_semantic() -> None:
+    merged = _hybrid_merge(
+        [
+            {
+                "id": "section:rev-1:sec-1",
+                "kind": "SECTION",
+                "revision_id": "rev-1",
+                "section_id": "sec-1",
+                "page_number": 7,
+                "code": "MPM",
+                "heading": "Tool calibration",
+                "score": 52.0,
+                "lexical_score": 52.0,
+                "retrieval_channels": ["LEXICAL"],
+            },
+            {
+                "id": "section:rev-1:sec-1",
+                "kind": "SECTION",
+                "revision_id": "rev-1",
+                "section_id": "sec-1",
+                "page_number": 7,
+                "code": "MPM",
+                "heading": "Tool calibration",
+                "score": 58.5,
+                "semantic_similarity": 0.9,
+                "retrieval_channels": ["SEMANTIC_PGVECTOR"],
+            },
+        ],
+        10,
+    )
+
+    assert len(merged) == 1
+    assert set(merged[0]["retrieval_channels"]) == {"LEXICAL", "SEMANTIC_PGVECTOR"}
+    assert merged[0]["score"] == pytest.approx(83.5)
+    assert "hybrid" in merged[0]["reason"].lower()
+
 def test_capability_scope_precedence_is_context_specific_not_universal() -> None:
     policy = precedence_policy("CAPABILITY_SCOPE")
     assert policy["APPROVAL_CERTIFICATE"] > policy["CONTROLLED_MANUAL"]
