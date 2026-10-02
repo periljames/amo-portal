@@ -343,7 +343,15 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
       <div className="qms-external-auditor-fieldwork__sync" role="status">
         {typeof navigator !== "undefined" && !navigator.onLine ? <CloudOff size={15} /> : <UploadCloud size={15} />}
-        <span>{pendingCount || pendingEvidenceCount ? `${pendingCount} fieldwork change${pendingCount === 1 ? "" : "s"} · ${pendingEvidenceCount} evidence file${pendingEvidenceCount === 1 ? "" : "s"} pending sync` : "No pending fieldwork changes"}</span>
+        <span>
+          {pendingCount || pendingEvidenceCount ? (
+            <>
+              {pendingCount ? `${pendingCount} encrypted change${pendingCount === 1 ? "" : "s"} pending sync` : null}
+              {pendingCount && pendingEvidenceCount ? " · " : null}
+              {pendingEvidenceCount ? `${pendingEvidenceCount} encrypted evidence file${pendingEvidenceCount === 1 ? "" : "s"} pending sync` : null}
+            </>
+          ) : "No pending fieldwork changes"}
+        </span>
         {pendingCount || pendingEvidenceCount ? <button type="button" onClick={() => void replayPending()} disabled={replaying || (typeof navigator !== "undefined" && !navigator.onLine)}>{replaying ? "Synchronizing…" : "Sync now"}</button> : null}
       </div>
       {error ? <div className="qms-public-audit__error" role="alert"><AlertTriangle size={15} /> {error}</div> : null}
