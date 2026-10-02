@@ -9,6 +9,9 @@ type Fixture = {
   realtime_audit_ref: string;
   realtime_user_a_email: string;
   realtime_password: string;
+  dms_checklist_id: string;
+  dms_checklist_code: string;
+  dms_checklist_revision_id: string;
 };
 
 function fixture(): Fixture {
@@ -104,6 +107,29 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
     await expect(prepare).toBeVisible({ timeout: 30_000 });
     await expect(prepare.getByText("Real browser setup scope covering controlled maintenance and Quality records.")).toBeVisible();
+
+    // Exercise the production DMS -> QMS binding path that gates fieldwork.
+    const controlledChecklist = prepare.getByLabel("Current controlled document", { exact: true });
+    await expect(controlledChecklist).toBeVisible({ timeout: 30_000 });
+    await controlledChecklist.selectOption(data.dms_checklist_id);
+    await expect(prepare.getByText("Current effective revision", { exact: true })).toBeVisible();
+    await prepare.getByLabel("Add to the existing checklist", { exact: true }).check();
+
+    const bindResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === "POST"
+      && response.url().includes(`/checklist-library/${data.dms_checklist_id}/bind-current`),
+    );
+    await prepare.getByRole("button", { name: "Use current revision", exact: true }).click();
+    const bindResponse = await bindResponsePromise;
+    expect(bindResponse.status()).toBe(201);
+    const persistedBinding = await bindResponse.json() as { id: string; audit_id: string; instantiated_item_ids: string[] };
+    expect(persistedBinding.id).toBeTruthy();
+    expect(persistedBinding.instantiated_item_ids.length).toBeGreaterThan(0);
+
+    await expect(prepare.getByText("1 bound", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(prepare.getByText(new RegExp(`${data.dms_checklist_code}.*Rev 1`, "i"))).toBeVisible();
+    await expect(prepare.getByText("The current effective DMS checklist is bound to fieldwork.", { exact: true })).toBeVisible();
+    await expect(prepare.getByText(/has not confirmed the authoritative fieldwork binding/i)).toHaveCount(0);
 
     await prepare.getByRole("button", { name: "New request" }).click();
     await prepare.getByLabel("Due date", { exact: true }).fill(futureDate(20));
