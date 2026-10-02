@@ -48,7 +48,7 @@ import {
   type GovernedAuditDocumentRequest,
 } from "../../../services/qmsAuditOccurrenceCompletion";
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
-import { getAuditPreparationContext, type AuditPreparationContext } from "../../../services/qmsAuditPreparationContext";
+import { getAuditPreparationContext } from "../../../services/qmsAuditPreparationContext";
 import { getAuditSession } from "../../../services/qmsAuditSession";
 import { AuditStageLoadError } from "./AuditStageLoadError";
 import { auditOccurrenceLoadDetail, auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
@@ -247,39 +247,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const effectiveDmsChecklistId = dmsChecklistsQuery.data?.items.some((item) => item.document_id === candidateDmsChecklistId)
     ? candidateDmsChecklistId : "";
 
-  const cacheChecklistBinding = (binding: ChecklistBinding) => {
-    queryClient.setQueryData<AuditPreparationContext>(
-      ["qms-audit-preparation-context", amoCode, auditId],
-      (current) => {
-        if (!current) return current;
-        const bindings = current.controlled_preparation?.checklist_bindings || [];
-        if (bindings.some((item) => item.id === binding.id)) return current;
-        return {
-          ...current,
-          controlled_preparation: {
-            ...current.controlled_preparation,
-            checklist_bindings: [
-              ...bindings,
-              {
-                id: binding.id,
-                template_code: binding.template_code,
-                revision_no: binding.revision_no,
-                content_sha256: binding.content_sha256,
-                applied_at: binding.applied_at,
-                application_reason: binding.application_reason,
-              },
-            ],
-          },
-        };
-      },
-    );
-  };
-
-  const refresh = async (binding?: ChecklistBinding) => {
-    // Cancel older reads before applying the mutation result, then reconcile
-    // every preparation indicator with the authoritative server projection.
+  const refresh = async () => {
+    // Cancel older reads, then reconcile every preparation indicator from the server.
+    // Do not seed the preparation cache from a mutation response: failed reads must
+    // never be able to masquerade as authoritative confirmation.
     await queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] });
-    if (binding) cacheChecklistBinding(binding);
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ["qms-audit-preparation-context", amoCode, auditId],
@@ -297,6 +269,30 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ]);
   };
 
+  const confirmChecklistBinding = async (binding: ChecklistBinding): Promise<boolean> => {
+    await queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] });
+    // Read the live authority directly. getAuditPreparationContext is classified as
+    // QMS live authority, so apiClient cannot satisfy this from response/offline cache.
+    // Any transport or backend failure throws instead of returning retained query data.
+    const confirmation = await getAuditPreparationContext(amoCode, auditId);
+    const confirmed = Boolean(
+      confirmation.controlled_preparation?.checklist_bindings?.some((item) => item.id === binding.id),
+    );
+    if (!confirmed) return false;
+    queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], confirmation);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-bindings", amoCode, auditId] }),
+    ]);
+    return true;
+  };
   const createMutation = useMutation({
     mutationFn: () => createGovernedAuditDocumentRequest(amoCode, auditId, {
       title: newRequest.title.trim(),
@@ -386,11 +382,23 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ),
     onSuccess: async (binding) => {
       setLocalError(null);
-      setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
-      setSelectedDmsChecklistId("");
-      setChecklistReason("Selected for this audit during governed preparation.");
-      setAllowExistingItems(false);
-      await refresh(binding);
+      setLocalSuccess(null);
+      try {
+        const confirmed = await confirmChecklistBinding(binding);
+        if (!confirmed) {
+          setLocalError("The checklist was saved, but Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify the checklist shows as bound before issuing preparation.");
+          return;
+        }
+        setSelectedDmsChecklistId("");
+        setChecklistReason("Selected for this audit during governed preparation.");
+        setAllowExistingItems(false);
+        setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
+      } catch (error) {
+        setLocalSuccess(null);
+        setLocalError(error instanceof Error
+          ? `The checklist was saved, but Prepare could not verify the authoritative binding: ${error.message}`
+          : "The checklist was saved, but Prepare could not verify the authoritative binding. Refresh before continuing.");
+      }
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The controlled checklist revision could not be applied."),
   });
@@ -418,14 +426,26 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }),
     onSuccess: async (binding) => {
       setLocalError(null);
-      setLocalSuccess("Checklist created and bound to fieldwork.");
-      setChecklistTitle("Audit fieldwork checklist");
-      setChecklistDescription("");
-      setChecklistReason("Created for this audit during governed preparation.");
-      setChecklistItems([emptyChecklistItem()]);
-      setChecklistDmsDocumentId("");
-      setAllowExistingItems(false);
-      await refresh(binding);
+      setLocalSuccess(null);
+      try {
+        const confirmed = await confirmChecklistBinding(binding);
+        if (!confirmed) {
+          setLocalError("The checklist was created, but Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify the checklist shows as bound before issuing preparation.");
+          return;
+        }
+        setChecklistTitle("Audit fieldwork checklist");
+        setChecklistDescription("");
+        setChecklistReason("Created for this audit during governed preparation.");
+        setChecklistItems([emptyChecklistItem()]);
+        setChecklistDmsDocumentId("");
+        setAllowExistingItems(false);
+        setLocalSuccess("Checklist created and bound to fieldwork.");
+      } catch (error) {
+        setLocalSuccess(null);
+        setLocalError(error instanceof Error
+          ? `The checklist was created, but Prepare could not verify the authoritative binding: ${error.message}`
+          : "The checklist was created, but Prepare could not verify the authoritative binding. Refresh before continuing.");
+      }
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The realtime checklist could not be created."),
   });
@@ -818,10 +838,23 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               "Approved DMS checklist uploaded and selected during audit preparation.",
               allowExistingItems,
             );
-            setLocalSuccess("The approved checklist is now current in DMS and populated for this audit.");
-            setAllowExistingItems(false);
-            await refresh(binding);
-            return;
+            setLocalSuccess(null);
+            try {
+              const confirmed = await confirmChecklistBinding(binding);
+              if (!confirmed) {
+                throw new Error("Prepare has not confirmed the authoritative fieldwork binding yet. Refresh and verify it shows as bound before issuing preparation.");
+              }
+              setAllowExistingItems(false);
+              setLocalSuccess("The approved checklist is now current in DMS and populated for this audit.");
+              return;
+            } catch (error) {
+              setLocalSuccess(null);
+              const message = error instanceof Error
+                ? `The approved checklist was saved, but Prepare could not verify the authoritative binding: ${error.message}`
+                : "The approved checklist was saved, but Prepare could not verify the authoritative binding. Refresh before continuing.";
+              setLocalError(message);
+              throw error instanceof Error ? error : new Error(message);
+            }
           }
           setLocalSuccess("The checklist was registered as a DMS draft. Track it under Awaiting DMS approval below; open Review document to advance its workflow.");
           await refresh();
