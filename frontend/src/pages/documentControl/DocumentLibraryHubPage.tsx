@@ -34,6 +34,8 @@ import {
   discoverLibrary,
   listIntegratedLibrary,
   listLibraryCatalog,
+  listSharedLibraryViews,
+  publishSharedLibraryView,
   type IntegratedLibraryFilters,
   type IntegratedLibraryItem,
   type IntegratedLibraryResponse,
@@ -41,6 +43,7 @@ import {
   type LibraryDiscoveryItem,
   type LibraryDiscoveryResponse,
   type LibraryDiscoveryView,
+  type SharedLibraryView,
 } from "../../services/documentLibrary";
 import LibraryOperationsPanel from "./LibraryOperationsPanel";
 import DocumentLibraryDetailsPane from "./DocumentLibraryDetailsPane";
@@ -88,6 +91,8 @@ const PRESETS: Array<{ id: LibraryDiscoveryView | ""; label: string; icon: typeo
 
 const SEARCH_DEBOUNCE_MS = 320;
 const PRESENTATION_STORAGE_KEY = "amo.dms.library.presentation.v1";
+const PERSONAL_VIEWS_STORAGE_KEY = "amo.dms.library.personal-views.v1";
+const SAVABLE_VIEW_KEYS = new Set(["q", "view", "type", "class", "status", "sort", "direction", "per_page"]);
 const DocumentLibraryRegisterGrid = lazy(() => import("./DocumentLibraryRegisterGrid"));
 
 type LibraryPresentation = "list" | "compact" | "cards" | "register";
@@ -95,6 +100,40 @@ type LibraryPresentation = "list" | "compact" | "cards" | "register";
 type SelectedLibraryItem =
   | { mode: "integrated"; item: IntegratedLibraryItem }
   | { mode: "discovery"; item: LibraryDiscoveryItem };
+
+type PersonalLibraryView = {
+  id: string;
+  name: string;
+  params: Record<string, string>;
+  presentation: LibraryPresentation;
+};
+
+function personalViewsKey(tenant: string): string {
+  return `${PERSONAL_VIEWS_STORAGE_KEY}:${tenant.toLowerCase()}`;
+}
+
+function readPersonalViews(tenant: string): PersonalLibraryView[] {
+  if (typeof window === "undefined" || !tenant) return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(personalViewsKey(tenant)) || "[]");
+    return Array.isArray(value)
+      ? value.filter((item): item is PersonalLibraryView => Boolean(
+        item && typeof item.id === "string" && typeof item.name === "string"
+        && ["list", "compact", "cards", "register"].includes(item.presentation),
+      ))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function currentViewParams(params: URLSearchParams): Record<string, string> {
+  const result: Record<string, string> = {};
+  params.forEach((value, key) => {
+    if (SAVABLE_VIEW_KEYS.has(key) && value) result[key] = value;
+  });
+  return result;
+}
 
 function categoryVisual(type?: string | null) {
   return CATEGORIES.find(([value]) => value === String(type || "").toUpperCase()) || CATEGORIES[0];
@@ -185,6 +224,11 @@ export default function DocumentLibraryHubPage() {
     return stored === "compact" || stored === "cards" || stored === "register" ? stored : "list";
   });
   const [selectedItem, setSelectedItem] = useState<SelectedLibraryItem | null>(null);
+  const [personalViews, setPersonalViews] = useState<PersonalLibraryView[]>([]);
+  const [sharedViews, setSharedViews] = useState<SharedLibraryView[]>([]);
+  const [savedViewName, setSavedViewName] = useState("");
+  const [savedViewNotice, setSavedViewNotice] = useState("");
+  const [savingSharedView, setSavingSharedView] = useState(false);
   const hasLoadedRef = useRef(false);
 
   const filters = useMemo<IntegratedLibraryFilters>(() => ({
@@ -256,6 +300,19 @@ export default function DocumentLibraryHubPage() {
   }, [discoveryMode, discoveryView, filters, selectingDocumentForJob, tenant]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!tenant) return;
+    setPersonalViews(readPersonalViews(tenant));
+    let cancelled = false;
+    void listSharedLibraryViews(tenant)
+      .then((response) => {
+        if (!cancelled) setSharedViews(response.items);
+      })
+      .catch(() => {
+        if (!cancelled) setSharedViews([]);
+      });
+    return () => { cancelled = true; };
+  }, [tenant]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
   useEffect(() => {
     const requestedService = params.get("library_services");
@@ -323,6 +380,68 @@ export default function DocumentLibraryHubPage() {
     const next = new URLSearchParams(params);
     next.delete("action");
     setParams(next, { replace: true });
+  };
+
+  const applySavedView = (view: PersonalLibraryView | SharedLibraryView) => {
+    const next = new URLSearchParams();
+    Object.entries(view.params || {}).forEach(([key, value]) => {
+      if (SAVABLE_VIEW_KEYS.has(key) && value) next.set(key, value);
+    });
+    next.set("page", "1");
+    setParams(next);
+    setPresentation(view.presentation);
+    setSavedViewNotice(`View applied: ${view.name}`);
+  };
+
+  const savePersonalView = () => {
+    const name = savedViewName.trim();
+    if (!tenant || !name) {
+      setSavedViewNotice("Enter a view name first.");
+      return;
+    }
+    const view: PersonalLibraryView = {
+      id: `personal-${Date.now()}`,
+      name,
+      params: currentViewParams(params),
+      presentation,
+    };
+    const next = [...personalViews.filter((item) => item.name.toLowerCase() !== name.toLowerCase()), view].slice(-24);
+    setPersonalViews(next);
+    window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
+    setSavedViewName("");
+    setSavedViewNotice(`Personal view saved: ${name}`);
+  };
+
+  const removePersonalView = (viewId: string) => {
+    if (!tenant) return;
+    const next = personalViews.filter((item) => item.id !== viewId);
+    setPersonalViews(next);
+    window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
+    setSavedViewNotice("Personal view removed.");
+  };
+
+  const publishCurrentView = async () => {
+    const name = savedViewName.trim();
+    if (!tenant || !name || !canControl) {
+      setSavedViewNotice(name ? "Publishing this view requires Document Control authority." : "Enter a view name first.");
+      return;
+    }
+    setSavingSharedView(true);
+    setSavedViewNotice("");
+    try {
+      const published = await publishSharedLibraryView(tenant, {
+        name,
+        params: currentViewParams(params),
+        presentation,
+      });
+      setSharedViews((items) => [...items.filter((item) => item.id !== published.id), published]);
+      setSavedViewName("");
+      setSavedViewNotice(`Shared view published: ${published.name}`);
+    } catch (caught) {
+      setSavedViewNotice(caught instanceof Error ? caught.message : "Shared view could not be published.");
+    } finally {
+      setSavingSharedView(false);
+    }
   };
 
   const pagination = discoveryMode ? discoveryData?.pagination : data?.pagination;
@@ -516,6 +635,36 @@ export default function DocumentLibraryHubPage() {
             <button type="button" className={presentation === "register" ? "active" : ""} aria-pressed={presentation === "register"} onClick={() => setPresentation("register")}><TableProperties size={15} /> Register</button>
           </div>
         </div>
+
+        {!selectingDocumentForJob ? <div className="dlibrary__saved-views" aria-label="Saved library views">
+          <label>
+            <span>Saved view</span>
+            <select
+              aria-label="Apply saved library view"
+              defaultValue=""
+              onChange={(event) => {
+                const [scope, id] = event.target.value.split(":");
+                const view = scope === "personal"
+                  ? personalViews.find((item) => item.id === id)
+                  : sharedViews.find((item) => item.id === id);
+                if (view) applySavedView(view);
+                event.currentTarget.value = "";
+              }}
+            >
+              <option value="">Choose a saved view…</option>
+              {personalViews.length ? <optgroup label="My views">{personalViews.map((view) => <option key={view.id} value={`personal:${view.id}`}>{view.name}</option>)}</optgroup> : null}
+              {sharedViews.length ? <optgroup label="Shared views">{sharedViews.map((view) => <option key={view.id} value={`shared:${view.id}`}>{view.name}{view.is_default ? " · Default" : ""}</option>)}</optgroup> : null}
+            </select>
+          </label>
+          <label className="dlibrary__saved-view-name"><span>Save current filters</span><input value={savedViewName} maxLength={80} onChange={(event) => setSavedViewName(event.target.value)} placeholder="View name" /></label>
+          <button type="button" className="dc-button" onClick={savePersonalView}>Save personal</button>
+          {canControl ? <button type="button" className="dc-button" disabled={savingSharedView} onClick={() => void publishCurrentView()}>{savingSharedView ? "Publishing…" : "Publish shared"}</button> : null}
+          {personalViews.length ? <details>
+            <summary>Manage my views</summary>
+            <div>{personalViews.map((view) => <button type="button" key={view.id} onClick={() => removePersonalView(view.id)}>Remove {view.name}</button>)}</div>
+          </details> : null}
+          {savedViewNotice ? <span role="status">{savedViewNotice}</span> : null}
+        </div> : null}
 
         {!loading && !selectingDocumentForJob && catalogItems.length ? <section className="dlibrary__materials" aria-label="Library books and physical materials">
           <header>
