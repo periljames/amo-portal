@@ -807,3 +807,37 @@
     justify-content: space-between;
   }
 }
+
+
+.qms-live-audit-focus__scope-context {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--qms-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--qms-panel) 94%, var(--accent-primary, #2563eb) 6%);
+}
+
+.qms-live-audit-focus__scope-context > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.qms-live-audit-focus__scope-context span {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 999px;
+  background: var(--qms-panel);
+  color: var(--qms-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.qms-live-audit-focus__scope-context small {
+  color: var(--qms-muted);
+  line-height: 1.45;
+}
