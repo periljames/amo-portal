@@ -14,10 +14,13 @@ import {
   FilterX,
   Heart,
   History,
+  AlignJustify,
   LayoutGrid,
   LibraryBig,
   List,
+  RefreshCcw,
   ScanLine,
+  TableProperties,
   Search,
   ShieldCheck,
   UserRound,
@@ -40,6 +43,7 @@ import {
   type LibraryDiscoveryView,
 } from "../../services/documentLibrary";
 import LibraryOperationsPanel from "./LibraryOperationsPanel";
+import DocumentLibraryDetailsPane from "./DocumentLibraryDetailsPane";
 import DocumentControlShell, {
   DocumentControlEmpty,
   DocumentControlError,
@@ -71,6 +75,7 @@ const CATEGORIES = [
 const PRESETS: Array<{ id: LibraryDiscoveryView | ""; label: string; icon: typeof BookOpen }> = [
   { id: "", label: "All Documents", icon: BookOpen },
   { id: "my-documents", label: "My Documents", icon: UserRound },
+  { id: "shared-with-me", label: "Shared With Me", icon: UserRound },
   { id: "favorites", label: "Favorites", icon: Heart },
   { id: "recently-opened", label: "Recently Opened", icon: Clock3 },
   { id: "recently-revised", label: "Recently Revised", icon: History },
@@ -85,7 +90,11 @@ const SEARCH_DEBOUNCE_MS = 320;
 const PRESENTATION_STORAGE_KEY = "amo.dms.library.presentation.v1";
 const DocumentLibraryRegisterGrid = lazy(() => import("./DocumentLibraryRegisterGrid"));
 
-type LibraryPresentation = "shelf" | "register";
+type LibraryPresentation = "list" | "compact" | "cards" | "register";
+
+type SelectedLibraryItem =
+  | { mode: "integrated"; item: IntegratedLibraryItem }
+  | { mode: "discovery"; item: LibraryDiscoveryItem };
 
 function categoryVisual(type?: string | null) {
   return CATEGORIES.find(([value]) => value === String(type || "").toUpperCase()) || CATEGORIES[0];
@@ -169,11 +178,13 @@ export default function DocumentLibraryHubPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [libraryServicesOpen, setLibraryServicesOpen] = useState(false);
   const [libraryServicesMode, setLibraryServicesMode] = useState<"warehouse" | "catalog" | "scan" | "internet" | "account">("warehouse");
-  const [presentation, setPresentation] = useState<LibraryPresentation>(() => (
-    typeof window !== "undefined" && window.localStorage.getItem(PRESENTATION_STORAGE_KEY) === "register"
-      ? "register"
-      : "shelf"
-  ));
+  const [presentation, setPresentation] = useState<LibraryPresentation>(() => {
+    if (typeof window === "undefined") return "list";
+    const stored = window.localStorage.getItem(PRESENTATION_STORAGE_KEY);
+    if (stored === "shelf") return "cards";
+    return stored === "compact" || stored === "cards" || stored === "register" ? stored : "list";
+  });
+  const [selectedItem, setSelectedItem] = useState<SelectedLibraryItem | null>(null);
   const hasLoadedRef = useRef(false);
 
   const filters = useMemo<IntegratedLibraryFilters>(() => ({
@@ -247,8 +258,14 @@ export default function DocumentLibraryHubPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
   useEffect(() => {
+    const requestedService = params.get("library_services");
     if (params.get("library_scan")) {
       setLibraryServicesMode("scan");
+      setLibraryServicesOpen(true);
+      return;
+    }
+    if (requestedService && ["warehouse", "catalog", "scan", "internet", "account"].includes(requestedService)) {
+      setLibraryServicesMode(requestedService as "warehouse" | "catalog" | "scan" | "internet" | "account");
       setLibraryServicesOpen(true);
     }
   }, [params]);
