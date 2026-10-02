@@ -24,7 +24,7 @@ from .workspace_service import audit, is_control_user, require_control_user, res
 router = APIRouter(prefix="/workspace", tags=["Document Control Library Discovery"])
 ACTIVE_REVIEW_STATUSES = {"SCHEDULED", "IN_PROGRESS"}
 LIBRARY_SHARED_VIEWS_KEY = "document_control_library_views"
-LIBRARY_VIEW_PARAM_KEYS = {"q", "view", "type", "class", "status", "sort", "direction", "per_page"}
+LIBRARY_VIEW_PARAM_KEYS = {"q", "view", "type", "format", "owner", "department", "class", "status", "sort", "direction", "per_page", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"}
 
 
 class SharedLibraryViewIn(BaseModel):
@@ -425,7 +425,7 @@ def library_discovery(
             "lifecycle_status": manual.status,
             "document_class": profile.document_class if profile else "INTERNAL",
             "owner": {
-                "id": owner.id if owner else profile.owner_user_id if profile else None,
+                "id": owner.id if controller and owner else None,
                 "name": owner.full_name if owner else None,
                 "department": profile.owner_department if profile else manual.owner_role,
             },
