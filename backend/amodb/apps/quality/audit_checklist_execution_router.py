@@ -1570,7 +1570,10 @@ def checklist_item_evidence_candidates(
     fact_payload = [_applicability_fact_dict(row) for row in _audit_applicability_facts(db, amo_id=ctx.amo_id, audit_id=audit_id)]
     as_of = audit.actual_start or audit.planned_start or date.today()
     semantic_used = any(
-        "SEMANTIC" in set(str(value) for value in (source.get("retrieval_channels") or []))
+        any(
+            str(value).startswith("SEMANTIC")
+            for value in (source.get("retrieval_channels") or [])
+        )
         for source in sources
     )
     lexical_used = any(
