@@ -156,6 +156,35 @@ function emptyAssessment(): ChecklistAssessmentState {
   };
 }
 
+function assessmentIntegrityError(assessment: ChecklistAssessmentState): string | null {
+  if (assessment.applicability === "NOT_APPLICABLE" && (
+    !assessment.applicability_reason?.trim() || !assessment.applicability_basis.length
+  )) {
+    return "N/A requires an explicit governed applicability reason and preserved basis.";
+  }
+  if (assessment.documentary_status === "CONFLICT" && !assessment.conflicts.length) {
+    return "Documentary status Conflict requires preserved competing controlled statements.";
+  }
+  if (
+    assessment.field_verification_status === "FIELD_VERIFICATION_REQUIRED"
+    && !assessment.fieldwork_requirements.length
+  ) {
+    return "Field verification required must identify the inspection, observation, interview, test or sample still required.";
+  }
+  return null;
+}
+
+function conflictSourceLabel(value: unknown): string {
+  if (!value || typeof value !== "object") return "Controlled source";
+  const row = value as Record<string, unknown>;
+  return String(row.reference || row.evidence_id || "Controlled source");
+}
+
+function conflictClause(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  return String((value as Record<string, unknown>).clause || "");
+}
+
 function normalisedAssessment(
   item: ChecklistExecutionGovernanceRow,
   response: CanonicalChecklistResponse,
@@ -427,15 +456,20 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const updateMutation = useMutation({
-    mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation, assessment: assessmentState }: FieldworkUpdateInput) => mutateChecklistFieldwork(amoCode, auditId, item, {
-      canonical_response_status: response,
-      response_value: responseValue,
-      auditor_notes: auditorNotes.trim() || null,
-      sampled_item_information: sampledItemInformation.trim() || null,
-      evidence_references: item.evidence_references || [],
-      assessment: normalisedAssessment(item, response, assessmentState),
-      reason: "Live audit fieldwork checklist update.",
-    }),
+    mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation, assessment: assessmentState }: FieldworkUpdateInput) => {
+      const normalized = normalisedAssessment(item, response, assessmentState);
+      const integrityError = assessmentIntegrityError(normalized);
+      if (integrityError) throw new Error(integrityError);
+      return mutateChecklistFieldwork(amoCode, auditId, item, {
+        canonical_response_status: response,
+        response_value: responseValue,
+        auditor_notes: auditorNotes.trim() || null,
+        sampled_item_information: sampledItemInformation.trim() || null,
+        evidence_references: item.evidence_references || [],
+        assessment: normalized,
+        reason: "Live audit fieldwork checklist update.",
+      });
+    },
     onSuccess: async (_result, variables) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
@@ -461,6 +495,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     mutationFn: async (draft: FindingDraft) => {
       const classification = findingClassification(draft);
       const auditorNotes = noteDrafts[draft.item.checklist_item_id] ?? draft.item.auditor_notes ?? "";
+      const normalized = normalisedAssessment(
+        draft.item,
+        draft.mode,
+        assessmentDrafts[draft.item.checklist_item_id] ?? draft.item.assessment ?? emptyAssessment(),
+      );
+      const integrityError = assessmentIntegrityError(normalized);
+      if (integrityError) throw new Error(integrityError);
       return createAtomicChecklistFinding(amoCode, auditId, draft.item, {
         canonical_response_status: draft.mode,
         response_value: draft.responseValue,
@@ -473,11 +514,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         auditor_notes: auditorNotes.trim() || null,
         sampled_item_information: sampleDrafts[draft.item.checklist_item_id] ?? draft.item.sampled_item_information ?? null,
         evidence_references: draft.item.evidence_references || [],
-        assessment: normalisedAssessment(
-          draft.item,
-          draft.mode,
-          assessmentDrafts[draft.item.checklist_item_id] ?? draft.item.assessment ?? emptyAssessment(),
-        ),
+        assessment: normalized,
         reason: `Live audit fieldwork ${draft.mode === "NONCOMPLIANT" ? "non-conformity" : "observation"} recorded atomically with the governed checklist response.`,
       });
     },
@@ -888,9 +925,27 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     })}
                   </div>
 
+                  {evidenceCandidatesQuery.data?.authority_policy && Object.keys(evidenceCandidatesQuery.data.authority_policy).length ? <div className="qms-live-audit-focus__authority-policy">
+                    <strong>Evidence precedence for this question</strong>
+                    <ol>{Object.entries(evidenceCandidatesQuery.data.authority_policy).sort((left, right) => right[1] - left[1]).map(([role, priority]) => <li key={role}><span>{statusLabel(role)}</span><b>{priority}</b></li>)}</ol>
+                    <small>This ranking is context-specific evidence precedence, not a universal legal hierarchy.</small>
+                  </div> : null}
+
                   {evidenceCandidatesQuery.data?.conflicts.length ? <div className="qms-live-audit-focus__document-conflicts">
                     <strong>Competing controlled statements</strong>
-                    {evidenceCandidatesQuery.data.conflicts.map((conflict, index) => <pre key={index}>{JSON.stringify(conflict, null, 2)}</pre>)}
+                    {evidenceCandidatesQuery.data.conflicts.map((conflict, index) => {
+                      const sources = Array.isArray(conflict.sources) ? conflict.sources : [];
+                      return <article key={index}>
+                        <header><span>{statusLabel(String(conflict.detector || "DOCUMENT_CONFLICT"))}</span><b>{String(conflict.confidence || "REVIEW")}</b></header>
+                        {sources.map((source, sourceIndex) => <div key={sourceIndex}><strong>{conflictSourceLabel(source)}</strong>{conflictClause(source) ? <p>{conflictClause(source)}</p> : null}</div>)}
+                        <small>Auditor review required. No source is silently selected as the winner.</small>
+                      </article>;
+                    })}
+                  </div> : null}
+
+                  {evidenceCandidatesQuery.data?.limitations.length ? <div className="qms-live-audit-focus__intelligence-limitations">
+                    <strong>Verification limits</strong>
+                    <ul>{evidenceCandidatesQuery.data.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
                   </div> : null}
 
                   <div className="qms-live-audit-focus__assessment-notes">
