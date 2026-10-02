@@ -1451,7 +1451,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
             <div className="qms-audit-setup-stage__fields">
               <label id="audit-setup-field-auditee" className={guidedClass("auditee")}>
-                <span>Auditee representative</span>
+                <span>Auditee</span>
                 <input
                   disabled={!canManage}
                   value={draft.auditee}
