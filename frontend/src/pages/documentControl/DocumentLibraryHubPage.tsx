@@ -92,7 +92,7 @@ const PRESETS: Array<{ id: LibraryDiscoveryView | ""; label: string; icon: typeo
 const SEARCH_DEBOUNCE_MS = 320;
 const PRESENTATION_STORAGE_KEY = "amo.dms.library.presentation.v1";
 const PERSONAL_VIEWS_STORAGE_KEY = "amo.dms.library.personal-views.v1";
-const SAVABLE_VIEW_KEYS = new Set(["q", "view", "type", "class", "status", "sort", "direction", "per_page"]);
+const SAVABLE_VIEW_KEYS = new Set(["q", "view", "type", "format", "owner", "department", "class", "status", "sort", "direction", "per_page", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"]);
 const DocumentLibraryRegisterGrid = lazy(() => import("./DocumentLibraryRegisterGrid"));
 
 type LibraryPresentation = "list" | "compact" | "cards" | "register";
@@ -239,6 +239,8 @@ export default function DocumentLibraryHubPage() {
     sourceType: params.get("format") || undefined,
     documentClass: params.get("class") || params.get("control_status") || undefined,
     status: params.get("status") || params.get("lifecycle_status") || undefined,
+    ownerName: params.get("owner") || undefined,
+    departmentCode: params.get("department") || undefined,
     ownerUserId: params.get("owner_user_id") || undefined,
     departmentId: params.get("department_id") || undefined,
     indexingStatus: params.get("indexing_status") || undefined,
@@ -258,7 +260,7 @@ export default function DocumentLibraryHubPage() {
   const selectingDocumentForJob = Boolean(selectedJob);
   const requestedView = params.get("view") as LibraryDiscoveryView | null;
   const discoveryView: LibraryDiscoveryView = PRESETS.some((preset) => preset.id === requestedView) ? requestedView as LibraryDiscoveryView : "all";
-  const hasIntegratedFilters = Boolean(filters.nodeType || filters.sourceType || filters.documentClass || filters.status || filters.ownerUserId || filters.departmentId || filters.indexingStatus || filters.unresolvedOwnership || filters.unresolvedRelationships || filters.structureStatus || filters.supersededReferenced);
+  const hasIntegratedFilters = Boolean(filters.nodeType || filters.sourceType || filters.documentClass || filters.status || filters.ownerName || filters.departmentCode || filters.ownerUserId || filters.departmentId || filters.indexingStatus || filters.unresolvedOwnership || filters.unresolvedRelationships || filters.structureStatus || filters.supersededReferenced);
   const discoveryMode = !selectingDocumentForJob && (Boolean(requestedView) || (Boolean(filters.q) && !hasIntegratedFilters));
 
   const load = useCallback(async () => {
@@ -349,7 +351,7 @@ export default function DocumentLibraryHubPage() {
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
-    if (["type", "format", "class", "status", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].includes(key)) next.delete("view");
+    if (["type", "format", "class", "status", "owner", "department", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].includes(key)) next.delete("view");
     if (key !== "page") next.set("page", "1");
     setParams(next);
   };
@@ -357,7 +359,7 @@ export default function DocumentLibraryHubPage() {
   const selectPreset = (value: LibraryDiscoveryView | "") => {
     const next = new URLSearchParams(params);
     if (value) next.set("view", value); else next.delete("view");
-    ["type", "format", "class", "status", "lifecycle_status", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].forEach((key) => next.delete(key));
+    ["type", "format", "class", "status", "lifecycle_status", "owner", "department", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].forEach((key) => next.delete(key));
     next.set("page", "1");
     setParams(next);
   };
@@ -702,8 +704,8 @@ export default function DocumentLibraryHubPage() {
         <div className="dlibrary__toolbar">
           <label className="dlibrary__search"><Search size={16} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Find code, title, alias, owner, revision, filename, hierarchy or indexed text" /></label>
           {!discoveryMode ? <>
-            <select aria-label="Document owner" value={filters.ownerUserId || ""} onChange={(event) => update("owner_user_id", event.target.value)}><option value="">All owners</option>{(data?.facets.owners || []).map((owner) => <option key={owner.id} value={owner.id}>{owner.name} ({owner.count})</option>)}</select>
-            <select aria-label="Responsible department" value={filters.departmentId || ""} onChange={(event) => update("department_id", event.target.value)}><option value="">All departments</option>{(data?.facets.departments || []).map((department) => <option key={department.id} value={department.id}>{department.name} ({department.count})</option>)}</select>
+            <select aria-label="Document owner" value={filters.ownerName || ""} onChange={(event) => update("owner", event.target.value)}><option value="">All owners</option>{(data?.facets.owners || []).map((owner) => <option key={owner.value} value={owner.value}>{owner.name} ({owner.count})</option>)}</select>
+            <select aria-label="Responsible department" value={filters.departmentCode || ""} onChange={(event) => update("department", event.target.value)}><option value="">All departments</option>{(data?.facets.departments || []).map((department) => <option key={department.value} value={department.value}>{department.name} ({department.count})</option>)}</select>
             <select aria-label="Document control class" value={filters.documentClass || ""} onChange={(event) => update("class", event.target.value)}><option value="">Internal + external</option><option value="INTERNAL">Internal controlled</option><option value="EXTERNAL">External controlled</option><option value="RECORD">Record documents</option></select>
             <select aria-label="Document format" value={filters.sourceType || ""} onChange={(event) => update("format", event.target.value)}><option value="">All formats</option><option value="PDF">PDF</option><option value="DOCX">DOCX</option><option value="DOC">DOC</option><option value="ODT">ODT</option><option value="RTF">RTF</option></select>
             <select aria-label="Document lifecycle" value={filters.status || ""} onChange={(event) => update("status", event.target.value)}><option value="">All lifecycle states</option><option value="ACTIVE">Active</option><option value="SUPERSEDED">Superseded</option><option value="ARCHIVED">Archived</option></select>
@@ -722,7 +724,7 @@ export default function DocumentLibraryHubPage() {
           <label className="is-check"><input type="checkbox" checked={Boolean(filters.supersededReferenced)} onChange={(event) => update("superseded_referenced", event.target.checked ? "1" : "")} /><span>Superseded still referenced</span></label>
           <button type="button" className="dc-button" onClick={() => {
             const next = new URLSearchParams(params);
-            ["type", "format", "class", "status", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].forEach((key) => next.delete(key));
+            ["type", "format", "class", "status", "owner", "department", "owner_user_id", "department_id", "indexing_status", "unresolved_ownership", "unresolved_relationships", "structure_status", "superseded_referenced"].forEach((key) => next.delete(key));
             next.set("page", "1");
             setParams(next);
           }}>Reset filters</button>
