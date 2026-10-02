@@ -65,27 +65,29 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
-    await setup.getByLabel("Planned start", { exact: true }).fill(futureDate(30));
-    await setup.getByLabel("Planned end", { exact: true }).fill(futureDate(31));
-    await setup.getByLabel("Reminder interval (days)", { exact: true }).fill("5");
+    await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
+    await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
+    await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
     await setup.getByRole("button", { name: "Save audit definition" }).click();
-    await expect(setup.getByRole("status")).toContainText("Audit definition and notification settings saved", { timeout: 30_000 });
+    await expect(setup.getByRole("status")).toContainText("Definition saved.", { timeout: 30_000 });
 
     const openingCard = setup.getByText("Opening meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    await openingCard.getByLabel("Customize", { exact: true }).check();
     await openingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(1));
     await openingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(2));
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
-    await openingCard.getByLabel("Agenda", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
+    await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText("opening meeting saved", { timeout: 30_000 });
+    await expect(setup.getByRole("status")).toContainText(/opening meeting saved/i, { timeout: 30_000 });
 
     const closingCard = setup.getByText("Closing meeting", { exact: true }).locator("xpath=ancestor::article[1]");
+    await closingCard.getByLabel("Customize", { exact: true }).check();
     await closingCard.getByLabel("Start", { exact: true }).fill(futureLocalDateTime(7));
     await closingCard.getByLabel("End", { exact: true }).fill(futureLocalDateTime(8));
     await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
-    await closingCard.getByLabel("Agenda", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
+    await closingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
-    await expect(setup.getByRole("status")).toContainText("closing meeting saved", { timeout: 30_000 });
+    await expect(setup.getByRole("status")).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
     const noticeCard = setup.getByText("Audit notice", { exact: true }).locator("xpath=ancestor::article[1]");
     await noticeCard.getByRole("button", { name: "Create notice" }).click();
