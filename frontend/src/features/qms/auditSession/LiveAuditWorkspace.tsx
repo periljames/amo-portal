@@ -262,7 +262,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         if (local) return local;
       }
       try {
-        return await qmsListFindings(auditId);
+        return await qmsListFindings(auditId, amoCode);
       } catch (error) {
         const message = error instanceof Error ? error.message.toLowerCase() : "";
         if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
