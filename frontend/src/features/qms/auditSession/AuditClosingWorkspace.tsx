@@ -144,7 +144,15 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const adoptMutation = useMutation({
     mutationFn: (artifactId: string) => adoptGeneratedAuditReport(amoCode, auditId, artifactId, "Adopt deterministic closing report for governed closing-meeting review."),
-    onSuccess: async () => { setLocalError(null); setNotice("Generated report adopted as a governed draft revision for the closing meeting."); await invalidateClosing(); },
+    onSuccess: async (revision) => {
+      setLocalError(null);
+      setNotice("Generated report adopted as a governed draft revision for the closing meeting.");
+      queryClient.setQueryData<{ items: AuditReportRevision[] }>(
+        ["qms-audit-report-revisions", amoCode, auditId],
+        (current) => ({ items: [revision, ...(current?.items || []).filter((item) => item.id !== revision.id)] }),
+      );
+      await invalidateClosing();
+    },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Generated report adoption failed."),
   });
   const transitionMutation = useMutation({
