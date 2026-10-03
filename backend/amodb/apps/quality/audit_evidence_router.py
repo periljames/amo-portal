@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
@@ -50,6 +51,68 @@ router = APIRouter(tags=["Quality audit evidence"])
 public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Released Audit Evidence"])
 
 
+def _reference_list(value: str | None, *, field: str) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be a JSON string array.") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=422, detail=f"{field} must be a JSON string array.")
+    result: list[str] = []
+    for raw in parsed:
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=422, detail=f"{field} may contain string references only.")
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        if len(cleaned) > 255:
+            raise HTTPException(status_code=422, detail=f"{field} contains a reference longer than 255 characters.")
+        if cleaned not in result:
+            result.append(cleaned)
+        if len(result) > 100:
+            raise HTTPException(status_code=422, detail=f"{field} may contain at most 100 references.")
+    return result
+
+
+def _evidence_context(
+    *,
+    location_ref: str | None = None,
+    person_ref: str | None = None,
+    facility_ref: str | None = None,
+    asset_ref: str | None = None,
+    tool_ref: str | None = None,
+    component_ref: str | None = None,
+    regulation_refs_json: str | None = None,
+    procedure_refs_json: str | None = None,
+    document_revision_ids_json: str | None = None,
+) -> dict[str, Any]:
+    scalar = {
+        "location_ref": location_ref,
+        "person_ref": person_ref,
+        "facility_ref": facility_ref,
+        "asset_ref": asset_ref,
+        "tool_ref": tool_ref,
+        "component_ref": component_ref,
+    }
+    result = {
+        key: str(value or "").strip()[:255]
+        for key, value in scalar.items()
+        if str(value or "").strip()
+    }
+    regulation_refs = _reference_list(regulation_refs_json, field="regulation_refs")
+    procedure_refs = _reference_list(procedure_refs_json, field="procedure_refs")
+    document_revision_ids = _reference_list(document_revision_ids_json, field="document_revision_ids")
+    if regulation_refs:
+        result["regulation_refs"] = regulation_refs
+    if procedure_refs:
+        result["procedure_refs"] = procedure_refs
+    if document_revision_ids:
+        result["document_revision_ids"] = document_revision_ids
+    return result
+
+
 def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -63,6 +126,7 @@ def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
         "size_bytes": int(row.size_bytes or 0),
         "sha256": row.sha256,
         "description": row.description,
+        "context": dict(row.context_json or {}),
         "source_device_id": row.source_device_id,
         "captured_at": row.captured_at.isoformat() if row.captured_at else None,
         "offline_upload_state": row.offline_upload_state,
@@ -132,6 +196,7 @@ def _evidence_audit_event(
             "content_type": artifact.content_type,
             "size_bytes": int(artifact.size_bytes or 0),
             "sha256": artifact.sha256,
+            "context": dict(artifact.context_json or {}),
             "offline_upload_state": artifact.offline_upload_state,
             "server_processing_state": artifact.server_processing_state,
         },
@@ -261,6 +326,15 @@ async def upload_internal_audit_evidence(
     description: str | None = Form(default=None, max_length=4000),
     finding_id: uuid.UUID | None = Form(default=None),
     evidence_request_id: uuid.UUID | None = Form(default=None),
+    location_ref: str | None = Form(default=None, max_length=255),
+    person_ref: str | None = Form(default=None, max_length=255),
+    facility_ref: str | None = Form(default=None, max_length=255),
+    asset_ref: str | None = Form(default=None, max_length=255),
+    tool_ref: str | None = Form(default=None, max_length=255),
+    component_ref: str | None = Form(default=None, max_length=255),
+    regulation_refs_json: str | None = Form(default=None, max_length=30000),
+    procedure_refs_json: str | None = Form(default=None, max_length=30000),
+    document_revision_ids_json: str | None = Form(default=None, max_length=30000),
     source_device_id: str | None = Form(default=None, max_length=128),
     captured_at: datetime | None = Form(default=None),
     ctx: TenantContext = Depends(write_tenant_context),
@@ -317,6 +391,17 @@ async def upload_internal_audit_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        context_json=_evidence_context(
+            location_ref=location_ref,
+            person_ref=person_ref,
+            facility_ref=facility_ref,
+            asset_ref=asset_ref,
+            tool_ref=tool_ref,
+            component_ref=component_ref,
+            regulation_refs_json=regulation_refs_json,
+            procedure_refs_json=procedure_refs_json,
+            document_revision_ids_json=document_revision_ids_json,
+        ),
         source_device_id=(source_device_id or "").strip() or None,
         captured_at=captured_at,
         offline_upload_state="SYNCED",
@@ -374,6 +459,15 @@ async def upload_external_auditor_evidence(
     base_version: int = Form(...),
     client_mutation_id: str = Form(..., min_length=8, max_length=128),
     description: str | None = Form(default=None, max_length=4000),
+    location_ref: str | None = Form(default=None, max_length=255),
+    person_ref: str | None = Form(default=None, max_length=255),
+    facility_ref: str | None = Form(default=None, max_length=255),
+    asset_ref: str | None = Form(default=None, max_length=255),
+    tool_ref: str | None = Form(default=None, max_length=255),
+    component_ref: str | None = Form(default=None, max_length=255),
+    regulation_refs_json: str | None = Form(default=None, max_length=30000),
+    procedure_refs_json: str | None = Form(default=None, max_length=30000),
+    document_revision_ids_json: str | None = Form(default=None, max_length=30000),
     source_device_id: str | None = Form(default=None, max_length=128),
     captured_at: datetime | None = Form(default=None),
     x_qms_csrf: str | None = Header(default=None, alias="X-QMS-CSRF"),
@@ -418,6 +512,17 @@ async def upload_external_auditor_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        context_json=_evidence_context(
+            location_ref=location_ref,
+            person_ref=person_ref,
+            facility_ref=facility_ref,
+            asset_ref=asset_ref,
+            tool_ref=tool_ref,
+            component_ref=component_ref,
+            regulation_refs_json=regulation_refs_json,
+            procedure_refs_json=procedure_refs_json,
+            document_revision_ids_json=document_revision_ids_json,
+        ),
         source_device_id=(source_device_id or "").strip() or None,
         captured_at=captured_at,
         offline_upload_state="SYNCED",
