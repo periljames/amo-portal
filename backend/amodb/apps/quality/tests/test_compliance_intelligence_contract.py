@@ -19,7 +19,7 @@ from amodb.apps.quality.audit_checklist_execution_router import (
     ChecklistAssessmentState,
     StructuredAIAnalysis,
 )
-from amodb.apps.quality.audit_evidence_router import _evidence_context, _with_assessment_context
+from amodb.apps.quality.audit_evidence_router import _evidence_context, _reference, _with_assessment_context
 
 
 def test_not_applicable_requires_reason_and_preserved_basis() -> None:
@@ -354,3 +354,20 @@ def test_field_evidence_context_is_structured_and_inherits_assessment_links() ->
 def test_field_evidence_context_rejects_non_string_reference_values() -> None:
     with pytest.raises(HTTPException, match="string references only"):
         _evidence_context(regulation_refs_json='[{"ref":"KCAR 36"}]')
+
+
+
+def test_public_evidence_reference_does_not_expose_structured_context() -> None:
+    artifact = SimpleNamespace(
+        id="artifact-1",
+        filename="tool-photo.jpg",
+        content_type="image/jpeg",
+        size_bytes=42,
+        sha256="a" * 64,
+        source_type="INTERNAL_USER",
+        context_json={"person_ref": "user-42", "tool_ref": "SL-ENG-488"},
+    )
+    internal = _reference(artifact, include_context=True)
+    released = _reference(artifact)
+    assert internal["context"]["tool_ref"] == "SL-ENG-488"
+    assert "context" not in released
