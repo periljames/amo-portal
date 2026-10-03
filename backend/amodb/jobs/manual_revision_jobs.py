@@ -146,6 +146,19 @@ def _refresh_pdf_search_blocks(
         .all()
     )
     rebuilt_blocks = 0
+    preserved_blocks = 0
+    skipped_shared_ocr_pages: list[int] = []
+
+    page_section_count: dict[int, int] = {}
+    for section in sections:
+        metadata = dict(section.metadata_json or {})
+        start = int(metadata.get("page_start") or 0)
+        end = int(metadata.get("page_end") or start or 0)
+        if start <= 0:
+            continue
+        for page_number in range(start, max(start, end) + 1):
+            page_section_count[page_number] = page_section_count.get(page_number, 0) + 1
+
     for section in sections:
         metadata = dict(section.metadata_json or {})
         start = int(metadata.get("page_start") or 0)
@@ -153,12 +166,18 @@ def _refresh_pdf_search_blocks(
         if start <= 0:
             continue
         end = max(start, end)
-        db.query(manual_models.ManualBlock).filter(
-            manual_models.ManualBlock.section_id == section.id,
-        ).delete(synchronize_session=False)
+        section_detection = str(metadata.get("section_detection") or "").upper()
+        logical_boundaries = section_detection in {"NUMBERED_HEADING", "PDF_OUTLINE"}
+        existing_blocks = (
+            db.query(manual_models.ManualBlock)
+            .filter(manual_models.ManualBlock.section_id == section.id)
+            .order_by(manual_models.ManualBlock.order_index.asc())
+            .all()
+        )
         section_ocr_pages: list[int] = []
         section_native_pages: list[int] = []
         section_missing_pages: list[int] = []
+
         for page_number in range(start, end + 1):
             text = str(page_text.get(page_number) or "").strip()
             engine = page_engine.get(page_number, "UNAVAILABLE")
@@ -168,23 +187,70 @@ def _refresh_pdf_search_blocks(
                 section_native_pages.append(page_number)
             else:
                 section_missing_pages.append(page_number)
-            digest = hashlib.sha256(
-                f"{revision.id}:{section.id}:{page_number}:{engine}:{text}".encode("utf-8")
-            ).hexdigest()
-            db.add(manual_models.ManualBlock(
-                section_id=section.id,
-                order_index=(page_number - start) + 1,
-                block_type="page-text" if text else "page-empty",
-                html_sanitized=f"<p>{escape(text)}</p>",
-                text_plain=text,
-                change_hash=digest,
-            ))
-            rebuilt_blocks += 1
+
+        if logical_boundaries and existing_blocks:
+            # The upload parser may split multiple numbered sections on one PDF
+            # page. Replacing those blocks with whole-page text would duplicate
+            # adjacent requirements across sections and corrupt citations. Keep
+            # the proven logical split. OCR is added only when the page belongs
+            # to one section; a shared boundary page is left unchanged and
+            # reported for manual follow-up rather than misattributed.
+            preserved_blocks += len(existing_blocks)
+            next_order = max((int(block.order_index or 0) for block in existing_blocks), default=0) + 1
+            for page_number in section_ocr_pages:
+                if page_section_count.get(page_number, 0) != 1:
+                    skipped_shared_ocr_pages.append(page_number)
+                    continue
+                text = str(page_text.get(page_number) or "").strip()
+                if not text:
+                    continue
+                digest = hashlib.sha256(
+                    f"{revision.id}:{section.id}:{page_number}:OCR_SUPPLEMENT:{text}".encode("utf-8")
+                ).hexdigest()
+                already_present = any(
+                    str(block.change_hash or "") == digest for block in existing_blocks
+                )
+                if already_present:
+                    continue
+                db.add(manual_models.ManualBlock(
+                    section_id=section.id,
+                    order_index=next_order,
+                    block_type="ocr-page-supplement",
+                    html_sanitized=f"<p>{escape(text)}</p>",
+                    text_plain=text,
+                    change_hash=digest,
+                ))
+                next_order += 1
+                rebuilt_blocks += 1
+        else:
+            db.query(manual_models.ManualBlock).filter(
+                manual_models.ManualBlock.section_id == section.id,
+            ).delete(synchronize_session=False)
+            for page_number in range(start, end + 1):
+                text = str(page_text.get(page_number) or "").strip()
+                engine = page_engine.get(page_number, "UNAVAILABLE")
+                digest = hashlib.sha256(
+                    f"{revision.id}:{section.id}:{page_number}:{engine}:{text}".encode("utf-8")
+                ).hexdigest()
+                db.add(manual_models.ManualBlock(
+                    section_id=section.id,
+                    order_index=(page_number - start) + 1,
+                    block_type="page-text" if text else "page-empty",
+                    html_sanitized=f"<p>{escape(text)}</p>",
+                    text_plain=text,
+                    change_hash=digest,
+                ))
+                rebuilt_blocks += 1
+
         metadata["text_extraction"] = {
             "policy": "NATIVE_FIRST_PAGE_OCR_FALLBACK",
+            "logical_boundaries_preserved": bool(logical_boundaries and existing_blocks),
             "native_pages": section_native_pages,
             "ocr_pages": section_ocr_pages,
             "unsearchable_pages": section_missing_pages,
+            "shared_boundary_ocr_skipped": sorted(
+                page for page in section_ocr_pages if page_section_count.get(page, 0) != 1
+            ),
         }
         section.metadata_json = metadata
 
@@ -196,6 +262,8 @@ def _refresh_pdf_search_blocks(
         "ocr_pages": ocr_pages,
         "unsearchable_pages": unsearchable_pages,
         "rebuilt_blocks": rebuilt_blocks,
+        "preserved_blocks": preserved_blocks,
+        "shared_boundary_ocr_skipped": sorted(set(skipped_shared_ocr_pages)),
         "warnings": warnings[:50],
     }
 
