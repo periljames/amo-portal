@@ -6,6 +6,7 @@ import {
 import {
   uploadInternalAuditEvidence,
   type AuditEvidenceArtifact,
+  type AuditEvidenceContext,
 } from "./qmsAuditEvidence";
 
 export type OfflineEvidenceState =
@@ -28,6 +29,7 @@ export type OfflineAuditEvidenceEntry = {
   sizeBytes: number;
   sha256: string;
   description: string | null;
+  context: AuditEvidenceContext | null;
   clientMutationId: string;
   capturedBaseVersion: number;
   capturedAt: string;
@@ -189,6 +191,7 @@ function publicEntry(row: StoredEntry): OfflineAuditEvidenceEntry {
     sizeBytes: row.sizeBytes,
     sha256: row.sha256,
     description: row.description,
+    context: row.context,
     clientMutationId: row.clientMutationId,
     capturedBaseVersion: row.capturedBaseVersion,
     capturedAt: row.capturedAt,
@@ -251,6 +254,7 @@ export async function enqueueOfflineAuditEvidence(input: {
   findingId?: string | null;
   file: File;
   description?: string | null;
+  context?: AuditEvidenceContext | null;
   clientMutationId: string;
   baseVersion: number;
 }): Promise<OfflineAuditEvidenceEntry> {
@@ -266,6 +270,7 @@ export async function enqueueOfflineAuditEvidence(input: {
     const metadata = await encryptText(key, {
       description: input.description?.trim() || null,
       findingId: input.findingId || null,
+      context: input.context || null,
     });
     const encryptedFile = await encryptFile(key, input.file);
     const row: StoredEntry = {
@@ -281,6 +286,7 @@ export async function enqueueOfflineAuditEvidence(input: {
       sizeBytes: input.file.size,
       sha256: hash,
       description: null,
+      context: null,
       clientMutationId: input.clientMutationId,
       capturedBaseVersion: input.baseVersion,
       capturedAt,
@@ -300,6 +306,7 @@ export async function enqueueOfflineAuditEvidence(input: {
       ...publicEntry(row),
       findingId: input.findingId || null,
       description: input.description?.trim() || null,
+      context: input.context || null,
     };
   } finally {
     db.close();
@@ -384,10 +391,10 @@ export async function replayOfflineAuditEvidence(
 
     const db = await openDb();
     let file: File;
-    let metadata: { description?: string | null; findingId?: string | null };
+    let metadata: { description?: string | null; findingId?: string | null; context?: AuditEvidenceContext | null };
     try {
       const key = await encryptionKey(db);
-      metadata = await decryptText<{ description?: string | null; findingId?: string | null }>(
+      metadata = await decryptText<{ description?: string | null; findingId?: string | null; context?: AuditEvidenceContext | null }>(
         key,
         row.metadataIv,
         row.metadataCiphertext,
@@ -413,6 +420,7 @@ export async function replayOfflineAuditEvidence(
           clientMutationId: row.clientMutationId,
           description: metadata.description || null,
           findingId: metadata.findingId || null,
+          context: metadata.context || null,
           capturedAt: row.capturedAt,
         },
       );
