@@ -209,8 +209,9 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
 
   await missionRow.getByRole("button", { name: "Manage project" }).click();
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
-  await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
-  await expect(page.getByText("Not assigned", { exact: true })).toBeVisible();
+  const sponsorSummary = page.locator(".qms-mission-detail__summary article").filter({ hasText: "Accountable Executive" });
+  await expect(sponsorSummary).toBeVisible();
+  await expect(sponsorSummary.getByText("Not assigned", { exact: true })).toBeVisible();
   await expect(page.locator(".qms-mission-detail__gate")).toHaveCount(11);
   await expect(page.getByText("Tooling and test equipment", { exact: true })).toBeVisible();
   await expect(page.getByText("Training and competence evidence", { exact: true })).toBeVisible();
