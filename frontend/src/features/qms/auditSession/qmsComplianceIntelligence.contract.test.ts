@@ -62,6 +62,25 @@ describe("QMS compliance intelligence frontend contract", () => {
     expect(live).toContain("applicability_reason");
   });
 
+  it("lets auditors save structured assessment without changing the checklist outcome", () => {
+    const live = source("./LiveAuditWorkspace.tsx");
+
+    expect(live).toContain("Save assessment");
+    expect(live).toContain("Save notes & assessment");
+    expect(live).toContain("unsaved fieldwork changes");
+    expect(live).toContain("setSampleDrafts");
+    expect(live).toContain("setAssessmentDrafts");
+  });
+
+  it("makes completed fieldwork explicitly read-only and preserves supporting-auditor execution", () => {
+    const live = source("./LiveAuditWorkspace.tsx");
+    const gates = source("./qmsAuditActionGates.ts");
+
+    expect(live).toContain("Fieldwork is complete. This workspace is read-only");
+    expect(live).toContain("canExecuteAssignedAudit(auditQuery.data) && !fieldworkComplete");
+    expect(gates).toContain("supporting_auditor_user_ids");
+  });
+
   it("keeps documentary, implementation and field verification states independent", () => {
     const live = source("./LiveAuditWorkspace.tsx");
 
