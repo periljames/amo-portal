@@ -95,3 +95,34 @@ def test_pdf_outline_preserves_detectable_section_number() -> None:
 
     assert result[0]["section_number"] == "3.5.2"
     assert result[0]["section_detection"] == "PDF_OUTLINE"
+
+
+
+def test_xlsx_uses_native_openpyxl_before_tika(monkeypatch) -> None:
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("Tika must not run when native XLSX extraction succeeds.")
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Calibration Register"
+    worksheet.append(["Asset", "Status", "Due"])
+    worksheet.append(["SL-ENG-488", "SERVICEABLE", "2026-12-31"])
+    payload = BytesIO()
+    workbook.save(payload)
+    workbook.close()
+
+    monkeypatch.setattr(extractor, "_tika_extract", fail_if_called)
+    result = extractor.extract_document_text(
+        "calibration-register.xlsx",
+        payload.getvalue(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    assert result.engine == "OPENPYXL"
+    assert "Calibration Register" in result.text
+    assert "SL-ENG-488" in result.text
+    assert "SERVICEABLE" in result.text
