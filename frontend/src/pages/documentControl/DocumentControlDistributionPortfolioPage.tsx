@@ -30,6 +30,7 @@ import DocumentControlShell, {
   DocumentControlStatus,
 } from "./DocumentControlShell";
 import { useDocumentControlRoute } from "./documentControlRoute";
+import PhysicalCopyOperationsPanel from "./PhysicalCopyOperationsPanel";
 import "./dmsDistributionPortfolio.css";
 
 const SEARCH_DEBOUNCE_MS = 320;
@@ -86,6 +87,12 @@ export default function DocumentControlDistributionPortfolioPage() {
 
   const load = useCallback(async () => {
     if (!tenant) return;
+    if (view === "physical-copies") {
+      setLoading(false);
+      setRefreshing(false);
+      setError("");
+      return;
+    }
     const initial = !hasLoadedRef.current;
     setLoading(initial);
     setRefreshing(!initial);
@@ -138,7 +145,7 @@ export default function DocumentControlDistributionPortfolioPage() {
     subtitle="Digital issue, acknowledgement follow-up and numbered physical-copy custody in one operating workspace."
     canControl
     actions={<>
-      <button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={14} /> Refresh</button>
+      {view !== "physical-copies" ? <button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={14} /> Refresh</button> : null}
       <button type="button" className="dc-button" onClick={() => update("view", "physical-copies")}><Copy size={14} /> Copy operations</button>
       <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library`)}><Send size={14} /> Choose document to distribute</button>
     </>}
@@ -152,6 +159,7 @@ export default function DocumentControlDistributionPortfolioPage() {
         })}
       </nav>
 
+      {view === "physical-copies" ? <PhysicalCopyOperationsPanel tenant={tenant} /> : <>
       <div className="dms-distribution__toolbar">
         <label><Search size={15} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={`Search ${viewMeta.label.toLowerCase()} by document${view === "physical-copies" || view === "recalls" ? ", copy or location" : ""}`} /></label>
         {(view === "campaigns" || view === "physical-copies") ? <select aria-label="Filter distribution status" value={params.get("status") || ""} onChange={(event) => update("status", event.target.value)}>
@@ -204,6 +212,7 @@ export default function DocumentControlDistributionPortfolioPage() {
         <span>Page {data.pagination.page} of {totalPages}</span>
         <button type="button" disabled={data.pagination.page >= totalPages || refreshing} onClick={() => update("page", String(data.pagination.page + 1))}>Next <ChevronRight size={14} /></button>
       </footer> : null}
+      </>}
     </section>
   </DocumentControlShell>;
 }
