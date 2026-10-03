@@ -414,12 +414,12 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
             ><Save size={15} /> {saving ? "Saving…" : "Save note / references"}</button>
 
             {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
-              <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload only · participant attribution retained</small></div></header>
+              <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload or encrypted offline queue · participant attribution retained</small></div></header>
               {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
               <label><span>File</span><input type="file" accept={EVIDENCE_ACCEPT} disabled={uploading} onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} /></label>
               <label><span>Evidence context</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="What this evidence demonstrates" /></label>
-              <button type="button" disabled={!evidenceFile || uploading || (typeof navigator !== "undefined" && !navigator.onLine)} onClick={() => void uploadEvidence()}><FileUp size={15} /> {uploading ? "Uploading…" : "Attach governed evidence"}</button>
-              {typeof navigator !== "undefined" && !navigator.onLine ? <small>File upload is paused offline; structured fieldwork can still be queued securely.</small> : null}
+              <button type="button" disabled={!evidenceFile || uploading} onClick={() => void uploadEvidence()}><FileUp size={15} /> {uploading ? "Saving…" : typeof navigator !== "undefined" && !navigator.onLine ? "Queue governed evidence" : "Attach governed evidence"}</button>
+              {typeof navigator !== "undefined" && !navigator.onLine ? <small>The file will be encrypted on this device and uploaded only after the active external-auditor session is revalidated online.</small> : null}
             </section> : <div className="qms-external-auditor-fieldwork__blocker"><ShieldAlert size={15} /><span>This invitation does not permit governed evidence upload.</span></div>}
 
             {model.can_draft_findings ? <ExternalAuditorFindingDraftPanel model={model} item={selected} /> : null}
