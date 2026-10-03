@@ -686,9 +686,10 @@
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
-  /* Fixed positioning already uses the layout viewport. A uniform inset keeps
-     the drawer exactly 24px from the visible edge without double-counting the
-     browser scrollbar gutter. */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  /* Reserve the overlay's native scrollbar gutter so the drawer aligns to
+     document.documentElement.clientWidth rather than the visual viewport. */
   padding: 24px;
   background: rgba(15, 23, 42, .36);
   backdrop-filter: blur(2px);
