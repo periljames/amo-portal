@@ -4,6 +4,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from amodb.apps.doc_control.knowledge_assistant_router import _cosine_similarity, _hybrid_merge, _pgvector_available
@@ -18,6 +19,7 @@ from amodb.apps.quality.audit_checklist_execution_router import (
     ChecklistAssessmentState,
     StructuredAIAnalysis,
 )
+from amodb.apps.quality.audit_evidence_router import _evidence_context, _with_assessment_context
 
 
 def test_not_applicable_requires_reason_and_preserved_basis() -> None:
@@ -321,3 +323,34 @@ def test_matching_retention_periods_do_not_create_false_conflict() -> None:
         ]
     )
     assert conflicts == []
+
+
+
+def test_field_evidence_context_is_structured_and_inherits_assessment_links() -> None:
+    context = _evidence_context(
+        location_ref="NBO Base",
+        person_ref="user-42",
+        facility_ref="Battery Shop",
+        asset_ref="5Y-SLK",
+        tool_ref="SL-ENG-488",
+        component_ref="PN-1234 SN-A17",
+        regulation_refs_json='["KCAR 2025 Reg. 36"]',
+        procedure_refs_json='["MPM 2.5.8"]',
+        document_revision_ids_json='["rev-current"]',
+    )
+    governance = SimpleNamespace(
+        regulation_refs=["KCAR 2025 Reg. 36", "KCAR 2025 Reg. 27"],
+        procedure_refs=["MPM 2.5.8", "QWI-003 Rev A 4.2"],
+        document_revision_ids=["rev-current", "qwi-rev-a"],
+    )
+    merged = _with_assessment_context(context, governance)
+    assert merged["location_ref"] == "NBO Base"
+    assert merged["tool_ref"] == "SL-ENG-488"
+    assert merged["regulation_refs"] == ["KCAR 2025 Reg. 36", "KCAR 2025 Reg. 27"]
+    assert merged["procedure_refs"] == ["MPM 2.5.8", "QWI-003 Rev A 4.2"]
+    assert merged["document_revision_ids"] == ["rev-current", "qwi-rev-a"]
+
+
+def test_field_evidence_context_rejects_non_string_reference_values() -> None:
+    with pytest.raises(HTTPException, match="string references only"):
+        _evidence_context(regulation_refs_json='[{"ref":"KCAR 36"}]')
