@@ -414,10 +414,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  if (checklistQuery.isLoading || bindingsQuery.isLoading) {
+  if (checklistQuery.isLoading || lineageQuery.isLoading) {
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
   }
-  const prerequisiteError = checklistQuery.error || bindingsQuery.error;
+  const prerequisiteError = checklistQuery.error || lineageQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -429,7 +429,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         )}
         onRetry={() => {
           void checklistQuery.refetch();
-          void bindingsQuery.refetch();
+          void lineageQuery.refetch();
         }}
         exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
         exitLabel="Back to Prepare"
