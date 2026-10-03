@@ -87,6 +87,7 @@ export type AuditOfflinePack = {
     size_bytes: number;
     sha256: string;
     description?: string | null;
+    context?: import("./qmsAuditEvidence").AuditEvidenceContext;
     source_device_id?: string | null;
     captured_at?: string | null;
     offline_upload_state?: string | null;
@@ -425,6 +426,7 @@ export function projectOfflineEvidence(
       source_type: artifact.source_type || "INTERNAL_USER",
       content_type: artifact.content_type ?? null,
       description: artifact.description ?? null,
+      context: artifact.context || {},
       uploaded_by_user_id: artifact.uploaded_by_user_id ?? null,
       uploaded_by_participant_id: artifact.uploaded_by_participant_id ?? null,
       created_at: artifact.created_at ?? null,
