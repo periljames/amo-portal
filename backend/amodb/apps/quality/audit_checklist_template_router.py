@@ -913,6 +913,45 @@ def list_checklist_bindings(
     }
 
 
+@router.get("/audits/{audit_id}/checklist-binding-lineage")
+def get_checklist_binding_lineage(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Return only the per-item governed source context required during fieldwork."""
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    rows = db.query(
+        QualityAuditChecklistBinding.template_code,
+        QualityAuditChecklistBinding.revision_no,
+        QualityAuditChecklistBinding.content_sha256,
+        QualityAuditChecklistBinding.item_snapshot,
+        QualityAuditChecklistBinding.instantiated_item_ids,
+    ).filter(
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id,
+        QualityAuditChecklistBinding.audit_id == audit_id,
+    ).order_by(
+        QualityAuditChecklistBinding.applied_at.asc(),
+        QualityAuditChecklistBinding.id.asc(),
+    ).all()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        snapshots = list(row.item_snapshot or [])
+        item_ids = list(row.instantiated_item_ids or [])
+        for index, item_id in enumerate(item_ids):
+            if index >= len(snapshots):
+                continue
+            items.append({
+                "checklist_item_id": str(item_id),
+                "template_code": row.template_code,
+                "revision_no": row.revision_no,
+                "content_sha256": row.content_sha256,
+                "source_context": snapshots[index],
+            })
+    return {"items": items}
+
+
 @router.get("/audits/{audit_id}/checklist-bindings/{binding_id}")
 def get_checklist_binding(
     audit_id: uuid.UUID,
