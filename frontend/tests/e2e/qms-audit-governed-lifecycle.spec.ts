@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
+test.use({ ignoreHTTPSErrors: true, serviceWorkers: "block", trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
 const AUDIT_ID = "11111111-1111-4111-8111-111111111111";
 const AUDIT_REF = "QAR-MO-26-015";
