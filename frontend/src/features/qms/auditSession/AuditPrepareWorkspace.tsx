@@ -876,6 +876,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <ShieldAlert size={14} aria-hidden /> {readiness?.issue_blockers.map((blocker) => blocker.reason).join(" · ") || "Preparation blockers remain."}
         </p>
       ) : null}
+      {fieldworkOpen ? (
+        <p className="qms-audit-prepare-stage__notice is-info">
+          <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Return the audit through the governed preparation lifecycle before changing checklist scope or questions.
+        </p>
+      ) : null}
 
       <section className="qms-audit-prepare__offline-pack" aria-label="Offline fieldwork package">
         <div className="qms-audit-prepare__offline-pack-copy">
