@@ -505,6 +505,8 @@ def seed() -> None:
             entity_version=2,
             updated_by_user_id=user_a.id,
         ))
+        db.flush()
+        _issue_preparation(db, audit=ceremony_audit, user_id=user_a.id, now=now)
         db.add(QualityAuditClosingNarrative(
             id=CEREMONY_CLOSING_NARRATIVE_ID,
             amo_id=amo.id,
