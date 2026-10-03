@@ -113,6 +113,33 @@ def _evidence_context(
     return result
 
 
+def _with_assessment_context(
+    context: dict[str, Any],
+    governance: QualityAuditChecklistExecutionGovernance | None,
+) -> dict[str, Any]:
+    result = dict(context)
+    if governance is None:
+        return result
+    for target_key, attribute in (
+        ("regulation_refs", "regulation_refs"),
+        ("procedure_refs", "procedure_refs"),
+        ("document_revision_ids", "document_revision_ids"),
+    ):
+        inherited = [
+            str(value).strip()
+            for value in list(getattr(governance, attribute, None) or [])
+            if str(value).strip()
+        ]
+        existing = [str(value).strip() for value in list(result.get(target_key) or []) if str(value).strip()]
+        combined: list[str] = []
+        for value in [*existing, *inherited]:
+            if value not in combined:
+                combined.append(value)
+        if combined:
+            result[target_key] = combined[:100]
+    return result
+
+
 def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -391,16 +418,19 @@ async def upload_internal_audit_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
-        context_json=_evidence_context(
-            location_ref=location_ref,
-            person_ref=person_ref,
-            facility_ref=facility_ref,
-            asset_ref=asset_ref,
-            tool_ref=tool_ref,
-            component_ref=component_ref,
-            regulation_refs_json=regulation_refs_json,
-            procedure_refs_json=procedure_refs_json,
-            document_revision_ids_json=document_revision_ids_json,
+        context_json=_with_assessment_context(
+            _evidence_context(
+                location_ref=location_ref,
+                person_ref=person_ref,
+                facility_ref=facility_ref,
+                asset_ref=asset_ref,
+                tool_ref=tool_ref,
+                component_ref=component_ref,
+                regulation_refs_json=regulation_refs_json,
+                procedure_refs_json=procedure_refs_json,
+                document_revision_ids_json=document_revision_ids_json,
+            ),
+            governance,
         ),
         source_device_id=(source_device_id or "").strip() or None,
         captured_at=captured_at,
@@ -512,16 +542,19 @@ async def upload_external_auditor_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
-        context_json=_evidence_context(
-            location_ref=location_ref,
-            person_ref=person_ref,
-            facility_ref=facility_ref,
-            asset_ref=asset_ref,
-            tool_ref=tool_ref,
-            component_ref=component_ref,
-            regulation_refs_json=regulation_refs_json,
-            procedure_refs_json=procedure_refs_json,
-            document_revision_ids_json=document_revision_ids_json,
+        context_json=_with_assessment_context(
+            _evidence_context(
+                location_ref=location_ref,
+                person_ref=person_ref,
+                facility_ref=facility_ref,
+                asset_ref=asset_ref,
+                tool_ref=tool_ref,
+                component_ref=component_ref,
+                regulation_refs_json=regulation_refs_json,
+                procedure_refs_json=procedure_refs_json,
+                document_revision_ids_json=document_revision_ids_json,
+            ),
+            governance,
         ),
         source_device_id=(source_device_id or "").strip() or None,
         captured_at=captured_at,
