@@ -243,7 +243,7 @@ test.describe("Document Control daily operating model", () => {
     await expect(libraryButton).toBeVisible();
     await libraryButton.focus();
     await expect(libraryButton).toBeFocused();
-    await expect(page.getByText("My Work", { exact: true })).toBeVisible();
+    await expect(page.getByText("Reviews & my work", { exact: true })).toBeVisible();
   });
 
   test("physical library registers, labels, checks out and returns one numbered copy", async ({ page }) => {
