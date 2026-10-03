@@ -9,6 +9,7 @@ import amodb.apps.quality.audit_checklist_template_router as checklist_router
 
 from amodb.apps.quality.audit_checklist_template_router import (
     bind_current_dms_checklist,
+    list_checklist_bindings,
     upload_dms_checklist_from_audit,
 )
 
@@ -59,6 +60,7 @@ def test_checklist_binding_authority_is_not_truncated_to_first_100_rows() -> Non
 
     assert ".limit(100)" not in source
     assert "QualityAuditChecklistBinding.applied_at.asc()" in source
+
 
 def test_pending_checklists_have_progress_but_cannot_be_selected(monkeypatch):
     document = SimpleNamespace(id="doc-1", code="CHK-1", title="Checklist", manual_type="CHECKLIST")
