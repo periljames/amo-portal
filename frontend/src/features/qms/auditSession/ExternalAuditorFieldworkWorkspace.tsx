@@ -66,11 +66,15 @@ function governedEvidence(value: Array<Record<string, unknown> | string>) {
     if (!entry || typeof entry === "string") return [];
     const artifactId = typeof entry.artifact_id === "string" ? entry.artifact_id : "";
     if (!artifactId) return [];
+    const context = entry.context && typeof entry.context === "object"
+      ? entry.context as Record<string, unknown>
+      : null;
     return [{
       artifactId,
       filename: typeof entry.filename === "string" ? entry.filename : "Governed evidence",
       sha256: typeof entry.sha256 === "string" ? entry.sha256 : null,
       sizeBytes: typeof entry.size_bytes === "number" ? entry.size_bytes : null,
+      context,
     }];
   });
 }
@@ -452,7 +456,14 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
 
             {model.can_create_evidence ? <section className="qms-external-auditor-fieldwork__evidence">
               <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload or encrypted offline queue · participant attribution retained</small></div></header>
-              {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
+              {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => {
+                const contextValues = artifact.context
+                  ? ["location_ref", "person_ref", "facility_ref", "asset_ref", "tool_ref", "component_ref"]
+                    .map((key) => typeof artifact.context?.[key] === "string" ? String(artifact.context[key]).trim() : "")
+                    .filter(Boolean)
+                  : [];
+                return <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB` : "Governed artifact"}</small>{contextValues.length ? <small>{contextValues.join(" · ")}</small> : null}</li>;
+              })}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
               <label><span>File</span><input type="file" accept={EVIDENCE_ACCEPT} disabled={uploading} onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} /></label>
               <label><span>What this demonstrates</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="Objective evidence observed or reviewed" /></label>
               <div className="qms-external-auditor-fieldwork__evidence-context" aria-label="Structured evidence context">
