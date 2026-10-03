@@ -238,6 +238,14 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   useEffect(() => {
     setEvidenceFile(null);
     setEvidenceDescription("");
+    setEvidenceContext({
+      locationRef: "",
+      personRef: "",
+      facilityRef: "",
+      assetRef: "",
+      toolRef: "",
+      componentRef: "",
+    });
   }, [effectiveSelectedId]);
 
   const save = async (item: ExternalAuditorFieldworkItem, option: ExternalChecklistResponseOption) => {
