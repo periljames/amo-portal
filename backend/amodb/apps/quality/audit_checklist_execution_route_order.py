@@ -16,6 +16,7 @@ def _is_execution_route(route_item) -> bool:
             "/fieldwork-mutations",
             "/fieldwork-findings",
             "/evidence-candidates",
+            "/applicability-context",
         )
     )
 
