@@ -151,7 +151,8 @@ test("People uses authorization cases and does not duplicate audit assignment wo
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "People", exact: true }).click();
+  const authorizationViews = page.getByRole("navigation", { name: "Authorization control views" });
+  await authorizationViews.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toBeVisible();
@@ -228,7 +229,7 @@ test("Personal to-dos save reminders, complete and reopen", async ({ page }) => 
 test("Calendar fits desktop, split screen and phone widths", async ({ page }) => {
   await prepare(page, route => emptyRegister(route));
   await page.goto("/maintenance/tenant-a/quality/calendar/month", { waitUntil: "domcontentloaded" });
-  const board = page.locator(".qms-calendar-board");
+  const board = page.getByLabel("Quality month planner");
   await expect(board).toBeVisible();
   for (const width of [1440, 800, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -249,11 +250,12 @@ test("People read access does not expose mutation controls to a Quality Auditor"
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "My Authorization", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "People", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Authorization Cases", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Reviews", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
+  const authorizationViews = page.getByRole("navigation", { name: "Authorization control views" });
+  await expect(authorizationViews.getByRole("button", { name: "My Authorization", exact: true })).toBeVisible();
+  await expect(authorizationViews.getByRole("button", { name: "People", exact: true })).toHaveCount(0);
+  await expect(authorizationViews.getByRole("button", { name: "Authorization Cases", exact: true })).toHaveCount(0);
+  await expect(authorizationViews.getByRole("button", { name: "Reviews", exact: true })).toHaveCount(0);
+  await expect(authorizationViews.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Authorization record/i })).toBeVisible();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toHaveCount(0);
