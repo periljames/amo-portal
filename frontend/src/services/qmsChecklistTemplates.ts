@@ -146,8 +146,36 @@ export function issueChecklistRevision(amoCode: string, templateId: string, revi
   return apiRequest<ChecklistTemplateRevision>(qmsPath(amoCode, `/audit-checklist-templates/${encodeURIComponent(templateId)}/revisions/${encodeURIComponent(revisionId)}/issue`), json("POST", { reason }));
 }
 
-export function listChecklistBindings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+export type ChecklistBindingPage = {
+  items: ChecklistBinding[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+export function listChecklistBindings(
+  amoCode: string,
+  auditId: string,
+  signal?: AbortSignal,
+  pagination: { offset?: number; limit?: number } = {},
+) {
+  const query = new URLSearchParams();
+  query.set("offset", String(pagination.offset ?? 0));
+  query.set("limit", String(pagination.limit ?? 50));
+  return apiRequest<ChecklistBindingPage>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings?${query.toString()}`),
+    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
+  );
+}
+
+export function getChecklistBinding(amoCode: string, auditId: string, bindingId: string, signal?: AbortSignal) {
+  return apiRequest<ChecklistBinding>(
+    qmsPath(
+      amoCode,
+      `/audits/${encodeURIComponent(auditId)}/checklist-bindings/${encodeURIComponent(bindingId)}`,
+    ),
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+  );
 }
 
 export function applyChecklistRevision(amoCode: string, auditId: string, templateRevisionId: string, reason: string, allowExistingItems: boolean) {
