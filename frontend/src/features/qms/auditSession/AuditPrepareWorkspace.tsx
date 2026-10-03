@@ -340,7 +340,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 1_000,
   });
   const candidateDmsChecklistId = selectedDmsChecklistId ?? dmsChecklistsQuery.data?.recommendation?.document_id ?? "";
-  const effectiveDmsChecklistId = dmsChecklistsQuery.data?.items.some((item) => item.document_id === candidateDmsChecklistId)
+  const effectiveDmsChecklistId = (dmsChecklistsQuery.data?.items || []).some((item) => item.document_id === candidateDmsChecklistId)
     ? candidateDmsChecklistId : "";
 
   const refresh = async () => {
