@@ -270,7 +270,8 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(generate).toBeEnabled();
     await generate.click();
     await expect(internalPage.getByRole("status")).toContainText("Closing report snapshot generated", { timeout: 30_000 });
-    await expect(internalPage.getByText("Artifact SHA-256")).toBeVisible();
+    await expect(internalPage.getByText("Artifact", { exact: true })).toBeVisible();
+    await expect(internalPage.getByText("SHA-256", { exact: false })).toHaveCount(0);
 
     const downloadPromise = internalPage.waitForEvent("download");
     await internalPage.getByRole("button", { name: "Preview / download" }).click();
