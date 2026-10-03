@@ -133,7 +133,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   });
   const assigneesQuery = useQuery({
     queryKey: ["qms-car-assignees", amoCode],
-    queryFn: () => qmsListCarAssignees(),
+    queryFn: () => qmsListCarAssignees(undefined, amoCode),
     staleTime: 60_000,
   });
 

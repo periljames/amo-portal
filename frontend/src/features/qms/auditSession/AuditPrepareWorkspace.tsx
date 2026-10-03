@@ -42,6 +42,11 @@ import {
   type ChecklistTemplateItem,
 } from "../../../services/qmsChecklistTemplates";
 import {
+  addAuditApplicabilityFact,
+  getAuditApplicabilityContext,
+  removeAuditApplicabilityFact,
+} from "../../../services/qmsChecklistExecutionGovernance";
+import {
   createExternalAuditParticipant,
   listExternalAuditParticipants,
   revokeExternalAuditParticipant,
@@ -94,6 +99,7 @@ type ChecklistComposerItem = {
   prompt: string;
   expectedEvidence: string;
   guidance: string;
+  evidenceContext: "GENERAL" | "CAPABILITY_SCOPE" | "PERSONNEL_AUTHORIZATION" | "CONTRACT_SCOPE" | "TECHNICAL_DATA" | "RECORD_RETENTION" | "TOOLING_CALIBRATION" | "FACILITY";
   auditMethod: "" | "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST";
   samplingRequirement: string;
   evidenceTypes: string;
@@ -172,6 +178,7 @@ function emptyChecklistItem(): ChecklistComposerItem {
     prompt: "",
     expectedEvidence: "",
     guidance: "",
+    evidenceContext: "GENERAL",
     auditMethod: "",
     samplingRequirement: "",
     evidenceTypes: "",
@@ -242,6 +249,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [composerSearch, setComposerSearch] = useState("");
   const [composerSection, setComposerSection] = useState("ALL");
   const [composerFilter, setComposerFilter] = useState<"ALL" | "INCOMPLETE" | "EVIDENCE_REQUIRED" | "APPLICABILITY_RULE">("ALL");
+  const [applicabilitySearch, setApplicabilitySearch] = useState("");
+  const [applicabilityReason, setApplicabilityReason] = useState("Selected as governed applicability context for this audit scope.");
 
   useEffect(() => {
     if (localError) pushToast({ title: "Preparation action needs attention", message: localError, variant: "error" });
@@ -277,6 +286,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const sessionQuery = useQuery({
     queryKey: ["qms-audit-session", amoCode, auditId],
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 2_000,
+  });
+  const applicabilityQuery = useQuery({
+    queryKey: ["qms-audit-applicability-context", amoCode, auditId],
+    queryFn: ({ signal }) => getAuditApplicabilityContext(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
@@ -325,7 +340,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 1_000,
   });
   const candidateDmsChecklistId = selectedDmsChecklistId ?? dmsChecklistsQuery.data?.recommendation?.document_id ?? "";
-  const effectiveDmsChecklistId = dmsChecklistsQuery.data?.items.some((item) => item.document_id === candidateDmsChecklistId)
+  const effectiveDmsChecklistId = (dmsChecklistsQuery.data?.items || []).some((item) => item.document_id === candidateDmsChecklistId)
     ? candidateDmsChecklistId : "";
 
   const refresh = async () => {
@@ -343,6 +358,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-readiness", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-applicability-context", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-activity", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
@@ -376,7 +392,6 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         refetchType: "active",
       });
     }
-
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
@@ -521,6 +536,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         prompt: item.prompt.trim(),
         expected_evidence: item.expectedEvidence.trim() || null,
         guidance: item.guidance.trim() || null,
+        evidence_context: item.evidenceContext,
         audit_method: item.auditMethod || null,
         sampling_requirement: item.samplingRequirement.trim() || null,
         evidence_types: item.evidenceTypes.split(",").map((value) => value.trim()).filter(Boolean),
@@ -615,10 +631,41 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The offline audit package could not be removed."),
   });
 
+  const addApplicabilityMutation = useMutation({
+    mutationFn: (ruleId: string) => addAuditApplicabilityFact(
+      amoCode,
+      auditId,
+      ruleId,
+      applicabilityReason.trim(),
+    ),
+    onSuccess: async () => {
+      setLocalError(null);
+      setLocalSuccess("Governed applicability context added. Preparation will be re-fingerprinted before issue.");
+      await refresh();
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "Applicability context could not be added."),
+  });
+  const removeApplicabilityMutation = useMutation({
+    mutationFn: (factId: string) => removeAuditApplicabilityFact(amoCode, auditId, factId),
+    onSuccess: async () => {
+      setLocalError(null);
+      setLocalSuccess("Applicability context removed. Preparation will be re-fingerprinted before issue.");
+      await refresh();
+    },
+    onError: (error) => setLocalError(error instanceof Error ? error.message : "Applicability context could not be removed."),
+  });
+
   const requests = useMemo(() => requestsQuery.data?.items || [], [requestsQuery.data?.items]);
   const participants = participantsQuery.data?.items || [];
   const context = contextQuery.data;
   const documents = controlledDocumentsQuery.data?.items || [];
+  const applicabilityFacts = applicabilityQuery.data?.items || [];
+  const applicabilityRules = (applicabilityQuery.data?.available_rules || []).filter((rule) => {
+    const needle = applicabilitySearch.trim().toLowerCase();
+    if (!needle) return true;
+    return [rule.document_code, rule.document_title, rule.target_type, rule.target_id, rule.target_value, rule.source]
+      .some((value) => String(value || "").toLowerCase().includes(needle));
+  });
   const filterDocuments = (search: string): CanonicalDocumentControlDocument[] => {
     const needle = search.trim().toLowerCase();
     if (!needle) return documents;
@@ -700,6 +747,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       participantsQuery.isPending ||
       sessionQuery.isLoading ||
       sessionQuery.isPending ||
+      applicabilityQuery.isLoading ||
+      applicabilityQuery.isPending ||
       fullBindingsQuery.isLoading ||
       fullBindingsQuery.isPending ||
       preparationRevisionsQuery.isLoading ||
@@ -725,7 +774,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || fullBindingsQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || applicabilityQuery.error || fullBindingsQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -740,6 +789,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           void requestsQuery.refetch();
           void participantsQuery.refetch();
           void sessionQuery.refetch();
+          void applicabilityQuery.refetch();
           void fullBindingsQuery.refetch();
           void preparationRevisionsQuery.refetch();
           void readinessQuery.refetch();
@@ -781,6 +831,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
+  const canEditFrozenPreparation = canManage && !fieldworkOpen;
   const preparationReady = Boolean(readiness?.issue_ready);
 
   return (
@@ -823,6 +874,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       {readinessWarning ? (
         <p className="qms-audit-prepare-stage__notice is-warning">
           <ShieldAlert size={14} aria-hidden /> {readiness?.issue_blockers.map((blocker) => blocker.reason).join(" · ") || "Preparation blockers remain."}
+        </p>
+      ) : null}
+      {fieldworkOpen ? (
+        <p className="qms-audit-prepare-stage__notice is-info">
+          <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Return the audit through the governed preparation lifecycle before changing checklist scope or questions.
         </p>
       ) : null}
 
@@ -935,6 +991,30 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </article>
           </div>
         </section>
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__applicability">
+          <header>
+            <div><h3>Applicability context</h3><p>Select only governed DMS applicability rules that define the actual aircraft, capability, authorization, location, role, work package or other audited scope.</p></div>
+            <span className="qms-audit-prepare-stage__meta-chip">{applicabilityFacts.length} selected</span>
+          </header>
+          {fieldworkOpen ? <p className="qms-audit-prepare-stage__notice is-info"><ShieldAlert size={14} aria-hidden /> Applicability context is frozen for the active fieldwork package. Return the audit through the governed preparation lifecycle before changing scope inputs.</p> : null}
+          {applicabilityFacts.length ? <div className="qms-audit-prepare__applicability-selected">
+            {applicabilityFacts.map((fact) => <article key={fact.id}>
+              <div><strong>{fact.target_type.replaceAll("_", " ")}</strong><span>{fact.target_value || fact.target_id || "Governed target"}</span><small>{fact.rule_type} · {fact.source}</small><p>{fact.reason}</p></div>
+              {canEditFrozenPreparation ? <button type="button" onClick={() => removeApplicabilityMutation.mutate(fact.id)} disabled={removeApplicabilityMutation.isPending} aria-label="Remove applicability context"><Trash2 size={15} /></button> : null}
+            </article>)}
+          </div> : <p className="qms-audit-prepare__empty">No governed applicability context is selected. Scoped documentary evidence will remain unverified rather than being assumed applicable or N/A.</p>}
+          {canEditFrozenPreparation ? <div className="qms-audit-prepare__applicability-picker">
+            <label><span>Search governed rules</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={applicabilitySearch} onChange={(event) => setApplicabilitySearch(event.target.value)} placeholder="Aircraft, base, department, authorization, work package…" /></div></label>
+            <label className="is-wide"><span>Selection basis</span><input value={applicabilityReason} onChange={(event) => setApplicabilityReason(event.target.value)} placeholder="Why this governed target belongs to this audit scope" /></label>
+            <div className="qms-audit-prepare__applicability-rules is-wide">
+              {applicabilityRules.length ? applicabilityRules.slice(0, 60).map((rule) => <article key={rule.id} className={rule.selected ? "is-selected" : ""}>
+                <div><strong>{rule.document_code} · {rule.target_type.replaceAll("_", " ")}</strong><span>{rule.target_value || rule.target_id || rule.document_title}</span><small>{rule.rule_type} · Rev {rule.current_revision} · {rule.source}</small></div>
+                <button type="button" disabled={rule.selected || addApplicabilityMutation.isPending || applicabilityReason.trim().length < 8} onClick={() => addApplicabilityMutation.mutate(rule.id)}>{rule.selected ? "Selected" : "Add to audit"}</button>
+              </article>) : <p className="qms-audit-prepare__empty">No current-published governed DMS applicability rules match this search.</p>}
+            </div>
+          </div> : null}
+        </section>
+
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__references">
           <header><div><h3>Controlled references</h3><p>Sources captured into the governed preparation and work-package fingerprint.</p></div><span className="qms-audit-prepare-stage__meta-chip">{context.regulatory_and_manual_basis.source_references.length} source(s)</span></header>
           {context.regulatory_and_manual_basis.source_references.length ? <div className="qms-audit-prepare__reference-list">{context.regulatory_and_manual_basis.source_references.map((source, index) => <pre key={index}>{typeof source === "string" ? source : JSON.stringify(source, null, 2)}</pre>)}</div> : <p className="qms-audit-prepare__empty">No structured controlled-source reference has been captured yet.</p>}
@@ -960,7 +1040,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
           ) : <p className="qms-audit-prepare__empty">No fieldwork checklist is bound. Fieldwork cannot open until one is selected or created.</p>}
 
-          {canManage ? <>
+          {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
               <button type="button" role="tab" aria-selected={checklistMode === "LIBRARY"} className={checklistMode === "LIBRARY" ? "is-active" : ""} onClick={() => setChecklistMode("LIBRARY")}>Use DMS checklist</button>
               <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Create in realtime</button>
@@ -1030,6 +1110,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label><span>Requirement / manual reference</span><input value={item.requirementRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, requirementRef: event.target.value } : entry))} /></label>
                         <label><span>Expected objective evidence</span><input value={item.expectedEvidence} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, expectedEvidence: event.target.value } : entry))} /></label>
                         <label><span>Audit method</span><select value={item.auditMethod} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, auditMethod: event.target.value as ChecklistComposerItem["auditMethod"] } : entry))}><option value="">Not specified</option><option value="RECORD_REVIEW">Record review</option><option value="INTERVIEW">Interview</option><option value="OBSERVATION">Observation</option><option value="SAMPLE">Sample</option><option value="TEST">Test</option></select></label>
+                        <label><span>Evidence authority context</span><select value={item.evidenceContext} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, evidenceContext: event.target.value as ChecklistComposerItem["evidenceContext"] } : entry))}>
+                          <option value="GENERAL">General — no precedence applied</option>
+                          <option value="CAPABILITY_SCOPE">Capability / approval scope</option>
+                          <option value="PERSONNEL_AUTHORIZATION">Personnel authorization</option>
+                          <option value="CONTRACT_SCOPE">Contract / subcontract scope</option>
+                          <option value="TECHNICAL_DATA">Technical data</option>
+                          <option value="RECORD_RETENTION">Record retention</option>
+                          <option value="TOOLING_CALIBRATION">Tooling / calibration</option>
+                          <option value="FACILITY">Facility / approved location</option>
+                        </select><small>Controls context-specific evidence ranking only; it does not make the compliance decision.</small></label>
                         <label className="is-wide"><span>Auditor guidance</span><textarea rows={2} value={item.guidance} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, guidance: event.target.value } : entry))} placeholder="Optional fieldwork guidance without changing the requirement itself" /></label>
                         <label><span>Sampling requirement</span><input value={item.samplingRequirement} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, samplingRequirement: event.target.value } : entry))} placeholder="e.g. 5 records across relevant work areas" /></label>
                         <label><span>Applicability rule</span><input value={item.applicability} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicability: event.target.value } : entry))} placeholder="APPLICABLE or the governed applicability rule" /></label><label><span>Applicability reason</span><input value={item.applicabilityReason} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, applicabilityReason: event.target.value } : entry))} placeholder="Controlled rationale when applicability is restricted or N/A" /></label>

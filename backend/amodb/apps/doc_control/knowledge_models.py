@@ -161,6 +161,43 @@ class DocumentationIndexJob(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+class DocumentationSectionEmbedding(Base):
+    """Persisted semantic index for one governed manual section."""
+
+    __tablename__ = "documentation_section_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "revision_id",
+            "section_id",
+            "embedding_model",
+            name="uq_documentation_section_embedding",
+        ),
+        Index(
+            "ix_documentation_section_embeddings_tenant_revision",
+            "tenant_id",
+            "revision_id",
+        ),
+        Index(
+            "ix_documentation_section_embeddings_section",
+            "section_id",
+            "embedding_model",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    manual_id = Column(String(36), ForeignKey("manuals.id", ondelete="CASCADE"), nullable=False)
+    revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="CASCADE"), nullable=False)
+    section_id = Column(String(36), ForeignKey("manual_sections.id", ondelete="CASCADE"), nullable=False)
+    embedding_model = Column(String(96), nullable=False)
+    dimensions = Column(Integer, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    vector_json = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
 class DocumentationRecord(Base):
     """Immutable output created from an executable controlled template."""
 

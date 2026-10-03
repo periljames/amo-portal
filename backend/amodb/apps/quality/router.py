@@ -2139,6 +2139,58 @@ def complete_audit_fieldwork(
     if not checklist:
         raise HTTPException(status_code=409, detail="A governed checklist is required before fieldwork can be completed.")
     pending = [item for item in checklist if item.response_status == "PENDING"]
+
+    from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+    governance_rows = db.query(QualityAuditChecklistExecutionGovernance).filter(
+        QualityAuditChecklistExecutionGovernance.amo_id == audit.amo_id,
+        QualityAuditChecklistExecutionGovernance.audit_id == audit.id,
+    ).all()
+    governance_by_item = {row.checklist_item_id: row for row in governance_rows}
+    structured_incomplete: list[dict[str, Any]] = []
+    for item in checklist:
+        if item.response_status == "PENDING":
+            continue
+        governance = governance_by_item.get(item.id)
+        if governance is None:
+            structured_incomplete.append({
+                "checklist_item_id": str(item.id),
+                "reason": "The resolved checklist item has no governed structured assessment.",
+            })
+            continue
+        canonical = str(governance.canonical_response_status or "NOT_VERIFIED").upper()
+        if canonical == "NOT_APPLICABLE":
+            if (
+                governance.assessment_applicability != "NOT_APPLICABLE"
+                or not str(governance.applicability_reason or "").strip()
+                or not list(governance.applicability_basis or [])
+            ):
+                structured_incomplete.append({
+                    "checklist_item_id": str(item.id),
+                    "reason": "N/A requires a preserved governed applicability reason and basis.",
+                })
+            continue
+
+        unresolved: list[str] = []
+        if governance.documentary_status == "UNVERIFIED":
+            unresolved.append("documentary evidence")
+        if governance.implementation_status == "UNVERIFIED":
+            unresolved.append("implementation evidence")
+        if governance.field_verification_status in {"UNVERIFIED", "NOT_VERIFIED", "FIELD_VERIFICATION_REQUIRED"}:
+            unresolved.append("field verification")
+        if list(governance.missing_evidence or []):
+            unresolved.append("missing evidence")
+        if (
+            governance.documentary_status == "CONFLICT"
+            and canonical == "COMPLIANT"
+            and not str(governance.human_override_reason or "").strip()
+        ):
+            unresolved.append("conflict resolution rationale")
+        if unresolved:
+            structured_incomplete.append({
+                "checklist_item_id": str(item.id),
+                "reason": "Incomplete structured compliance state: " + ", ".join(unresolved) + ".",
+            })
+
     adverse_without_finding = [
         item for item in checklist
         if item.response_status in {"NON_CONFORMING", "OBSERVATION"} and item.finding_id is None
@@ -2146,6 +2198,13 @@ def complete_audit_fieldwork(
     blockers: list[dict[str, Any]] = []
     if pending:
         blockers.append({"type": "CHECKLIST", "count": len(pending), "reason": "Checklist items remain not verified."})
+    if structured_incomplete:
+        blockers.append({
+            "type": "COMPLIANCE_ASSESSMENT",
+            "count": len(structured_incomplete),
+            "reason": "Resolved checklist items still have incomplete documentary, implementation, applicability, or field-verification state.",
+            "items": structured_incomplete[:50],
+        })
     if adverse_without_finding:
         blockers.append({"type": "FINDING", "count": len(adverse_without_finding), "reason": "Adverse checklist responses must be linked to governed findings."})
     from .audit_external_finding_draft_models import QualityAuditExternalFindingDraft

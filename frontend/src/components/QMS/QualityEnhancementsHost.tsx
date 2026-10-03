@@ -161,6 +161,8 @@ const QualityEnhancementsHost: React.FC = () => {
   const route = useAuditRoute();
   const auditSessionStage = auditSessionStageFromPath(location.pathname);
   const canonicalOccurrence = Boolean(route && auditSessionStage);
+  const legacyAuditMatch = location.pathname.match(/^\/maintenance\/([^/]+)\/quality\/audits\/([^/]+)\/?$/i);
+  const legacyAuditTab = new URLSearchParams(location.search).get("tab")?.toLowerCase() || "";
 
   useEffect(() => {
     document.documentElement.classList.toggle("quality-audit-canonical-occurrence", canonicalOccurrence);
@@ -168,6 +170,15 @@ const QualityEnhancementsHost: React.FC = () => {
   }, [canonicalOccurrence]);
 
   if (/^\/car-invite\/?$/i.test(location.pathname)) return <CarInviteResponsiveStyleLoader />;
+
+  // The pre-canonical mobile/report links remain supported as documented.
+  // Do not infer mappings for other legacy tabs whose lifecycle meaning is
+  // ambiguous; only closeout/report have an explicit canonical Closing contract.
+  if (legacyAuditMatch && ["closeout", "report"].includes(legacyAuditTab)) {
+    const amo = decodeURIComponent(legacyAuditMatch[1]);
+    const auditKey = decodeURIComponent(legacyAuditMatch[2]);
+    return <Navigate replace to={auditSessionPath(amo, auditKey, "closing")} />;
+  }
 
   return <>
     <PortalTextScaleManager />

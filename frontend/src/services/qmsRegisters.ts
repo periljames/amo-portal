@@ -1,4 +1,4 @@
-import { apiRequest } from "./apiClient";
+import { apiRequest, qmsPath } from "./apiClient";
 import type { CAROut, CARProgram, CARStatus, QMSAuditRegisterRowOut } from "./qms";
 
 export type QmsAuditRegisterPage = {
@@ -12,6 +12,7 @@ export type QmsAuditRegisterPage = {
 };
 
 export type QmsAuditRegisterPageParams = {
+  amoCode?: string;
   domain?: string;
   view?: "global" | "mine";
   period?: number;
@@ -61,6 +62,7 @@ export type QmsCarRegisterPage = {
 };
 
 export type QmsCarRegisterPageParams = {
+  amoCode?: string;
   program?: CARProgram;
   view?: "global" | "mine";
   status?: CARStatus;
@@ -104,7 +106,10 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
 
-  return apiRequest<QmsAuditRegisterPage>(`/quality/audits/register/paged?${query.toString()}`, {
+  const path = params.amoCode
+    ? qmsPath(params.amoCode, `/audits/register/paged?${query.toString()}`)
+    : `/quality/audits/register/paged?${query.toString()}`;
+  return apiRequest<QmsAuditRegisterPage>(path, {
     signal: params.signal,
     timeoutMs: 15_000,
     cacheTtlMs: 10_000,
@@ -126,7 +131,10 @@ export function qmsGetCarRegisterPage(params: QmsCarRegisterPageParams = {}): Pr
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
 
-  return apiRequest<QmsCarRegisterPage>(`/quality/cars/register/paged?${query.toString()}`, {
+  const path = params.amoCode
+    ? qmsPath(params.amoCode, `/cars/register/paged?${query.toString()}`)
+    : `/quality/cars/register/paged?${query.toString()}`;
+  return apiRequest<QmsCarRegisterPage>(path, {
     signal: params.signal,
     timeoutMs: 15_000,
     cacheTtlMs: 8_000,

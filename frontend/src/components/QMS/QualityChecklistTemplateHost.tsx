@@ -41,6 +41,7 @@ const EMPTY_ITEM: ChecklistTemplateItem = {
   manual_source_ref: "",
   prompt: "",
   expected_evidence: "",
+  evidence_context: "GENERAL",
   response_type: "COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED",
   response_options: [],
   applicability: "ALL",
@@ -612,6 +613,16 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "" }) => {
                     <div className="qms-checklist-template-grid"><label>Requirement ref<input value={item.requirement_ref || ""} onChange={(event) => patchItem(index, { requirement_ref: event.target.value })} title={item.requirement_ref || undefined} /></label><label>Checklist ref<input value={item.checklist_ref || ""} onChange={(event) => patchItem(index, { checklist_ref: event.target.value })} title={item.checklist_ref || undefined} /></label></div>
                     <div className="qms-checklist-template-grid"><label>Regulatory source<input value={item.regulatory_source_ref || ""} onChange={(event) => patchItem(index, { regulatory_source_ref: event.target.value })} title={item.regulatory_source_ref || undefined} /></label><label>Manual source<input value={item.manual_source_ref || ""} onChange={(event) => patchItem(index, { manual_source_ref: event.target.value })} title={item.manual_source_ref || undefined} /></label></div>
                     <label>Expected evidence<textarea rows={2} value={item.expected_evidence || ""} onChange={(event) => patchItem(index, { expected_evidence: event.target.value })} title={item.expected_evidence || undefined} /></label>
+                    <label>Evidence authority context<select value={item.evidence_context || "GENERAL"} onChange={(event) => patchItem(index, { evidence_context: event.target.value as NonNullable<ChecklistTemplateItem["evidence_context"]> })}>
+                      <option value="GENERAL">General — no precedence applied</option>
+                      <option value="CAPABILITY_SCOPE">Capability / approval scope</option>
+                      <option value="PERSONNEL_AUTHORIZATION">Personnel authorization</option>
+                      <option value="CONTRACT_SCOPE">Contract / subcontract scope</option>
+                      <option value="TECHNICAL_DATA">Technical data</option>
+                      <option value="RECORD_RETENTION">Record retention</option>
+                      <option value="TOOLING_CALIBRATION">Tooling / calibration</option>
+                      <option value="FACILITY">Facility / approved location</option>
+                    </select><small>Applies only the matching context-specific evidence precedence policy during audit retrieval. It does not determine compliance.</small></label>
                   </div>
                   <div className="qms-checklist-template-group qms-checklist-template-group--response">
                     <div className="qms-checklist-template-grid"><label>Response type<select value={item.response_type} onChange={(event) => setResponseType(index, event.target.value)}><option value="COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED">Compliance / observation / N/A / not verified</option><option value="COMPLIANT_NONCOMPLIANT_NA">Compliant / Noncompliant / N/A</option><option value="YES_NO_NA">Yes / No / N/A</option><option value="CUSTOM_SOURCE_SCHEME">Custom / source-defined (e.g. YES / NO / N/A / U / S)</option><option value="TEXT">Text evidence</option></select></label><label>Applicability<select value={item.applicability} onChange={(event) => patchItem(index, { applicability: event.target.value })}><option value="ALL">All audit scopes</option><option value="APPLICABLE">Applicable requirements</option><option value="CONDITIONAL">Conditional</option></select></label></div>

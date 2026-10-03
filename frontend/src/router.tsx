@@ -194,8 +194,25 @@ function DocumentControlFallback() {
   const location = useLocation();
   const basePath = `/maintenance/${encodeURIComponent(amoCode)}/document-control`;
   const relative = (location.pathname.split("/document-control/")[1] || "").replace(/\/+$/, "");
-  if (relative === "records") {
-    return <Navigate to={`${basePath}/reports/records${location.search}${location.hash}`} replace />;
+  const legacyTarget: Record<string, { path: string; view?: string }> = {
+    records: { path: "reports/records" },
+    drafts: { path: "changes", view: "in-review" },
+    "change-proposals": { path: "changes", view: "requests" },
+    authority: { path: "changes", view: "authority" },
+    tr: { path: "changes", view: "temporary-revisions" },
+    reviews: { path: "compliance", view: "reviews" },
+    "external-sources": { path: "compliance", view: "external-sources" },
+    integrations: { path: "compliance", view: "relationships" },
+    registers: { path: "reports" },
+    settings: { path: "administration" },
+    "controlled-copies": { path: "distribution", view: "physical-copies" },
+  };
+  const target = legacyTarget[relative];
+  if (target) {
+    const params = new URLSearchParams(location.search);
+    if (target.view && !params.has("view")) params.set("view", target.view);
+    const query = params.toString();
+    return <Navigate to={`${basePath}/${target.path}${query ? `?${query}` : ""}${location.hash}`} replace />;
   }
   return <Navigate to={`${basePath}${location.search}${location.hash}`} replace />;
 }

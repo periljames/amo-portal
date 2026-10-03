@@ -124,30 +124,46 @@ def _xlsx_text(content: bytes) -> str:
 
 
 def extract_document_text(filename: str, content: bytes, mime_type: str) -> ExtractedDocumentText:
-    """Extract searchable text locally, with optional Tika as the broad-format engine."""
-    tika = _tika_extract(content, mime_type)
-    if tika and tika.text:
-        return tika
-
+    """Extract natively first; use optional Tika only when the native path cannot supply text."""
     suffix = os.path.splitext(filename.lower())[1]
+    local: ExtractedDocumentText | None = None
     try:
         if suffix == ".pdf" or mime_type == "application/pdf":
             value = _pdf_text(content)
-            return _bounded(value, "PYMUPDF", None if value.strip() else "PDF has no embedded searchable text; OCR indexing is required.")
-        if suffix == ".docx":
-            return _bounded(_xml_archive_text(content, ("word/",)), "OOXML_DOCX")
-        if suffix == ".pptx":
-            return _bounded(_xml_archive_text(content, ("ppt/slides/", "ppt/notesSlides/")), "OOXML_PPTX")
-        if suffix in {".xlsx", ".xlsm"}:
-            return _bounded(_xlsx_text(content), "OPENPYXL")
-        if suffix in {".txt", ".csv", ".md", ".json", ".xml", ".yaml", ".yml", ".log"} or mime_type.startswith("text/"):
-            return _bounded(content.decode("utf-8", errors="replace"), "TEXT")
-        if suffix in {".html", ".htm"}:
+            local = _bounded(
+                value,
+                "PYMUPDF",
+                None if value.strip() else "PDF has no embedded searchable text; OCR indexing is required.",
+            )
+        elif suffix == ".docx":
+            local = _bounded(_xml_archive_text(content, ("word/",)), "OOXML_DOCX")
+        elif suffix == ".pptx":
+            local = _bounded(
+                _xml_archive_text(content, ("ppt/slides/", "ppt/notesSlides/")),
+                "OOXML_PPTX",
+            )
+        elif suffix in {".xlsx", ".xlsm"}:
+            local = _bounded(_xlsx_text(content), "OPENPYXL")
+        elif suffix in {".txt", ".csv", ".md", ".json", ".xml", ".yaml", ".yml", ".log"} or mime_type.startswith("text/"):
+            local = _bounded(content.decode("utf-8", errors="replace"), "TEXT")
+        elif suffix in {".html", ".htm"}:
             decoded = content.decode("utf-8", errors="replace")
             decoded = re.sub(r"<script\b[^>]*>.*?</script>", " ", decoded, flags=re.IGNORECASE | re.DOTALL)
             decoded = re.sub(r"<style\b[^>]*>.*?</style>", " ", decoded, flags=re.IGNORECASE | re.DOTALL)
-            return _bounded(html.unescape(re.sub(r"<[^>]+>", " ", decoded)), "HTML")
+            local = _bounded(html.unescape(re.sub(r"<[^>]+>", " ", decoded)), "HTML")
     except (OSError, ValueError, zipfile.BadZipFile):
-        return _bounded("", "LOCAL_FALLBACK", "The file could not be parsed for full-text indexing.")
+        local = _bounded("", "LOCAL_FALLBACK", "The file could not be parsed by its native full-text extractor.")
 
+    if local is not None and local.text.strip():
+        return local
+
+    # Tika remains a broad-format fallback, but never replaces a successful
+    # native parser. This preserves DOCX/XLSX/PDF structure fidelity and avoids
+    # unnecessary heavyweight processing for content the portal can read itself.
+    tika = _tika_extract(content, mime_type)
+    if tika and tika.text.strip():
+        return tika
+
+    if local is not None:
+        return local
     return _bounded("", "METADATA_ONLY", "No local full-text extractor is configured for this file type.")

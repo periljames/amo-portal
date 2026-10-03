@@ -16,7 +16,11 @@ from amodb.database import get_write_db
 
 from . import models
 from .audit_checklist_template_models import QualityAuditChecklistBinding
-from .audit_checklist_execution_models import QualityAuditChecklistExecutionEvent, QualityAuditChecklistExecutionGovernance
+from .audit_checklist_execution_models import (
+    QualityAuditApplicabilityFact,
+    QualityAuditChecklistExecutionEvent,
+    QualityAuditChecklistExecutionGovernance,
+)
 from .audit_evidence_models import QualityAuditEvidenceArtifact
 from .audit_external_access_models import QualityAuditFindingReleaseEvent
 from .audit_report_governance_models import QualityAuditReportEvent
@@ -78,6 +82,33 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         QualityAuditDocumentRequestMetadata.audit_id == audit.id,
     ).all()
     metadata_by_request = {row.request_id: row for row in request_metadata}
+    applicability_facts = (
+        db.query(QualityAuditApplicabilityFact)
+        .filter(
+            QualityAuditApplicabilityFact.amo_id == amo_id,
+            QualityAuditApplicabilityFact.audit_id == audit.id,
+        )
+        .order_by(QualityAuditApplicabilityFact.created_at.asc())
+        .all()
+    )
+    applicability_snapshot = [
+        {
+            "id": str(row.id),
+            "applicability_rule_id": row.applicability_rule_id,
+            "source_manual_id": row.source_manual_id,
+            "source_revision_id": row.source_revision_id,
+            "rule_type": row.rule_type,
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "target_value": row.target_value,
+            "source": row.source,
+            "criteria": dict(row.criteria_json or {}),
+            "reason": row.reason,
+            "created_by_user_id": row.created_by_user_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in applicability_facts
+    ]
 
     audit_snapshot = {
         "audit_id": str(audit.id),
@@ -107,6 +138,7 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         "planned_end_time": audit.planned_end_time.isoformat(timespec="minutes") if audit.planned_end_time else None,
         "actual_start": audit.actual_start.isoformat() if audit.actual_start else None,
         "actual_end": audit.actual_end.isoformat() if audit.actual_end else None,
+        "applicability_context": applicability_snapshot,
     }
     checklist_snapshot = [
         {
@@ -387,6 +419,7 @@ def _build_work_package_snapshot(
             for binding in frozen_bindings
         ],
         "document_request_definitions": request_definitions,
+        "applicability_context": list((preparation.audit_snapshot or {}).get("applicability_context") or []),
         "source_references": _offline_enriched_source_references(db, list(preparation.source_references or [])),
         "prior_audits": [_audit_dict(item) for item in prior_audits],
         "prior_findings": [_finding_dict(item) for item in prior_findings],
@@ -999,7 +1032,7 @@ def get_audit_offline_pack(
         .order_by(QualityAuditEvidenceArtifact.created_at.asc())
         .all()
     )
-    from .audit_checklist_execution_router import _fieldwork_write_blocker
+    from .audit_checklist_execution_router import _assessment_dict, _fieldwork_write_blocker
     fieldwork_blocker = _fieldwork_write_blocker(db, amo_id=ctx.amo_id, audit=audit)
     return {
         "schema": "QMS_AUDIT_OFFLINE_PACK_V1",
@@ -1024,6 +1057,7 @@ def get_audit_offline_pack(
                 "sampled_item_information": item.sampled_item_information,
                 "applicability": item.applicability,
                 "evidence_references": item.evidence_references or [],
+                "assessment": _assessment_dict(item),
                 "entity_version": item.entity_version,
                 "answered_by_user_id": item.answered_by_user_id,
                 "answered_at": item.answered_at.isoformat() if item.answered_at else None,
@@ -1067,6 +1101,7 @@ def get_audit_offline_pack(
                 "size_bytes": item.size_bytes,
                 "sha256": item.sha256,
                 "description": item.description,
+                "context": dict(item.context_json or {}),
                 "source_device_id": item.source_device_id,
                 "captured_at": item.captured_at.isoformat() if item.captured_at else None,
                 "offline_upload_state": item.offline_upload_state,
