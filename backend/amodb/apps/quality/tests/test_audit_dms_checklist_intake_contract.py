@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import uuid
 from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
@@ -55,11 +56,60 @@ def test_dms_bind_returns_201_only_after_committed_binding_is_read_back() -> Non
 
 
 
-def test_checklist_binding_authority_is_not_truncated_to_first_100_rows() -> None:
-    source = inspect.getsource(list_checklist_bindings)
+def test_checklist_binding_authority_is_not_truncated_to_first_100_rows(monkeypatch) -> None:
+    audit_id = uuid.uuid4()
+    rows = [
+        SimpleNamespace(
+            id=f"binding-{index}",
+            audit_id=audit_id,
+            template_id=f"template-{index}",
+            template_revision_id=f"revision-{index}",
+            template_code=f"CHK-{index:03d}",
+            revision_no=1,
+            content_sha256=f"sha-{index}",
+            item_snapshot=[],
+            source_references=[],
+            instantiated_item_ids=[],
+            application_reason="Regression fixture",
+            applied_by_user_id="quality-user",
+            applied_at=None,
+        )
+        for index in range(101)
+    ]
 
-    assert ".limit(100)" not in source
-    assert "QualityAuditChecklistBinding.applied_at.asc()" in source
+    class Query:
+        def __init__(self, values):
+            self.values = list(values)
+
+        def filter(self, *args):
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def limit(self, count):
+            self.values = self.values[:count]
+            return self
+
+        def all(self):
+            return self.values
+
+    class DB:
+        def query(self, entity):
+            assert entity is checklist_router.QualityAuditChecklistBinding
+            return Query(rows)
+
+    monkeypatch.setattr(checklist_router, "set_postgres_tenant_context", lambda *args, **kwargs: None)
+    monkeypatch.setattr(checklist_router, "_audit", lambda *args, **kwargs: SimpleNamespace(id=audit_id))
+
+    result = list_checklist_bindings(
+        audit_id=audit_id,
+        ctx=SimpleNamespace(amo_id="amo-1", user_id="quality-user"),
+        db=DB(),
+    )
+
+    assert len(result["items"]) == 101
+    assert result["items"][-1]["id"] == "binding-100"
 
 
 def test_pending_checklists_have_progress_but_cannot_be_selected(monkeypatch):
