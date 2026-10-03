@@ -164,10 +164,14 @@ def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
     }
 
 
-def _reference(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
+def _reference(
+    row: QualityAuditEvidenceArtifact,
+    *,
+    include_context: bool = False,
+) -> dict[str, Any]:
     # Never put a server storage path in checklist/finding JSON. Public release
     # resolves this opaque artifact id back to storage only after authorization.
-    return {
+    result = {
         "artifact_id": row.id,
         "filename": row.filename,
         "content_type": row.content_type,
@@ -175,6 +179,9 @@ def _reference(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
         "sha256": row.sha256,
         "source_type": row.source_type,
     }
+    if include_context and row.context_json:
+        result["context"] = dict(row.context_json)
+    return result
 
 
 def _publish_persisted_evidence_event(row: audit_models.AuditEvent) -> None:
@@ -300,7 +307,7 @@ def _append_reference(
         payload=ChecklistExecutionUpdate(
             canonical_response_status=current_status,
             auditor_notes=current_notes,
-            evidence_references=[*current_refs, _reference(artifact)],
+            evidence_references=[*current_refs, _reference(artifact, include_context=True)],
             reason=reason,
         ),
         governance=governance,
