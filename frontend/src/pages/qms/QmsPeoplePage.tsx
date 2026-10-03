@@ -703,12 +703,17 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     await run("Default Quality authorization policies are ready.", () => ensureQmsDefaultPrivilegeRules(amoCode));
   }
 
+  const layoutScrollbarWidth = typeof window === "undefined"
+    ? 0
+    : Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+  const viewportStyle = { "--qms-layout-scrollbar-width": `${layoutScrollbarWidth}px` } as React.CSSProperties;
+
   if (pageLoading && !overview) {
-    return <section className="qms-authz qms-people qms-surface-root"><div className="qms-authz-loading">Loading Quality authorization control…</div></section>;
+    return <section className="qms-authz qms-people qms-surface-root" style={viewportStyle}><div className="qms-authz-loading">Loading Quality authorization control…</div></section>;
   }
 
   return (
-    <section className="qms-authz qms-people qms-surface-root" aria-label="QMS People and authorization control">
+    <section className="qms-authz qms-people qms-surface-root" style={viewportStyle} aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
           <p className="qms-authz-eyebrow">Quality Management System</p>
