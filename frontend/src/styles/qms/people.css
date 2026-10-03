@@ -686,7 +686,9 @@
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
-  padding: 24px;
+  /* Keep the drawer aligned to the document layout viewport rather than
+     disappearing under the vertical scrollbar gutter on desktop browsers. */
+  padding: 24px calc(24px + max(0px, 100vw - 100%)) 24px 24px;
   background: rgba(15, 23, 42, .36);
   backdrop-filter: blur(2px);
 }
