@@ -37,7 +37,7 @@ class ReaderPositionUpdate(BaseModel):
     anchor_slug: str | None = Field(default=None, max_length=255)
     section_id: str | None = Field(default=None, max_length=36)
     scroll_percent: int = Field(default=0, ge=0, le=100)
-    zoom_percent: int = Field(default=100, ge=50, le=250)
+    zoom_percent: int = Field(default=100, ge=1, le=400)
 
 
 def _status_value(revision: models.ManualRevision) -> str:
