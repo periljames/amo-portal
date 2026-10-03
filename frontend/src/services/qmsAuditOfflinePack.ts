@@ -1,6 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { QMSFindingOut } from "./qmsCore";
-import type { AuditEvidenceArtifact } from "./qmsAuditEvidence";
+import type { AuditEvidenceArtifact, AuditEvidenceContext } from "./qmsAuditEvidence";
 import type { ChecklistAssessmentState } from "./qmsChecklistExecutionGovernance";
 import {
   currentOfflineScope,
@@ -87,7 +87,7 @@ export type AuditOfflinePack = {
     size_bytes: number;
     sha256: string;
     description?: string | null;
-    context?: import("./qmsAuditEvidence").AuditEvidenceContext;
+    context?: AuditEvidenceContext;
     source_device_id?: string | null;
     captured_at?: string | null;
     offline_upload_state?: string | null;
