@@ -4,6 +4,18 @@ import { getApiBaseUrl } from "./config";
 import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
 import { qmsFieldworkDeviceId } from "./qmsChecklistExecutionGovernance";
 
+export type AuditEvidenceContext = {
+  location_ref?: string;
+  person_ref?: string;
+  facility_ref?: string;
+  asset_ref?: string;
+  tool_ref?: string;
+  component_ref?: string;
+  regulation_refs?: string[];
+  procedure_refs?: string[];
+  document_revision_ids?: string[];
+};
+
 export type AuditEvidenceArtifact = {
   id: string;
   audit_id: string;
@@ -16,6 +28,7 @@ export type AuditEvidenceArtifact = {
   size_bytes: number;
   sha256: string;
   description: string | null;
+  context: AuditEvidenceContext;
   source_device_id?: string | null;
   captured_at?: string | null;
   offline_upload_state?: "SYNCED" | "PENDING" | "FAILED" | "CONFLICT";
@@ -37,6 +50,17 @@ export function listAuditEvidence(amoCode: string, auditId: string, checklistIte
   });
 }
 
+function appendEvidenceContext(form: FormData, context?: AuditEvidenceContext | null): void {
+  if (!context) return;
+  for (const key of ["location_ref", "person_ref", "facility_ref", "asset_ref", "tool_ref", "component_ref"] as const) {
+    const value = context[key]?.trim();
+    if (value) form.append(key, value);
+  }
+  if (context.regulation_refs?.length) form.append("regulation_refs_json", JSON.stringify(context.regulation_refs));
+  if (context.procedure_refs?.length) form.append("procedure_refs_json", JSON.stringify(context.procedure_refs));
+  if (context.document_revision_ids?.length) form.append("document_revision_ids_json", JSON.stringify(context.document_revision_ids));
+}
+
 export function createEvidenceMutationId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? `qms-evidence-${crypto.randomUUID()}`
@@ -48,7 +72,7 @@ export function uploadInternalAuditEvidence(
   auditId: string,
   checklistItemId: string,
   file: File,
-  options: { baseVersion: number; clientMutationId: string; description?: string | null; findingId?: string | null; evidenceRequestId?: string | null; capturedAt?: string; deviceId?: string },
+  options: { baseVersion: number; clientMutationId: string; description?: string | null; findingId?: string | null; evidenceRequestId?: string | null; capturedAt?: string; deviceId?: string; context?: AuditEvidenceContext },
 ) {
   const form = new FormData();
   form.append("file", file);
@@ -57,6 +81,7 @@ export function uploadInternalAuditEvidence(
   if (options.description?.trim()) form.append("description", options.description.trim());
   if (options.findingId) form.append("finding_id", options.findingId);
   if (options.evidenceRequestId) form.append("evidence_request_id", options.evidenceRequestId);
+  appendEvidenceContext(form, options.context);
   form.append("source_device_id", options.deviceId || qmsFieldworkDeviceId());
   form.append("captured_at", options.capturedAt || new Date(file.lastModified || Date.now()).toISOString());
   return apiRequest<{ artifact: AuditEvidenceArtifact; committed_version: number; replayed: boolean }>(
@@ -71,12 +96,14 @@ export async function uploadExternalAuditorEvidence(
   file: File,
   description?: string | null,
   clientMutationId = createEvidenceMutationId(),
+  context?: AuditEvidenceContext | null,
 ) {
   const form = new FormData();
   form.append("file", file);
   form.append("base_version", String(item.entity_version));
   form.append("client_mutation_id", clientMutationId);
   if (description?.trim()) form.append("description", description.trim());
+  appendEvidenceContext(form, context);
   form.append("source_device_id", qmsFieldworkDeviceId());
   form.append("captured_at", new Date(file.lastModified || Date.now()).toISOString());
   const response = await fetch(
