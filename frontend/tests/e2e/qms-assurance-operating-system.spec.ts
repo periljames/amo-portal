@@ -316,7 +316,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   const panelBox = await panel.boundingBox();
   expect(panelBox).not.toBeNull();
   expect(panelBox!.width).toBeGreaterThanOrEqual(620);
-  const layoutViewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  const layoutViewportWidth = await page.evaluate(() => window.innerWidth);
   expect(Math.abs((panelBox!.x + panelBox!.width) - (layoutViewportWidth - 24))).toBeLessThanOrEqual(2);
   const personSelect = dialog.getByLabel("Person");
   const controlHeight = await personSelect.evaluate((element) => Number.parseFloat(window.getComputedStyle(element).height));
