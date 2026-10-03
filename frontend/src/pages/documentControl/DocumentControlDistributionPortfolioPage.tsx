@@ -161,10 +161,10 @@ export default function DocumentControlDistributionPortfolioPage() {
 
       {view === "physical-copies" ? <PhysicalCopyOperationsPanel tenant={tenant} /> : <>
       <div className="dms-distribution__toolbar">
-        <label><Search size={15} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={`Search ${viewMeta.label.toLowerCase()} by document${view === "physical-copies" || view === "recalls" ? ", copy or location" : ""}`} /></label>
-        {(view === "campaigns" || view === "physical-copies") ? <select aria-label="Filter distribution status" value={params.get("status") || ""} onChange={(event) => update("status", event.target.value)}>
+        <label><Search size={15} /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={`Search ${viewMeta.label.toLowerCase()} by document${view === "recalls" ? ", copy or location" : ""}`} /></label>
+        {view === "campaigns" ? <select aria-label="Filter distribution status" value={params.get("status") || ""} onChange={(event) => update("status", event.target.value)}>
           <option value="">All states</option>
-          {view === "campaigns" ? <><option value="DRAFT">Draft</option><option value="ISSUED">Issued</option><option value="COMPLETED">Completed</option></> : <><option value="ISSUED">Issued / checked out</option><option value="RETURNED">Returned / on shelf</option><option value="RECALLED">Recalled</option><option value="WITHDRAWN">Withdrawn</option></>}
+          <><option value="DRAFT">Draft</option><option value="ISSUED">Issued</option><option value="COMPLETED">Completed</option></>
         </select> : null}
         {refreshing ? <span role="status" aria-live="polite">Updating…</span> : null}
       </div>
