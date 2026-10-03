@@ -168,6 +168,21 @@ export function listChecklistBindings(
   );
 }
 
+export type ChecklistBindingLineageItem = {
+  checklist_item_id: string;
+  template_code: string;
+  revision_no: number;
+  content_sha256: string;
+  source_context: ChecklistTemplateItem;
+};
+
+export function getChecklistBindingLineage(amoCode: string, auditId: string, signal?: AbortSignal) {
+  return apiRequest<{ items: ChecklistBindingLineageItem[] }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-binding-lineage`),
+    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+  );
+}
+
 export function getChecklistBinding(amoCode: string, auditId: string, bindingId: string, signal?: AbortSignal) {
   return apiRequest<ChecklistBinding>(
     qmsPath(
