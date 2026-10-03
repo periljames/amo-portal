@@ -88,7 +88,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     mimeType: "text/plain",
     buffer: Buffer.from(`Governed corrective-action evidence ${suffix}.\n`, "utf-8"),
   });
-  await expect(page.getByRole("button", { name: `car-effectiveness-${suffix}.txt`, exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`car-effectiveness-${suffix}.txt`, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Save evidence and continue" }).click();
   await page.getByLabel("I confirm this response and evidence are accurate for audit closeout.").check();
   await page.getByRole("button", { name: "Preview submission" }).click();
