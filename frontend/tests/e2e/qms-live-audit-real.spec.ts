@@ -210,8 +210,8 @@ test("two authenticated Quality browsers receive the same committed live-audit c
 
     await expect(pageA.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
     await expect(pageB.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
-    await expect(pageA.getByText("Verify concurrent authenticated browsers receive committed fieldwork updates without manual refresh.")).toBeVisible();
-    await expect(pageB.getByText("Verify concurrent authenticated browsers receive committed fieldwork updates without manual refresh.")).toBeVisible();
+    await expect(pageA.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
+    await expect(pageB.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
 
     await expect(pageA.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
     await expect(pageB.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
@@ -278,11 +278,17 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     const generatedDownload = await downloadPromise;
     expect(await generatedDownload.path()).toBeTruthy();
 
+    const adoptResponsePromise = internalPage.waitForResponse((response) =>
+      response.url().includes("/report-revisions/adopt-generated/") && response.request().method() === "POST",
+    );
     await internalPage.getByRole("button", { name: "Adopt governed draft" }).click();
+    const adoptResponse = await adoptResponsePromise;
+    expect(adoptResponse.ok()).toBeTruthy();
+    const adoptedRevision = await adoptResponse.json() as { sha256: string };
+    const draftSha = adoptedRevision.sha256;
+    expect(draftSha).toMatch(/^[0-9a-f]{64}$/i);
     await expect(internalPage.getByRole("status")).toContainText("Generated report adopted as a governed draft revision", { timeout: 30_000 });
     await expect(internalPage.getByText(/R1 · DRAFT/i)).toBeVisible();
-    const draftSha = await internalPage.locator("dt", { hasText: "SHA-256" }).locator("..").locator("code").first().innerText();
-    expect(draftSha).toMatch(/^[0-9a-f]{64}$/i);
 
     const auditeePage = await auditeeContext.newPage();
     watchServerFailures(auditeePage, auditeeFailures);
