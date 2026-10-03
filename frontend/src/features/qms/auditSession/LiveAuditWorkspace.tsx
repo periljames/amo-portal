@@ -807,7 +807,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             {visibleItems.map((item, index) => (
               <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} onClick={() => setSelectedId(item.checklist_item_id)}>
                 <span>{index + 1}</span>
-                <div><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.section || "General"}</small></div>
+                <div><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small><span>{item.section || "General"}</span></div>
                 <em data-status={item.canonical_response_status}>{statusLabel(item.canonical_response_status)}</em>
               </button>
             ))}
