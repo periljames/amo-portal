@@ -247,8 +247,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 5_000,
   });
   const auditId = auditQuery.data?.id || "";
-  const canExecute = canExecuteAssignedAudit(auditQuery.data);
-  const canCompleteFieldwork = canCompleteAuditFieldwork(auditQuery.data);
+  const fieldworkComplete = Boolean(auditQuery.data?.actual_end);
+  const canExecute = canExecuteAssignedAudit(auditQuery.data) && !fieldworkComplete;
+  const canCompleteFieldwork = canCompleteAuditFieldwork(auditQuery.data) && !fieldworkComplete;
   const sessionQuery = useQuery({
     queryKey: ["qms", "audit-session", amoCode, auditId],
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
@@ -582,8 +583,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (outbox.failed) blockers.push(`${outbox.failed} failed sync change${outbox.failed === 1 ? " requires" : "s require"} review`);
     return blockers;
   }, [counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued]);
-  const fieldworkComplete = Boolean(auditQuery.data?.actual_end);
-
   const completeMutation = useMutation({
     mutationFn: () => completeAuditFieldwork(amoCode, auditId),
     onSuccess: async () => {
@@ -624,6 +623,20 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return null;
   };
 
+  const saveCurrentAssessment = () => {
+    if (!selected || !assessment || !canExecute) return;
+    setSyncNotice(null);
+    setLocalError(null);
+    updateMutation.mutate({
+      item: selected,
+      response: selected.canonical_response_status,
+      responseValue: selected.response_value || selected.canonical_response_status,
+      auditorNotes: notes,
+      sampledItemInformation: sampledItems,
+      assessment,
+    });
+  };
+
   const selectResponse = (item: ChecklistExecutionGovernanceRow, option: ChecklistResponseOption) => {
     if (!canExecute) return;
     setSyncNotice(null);
@@ -647,7 +660,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       });
       return;
     }
-    const assessmentState = assessmentDrafts[item.checklist_item_id] ?? item.assessment;
+    const assessmentState = assessmentDrafts[item.checklist_item_id] ?? item.assessment ?? emptyAssessment();
     if (response === "NOT_APPLICABLE" && (
       assessmentState.applicability !== "NOT_APPLICABLE"
       || !assessmentState.applicability_reason?.trim()
@@ -776,6 +789,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       </header>
 
+      {fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">Fieldwork is complete. This workspace is read-only; reopen the governed lifecycle before recording further work.</div> : null}
       {localError ? <div className="qms-live-audit-focus__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
       {!fieldworkComplete && completionBlockers.length ? <div className="qms-live-audit-focus__sync-notice" role="status">Closing remains locked: {completionBlockers.join("; ")}.</div> : null}
@@ -982,6 +996,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     <label className="is-wide"><span>Auditor decision / override rationale</span><textarea readOnly={!canExecute} rows={2} value={assessment.human_override_reason || ""} onChange={(event) => updateAssessmentDraft({ human_override_reason: event.target.value || null })} placeholder="Required by local procedure where the final human decision differs from the evidence recommendation." /></label>
                   </div>
                   {assessment.ai_analysis?.conclusion ? <div className="qms-live-audit-focus__ai-analysis"><strong>Structured AI assistance</strong><p>{assessment.ai_analysis.conclusion}</p><small>{assessment.ai_analysis.confidence_basis || "No confidence basis recorded."}</small></div> : null}
+                  {canExecute ? <div className="qms-live-audit-focus__assessment-actions">
+                    <button type="button" disabled={updateMutation.isPending} onClick={saveCurrentAssessment}>
+                      {updateMutation.isPending ? "Saving…" : "Save assessment"}
+                    </button>
+                    <small>Saves the evidence basis and verification state without changing the current checklist outcome.</small>
+                  </div> : null}
                 </> : null}
               </section>
 
@@ -998,7 +1018,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
               {selectedSource?.sampling_requirement || selectedSource?.audit_method === "SAMPLE" ? <label className="qms-live-audit-focus__notes"><span>Sampled items / records</span><textarea readOnly={!canExecute} value={sampledItems} onChange={(event) => setSampleDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={3} placeholder="Record the sampled records, serials, work packs, dates or other sample identifiers." /></label> : null}
               <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
-              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={() => { setSyncNotice(null); updateMutation.mutate({ item: selected, response: selected.canonical_response_status, responseValue: selected.response_value || selected.canonical_response_status, auditorNotes: notes, sampledItemInformation: sampledItems, assessment: assessment || selected.assessment || emptyAssessment() }); }}>Save note</button></div>
+              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={saveCurrentAssessment}>{updateMutation.isPending ? "Saving…" : "Save notes & assessment"}</button></div>
 
               <div id="audit-occurrence-evidence">
                 <LiveAuditEvidenceStrip
