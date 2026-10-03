@@ -826,3 +826,55 @@ body[data-color-scheme="dark"] .qms-occurrence-stage__message.is-error {
     justify-content: flex-start;
   }
 }
+
+
+.qms-followup-milestones {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.qms-followup-milestones li {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--qms-line, #d8dee8);
+  border-radius: var(--qms-radius, 8px);
+  background: var(--qms-panel, #fff);
+}
+
+.qms-followup-milestones li > span {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: var(--surface-subtle, #f1f5f9);
+  font-weight: 800;
+}
+
+.qms-followup-milestones li > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.qms-followup-milestones li small {
+  color: var(--qms-muted, #64748b);
+  overflow-wrap: anywhere;
+}
+
+.qms-followup-milestones li[data-status="ACCEPTED"],
+.qms-followup-milestones li[data-status="COMPLETED"],
+.qms-followup-milestones li[data-status="WAIVED"] {
+  border-color: color-mix(in srgb, var(--accent-success, #15803d) 35%, var(--qms-line, #d8dee8));
+}
+
+.qms-followup-milestones li[data-status="REJECTED"],
+.qms-followup-milestones li[data-status="BLOCKED"] {
+  border-color: color-mix(in srgb, var(--accent-danger, #b42318) 40%, var(--qms-line, #d8dee8));
+}
