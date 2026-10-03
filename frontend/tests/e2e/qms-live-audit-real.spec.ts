@@ -160,7 +160,7 @@ test("real browsers prove two-party persistence, offline replay, exactly-once re
     await expect(fieldwork.getByRole("button", { name: "CHK-LIVE-001 NOT APPLICABLE · v5" })).toBeVisible({ timeout: 30_000 });
 
     await staleFieldwork.getByRole("textbox", { name: "My attributable fieldwork note" }).fill("This stale v4 edit must not overwrite v5.");
-    await staleFieldwork.getByRole("button", { name: "Compliant" }).click();
+    await staleFieldwork.getByRole("button", { name: "Compliant", exact: true }).click();
     await expect(staleFieldwork.getByRole("alert")).toContainText(/changed on the server|newer authoritative version/i);
     await expect(staleFieldwork.getByRole("button", { name: "CHK-LIVE-001 COMPLIANT · v4" })).toBeVisible();
 
