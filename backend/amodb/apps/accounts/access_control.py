@@ -678,7 +678,7 @@ def assign_primary_access_profile(
         models.AuthUserRoleAssignment.user_id == user.id,
         models.AuthUserRoleAssignment.is_primary.is_(True),
         models.AuthUserRoleAssignment.valid_to.is_(None),
-    ).with_for_update().all()
+    ).with_for_update(of=models.AuthUserRoleAssignment).all()
     matching = next(
         (
             row for row in assignments
