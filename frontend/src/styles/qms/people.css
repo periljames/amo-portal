@@ -679,7 +679,7 @@
 
 .qms-authz-modal {
   position: fixed;
-  inset: 0 calc(100vw - 100%) 0 0;
+  inset: 0;
   width: auto;
   box-sizing: border-box;
   z-index: 1350;
