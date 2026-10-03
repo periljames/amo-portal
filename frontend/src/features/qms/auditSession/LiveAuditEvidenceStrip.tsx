@@ -7,6 +7,7 @@ import {
   downloadInternalAuditEvidence,
   listAuditEvidence,
   uploadInternalAuditEvidence,
+  type AuditEvidenceContext,
 } from "../../../services/qmsAuditEvidence";
 import {
   enqueueOfflineAuditEvidence,
@@ -45,6 +46,14 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [description, setDescription] = useState("");
+  const [contextDraft, setContextDraft] = useState({
+    locationRef: "",
+    personRef: "",
+    facilityRef: "",
+    assetRef: "",
+    toolRef: "",
+    componentRef: "",
+  });
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
 
@@ -79,6 +88,43 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   });
   const artifacts = evidenceQuery.data?.items || [];
   const pending = pendingQuery.data || [];
+  const evidenceContext = (): AuditEvidenceContext => ({
+    location_ref: contextDraft.locationRef.trim() || undefined,
+    person_ref: contextDraft.personRef.trim() || undefined,
+    facility_ref: contextDraft.facilityRef.trim() || undefined,
+    asset_ref: contextDraft.assetRef.trim() || undefined,
+    tool_ref: contextDraft.toolRef.trim() || undefined,
+    component_ref: contextDraft.componentRef.trim() || undefined,
+    regulation_refs: item.assessment?.regulation_refs || [],
+    procedure_refs: item.assessment?.procedure_refs || [],
+    document_revision_ids: item.assessment?.document_revision_ids || [],
+  });
+  const resetCapture = () => {
+    setFile(null);
+    setDescription("");
+    setContextDraft({
+      locationRef: "",
+      personRef: "",
+      facilityRef: "",
+      assetRef: "",
+      toolRef: "",
+      componentRef: "",
+    });
+  };
+  const contextSummary = (context?: AuditEvidenceContext | null) => {
+    if (!context) return [];
+    return [
+      context.location_ref ? `Location ${context.location_ref}` : "",
+      context.person_ref ? `Person ${context.person_ref}` : "",
+      context.facility_ref ? `Facility ${context.facility_ref}` : "",
+      context.asset_ref ? `Asset ${context.asset_ref}` : "",
+      context.tool_ref ? `Tool ${context.tool_ref}` : "",
+      context.component_ref ? `Component ${context.component_ref}` : "",
+      context.regulation_refs?.length ? `${context.regulation_refs.length} regulation ref(s)` : "",
+      context.procedure_refs?.length ? `${context.procedure_refs.length} procedure ref(s)` : "",
+      context.document_revision_ids?.length ? `${context.document_revision_ids.length} document revision(s)` : "",
+    ].filter(Boolean);
+  };
 
   const refreshPending = () => void pendingQuery.refetch();
 
@@ -132,11 +178,11 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
         findingId: item.finding_id || null,
         file,
         description,
+        context: evidenceContext(),
         clientMutationId,
         baseVersion: item.entity_version,
       });
-      setFile(null);
-      setDescription("");
+      resetCapture();
       onNotice("Evidence saved securely on this device · pending synchronization. The server record is unchanged until upload is accepted and hash-verified.");
       await pendingQuery.refetch();
     };
@@ -150,8 +196,9 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
         clientMutationId,
         description,
         findingId: item.finding_id || null,
+        context: evidenceContext(),
       });
-      setFile(null); setDescription("");
+      resetCapture();
       onNotice(`Evidence attached · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await evidenceQuery.refetch();
       await onChanged();
@@ -192,7 +239,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
             const reliedUpon = selectedAssessmentEvidenceIds.includes(artifact.id);
             return (
               <li key={artifact.id} className={reliedUpon ? "is-assessment-evidence" : ""}>
-                <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small></span></div>
+                <div><ShieldCheck size={14} /><span><strong>{artifact.filename}</strong><small>{Math.ceil(artifact.size_bytes / 1024)} KB · {artifact.source_type.replaceAll("_", " ")}</small>{contextSummary(artifact.context).length ? <small>{contextSummary(artifact.context).join(" · ")}</small> : null}</span></div>
                 <div className="qms-live-audit-focus__evidence-actions">
                   {onAssessmentEvidenceChange ? (
                     <label title="Attaching a file does not automatically make it evidence relied upon for the compliance assessment.">
@@ -231,7 +278,16 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
       {canManage ? (
         <div className="qms-live-audit-focus__evidence-upload">
           <label><span>Attach evidence</span><input type="file" accept={ACCEPT} disabled={busy} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
-          <label><span>Evidence context</span><input value={description} maxLength={4000} onChange={(event) => setDescription(event.target.value)} placeholder="What this file demonstrates" /></label>
+          <label><span>What this demonstrates</span><input value={description} maxLength={4000} onChange={(event) => setDescription(event.target.value)} placeholder="Objective evidence observed or reviewed" /></label>
+          <div className="qms-live-audit-focus__evidence-context-grid" aria-label="Structured evidence context">
+            <label><span>Location</span><input value={contextDraft.locationRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, locationRef: event.target.value }))} placeholder="Base / line / station" /></label>
+            <label><span>Person</span><input value={contextDraft.personRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, personRef: event.target.value }))} placeholder="Name or personnel ID" /></label>
+            <label><span>Facility</span><input value={contextDraft.facilityRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, facilityRef: event.target.value }))} placeholder="Hangar / workshop / store" /></label>
+            <label><span>Asset</span><input value={contextDraft.assetRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, assetRef: event.target.value }))} placeholder="Aircraft / equipment / asset" /></label>
+            <label><span>Tool</span><input value={contextDraft.toolRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, toolRef: event.target.value }))} placeholder="Tool or calibration ID" /></label>
+            <label><span>Component</span><input value={contextDraft.componentRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, componentRef: event.target.value }))} placeholder="P/N, S/N or component ref" /></label>
+          </div>
+          <small className="qms-live-audit-focus__evidence-context-note">Regulation, procedure and document-revision references are inherited from the current structured assessment and stored with this evidence.</small>
           <button type="button" disabled={!file || busy} onClick={() => void upload()}><FileUp size={15} /> {busy ? "Uploading…" : "Attach to question"}</button>
         </div>
       ) : null}
