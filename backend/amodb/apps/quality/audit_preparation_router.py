@@ -1101,6 +1101,7 @@ def get_audit_offline_pack(
                 "size_bytes": item.size_bytes,
                 "sha256": item.sha256,
                 "description": item.description,
+                "context": dict(item.context_json or {}),
                 "source_device_id": item.source_device_id,
                 "captured_at": item.captured_at.isoformat() if item.captured_at else None,
                 "offline_upload_state": item.offline_upload_state,
