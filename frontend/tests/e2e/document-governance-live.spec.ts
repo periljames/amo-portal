@@ -83,7 +83,7 @@ test.describe("Document Control daily operating model", () => {
     const home = page.getByTestId("document-control-home");
     await expect(home).toBeVisible({ timeout: 30_000 });
 
-    for (const section of ["My Work", "Exceptions", "Due Soon", "Recent Changes", "Quick Actions"]) {
+    for (const section of ["Reviews & my work", "Exceptions", "Due Soon", "Recent Changes", "Quick Actions"]) {
       await expect(home.getByText(section, { exact: true })).toBeVisible();
     }
 
