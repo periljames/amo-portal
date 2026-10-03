@@ -40,6 +40,11 @@ export type EffectivenessResponseAction = {
     prior_status?: string | null;
     status: string;
     capa_status?: string | null;
+    reset_milestones?: Array<{
+      milestone_key: string;
+      prior_status: string;
+      status: string;
+    }>;
   } | null;
   events: Array<{ id: string; event_type: string; reason: string; actor_user_id?: string | null; created_at: string }>;
 };
