@@ -76,6 +76,26 @@
   background: var(--surface-subtle);
 }
 
+.qms-live-audit-focus__evidence-context-grid,
+.qms-external-auditor-fieldwork__evidence-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qms-live-audit-focus__evidence-context-note {
+  color: var(--qms-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .qms-live-audit-focus__evidence-context-grid,
+  .qms-external-auditor-fieldwork__evidence-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .qms-live-audit-focus__evidence-upload label,
 .qms-external-auditor-fieldwork__evidence label,
 .qms-public-audit__closing-form label,
