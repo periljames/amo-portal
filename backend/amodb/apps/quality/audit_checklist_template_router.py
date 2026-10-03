@@ -897,7 +897,7 @@ def list_checklist_bindings(
     rows = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == ctx.amo_id,
         QualityAuditChecklistBinding.audit_id == audit_id,
-    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).limit(100).all()
+    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).all()
     return {"items": [_binding_dict(row) for row in rows]}
 
 
