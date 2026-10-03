@@ -101,6 +101,24 @@ test.describe("tenant shell theme and responsive layout", () => {
           body: JSON.stringify({ eligible: false, active: false }),
         });
       });
+      await page.route("**/readyz", async (route) => {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ready: true, status: "ok", db: true }) });
+      });
+      await page.route("**/livez", async (route) => {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+      });
+      await page.route("**/time", async (route) => {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ utc: new Date().toISOString() }) });
+      });
+      await page.route("**/auth/portal-preferences/**", async (route) => {
+        await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      });
+      await page.route("**/platform/product-events", async (route) => {
+        await route.fulfill({ status: 204, body: "" });
+      });
+      await page.route("**/accounts/amo-assets/logo**", async (route) => {
+        await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      });
       await page.route("http://127.0.0.1:8080/**", async (route) => {
         await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
       });
