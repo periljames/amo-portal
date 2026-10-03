@@ -345,7 +345,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <div className="qms-audit-closing__body"><main>
         <section className={closingCardClass(1)} aria-current={activeClosingStep === 1 ? "step" : undefined}>
           <header><FileCheck2 size={19} /><div><h3>1 · Freeze fieldwork and generate the closing report</h3><small>The report is built from the authoritative audit, checklist, finding, CAR and preparation state.</small></div></header>
-          {lockedReason(1) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(1)}</div> : null}
+          {lockedReason(1) ? <div className="qms-audit-closing__locked">{lockedReason(1)}</div> : null}
           <div className="qms-audit-closing__metrics"><div><strong>{counts.compliant}</strong><span>Compliant</span></div><div><strong>{counts.noncompliant}</strong><span>Noncompliant</span></div><div><strong>{counts.observations}</strong><span>Observations</span></div><div><strong>{composition.findings_count}</strong><span>Findings</span></div><div><strong>{composition.cars_count}</strong><span>CARs</span></div><div><strong>{pending}</strong><span>Not verified</span></div></div>
           {!composition.audit.actual_end ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> Fieldwork must be formally completed before a closing snapshot can be generated.</div> : null}
           {pending > 0 ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> {pending} checklist item(s) remain NOT_VERIFIED.</div> : null}
