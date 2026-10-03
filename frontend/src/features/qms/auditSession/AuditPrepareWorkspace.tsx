@@ -831,6 +831,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
+  const canEditFrozenPreparation = canManage && !fieldworkOpen;
   const preparationReady = Boolean(readiness?.issue_ready);
 
   return (
@@ -990,13 +991,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <div><h3>Applicability context</h3><p>Select only governed DMS applicability rules that define the actual aircraft, capability, authorization, location, role, work package or other audited scope.</p></div>
             <span className="qms-audit-prepare-stage__meta-chip">{applicabilityFacts.length} selected</span>
           </header>
+          {fieldworkOpen ? <p className="qms-audit-prepare-stage__notice is-info"><ShieldAlert size={14} aria-hidden /> Applicability context is frozen for the active fieldwork package. Return the audit through the governed preparation lifecycle before changing scope inputs.</p> : null}
           {applicabilityFacts.length ? <div className="qms-audit-prepare__applicability-selected">
             {applicabilityFacts.map((fact) => <article key={fact.id}>
               <div><strong>{fact.target_type.replaceAll("_", " ")}</strong><span>{fact.target_value || fact.target_id || "Governed target"}</span><small>{fact.rule_type} · {fact.source}</small><p>{fact.reason}</p></div>
-              {canManage ? <button type="button" onClick={() => removeApplicabilityMutation.mutate(fact.id)} disabled={removeApplicabilityMutation.isPending} aria-label="Remove applicability context"><Trash2 size={15} /></button> : null}
+              {canEditFrozenPreparation ? <button type="button" onClick={() => removeApplicabilityMutation.mutate(fact.id)} disabled={removeApplicabilityMutation.isPending} aria-label="Remove applicability context"><Trash2 size={15} /></button> : null}
             </article>)}
           </div> : <p className="qms-audit-prepare__empty">No governed applicability context is selected. Scoped documentary evidence will remain unverified rather than being assumed applicable or N/A.</p>}
-          {canManage ? <div className="qms-audit-prepare__applicability-picker">
+          {canEditFrozenPreparation ? <div className="qms-audit-prepare__applicability-picker">
             <label><span>Search governed rules</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={applicabilitySearch} onChange={(event) => setApplicabilitySearch(event.target.value)} placeholder="Aircraft, base, department, authorization, work package…" /></div></label>
             <label className="is-wide"><span>Selection basis</span><input value={applicabilityReason} onChange={(event) => setApplicabilityReason(event.target.value)} placeholder="Why this governed target belongs to this audit scope" /></label>
             <div className="qms-audit-prepare__applicability-rules is-wide">
@@ -1033,7 +1035,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
           ) : <p className="qms-audit-prepare__empty">No fieldwork checklist is bound. Fieldwork cannot open until one is selected or created.</p>}
 
-          {canManage ? <>
+          {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
               <button type="button" role="tab" aria-selected={checklistMode === "LIBRARY"} className={checklistMode === "LIBRARY" ? "is-active" : ""} onClick={() => setChecklistMode("LIBRARY")}>Use DMS checklist</button>
               <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Create in realtime</button>
