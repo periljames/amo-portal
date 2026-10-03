@@ -458,9 +458,8 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
   await expect(diagnostics).not.toHaveAttribute("open", "");
 
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
-  await expect(page).toHaveURL(/\?workspace=assurance$/);
-  await expect(page.getByRole("heading", { name: "Cases, investigation & effectiveness" })).toBeVisible();
-  await expect(page.getByText(/source audit, CAR, supplier or maintenance records/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/maintenance\/tenant-a\/quality\/audits\/dashboard$/);
+  await expect(page.getByLabel("Assurance workspace sections")).toBeVisible();
 });
 
 test("Control Room Continuous assurance opens the cockpit and returns cleanly", async ({ page }) => {
@@ -489,9 +488,9 @@ test("Evidence hub surfaces pending approvals and linked evidence for review", a
   await expect(page.getByRole("heading", { name: "Records awaiting decision" })).toBeVisible();
   const queue = page.getByRole("region", { name: "Records awaiting review" });
   await expect(queue.getByText("2 items need a decision")).toBeVisible();
-  await expect(queue.getByText("Independent quality audit programme")).toBeVisible();
+  await expect(queue.getByText("145.A.65-C01 · Independent quality audit programme", { exact: true })).toBeVisible();
   await expect(queue.getByRole("button", { name: "Approve" })).toBeVisible();
-  await expect(queue.getByText("Audit programme evidence pack")).toBeVisible();
+  await expect(queue.getByText("Audit programme evidence pack", { exact: true })).toBeVisible();
   await expect(queue.getByRole("button", { name: "Verify" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Authoritative evidence catalogue" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Pending source changes" })).toBeVisible();
@@ -508,7 +507,7 @@ test("Quality management selects and links a validated tenant source record", as
 
   await expect(page.getByRole("heading", { name: "Versioned control library" })).toBeVisible();
   await expect(page.getByText("145.A.65-C01 · v1")).toBeVisible();
-  await page.getByRole("button", { name: "Evidence", exact: true }).click();
+  await page.getByLabel("Continuous assurance controls").getByRole("button", { name: "Evidence", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Link authoritative evidence" })).toBeVisible();
   await page.getByPlaceholder("Search controlled document").fill("MOE");
   await page.getByRole("button", { name: /MOE-3.2 · Quality audit procedure/ }).click();

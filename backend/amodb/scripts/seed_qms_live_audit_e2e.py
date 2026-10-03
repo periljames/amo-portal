@@ -8,7 +8,8 @@ route mocks or production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,10 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from amodb.main import app as _app  # noqa: F401,E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
+from amodb.apps.doc_control import knowledge_models as document_knowledge_models  # noqa: E402
+from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
     QualityAuditRetentionPolicyRevision,
 )
@@ -42,6 +46,8 @@ from amodb.apps.quality.audit_occurrence_completion_models import (  # noqa: E40
     QualityAuditClosingNarrative,
     QualityAuditMeeting,
 )
+from amodb.apps.quality.audit_preparation_models import QualityAuditPreparationRevision  # noqa: E402
+from amodb.apps.quality.audit_preparation_router import _capture_sources  # noqa: E402
 from amodb.apps.quality.enums import (  # noqa: E402
     CARPriority,
     CARProgram,
@@ -90,6 +96,12 @@ OUTPUT_POLICY_ID = "00000000-0000-4000-8000-000000000729"
 RETENTION_POLICY_ID = "00000000-0000-4000-8000-000000000730"
 CEREMONY_CLOSING_NARRATIVE_ID = uuid.UUID("00000000-0000-4000-8000-000000000731")
 CEREMONY_CLOSING_MEETING_ID = uuid.UUID("00000000-0000-4000-8000-000000000732")
+DMS_TENANT_ID = "00000000-0000-4000-8000-000000000733"
+DMS_CHECKLIST_ID = "00000000-0000-4000-8000-000000000734"
+DMS_CHECKLIST_REVISION_ID = "00000000-0000-4000-8000-000000000735"
+DMS_CHECKLIST_SECTION_ID = "00000000-0000-4000-8000-000000000736"
+DMS_CHECKLIST_BLOCK_ID = "00000000-0000-4000-8000-000000000737"
+DMS_CHECKLIST_NODE_ID = "00000000-0000-4000-8000-000000000738"
 
 AMO_CODE = "QMSLIVE"
 AMO_SLUG = "qmslive"
@@ -138,6 +150,28 @@ def _quality_user(
         must_change_password=False,
         password_changed_at=datetime.now(timezone.utc),
     )
+
+
+def _issue_preparation(db, *, audit: quality_models.QMSAudit, user_id: str, now: datetime) -> None:
+    captured = _capture_sources(db, amo_id=audit.amo_id, audit=audit)
+    db.add(QualityAuditPreparationRevision(
+        amo_id=audit.amo_id,
+        audit_id=audit.id,
+        revision_no=1,
+        status="ISSUED",
+        preparation_scope="Deterministic browser-acceptance preparation snapshot.",
+        audit_snapshot=captured["audit_snapshot"],
+        checklist_snapshot=captured["checklist_snapshot"],
+        document_request_snapshot=captured["document_request_snapshot"],
+        source_references=captured["source_references"],
+        source_fingerprint=captured["source_fingerprint"],
+        change_reason="Seed the issued preparation authority required by real-browser fieldwork acceptance.",
+        issued_by_user_id=user_id,
+        issued_at=now,
+        created_by_user_id=user_id,
+        created_at=now,
+    ))
+    db.flush()
 
 
 def seed() -> None:
@@ -191,6 +225,52 @@ def seed() -> None:
         db.add_all([user_a, user_b])
         db.flush()
 
+        lead_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_LEAD_AUDITOR",
+            title="CI lead auditor authority",
+            privilege_type="LEAD_AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        auditor_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_AUDITOR",
+            title="CI auditor authority",
+            privilege_type="AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        db.add_all([lead_rule, auditor_rule])
+        db.flush()
+        db.add_all([
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=lead_rule.id,
+                user_id=user_a.id,
+                privilege_code=lead_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=auditor_rule.id,
+                user_id=user_b.id,
+                privilege_code=auditor_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+        ])
+        db.flush()
+
         # A direct tenant module subscription is sufficient for module gating in
         # this disposable acceptance tenant and avoids inventing a commercial SKU.
         db.add(account_models.ModuleSubscription(
@@ -203,6 +283,90 @@ def seed() -> None:
             plan_code="CI-QMS-LIVE",
             metadata_json=json.dumps({"source": "qms_live_audit_real_browser_ci"}),
         ))
+
+        # Seed one real, current, immutable DMS checklist so the Setup -> Prepare
+        # browser journey exercises the same "Use current revision" path as production.
+        dms_tenant = manual_models.Tenant(
+            id=DMS_TENANT_ID,
+            amo_id=amo.id,
+            slug=AMO_SLUG,
+            name="QMS Live Audit Controlled Documents",
+            settings_json={"ack_due_days": 10},
+        )
+        db.add(dms_tenant)
+        db.flush()
+
+        dms_checklist = manual_models.Manual(
+            id=DMS_CHECKLIST_ID,
+            tenant_id=dms_tenant.id,
+            code="QMS-CI-CHK-001",
+            title="Real Browser Audit Fieldwork Checklist",
+            manual_type="CHECKLIST",
+            owner_role="QUALITY",
+            status="ACTIVE",
+        )
+        db.add(dms_checklist)
+        db.flush()
+
+        dms_revision = manual_models.ManualRevision(
+            id=DMS_CHECKLIST_REVISION_ID,
+            manual_id=dms_checklist.id,
+            rev_number="00",
+            issue_number="01",
+            effective_date=date.today(),
+            status_enum=manual_models.ManualRevisionStatus.PUBLISHED,
+            created_by=user_a.id,
+            created_at=now,
+            published_at=now,
+            immutable_locked=True,
+        )
+        db.add(dms_revision)
+        db.flush()
+        dms_checklist.current_published_rev_id = dms_revision.id
+
+        dms_section = manual_models.ManualSection(
+            id=DMS_CHECKLIST_SECTION_ID,
+            revision_id=dms_revision.id,
+            order_index=1,
+            heading="Fieldwork verification",
+            anchor_slug="fieldwork-verification",
+            level=1,
+            metadata_json={"source": "qms_live_audit_real_browser_ci"},
+        )
+        db.add(dms_section)
+        db.flush()
+        checklist_text = (
+            "Verify the current authorization and competence evidence is available for sampled personnel.\n"
+            "Verify the sampled controlled procedure is the current effective revision."
+        )
+        db.add(manual_models.ManualBlock(
+            id=DMS_CHECKLIST_BLOCK_ID,
+            section_id=dms_section.id,
+            order_index=1,
+            block_type="paragraph",
+            html_sanitized="<p>Verify the current authorization and competence evidence is available for sampled personnel.</p>"
+                           "<p>Verify the sampled controlled procedure is the current effective revision.</p>",
+            text_plain=checklist_text,
+            change_hash=hashlib.sha256(checklist_text.encode("utf-8")).hexdigest(),
+            created_at=now,
+        ))
+        db.add(document_knowledge_models.DocumentationNode(
+            id=DMS_CHECKLIST_NODE_ID,
+            tenant_id=amo.id,
+            parent_id=None,
+            manual_id=dms_checklist.id,
+            node_type="CHECKLIST",
+            code=dms_checklist.code,
+            normalized_code=dms_checklist.code.upper(),
+            title=dms_checklist.title,
+            path=dms_checklist.code,
+            depth=0,
+            order_index=10,
+            status="ACTIVE",
+            metadata_json={"source": "qms_live_audit_real_browser_ci"},
+            created_by_user_id=user_a.id,
+        ))
+        db.flush()
 
         db.add(QualityAuditOutputPolicyRevision(
             id=OUTPUT_POLICY_ID,
@@ -247,7 +411,9 @@ def seed() -> None:
             auditee="Browser Acceptance Auditee",
             auditee_email="auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -281,6 +447,8 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=audit, user_id=user_a.id, now=now)
 
         realtime_audit = quality_models.QMSAudit(
             id=REALTIME_AUDIT_ID,
@@ -298,7 +466,9 @@ def seed() -> None:
             criteria="QMS live-audit realtime event propagation contract.",
             auditee="Internal realtime fixture",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -331,13 +501,15 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=realtime_audit, user_id=user_a.id, now=now)
 
         ceremony_audit = quality_models.QMSAudit(
             id=CEREMONY_AUDIT_ID,
             amo_id=amo.id,
             domain=QMSDomain.AMO,
             kind=QMSAuditKind.INTERNAL,
-            status=QMSAuditStatus.CLOSED,
+            status=QMSAuditStatus.IN_PROGRESS,
             audit_ref=CEREMONY_AUDIT_REF,
             reference_family="QAR",
             unit_code="MO",
@@ -349,7 +521,9 @@ def seed() -> None:
             auditee="Closing Ceremony Auditee",
             auditee_email="closing.auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today(),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             actual_end=date.today(),
             lead_auditor_user_id=user_a.id,
@@ -384,6 +558,8 @@ def seed() -> None:
             entity_version=2,
             updated_by_user_id=user_a.id,
         ))
+        db.flush()
+        _issue_preparation(db, audit=ceremony_audit, user_id=user_a.id, now=now)
         db.add(QualityAuditClosingNarrative(
             id=CEREMONY_CLOSING_NARRATIVE_ID,
             amo_id=amo.id,
@@ -638,6 +814,9 @@ def seed() -> None:
             "realtime_user_b_id": REALTIME_USER_B_ID,
             "realtime_user_b_email": REALTIME_USER_B_EMAIL,
             "realtime_password": REALTIME_PASSWORD,
+            "dms_checklist_id": DMS_CHECKLIST_ID,
+            "dms_checklist_code": "QMS-CI-CHK-001",
+            "dms_checklist_revision_id": DMS_CHECKLIST_REVISION_ID,
             "ceremony_audit_id": str(CEREMONY_AUDIT_ID),
             "ceremony_audit_ref": CEREMONY_AUDIT_REF,
             "ceremony_checklist_item_id": str(CEREMONY_CHECKLIST_ITEM_ID),

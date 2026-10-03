@@ -28,6 +28,8 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  getChecklistBinding,
+  listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
   type ChecklistBinding,
@@ -223,6 +225,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
+  const checklistBindingsQuery = useQuery({
+    queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId],
+    queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 0,
+  });
   const controlledDocumentsQuery = useQuery({
     queryKey: ["qms-canonical-document-control-documents", amoCode, auditId],
     queryFn: ({ signal }) => listCanonicalDocumentControlDocuments(amoCode, auditId, signal),
@@ -261,6 +269,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
@@ -270,16 +279,28 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const confirmChecklistBinding = async (binding: ChecklistBinding): Promise<boolean> => {
-    await queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] });
-    // Read the live authority directly. getAuditPreparationContext is classified as
-    // QMS live authority, so apiClient cannot satisfy this from response/offline cache.
-    // Any transport or backend failure throws instead of returning retained query data.
-    const confirmation = await getAuditPreparationContext(amoCode, auditId);
-    const confirmed = Boolean(
-      confirmation.controlled_preparation?.checklist_bindings?.some((item) => item.id === binding.id),
-    );
-    if (!confirmed) return false;
-    queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], confirmation);
+    const bindingQueryKey = ["qms", "prepare-checklist-bindings", amoCode, auditId] as const;
+    await Promise.all([
+      queryClient.cancelQueries({ queryKey: bindingQueryKey }),
+      queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
+    ]);
+    // Confirm the exact immutable row directly so authority checks do not depend
+    // on list pagination or payload size.
+    const confirmation = await getChecklistBinding(amoCode, auditId, binding.id);
+    if (confirmation.id !== binding.id) return false;
+    await queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" });
+
+    // Keep the aggregate preparation projection synchronized as a secondary read model.
+    // Its failure or lag cannot erase a binding that the canonical binding table confirms.
+    try {
+      const contextConfirmation = await getAuditPreparationContext(amoCode, auditId);
+      queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], contextConfirmation);
+    } catch {
+      void queryClient.invalidateQueries({
+        queryKey: ["qms-audit-preparation-context", amoCode, auditId],
+        refetchType: "active",
+      });
+    }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
@@ -530,6 +551,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       participantsQuery.isPending ||
       sessionQuery.isLoading ||
       sessionQuery.isPending ||
+      checklistBindingsQuery.isLoading ||
+      checklistBindingsQuery.isPending ||
       preparationRevisionsQuery.isLoading ||
       preparationRevisionsQuery.isPending);
 
@@ -551,7 +574,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || preparationRevisionsQuery.error;
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || checklistBindingsQuery.error || preparationRevisionsQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -566,6 +589,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           void requestsQuery.refetch();
           void participantsQuery.refetch();
           void sessionQuery.refetch();
+          void checklistBindingsQuery.refetch();
           void preparationRevisionsQuery.refetch();
         }}
         exitHref={auditSessionPath(amoCode, auditKey, "setup")}
@@ -587,8 +611,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }
 
   const prepRevision = context.controlled_preparation?.latest_revision;
-  const bindings = context.controlled_preparation?.checklist_bindings || [];
-  const checklistBindings = bindings.length;
+  const bindings = checklistBindingsQuery.data?.items || [];
+  const checklistBindings = checklistBindingsQuery.data?.total ?? bindings.length;
   const readinessWarning = readiness.percent != null && readiness.percent < 100;
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;

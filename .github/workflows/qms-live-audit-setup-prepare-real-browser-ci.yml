@@ -109,6 +109,7 @@ jobs:
           from sqlalchemy import MetaData, Table, inspect, select
           from amodb.main import app as _app  # noqa: F401
           from amodb.apps.quality import models
+          from amodb.apps.quality.audit_checklist_template_models import QualityAuditChecklistBinding
           from amodb.apps.quality.audit_external_access_models import QualityAuditAccessGrant, QualityAuditParticipant, QualityExternalIdentity
           from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
           from amodb.apps.quality.audit_occurrence_completion_models import QualityAuditMeeting
@@ -123,6 +124,26 @@ jobs:
               assert audit.criteria == "Approved QMS manual, controlled procedures and applicable aviation regulatory requirements."
               assert audit.auditee == "Preparation Journey Auditee" and audit.auditee_email == "prepare.auditee@example.com"
               assert (audit.planned_end - audit.planned_start).days == 1 and audit.reminder_interval_days == 5
+
+              bindings = db.query(QualityAuditChecklistBinding).filter_by(
+                  amo_id=f["amo_id"],
+                  audit_id=audit_id,
+              ).all()
+              assert len(bindings) == 1
+              binding = bindings[0]
+              assert binding.instantiated_item_ids
+              assert any(
+                  isinstance(source, dict)
+                  and str(source.get("document_id")) == f["dms_checklist_id"]
+                  and str(source.get("revision_id")) == f["dms_checklist_revision_id"]
+                  for source in (binding.source_references or [])
+              )
+              instantiated = db.query(models.QualityAuditChecklistItem).filter(
+                  models.QualityAuditChecklistItem.amo_id == f["amo_id"],
+                  models.QualityAuditChecklistItem.audit_id == audit_id,
+                  models.QualityAuditChecklistItem.id.in_([uuid.UUID(value) for value in binding.instantiated_item_ids]),
+              ).all()
+              assert len(instantiated) == len(binding.instantiated_item_ids)
 
               meetings = db.query(QualityAuditMeeting).filter_by(amo_id=f["amo_id"], audit_id=audit_id).all()
               assert {m.meeting_type for m in meetings} >= {"OPENING", "CLOSING"}

@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+test.use({ serviceWorkers: "block" });
+
 type StoredScale = "standard" | "large" | "extra-large";
 type TestState = {
   scale: StoredScale;

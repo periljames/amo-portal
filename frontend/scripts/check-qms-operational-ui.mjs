@@ -170,9 +170,9 @@ assertNotMatch(planner, /\.qms-modern-planner-v2\.has-left-rail\.has-context\s+\
 for (const testContract of [
   "Intelligence keeps authoritative source-warning provenance",
   "My Quality Work treats a date-only deadline due today as due today",
-  "Assurance refresh re-reads the selected case detail",
-  "Assurance exposes only backend-allowed transitions",
-  "Assurance requires an evidence-backed effectiveness conclusion before closure becomes available",
+  "Assurance workspace deep link resolves to the consolidated governed register",
+  "Assurance exposes the consolidated analysis entry point instead of the retired standalone cases page",
+  "Assurance keeps one visible lifecycle surface without duplicate legacy case chrome",
 ]) {
   assertIncludes(semanticRegressions, testContract, `Semantic browser regression is missing: ${testContract}`);
 }

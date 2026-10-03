@@ -889,16 +889,86 @@ def issue_checklist_revision(
 @router.get("/audits/{audit_id}/checklist-bindings")
 def list_checklist_bindings(
     audit_id: uuid.UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
-    rows = db.query(QualityAuditChecklistBinding).filter(
+    query = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == ctx.amo_id,
         QualityAuditChecklistBinding.audit_id == audit_id,
-    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).limit(100).all()
-    return {"items": [_binding_dict(row) for row in rows]}
+    )
+    total = query.count()
+    rows = query.order_by(
+        QualityAuditChecklistBinding.applied_at.desc(),
+        QualityAuditChecklistBinding.id.desc(),
+    ).offset(offset).limit(limit).all()
+    return {
+        "items": [_binding_dict(row) for row in rows],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@router.get("/audits/{audit_id}/checklist-binding-lineage")
+def get_checklist_binding_lineage(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Return only the per-item governed source context required during fieldwork."""
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    rows = db.query(
+        QualityAuditChecklistBinding.template_code,
+        QualityAuditChecklistBinding.revision_no,
+        QualityAuditChecklistBinding.content_sha256,
+        QualityAuditChecklistBinding.item_snapshot,
+        QualityAuditChecklistBinding.instantiated_item_ids,
+    ).filter(
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id,
+        QualityAuditChecklistBinding.audit_id == audit_id,
+    ).order_by(
+        QualityAuditChecklistBinding.applied_at.asc(),
+        QualityAuditChecklistBinding.id.asc(),
+    ).all()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        snapshots = list(row.item_snapshot or [])
+        item_ids = list(row.instantiated_item_ids or [])
+        for index, item_id in enumerate(item_ids):
+            if index >= len(snapshots):
+                continue
+            items.append({
+                "checklist_item_id": str(item_id),
+                "template_code": row.template_code,
+                "revision_no": row.revision_no,
+                "content_sha256": row.content_sha256,
+                "source_context": snapshots[index],
+            })
+    return {"items": items}
+
+
+@router.get("/audits/{audit_id}/checklist-bindings/{binding_id}")
+def get_checklist_binding(
+    audit_id: uuid.UUID,
+    binding_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    row = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.id == binding_id,
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id,
+        QualityAuditChecklistBinding.audit_id == audit_id,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Audit checklist binding not found.")
+    return _binding_dict(row)
 
 
 @router.get("/audits/{audit_id}/checklist-library")
@@ -1072,8 +1142,26 @@ def bind_current_dms_checklist(
         allow_existing_items=payload.allow_existing_items,
     )
     db.commit()
-    db.refresh(binding)
-    return _binding_dict(binding)
+    # Commit success is not enough for this workflow: re-open an authoritative
+    # tenant-scoped transaction and prove the immutable binding row is readable
+    # before returning HTTP 201 to the browser.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    persisted = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.id == binding.id,
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id,
+        QualityAuditChecklistBinding.audit_id == audit.id,
+    ).first()
+    if persisted is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "CHECKLIST_BINDING_COMMIT_NOT_VISIBLE",
+                "message": "The checklist transaction committed but the authoritative binding row could not be read back.",
+                "audit_id": str(audit.id),
+                "binding_id": str(binding.id),
+            },
+        )
+    return _binding_dict(persisted)
 
 
 @router.post("/audits/{audit_id}/checklist-library/upload", status_code=status.HTTP_201_CREATED)
