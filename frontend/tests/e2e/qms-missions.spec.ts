@@ -201,12 +201,13 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
   await page.goto("/maintenance/tenant-a/quality?workspace=missions", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Missions", exact: true })).toBeVisible();
-  await expect(page.getByText("DHC-8-400 capability inclusion", { exact: true })).toBeVisible();
-  await expect(page.getByText("0/11", { exact: true })).toBeVisible();
-  await expect(page.getByText("11 hard gates open", { exact: true })).toBeVisible();
-  await expect(page.getByText(/compliance percentage/i)).toBeVisible();
+  const missionRow = page.getByRole("row", { name: /DHC-8-400 capability inclusion/ });
+  await expect(missionRow).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Open hard gates" })).toBeVisible();
+  await expect(missionRow).toContainText("11");
+  await expect(page.getByText(/never as a regulatory compliance percentage/i)).toBeVisible();
 
-  await page.getByText("DHC-8-400 capability inclusion", { exact: true }).click();
+  await missionRow.getByRole("button", { name: "Manage project" }).click();
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
   await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
   await expect(page.getByText("Not assigned", { exact: true })).toBeVisible();
