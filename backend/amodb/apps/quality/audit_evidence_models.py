@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -41,6 +41,7 @@ class QualityAuditEvidenceArtifact(Base):
     size_bytes = Column(BigInteger, nullable=False)
     sha256 = Column(String(64), nullable=False)
     description = Column(Text, nullable=True)
+    context_json = Column(JSON, nullable=False, default=dict)
     source_device_id = Column(String(128), nullable=True)
     captured_at = Column(DateTime(timezone=True), nullable=True)
     offline_upload_state = Column(String(16), nullable=False, default="SYNCED", server_default="SYNCED")
