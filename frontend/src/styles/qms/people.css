@@ -679,17 +679,14 @@
 
 .qms-authz-modal {
   position: fixed;
-  inset: 0;
+  inset: 0 var(--qms-layout-scrollbar-width, 0px) 0 0;
   width: auto;
   box-sizing: border-box;
   z-index: 1350;
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  /* Reserve the overlay's native scrollbar gutter so the drawer aligns to
-     document.documentElement.clientWidth rather than the visual viewport. */
+  /* Align to the layout viewport that excludes the browser scrollbar. */
   padding: 24px;
   background: rgba(15, 23, 42, .36);
   backdrop-filter: blur(2px);
