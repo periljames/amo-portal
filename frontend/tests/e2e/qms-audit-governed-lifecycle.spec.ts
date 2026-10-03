@@ -133,6 +133,7 @@ async function prepareLifecycle(page: Page): Promise<void> {
       controlled_preparation: { checklist_bindings: [], latest_revision: preparation },
       prior_audits: [], prior_findings: [], car_exposure: [], document_requests: [], source_lineage: [],
     });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/meetings`) && method === "GET") return respond(route, { items: [] });
