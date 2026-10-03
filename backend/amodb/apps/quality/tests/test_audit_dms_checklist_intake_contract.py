@@ -53,6 +53,13 @@ def test_dms_bind_returns_201_only_after_committed_binding_is_read_back() -> Non
     assert "set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)" in source
 
 
+
+def test_checklist_binding_authority_is_not_truncated_to_first_100_rows() -> None:
+    source = inspect.getsource(list_checklist_bindings)
+
+    assert ".limit(100)" not in source
+    assert "QualityAuditChecklistBinding.applied_at.asc()" in source
+
 def test_pending_checklists_have_progress_but_cannot_be_selected(monkeypatch):
     document = SimpleNamespace(id="doc-1", code="CHK-1", title="Checklist", manual_type="CHECKLIST")
     hidden = SimpleNamespace(id="hidden", code="HIDDEN", title="Restricted", manual_type="CHECKLIST")
