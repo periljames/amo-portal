@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.tasks import services as task_services
@@ -322,15 +323,17 @@ def _reopen_car_for_ineffective_action(
             cap.updated_by_user_id = ctx.user_id
 
     reset_milestones: list[dict[str, str]] = []
-    profile = (
-        db.query(QualityCARControlProfile)
-        .filter(
-            QualityCARControlProfile.amo_id == ctx.amo_id,
-            QualityCARControlProfile.car_id == car.id,
+    profile = None
+    if sa_inspect(db.connection()).has_table(QualityCARControlProfile.__tablename__):
+        profile = (
+            db.query(QualityCARControlProfile)
+            .filter(
+                QualityCARControlProfile.amo_id == ctx.amo_id,
+                QualityCARControlProfile.car_id == car.id,
+            )
+            .with_for_update()
+            .first()
         )
-        .with_for_update()
-        .first()
-    )
     if profile is not None:
         milestones = (
             db.query(QualityCARMilestone)
