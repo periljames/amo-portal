@@ -8,7 +8,7 @@ route mocks or production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
 import os
@@ -25,6 +25,7 @@ from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.doc_control import knowledge_models as document_knowledge_models  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
     QualityAuditRetentionPolicyRevision,
 )
@@ -224,6 +225,52 @@ def seed() -> None:
         db.add_all([user_a, user_b])
         db.flush()
 
+        lead_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_LEAD_AUDITOR",
+            title="CI lead auditor authority",
+            privilege_type="LEAD_AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        auditor_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_AUDITOR",
+            title="CI auditor authority",
+            privilege_type="AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        db.add_all([lead_rule, auditor_rule])
+        db.flush()
+        db.add_all([
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=lead_rule.id,
+                user_id=user_a.id,
+                privilege_code=lead_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=auditor_rule.id,
+                user_id=user_b.id,
+                privilege_code=auditor_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+        ])
+        db.flush()
+
         # A direct tenant module subscription is sufficient for module gating in
         # this disposable acceptance tenant and avoids inventing a commercial SKU.
         db.add(account_models.ModuleSubscription(
@@ -364,7 +411,9 @@ def seed() -> None:
             auditee="Browser Acceptance Auditee",
             auditee_email="auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -417,7 +466,9 @@ def seed() -> None:
             criteria="QMS live-audit realtime event propagation contract.",
             auditee="Internal realtime fixture",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -470,7 +521,9 @@ def seed() -> None:
             auditee="Closing Ceremony Auditee",
             auditee_email="closing.auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today(),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             actual_end=date.today(),
             lead_auditor_user_id=user_a.id,
