@@ -434,6 +434,15 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       },
     }));
   };
+  const unsavedDraftCount = useMemo(() => {
+    const ids = new Set([
+      ...Object.keys(noteDrafts),
+      ...Object.keys(sampleDrafts),
+      ...Object.keys(assessmentDrafts),
+    ]);
+    return ids.size;
+  }, [assessmentDrafts, noteDrafts, sampleDrafts]);
+
   const outboxEntries = useMemo(() => outboxQuery.data ?? [], [outboxQuery.data]);
   const outbox = useMemo(() => ({
     queued: outboxEntries.filter((entry) => entry.status === "queued" || entry.status === "syncing").length,
@@ -475,6 +484,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
       setNoteDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
+      setSampleDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setAssessmentDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       await refreshFieldwork();
       void outboxQuery.refetch();
@@ -524,6 +534,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setLocalError(null);
       setSyncNotice("Finding, checklist response and governed CAR/task consequences committed as one authoritative transaction.");
       setNoteDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
+      setSampleDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
+      setAssessmentDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       await refreshFieldwork();
       void outboxQuery.refetch();
     },
@@ -553,6 +565,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const completionBlockers = useMemo(() => {
     const blockers: string[] = [];
     if (!items.length) blockers.push("No governed checklist is bound");
+    if (unsavedDraftCount) blockers.push(`${unsavedDraftCount} checklist item${unsavedDraftCount === 1 ? " has" : "s have"} unsaved fieldwork changes`);
     if (counts.NOT_VERIFIED) blockers.push(`${counts.NOT_VERIFIED} checklist item${counts.NOT_VERIFIED === 1 ? " is" : "s are"} not verified`);
     const structuredOpen = items.filter((item) => {
       if (item.canonical_response_status === "NOT_VERIFIED") return false;
@@ -582,7 +595,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (outbox.conflicts) blockers.push(`${outbox.conflicts} sync conflict${outbox.conflicts === 1 ? " requires" : "s require"} review`);
     if (outbox.failed) blockers.push(`${outbox.failed} failed sync change${outbox.failed === 1 ? " requires" : "s require"} review`);
     return blockers;
-  }, [counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued]);
+  }, [counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued, unsavedDraftCount]);
   const completeMutation = useMutation({
     mutationFn: () => completeAuditFieldwork(amoCode, auditId),
     onSuccess: async () => {
@@ -771,6 +784,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             {connectivity === "ONLINE" ? <Cloud size={13} /> : connectivity === "RECOVERING" ? <RefreshCw size={13} /> : <CloudOff size={13} />}
             {connectivity === "ONLINE" ? "ONLINE" : connectivity === "RECOVERING" ? "SYNCING / RECOVERING" : "OFFLINE"}
           </span>
+          {unsavedDraftCount ? <span>UNSAVED · {unsavedDraftCount}</span> : null}
           {outbox.conflicts ? (
             <span>CONFLICT · {outbox.conflicts} require review</span>
           ) : outbox.failed ? (
