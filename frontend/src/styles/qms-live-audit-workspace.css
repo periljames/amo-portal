@@ -841,3 +841,46 @@
   color: var(--qms-muted);
   line-height: 1.45;
 }
+
+
+.qms-live-audit-focus__assessment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--qms-line);
+  border-radius: var(--qms-radius);
+  background: var(--qms-line-soft);
+}
+
+.qms-live-audit-focus__assessment-actions button {
+  min-height: 2.4rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent-primary, #2563eb);
+  border-radius: var(--qms-radius);
+  background: var(--accent-primary, #2563eb);
+  color: var(--brand-accent-contrast);
+  font-weight: 750;
+}
+
+.qms-live-audit-focus__assessment-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.qms-live-audit-focus__assessment-actions small {
+  color: var(--qms-muted);
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .qms-live-audit-focus__assessment-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .qms-live-audit-focus__assessment-actions small {
+    text-align: left;
+  }
+}
