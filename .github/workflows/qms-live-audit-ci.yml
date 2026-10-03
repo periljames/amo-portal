@@ -125,6 +125,7 @@ jobs:
           amodb/apps/quality/audit_archive_governance_route_order.py
           amodb/apps/quality/audit_checklist_execution_models.py
           amodb/apps/quality/audit_checklist_execution_router.py
+          amodb/apps/quality/audit_checklist_execution_route_order.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
       - name: Test external access token, scope, CSRF and issued-report receipt contract
@@ -135,8 +136,11 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
       - name: Test deterministic report composition helpers
         run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
-      - name: Test idempotent fieldwork sync contract
-        run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
+      - name: Test idempotent fieldwork sync and route-order contract
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
+          amodb/apps/quality/tests/test_audit_checklist_execution_route_order.py
       - name: Test realtime reconnect and tenant replay contract
         run: pytest -q amodb/apps/quality/tests/test_audit_realtime_contract.py
       - name: Test closing and archive governance helpers
