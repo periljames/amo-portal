@@ -9,6 +9,7 @@ from amodb.database import Base
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_case_router import router as assurance_case_router
 from amodb.apps.quality.audit_checklist_execution_router import router as audit_checklist_execution_router
+from amodb.apps.quality.effectiveness_response_router import _reopen_car_for_ineffective_action
 from amodb.apps.quality.audit_checklist_template_router import router as audit_checklist_template_router
 from amodb.apps.quality.audit_closure_router import router as audit_closure_router
 from amodb.apps.quality.audit_deferral_router import router as audit_deferral_router
@@ -284,3 +285,28 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
             assert len(matches) == 1, (prefix, suffix, method, [route.endpoint.__name__ for route in matches])
             assert matches[0].endpoint.__name__ == endpoint_name
             assert api_router.routes.index(matches[0]) < catchall_index
+
+
+def test_applicability_context_routes_are_registered_before_quality_catchall() -> None:
+    catchall = _catchall_index(canonical_router.router)
+    for suffix, method in (
+        ("/audits/{audit_id}/applicability-context", "GET"),
+        ("/audits/{audit_id}/applicability-context", "POST"),
+        ("/audits/{audit_id}/applicability-context/{fact_id}", "DELETE"),
+    ):
+        path = f"/api/maintenance/{{amo_code}}/quality{suffix}"
+        matches = _matching(canonical_router.router, path, method)
+        assert len(matches) == 1, (path, method, matches)
+        assert canonical_router.router.routes.index(matches[0]) < catchall
+
+
+def test_ineffective_car_reopen_resets_downstream_control_loop_milestones() -> None:
+    import inspect
+
+    source_text = inspect.getsource(_reopen_car_for_ineffective_action)
+    for milestone in ("IMPLEMENTATION_COMPLETE", "EVIDENCE_COMPLETE", "EFFECTIVENESS_REVIEW"):
+        assert milestone in source_text
+    assert "milestone.evidence_ref = None" in source_text
+    assert "milestone.completed_at = None" in source_text
+    assert "milestone.reviewed_at = None" in source_text
+    assert '"reset_milestones"' in source_text
