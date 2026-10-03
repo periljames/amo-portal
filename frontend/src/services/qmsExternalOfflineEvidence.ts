@@ -1,6 +1,6 @@
 import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
 import { getExternalAuditorFieldwork } from "./qmsAuditExternalAccess";
-import { createEvidenceMutationId, uploadExternalAuditorEvidence, type AuditEvidenceArtifact } from "./qmsAuditEvidence";
+import { createEvidenceMutationId, uploadExternalAuditorEvidence, type AuditEvidenceArtifact, type AuditEvidenceContext } from "./qmsAuditEvidence";
 import { listExternalAuditMutations, type ExternalAuditOutboxScope } from "./qmsExternalAuditOutbox";
 
 export type ExternalOfflineEvidenceEntry = {
@@ -192,6 +192,7 @@ export async function enqueueExternalOfflineEvidence(
   item: Pick<ExternalAuditorFieldworkItem, "checklist_item_id">,
   file: File,
   description?: string | null,
+  context?: AuditEvidenceContext | null,
 ): Promise<ExternalOfflineEvidenceEntry> {
   if (file.size > MAX_BYTES) throw new Error("Evidence exceeds the 50 MB offline storage limit.");
   const db = await openDb();
@@ -199,7 +200,7 @@ export async function enqueueExternalOfflineEvidence(
     const key = await keyFor(db);
     const id = createEvidenceMutationId();
     const capturedAt = new Date().toISOString();
-    const metadata = await encryptJson(key, { description: description?.trim() || null });
+    const metadata = await encryptJson(key, { description: description?.trim() || null, context: context || null });
     const encryptedFile = await encryptFile(key, file);
     const row: StoredEntry = {
       id,
@@ -279,10 +280,10 @@ export async function replayExternalOfflineEvidence(
 
     const db = await openDb();
     let file: File;
-    let metadata: { description?: string | null };
+    let metadata: { description?: string | null; context?: AuditEvidenceContext | null };
     try {
       const key = await keyFor(db);
-      metadata = await decryptJson<{ description?: string | null }>(key, row.metadataIv, row.metadataCiphertext);
+      metadata = await decryptJson<{ description?: string | null; context?: AuditEvidenceContext | null }>(key, row.metadataIv, row.metadataCiphertext);
       file = await decryptFile(key, row);
     } catch (error) {
       await updateState(row, "CORRUPT", error instanceof Error ? error.message : "Local evidence could not be decrypted.");
@@ -300,6 +301,7 @@ export async function replayExternalOfflineEvidence(
         file,
         metadata.description || null,
         row.id,
+        metadata.context || null,
       );
       if (result.artifact.sha256.toLowerCase() !== row.sha256.toLowerCase()) {
         await updateState(row, "CORRUPT", "Server evidence hash does not match the locally captured file.");
