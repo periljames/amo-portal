@@ -212,9 +212,10 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
   const sponsorSummary = page.locator(".qms-mission-detail__summary article").filter({ hasText: "Accountable Executive" });
   await expect(sponsorSummary).toBeVisible();
   await expect(sponsorSummary.getByText("Not assigned", { exact: true })).toBeVisible();
-  await expect(page.locator(".qms-mission-detail__gate")).toHaveCount(11);
-  await expect(page.getByText("Tooling and test equipment", { exact: true })).toBeVisible();
-  await expect(page.getByText("Training and competence evidence", { exact: true })).toBeVisible();
+  const gateRows = page.locator(".qms-mission-detail__gate");
+  await expect(gateRows).toHaveCount(11);
+  await expect(gateRows.filter({ hasText: "Tooling and test equipment" })).toHaveCount(1);
+  await expect(gateRows.filter({ hasText: "Training and competence evidence" })).toHaveCount(1);
 });
 
 test("Quality Manager can create a capability Mission and receives seeded hard gates", async ({ page }) => {
