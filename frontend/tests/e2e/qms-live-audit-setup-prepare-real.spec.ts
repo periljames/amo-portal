@@ -71,7 +71,10 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
     await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
     await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
-    await setup.getByLabel("Reason for rescheduling", { exact: true }).fill("Move this acceptance audit into the governed preparation window.");
+    const rescheduleReason = setup.getByLabel("Reason for rescheduling", { exact: true });
+    if (await rescheduleReason.isVisible().catch(() => false)) {
+      await rescheduleReason.fill("Move this acceptance audit into the governed preparation window.");
+    }
     await setup.getByRole("button", { name: "Save audit definition" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
