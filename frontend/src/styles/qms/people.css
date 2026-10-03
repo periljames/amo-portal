@@ -679,8 +679,8 @@
 
 .qms-authz-modal {
   position: fixed;
-  inset: 0;
-  width: auto;
+  inset: 0 auto 0 0;
+  width: 100%;
   box-sizing: border-box;
   z-index: 1350;
   display: flex;
