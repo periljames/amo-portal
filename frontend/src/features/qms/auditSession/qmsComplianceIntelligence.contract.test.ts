@@ -110,3 +110,15 @@ describe("QMS governed lifecycle frontend contract", () => {
     expect(followUp).toContain("qms-followup-milestones");
   });
 });
+
+
+describe("QMS external-auditor offline evidence contract", () => {
+  it("keeps encrypted evidence queue reachable while offline", () => {
+    const external = source("./ExternalAuditorFieldworkWorkspace.tsx");
+
+    expect(external).toContain("encrypted offline queue");
+    expect(external).toContain("Queue governed evidence");
+    expect(external).toContain("enqueueExternalOfflineEvidence");
+    expect(external).not.toContain("Online upload only");
+  });
+});
