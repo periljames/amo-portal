@@ -7,7 +7,7 @@ import {
   type ExternalAuditorFieldworkModel,
   type ExternalChecklistResponseOption,
 } from "../../../services/qmsAuditExternalAccess";
-import { uploadExternalAuditorEvidence } from "../../../services/qmsAuditEvidence";
+import { createEvidenceMutationId, uploadExternalAuditorEvidence, type AuditEvidenceContext } from "../../../services/qmsAuditEvidence";
 import {
   buildExternalAuditorMutation,
   commitExternalAuditorMutation,
@@ -107,6 +107,14 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
   const [evidence, setEvidence] = useState<Record<string, string>>({});
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceDescription, setEvidenceDescription] = useState("");
+  const [evidenceContext, setEvidenceContext] = useState({
+    locationRef: "",
+    personRef: "",
+    facilityRef: "",
+    assetRef: "",
+    toolRef: "",
+    componentRef: "",
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -281,13 +289,34 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
     }
   };
 
+  const capturedEvidenceContext = (): AuditEvidenceContext => ({
+    location_ref: evidenceContext.locationRef.trim() || undefined,
+    person_ref: evidenceContext.personRef.trim() || undefined,
+    facility_ref: evidenceContext.facilityRef.trim() || undefined,
+    asset_ref: evidenceContext.assetRef.trim() || undefined,
+    tool_ref: evidenceContext.toolRef.trim() || undefined,
+    component_ref: evidenceContext.componentRef.trim() || undefined,
+  });
+
+  const resetEvidenceCapture = () => {
+    setEvidenceFile(null);
+    setEvidenceDescription("");
+    setEvidenceContext({
+      locationRef: "",
+      personRef: "",
+      facilityRef: "",
+      assetRef: "",
+      toolRef: "",
+      componentRef: "",
+    });
+  };
+
   const uploadEvidence = async () => {
     if (!model || !model.can_create_evidence || !selected || !evidenceFile || uploading) return;
     setUploading(true); setError(null); setNotice(null);
     const queueLocal = async () => {
-      await enqueueExternalOfflineEvidence(model, selected, evidenceFile, evidenceDescription);
-      setEvidenceFile(null);
-      setEvidenceDescription("");
+      await enqueueExternalOfflineEvidence(model, selected, evidenceFile, evidenceDescription, capturedEvidenceContext());
+      resetEvidenceCapture();
       await updatePendingCount(model);
       setNotice("Evidence saved encrypted on this device. No guest credential or CSRF token was stored; upload will revalidate the active external-auditor session.");
     };
@@ -304,8 +333,8 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
       }
       const current = fresh.items.find((item) => item.checklist_item_id === selected.checklist_item_id);
       if (!current) throw new Error("The selected checklist item is no longer assigned to this external auditor.");
-      const result = await uploadExternalAuditorEvidence(fresh, current, evidenceFile, evidenceDescription);
-      setEvidenceFile(null); setEvidenceDescription("");
+      const result = await uploadExternalAuditorEvidence(fresh, current, evidenceFile, evidenceDescription, createEvidenceMutationId(), capturedEvidenceContext());
+      resetEvidenceCapture();
       setNotice(`Governed evidence uploaded · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await load();
     } catch (cause) {
@@ -417,7 +446,15 @@ const ExternalAuditorFieldworkWorkspace: React.FC = () => {
               <header><FileUp size={15} /><div><strong>Governed evidence files</strong><small>Online upload or encrypted offline queue · participant attribution retained</small></div></header>
               {selectedGovernedEvidence.length ? <ul>{selectedGovernedEvidence.map((artifact) => <li key={artifact.artifactId}><b>{artifact.filename}</b><small>{artifact.sizeBytes ? `${Math.ceil(artifact.sizeBytes / 1024)} KB` : "Governed artifact"}</small></li>)}</ul> : <p>No governed file has been attached by this external auditor yet.</p>}
               <label><span>File</span><input type="file" accept={EVIDENCE_ACCEPT} disabled={uploading} onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} /></label>
-              <label><span>Evidence context</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="What this evidence demonstrates" /></label>
+              <label><span>What this demonstrates</span><input value={evidenceDescription} maxLength={4000} onChange={(event) => setEvidenceDescription(event.target.value)} placeholder="Objective evidence observed or reviewed" /></label>
+              <div className="qms-external-auditor-fieldwork__evidence-context" aria-label="Structured evidence context">
+                <label><span>Location</span><input value={evidenceContext.locationRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, locationRef: event.target.value }))} placeholder="Base / line / station" /></label>
+                <label><span>Person</span><input value={evidenceContext.personRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, personRef: event.target.value }))} placeholder="Name or personnel ID" /></label>
+                <label><span>Facility</span><input value={evidenceContext.facilityRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, facilityRef: event.target.value }))} placeholder="Hangar / workshop / store" /></label>
+                <label><span>Asset</span><input value={evidenceContext.assetRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, assetRef: event.target.value }))} placeholder="Aircraft / equipment / asset" /></label>
+                <label><span>Tool</span><input value={evidenceContext.toolRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, toolRef: event.target.value }))} placeholder="Tool or calibration ID" /></label>
+                <label><span>Component</span><input value={evidenceContext.componentRef} maxLength={255} onChange={(event) => setEvidenceContext((current) => ({ ...current, componentRef: event.target.value }))} placeholder="P/N, S/N or component ref" /></label>
+              </div>
               <button type="button" disabled={!evidenceFile || uploading} onClick={() => void uploadEvidence()}><FileUp size={15} /> {uploading ? "Saving…" : typeof navigator !== "undefined" && !navigator.onLine ? "Queue governed evidence" : "Attach governed evidence"}</button>
               {typeof navigator !== "undefined" && !navigator.onLine ? <small>The file will be encrypted on this device and uploaded only after the active external-auditor session is revalidated online.</small> : null}
             </section> : <div className="qms-external-auditor-fieldwork__blocker"><ShieldAlert size={15} /><span>This invitation does not permit governed evidence upload.</span></div>}
