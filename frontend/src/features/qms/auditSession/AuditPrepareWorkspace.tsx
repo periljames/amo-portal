@@ -28,6 +28,7 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  getChecklistBinding,
   listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
@@ -283,12 +284,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.cancelQueries({ queryKey: bindingQueryKey }),
       queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
     ]);
-    // The dedicated binding endpoint is the canonical source used by the backend
-    // fieldwork/preparation issue path. Do not gate on the aggregate context projection.
-    const confirmation = await listChecklistBindings(amoCode, auditId);
-    const confirmed = Boolean(confirmation.items.some((item) => item.id === binding.id));
-    if (!confirmed) return false;
-    queryClient.setQueryData(bindingQueryKey, confirmation);
+    // Confirm the exact immutable row directly so authority checks do not depend
+    // on list pagination or payload size.
+    const confirmation = await getChecklistBinding(amoCode, auditId, binding.id);
+    if (confirmation.id !== binding.id) return false;
+    await queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" });
 
     // Keep the aggregate preparation projection synchronized as a secondary read model.
     // Its failure or lag cannot erase a binding that the canonical binding table confirms.
@@ -612,7 +612,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const prepRevision = context.controlled_preparation?.latest_revision;
   const bindings = checklistBindingsQuery.data?.items || [];
-  const checklistBindings = bindings.length;
+  const checklistBindings = checklistBindingsQuery.data?.total ?? bindings.length;
   const readinessWarning = readiness.percent != null && readiness.percent < 100;
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
