@@ -203,7 +203,7 @@ const PublicAuditAccessPage: React.FC = () => {
     try {
       await acknowledgeGuestFinding(findingId);
       await load(null);
-      setNotice("Finding receipt recorded. Receipt acknowledged. This does not waive response, review or challenge rights.");
+      setNotice("Finding receipt recorded. Acknowledged. This does not waive response, review or challenge rights.");
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Finding acknowledgement failed."); }
     finally { setActionId(null); }
