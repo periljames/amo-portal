@@ -3,6 +3,9 @@ name: QMS Live Audit CI
 on:
   pull_request:
     paths:
+      - "backend/Dockerfile"
+      - "backend/requirements.txt"
+      - "backend/amodb/jobs/manual_revision_jobs.py"
       - "backend/amodb/alembic/versions/quality_260816_*.py"
       - "backend/amodb/alembic/versions/quality_260817_*.py"
       - "backend/amodb/apps/quality/audit_session_*.py"
@@ -148,6 +151,30 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_closing_assurance_contract.py amodb/apps/quality/tests/test_audit_archive_governance_contract.py
       - name: Prove authoritative workflow contract remains green
         run: pytest -q amodb/apps/quality/tests/test_audit_workflow_contract.py
+
+  ocr-runtime-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - name: Build production backend OCR image
+        run: docker build -f backend/Dockerfile -t amo-backend-ocr-smoke .
+      - name: Prove Tesseract OCR inside production image
+        run: >-
+          docker run --rm --entrypoint python amo-backend-ocr-smoke -c
+          "import pytesseract;
+          from PIL import Image, ImageDraw, ImageFont;
+          version = pytesseract.get_tesseract_version();
+          image = Image.new('RGB', (1000, 180), 'white');
+          draw = ImageDraw.Draw(image);
+          font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 48);
+          draw.text((40, 55), 'AMO PORTAL OCR CONTROLLED DOCUMENT', fill='black', font=font);
+          extracted = pytesseract.image_to_string(image).upper();
+          required = ('AMO', 'PORTAL', 'OCR', 'CONTROLLED');
+          missing = [token for token in required if token not in extracted];
+          assert not missing, f'OCR smoke missed {missing}: {extracted!r}';
+          print(f'tesseract={version}; extracted={extracted.strip()}')"
 
   postgres-contract:
     runs-on: ubuntu-24.04
