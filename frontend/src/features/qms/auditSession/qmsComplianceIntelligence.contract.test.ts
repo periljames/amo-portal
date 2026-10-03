@@ -90,3 +90,23 @@ describe("QMS compliance intelligence frontend contract", () => {
     expect(live).toContain("FIELD_VERIFICATION_REQUIRED");
   });
 });
+
+
+describe("QMS governed lifecycle frontend contract", () => {
+  it("freezes checklist and applicability preparation inputs once fieldwork opens", () => {
+    const prepare = source("./AuditPrepareWorkspace.tsx");
+
+    expect(prepare).toContain("canEditFrozenPreparation");
+    expect(prepare).toContain("Applicability context is frozen for the active fieldwork package");
+    expect(prepare).toContain("issued checklist baseline is locked while fieldwork is active");
+  });
+
+  it("does not present archive as available before governed follow-up is complete", () => {
+    const followUp = source("./AuditFollowUpWorkspace.tsx");
+
+    expect(followUp).toContain('closure.follow_up_status === "COMPLETE"');
+    expect(followUp).toContain("Archive locked");
+    expect(followUp).toContain("COMPLETE_MILESTONE_STATUSES");
+    expect(followUp).toContain("qms-followup-milestones");
+  });
+});
