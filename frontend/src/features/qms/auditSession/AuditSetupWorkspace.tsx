@@ -1550,19 +1550,21 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 Notify auditee
               </label>
             </div>
-            {canManage && definitionScheduleChanged ? (
+            {canManage ? (
               <label className="qms-audit-setup-stage__reschedule-reason">
                 <span>Reason for rescheduling</span>
                 <textarea
                   rows={2}
                   value={rescheduleReason}
                   onChange={(event) => setRescheduleReason(event.target.value)}
-                  placeholder="Why the audit date or time is changing"
+                  placeholder={definitionScheduleChanged ? "Why the audit date or time is changing" : "Add a reason when changing the audit schedule"}
                 />
                 <small>
-                  Required for the permanent audit history. This reason will also be suggested when a revised notice is required.
+                  {definitionScheduleChanged
+                    ? "Required for the permanent audit history. This reason will also be suggested when a revised notice is required."
+                    : "Recorded only when the planned audit date or time changes."}
                 </small>
-                {rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
+                {definitionScheduleChanged && rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
               </label>
             ) : null}
             {canManage ? (
