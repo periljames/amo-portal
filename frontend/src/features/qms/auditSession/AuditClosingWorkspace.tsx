@@ -354,12 +354,12 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
         <section className={closingCardClass(2)} aria-current={activeClosingStep === 2 ? "step" : undefined}>
           <header><FileSignature size={19} /><div><h3>2 · Auditee closing-meeting acknowledgement</h3><small>Ask the auditee to review this draft before approval.</small></div></header>
-          {lockedReason(2) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(2)}</div> : null}
+          {lockedReason(2) ? <div className="qms-audit-closing__locked">{lockedReason(2)}</div> : null}
           {!currentRevision ? <p className="qms-audit-closing__empty">Adopt a governed draft before requesting acknowledgement.</p> : <><dl className="qms-audit-closing__artifact"><div><dt>Revision</dt><dd>R{currentRevision.revision_no} · {currentRevision.status.replaceAll("_", " ")}</dd></div></dl>{currentAcknowledgement ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /><span><strong>{currentAcknowledgement.acknowledgement_status.replaceAll("_", " ")}</strong>{currentAcknowledgement.comments ? ` · ${currentAcknowledgement.comments}` : ""}</span></div> : currentRevision.status === "DRAFT" ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> The auditee workspace must record acknowledgement, comments, or declined acknowledgement against this exact draft before it can enter review when an auditee participant is assigned.</div> : <p className="qms-audit-closing__empty">No closing acknowledgement is attached to this revision.</p>}</>}
         </section>
         <section className={closingCardClass(3)} aria-current={activeClosingStep === 3 ? "step" : undefined}>
           <header><Stamp size={19} /><div><h3>3 · Review and Quality approval</h3><small>Approval does not issue the report. It creates the exact approved state that must then be authorized with a passkey.</small></div></header>
-          {lockedReason(3) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(3)}</div> : null}
+          {lockedReason(3) ? <div className="qms-audit-closing__locked">{lockedReason(3)}</div> : null}
           {!activeRevision && issuedRevision ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> Report R{issuedRevision.revision_no} is ISSUED.</div> : null}
           {activeRevision?.status === "DRAFT" ? (
             <div className="qms-audit-closing__actions">
@@ -371,7 +371,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
         <section className={closingCardClass(4)} aria-current={activeClosingStep === 4 ? "step" : undefined}>
           <header><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision. Password re-auth is not treated as equivalent evidence.</small></div></header>
-          {lockedReason(4) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(4)}</div> : null}
+          {lockedReason(4) ? <div className="qms-audit-closing__locked">{lockedReason(4)}</div> : null}
           {!isWebAuthnSupported() || !isSecureContextAvailable() ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> This browser/origin does not currently expose a secure WebAuthn context.</div> : null}
           {!passkeys.length ? <div className="qms-audit-closing__passkey-setup"><label><span>Passkey label</span><input value={passkeyNickname} onChange={(event) => setPasskeyNickname(event.target.value)} maxLength={80} /></label><button type="button" disabled={!canGovern || ceremonyBusy !== null} onClick={() => void registerPasskey()}><KeyRound size={15} /> {ceremonyBusy === "register" ? "Registering…" : "Register passkey"}</button></div> : <p>{passkeys.length} active passkey{passkeys.length === 1 ? "" : "s"} registered for this Quality user.</p>}
           {activeRevision?.status === "APPROVED" && !currentSignature ? <div className="qms-audit-closing__passkey-sign"><label><span>Approval reason</span><textarea rows={3} value={signReason} onChange={(event) => setSignReason(event.target.value)} /></label><button type="button" className="is-primary" disabled={!canSign || !stepAllowsActions(4) || !passkeys.length || ceremonyBusy !== null || signReason.trim().length < 8} onClick={() => void signWithPasskey()}><Fingerprint size={15} /> {ceremonyBusy === "sign" ? "Verifying passkey…" : "Approve exact report with passkey"}</button></div> : null}
@@ -379,7 +379,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
         <section className={closingCardClass(5)} aria-current={activeClosingStep === 5 ? "step" : undefined}>
           <header><FileCheck2 size={19} /><div><h3>5 · Issue immutable report</h3><small>The server refuses ISSUE unless current passkey evidence matches the exact approved revision and is newer than the approval state.</small></div></header>
-          {lockedReason(5) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(5)}</div> : null}
+          {lockedReason(5) ? <div className="qms-audit-closing__locked">{lockedReason(5)}</div> : null}
           {activeRevision?.status === "APPROVED" ? (
             <div className="qms-audit-closing__actions">
               <button type="button" className="is-primary" disabled={!canIssue || !stepAllowsActions(5) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "ISSUE" })}>Issue passkey-approved report</button>
@@ -389,7 +389,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
         <section className={closingCardClass(6)} aria-current={activeClosingStep === 6 ? "step" : undefined}>
           <header><ShieldAlert size={19} /><div><h3>6 · Close execution without erasing follow-up</h3><small>Execution closure and CAR/CAPA completion are separate controls.</small></div></header>
-          {lockedReason(6) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(6)}</div> : null}
+          {lockedReason(6) ? <div className="qms-audit-closing__locked">{lockedReason(6)}</div> : null}
           {closure?.execution_readiness?.blockers?.length ? <ul>{closure.execution_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : null}
           <div className="qms-audit-closing__actions">
             <button type="button" className={canExecutionClose ? "is-primary" : undefined} disabled={!canExecutionClose || !stepAllowsActions(6) || executionCloseMutation.isPending} onClick={() => executionCloseMutation.mutate()}>{executionCloseMutation.isPending ? "Closing execution…" : closure?.execution_status === "CLOSED" ? "Execution closed" : "Close audit execution"}</button>
@@ -397,7 +397,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
         <section className={closingCardClass(7)} aria-current={activeClosingStep === 7 ? "step" : undefined}>
           <header><Stamp size={19} /><div><h3>7 · Policy-controlled assurance output and verification</h3><small>Certificate/approval output is generated only when policy requires it. Verification links are purpose-bound and time-limited.</small></div></header>
-          {lockedReason(7) ? <div className="qms-audit-closing__locked" role="status">{lockedReason(7)}</div> : null}
+          {lockedReason(7) ? <div className="qms-audit-closing__locked">{lockedReason(7)}</div> : null}
           <p>Output policy: <strong>{policy?.artifact_policy || "Not configured"}</strong>{policy?.rationale ? ` · ${policy.rationale}` : ""}</p>
           <div className="qms-audit-closing__actions">
             {canGenerateAssurance && currentSignature ? <button type="button" className="is-primary" disabled={!stepAllowsActions(7) || assuranceArtifactMutation.isPending} onClick={() => assuranceArtifactMutation.mutate(currentSignature.id)}>{assuranceArtifactMutation.isPending ? "Generating…" : `Generate ${(policy?.artifact_policy || "assurance artifact").replaceAll("_", " ")}`}</button> : null}
