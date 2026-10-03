@@ -57,6 +57,19 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
 
+  useEffect(() => {
+    setFile(null);
+    setDescription("");
+    setContextDraft({
+      locationRef: "",
+      personRef: "",
+      facilityRef: "",
+      assetRef: "",
+      toolRef: "",
+      componentRef: "",
+    });
+  }, [item.checklist_item_id]);
+
   const evidenceQuery = useQuery({
     queryKey: ["qms", "audit-evidence", amoCode, auditId, item.checklist_item_id],
     queryFn: async ({ signal }) => {
