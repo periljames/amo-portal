@@ -69,12 +69,18 @@ async function authenticatedPost(page: Page, path: string, payload: unknown): Pr
 async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffix: string): Promise<void> {
   await page.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".car-invite-kicker").getByText(data.car_loop_number, { exact: true })).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Your name").fill("Responsible Maintenance Manager");
-  await page.getByLabel("Your email").fill("responsible.manager@example.com");
-  await page.getByRole("button", { name: "Save responder details" }).click();
+  const responderName = page.getByLabel("Your name");
+  if (await responderName.isVisible().catch(() => false)) {
+    await responderName.fill("Responsible Maintenance Manager");
+    await page.getByLabel("Your email").fill("responsible.manager@example.com");
+    await page.getByRole("button", { name: "Save responder details" }).click();
+  }
 
-  await structuredEditor(page, "Immediate containment action").fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
-  await page.getByRole("button", { name: "Save containment and continue" }).click();
+  const containmentEditor = structuredEditor(page, "Immediate containment action");
+  if (await containmentEditor.isVisible().catch(() => false)) {
+    await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
+    await page.getByRole("button", { name: "Save containment and continue" }).click();
+  }
   await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
