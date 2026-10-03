@@ -72,7 +72,7 @@ export function uploadInternalAuditEvidence(
   auditId: string,
   checklistItemId: string,
   file: File,
-  options: { baseVersion: number; clientMutationId: string; description?: string | null; findingId?: string | null; evidenceRequestId?: string | null; capturedAt?: string; deviceId?: string; context?: AuditEvidenceContext },
+  options: { baseVersion: number; clientMutationId: string; description?: string | null; findingId?: string | null; evidenceRequestId?: string | null; capturedAt?: string; deviceId?: string; context?: AuditEvidenceContext | null },
 ) {
   const form = new FormData();
   form.append("file", file);
