@@ -55,6 +55,8 @@ function carIsClosed(car: AuditCar): boolean {
   return Boolean(car.closed_at) || ["CLOSED", "VERIFIED", "CANCELLED"].includes(car.status.toUpperCase());
 }
 
+const COMPLETE_MILESTONE_STATUSES = new Set(["ACCEPTED", "COMPLETED", "WAIVED"]);
+
 function carIsOverdue(car: AuditCar): boolean {
   if (carIsClosed(car)) return false;
   if (typeof car.days_remaining_past === "number" && car.days_remaining_past > 0) return true;
@@ -196,7 +198,9 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <div><span>Follow-up</span><h2>Corrective action control</h2><p>Execution closure does not close corrective action. Track CAR ownership, milestones, extensions, escalation and effectiveness here.</p></div>
         <div className="qms-occurrence-stage__header-actions">
           <span>{closure.follow_up_status}</span>
-          <Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "archive")}>Open Archive</Link>
+          {closure.follow_up_status === "COMPLETE"
+            ? <Link className="qms-occurrence-stage__next" to={auditSessionPath(amoCode, auditKey, "archive")}>Open Archive</Link>
+            : <span className="qms-occurrence-stage__next is-disabled" aria-disabled="true" title="Complete governed follow-up before archive">Archive locked</span>}
           <button type="button" onClick={() => void refresh()}><RefreshCw size={15} /> Refresh</button>
         </div>
       </header>
@@ -221,7 +225,8 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {selectedCar ? <article className="qms-occurrence-stage__card">
             <header><ShieldAlert size={18} /><div><h3>{selectedCar.car_number} · control state</h3><small>{selectedCar.summary || selectedCar.title}</small></div></header>
             {selectedControlQuery.isLoading ? <p>Loading selected CAR control loop…</p> : selectedControlQuery.isError ? <div role="alert">{selectedControlQuery.error instanceof Error ? selectedControlQuery.error.message : "CAR control loop unavailable."}</div> : selectedControl ? <>
-              <div className="qms-occurrence-stage__metrics is-compact"><div><strong>{selectedControl.health.state}</strong><span>Health</span></div><div><strong>{selectedControl.health.risk_score}</strong><span>Risk score</span></div><div><strong>{selectedControl.milestones.filter((row) => row.status === "COMPLETED").length}/{selectedControl.milestones.length}</strong><span>Milestones complete</span></div><div><strong>{selectedControl.deadline_changes.filter((row) => row.status === "PENDING").length}</strong><span>Extension decisions</span></div></div>
+              <div className="qms-occurrence-stage__metrics is-compact"><div><strong>{selectedControl.health.state}</strong><span>Health</span></div><div><strong>{selectedControl.health.risk_score}</strong><span>Risk score</span></div><div><strong>{selectedControl.milestones.filter((row) => COMPLETE_MILESTONE_STATUSES.has(row.status)).length}/{selectedControl.milestones.length}</strong><span>Milestones complete</span></div><div><strong>{selectedControl.deadline_changes.filter((row) => row.status === "PENDING").length}</strong><span>Extension decisions</span></div></div>
+              <ol className="qms-followup-milestones" aria-label="Corrective action milestones">{[...selectedControl.milestones].sort((left, right) => left.phase_order - right.phase_order).map((row) => <li key={row.id} data-status={row.status}><span>{row.phase_order}</span><div><strong>{row.title}</strong><small>{row.status.replaceAll("_", " ")} · due {row.current_due_date || "not set"}{row.evidence_ref ? " · evidence linked" : ""}</small></div></li>)}</ol>
               <p><strong>Next required action:</strong> {selectedControl.health.next_action}</p>
               {selectedControl.closure_readiness.blockers.length ? <ul>{selectedControl.closure_readiness.blockers.map((blocker, index) => <li key={`${blocker.code}-${index}`}>{blocker.message}</li>)}</ul> : <p className="is-ready"><CheckCircle2 size={14} /> CAR closure gates are satisfied.</p>}
               <Link className="qms-occurrence-stage__next" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/${encodeURIComponent(selectedCar.id)}`}><ExternalLink size={15} /> {canManageCarActions ? "Open full CAR control loop" : "View CAR control loop"}</Link>
