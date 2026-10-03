@@ -14,6 +14,7 @@ from amodb.database import get_read_db, get_write_db
 from . import models
 from .assurance_case_models import QualityAssuranceCase, QualityEffectivenessPlan
 from .audit_source_link_models import QualityAuditSourceLink
+from .car_control_loop_models import QualityCARControlProfile, QualityCARMilestone
 from .effectiveness_response_models import QualityEffectivenessResponseAction, QualityEffectivenessResponseEvent
 from .planner_assignment_guard_router import create_guarded_planner_audit_schedule
 from .planner_schedule_router import PlannerAuditScheduleCreate
@@ -320,6 +321,59 @@ def _reopen_car_for_ineffective_action(
             cap.verified_by_user_id = None
             cap.updated_by_user_id = ctx.user_id
 
+    reset_milestones: list[dict[str, str]] = []
+    profile = (
+        db.query(QualityCARControlProfile)
+        .filter(
+            QualityCARControlProfile.amo_id == ctx.amo_id,
+            QualityCARControlProfile.car_id == car.id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if profile is not None:
+        milestones = (
+            db.query(QualityCARMilestone)
+            .filter(
+                QualityCARMilestone.amo_id == ctx.amo_id,
+                QualityCARMilestone.car_id == car.id,
+                QualityCARMilestone.milestone_key.in_(
+                    ("IMPLEMENTATION_COMPLETE", "EVIDENCE_COMPLETE", "EFFECTIVENESS_REVIEW")
+                ),
+            )
+            .order_by(QualityCARMilestone.phase_order.asc())
+            .with_for_update()
+            .all()
+        )
+        reset_status = {
+            "IMPLEMENTATION_COMPLETE": "IN_PROGRESS",
+            "EVIDENCE_COMPLETE": "PLANNED",
+            "EFFECTIVENESS_REVIEW": "PLANNED",
+        }
+        for milestone in milestones:
+            prior_milestone_status = milestone.status
+            milestone.status = reset_status[milestone.milestone_key]
+            milestone.evidence_ref = None
+            milestone.completed_by_user_id = None
+            milestone.completed_at = None
+            milestone.reviewed_by_user_id = None
+            milestone.reviewed_at = None
+            milestone.notes = (
+                f"{milestone.notes.strip()}\n\n{note}"
+                if milestone.notes and milestone.notes.strip()
+                else note
+            )
+            milestone.updated_at = _utcnow()
+            reset_milestones.append(
+                {
+                    "milestone_key": milestone.milestone_key,
+                    "prior_status": prior_milestone_status,
+                    "status": milestone.status,
+                }
+            )
+        profile.updated_by_user_id = ctx.user_id
+        profile.updated_at = _utcnow()
+
     db.add(models.CARActionLog(
         car_id=car.id,
         action_type=models.CARActionType.STATUS_CHANGE,
@@ -353,6 +407,7 @@ def _reopen_car_for_ineffective_action(
         "prior_status": prior_status,
         "status": car.status.value,
         "capa_status": car.capa_status,
+        "reset_milestones": reset_milestones,
     }
 
 
