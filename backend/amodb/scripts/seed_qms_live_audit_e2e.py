@@ -45,6 +45,8 @@ from amodb.apps.quality.audit_occurrence_completion_models import (  # noqa: E40
     QualityAuditClosingNarrative,
     QualityAuditMeeting,
 )
+from amodb.apps.quality.audit_preparation_models import QualityAuditPreparationRevision  # noqa: E402
+from amodb.apps.quality.audit_preparation_router import _capture_sources  # noqa: E402
 from amodb.apps.quality.enums import (  # noqa: E402
     CARPriority,
     CARProgram,
@@ -147,6 +149,28 @@ def _quality_user(
         must_change_password=False,
         password_changed_at=datetime.now(timezone.utc),
     )
+
+
+def _issue_preparation(db, *, audit: quality_models.QMSAudit, user_id: str, now: datetime) -> None:
+    captured = _capture_sources(db, amo_id=audit.amo_id, audit=audit)
+    db.add(QualityAuditPreparationRevision(
+        amo_id=audit.amo_id,
+        audit_id=audit.id,
+        revision_no=1,
+        status="ISSUED",
+        preparation_scope="Deterministic browser-acceptance preparation snapshot.",
+        audit_snapshot=captured["audit_snapshot"],
+        checklist_snapshot=captured["checklist_snapshot"],
+        document_request_snapshot=captured["document_request_snapshot"],
+        source_references=captured["source_references"],
+        source_fingerprint=captured["source_fingerprint"],
+        change_reason="Seed the issued preparation authority required by real-browser fieldwork acceptance.",
+        issued_by_user_id=user_id,
+        issued_at=now,
+        created_by_user_id=user_id,
+        created_at=now,
+    ))
+    db.flush()
 
 
 def seed() -> None:
@@ -374,6 +398,8 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=audit, user_id=user_a.id, now=now)
 
         realtime_audit = quality_models.QMSAudit(
             id=REALTIME_AUDIT_ID,
@@ -424,13 +450,15 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=realtime_audit, user_id=user_a.id, now=now)
 
         ceremony_audit = quality_models.QMSAudit(
             id=CEREMONY_AUDIT_ID,
             amo_id=amo.id,
             domain=QMSDomain.AMO,
             kind=QMSAuditKind.INTERNAL,
-            status=QMSAuditStatus.CLOSED,
+            status=QMSAuditStatus.IN_PROGRESS,
             audit_ref=CEREMONY_AUDIT_REF,
             reference_family="QAR",
             unit_code="MO",
