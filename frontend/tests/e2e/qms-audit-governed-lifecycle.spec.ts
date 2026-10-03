@@ -183,6 +183,21 @@ async function prepareLifecycle(page: Page): Promise<void> {
     });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/applicability-context`) && method === "GET") return respond(route, { items: [], available_rules: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-readiness`) && method === "GET") return respond(route, {
+      issue_ready: false,
+      fieldwork_ready: false,
+      checks: [],
+      issue_blockers: [],
+      fieldwork_blockers: [],
+      complete_count: 0,
+      total_count: 0,
+      percent: 0,
+      source_fingerprint: "b".repeat(64),
+      issued_preparation_revision_id: null,
+      issued_preparation_revision_no: null,
+    });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/meetings`) && method === "GET") return respond(route, { items: [] });
 
     if (path.endsWith("/quality/audit-notice-policies") && method === "GET") return respond(route, { items: [policy] });
