@@ -89,6 +89,7 @@ def test_assessment_accepts_separate_documentary_implementation_and_field_states
         "/api/maintenance/AMO/quality/audits/a/checklist-items/i/fieldwork-mutations",
         "/api/maintenance/AMO/quality/audits/a/checklist-items/i/fieldwork-findings",
         "/api/maintenance/AMO/quality/audits/a/checklist-items/i/evidence-candidates",
+        "/api/maintenance/AMO/quality/audits/a/applicability-context",
     ],
 )
 def test_all_checklist_execution_route_families_are_promoted(path: str) -> None:
