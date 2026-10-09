@@ -364,7 +364,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [amoCode, auditId, fieldworkEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
-  const itemNumberById = useMemo(() => new Map(items.map((item, index) => [item.checklist_item_id, index + 1])), [items]);
+  const itemNumberById = useMemo(() => new Map<string, number>(items.map((item, index): [string, number] => [item.checklist_item_id, index + 1])), [items]);
   const sourceContextByItemId = useMemo(() => {
     const map = new Map<string, LiveChecklistSourceContext>();
     for (const binding of bindingsQuery.data?.items || []) {
