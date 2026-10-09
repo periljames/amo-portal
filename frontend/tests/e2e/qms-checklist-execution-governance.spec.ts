@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 
 const AUDIT_ID = "22222222-2222-4222-8222-222222222222";
 const ITEM_ID = "33333333-3333-4333-8333-333333333333";
@@ -40,12 +41,19 @@ async function prepare(page: Page, state: State): Promise<void> {
     created_at: "2026-08-01T08:00:00Z", updated_at: "2026-08-20T09:00:00Z",
   };
   const evidenceReferences = ["DMS:AUTH-REGISTER@REV-7", { source_type: "TRAINING_RECORD", source_id: "training-44" }];
+  const assessment = () => ({
+    applicability: "UNVERIFIED", applicability_reason: null, applicability_basis: [],
+    documentary_status: "UNVERIFIED", implementation_status: "UNVERIFIED", field_verification_status: "UNVERIFIED",
+    evidence_ids: [], document_revision_ids: [], regulation_refs: [], procedure_refs: [],
+    conflicts: [], missing_evidence: [], fieldwork_requirements: [], ai_analysis: null,
+    human_decision: state.response, human_override_reason: null,
+  });
   const governanceRow = () => ({
     checklist_item_id: ITEM_ID, audit_id: AUDIT_ID, section: "Personnel", checklist_ref: "TP-01", requirement_ref: "KCAR-TP-01",
     prompt: "Verify authorization and competence records for sampled certifying staff.",
     legacy_response_status: state.response === "COMPLIANT" ? "CONFORMING" : "PENDING",
     canonical_response_status: state.response, objective_evidence: "Training matrix and authorization records sampled.", finding_id: null,
-    auditor_notes: state.notes, evidence_references: evidenceReferences, governance_id: state.response === "COMPLIANT" ? "gov-1" : null,
+    auditor_notes: state.notes, response_value: state.response, assessment: assessment(), evidence_references: evidenceReferences, governance_id: state.response === "COMPLIANT" ? "gov-1" : null,
     entity_version: state.version, updated_by_user_id: "quality-user-a", updated_at: "2026-08-20T09:00:00Z", events: [],
   });
   const binding = {
@@ -85,6 +93,15 @@ async function prepare(page: Page, state: State): Promise<void> {
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/presence`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/presence/heartbeat`) && method === "POST") return respond(route, { ok: true });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/findings`) && method === "GET") return respond(route, []);
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-finding-drafts`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-items/${ITEM_ID}/evidence-candidates`) && method === "GET") return respond(route, {
+      items: [], evidence_context: "PERSONNEL_AUTHORIZATION", retrieval_mode: "MOCKED_CURRENT_CONTROLLED_SOURCES",
+      limitations: [], conflicts: [],
+      applicability_recommendation: { status: "UNVERIFIED", reason: "Auditor must verify applicable scope.", basis: [] },
+      documentary_recommendation: "UNVERIFIED",
+      authority_policy: {},
+    });
+    if (path.includes(`/quality/audits/${AUDIT_ID}/evidence`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-items/${ITEM_ID}/fieldwork-mutations`) && method === "POST") {
       state.mutationBody = request.postDataJSON() as Record<string, unknown>;
       state.response = "COMPLIANT";
@@ -113,6 +130,19 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await expect(live).toBeVisible({ timeout: 30_000 });
   await expect(live.getByRole("heading", { name: "Verify authorization and competence records for sampled certifying staff." })).toBeVisible();
   await expect(live.getByText("NOT VERIFIED · v1")).toBeVisible();
+
+  // Evidence for review: actual Chromium screenshots of the committed React Fieldwork component
+  // under a deterministic governed audit fixture (not production/tenant data).
+  mkdirSync("test-results", { recursive: true });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.screenshot({ path: "test-results/fieldwork-desktop-proof.png", fullPage: true });
+  await live.locator("details.qms-live-audit-focus__compliance > summary").click();
+  await page.screenshot({ path: "test-results/fieldwork-compliance-expanded-proof.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await live.getByRole("button", { name: "Open question list" }).click();
+  await page.screenshot({ path: "test-results/fieldwork-mobile-proof.png", fullPage: true });
+  await live.getByRole("button", { name: "Close question list" }).click();
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await live.getByLabel("Auditor note").fill("Authorization and competence records were current for the sampled certifying staff member.");
   await live.getByRole("button", { name: "Compliant" }).click();
