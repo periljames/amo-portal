@@ -56,7 +56,7 @@ def test_public_audit_routes_are_mounted_at_the_single_quality_prefix() -> None:
     required = {
         ("/quality/audit-access/closing", "GET", "public_closing_context"),
         ("/quality/audit-access/closing/acknowledgements", "POST", "public_closing_acknowledgement"),
-        ("/quality/audit-access/presence/heartbeat", "POST", "heartbeat_public_audit_presence"),
+        ("/quality/audit-access/presence/heartbeat", "POST", "heartbeat_guest_audit_presence"),
         ("/quality/audit-access/collaboration", "GET", "get_public_occurrence_collaboration_scoped"),
     }
     for path, method, endpoint in required:
