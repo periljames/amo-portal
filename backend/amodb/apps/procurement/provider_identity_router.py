@@ -164,6 +164,21 @@ def _check_references(db: Session, tenant: str, supplier_id: int, kind: str,
             raise HTTPException(422, field + " must belong to this tenant/provider.")
     if values.get("parent_supplier_id") == supplier_id:
         raise HTTPException(422, "A provider cannot be its own parent.")
+    if kind == "relationships" and values.get("parent_supplier_id"):
+        cycle = db.execute(text("""WITH RECURSIVE ancestors(id) AS (
+            SELECT parent_supplier_id FROM external_provider_relationships
+                WHERE amo_id=:tenant AND supplier_id=:parent
+                  AND relationship_kind IN ('PARENT','FURTHER_SUBCONTRACTOR')
+            UNION
+            SELECT relation.parent_supplier_id
+            FROM external_provider_relationships relation
+            JOIN ancestors ON relation.supplier_id=ancestors.id
+                WHERE relation.amo_id=:tenant
+                  AND relation.relationship_kind IN ('PARENT','FURTHER_SUBCONTRACTOR')
+        ) SELECT 1 FROM ancestors WHERE id=:child LIMIT 1"""),
+        {"tenant":tenant,"parent":values["parent_supplier_id"],"child":supplier_id}).scalar()
+        if cycle:
+            raise HTTPException(409, "Provider relationship would introduce a subcontracting cycle.")
     if values.get("contract_id"):
         if not values.get("parent_supplier_id"):
             raise HTTPException(422, "Parent provider must accompany a contract link.")
