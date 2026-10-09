@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { apiRequest } from "../../services/apiClient";
+import { getCachedUser } from "../../services/auth";
 
-type Kind = "roles" | "sites" | "contacts" | "capabilities";
+type Kind = "roles" | "sites" | "contacts" | "capabilities" | "certificates" |
+  "relationships" | "account-links" | "scope-links" | "source-links";
 type RecordRow = { id: string; version: number; [key: string]: unknown };
 const FIELDS: Record<Kind, {key: string; label: string; required?: boolean}[]> = {
   roles: [{key:"role_code",label:"Role",required:true},{key:"notes",label:"Notes"}],
@@ -13,6 +15,28 @@ const FIELDS: Record<Kind, {key: string; label: string; required?: boolean}[]> =
                  {key:"site_id",label:"Site ID"},{key:"rating",label:"Rating"},
                  {key:"limitations",label:"Limitations"},{key:"regulatory_authority",label:"Authority"},
                  {key:"certificate_number",label:"Certificate number"},{key:"valid_until",label:"Valid until (YYYY-MM-DD)"}],
+  certificates:[{key:"certificate_type",label:"Certificate type",required:true},
+                {key:"certificate_number",label:"Approval number",required:true},
+                {key:"issuing_authority",label:"Authority"},{key:"jurisdiction",label:"Jurisdiction"},
+                {key:"approval_rating",label:"Ratings"},{key:"limitations",label:"Limitations"},
+                {key:"valid_from",label:"Valid from"},{key:"valid_until",label:"Valid until"},
+                {key:"evidence_id",label:"Governed evidence ID"}],
+  relationships:[{key:"parent_supplier_id",label:"Parent supplier ID",required:true},
+                 {key:"relationship_kind",label:"Relationship",required:true},
+                 {key:"contract_id",label:"Parent contract ID"},
+                 {key:"function_scope",label:"Contracted function",required:true},
+                 {key:"consent_evidence_id",label:"Written consent evidence ID"},
+                 {key:"consent_expires_on",label:"Consent expires"}],
+  "account-links":[{key:"user_id",label:"Tenant user ID",required:true},
+                   {key:"contact_id",label:"Provider contact ID"},
+                   {key:"requested_scopes",label:"Requested scope codes (comma separated)"}],
+  "scope-links":[{key:"approval_scope_id",label:"Quality approval scope ID",required:true},
+                 {key:"site_id",label:"Site ID"},
+                 {key:"contracted_function",label:"Contracted function"},
+                 {key:"service_category",label:"Service category"},
+                 {key:"product_family",label:"Product family"}],
+  "source-links":[{key:"source_system",label:"Source"},{key:"source_identifier",label:"Source identifier"},
+                  {key:"source_row",label:"Source row"},{key:"source_digest",label:"File digest"}],
 };
 const roleValues = ["SUPPLIER","VENDOR","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
                     "LABORATORY","CALIBRATION_PROVIDER","CONSULTANT","OTHER"];
@@ -21,6 +45,9 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
   amoCode:string; supplierId:number; onClose:()=>void;
 }) {
   const [kind,setKind]=useState<Kind>("roles");
+  const isQuality=getCachedUser()?.role==="QUALITY_MANAGER";
+  const canWrite=kind!=="source-links" && (!["relationships","account-links","scope-links"].includes(kind)||isQuality);
+  const [governanceReason,setGovernanceReason]=useState("");
   const [rows,setRows]=useState<RecordRow[]>([]);
   const [form,setForm]=useState<Record<string,string>>({});
   const [editing,setEditing]=useState<RecordRow|null>(null);
@@ -42,7 +69,11 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
   }
   async function submit(event:React.FormEvent<HTMLFormElement>){
     event.preventDefault();setBusy(true);setError("");
-    const fields=Object.fromEntries(Object.entries(form).filter(([,value])=>value.trim()!==""));
+    const fields:Record<string,unknown>=Object.fromEntries(Object.entries(form).filter(([,value])=>value.trim()!==""));
+    if(typeof fields.parent_supplier_id==="string")fields.parent_supplier_id=Number(fields.parent_supplier_id);
+    if(typeof fields.approval_scope_id==="string")fields.approval_scope_id=Number(fields.approval_scope_id);
+    if(typeof fields.requested_scopes==="string")fields.requested_scopes=fields.requested_scopes.split(",").map(v=>v.trim()).filter(Boolean);
+    if(typeof fields.is_primary==="string")fields.is_primary=fields.is_primary==="true";
     try{
       await apiRequest(editing?`${endpoint}/${encodeURIComponent(editing.id)}`:endpoint,{
         method:editing?"PATCH":"POST",
