@@ -45,6 +45,9 @@ def _create(name, *columns, extra=()):
 def upgrade():
     # Existing supplier IDs are globally primary keyed, but composite uniqueness
     # is needed to enforce tenant-matched references at the database boundary.
+    op.add_column("procurement_suppliers",
+                  sa.Column("external_import_pending_activation", sa.Boolean(),
+                            nullable=False, server_default=sa.false()))
     op.create_unique_constraint("uq_procurement_supplier_tenant_identity",
                                 "procurement_suppliers", ["amo_id", "id"])
     _create("external_provider_roles",
@@ -284,3 +287,4 @@ def downgrade():
     op.drop_constraint("uq_ext_qms_evidence_tenant_identity",
                        "quality_external_provider_evidence", type_="unique")
     op.drop_constraint("uq_procurement_supplier_tenant_identity", "procurement_suppliers", type_="unique")
+    op.drop_column("procurement_suppliers", "external_import_pending_activation")
