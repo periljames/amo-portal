@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from openpyxl import load_workbook
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as accounts
@@ -115,7 +116,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     try:
         db.execute(text("""INSERT INTO external_provider_import_batches
             (id, amo_id, filename, source_sha256, mapping_json, import_kind, source_sheet, created_by_user_id)
-            VALUES (:id, :amo, :filename, :digest, :mapping, :kind, :sheet, :actor)"""),
+            VALUES (:id, :amo, :filename, :digest, CAST(:mapping AS JSON), :kind, :sheet, :actor)"""),
             {"id": batch_id, "amo": tenant, "filename": filename[:255],
              "digest": digest, "mapping":json.dumps(overrides), "kind":import_kind,
              "sheet":source_sheet[:128] or None, "actor": str(user.id)})
@@ -216,6 +217,15 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
         db.commit()
         return {"batch_id":batch_id, "source_sha256":digest, "import_kind":import_kind,
                 "counts":counts,"status":"STAGED"}
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.execute(text("""SELECT id,status FROM external_provider_import_batches
+            WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind"""),
+            {"amo":tenant,"digest":digest,"kind":import_kind}).mappings().first()
+        if existing:
+            return {"batch_id":existing["id"],"source_sha256":digest,
+                    "import_kind":import_kind,"status":existing["status"],"already_uploaded":True}
+        raise HTTPException(409,"Workbook has duplicate or incompatible records.") from exc
     except Exception:
         db.rollback()
         raise
@@ -393,6 +403,8 @@ def rollback_import(amo_code: str, batch_id: str, reason: str = Form(...),
             # Never archive suppliers that have become referenced in live work.
             linked = db.execute(text("""SELECT
                  EXISTS(SELECT 1 FROM procurement_purchase_orders
+                        WHERE amo_id=:amo AND supplier_id=:supplier)
+                 OR EXISTS(SELECT 1 FROM procurement_quotes
                         WHERE amo_id=:amo AND supplier_id=:supplier)
                  OR EXISTS(SELECT 1 FROM procurement_supplier_evaluations
                         WHERE amo_id=:amo AND supplier_id=:supplier)
