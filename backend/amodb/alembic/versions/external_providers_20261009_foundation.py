@@ -91,7 +91,49 @@ def upgrade():
             extra=(sa.UniqueConstraint("amo_id", "source_system", "source_identifier",
                                        name="uq_external_provider_source_identity"),))
 
+    op.create_table("external_provider_import_batches",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("amo_id", sa.String(36), nullable=False),
+        sa.Column("filename", sa.String(255), nullable=False),
+        sa.Column("source_sha256", sa.String(64), nullable=False),
+        sa.Column("mapping_json", sa.JSON(), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False, server_default="STAGED"),
+        sa.Column("created_by_user_id", sa.String(36), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("committed_at", sa.DateTime(timezone=True)),
+        sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"))
+    op.create_index("ix_ext_import_batches_tenant", "external_provider_import_batches", ["amo_id", "status"])
+    op.create_table("external_provider_import_rows",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("amo_id", sa.String(36), nullable=False),
+        sa.Column("batch_id", sa.String(36), nullable=False),
+        sa.Column("sheet_name", sa.String(128), nullable=False),
+        sa.Column("row_number", sa.Integer(), nullable=False),
+        sa.Column("raw_json", sa.JSON(), nullable=False),
+        sa.Column("normalized_json", sa.JSON(), nullable=False),
+        sa.Column("diagnostics_json", sa.JSON(), nullable=False),
+        sa.Column("status", sa.String(24), nullable=False, server_default="STAGED"),
+        sa.Column("supplier_id", sa.Integer()),
+        sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["batch_id"], ["external_provider_import_batches.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id", "supplier_id"],
+                                ["procurement_suppliers.amo_id", "procurement_suppliers.id"]),
+        sa.UniqueConstraint("batch_id", "sheet_name", "row_number", name="uq_ext_import_source_row"))
+    op.create_index("ix_ext_import_rows_batch", "external_provider_import_rows", ["amo_id", "batch_id"])
+    if op.get_bind().dialect.name == "postgresql":
+        for name in ("external_provider_import_batches", "external_provider_import_rows"):
+            op.execute(sa.text(f'ALTER TABLE "{name}" ENABLE ROW LEVEL SECURITY'))
+            op.execute(sa.text(f'ALTER TABLE "{name}" FORCE ROW LEVEL SECURITY'))
+            op.execute(sa.text(f"""CREATE POLICY "{name}_tenant" ON "{name}"
+                USING (amo_id = NULLIF(current_setting('app.tenant_id', true), ''))
+                WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id', true), ''))"""))
+
 def downgrade():
+
+    for name in ("external_provider_import_rows", "external_provider_import_batches"):
+        if op.get_bind().dialect.name == "postgresql":
+            op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
+        op.drop_table(name)
     for name in reversed(TABLES):
         if op.get_bind().dialect.name == "postgresql":
             op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
