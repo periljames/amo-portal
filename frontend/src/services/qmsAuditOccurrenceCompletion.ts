@@ -108,6 +108,7 @@ export type PublicAuditCar = {
   closed_at: string | null;
   finding_id: string;
   finding_ref: string | null;
+  response_url?: string | null;
 };
 
 export type PublicAuditCollaboration = {

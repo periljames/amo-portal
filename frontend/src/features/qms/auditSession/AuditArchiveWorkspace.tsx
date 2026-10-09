@@ -98,7 +98,12 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms-audit-archive-governance", amoCode, auditId] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-archive-governance", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
+    ]);
   };
   const success = async (message: string) => {
     setLocalError(null);

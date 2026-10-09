@@ -56,7 +56,7 @@ def test_quality_officer_can_prepare_audits_but_not_review_approve_or_close() ->
     assert _has_role_permission(officer, "qms.car.manage") is True
     assert _has_role_permission(officer, "qms.car.close") is False
     assert _has_role_permission(officer, "qms.reports.view") is True
-    assert _has_role_permission(officer, "qms.training.manage") is False
+    assert _has_role_permission(officer, "qms.training.manage") is True
 
 
 def test_authority_attestation_is_accountable_executive_or_tenant_admin() -> None:

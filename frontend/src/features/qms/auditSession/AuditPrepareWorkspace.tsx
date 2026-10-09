@@ -77,6 +77,36 @@ import "../../../styles/qms-audit-prepare-workspace.css";
 
 type Props = { amoCode: string; auditKey: string };
 
+const preparationRecordSourceTypes = new Set(["QMS_AUDIT", "QUALITY_AUDIT_CHECKLIST_ITEM", "QUALITY_AUDIT_DOCUMENT_REQUEST", "QUALITY_AUDIT_CHECKLIST_BINDING"]);
+const controlledDocumentSources = (sources: unknown[]) => {
+  const documents = new Map<string, unknown>();
+  let recordCount = 0;
+  for (const source of sources) {
+    const reference = source && typeof source === "object" && !Array.isArray(source) ? source as Record<string, unknown> : {};
+    if (preparationRecordSourceTypes.has(String(reference.source_type || ""))) { recordCount += 1; continue; }
+    const key = reference.document_id && reference.revision_id ? `${reference.document_id}:${reference.revision_id}` : JSON.stringify(source);
+    documents.set(key ?? String(source), source);
+  }
+  return { documents: [...documents.values()], recordCount };
+};
+
+const ControlledSourceReference: React.FC<{ source: unknown; index: number }> = ({ source, index }) => {
+  const reference = source && typeof source === "object" && !Array.isArray(source) ? source as Record<string, unknown> : {};
+  const value = (...keys: string[]) => keys.map((key) => reference[key]).map((item) => typeof item === "string" ? item.trim() : typeof item === "number" && Number.isFinite(item) ? String(item) : "").find(Boolean);
+  const title = typeof source === "string" ? source : value("document_title", "title", "source_title") || `Controlled reference ${index + 1}`;
+  const code = value("document_code", "doc_code", "reference_ref");
+  const revision = value("revision_number", "rev_no");
+  const issue = value("issue_number", "issue_no");
+  const hash = value("source_sha256", "content_sha256", "sha256");
+  const route = value("source_route");
+  return <article className="qms-audit-prepare__reference-card">
+    <div><strong>{code ? `${code} · ${title}` : title}</strong><small>{[issue ? `Issue ${issue}` : null, revision ? `Rev ${revision}` : null, value("revision_status"), value("source_type")].filter(Boolean).join(" · ") || "Retained audit source"}</small></div>
+    {value("source_filename") ? <p>{value("source_filename")}</p> : null}
+    {route?.startsWith("/") && !route.startsWith("//") ? <Link to={route}>Open source <ArrowRight size={14} aria-hidden /></Link> : null}
+    {hash ? <details><summary>File verification</summary><small>SHA-256 identifies the exact source file retained for this audit.</small><code>{hash}</code></details> : null}
+  </article>;
+};
+
 type NewRequest = {
   title: string;
   description: string;
@@ -599,7 +629,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
     onSuccess: async () => {
       setLocalError(null);
-      setLocalSuccess("Preparation issued. Fieldwork is now available to the assigned audit team.");
+      setLocalSuccess("Preparation issued. Resolve any remaining pre-fieldwork evidence requests, then open Fieldwork.");
       await refresh();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "Audit preparation could not be issued."),
@@ -779,7 +809,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return (
       <AuditStageLoadError
         className="qms-occurrence-stage qms-occurrence-stage--error"
-        title="Complete audit setup before preparation"
+        title="Preparation could not be loaded"
         detail={auditPrerequisiteLoadDetail(
           prerequisiteError,
           "The governed preparation context is not available yet. Complete and save the audit Setup stage, then retry preparation.",
@@ -803,8 +833,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return (
       <AuditStageLoadError
         className="qms-occurrence-stage qms-occurrence-stage--error"
-        title="Complete audit setup before preparation"
-        detail="The governed preparation context is not available yet. Complete and save the audit Setup stage, then retry preparation."
+        title="Preparation context unavailable"
+        detail="The audit preparation data could not be loaded. Retry to retrieve the saved audit and preparation records."
         onRetry={() => void contextQuery.refetch()}
         exitHref={auditSessionPath(amoCode, auditKey, "setup")}
         exitLabel="Back to Setup"
@@ -824,15 +854,18 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       : [])
   );
   const meetingPlan = context.opening_meeting_records || [];
+  const controlledReferences = controlledDocumentSources(context.regulatory_and_manual_basis.source_references);
   const prepRevision = context.controlled_preparation?.latest_revision;
   const offlinePackStatus = offlinePackQuery.data;
   const bindings = fullBindingsQuery.data?.items || [];
   const checklistBindings = bindings.length;
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
-  const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
+  const fieldworkOpen = Boolean(readiness?.fieldwork_ready) && isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
-  const canEditFrozenPreparation = canManage && !fieldworkOpen;
+  const canEditFrozenPreparation = canManage && !isAtLeastLiveStage(sessionQuery.data?.current_stage_id) && !auditQuery.data.actual_start && !auditQuery.data.actual_end;
   const preparationReady = Boolean(readiness?.issue_ready);
+  const needsPreparationIssue = !readiness?.checks.some((check) => check.code === "CONTROLLED_PREPARATION" && check.complete);
+  const waitingForFieldworkEvidence = preparationReady && !needsPreparationIssue && !readiness?.fieldwork_ready;
 
   return (
     <section className="qms-occurrence-stage qms-audit-prepare-stage" aria-label="Pre-audit preparation workspace" id="audit-occurrence-prepare">
@@ -867,8 +900,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       {localSuccess ? <div className="qms-occurrence-stage__message is-success" role="status"><CheckCircle2 size={16} /> {localSuccess}</div> : null}
       {stageBlocked ? (
         <div className={`qms-audit-prepare-stage__release${preparationReady ? " is-ready" : ""}`}>
-          <div><ShieldAlert size={16} aria-hidden /><span><strong>{preparationReady ? "Ready to start fieldwork" : "Preparation is incomplete"}</strong><small>{preparationReady ? "Issue the current controlled snapshot to open fieldwork." : readiness?.issue_blockers?.[0]?.reason || "Resolve the identified preparation blockers before issue."}</small></span></div>
-          {canManage ? <button type="button" className="is-primary" disabled={!preparationReady || preparationRevisionsQuery.isPending || issuePreparationMutation.isPending} onClick={() => issuePreparationMutation.mutate()}>{issuePreparationMutation.isPending ? "Issuing…" : "Issue preparation & open fieldwork"}</button> : null}
+          <div><ShieldAlert size={16} aria-hidden /><span><strong>{waitingForFieldworkEvidence ? "Preparation issued · evidence still required" : preparationReady ? "Ready to issue preparation" : "Preparation is incomplete"}</strong><small>{waitingForFieldworkEvidence ? readiness?.fieldwork_blockers?.[0]?.reason : preparationReady ? "Issue the current snapshot. Fieldwork opens when its evidence requirements are satisfied." : readiness?.issue_blockers?.[0]?.reason || "Resolve the identified preparation blockers before issue."}</small></span></div>
+          {waitingForFieldworkEvidence ? <a href="#audit-preparation-requests">Review evidence requests</a> : canManage && needsPreparationIssue ? <button type="button" className="is-primary" disabled={!preparationReady || preparationRevisionsQuery.isPending || issuePreparationMutation.isPending} onClick={() => issuePreparationMutation.mutate()}>{issuePreparationMutation.isPending ? "Issuing…" : "Issue preparation"}</button> : null}
         </div>
       ) : null}
       {readinessWarning ? (
@@ -881,6 +914,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Return the audit through the governed preparation lifecycle before changing checklist scope or questions.
         </p>
       ) : null}
+
+      <nav className="qms-audit-prepare__navigation" aria-label="Preparation sections">
+        <a href="#audit-preparation-readiness">Readiness <span>{readiness?.complete_count}/{readiness?.total_count}</span></a>
+        <a href="#audit-preparation-checklists">Checklist <span>{checklistBindings}</span></a>
+        <a href="#audit-preparation-requests">Evidence requests <span>{requests.length}</span></a>
+        <a href="#audit-preparation-participants">Auditee access <span>{participants.length}</span></a>
+        <a href="#audit-occurrence-activity">Activity</a>
+      </nav>
 
       <section className="qms-audit-prepare__offline-pack" aria-label="Offline fieldwork package">
         <div className="qms-audit-prepare__offline-pack-copy">
@@ -902,7 +943,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <button
             type="button"
             className="is-primary"
-            disabled={prepRevision?.status !== "ISSUED" || offlinePackMutation.isPending}
+            disabled={!readiness?.fieldwork_ready || prepRevision?.status !== "ISSUED" || offlinePackMutation.isPending}
             onClick={() => offlinePackMutation.mutate()}
           >
             {offlinePackMutation.isPending ? "Preparing…" : offlinePackStatus?.ready ? "Refresh offline package" : "Make available offline"}
@@ -955,7 +996,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {context.data_quality.warnings.length ? <div className="qms-audit-prepare-stage__notice is-warning"><AlertTriangle size={14} aria-hidden /><span>{context.data_quality.warnings.map((warning) => warning.message).join(" · ")}</span></div> : null}
         </section>
 
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__readiness">
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__readiness" id="audit-preparation-readiness">
           <header>
             <div><h3>Readiness</h3><p>Deterministic checks from persisted setup, checklist and document-request state.</p></div>
             <span className="qms-audit-prepare-stage__meta-chip">{readiness?.complete_count || 0}/{readiness?.total_count || 0} complete</span>
@@ -1016,11 +1057,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
 
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__references">
-          <header><div><h3>Controlled references</h3><p>Sources captured into the governed preparation and work-package fingerprint.</p></div><span className="qms-audit-prepare-stage__meta-chip">{context.regulatory_and_manual_basis.source_references.length} source(s)</span></header>
-          {context.regulatory_and_manual_basis.source_references.length ? <div className="qms-audit-prepare__reference-list">{context.regulatory_and_manual_basis.source_references.map((source, index) => <pre key={index}>{typeof source === "string" ? source : JSON.stringify(source, null, 2)}</pre>)}</div> : <p className="qms-audit-prepare__empty">No structured controlled-source reference has been captured yet.</p>}
+          <header><div><h3>Controlled references</h3><p>Approved source documents retained with this audit preparation.</p></div><span className="qms-audit-prepare-stage__meta-chip">{controlledReferences.documents.length} source(s)</span></header>
+          {controlledReferences.documents.length ? <div className="qms-audit-prepare__reference-list">{controlledReferences.documents.map((source, index) => <ControlledSourceReference key={index} source={source} index={index} />)}</div> : <p className="qms-audit-prepare__empty">No controlled source document has been captured yet.</p>}
+          {controlledReferences.recordCount > 0 ? <p className="qms-audit-prepare__empty">{controlledReferences.recordCount} audit, checklist and request references are retained in the preparation history.</p> : null}
         </section>
 
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__checklists">
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__checklists" id="audit-preparation-checklists">
           <header>
             <div>
               <h3>Fieldwork checklist</h3>
@@ -1151,7 +1193,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </> : null}
         </section>
 
-        <section className="qms-audit-prepare-stage__section">
+        <section className="qms-audit-prepare-stage__section" id="audit-preparation-requests">
           <header>
             <div><h3>Document requests</h3></div>
             {canManage ? <button type="button" onClick={() => setShowRequestForm((value) => !value)}><Plus size={15} /> New request</button> : null}
@@ -1206,7 +1248,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
         </section>
 
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__participants">
+        <section className="qms-audit-prepare-stage__section qms-audit-prepare__participants" id="audit-preparation-participants">
           <header>
             <div><h3>External participants</h3></div>
             {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}

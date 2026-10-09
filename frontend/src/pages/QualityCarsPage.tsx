@@ -553,13 +553,9 @@ const QualityCarsPage: React.FC = () => {
   const openReview = async (car: CAROut) => {
     setReviewCar(car);
     setReviewForm({
-      root_cause_status: car.root_cause_status === "REJECTED" ? "REJECTED" : "ACCEPTED",
+      root_cause_status: "",
       root_cause_review_note: car.root_cause_review_note ?? "",
-      capa_status: car.capa_status === "REJECTED"
-        ? "REJECTED"
-        : car.capa_status === "NEEDS_EVIDENCE"
-          ? "NEEDS_EVIDENCE"
-          : "ACCEPTED",
+      capa_status: "",
       capa_review_note: car.capa_review_note ?? "",
       message: "",
     });
@@ -582,8 +578,12 @@ const QualityCarsPage: React.FC = () => {
 
   const submitReview = async () => {
     if (!reviewCar) return;
-    const rootDecision = reviewForm.root_cause_status || "ACCEPTED";
-    const capaDecision = reviewForm.capa_status || "ACCEPTED";
+    const rootDecision = reviewForm.root_cause_status;
+    const capaDecision = reviewForm.capa_status;
+    if (!rootDecision || !capaDecision) {
+      setLocalError("Choose a root cause decision and a corrective action decision before recording the review.");
+      return;
+    }
     if (rootDecision === "REJECTED" && !reviewForm.root_cause_review_note.trim()) {
       setLocalError("Root cause rejection requires a review note.");
       return;
@@ -1085,12 +1085,14 @@ const QualityCarsPage: React.FC = () => {
             <div className="qms-form-grid">
               <label>Root cause decision
                 <select className="input" value={reviewForm.root_cause_status} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_status: event.target.value as CarReviewForm["root_cause_status"] }))}>
+                  <option value="">Choose a decision</option>
                   <option value="ACCEPTED">Accept</option>
                   <option value="REJECTED">Return</option>
                 </select>
               </label>
               <label>Corrective action decision
                 <select className="input" value={reviewForm.capa_status} onChange={(event) => setReviewForm((current) => ({ ...current, capa_status: event.target.value as CarReviewForm["capa_status"] }))}>
+                  <option value="">Choose a decision</option>
                   <option value="ACCEPTED">Accept</option>
                   <option value="REJECTED">Return</option>
                   <option value="NEEDS_EVIDENCE">Request more evidence</option>

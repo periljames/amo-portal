@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
 
 const AUDIT_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
@@ -102,6 +103,7 @@ async function prepareFindingAndCar(page: Page, state: State): Promise<void> {
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("**/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await mockPortalBackgroundRequests(page);
 }
 
 test("MD scenarios 11 and 13 — records a structured finding atomically from Live Audit and creates its CAR consequence", async ({ page }) => {

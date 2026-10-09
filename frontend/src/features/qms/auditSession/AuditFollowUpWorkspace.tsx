@@ -113,6 +113,8 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-closure-state", amoCode, auditId] }),
       effectiveSelectedCarId ? queryClient.invalidateQueries({ queryKey: ["qms-car-control-loop", amoCode, effectiveSelectedCarId] }) : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
     ]);
   };
 
@@ -218,7 +220,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <div className="qms-occurrence-stage__grid">
         <main>
           <article className="qms-occurrence-stage__card">
-            <header><Clock3 size={18} /><div><h3>Corrective-action queue</h3><small>One audit-filtered register query; detailed control-loop state is fetched only for the selected CAR.</small></div></header>
+            <header><Clock3 size={18} /><div><h3>Corrective-action queue</h3><small>Select a CAR to see its owner, milestones and closure requirements.</small></div></header>
             {!cars.length ? <p>No corrective actions are linked to this audit.</p> : <div className="qms-followup-car-grid ag-theme-alpine"><AgGridReact<AuditCar> rowData={cars} columnDefs={carColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.id} rowHeight={48} headerHeight={34} domLayout="autoHeight" animateRows={false} suppressCellFocus onRowClicked={(event: RowClickedEvent<AuditCar>) => event.data && setSelectedCarId(event.data.id)} rowClassRules={{ "is-selected": ({ data }) => data?.id === effectiveSelectedCarId }} /></div>}
           </article>
 

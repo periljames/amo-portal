@@ -78,6 +78,22 @@
 .qms-public-audit button:disabled { opacity: 0.55; }
 .qms-public-audit button:focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
 
+.qms-public-audit__response-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.qms-public-audit__response-link:focus-visible { outline: 3px solid #0f172a; outline-offset: 3px; }
+
 .qms-public-audit__error {
   display: flex;
   align-items: center;

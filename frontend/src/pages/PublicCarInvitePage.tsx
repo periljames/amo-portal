@@ -38,8 +38,10 @@ import {
   type CARStatus,
 } from "../services/qms";
 import { getApiBaseUrl } from "../services/config";
+import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
 import { personDisplay } from "../utils/personDisplay";
 import "../styles/car-invite.css";
+import "../styles/car-invite-responsive.css";
 
 const MAX_RESPONSE_CHARS = 8000;
 const MAX_EVIDENCE_REFERENCE_CHARS = 500;
@@ -112,17 +114,7 @@ const INVITE_EVIDENCE_MIME_TYPES = new Set([
 
 type InviteStepId = "identity" | "containment" | "analysis" | "corrective" | "evidence" | "review";
 
-type InviteForm = {
-  submitted_by_name: string;
-  submitted_by_email: string;
-  containment_action: string;
-  root_cause: string;
-  corrective_action: string;
-  preventive_action: string;
-  evidence_ref: string;
-  due_date: string;
-  target_closure_date: string;
-};
+type InviteForm = CarInviteDraftForm;
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -137,6 +129,7 @@ type InviteEntry = {
   attachments: CARAttachmentOut[];
   actions: CARActionOut[];
   attachmentsError: string | null;
+  refreshingEvidence: boolean;
   uploading: boolean;
   submitting: boolean;
   recalling: boolean;
@@ -518,9 +511,39 @@ const PublicCarInvitePage: React.FC = () => {
   const initialized = useRef<string | null | undefined>(undefined);
   const pendingSubmissions = useRef(new Set<string>());
   const pendingUploads = useRef(new Set<string>());
+  const knownTokens = useRef(new Set<string>());
+  const loadGeneration = useRef(0);
   const activeCameraStream = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const latestEntries = useRef(entries);
+  latestEntries.current = entries;
+
+  useEffect(() => () => {
+    latestEntries.current.forEach((entry) => {
+      if (entry.state === "ready" && !entry.submitting && !entry.recalling && entry.invite && isInviteEditable(entry.invite) && JSON.stringify(entry.form) !== JSON.stringify(toForm(entry.invite))) {
+        saveCarInviteDraft(entry.invite, entry.form);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const unfinished = entries.filter((entry) => entry.state === "ready" && !entry.submitting && !entry.recalling && entry.invite && isInviteEditable(entry.invite));
+    const save = () => unfinished.forEach((entry) => {
+      if (JSON.stringify(entry.form) !== JSON.stringify(toForm(entry.invite!))) saveCarInviteDraft(entry.invite!, entry.form);
+      else removeCarInviteDraft(entry.invite!.car_id);
+    });
+    const timer = window.setTimeout(save, 350);
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      save();
+      if (unfinished.some((entry) => JSON.stringify(entry.form) !== JSON.stringify(toForm(entry.invite!)))) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => { window.clearTimeout(timer); window.removeEventListener("beforeunload", beforeUnload); };
+  }, [entries]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -568,6 +591,7 @@ const PublicCarInvitePage: React.FC = () => {
     attachments: [],
     actions: [],
     attachmentsError: null,
+    refreshingEvidence: false,
     uploading: false,
     submitting: false,
     recalling: false,
@@ -581,10 +605,8 @@ const PublicCarInvitePage: React.FC = () => {
       case "containment":
         return fieldHasValue(entry.form.containment_action);
       case "analysis":
-        if ((invite?.root_cause_status ?? "") === "REJECTED") return false;
         return fieldHasValue(entry.form.root_cause) || ["ACCEPTED", "APPROVED"].includes(invite?.root_cause_status ?? "");
       case "corrective":
-        if ((invite?.capa_status ?? "") === "REJECTED") return false;
         return fieldHasValue(entry.form.corrective_action) || ["ACCEPTED", "APPROVED"].includes(invite?.capa_status ?? "");
       case "evidence":
         return !invite?.evidence_required || fieldHasValue(entry.form.evidence_ref) || entry.attachments.length > 0 || Boolean(invite.evidence_received_at);
@@ -602,6 +624,7 @@ const PublicCarInvitePage: React.FC = () => {
   const stepIndex = (stepId: InviteStepId): number => INVITE_STEPS.findIndex((step) => step.id === stepId);
 
   const isStepUnlocked = (entry: InviteEntry, stepId: InviteStepId): boolean => {
+    if (entry.invite && !isInviteEditable(entry.invite)) return true;
     const index = stepIndex(stepId);
     if (index <= 0) return true;
     return INVITE_STEPS.slice(0, index).every((step) => isStepComplete(entry, step.id));
@@ -610,6 +633,7 @@ const PublicCarInvitePage: React.FC = () => {
   const getActiveStep = (entry: InviteEntry): InviteStepId => {
     const preferred = activeSteps[entry.token];
     if (preferred && isStepUnlocked(entry, preferred)) return preferred;
+    if (entry.invite && !isInviteEditable(entry.invite)) return "review";
     return firstIncompleteStep(entry);
   };
 
@@ -648,6 +672,7 @@ const PublicCarInvitePage: React.FC = () => {
   };
 
   const loadInvite = React.useCallback(async (tokenValue: string, notice?: string) => {
+    const generation = loadGeneration.current;
     updateEntry(tokenValue, (entry) => ({ ...entry, state: "loading", error: null, notice: notice ?? entry.notice }));
     try {
       const [data, attachmentsResult, actionsResult] = await Promise.allSettled([
@@ -655,35 +680,32 @@ const PublicCarInvitePage: React.FC = () => {
         qmsListCarInviteAttachments(tokenValue),
         qmsListCarInviteActions(tokenValue),
       ]);
+      if (generation !== loadGeneration.current) return;
       if (data.status === "rejected") throw data.reason;
-      updateEntry(tokenValue, (entry) => {
-        const nextEntry = {
-          ...entry,
+      const restoredDraft = isInviteEditable(data.value) ? readCarInviteDraft(data.value) : null;
+      if (!isInviteEditable(data.value)) removeCarInviteDraft(data.value.car_id);
+      const nextEntry: InviteEntry = {
+          ...createEntry(tokenValue),
           invite: data.value,
-          form: toForm(data.value),
+          form: restoredDraft || toForm(data.value),
           attachments: attachmentsResult.status === "fulfilled" ? attachmentsResult.value : [],
           actions: actionsResult.status === "fulfilled" ? actionsResult.value : [],
           attachmentsError: attachmentsResult.status === "rejected" ? getErrorMessage(attachmentsResult.reason, "Could not load attachments.") : null,
           state: "ready" as const,
-          notice: notice ?? null,
-        };
-        setActiveSteps((prev) => ({ ...prev, [tokenValue]: prev[tokenValue] ?? firstIncompleteStep(nextEntry) }));
-        return nextEntry;
-      });
-      const relatedTokens = (data.value.related_cars ?? [])
+          notice: notice ?? (restoredDraft ? "Your unfinished response was restored from this browser tab. Review it before submitting." : null),
+      };
+      updateEntry(tokenValue, (entry) => ({ ...entry, ...nextEntry }));
+      setActiveSteps((prev) => ({ ...prev, [tokenValue]: isInviteEditable(data.value) ? prev[tokenValue] ?? firstIncompleteStep(nextEntry) : "review" }));
+      const relatedTokens = Array.from(new Set((data.value.related_cars ?? [])
         .map((item) => item.invite_token)
-        .filter((relatedToken) => relatedToken && relatedToken !== tokenValue);
+        .filter((relatedToken) => relatedToken && !knownTokens.current.has(relatedToken))));
       if (relatedTokens.length) {
-        const toLoad: string[] = [];
-        setEntries((prev) => {
-          const seen = new Set(prev.map((entry) => entry.token));
-          const additions = relatedTokens.filter((relatedToken) => !seen.has(relatedToken));
-          toLoad.push(...additions);
-          return additions.length ? [...prev, ...additions.map((relatedToken) => createEntry(relatedToken))] : prev;
-        });
-        toLoad.forEach((relatedToken) => window.setTimeout(() => void loadInvite(relatedToken), 0));
+        relatedTokens.forEach((relatedToken) => knownTokens.current.add(relatedToken));
+        setEntries((prev) => [...prev, ...relatedTokens.map((relatedToken) => createEntry(relatedToken))]);
+        relatedTokens.forEach((relatedToken) => void loadInvite(relatedToken));
       }
     } catch (error: unknown) {
+      if (generation !== loadGeneration.current) return;
       updateEntry(tokenValue, (entry) => ({
         ...entry,
         error: getErrorMessage(error, "Failed to load CAR invite."),
@@ -696,13 +718,16 @@ const PublicCarInvitePage: React.FC = () => {
   useEffect(() => {
     if (initialized.current === token) return;
     initialized.current = token;
+    loadGeneration.current += 1;
     setActiveSteps({});
     setSelectedPreview(null);
     if (!token) {
+      knownTokens.current.clear();
       setEntries([{ ...createEntry(""), state: "error", error: "Invite token missing." }]);
       return;
     }
-    const tokens = token.split(",").map((value) => value.trim()).filter(Boolean);
+    const tokens = Array.from(new Set(token.split(",").map((value) => value.trim()).filter(Boolean)));
+    knownTokens.current = new Set(tokens);
     setEntries(tokens.map((tokenValue) => createEntry(tokenValue)));
     tokens.forEach((tokenValue) => void loadInvite(tokenValue));
   }, [token, loadInvite]);
@@ -717,6 +742,8 @@ const PublicCarInvitePage: React.FC = () => {
   const validateEntry = (entry: InviteEntry): string | null => {
     if (!entry.invite) return "CAR invite is not loaded.";
     if (!canSubmitInvite(entry.invite)) return entry.invite.locked_reason || "This CAR cannot be submitted right now.";
+    if (entry.uploading) return "Wait for the evidence upload to finish before submitting.";
+    if (entry.attachmentsError) return "Resolve the evidence loading or upload error before submitting.";
     const stepError = INVITE_STEPS.slice(0, -1).map((step) => validateStep(entry, step.id)).find(Boolean);
     if (stepError) return stepError;
     if (!entry.consentAccepted) return "Accept the submission declaration before submitting.";
@@ -742,9 +769,12 @@ const PublicCarInvitePage: React.FC = () => {
         corrective_action: clampResponseText(current.form.corrective_action.trim()),
         preventive_action: clampResponseText(current.form.preventive_action.trim()),
         evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim()),
-        due_date: current.form.due_date || null,
-        target_closure_date: current.form.target_closure_date || null,
+        ...(current.invite.deadline_change_requires_review ? {} : {
+          due_date: current.form.due_date || null,
+          target_closure_date: current.form.target_closure_date || null,
+        }),
       });
+      removeCarInviteDraft(current.invite.car_id);
       setSubmissionPreviewToken(null);
       updateEntry(tokenValue, (entry) => ({ ...entry, submitting: false, consentAccepted: false }));
       await loadInvite(tokenValue, "Response submitted. The audit team can now review it.");
@@ -840,6 +870,27 @@ const PublicCarInvitePage: React.FC = () => {
     const selectedFiles: File[] = event.target.files ? Array.from(event.target.files) : [];
     await uploadFiles(tokenValue, selectedFiles);
     event.target.value = "";
+  };
+
+  const refreshEvidence = async (tokenValue: string) => {
+    const current = latestEntries.current.find((entry) => entry.token === tokenValue);
+    if (!current?.invite || current.refreshingEvidence || current.uploading) return;
+    const generation = loadGeneration.current;
+    updateEntry(tokenValue, (entry) => ({ ...entry, refreshingEvidence: true }));
+    try {
+      const attachments = await qmsListCarInviteAttachments(tokenValue);
+      if (generation !== loadGeneration.current) return;
+      updateEntry(tokenValue, (entry) => ({
+        ...entry, attachments, attachmentsError: null, refreshingEvidence: false,
+        notice: "Evidence refreshed. Check the files and descriptions before submitting.",
+      }));
+    } catch (error: unknown) {
+      if (generation !== loadGeneration.current) return;
+      updateEntry(tokenValue, (entry) => ({
+        ...entry, refreshingEvidence: false,
+        attachmentsError: getErrorMessage(error, "Could not refresh evidence. Try again."),
+      }));
+    }
   };
 
   const updateAttachmentDescription = async (tokenValue: string, attachmentId: string, description: string) => {
@@ -1010,7 +1061,7 @@ const PublicCarInvitePage: React.FC = () => {
               return (
                 <article key={entry.token || "missing-token"} id={invite ? `car-${invite.car_number}` : undefined} className={`car-invite-card ${entry.state === "ready" ? "is-active" : ""}`}>
                   {entry.state === "loading" && <p className="car-invite-subtitle">Loading invite…</p>}
-                  {entry.state === "error" && <div className="car-invite-error">{entry.error}</div>}
+                  {entry.state === "error" && <div className="car-invite-error" role="alert">{entry.error}{entry.token ? <button type="button" className="car-invite-btn" onClick={() => void loadInvite(entry.token)}>Retry loading response</button> : null}</div>}
 
                   {entry.state === "ready" && invite && (
                     <>
@@ -1030,9 +1081,13 @@ const PublicCarInvitePage: React.FC = () => {
                         </aside>
                       </header>
 
-                      {entry.notice && <div className="car-invite-notice"><CheckCircle2 size={18} /> {entry.notice}</div>}
-                      {entry.error && <div className="car-invite-error"><AlertTriangle size={18} /> {entry.error}</div>}
+                      {entry.notice && <div className="car-invite-notice" role="status"><CheckCircle2 size={18} /> {entry.notice}</div>}
+                      {entry.error && <div className="car-invite-error" role="alert"><AlertTriangle size={18} /> {entry.error}</div>}
                       {invite.locked_reason && <div className="car-invite-readonly"><Eye size={16} /> {invite.locked_reason}</div>}
+                      {!locked ? <div className="car-invite-actions"><button type="button" className="car-invite-btn car-invite-btn--compact" disabled={entry.submitting || entry.recalling} onClick={() => {
+                        const saved = saveCarInviteDraft(invite, entry.form);
+                        updateEntry(entry.token, (current) => ({ ...current, error: saved ? null : "This browser could not save the draft. Keep this page open until you submit.", notice: saved ? "Draft saved in this browser tab. It has not been submitted to Quality." : null }));
+                      }}><Save size={14} /> Save draft</button><small className="car-invite-subtitle">Unfinished responses are saved in this tab. Submission requires your declaration and confirmation.</small></div> : null}
 
                       <section className="car-invite-finding">
                         <div className="car-invite-finding__main">
@@ -1058,7 +1113,7 @@ const PublicCarInvitePage: React.FC = () => {
                                   key={step.id}
                                   type="button"
                                   className={`car-invite-stage-rail__step ${active ? "is-active" : ""} ${complete ? "is-complete" : ""}`}
-                                  disabled={!unlocked || locked}
+                                  disabled={!unlocked}
                                   onClick={() => setActiveStep(entry.token, step.id)}
                                 >
                                   <span>{complete ? <CheckCircle2 size={15} /> : index + 1}</span>
@@ -1081,7 +1136,7 @@ const PublicCarInvitePage: React.FC = () => {
                                     <p>{step.help}</p>
                                   </div>
                                   {!active && (
-                                    <button type="button" className="car-invite-btn car-invite-btn--compact" disabled={locked} onClick={() => setActiveStep(entry.token, step.id)}>Edit</button>
+                                    <button type="button" className="car-invite-btn car-invite-btn--compact" onClick={() => setActiveStep(entry.token, step.id)}>{locked ? "View" : "Edit"}</button>
                                   )}
                                 </header>
                                 {!active && <p className="car-invite-stage__summary">{renderStageSummary(entry, step.id)}</p>}
@@ -1156,13 +1211,14 @@ const PublicCarInvitePage: React.FC = () => {
                                     />
                                     <label className="car-invite-field">
                                       <span>Target closure date</span>
-                                      <input className="car-invite-input" type="date" value={entry.form.target_closure_date} disabled={locked} onChange={(event) => updateFormField(entry.token, "target_closure_date", event.target.value)} />
+                                      <input className="car-invite-input" type="date" value={entry.form.target_closure_date} disabled={locked || invite.deadline_change_requires_review} onChange={(event) => updateFormField(entry.token, "target_closure_date", event.target.value)} />
                                     </label>
                                     <label className="car-invite-field">
                                       <span>Due date</span>
-                                      <input className="car-invite-input" type="date" value={entry.form.due_date} disabled={locked} onChange={(event) => updateFormField(entry.token, "due_date", event.target.value)} />
+                                      <input className="car-invite-input" type="date" value={entry.form.due_date} disabled={locked || invite.deadline_change_requires_review} onChange={(event) => updateFormField(entry.token, "due_date", event.target.value)} />
                                     </label>
                                     <div className="car-invite-stage__actions">
+                                      {invite.deadline_change_requires_review ? <p className="car-invite-subtitle">These are agreed deadlines. Contact Quality to request an extension; submitting a CAP does not change them.</p> : null}
                                       <button type="button" className="car-invite-btn" disabled={locked} onClick={() => setActiveStep(entry.token, "analysis")}>Back</button>
                                       <button type="button" className="car-invite-btn car-invite-btn--primary" disabled={locked} onClick={() => advanceStep(entry, "corrective")}>Save corrective action and continue</button>
                                     </div>
@@ -1195,7 +1251,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       </div>
                                     </details>
                                     {entry.uploading && <div className="car-invite-notice"><UploadCloud size={18} /> Uploading evidence…</div>}
-                                    {entry.attachmentsError && <div className="car-invite-error"><AlertTriangle size={18} /> {entry.attachmentsError}</div>}
+                                    {entry.attachmentsError && <div className="car-invite-error"><AlertTriangle size={18} /> {entry.attachmentsError}<button type="button" className="car-invite-btn" disabled={entry.refreshingEvidence || entry.uploading} onClick={() => void refreshEvidence(entry.token)}><RotateCcw size={16} /> {entry.refreshingEvidence ? "Refreshing…" : "Refresh evidence"}</button></div>}
                                     {entry.attachments.length > 0 && (
                                       <div className="car-invite-evidence-list">
                                         {entry.attachments.map((attachment) => {
@@ -1262,7 +1318,7 @@ const PublicCarInvitePage: React.FC = () => {
                                             <RotateCcw size={16} /> {entry.recalling ? "Recalling…" : "Recall submission"}
                                           </button>
                                         ) : null}
-                                        <button type="submit" className="car-invite-btn car-invite-btn--primary" disabled={!canSubmit || !entry.consentAccepted || entry.submitting}>
+                                        <button type="submit" className="car-invite-btn car-invite-btn--primary" disabled={!canSubmit || !entry.consentAccepted || entry.submitting || entry.uploading || Boolean(entry.attachmentsError)}>
                                           <Eye size={16} /> Preview submission
                                         </button>
                                       </div>

@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { projectOfflineAuditSession, readAuditOfflinePack } from "./qmsAuditOfflinePack";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
 export type AuditSessionStageId = "setup" | "prepare" | "live" | "closing" | "follow-up" | "archive";
 
@@ -37,11 +38,12 @@ export async function getAuditSession(amoCode: string, auditId: string, signal?:
     if (offline) return offline;
   }
   try {
-    return await apiRequest<AuditSession>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/session`), {
+    const session = await apiRequest<AuditSession>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/session`), {
       timeoutMs: 15_000,
       cacheTtlMs: 2_000,
       signal,
     });
+    return requireAuditContract(session, "session");
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;

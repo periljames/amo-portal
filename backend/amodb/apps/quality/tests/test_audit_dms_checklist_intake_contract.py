@@ -111,7 +111,7 @@ def test_reselecting_current_dms_checklist_returns_saved_binding_without_duplica
     for _ in range(2):
         result = bind_current_dms_checklist(
             audit_id=audit.id, document_id=document.id,
-            payload=SimpleNamespace(reason="Selected for audit", allow_existing_items=False),
+            payload=SimpleNamespace(reason="Selected for audit", allow_existing_items=False, response_type="YES_NO_NA", response_options=[]),
             ctx=SimpleNamespace(amo_id="amo-1", user_id="user-1"), db=DB(),
         )
         assert result == {"id": "binding-1"}

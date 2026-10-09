@@ -25,6 +25,7 @@ from amodb.database import get_db
 
 from . import models
 from .audit_report_governance_models import QualityAuditReportRevision
+from .car_control_loop_models import QualityCARControlProfile
 from .router import (
     AUDIT_REPORT_DIR,
     _car_invite_payload,
@@ -40,6 +41,7 @@ class CARInviteWithAuditReportOut(CARInviteOut):
     """Public invite response with a token-scoped report download route."""
 
     audit_report_download_url: Optional[str] = Field(default=None, max_length=1024)
+    deadline_change_requires_review: bool = False
 
 
 _extension_router = APIRouter(prefix="/quality", tags=["Quality / Public CAR"])
@@ -52,15 +54,15 @@ _DETAILED_RESPONSE_FIELDS = (
 _DETAILED_RESPONSE_MAX_LENGTH = 8000
 
 
-def _car_for_token(db: Session, invite_token: str) -> models.CorrectiveActionRequest:
+def _car_for_token(db: Session, invite_token: str, *, lock: bool = False) -> models.CorrectiveActionRequest:
     clean_token = (invite_token or "").strip()
     if not clean_token or len(clean_token) > 255:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
-    car = (
+    query = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == clean_token)
-        .first()
     )
+    car = (query.with_for_update(of=models.CorrectiveActionRequest) if lock else query).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
     return car
@@ -163,6 +165,10 @@ def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, paylo
                 field,
                 _limit_car_invite_text(value, max_length=_DETAILED_RESPONSE_MAX_LENGTH),
             )
+            if field == "root_cause":
+                car.root_cause_text = car.root_cause
+            elif field == "corrective_action":
+                car.capa_text = car.corrective_action
 
 
 @_extension_router.get("/cars/invite/{invite_token}", response_model=CARInviteWithAuditReportOut)
@@ -178,6 +184,10 @@ def get_car_invite_with_report(
     payload["audit_report_download_url"] = (
         f"/quality/cars/invite/{car.invite_token}/audit-report" if report_path is not None else None
     )
+    payload["deadline_change_requires_review"] = db.query(QualityCARControlProfile.id).filter(
+        QualityCARControlProfile.amo_id == car.amo_id,
+        QualityCARControlProfile.car_id == car.id,
+    ).first() is not None
     return payload
 
 
@@ -188,8 +198,17 @@ def submit_car_invite_with_detailed_response(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    car = _car_for_token(db, invite_token)
+    car = _car_for_token(db, invite_token, lock=True)
     _require_public_car_invite_editable(db, car)
+    profile = db.query(QualityCARControlProfile).filter(
+        QualityCARControlProfile.amo_id == car.amo_id,
+        QualityCARControlProfile.car_id == car.id,
+    ).first()
+    if profile is not None and any(
+        getattr(payload, field) is not None and getattr(payload, field) != getattr(car, field)
+        for field in ("due_date", "target_closure_date")
+    ):
+        raise HTTPException(status_code=409, detail="The agreed CAR deadline requires a Quality extension decision. Submit your response without changing the deadline.")
     _persist_detailed_response_fields(car, payload)
 
     # Prevent the compatibility handler from re-applying its historical 500

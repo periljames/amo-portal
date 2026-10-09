@@ -358,7 +358,7 @@ def get_audit_session(
     ).order_by(QualityAuditPreparationRevision.revision_no.desc()).first()
     preparation_issued = bool(latest_preparation and latest_preparation.status == "ISSUED")
     if preparation_issued:
-        from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
+        from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers, _preparation_sources_match
 
         current_preparation = _capture_sources(
             db,
@@ -366,8 +366,8 @@ def get_audit_session(
             audit=audit,
         )
         preparation_issued = (
-            not _preparation_readiness_blockers(current_preparation)
-            and latest_preparation.source_fingerprint == current_preparation["source_fingerprint"]
+            not _preparation_readiness_blockers(current_preparation, phase="FIELDWORK")
+            and _preparation_sources_match(db, amo_id=ctx.amo_id, audit=audit, preparation=latest_preparation, captured=current_preparation)
         )
     closure = db.query(QualityAuditClosureState).filter(
         QualityAuditClosureState.amo_id == ctx.amo_id,

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
 
 const CAR_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -235,6 +236,7 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     if (isQmsData || isPortalData) { await fulfil(route); return; }
     await route.continue();
   });
+  await mockPortalBackgroundRequests(page);
   return { evaluateCalls: () => evaluations };
 }
 

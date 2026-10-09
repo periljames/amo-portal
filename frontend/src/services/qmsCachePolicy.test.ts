@@ -4,7 +4,7 @@ import { isPortalCacheablePath } from "./offlineHttp";
 import { collectQmsPrecacheUrls } from "../../scripts/qmsPrecacheGraph";
 
 describe("QMS offline cache boundaries", () => {
-  it.each(["preparation-context", "preparation-revisions", "checklist-bindings", "audit-session"])(
+  it.each(["preparation-context", "preparation-revisions", "checklist-bindings", "audit-session", "activity"])(
     "never restores stale %s after an audit mutation", (resource) => {
       expect(isPortalCacheablePath(`/api/quality/audits/a1/${resource}`)).toBe(false);
       const cached = { clientState: { queries: [{ queryKey: [`qms-audit-${resource}`, "t", "a1"] }] } };

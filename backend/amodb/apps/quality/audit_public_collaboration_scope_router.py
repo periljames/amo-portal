@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -16,6 +17,15 @@ from .audit_occurrence_completion_router import _enum_value, _meeting_dict, _nar
 router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
 _SUMMARY_SCOPES = {"audit:read_summary", "audit:read_assigned"}
 _CAR_SCOPES = {"car:respond", "audit:read_released_findings"}
+
+
+def _car_response_url(car: models.CorrectiveActionRequest, scope: set[str]) -> str | None:
+    # Only an explicit response grant may disclose the existing CAR invitation.
+    # Read-only released-finding access must never become write access.
+    if "car:respond" not in scope or car.closed_at or _enum_value(car.status) == "CLOSED":
+        return None
+    token = str(car.invite_token or "").strip()
+    return f"/qms/car-access/{quote(token, safe='')}" if token else None
 
 
 @router.get("/collaboration")
@@ -68,6 +78,7 @@ def get_public_occurrence_collaboration_scoped(
                 models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id,
             ).filter(
                 models.CorrectiveActionRequest.amo_id == grant.amo_id,
+                models.QMSAuditFinding.amo_id == grant.amo_id,
                 models.QMSAuditFinding.audit_id == grant.audit_id,
                 models.QMSAuditFinding.id.in_(released_finding_ids),
             ).order_by(models.CorrectiveActionRequest.created_at.asc()).all()
@@ -84,6 +95,7 @@ def get_public_occurrence_collaboration_scoped(
                     "closed_at": car.closed_at.isoformat() if car.closed_at else None,
                     "finding_id": str(finding.id),
                     "finding_ref": finding.finding_ref,
+                    "response_url": _car_response_url(car, scope),
                 })
 
     return {

@@ -129,7 +129,9 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
     return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
   }, [degraded]);
   const routeStage = auditSessionStageFromPath(location.pathname);
-  if (sessionQuery.data?.current_stage_id === "setup" && routeStage && routeStage !== "setup" && occurrenceQuery.data) {
+  // Preparation drafts can be composed while team eligibility is being resolved.
+  // The server readiness checks still block issue and entry into fieldwork.
+  if (sessionQuery.data?.current_stage_id === "setup" && routeStage && routeStage !== "setup" && routeStage !== "prepare" && occurrenceQuery.data) {
     const firstIssue = auditSetupIssues({
       title: occurrenceQuery.data.title || "",
       scope: occurrenceQuery.data.scope || "",
@@ -202,7 +204,7 @@ const QualityEnhancementsHost: React.FC = () => {
           <MobileAuditDeepLinkState />
 
           {auditSessionStage === "setup" ? (
-            <Suspense fallback={null}>
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading audit setup…</div>}>
               <AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
