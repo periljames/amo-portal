@@ -75,16 +75,21 @@ def _mapping(headers, overrides, columns):
 
 @router.post("/external-provider-imports/preview", status_code=201)
 async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str = Form("{}"),
+                  import_kind: str = Form("SUPPLIERS"), source_sheet: str = Form(""),
                   db: Session = Depends(get_db),
                   user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
+    import_kind = import_kind.strip().upper()
+    if import_kind not in ("SUPPLIERS", "CONTRACTS"):
+        raise HTTPException(422, "Unknown spreadsheet import kind.")
+    columns = _COLUMNS if import_kind == "SUPPLIERS" else _CONTRACT_COLUMNS
     filename = file.filename or ""
     if not filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(415, "Only XLSX and XLSM files are supported.")
     try:
         overrides = json.loads(mapping_json)
         if not isinstance(overrides, dict) or any(
-            key not in _COLUMNS or not isinstance(value, str)
+            key not in columns or not isinstance(value, str)
             for key, value in overrides.items()
         ):
             raise ValueError()
@@ -95,8 +100,8 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
         raise HTTPException(413, "Workbook exceeds 10 MB.")
     digest = hashlib.sha256(data).hexdigest()
     existing = db.execute(text("""SELECT id, status FROM external_provider_import_batches
-        WHERE amo_id=:amo AND source_sha256=:digest"""),
-        {"amo":tenant,"digest":digest}).mappings().first()
+        WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind"""),
+        {"amo":tenant,"digest":digest,"kind":import_kind}).mappings().first()
     if existing:
         return {"batch_id":existing["id"],"source_sha256":digest,
                 "status":existing["status"],"already_uploaded":True}
@@ -108,12 +113,17 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     counts = {"total": 0, "ready": 0, "errors": 0, "duplicates": 0}
     try:
         db.execute(text("""INSERT INTO external_provider_import_batches
-            (id, amo_id, filename, source_sha256, mapping_json, created_by_user_id)
-            VALUES (:id, :amo, :filename, :digest, :mapping, :actor)"""),
+            (id, amo_id, filename, source_sha256, mapping_json, import_kind, source_sheet, created_by_user_id)
+            VALUES (:id, :amo, :filename, :digest, :mapping, :kind, :sheet, :actor)"""),
             {"id": batch_id, "amo": tenant, "filename": filename[:255],
-             "digest": digest, "mapping":json.dumps(overrides), "actor": str(user.id)})
+             "digest": digest, "mapping":json.dumps(overrides), "kind":import_kind,
+             "sheet":source_sheet[:128] or None, "actor": str(user.id)})
         seen = set()
+        matched_sheet = False
         for sheet in workbook.worksheets:
+            if source_sheet and sheet.title != source_sheet:
+                continue
+            matched_sheet = True
             rows = sheet.iter_rows(values_only=True)
             headers = next(rows, None)
             if not headers:
@@ -157,8 +167,11 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                      "sheet": sheet.title[:128], "row": row_number,
                      "raw": json.dumps([_value(cell) for cell in cells]),
                      "norm": json.dumps(fields), "errors": json.dumps(errors), "state": state})
+        if not matched_sheet:
+            raise HTTPException(422, "Selected worksheet not found.")
         db.commit()
-        return {"batch_id": batch_id, "source_sha256": digest, "counts": counts, "status": "STAGED"}
+        return {"batch_id":batch_id, "source_sha256":digest, "import_kind":import_kind,
+                "counts":counts,"status":"STAGED"}
     except Exception:
         db.rollback()
         raise
