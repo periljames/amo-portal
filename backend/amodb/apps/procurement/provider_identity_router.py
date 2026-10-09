@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as accounts
@@ -134,8 +135,16 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
     record_id = str(uuid4())
     columns = ["id", "amo_id", "supplier_id", *values]
     params = {"id": record_id, "amo_id": tenant, "supplier_id": supplier_id, **values}
-    db.execute(text(f"""INSERT INTO {_TABLES[kind]} ({', '.join(columns)})
+    try:
+        db.execute(text(f"""INSERT INTO {_TABLES[kind]} ({', '.join(columns)})
                       VALUES ({', '.join(':'+c for c in columns)})"""), params)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Duplicate or conflicting provider metadata.") from exc
+    service._event(db, amo_id=tenant, entity_type="ExternalProviderMetadata",
+                   entity_id=record_id, action="create_" + kind,
+                   actor_user_id=str(current_user.id),
+                   detail={"supplier_id": supplier_id})
     row = db.execute(text(f"SELECT * FROM {_TABLES[kind]} WHERE id=:id AND amo_id=:tenant"),
                      {"id": record_id, "tenant": tenant}).mappings().one()
     db.commit()
@@ -166,5 +175,10 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
                       "id": record_id, "version": payload.expected_version}).mappings().first()
     if row is None:
         raise HTTPException(409, "Record not found or stale version. Refresh and retry.")
+    service._event(db, amo_id=tenant, entity_type="ExternalProviderMetadata",
+                   entity_id=record_id, action="update_" + kind,
+                   actor_user_id=str(current_user.id),
+                   detail={"supplier_id": supplier_id, "changed_fields": sorted(values),
+                           "version": row["version"]})
     db.commit()
     return dict(row)
