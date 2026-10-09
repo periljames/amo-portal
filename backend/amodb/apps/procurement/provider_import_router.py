@@ -1,4 +1,4 @@
-"""Controlled workbook staging. Does not approve suppliers or grant eligibility."""
+"""Controlled workbook staging. PROSPECTIVE status blocks use despite an enabled master record."""
 from __future__ import annotations
 
 import hashlib
@@ -199,7 +199,7 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
             phone=fields.get("phone"), country=fields.get("country"),
             physical_address=fields.get("physical_address"),
             supplier_type="OTHER", status=models.SupplierLifecycleStatus.PROSPECTIVE,
-            is_active=False, created_by_user_id=str(user.id),
+            is_active=True, created_by_user_id=str(user.id),
         )
         db.add(supplier)
         db.flush()
