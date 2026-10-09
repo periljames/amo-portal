@@ -192,6 +192,7 @@ class ProcurementSupplier(Base):
     quality_contact_email = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
+    external_import_pending_activation = Column(Boolean, nullable=False, default=False, server_default="false")
     approved_at = Column(DateTime(timezone=True), nullable=True)
     approved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     suspended_at = Column(DateTime(timezone=True), nullable=True)
