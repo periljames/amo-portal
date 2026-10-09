@@ -93,6 +93,17 @@ def _clean(kind: str, values: dict[str, Any], *, creation: bool) -> dict[str, An
         raise HTTPException(422, f"Unsupported fields: {', '.join(sorted(unexpected))}")
     if creation and (_REQUIRED[kind] - {key for key, val in values.items() if val is not None and val != ""}):
         raise HTTPException(422, "Required provider fields are missing.")
+    size_limits = {"role_code":64,"site_code":64,"site_name":255,"country":80,
+                   "contact_name":255,"email":255,"phone":80,"assignment":32,
+                   "capability_type":64,"manufacturer":255,"product_family":255,
+                   "rating":255,"regulatory_authority":128,"certificate_number":160,
+                   "certificate_type":80,"issuing_authority":160,"jurisdiction":80,
+                   "approval_rating":255,"relationship_kind":32,"contracted_function":128,
+                   "service_category":128,"aircraft_type":128,"engine_type":128,
+                   "component_part_number":128,"service_code":128}
+    for field,maximum in size_limits.items():
+        if field in values and values[field] is not None and len(str(values[field]))>maximum:
+            raise HTTPException(422, field + " exceeds allowed length.")
     if "role_code" in values and values["role_code"] not in _ALLOWED_ROLES:
         raise HTTPException(422, "Unsupported provider role.")
     if "assignment" in values and values["assignment"] not in _ALLOWED_ASSIGNMENTS:
