@@ -263,7 +263,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const isLiveStage = Boolean(sessionQuery.data && isAtLeastLiveStage(sessionQuery.data.current_stage_id));
   const writeWindowReady = Boolean(sessionQuery.data && !sessionQuery.isError && (sessionQuery.data.fieldwork_access?.ready ?? sessionQuery.data.preparation_issued));
-  const canExecute = canExecuteAssignedAudit(auditQuery.data) && writeWindowReady && !fieldworkComplete;
+  const canExecute = canExecuteAssignedAudit(auditQuery.data) && !fieldworkComplete && writeWindowReady;
   const canCompleteFieldwork = canCompleteAuditFieldwork(auditQuery.data) && writeWindowReady && !fieldworkComplete;
   const fieldworkEnabled = Boolean(auditId) && isLiveStage;
 
