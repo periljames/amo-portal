@@ -217,6 +217,8 @@ def upgrade():
         sa.Column("import_kind", sa.String(20), nullable=False, server_default="SUPPLIERS"),
         sa.Column("mapping_digest", sa.String(64), nullable=False),
         sa.Column("source_sheet", sa.String(128)),
+        sa.Column("header_row", sa.Integer(), nullable=False, server_default="1"),
+        sa.CheckConstraint("header_row BETWEEN 1 AND 100",name="ck_ext_import_header_row"),
         sa.Column("status", sa.String(20), nullable=False, server_default="STAGED"),
         sa.Column("created_by_user_id", sa.String(36), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
