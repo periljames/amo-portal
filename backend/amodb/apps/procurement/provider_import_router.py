@@ -97,13 +97,17 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
             raise ValueError()
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, "Invalid source column mapping.") from exc
+    mapping_digest = hashlib.sha256(json.dumps({"mapping":overrides,"sheet":source_sheet},
+                                               sort_keys=True).encode("utf-8")).hexdigest()
     data = await file.read(_MAX_BYTES + 1)
     if len(data) > _MAX_BYTES:
         raise HTTPException(413, "Workbook exceeds 10 MB.")
     digest = hashlib.sha256(data).hexdigest()
     existing = db.execute(text("""SELECT id, status FROM external_provider_import_batches
-        WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind"""),
-        {"amo":tenant,"digest":digest,"kind":import_kind}).mappings().first()
+        WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind
+        AND mapping_digest=:mapping_digest"""),
+        {"amo":tenant,"digest":digest,"kind":import_kind,
+         "mapping_digest":mapping_digest}).mappings().first()
     if existing:
         return {"batch_id":existing["id"],"source_sha256":digest,
                 "status":existing["status"],"already_uploaded":True}
@@ -115,10 +119,13 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     counts = {"total": 0, "ready": 0, "errors": 0, "duplicates": 0}
     try:
         db.execute(text("""INSERT INTO external_provider_import_batches
-            (id, amo_id, filename, source_sha256, mapping_json, import_kind, source_sheet, created_by_user_id)
-            VALUES (:id, :amo, :filename, :digest, CAST(:mapping AS JSON), :kind, :sheet, :actor)"""),
+            (id, amo_id, filename, source_sha256, mapping_json, mapping_digest,
+             import_kind, source_sheet, created_by_user_id)
+            VALUES (:id, :amo, :filename, :digest, CAST(:mapping AS JSON), :mapping_digest,
+                    :kind, :sheet, :actor)"""),
             {"id": batch_id, "amo": tenant, "filename": filename[:255],
-             "digest": digest, "mapping":json.dumps(overrides), "kind":import_kind,
+             "digest": digest, "mapping":json.dumps(overrides), "mapping_digest":mapping_digest,
+             "kind":import_kind,
              "sheet":source_sheet[:128] or None, "actor": str(user.id)})
         seen = set()
         matched_sheet = False
