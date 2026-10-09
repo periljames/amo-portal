@@ -128,12 +128,13 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       {preview.counts&&` ${preview.counts.total} rows; ${preview.counts.ready} ready; ${preview.counts.errors} errors.`}</p>}
     {detail&&<>
       <div className="proc-table-wrap"><table className="proc-table"><thead><tr>
-        <th>Sheet / row</th><th>Provider</th><th>Status</th><th>Issues</th>
+        <th>Sheet / row</th><th>Provider</th><th>Source label (not authority)</th><th>Import status</th><th>Issues</th>
       </tr></thead><tbody>{detail.rows.map(row=>{
         const fields=unpack<Record<string,string|null>>(row.normalized_json);
         const issues=unpack<string[]>(row.diagnostics_json);
         return <tr key={row.id}><td>{row.sheet_name} #{row.row_number}</td>
           <td>{fields.supplier_code||fields.contract_number||"—"} — {fields.legal_name||fields.supplier_name||fields.title||"—"}</td>
+          <td>{fields.source_status||"—"} → {detail.batch.import_kind==="CONTRACTS"?"DRAFT":"PROSPECTIVE"}</td>
           <td>{row.status}</td><td>{issues.join(", ")||"—"}</td></tr>;
       })}</tbody></table></div>
       <div className="proc-toolbar">
