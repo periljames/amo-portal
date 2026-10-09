@@ -328,8 +328,8 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
                 trading_name=fields.get("trading_name"),email=fields.get("email"),
                 phone=fields.get("phone"),country=fields.get("country"),
                 physical_address=fields.get("physical_address"),supplier_type="OTHER",
-                status=models.SupplierLifecycleStatus.PROSPECTIVE,is_active=True,
-                created_by_user_id=str(user.id),
+                status=models.SupplierLifecycleStatus.PROSPECTIVE,is_active=False,
+                external_import_pending_activation=True,created_by_user_id=str(user.id),
             )
             db.add(supplier)
             try:
