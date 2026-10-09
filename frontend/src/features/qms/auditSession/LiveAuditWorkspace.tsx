@@ -853,7 +853,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <span>{sessionQuery.data ? `Stage: ${sessionQuery.data.current_stage_label}` : "Verifying lifecycle…"}</span>
           <span>
             {items.length
-              ? `${completed}/${items.length} complete · ${percent}%`
+              ? `${completed}/${items.length} answered · ${percent}%`
               : "No checklist items · Not applicable"}
           </span>
           <span><Users size={13} /> {presence.length} active</span>
@@ -868,9 +868,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span>SYNC ERROR · {outbox.failed} failed</span>
           ) : outbox.queued ? (
             <span>PENDING CHANGES · {outbox.queued}</span>
+          ) : (evidenceOutboxQuery.data?.length || 0) > 0 ? (
+            <span>EVIDENCE PENDING · {evidenceOutboxQuery.data?.length}</span>
           ) : (
-            <span>SYNCED · no pending changes</span>
-          )}
+            <span>{connectivity === "ONLINE" ? "No queued changes" : "Offline · no queued changes"}</span>
+          )
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
           ) : (
