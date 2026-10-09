@@ -155,6 +155,13 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                 fields = {key: _value(cells[index] if index < len(cells) else None)
                           for key, index in matched.items()}
                 errors = []
+                limits = {"supplier_code":64,"legal_name":255,"trading_name":255,
+                          "email":255,"phone":64,"country":64,"contract_number":128,
+                          "supplier_name":255,"title":255,"controlled_document_id":64,
+                          "controlled_document_revision":64}
+                for column,maximum in limits.items():
+                    if fields.get(column) and len(fields[column])>maximum:
+                        errors.append(column + "_too_long")
                 supplier_id = None
                 if any(isinstance(cell, str) and cell.startswith("=") for cell in cells):
                     errors.append("formula_requires_manual_review")
