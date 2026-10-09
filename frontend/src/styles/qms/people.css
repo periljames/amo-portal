@@ -689,7 +689,7 @@ body:has(.qms-authz-modal) {
   position: fixed;
   /* Stretch to both viewport edges; auto width avoids the 9px native scrollbar drift
      produced by width:100% when the document scrollbar is reserved. */
-  inset: 0;
+  inset: 0 var(--qms-authz-layout-viewport-gutter, 0px) 0 0;
   width: auto;
   box-sizing: border-box;
   z-index: 1350;
