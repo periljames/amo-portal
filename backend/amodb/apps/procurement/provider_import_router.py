@@ -35,6 +35,17 @@ _COLUMNS = {
     "country": ("country",),
     "physical_address": ("address", "physical address"),
 }
+_CONTRACT_COLUMNS = {
+    "contract_number": ("contract number", "agreement number", "agreement ref", "reference number"),
+    "supplier_code": ("vendor code", "supplier code", "provider code"),
+    "supplier_name": ("vendor name", "supplier name", "contractor", "provider name"),
+    "title": ("contract title", "agreement title", "description"),
+    "scope_text": ("scope", "scope of work", "services"),
+    "effective_on": ("effective date", "start date"),
+    "expires_on": ("expiry date", "expiration date", "end date"),
+    "source_status": ("status", "approval status", "contract status"),
+}
+
 _MAX_BYTES = 10 * 1024 * 1024
 
 def _tenant(db, amo_code, user):
@@ -52,9 +63,9 @@ def _value(value):
         return value.isoformat()
     return str(value).strip() or None
 
-def _mapping(headers, overrides):
+def _mapping(headers, overrides, columns):
     mapping = {}
-    for field, aliases in _COLUMNS.items():
+    for field, aliases in columns.items():
         allowed = {_key(value) for value in (*aliases, overrides.get(field, ""))}
         for index, header in enumerate(headers):
             if _key(header) in allowed:
@@ -107,7 +118,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
             headers = next(rows, None)
             if not headers:
                 continue
-            matched = _mapping(headers, overrides)
+            matched = _mapping(headers, overrides, columns)
             for row_number, cells in enumerate(rows, start=2):
                 if not any(cell is not None for cell in cells):
                     continue
