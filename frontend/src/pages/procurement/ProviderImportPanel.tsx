@@ -72,12 +72,13 @@ export default function ProviderImportPanel({amoCode,onImported}:{
   function download() {
     if(!detail)return;
     const escape=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
-    const header=["sheet","row","supplier_code","supplier_name","contract_number","title","status","issues","supplier_id"];
+    const header=["sheet","row","supplier_code","supplier_name","contract_number","title","source_status","effective_on","expires_on","status","issues","supplier_id"];
     const lines=[header.map(escape).join(","),...detail.rows.map(row=>{
       const fields=unpack<Record<string,string|null>>(row.normalized_json);
       const issues=unpack<string[]>(row.diagnostics_json);
       return [row.sheet_name,row.row_number,fields.supplier_code,fields.legal_name||fields.supplier_name,
-        fields.contract_number,fields.title,row.status,issues.join("; "),row.supplier_id].map(escape).join(",");
+        fields.contract_number,fields.title,fields.source_status,fields.effective_on,fields.expires_on,
+        row.status,issues.join("; "),row.supplier_id].map(escape).join(",");
     })];
     const url=URL.createObjectURL(new Blob([lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));
     const anchor=document.createElement("a");anchor.href=url;
