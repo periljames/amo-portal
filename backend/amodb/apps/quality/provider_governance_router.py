@@ -819,6 +819,8 @@ def transition_external_provider(
             """
             UPDATE procurement_suppliers
             SET status = :target,
+                is_active = CASE WHEN :approved AND external_import_pending_activation THEN TRUE ELSE is_active END,
+                external_import_pending_activation = CASE WHEN :approved THEN FALSE ELSE external_import_pending_activation END,
                 approved_at = CASE WHEN :approved THEN NOW() ELSE approved_at END,
                 approved_by_user_id = CASE WHEN :approved THEN :actor ELSE approved_by_user_id END,
                 suspended_at = CASE WHEN :suspended THEN NOW() ELSE suspended_at END,

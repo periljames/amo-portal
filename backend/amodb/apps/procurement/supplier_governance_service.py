@@ -834,6 +834,7 @@ def decide_supplier(
     )
     supplier.status = target_status
     supplier.is_active = True
+    supplier.external_import_pending_activation = False
     supplier.approved_at = now
     supplier.approved_by_user_id = actor_user_id
     supplier.suspended_at = None
