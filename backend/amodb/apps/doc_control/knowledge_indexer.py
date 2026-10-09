@@ -7,6 +7,9 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from amodb.apps.ai.contracts import AIRequestContext
+from amodb.apps.ai.errors import AIServiceError
+from amodb.apps.ai.service import AIService, get_effective_settings
 from amodb.apps.manuals import models as manual_models
 from amodb.database import WriteSessionLocal
 
@@ -197,18 +200,48 @@ def _index_pdf(
         import fitz  # type: ignore
     except ImportError as exc:
         raise RuntimeError("PyMuPDF is required for exact PDF reference indexing") from exc
+
     counts = {"detected": 0, "resolved": 0, "unresolved": 0, "broken": 0}
     searchable_text = False
     page_section = _page_sections(sections)
+    section_blocks: dict[str, list[manual_models.ManualBlock]] = {}
+    section_ids = [section.id for section in sections]
+    if section_ids:
+        for block in (
+            db.query(manual_models.ManualBlock)
+            .filter(manual_models.ManualBlock.section_id.in_(section_ids))
+            .order_by(manual_models.ManualBlock.section_id.asc(), manual_models.ManualBlock.order_index.asc())
+            .all()
+        ):
+            section_blocks.setdefault(block.section_id, []).append(block)
+
     with fitz.open(path) as document:
         for page_index in range(document.page_count):
             page_number = page_index + 1
             page = document.load_page(page_index)
-            text = str(page.get_text("text") or "")
+            native_text = str(page.get_text("text") or "")
+            text = native_text
+            section = page_section.get(page_number)
+            source_block = None
+
+            # MANUAL_REVISION_PROCESS rebuilds PDF blocks as one derived text
+            # block per searchable page. For scanned/mixed PDFs prefer that
+            # page-level OCR result only when the immutable PDF page has too
+            # little native text to support reliable reference detection.
+            if len(native_text.strip()) < 24 and section is not None:
+                metadata = dict(section.metadata_json or {})
+                page_start = int(metadata.get("page_start") or page_number)
+                block_index = max(0, page_number - page_start)
+                blocks = section_blocks.get(section.id, [])
+                if block_index < len(blocks):
+                    candidate = blocks[block_index]
+                    if len(str(candidate.text_plain or "").strip()) > len(native_text.strip()):
+                        source_block = candidate
+                        text = str(candidate.text_plain or "")
+
             if not text.strip():
                 continue
             searchable_text = True
-            section = page_section.get(page_number)
             for start, end, raw_token, normalized, targets, method in _reference_occurrences(
                 text,
                 alias_patterns=alias_patterns,
@@ -223,17 +256,17 @@ def _index_pdf(
                     source_manual=source_manual,
                     source_revision=source_revision,
                     source_section_id=section.id if section else None,
-                    source_block_id=None,
+                    source_block_id=source_block.id if source_block else None,
                     source_page_number=page_number,
-                    source_change_hash=source_revision.source_sha256,
+                    source_change_hash=source_block.change_hash if source_block else source_revision.source_sha256,
                     source_text=text,
                     start=start,
                     end=end,
                     raw_token=raw_token,
                     normalized=normalized,
                     targets=targets,
-                    detection_method=method,
-                    bbox=_page_bbox(page, raw_token),
+                    detection_method=f"{method}:OCR_BLOCK" if source_block else method,
+                    bbox={} if source_block else _page_bbox(page, raw_token),
                 )
                 if not status:
                     continue
@@ -309,6 +342,137 @@ def _index_structured_blocks(
             else:
                 counts["unresolved"] += 1
     return counts
+
+
+def _section_embedding_text(
+    db: Session,
+    section: manual_models.ManualSection,
+    *,
+    max_chars: int = 12000,
+) -> str:
+    blocks = (
+        db.query(manual_models.ManualBlock)
+        .filter(manual_models.ManualBlock.section_id == section.id)
+        .order_by(manual_models.ManualBlock.order_index.asc())
+        .all()
+    )
+    body = "\n".join(str(block.text_plain or "").strip() for block in blocks if str(block.text_plain or "").strip())
+    combined = "\n".join(value for value in (str(section.heading or "").strip(), body) if value)
+    return combined[:max_chars].strip()
+
+
+def _refresh_section_embeddings(
+    db: Session,
+    *,
+    tenant_id: str,
+    manual: manual_models.Manual,
+    revision: manual_models.ManualRevision,
+    sections: list[manual_models.ManualSection],
+) -> dict[str, object]:
+    """Persist semantic vectors during indexing; never embed the same section per audit query."""
+    try:
+        settings = get_effective_settings(db, tenant_id=tenant_id)
+    except (ValueError, AIServiceError) as exc:
+        return {"status": "SKIPPED", "reason": f"AI settings unavailable: {exc}"}
+
+    if not settings.enabled:
+        return {"status": "SKIPPED", "reason": "Tenant AI is disabled."}
+    if "DOCUMENT_INTELLIGENCE" not in settings.enabled_features:
+        return {"status": "SKIPPED", "reason": "Document intelligence is disabled for the tenant."}
+    if not settings.allow_external_document_context:
+        return {
+            "status": "SKIPPED",
+            "reason": "Tenant policy does not allow controlled document text to be sent to the configured embedding provider.",
+        }
+    if not revision.created_by:
+        return {
+            "status": "SKIPPED",
+            "reason": "Revision has no attributable user; semantic indexing will not create an untraceable AI usage record.",
+        }
+
+    indexed: list[tuple[manual_models.ManualSection, str, str]] = []
+    for section in sections:
+        text_value = _section_embedding_text(db, section)
+        if not text_value:
+            continue
+        content_hash = hashlib.sha256(text_value.encode("utf-8")).hexdigest()
+        indexed.append((section, text_value, content_hash))
+
+    if not indexed:
+        db.query(km.DocumentationSectionEmbedding).filter(
+            km.DocumentationSectionEmbedding.tenant_id == tenant_id,
+            km.DocumentationSectionEmbedding.revision_id == revision.id,
+        ).delete(synchronize_session=False)
+        return {"status": "COMPLETED", "embedded_sections": 0, "model": settings.embedding_model}
+
+    existing = {
+        (row.section_id, row.embedding_model): row
+        for row in db.query(km.DocumentationSectionEmbedding).filter(
+            km.DocumentationSectionEmbedding.tenant_id == tenant_id,
+            km.DocumentationSectionEmbedding.revision_id == revision.id,
+        ).all()
+    }
+    active_keys: set[tuple[str, str]] = set()
+    pending: list[tuple[manual_models.ManualSection, str, str]] = []
+    for section, text_value, content_hash in indexed:
+        key = (str(section.id), settings.embedding_model)
+        active_keys.add(key)
+        row = existing.get(key)
+        if row is not None and row.content_hash == content_hash and list(row.vector_json or []):
+            continue
+        pending.append((section, text_value, content_hash))
+
+    service = AIService()
+    batch_size = 16
+    for offset in range(0, len(pending), batch_size):
+        batch = pending[offset : offset + batch_size]
+        request_id = f"dms-index-embedding:{revision.id}:{offset // batch_size}"
+        result = service.embed(
+            db,
+            context=AIRequestContext(
+                tenant_id=tenant_id,
+                user_id=str(revision.created_by),
+                document_context={"document_id": manual.id, "revision_id": revision.id},
+                workflow_context={"workflow_type": "DOCUMENT_INDEXING", "workflow_id": revision.id},
+            ),
+            request_id=request_id,
+            feature="DOCUMENT_INTELLIGENCE",
+            input_texts=tuple(text_value for _section, text_value, _hash in batch),
+            model=settings.embedding_model,
+        )
+        if len(result.embeddings) != len(batch):
+            raise RuntimeError("Embedding provider returned an incomplete section embedding batch.")
+        for (section, _text_value, content_hash), vector in zip(batch, result.embeddings, strict=True):
+            if not vector:
+                raise RuntimeError("Embedding provider returned an empty section vector.")
+            key = (str(section.id), result.model)
+            row = existing.get(key)
+            if row is None:
+                row = km.DocumentationSectionEmbedding(
+                    tenant_id=tenant_id,
+                    manual_id=manual.id,
+                    revision_id=revision.id,
+                    section_id=section.id,
+                    embedding_model=result.model,
+                )
+                db.add(row)
+                existing[key] = row
+            row.dimensions = len(vector)
+            row.content_hash = content_hash
+            row.vector_json = [float(value) for value in vector]
+            row.updated_at = utcnow()
+            active_keys.add(key)
+
+    for key, row in existing.items():
+        if key not in active_keys:
+            db.delete(row)
+    db.flush()
+    return {
+        "status": "COMPLETED",
+        "embedded_sections": len(indexed),
+        "refreshed_sections": len(pending),
+        "model": settings.embedding_model,
+    }
 
 
 def index_revision_references(db: Session, *, revision_id: str) -> dict:
@@ -392,6 +556,24 @@ def index_revision_references(db: Session, *, revision_id: str) -> dict:
         for row in existing.values():
             if row.status == "OUTDATED" and row.occurrence_key not in seen:
                 counts["unresolved"] += 1
+
+        semantic_index: dict[str, object]
+        try:
+            semantic_index = _refresh_section_embeddings(
+                db,
+                tenant_id=tenant_id,
+                manual=manual,
+                revision=revision,
+                sections=sections,
+            )
+        except AIServiceError as exc:
+            semantic_index = {"status": "FAILED", "reason": f"{exc.code}: {exc}"}
+        except Exception as exc:
+            semantic_index = {"status": "FAILED", "reason": str(exc)[:1000]}
+        if semantic_index.get("status") == "FAILED":
+            semantic_warning = f"Semantic indexing failed: {semantic_index.get('reason')}"
+            warning = f"{warning} {semantic_warning}".strip() if warning else semantic_warning
+
         job.status = "COMPLETED_WITH_WARNINGS" if warning else "COMPLETED"
         job.detected_count = counts["detected"]
         job.resolved_count = counts["resolved"]

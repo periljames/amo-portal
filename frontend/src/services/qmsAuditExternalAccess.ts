@@ -5,6 +5,11 @@ import { getApiBaseUrl } from "./config";
 export type ExternalParticipantType = "EXTERNAL_AUDITOR" | "AUDITEE_GUEST";
 export type ExternalAuditAssuranceLevel = "EMAIL_LINK" | "MFA" | "PASSKEY";
 export type ExternalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+export type ExternalChecklistResponseOption = {
+  value: string;
+  label: string;
+  canonical_status: ExternalChecklistResponse;
+};
 
 export type ExternalAuditParticipant = {
   id: string;
@@ -133,7 +138,19 @@ export type ExternalAuditorFieldworkItem = {
   checklist_ref: string | null;
   requirement_ref: string | null;
   prompt: string;
+  response_type: string;
+  expected_evidence?: string | null;
+  guidance?: string | null;
+  audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
+  sampling_requirement?: string | null;
+  evidence_types?: string[];
+  evidence_required_when?: ExternalChecklistResponse[];
+  notes_required_when?: ExternalChecklistResponse[];
+  na_justification_required?: boolean;
+  mandatory?: boolean;
+  response_options: ExternalChecklistResponseOption[];
   canonical_response_status: ExternalChecklistResponse;
+  response_value: string | null;
   entity_version: number;
   finding_id: string | null;
   my_auditor_notes: string | null;
@@ -284,6 +301,7 @@ export function mutateExternalAuditorChecklist(
   item: ExternalAuditorFieldworkItem,
   payload: {
     canonical_response_status: ExternalChecklistResponse;
+    response_value?: string | null;
     auditor_notes?: string | null;
     evidence_references?: Array<Record<string, unknown> | string>;
     reason: string;
@@ -314,6 +332,7 @@ export function mutateExternalAuditorChecklist(
       base_version: item.entity_version,
       operation: "CHECKLIST_UPDATE",
       canonical_response_status: payload.canonical_response_status,
+      response_value: payload.response_value ?? null,
       auditor_notes: payload.auditor_notes ?? null,
       evidence_references: payload.evidence_references ?? [],
       reason: payload.reason,

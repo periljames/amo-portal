@@ -53,7 +53,7 @@ def adopt_generated_report_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Generated audit report artifact not found.")
 
-    path = resolve_report_artifact(artifact.storage_ref)
+    path = resolve_report_artifact(artifact.storage_ref, expected_sha256=artifact.sha256)
     digest = _sha256(path)
     if digest != artifact.sha256:
         raise HTTPException(status_code=409, detail="Generated report artifact no longer matches its governed checksum.")

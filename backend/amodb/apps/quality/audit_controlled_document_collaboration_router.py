@@ -132,7 +132,9 @@ def public_governed_document_requests(
             "review_note": row.review_note,
             "request_type": meta.request_type if meta else "DOCUMENT",
             "linked_criterion": meta.linked_criterion if meta else None,
+            "responsible_party": meta.responsible_party if meta else None,
             "is_required": meta.is_required if meta else True,
+            "requirement_stage": meta.requirement_stage if meta else "REQUIRED_BEFORE_ISSUE",
             "source_mode": meta.source_mode if meta else "UPLOAD_OR_CONTROLLED",
             "controlled_source_system": meta.controlled_source_system if meta else "QMS_LOCAL",
             # Only an explicitly selected document/revision is disclosed. This

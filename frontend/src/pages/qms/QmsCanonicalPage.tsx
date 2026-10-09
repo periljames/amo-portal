@@ -58,16 +58,7 @@ function QmsCanonicalContent(): React.ReactElement {
 
   const carListView = location.pathname.match(/\/quality\/cars(?:\/(register|overdue|due-soon|awaiting-auditee|awaiting-quality-review|awaiting-effectiveness-review|closed))?\/?$/i)?.[1]?.toLowerCase() || "";
   if (carListView || (/\/quality\/cars\/?$/i.test(location.pathname) && !searchParams.get("carId"))) {
-    const filters: Record<string, string> = {
-      overdue: "timing=overdue",
-      "due-soon": "timing=due_soon",
-      "awaiting-auditee": "stage=with_auditee",
-      "awaiting-quality-review": "stage=needs_review",
-      "awaiting-effectiveness-review": "stage=effectiveness",
-      closed: "stage=closed",
-    };
-    const suffix = filters[carListView] ? `?${filters[carListView]}` : "";
-    return <Navigate to={`/maintenance/${amoCode}/quality/audits/register${suffix}`} replace />;
+    return <QualityCarsPage />;
   }
 
   if (pathname.includes("/quality/cars")) {

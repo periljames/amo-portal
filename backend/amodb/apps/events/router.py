@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import queue
+import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
@@ -24,6 +25,8 @@ router = APIRouter(prefix="/api", tags=["events"])
 
 REPLAY_RETENTION_DAYS = 7
 REPLAY_MAX_EVENTS = 500
+DURABLE_SWEEP_SECONDS = 3.0
+DURABLE_SWEEP_MAX_EVENTS = 250
 
 
 class ActivityEventRead(BaseModel):
@@ -139,12 +142,24 @@ def _event_matches_tenant(event: EventEnvelope, effective_amo_id: str) -> bool:
     return bool(amo_id) and str(amo_id) == str(effective_amo_id)
 
 
+def _latest_event_cursor(db: Session, *, amo_id: str) -> tuple[datetime, str] | None:
+    row = (
+        db.query(audit_models.AuditEvent)
+        .filter(audit_models.AuditEvent.amo_id == amo_id)
+        .order_by(audit_models.AuditEvent.occurred_at.desc(), audit_models.AuditEvent.id.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return (row.occurred_at or row.created_at, str(row.id))
+
+
 def _replay_events_since(
     db: Session,
     *,
     amo_id: str,
     last_event_id: str,
-) -> tuple[list[EventEnvelope], bool]:
+) -> tuple[list[EventEnvelope], bool, tuple[datetime, str] | None]:
     anchor = (
         db.query(audit_models.AuditEvent)
         .filter(
@@ -154,12 +169,12 @@ def _replay_events_since(
         .first()
     )
     if not anchor:
-        return [], True
+        return [], True, _latest_event_cursor(db, amo_id=amo_id)
 
     anchor_ts = anchor.occurred_at or anchor.created_at
     replay_threshold = datetime.now(timezone.utc) - timedelta(days=REPLAY_RETENTION_DAYS)
     if anchor_ts < replay_threshold:
-        return [], True
+        return [], True, _latest_event_cursor(db, amo_id=amo_id)
 
     rows = (
         db.query(audit_models.AuditEvent)
@@ -174,27 +189,79 @@ def _replay_events_since(
         .limit(REPLAY_MAX_EVENTS)
         .all()
     )
-    return [_audit_row_to_envelope(row) for row in rows], False
+    cursor_row = rows[-1] if rows else anchor
+    cursor = (cursor_row.occurred_at or cursor_row.created_at, str(cursor_row.id))
+    return [_audit_row_to_envelope(row) for row in rows], False, cursor
 
 
-def _prepare_stream_bootstrap(request: Request) -> tuple[account_models.User, list[str]]:
+def _persisted_events_after(
+    *,
+    amo_id: str,
+    cursor: tuple[datetime, str] | None,
+) -> tuple[list[EventEnvelope], tuple[datetime, str] | None, bool]:
+    """Read committed events with a fresh short-lived session.
+
+    The process-local broker is the low-latency path. This durable sweep closes
+    the commit-before-publish and multi-process gaps without keeping a database
+    session pinned for the lifetime of the SSE connection.
+    """
+    db = SessionLocal()
+    try:
+        query = db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id)
+        if cursor is not None:
+            cursor_ts, cursor_id = cursor
+            query = query.filter(
+                or_(
+                    audit_models.AuditEvent.occurred_at > cursor_ts,
+                    and_(
+                        audit_models.AuditEvent.occurred_at == cursor_ts,
+                        audit_models.AuditEvent.id > cursor_id,
+                    ),
+                )
+            )
+        rows = (
+            query.order_by(audit_models.AuditEvent.occurred_at.asc(), audit_models.AuditEvent.id.asc())
+            .limit(DURABLE_SWEEP_MAX_EVENTS)
+            .all()
+        )
+        if not rows:
+            return [], cursor, False
+        last = rows[-1]
+        next_cursor = (last.occurred_at or last.created_at, str(last.id))
+        return (
+            [_audit_row_to_envelope(row) for row in rows],
+            next_cursor,
+            len(rows) >= DURABLE_SWEEP_MAX_EVENTS,
+        )
+    finally:
+        close_session_safely(db)
+
+
+def _prepare_stream_bootstrap(
+    request: Request,
+) -> tuple[account_models.User, list[str], tuple[datetime, str] | None, set[str]]:
     """Authenticate and optionally replay history, then release the DB connection.
 
-    The SSE keepalive loop must not hold a pooled session for the stream lifetime;
-    that previously reserved one (or two) write connections per open tab forever.
+    The SSE keepalive loop must not hold a pooled session for the stream lifetime.
+    A durable cursor is returned so the live stream can recover committed events
+    that were never observed by this process-local broker.
     """
     db = SessionLocal()
     try:
         user = _get_user_from_token(_bearer_token_from_request(request), db)
         effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+        amo_id = str(effective_amo_id)
         last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
         bootstrap: list[str] = []
+        delivered_ids: set[str] = set()
+        cursor = _latest_event_cursor(db, amo_id=amo_id)
         if last_event_id:
-            replay, requires_reset = _replay_events_since(
+            replay, requires_reset, replay_cursor = _replay_events_since(
                 db,
-                amo_id=str(effective_amo_id),
+                amo_id=amo_id,
                 last_event_id=last_event_id,
             )
+            cursor = replay_cursor
             if requires_reset:
                 bootstrap.append(
                     format_sse(
@@ -210,8 +277,9 @@ def _prepare_stream_bootstrap(request: Request) -> tuple[account_models.User, li
                 )
             else:
                 for event in replay:
+                    delivered_ids.add(event.id)
                     bootstrap.append(format_sse(event.to_json(), event=event.type, event_id=event.id))
-        return user, bootstrap
+        return user, bootstrap, cursor, delivered_ids
     finally:
         close_session_safely(db)
 
@@ -220,31 +288,62 @@ async def _event_generator(
     request: Request,
     user: account_models.User,
     bootstrap: list[str],
+    durable_cursor: tuple[datetime, str] | None,
+    delivered_ids: set[str],
 ) -> AsyncGenerator[str, None]:
     for chunk in bootstrap:
         yield chunk
     q = broker.subscribe()
     try:
-        effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+        effective_amo_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", ""))
+        last_durable_sweep = time.monotonic()
+        last_keepalive = time.monotonic()
         while True:
             if await request.is_disconnected():
                 break
+
+            now = time.monotonic()
+            until_sweep = max(0.05, DURABLE_SWEEP_SECONDS - (now - last_durable_sweep))
+            wait_seconds = min(until_sweep, 1.0)
             try:
-                event = await asyncio.to_thread(q.get, True, 15)
-                if not _event_matches_tenant(event, str(effective_amo_id)):
-                    continue
-                yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+                event = await asyncio.to_thread(q.get, True, wait_seconds)
+                if _event_matches_tenant(event, effective_amo_id) and event.id not in delivered_ids:
+                    delivered_ids.add(event.id)
+                    yield format_sse(event.to_json(), event=event.type, event_id=event.id)
             except queue.Empty:
+                pass
+
+            now = time.monotonic()
+            if now - last_durable_sweep >= DURABLE_SWEEP_SECONDS:
+                persisted, durable_cursor, has_more = await asyncio.to_thread(
+                    _persisted_events_after,
+                    amo_id=effective_amo_id,
+                    cursor=durable_cursor,
+                )
+                for event in persisted:
+                    if event.id in delivered_ids:
+                        continue
+                    delivered_ids.add(event.id)
+                    yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+                # Prevent unbounded per-connection memory while retaining enough
+                # overlap to suppress broker/durable duplicate delivery.
+                if len(delivered_ids) > 4000:
+                    delivered_ids.clear()
+                    delivered_ids.update(event.id for event in persisted[-250:])
+                last_durable_sweep = 0.0 if has_more else now
+
+            if now - last_keepalive >= 15:
                 yield keepalive_message()
+                last_keepalive = now
     finally:
         broker.unsubscribe(q)
 
 
 @router.get("/events")
 async def stream_events(request: Request) -> StreamingResponse:
-    user, bootstrap = _prepare_stream_bootstrap(request)
+    user, bootstrap, durable_cursor, delivered_ids = _prepare_stream_bootstrap(request)
     return StreamingResponse(
-        _event_generator(request, user, bootstrap),
+        _event_generator(request, user, bootstrap, durable_cursor, delivered_ids),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

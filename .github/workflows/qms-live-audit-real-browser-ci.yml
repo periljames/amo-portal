@@ -193,6 +193,11 @@ jobs:
               assert realtime.entity_version == 2, realtime.entity_version
               assert realtime.updated_by_user_id == fixture["realtime_user_a_id"], realtime.updated_by_user_id
               assert realtime.auditor_notes == "Committed by Quality Alpha and delivered to Quality Bravo by the authenticated SSE stream."
+              assert realtime.assessment_applicability == "APPLICABLE", realtime.assessment_applicability
+              assert realtime.documentary_status == "DOCUMENTED", realtime.documentary_status
+              assert realtime.implementation_status == "VERIFIED", realtime.implementation_status
+              assert realtime.field_verification_status == "VERIFIED", realtime.field_verification_status
+              assert realtime.human_decision == "COMPLIANT", realtime.human_decision
 
               report = db.query(QualityAuditReportRevision).filter_by(amo_id=fixture["amo_id"], audit_id=ceremony_audit_id).one()
               assert report.status == "ISSUED", report.status

@@ -46,7 +46,9 @@ class AuditSetupUpdate(BaseModel):
 
     title: str | None = Field(default=None, max_length=255)
     scope: str | None = None
+    objectives: str | None = None
     criteria: str | None = None
+    location: str | None = Field(default=None, max_length=255)
     auditee: str | None = Field(default=None, max_length=255)
     auditee_email: str | None = Field(default=None, max_length=255)
     planned_start: date | None = None
@@ -57,6 +59,7 @@ class AuditSetupUpdate(BaseModel):
     notify_auditees: bool | None = None
     reminder_interval_days: int | None = Field(default=None, ge=1, le=60)
     reschedule_reason: str | None = Field(default=None, max_length=1000)
+    base_version: int | None = Field(default=None, ge=1)
 
 
 def _workflow_stage(workflow: Any, stage_id: str) -> Any | None:
@@ -74,13 +77,17 @@ def _audit_payload(audit: models.QMSAudit) -> dict[str, Any]:
         "audit_ref": audit.audit_ref,
         "title": audit.title,
         "scope": audit.scope,
+        "objectives": audit.objectives,
         "criteria": audit.criteria,
+        "location": audit.location,
+        "entity_version": int(audit.entity_version or 1),
         "auditee": audit.auditee,
         "auditee_email": audit.auditee_email,
         "auditee_user_id": audit.auditee_user_id,
         "lead_auditor_user_id": audit.lead_auditor_user_id,
         "observer_auditor_user_id": audit.observer_auditor_user_id,
         "assistant_auditor_user_id": audit.assistant_auditor_user_id,
+        "supporting_auditor_user_ids": list(audit.supporting_auditor_user_ids or []),
         "external_auditees": audit.external_auditees,
         "notify_auditors": audit.notify_auditors,
         "notify_auditees": audit.notify_auditees,
@@ -174,13 +181,23 @@ def update_audit_setup(
         raise HTTPException(status_code=404, detail="Audit occurrence not found.")
 
     update = payload.model_dump(exclude_unset=True)
+    requested_base_version = update.pop("base_version", None)
+    if requested_base_version is not None and requested_base_version != int(audit.entity_version or 1):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AUDIT_VERSION_CONFLICT",
+                "message": "The audit definition changed in another session. Refresh before saving.",
+                "server_version": int(audit.entity_version or 1),
+            },
+        )
     if "title" in update:
         title = (update["title"] or "").strip()
         if not title:
             raise HTTPException(status_code=422, detail="Audit title is required.")
         audit.title = title
 
-    for field_name in ("scope", "criteria", "auditee", "auditee_email"):
+    for field_name in ("scope", "objectives", "criteria", "location", "auditee", "auditee_email"):
         if field_name in update:
             value = update[field_name]
             setattr(audit, field_name, value.strip() if isinstance(value, str) and value.strip() else None)
@@ -258,6 +275,7 @@ def update_audit_setup(
             request=request,
         )
 
+    audit.entity_version = int(audit.entity_version or 1) + 1
     db.commit()
     db.refresh(audit)
     return _audit_payload(audit)

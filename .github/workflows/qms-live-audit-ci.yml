@@ -3,6 +3,9 @@ name: QMS Live Audit CI
 on:
   pull_request:
     paths:
+      - "backend/Dockerfile"
+      - "backend/requirements.txt"
+      - "backend/amodb/jobs/manual_revision_jobs.py"
       - "backend/amodb/alembic/versions/quality_260816_*.py"
       - "backend/amodb/alembic/versions/quality_260817_*.py"
       - "backend/amodb/apps/quality/audit_session_*.py"
@@ -21,6 +24,8 @@ on:
       - "backend/amodb/apps/quality/audit_archive_*.py"
       - "backend/amodb/apps/quality/audit_official_finding_service.py"
       - "backend/amodb/apps/quality/audit_checklist_execution_*.py"
+      - "backend/amodb/apps/quality/compliance_intelligence_service.py"
+      - "backend/amodb/alembic/versions/quality_2026100*.py"
       - "backend/amodb/apps/quality/car_control_loop_route_order.py"
       - "backend/amodb/apps/quality/tests/test_audit_*.py"
       - "backend/amodb/apps/quality/tests/postgres_audit_external_access_probe.py"
@@ -125,6 +130,7 @@ jobs:
           amodb/apps/quality/audit_archive_governance_route_order.py
           amodb/apps/quality/audit_checklist_execution_models.py
           amodb/apps/quality/audit_checklist_execution_router.py
+          amodb/apps/quality/compliance_intelligence_service.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
       - name: Test external access token, scope, CSRF and issued-report receipt contract
@@ -135,6 +141,8 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_guest_document_storage_contract.py
       - name: Test deterministic report composition helpers
         run: pytest -q amodb/apps/quality/tests/test_audit_report_composition_contract.py
+      - name: Test compliance intelligence, applicability, conflict and effectiveness controls
+        run: pytest -q amodb/apps/quality/tests/test_compliance_intelligence_contract.py amodb/apps/quality/tests/test_audit_workflow_enforcement.py
       - name: Test idempotent fieldwork sync contract
         run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
       - name: Test realtime reconnect and tenant replay contract
@@ -143,6 +151,30 @@ jobs:
         run: pytest -q amodb/apps/quality/tests/test_audit_closing_assurance_contract.py amodb/apps/quality/tests/test_audit_archive_governance_contract.py
       - name: Prove authoritative workflow contract remains green
         run: pytest -q amodb/apps/quality/tests/test_audit_workflow_contract.py
+
+  ocr-runtime-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - name: Build production backend OCR image
+        run: docker build -f backend/Dockerfile -t amo-backend-ocr-smoke .
+      - name: Prove Tesseract OCR inside production image
+        run: >-
+          docker run --rm --entrypoint python amo-backend-ocr-smoke -c
+          "import pytesseract;
+          from PIL import Image, ImageDraw, ImageFont;
+          version = pytesseract.get_tesseract_version();
+          image = Image.new('RGB', (1000, 180), 'white');
+          draw = ImageDraw.Draw(image);
+          font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 48);
+          draw.text((40, 55), 'AMO PORTAL OCR CONTROLLED DOCUMENT', fill='black', font=font);
+          extracted = pytesseract.image_to_string(image).upper();
+          required = ('AMO', 'PORTAL', 'OCR', 'CONTROLLED');
+          missing = [token for token in required if token not in extracted];
+          assert not missing, f'OCR smoke missed {missing}: {extracted!r}';
+          print(f'tesseract={version}; extracted={extracted.strip()}')"
 
   postgres-contract:
     runs-on: ubuntu-24.04
@@ -247,8 +279,13 @@ jobs:
           src/services/qmsChecklistExecutionGovernance.ts
           src/components/QMS/QualityEnhancementsHost.tsx
           src/components/QMS/QualityDataFreshnessCoordinator.tsx
-      - name: Test route and realtime compatibility
-        run: npx vitest run src/features/qms/auditSession/auditSessionRoutes.test.ts src/services/qmsAuditRealtime.test.ts
+      - name: Test route, realtime and compliance-intelligence compatibility
+        run: >-
+          npx vitest run
+          src/features/qms/auditSession/auditSessionRoutes.test.ts
+          src/features/qms/auditSession/qmsComplianceIntelligence.contract.test.ts
+          src/services/qmsAuditRealtime.test.ts
+          src/services/qmsAuditOfflinePack.test.ts
       - name: Production frontend build
         run: npm run build
       - name: Start production preview
@@ -268,7 +305,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
+          npx playwright test tests/e2e/qms-live-audit-public-access.spec.ts tests/e2e/qms-live-audit-accessibility.spec.ts tests/e2e/qms-audit-governed-lifecycle.spec.ts --trace=retain-on-failure 2>&1 | tee /tmp/qms-live-audit-playwright.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             summary=$(tail -n 100 /tmp/qms-live-audit-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)

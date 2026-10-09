@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -82,6 +83,16 @@ def ensure_default_quality_privilege_rules(
     """
 
     ensured: list[QualityPrivilegeRule] = []
+    get_bind = getattr(db, "get_bind", None)
+    bind = get_bind() if callable(get_bind) else None
+    if bind is not None and bind.dialect.name == "postgresql":
+        # First-use audit setup can open several concurrent requests. Serialize
+        # tenant default provisioning so the normal path never emits duplicate-
+        # key errors while preserving the unique constraint as final authority.
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"quality-default-privileges:{amo_id}"},
+        )
     for spec in DEFAULT_QUALITY_PRIVILEGE_RULES:
         code = str(spec["privilege_code"])
         row = (

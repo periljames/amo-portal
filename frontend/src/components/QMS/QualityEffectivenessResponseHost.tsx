@@ -92,6 +92,7 @@ const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => 
       queryClient.invalidateQueries({ queryKey: ["qms-effectiveness-responses", resolvedAmo, selectedCaseId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-assurance"] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-closure-state"] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-car-control-loop"] }),
     ]);
   };
 
@@ -130,7 +131,16 @@ const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => 
     mutationFn: ({ responseId, decision }: { responseId: string; decision: "COMPLETE" | "CANCEL" }) => decideEffectivenessResponse(resolvedAmo, selectedCaseId, responseId, decision, decisionReason),
     onSuccess: async (row) => {
       setError("");
-      setSuccess(`${row.action_type} marked ${row.status}.`);
+      if (row.action_type === "REOPEN_CAR" && row.consequence) {
+        const reset = (row.consequence.reset_milestones || [])
+          .map((milestone) => milestone.milestone_key.replaceAll("_", " ").toLowerCase())
+          .join(", ");
+        setSuccess(
+          `CAR ${row.consequence.car_number || row.consequence.car_id} reopened ${row.consequence.prior_status ? `from ${row.consequence.prior_status} ` : ""}to ${row.consequence.status}; CAPA is ${row.consequence.capa_status || "active"} and requires fresh effectiveness evidence${reset ? `. Reopened milestones: ${reset}.` : "."}`,
+        );
+      } else {
+        setSuccess(`${row.action_type} marked ${row.status}.`);
+      }
       await refresh();
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -169,7 +179,7 @@ const QualityEffectivenessResponseHost: React.FC<Props> = ({ amoCode = "" }) => 
 
         <button type="button" className="qms-effectiveness-response-submit" disabled={!createReady || pending} onClick={() => createMutation.mutate()}>{actionType === "FOLLOW_UP_AUDIT" ? <CalendarPlus size={16} /> : <ClipboardCheck size={16} />} Open governed response</button>
 
-        <section className="qms-effectiveness-response-card"><header><ClipboardCheck size={17} /><strong>Open downstream obligations</strong></header>{openResponses.length ? <>{openResponses.map((row) => <article key={row.id}><div><strong>{row.action_type}</strong><span>{row.due_date ? `Due ${row.due_date}` : "No due date"}{row.target_source_type ? ` · ${row.target_source_type}` : ""}</span></div><p>{row.rationale}</p>{row.target_route ? <a href={row.target_route}>Open target workflow</a> : null}<div className="qms-effectiveness-response-actions"><button type="button" onClick={() => decisionMutation.mutate({ responseId: row.id, decision: "COMPLETE" })} disabled={pending}>Complete</button><button type="button" onClick={() => decisionMutation.mutate({ responseId: row.id, decision: "CANCEL" })} disabled={pending}>Cancel</button></div></article>)}<label>Completion/cancellation reason<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /></label></> : <p>No open downstream response obligations are recorded for this case.</p>}</section>
+        <section className="qms-effectiveness-response-card"><header><ClipboardCheck size={17} /><strong>Open downstream obligations</strong></header>{openResponses.length ? <>{openResponses.map((row) => <article key={row.id}><div><strong>{row.action_type}</strong><span>{row.due_date ? `Due ${row.due_date}` : "No due date"}{row.target_source_type ? ` · ${row.target_source_type}` : ""}</span></div><p>{row.rationale}</p>{row.target_route ? <a href={row.target_route}>Open target workflow</a> : null}<div className="qms-effectiveness-response-actions"><button type="button" onClick={() => decisionMutation.mutate({ responseId: row.id, decision: "COMPLETE" })} disabled={pending || decisionReason.trim().length < 8}>Complete</button><button type="button" onClick={() => decisionMutation.mutate({ responseId: row.id, decision: "CANCEL" })} disabled={pending || decisionReason.trim().length < 8}>Cancel</button></div></article>)}<label>Completion/cancellation reason<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /><small>Enter at least 8 characters. The decision and reason are retained in the governed response history.</small></label></> : <p>No open downstream response obligations are recorded for this case.</p>}</section>
       </div>
     </aside> : null}
   </>;

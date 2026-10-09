@@ -34,6 +34,18 @@ export type EffectivenessResponseAction = {
   owner_user_id?: string | null;
   created_at: string;
   completion_reason?: string | null;
+  consequence?: {
+    car_id: string;
+    car_number?: string | null;
+    prior_status?: string | null;
+    status: string;
+    capa_status?: string | null;
+    reset_milestones?: Array<{
+      milestone_key: string;
+      prior_status: string;
+      status: string;
+    }>;
+  } | null;
   events: Array<{ id: string; event_type: string; reason: string; actor_user_id?: string | null; created_at: string }>;
 };
 

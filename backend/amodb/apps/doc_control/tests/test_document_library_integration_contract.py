@@ -130,19 +130,41 @@ def test_qr_label_is_an_identifier_not_an_authorization_bypass() -> None:
 
 def test_physical_library_frontend_supports_shelf_scan_signoff_and_return() -> None:
     page = _source("frontend/src/pages/documentControl/DocumentControlDistributionPortfolioPage.tsx")
+    physical = _source("frontend/src/pages/documentControl/PhysicalCopyOperationsPanel.tsx")
     actions = _source("frontend/src/pages/documentControl/DocumentControlLifecycleActions.tsx")
+    service = _source("frontend/src/services/documentLibrary.ts")
     exports = _source("frontend/src/pages/DocControlPages.tsx")
 
     assert 'label: "Physical Copies"' in page
     assert 'label: "Recalls"' in page
     assert 'update("view", "physical-copies")' in page
+    assert '<PhysicalCopyOperationsPanel tenant={tenant} />' in page
+    for token in (
+        'data-testid="physical-document-library"',
+        'data-testid="physical-copy-scan"',
+        "Register physical controlled copy",
+        "Print QR label",
+        "Check out to me",
+        "Sign in / return",
+        "Verify location",
+        "Custody history",
+    ):
+        assert token in physical
+    for token in (
+        "listPhysicalCopies",
+        "registerPhysicalCopy",
+        "scanPhysicalCopy",
+        "circulatePhysicalCopy",
+        "downloadPhysicalCopyLabel",
+    ):
+        assert token in physical
+        assert f"function {token}" in service or f"async function {token}" in service
     assert 'activeView === "copies"' in actions
     assert 'createControlledCopy' in actions
     assert 'createControlledCopyEvent' in actions
     assert 'searchParams.get("copy") || searchParams.get("scan")' in actions
     assert 'DocControlDistributionPage' in exports
     assert 'DocControlLibraryPage' in exports
-
 
 def test_existing_tree_relationships_and_generated_records_remain_authoritative() -> None:
     tree = _source("backend/amodb/apps/doc_control/knowledge_tree_reader.py")

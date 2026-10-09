@@ -12,6 +12,7 @@ export type ExternalAuditOutboxMutation = {
   baseVersion: number;
   operation: "CHECKLIST_UPDATE";
   canonicalResponseStatus: "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+  responseValue: string | null;
   auditorNotes: string | null;
   evidenceReferences: Array<Record<string, unknown> | string>;
   reason: string;

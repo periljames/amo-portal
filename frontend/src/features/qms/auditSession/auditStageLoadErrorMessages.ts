@@ -15,6 +15,12 @@ export function auditOccurrenceLoadDetail(error: unknown): string {
   if (status === 401 || status === 403) {
     return "Your current account cannot access this audit occurrence. Sign in with the authorised Quality role or return to the audit register.";
   }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (message.includes("cached") || message.includes("offline") || message.includes("could not be reached")) {
+      return "This audit is unavailable offline on this device. Reconnect, open Prepare, and use Make available offline before the next disconnected fieldwork session.";
+    }
+  }
   return error instanceof Error && error.message.trim()
     ? error.message
     : "The audit occurrence could not be loaded. Retry, or return to Setup.";

@@ -95,3 +95,12 @@ def test_training_report_jobs_are_processed_and_retryable_from_the_portal() -> N
     assert '@router.post("/report-jobs/{job_id}/retry"' in router
     assert "def retry_report_job(" in service
     assert 'job.status = "QUEUED"' in service
+
+
+def test_manual_pdf_reindex_preserves_detected_logical_section_boundaries() -> None:
+    handler = source("jobs/manual_revision_jobs.py")
+    assert 'section_detection in {"NUMBERED_HEADING", "PDF_OUTLINE"}' in handler
+    assert '"logical_boundaries_preserved"' in handler
+    assert '"ocr-page-supplement"' in handler
+    assert "page_section_count.get(page_number, 0) != 1" in handler
+    assert '"shared_boundary_ocr_skipped"' in handler

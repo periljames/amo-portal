@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -19,6 +19,8 @@ class QualityAuditEvidenceArtifact(Base):
         CheckConstraint("source_type IN ('INTERNAL_USER','EXTERNAL_AUDITOR','AUDITEE_GUEST')", name="ck_quality_audit_evidence_source"),
         CheckConstraint("NOT (uploaded_by_user_id IS NOT NULL AND uploaded_by_participant_id IS NOT NULL)", name="ck_quality_audit_evidence_single_actor"),
         CheckConstraint("size_bytes >= 0", name="ck_quality_audit_evidence_size"),
+        CheckConstraint("offline_upload_state IN (\'SYNCED\',\'PENDING\',\'FAILED\',\'CONFLICT\')", name="ck_quality_audit_evidence_upload_state"),
+        CheckConstraint("server_processing_state IN (\'AVAILABLE\',\'PROCESSING\',\'FAILED\')", name="ck_quality_audit_evidence_processing_state"),
         Index("ix_quality_audit_evidence_audit", "amo_id", "audit_id", "created_at"),
         Index("ix_quality_audit_evidence_checklist", "amo_id", "audit_id", "checklist_item_id", "created_at"),
         Index("ix_quality_audit_evidence_finding", "amo_id", "audit_id", "finding_id", "created_at"),
@@ -30,6 +32,7 @@ class QualityAuditEvidenceArtifact(Base):
     audit_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False)
     checklist_item_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_checklist_items.id", ondelete="SET NULL"), nullable=True)
     finding_id = Column(Uuid(as_uuid=True), ForeignKey("qms_audit_findings.id", ondelete="SET NULL"), nullable=True)
+    evidence_request_id = Column(Uuid(as_uuid=True), ForeignKey("quality_audit_document_requests.id", ondelete="SET NULL"), nullable=True)
     source_type = Column(String(24), nullable=False)
     client_mutation_id = Column(String(128), nullable=True)
     file_ref = Column(String(1024), nullable=False)
@@ -38,6 +41,11 @@ class QualityAuditEvidenceArtifact(Base):
     size_bytes = Column(BigInteger, nullable=False)
     sha256 = Column(String(64), nullable=False)
     description = Column(Text, nullable=True)
+    context_json = Column(JSON, nullable=False, default=dict)
+    source_device_id = Column(String(128), nullable=True)
+    captured_at = Column(DateTime(timezone=True), nullable=True)
+    offline_upload_state = Column(String(16), nullable=False, default="SYNCED", server_default="SYNCED")
+    server_processing_state = Column(String(16), nullable=False, default="AVAILABLE", server_default="AVAILABLE")
     uploaded_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     uploaded_by_participant_id = Column(String(36), ForeignKey("quality_audit_participants.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

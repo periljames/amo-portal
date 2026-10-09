@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,10 +10,15 @@ from fastapi import APIRouter, Cookie, Depends, File, Form, Header, HTTPExceptio
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from amodb.apps.audit import models as audit_models
+from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.database import get_db, get_read_db, get_write_db
 
 from . import models
-from .audit_checklist_execution_models import QualityAuditChecklistExecutionEvent
+from .audit_checklist_execution_models import (
+    QualityAuditChecklistExecutionEvent,
+    QualityAuditChecklistExecutionGovernance,
+)
 from .audit_checklist_execution_router import (
     ChecklistExecutionUpdate,
     _apply_execution_update,
@@ -44,28 +51,127 @@ router = APIRouter(tags=["Quality audit evidence"])
 public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Released Audit Evidence"])
 
 
+def _reference_list(value: str | None, *, field: str) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be a JSON string array.") from exc
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=422, detail=f"{field} must be a JSON string array.")
+    result: list[str] = []
+    for raw in parsed:
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=422, detail=f"{field} may contain string references only.")
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        if len(cleaned) > 255:
+            raise HTTPException(status_code=422, detail=f"{field} contains a reference longer than 255 characters.")
+        if cleaned not in result:
+            result.append(cleaned)
+        if len(result) > 100:
+            raise HTTPException(status_code=422, detail=f"{field} may contain at most 100 references.")
+    return result
+
+
+def _evidence_context(
+    *,
+    location_ref: str | None = None,
+    person_ref: str | None = None,
+    facility_ref: str | None = None,
+    asset_ref: str | None = None,
+    tool_ref: str | None = None,
+    component_ref: str | None = None,
+    regulation_refs_json: str | None = None,
+    procedure_refs_json: str | None = None,
+    document_revision_ids_json: str | None = None,
+) -> dict[str, Any]:
+    scalar = {
+        "location_ref": location_ref,
+        "person_ref": person_ref,
+        "facility_ref": facility_ref,
+        "asset_ref": asset_ref,
+        "tool_ref": tool_ref,
+        "component_ref": component_ref,
+    }
+    result = {
+        key: str(value or "").strip()[:255]
+        for key, value in scalar.items()
+        if str(value or "").strip()
+    }
+    regulation_refs = _reference_list(regulation_refs_json, field="regulation_refs")
+    procedure_refs = _reference_list(procedure_refs_json, field="procedure_refs")
+    document_revision_ids = _reference_list(document_revision_ids_json, field="document_revision_ids")
+    if regulation_refs:
+        result["regulation_refs"] = regulation_refs
+    if procedure_refs:
+        result["procedure_refs"] = procedure_refs
+    if document_revision_ids:
+        result["document_revision_ids"] = document_revision_ids
+    return result
+
+
+def _with_assessment_context(
+    context: dict[str, Any],
+    governance: QualityAuditChecklistExecutionGovernance | None,
+) -> dict[str, Any]:
+    result = dict(context)
+    if governance is None:
+        return result
+    for target_key, attribute in (
+        ("regulation_refs", "regulation_refs"),
+        ("procedure_refs", "procedure_refs"),
+        ("document_revision_ids", "document_revision_ids"),
+    ):
+        inherited = [
+            str(value).strip()
+            for value in list(getattr(governance, attribute, None) or [])
+            if str(value).strip()
+        ]
+        existing = [str(value).strip() for value in list(result.get(target_key) or []) if str(value).strip()]
+        combined: list[str] = []
+        for value in [*existing, *inherited]:
+            if value not in combined:
+                combined.append(value)
+        if combined:
+            result[target_key] = combined[:100]
+    return result
+
+
 def _artifact_dict(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
     return {
         "id": row.id,
         "audit_id": str(row.audit_id),
         "checklist_item_id": str(row.checklist_item_id) if row.checklist_item_id else None,
         "finding_id": str(row.finding_id) if row.finding_id else None,
+        "evidence_request_id": str(row.evidence_request_id) if row.evidence_request_id else None,
         "source_type": row.source_type,
         "filename": row.filename,
         "content_type": row.content_type,
         "size_bytes": int(row.size_bytes or 0),
         "sha256": row.sha256,
         "description": row.description,
+        "context": dict(row.context_json or {}),
+        "source_device_id": row.source_device_id,
+        "captured_at": row.captured_at.isoformat() if row.captured_at else None,
+        "offline_upload_state": row.offline_upload_state,
+        "server_processing_state": row.server_processing_state,
         "uploaded_by_user_id": row.uploaded_by_user_id,
         "uploaded_by_participant_id": row.uploaded_by_participant_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
-def _reference(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
+def _reference(
+    row: QualityAuditEvidenceArtifact,
+    *,
+    include_context: bool = False,
+) -> dict[str, Any]:
     # Never put a server storage path in checklist/finding JSON. Public release
     # resolves this opaque artifact id back to storage only after authorization.
-    return {
+    result = {
         "artifact_id": row.id,
         "filename": row.filename,
         "content_type": row.content_type,
@@ -73,6 +179,72 @@ def _reference(row: QualityAuditEvidenceArtifact) -> dict[str, Any]:
         "sha256": row.sha256,
         "source_type": row.source_type,
     }
+    if include_context and row.context_json:
+        result["context"] = dict(row.context_json)
+    return result
+
+
+def _publish_persisted_evidence_event(row: audit_models.AuditEvent) -> None:
+    try:
+        timestamp = (row.occurred_at or row.created_at or datetime.utcnow()).isoformat()
+        publish_event(EventEnvelope(
+            id=str(row.id),
+            type="qms.audit.evidence",
+            entityType=row.entity_type,
+            entityId=row.entity_id,
+            action=row.action,
+            timestamp=timestamp,
+            actor={"id": row.actor_user_id} if row.actor_user_id else None,
+            metadata={
+                **dict(row.metadata_json or {}),
+                "amoId": row.amo_id,
+                "before": row.before,
+                "after": row.after,
+            },
+        ))
+    except Exception:
+        # Durable AuditEvent polling remains the recovery path if low-latency
+        # broker publication is unavailable after commit.
+        return
+
+
+def _evidence_audit_event(
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    artifact: QualityAuditEvidenceArtifact,
+    actor_user_id: str | None,
+    actor_participant_id: str | None,
+) -> audit_models.AuditEvent:
+    return audit_models.AuditEvent(
+        amo_id=amo_id,
+        entity_type="qms.audit.evidence",
+        entity_id=str(artifact.id),
+        action="UPLOADED",
+        actor_user_id=actor_user_id,
+        after={
+            "checklist_item_id": str(artifact.checklist_item_id) if artifact.checklist_item_id else None,
+            "finding_id": str(artifact.finding_id) if artifact.finding_id else None,
+            "evidence_request_id": str(artifact.evidence_request_id) if artifact.evidence_request_id else None,
+            "filename": artifact.filename,
+            "content_type": artifact.content_type,
+            "size_bytes": int(artifact.size_bytes or 0),
+            "sha256": artifact.sha256,
+            "context": dict(artifact.context_json or {}),
+            "offline_upload_state": artifact.offline_upload_state,
+            "server_processing_state": artifact.server_processing_state,
+        },
+        correlation_id=artifact.client_mutation_id,
+        metadata_json={
+            "module": "quality",
+            "auditId": str(audit_id),
+            "checklistItemId": str(artifact.checklist_item_id) if artifact.checklist_item_id else None,
+            "findingId": str(artifact.finding_id) if artifact.finding_id else None,
+            "evidenceRequestId": str(artifact.evidence_request_id) if artifact.evidence_request_id else None,
+            "actorParticipantId": actor_participant_id,
+            "sourceDeviceId": artifact.source_device_id,
+        },
+    )
 
 
 def _existing_by_mutation(db: Session, *, amo_id: str, audit_id: uuid.UUID, client_mutation_id: str) -> QualityAuditEvidenceArtifact | None:
@@ -81,6 +253,37 @@ def _existing_by_mutation(db: Session, *, amo_id: str, audit_id: uuid.UUID, clie
         QualityAuditEvidenceArtifact.audit_id == audit_id,
         QualityAuditEvidenceArtifact.client_mutation_id == client_mutation_id,
     ).first()
+
+
+def _replay_committed_version(
+    db: Session,
+    *,
+    amo_id: str,
+    audit_id: uuid.UUID,
+    checklist_item_id: uuid.UUID | None,
+) -> int:
+    if checklist_item_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "EVIDENCE_REPLAY_CHECKLIST_LINK_MISSING",
+                "message": "The persisted evidence replay is missing its governed checklist link.",
+            },
+        )
+    governance = db.query(QualityAuditChecklistExecutionGovernance).filter(
+        QualityAuditChecklistExecutionGovernance.amo_id == amo_id,
+        QualityAuditChecklistExecutionGovernance.audit_id == audit_id,
+        QualityAuditChecklistExecutionGovernance.checklist_item_id == checklist_item_id,
+    ).first()
+    if governance is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "EVIDENCE_REPLAY_GOVERNANCE_MISSING",
+                "message": "The persisted evidence replay has no authoritative checklist execution state.",
+            },
+        )
+    return int(governance.entity_version or 1)
 
 
 def _append_reference(
@@ -104,7 +307,7 @@ def _append_reference(
         payload=ChecklistExecutionUpdate(
             canonical_response_status=current_status,
             auditor_notes=current_notes,
-            evidence_references=[*current_refs, _reference(artifact)],
+            evidence_references=[*current_refs, _reference(artifact, include_context=True)],
             reason=reason,
         ),
         governance=governance,
@@ -156,6 +359,18 @@ async def upload_internal_audit_evidence(
     client_mutation_id: str = Form(..., min_length=8, max_length=128),
     description: str | None = Form(default=None, max_length=4000),
     finding_id: uuid.UUID | None = Form(default=None),
+    evidence_request_id: uuid.UUID | None = Form(default=None),
+    location_ref: str | None = Form(default=None, max_length=255),
+    person_ref: str | None = Form(default=None, max_length=255),
+    facility_ref: str | None = Form(default=None, max_length=255),
+    asset_ref: str | None = Form(default=None, max_length=255),
+    tool_ref: str | None = Form(default=None, max_length=255),
+    component_ref: str | None = Form(default=None, max_length=255),
+    regulation_refs_json: str | None = Form(default=None, max_length=30000),
+    procedure_refs_json: str | None = Form(default=None, max_length=30000),
+    document_revision_ids_json: str | None = Form(default=None, max_length=30000),
+    source_device_id: str | None = Form(default=None, max_length=128),
+    captured_at: datetime | None = Form(default=None),
     ctx: TenantContext = Depends(write_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
@@ -164,7 +379,16 @@ async def upload_internal_audit_evidence(
     _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     existing = _existing_by_mutation(db, amo_id=ctx.amo_id, audit_id=audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
-        return {"artifact": _artifact_dict(existing), "replayed": True}
+        return {
+            "artifact": _artifact_dict(existing),
+            "committed_version": _replay_committed_version(
+                db,
+                amo_id=ctx.amo_id,
+                audit_id=audit_id,
+                checklist_item_id=existing.checklist_item_id,
+            ),
+            "replayed": True,
+        }
 
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
@@ -178,12 +402,21 @@ async def upload_internal_audit_evidence(
         if finding is None:
             raise HTTPException(status_code=404, detail="Finding not found for this audit.")
 
+    if evidence_request_id is not None:
+        request_row = db.query(models.QualityAuditDocumentRequest).filter(
+            models.QualityAuditDocumentRequest.amo_id == ctx.amo_id,
+            models.QualityAuditDocumentRequest.audit_id == audit_id,
+            models.QualityAuditDocumentRequest.id == evidence_request_id,
+        ).first()
+        if request_row is None:
+            raise HTTPException(status_code=404, detail="Evidence request not found for this audit.")
     stored = await store_audit_evidence(file, amo_id=ctx.amo_id, audit_id=str(audit_id), checklist_item_id=str(item_id))
     artifact = QualityAuditEvidenceArtifact(
         amo_id=ctx.amo_id,
         audit_id=audit_id,
         checklist_item_id=item_id,
         finding_id=finding_id,
+        evidence_request_id=evidence_request_id,
         source_type="INTERNAL_USER",
         client_mutation_id=client_mutation_id,
         file_ref=stored.storage_ref,
@@ -192,6 +425,24 @@ async def upload_internal_audit_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        context_json=_with_assessment_context(
+            _evidence_context(
+                location_ref=location_ref,
+                person_ref=person_ref,
+                facility_ref=facility_ref,
+                asset_ref=asset_ref,
+                tool_ref=tool_ref,
+                component_ref=component_ref,
+                regulation_refs_json=regulation_refs_json,
+                procedure_refs_json=procedure_refs_json,
+                document_revision_ids_json=document_revision_ids_json,
+            ),
+            governance,
+        ),
+        source_device_id=(source_device_id or "").strip() or None,
+        captured_at=captured_at,
+        offline_upload_state="SYNCED",
+        server_processing_state="AVAILABLE",
         uploaded_by_user_id=ctx.user_id,
     )
     db.add(artifact)
@@ -204,7 +455,17 @@ async def upload_internal_audit_evidence(
         artifact=artifact,
         reason="Governed audit evidence attachment uploaded and linked to checklist execution.",
     )
+    realtime_event = _evidence_audit_event(
+        amo_id=ctx.amo_id,
+        audit_id=audit_id,
+        artifact=artifact,
+        actor_user_id=ctx.user_id,
+        actor_participant_id=None,
+    )
+    db.add(realtime_event)
+    db.flush()
     db.commit()
+    _publish_persisted_evidence_event(realtime_event)
     return {"artifact": _artifact_dict(artifact), "committed_version": int(updated.entity_version or 1), "replayed": False}
 
 
@@ -235,6 +496,17 @@ async def upload_external_auditor_evidence(
     base_version: int = Form(...),
     client_mutation_id: str = Form(..., min_length=8, max_length=128),
     description: str | None = Form(default=None, max_length=4000),
+    location_ref: str | None = Form(default=None, max_length=255),
+    person_ref: str | None = Form(default=None, max_length=255),
+    facility_ref: str | None = Form(default=None, max_length=255),
+    asset_ref: str | None = Form(default=None, max_length=255),
+    tool_ref: str | None = Form(default=None, max_length=255),
+    component_ref: str | None = Form(default=None, max_length=255),
+    regulation_refs_json: str | None = Form(default=None, max_length=30000),
+    procedure_refs_json: str | None = Form(default=None, max_length=30000),
+    document_revision_ids_json: str | None = Form(default=None, max_length=30000),
+    source_device_id: str | None = Form(default=None, max_length=128),
+    captured_at: datetime | None = Form(default=None),
     x_qms_csrf: str | None = Header(default=None, alias="X-QMS-CSRF"),
     db: Session = Depends(get_db),
     amo_qms_audit_guest: str | None = Cookie(default=None, alias=_GUEST_COOKIE),
@@ -249,7 +521,16 @@ async def upload_external_auditor_evidence(
     _mark_fieldwork_started(audit)
     existing = _existing_by_mutation(db, amo_id=grant.amo_id, audit_id=grant.audit_id, client_mutation_id=client_mutation_id)
     if existing is not None:
-        return {"artifact": _artifact_dict(existing), "replayed": True}
+        return {
+            "artifact": _artifact_dict(existing),
+            "committed_version": _replay_committed_version(
+                db,
+                amo_id=grant.amo_id,
+                audit_id=grant.audit_id,
+                checklist_item_id=existing.checklist_item_id,
+            ),
+            "replayed": True,
+        }
 
     actor_ctx = SimpleNamespace(amo_id=grant.amo_id, user_id=None)
     item = _item(db, amo_id=grant.amo_id, audit_id=grant.audit_id, item_id=item_id, lock=True)
@@ -268,6 +549,24 @@ async def upload_external_auditor_evidence(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
         description=(description or "").strip() or None,
+        context_json=_with_assessment_context(
+            _evidence_context(
+                location_ref=location_ref,
+                person_ref=person_ref,
+                facility_ref=facility_ref,
+                asset_ref=asset_ref,
+                tool_ref=tool_ref,
+                component_ref=component_ref,
+                regulation_refs_json=regulation_refs_json,
+                procedure_refs_json=procedure_refs_json,
+                document_revision_ids_json=document_revision_ids_json,
+            ),
+            governance,
+        ),
+        source_device_id=(source_device_id or "").strip() or None,
+        captured_at=captured_at,
+        offline_upload_state="SYNCED",
+        server_processing_state="AVAILABLE",
         uploaded_by_participant_id=participant.id,
     )
     db.add(artifact)
@@ -281,7 +580,17 @@ async def upload_external_auditor_evidence(
         reason=f"External auditor participant {participant.id} uploaded governed checklist evidence.",
         participant_id=participant.id,
     )
+    realtime_event = _evidence_audit_event(
+        amo_id=grant.amo_id,
+        audit_id=grant.audit_id,
+        artifact=artifact,
+        actor_user_id=None,
+        actor_participant_id=str(participant.id),
+    )
+    db.add(realtime_event)
+    db.flush()
     db.commit()
+    _publish_persisted_evidence_event(realtime_event)
     return {"artifact": _artifact_dict(artifact), "committed_version": int(updated.entity_version or 1), "replayed": False}
 
 

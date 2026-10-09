@@ -47,7 +47,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const auditId = auditQuery.data?.id || "";
   const findingsQuery = useQuery({
     queryKey: ["qms-live-audit-findings", auditId],
-    queryFn: () => qmsListFindings(auditId),
+    queryFn: () => qmsListFindings(auditId, amoCode),
     enabled: Boolean(canManage && auditId),
     staleTime: 1_500,
   });

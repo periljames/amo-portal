@@ -128,7 +128,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 
   const responsesQuery = useQuery({
     queryKey: ["qms-car-control-responses", carId],
-    queryFn: () => qmsListCarResponses(carId, false),
+    queryFn: () => qmsListCarResponses(carId, false, amoCode),
     staleTime: 10_000,
   });
   const attachmentsQuery = useQuery({
@@ -138,7 +138,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   });
   const inviteQuery = useQuery({
     queryKey: ["qms-car-control-source", carId],
-    queryFn: () => qmsGetCarInvite(carId),
+    queryFn: () => qmsGetCarInvite(carId, amoCode),
     staleTime: 30_000,
   });
 

@@ -9,7 +9,9 @@ export type PreparationAuditSummary = {
   domain?: string | null;
   audit_scope_id?: string | null;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
+  entity_version?: number;
   planned_start?: string | null;
   planned_end?: string | null;
   actual_start?: string | null;

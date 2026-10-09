@@ -82,7 +82,9 @@ export interface QMSAuditOut {
   audit_ref: string;
   title: string;
   scope?: string | null;
+  objectives?: string | null;
   criteria?: string | null;
+  entity_version?: number;
   auditee?: string | null;
   auditee_email?: string | null;
   auditee_user_id?: string | null;
@@ -318,7 +320,9 @@ export interface QMSFindingOut {
   acknowledged_by_name?: string | null;
   acknowledged_by_email?: string | null;
   created_by_user_id?: string | null;
+  entity_version?: number;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export interface QMSFindingAttachmentOut {
@@ -377,7 +381,7 @@ export type QMSFindingCreatePayload = {
   target_close_date?: string | null;
 };
 
-export type QMSFindingUpdatePayload = Partial<QMSFindingCreatePayload>;
+export type QMSFindingUpdatePayload = Partial<QMSFindingCreatePayload> & { base_version?: number | null };
 
 export interface QMSAuditRegisterRowOut {
   audit: QMSAuditOut;
@@ -494,6 +498,11 @@ function writeStoredNotificationSummary(
 function readStoredNotificationSummaryEtag(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(NOTIFICATION_SUMMARY_ETAG_KEY);
+}
+
+function carApiPath(path: string, amoCode?: string): string {
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return amoCode ? qualityPath(amoCode, suffix) : `/quality${suffix}`;
 }
 
 function toQuery(params: Record<string, QueryVal>): string {
@@ -1135,7 +1144,7 @@ export interface QMSAuditeeBrandOut {
 }
 
 export async function qmsListAuditPersonnelOptions(
-  _amoCode: string,
+  amoCode: string,
   params?: {
     search?: string;
     auditorsOnly?: boolean;
@@ -1149,9 +1158,8 @@ export async function qmsListAuditPersonnelOptions(
     auditors_only: params?.auditorsOnly ?? true,
     limit: Math.min(params?.limit ?? 50, 1000),
   });
-  // Legacy quality route remains authoritative; session carries tenant AMO context.
   return apiRequest<QMSPersonOption[]>(
-    `/quality/audits/personnel/options${suffix}`,
+    qualityPath(amoCode, `/audits/personnel/options${suffix}`),
     {
       cacheTtlMs: params?.bypassCache ? 0 : 30_000,
       signal,
@@ -1721,7 +1729,14 @@ export async function qmsShareAuditReport(
 
 export async function qmsListFindings(
   auditId: string,
+  amoCode?: string,
 ): Promise<QMSFindingOut[]> {
+  if (amoCode) {
+    return apiRequest<QMSFindingOut[]>(
+      qualityPath(amoCode, `/audits/${encodeURIComponent(auditId)}/findings`),
+      { cacheTtlMs: 0 },
+    );
+  }
   return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
 }
 
@@ -1950,7 +1965,7 @@ export async function qmsListCars(
   },
   options?: QmsServiceOptions,
 ): Promise<CAROut[]> {
-  return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`, options);
+  return fetchJson<CAROut[]>(carApiPath(`/cars${toQuery(params ?? {})}`, options?.amoCode), options);
 }
 
 export async function qmsListCarRegister(
@@ -1966,7 +1981,7 @@ export async function qmsListCarRegister(
   options?: QmsServiceOptions,
 ): Promise<CARRegisterResponse> {
   return fetchJson<CARRegisterResponse>(
-    `/quality/cars/register${toQuery(params ?? {})}`,
+    carApiPath(`/cars/register${toQuery(params ?? {})}`, options?.amoCode),
     options,
   );
 }
@@ -1985,9 +2000,9 @@ export type CARAssignee = {
 export async function qmsListCarAssignees(params?: {
   department_id?: string;
   search?: string;
-}): Promise<CARAssignee[]> {
+}, amoCode?: string): Promise<CARAssignee[]> {
   return fetchJson<CARAssignee[]>(
-    `/quality/cars/assignees${toQuery(params ?? {})}`,
+    carApiPath(`/cars/assignees${toQuery(params ?? {})}`, amoCode),
   );
 }
 
@@ -2001,8 +2016,8 @@ export async function qmsCreateCar(payload: {
   assigned_to_user_id?: string | null;
   finding_id: string;
   evidence_required?: boolean;
-}): Promise<CAROut> {
-  return sendJson<CAROut>("/quality/cars", "POST", payload);
+}, amoCode?: string): Promise<CAROut> {
+  return sendJson<CAROut>(carApiPath("/cars", amoCode), "POST", payload);
 }
 
 export async function qmsUpdateCar(
@@ -2017,8 +2032,9 @@ export async function qmsUpdateCar(
     assigned_to_user_id?: string | null;
     reminder_interval_days?: number | null;
   },
+  amoCode?: string,
 ): Promise<CAROut> {
-  return sendJson<CAROut>(`/quality/cars/${carId}`, "PATCH", payload);
+  return sendJson<CAROut>(carApiPath(`/cars/${encodeURIComponent(carId)}`, amoCode), "PATCH", payload);
 }
 
 export async function qmsReviewCarResponse(
@@ -2030,16 +2046,17 @@ export async function qmsReviewCarResponse(
     capa_review_note?: string | null;
     message?: string | null;
   },
+  amoCode?: string,
 ): Promise<CAROut> {
   return sendJson<CAROut>(
-    `/quality/cars/${encodeURIComponent(carId)}/review`,
+    carApiPath(`/cars/${encodeURIComponent(carId)}/review`, amoCode),
     "POST",
     payload,
   );
 }
 
-export async function qmsDeleteCar(carId: string): Promise<void> {
-  await sendJson(`/quality/cars/${carId}`, "DELETE", {});
+export async function qmsDeleteCar(carId: string, amoCode?: string): Promise<void> {
+  await sendJson(carApiPath(`/cars/${encodeURIComponent(carId)}`, amoCode), "DELETE", {});
 }
 
 export interface QualityCARExtensionRequestOut {
@@ -2150,8 +2167,8 @@ export interface CARResponseOut {
   recalled_at?: string | null;
 }
 
-export async function qmsGetCarInvite(carId: string): Promise<CARInviteOut> {
-  return fetchJson(`/quality/cars/${carId}/invite`);
+export async function qmsGetCarInvite(carId: string, amoCode?: string): Promise<CARInviteOut> {
+  return fetchJson(carApiPath(`/cars/${encodeURIComponent(carId)}/invite`, amoCode));
 }
 
 export async function qmsRescheduleCarReminder(
@@ -2207,9 +2224,10 @@ export async function qmsRecallCarInviteSubmission(
 export async function qmsListCarResponses(
   carId: string,
   markOpen = true,
+  amoCode?: string,
 ): Promise<CARResponseOut[]> {
   return fetchJson<CARResponseOut[]>(
-    `/quality/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`,
+    carApiPath(`/cars/${encodeURIComponent(carId)}/responses?mark_open=${markOpen ? "true" : "false"}`, amoCode),
   );
 }
 

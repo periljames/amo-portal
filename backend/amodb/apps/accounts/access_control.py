@@ -19,7 +19,7 @@ from datetime import date, datetime, timezone
 from typing import Iterable
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, lazyload, selectinload
 
 from amodb.user_id import generate_user_id
 
@@ -673,12 +673,14 @@ def assign_primary_access_profile(
         )
 
     now = datetime.now(timezone.utc)
-    assignments = db.query(models.AuthUserRoleAssignment).filter(
+    assignments = db.query(models.AuthUserRoleAssignment).options(
+        lazyload("*"),
+    ).filter(
         models.AuthUserRoleAssignment.amo_id == user.amo_id,
         models.AuthUserRoleAssignment.user_id == user.id,
         models.AuthUserRoleAssignment.is_primary.is_(True),
         models.AuthUserRoleAssignment.valid_to.is_(None),
-    ).with_for_update().all()
+    ).with_for_update(of=models.AuthUserRoleAssignment).all()
     matching = next(
         (
             row for row in assignments

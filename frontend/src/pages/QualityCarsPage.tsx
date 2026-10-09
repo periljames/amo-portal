@@ -360,6 +360,7 @@ const QualityCarsPage: React.FC = () => {
       currentPage,
     ],
     queryFn: ({ signal }) => qmsGetCarRegisterPage({
+      amoCode: amoSlug,
       view: actorView,
       program: directCarId ? undefined : programFilter,
       status: exactStatus,
@@ -377,7 +378,7 @@ const QualityCarsPage: React.FC = () => {
 
   const assigneesQuery = useQuery({
     queryKey: ["qms-car-assignees", amoSlug],
-    queryFn: () => qmsListCarAssignees(),
+    queryFn: () => qmsListCarAssignees(undefined, amoSlug),
     staleTime: 60_000,
   });
 
@@ -438,7 +439,7 @@ const QualityCarsPage: React.FC = () => {
         assigned_to_user_id: form.assigned_to_user_id || null,
         finding_id: form.finding_id.trim(),
         evidence_required: true,
-      });
+      }, amoSlug);
       setForm({ ...EMPTY_FORM, program: form.program });
       setCreateAssigneeSearch("");
       setPreviewOpen(false);
@@ -486,7 +487,7 @@ const QualityCarsPage: React.FC = () => {
         due_date: editForm.due_date || null,
         target_closure_date: editForm.target_closure_date || null,
         assigned_to_user_id: editForm.assigned_to_user_id || null,
-      });
+      }, amoSlug);
       setEditingCar(null);
       setEditForm(null);
       setEditAssigneeSearch("");
@@ -504,7 +505,7 @@ const QualityCarsPage: React.FC = () => {
     setDeleteBusyId(car.id);
     setLocalError(null);
     try {
-      await qmsDeleteCar(car.id);
+      await qmsDeleteCar(car.id, amoSlug);
       await refreshRegister();
       pushToast({ title: "Corrective action removed", message: car.car_number, variant: "info" });
       if (directCarId === car.id) navigate(`/maintenance/${amoSlug}/quality/cars/register`);
@@ -518,7 +519,7 @@ const QualityCarsPage: React.FC = () => {
   const handleCopyInvite = async (car: CAROut) => {
     setInviteBusyId(car.id);
     try {
-      const invite = await qmsGetCarInvite(car.id);
+      const invite = await qmsGetCarInvite(car.id, amoSlug);
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(invite.invite_url);
         pushToast({ title: "Invite link copied", message: invite.invite_url, variant: "info" });
@@ -565,7 +566,7 @@ const QualityCarsPage: React.FC = () => {
     setReviewAttachmentsLoading(true);
     setLocalError(null);
     try {
-      await qmsListCarResponses(car.id, true);
+      await qmsListCarResponses(car.id, true, amoSlug);
       setReviewAttachments(await qmsListCarAttachments(car.id));
     } catch (error) {
       pushToast({
@@ -600,7 +601,7 @@ const QualityCarsPage: React.FC = () => {
         capa_status: capaDecision,
         capa_review_note: reviewForm.capa_review_note.trim() || null,
         message: reviewForm.message.trim() || null,
-      });
+      }, amoSlug);
       setReviewCar(null);
       setReviewAttachments([]);
       await refreshRegister();
