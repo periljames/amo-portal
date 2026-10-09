@@ -33,6 +33,7 @@ import type {
 import { Empty, RecordActions, Skeleton } from "./procurementUiShared";
 import SupplierGovernancePanel from "./SupplierGovernancePanel";
 import ProviderIdentityPanel from "./ProviderIdentityPanel";
+import ProviderImportPanel from "./ProviderImportPanel";
 import {
   badgeClass,
   dateLabel,
@@ -191,11 +192,13 @@ export function Suppliers({
 }) {
   const [governedSupplierId, setGovernedSupplierId] = useState<number | null>(null);
   const [identitySupplierId, setIdentitySupplierId] = useState<number | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const governedSupplier = items.find((item) => item.id === governedSupplierId) || null;
   return (
     <section className="proc-panel">
-      <header className="proc-section-heading proc-section-heading--split"><div><h2>Approved supplier control</h2><p>Evaluation evidence, independent review, approved scope, validity, surveillance and lifecycle decisions.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button proc-button--primary" onClick={() => openModal("supplier", { risk: "MEDIUM", currency: "USD" })}><Plus size={16} />Supplier</button></div></header>
+      <header className="proc-section-heading proc-section-heading--split"><div><h2>Approved supplier control</h2><p>Evaluation evidence, independent review, approved scope, validity, surveillance and lifecycle decisions.</p></div><div className="proc-toolbar">{search}<button type="button" className="proc-button" onClick={() => setShowImport(value => !value)}>{showImport ? "Close import" : "Import trackers"}</button><button type="button" className="proc-button proc-button--primary" onClick={() => openModal("supplier", { risk: "MEDIUM", currency: "USD" })}><Plus size={16} />Supplier</button></div></header>
       {loading ? <Skeleton /> : items.length ? <div className="proc-card-list proc-card-list--suppliers">{items.map((item) => <article key={item.id}><div className="proc-supplier-head"><div><strong>{item.supplier_code}</strong><span>{item.legal_name}</span></div><Status value={item.status} /></div><div className="proc-supplier-meta"><span>{humanize(item.supplier_type)}</span><span>{humanize(item.risk_level)} risk</span><span>{item.country || "Country not set"}</span><span>{item.approval_scopes.length} governed scope{item.approval_scopes.length === 1 ? "" : "s"}</span></div><RecordActions><button type="button" onClick={() => linkDocument("SUPPLIER", item.id)}><Paperclip size={14} />Evidence</button><button type="button" onClick={() => setGovernedSupplierId(item.id)}><ShieldCheck size={14} />Governance</button><button type="button" onClick={() => setIdentitySupplierId(item.id)}>Profile</button></RecordActions></article>)}</div> : <Empty icon={UsersRound} title="No suppliers" text="Register a supplier, then complete its governed evaluation before approval." />}
+      {showImport ? <ProviderImportPanel amoCode={amoCode()} onImported={onChanged} /> : null}
       {identitySupplierId !== null ? <ProviderIdentityPanel amoCode={amoCode()} supplierId={identitySupplierId} onClose={() => setIdentitySupplierId(null)} /> : null}
       {governedSupplier ? <SupplierGovernancePanel amoCode={amoCode()} supplier={governedSupplier} canQuality={canQuality} currentUserId={currentUserId} onClose={() => setGovernedSupplierId(null)} onChanged={onChanged} /> : null}
     </section>
