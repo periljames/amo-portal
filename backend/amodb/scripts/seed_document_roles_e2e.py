@@ -16,7 +16,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from amodb.main import app as _app  # noqa: F401,E402
-from amodb.apps.accounts import models as account_models  # noqa: E402
+from amodb.apps.accounts import access_control, models as account_models  # noqa: E402
 from amodb.apps.doc_control import domain_models, governance_models  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.database import WriteSessionLocal  # noqa: E402
@@ -42,6 +42,7 @@ TECH_ASSIGNMENT_ID = "00000000-0000-4000-8000-000000000502"
 QUALITY_ASSIGNMENT_ID = "00000000-0000-4000-8000-000000000503"
 APPROVER_ASSIGNMENT_ID = "00000000-0000-4000-8000-000000000504"
 CHANGE_ID = "00000000-0000-4000-8000-000000000505"
+REVIEWER_ACCESS_PROFILE_ID = "00000000-0000-4000-8000-000000000507"
 
 READER_EMAIL = "dms-reader@example.com"
 TECH_REVIEWER_EMAIL = "dms-tech-reviewer@example.com"
@@ -150,6 +151,43 @@ def seed() -> None:
             title="Accountable Management Approver",
         )
         db.add_all([reader, technical, quality, management])
+        db.flush()
+
+        # The portal module boundary is deliberately independent from document
+        # responsibility. Give assigned reviewers permission to operate the
+        # Documents workspace, then let the governed responsibility assignments
+        # below decide which review action each person may actually perform.
+        catalogue = access_control.ensure_capability_catalogue(db)
+        reviewer_profile = account_models.AuthRoleDefinition(
+            id=REVIEWER_ACCESS_PROFILE_ID,
+            code=f"TENANT:{AMO_ID}:DMS_REVIEWER_CI",
+            scope_type="TENANT",
+            amo_id=AMO_ID,
+            tenant_code="DMS_REVIEWER_CI",
+            display_name="Controlled Document Reviewer CI",
+            base_role_key="TECHNICIAN",
+            category="QUALITY",
+            description="Disposable browser-CI profile: Documents module access only; document decisions remain assignment-scoped.",
+            is_system=False,
+            is_regulated=False,
+            is_editable=True,
+            is_active=True,
+        )
+        db.add(reviewer_profile)
+        db.flush()
+        db.add(account_models.AuthRoleCapabilityBinding(
+            role_id=reviewer_profile.id,
+            capability_id=catalogue["portal.documents.manage"].id,
+            constraints_json={"source": "document_roles_ci_seed"},
+        ))
+        db.flush()
+        for reviewer in (technical, quality, management):
+            access_control.assign_primary_access_profile(
+                db,
+                user=reviewer,
+                profile_id=reviewer_profile.id,
+                actor_user_id=CONTROLLER_USER_ID,
+            )
         db.flush()
 
         # Use real PDF bytes already created by the base seed. The candidate remains

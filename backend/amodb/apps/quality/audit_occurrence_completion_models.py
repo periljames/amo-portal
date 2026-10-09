@@ -21,7 +21,10 @@ class QualityAuditDocumentRequestMetadata(Base):
     audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
     request_type = Column(String(64), nullable=False, default="DOCUMENT")
     linked_criterion = Column(Text, nullable=True)
+    responsible_party = Column(String(255), nullable=True)
+    checklist_item_ids = Column(JSON, nullable=False, default=list)
     is_required = Column(Boolean, nullable=False, default=True)
+    requirement_stage = Column(String(32), nullable=False, default="REQUIRED_BEFORE_ISSUE", server_default="REQUIRED_BEFORE_ISSUE")
     source_mode = Column(String(32), nullable=False, default="UPLOAD_OR_CONTROLLED")
 
     # Compatibility source: these UUIDs remain explicitly bound to the
@@ -93,6 +96,8 @@ class QualityAuditMeeting(Base):
     location = Column(String(255), nullable=True)
     conference_url = Column(String(1024), nullable=True)
     agenda = Column(Text, nullable=True)
+    auditee_department = Column(String(255), nullable=True)
+    auditor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(24), nullable=False, default="PLANNED", index=True)
     notes = Column(Text, nullable=True)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

@@ -26,8 +26,8 @@ const audit = {
   lead_auditor_user_id: "quality-user-a",
   assistant_auditor_user_id: null,
   observer_auditor_user_id: null,
-  planned_start: "2026-08-19",
-  planned_end: "2026-08-19",
+  planned_start: "2026-10-19",
+  planned_end: "2026-10-19",
   actual_start: "2026-08-19T05:10:00Z",
   actual_end: "2026-08-19T13:00:00Z",
   checklist_file_ref: null,
@@ -128,32 +128,114 @@ async function prepareLifecycle(page: Page): Promise<void> {
       return respond(route, preparation);
     }
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-context`) && method === "GET") return respond(route, {
-      audit_id: AUDIT_ID,
-      regulatory_and_manual_basis: { audit_scope: audit.scope, audit_criteria: audit.criteria },
-      controlled_preparation: { checklist_bindings: [], latest_revision: preparation },
-      prior_audits: [], prior_findings: [], car_exposure: [], document_requests: [], source_lineage: [],
+      as_of: now(),
+      audit: {
+        id: AUDIT_ID,
+        audit_ref: AUDIT_REF,
+        title: audit.title,
+        status: audit.status,
+        kind: audit.kind,
+        domain: "MAINTENANCE",
+        scope: audit.scope,
+        objectives: "Verify controlled assurance implementation.",
+        criteria: audit.criteria,
+        entity_version: 1,
+        planned_start: audit.planned_start,
+        planned_end: audit.planned_end,
+        actual_start: audit.actual_start,
+        actual_end: audit.actual_end,
+        lead_auditor_user_id: audit.lead_auditor_user_id,
+        observer_auditor_user_id: audit.observer_auditor_user_id,
+        assistant_auditor_user_id: audit.assistant_auditor_user_id,
+        location: "Main Base",
+      },
+      prior_audit_history: { items: [], matching_basis: "No comparable prior audit in this acceptance fixture." },
+      prior_findings: { items: [], classification_counts: {}, total: 0 },
+      car_exposure: { items: [], open_count: 0, total: 0 },
+      current_findings: [],
+      document_requests: [],
+      opening_meeting_records: [],
+      controlled_preparation: {
+        checklist_bindings: [],
+        latest_revision: preparation ? {
+          id: preparation.id,
+          revision_no: preparation.revision_no,
+          status: preparation.status,
+          source_fingerprint: preparation.source_fingerprint,
+          issued_at: preparation.issued_at,
+          change_reason: preparation.change_reason,
+        } : null,
+        source_references: [],
+      },
+      source_lineage: { planner_schedule_id: null, items: [] },
+      cross_source_assurance_pressure: {
+        factors: [],
+        authoritative_metrics: {},
+        reliability: {},
+        statement: "No additional assurance pressure factors in this acceptance fixture.",
+      },
+      regulatory_and_manual_basis: {
+        audit_scope: audit.scope,
+        audit_criteria: audit.criteria,
+        source_references: [],
+      },
+      data_quality: { warnings: [], statement: "Acceptance fixture complete." },
     });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/applicability-context`) && method === "GET") return respond(route, { items: [], available_rules: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-readiness`) && method === "GET") return respond(route, {
+      issue_ready: false,
+      fieldwork_ready: false,
+      checks: [],
+      issue_blockers: [],
+      fieldwork_blockers: [],
+      complete_count: 0,
+      total_count: 0,
+      percent: 0,
+      source_fingerprint: "b".repeat(64),
+      issued_preparation_revision_id: null,
+      issued_preparation_revision_no: null,
+    });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/meetings`) && method === "GET") return respond(route, { items: [] });
 
     if (path.endsWith("/quality/audit-notice-policies") && method === "GET") return respond(route, { items: [policy] });
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "GET") return respond(route, { items: notice ? [notice] : [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "GET") return respond(route, { items: notice ? [notice] : [], reschedule_history: [] });
+    if (path.endsWith("/quality/audit-notice-template") && method === "GET") return respond(route, { selected_document_id: null, selected_current_revision_id: null, items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices`) && method === "POST") {
       notice = {
         id: "notice-1", audit_id: AUDIT_ID, policy_id: policy.id, revision_no: 1, status: "DRAFT", required_notice_days: 14,
-        notice_date: "2026-08-05", subject: `${AUDIT_REF} · ${audit.title}`, body: "Controlled audit notice", audit_snapshot: audit,
+        notice_date: "2026-10-02", subject: `${AUDIT_REF} · ${audit.title}`, body: "Controlled audit notice", audit_snapshot: audit,
         recipient_snapshot: [{ email: audit.auditee_email }], delivery_channel: null, delivery_reference: null,
-        approved_at: null, generated_at: null, delivered_at: null, acknowledged_at: null, created_at: now(), events: [],
+        notice_reference: `${AUDIT_REF}/N01`, is_latest: true, is_current_source: true, requires_revision: false,
+        form_number: "QMS-AUDIT-NOTICE", form_issue_date: "2026-10-02", form_revision: "1",
+        approved_at: null, generated_at: null, delivered_at: null, acknowledged_at: null, created_at: now(), artifact: null, events: [],
       };
       return respond(route, notice, 201);
     }
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices/notice-1/transitions`) && method === "POST") {
-      const payload = request.postDataJSON() as { action: string; delivery_channel?: string; delivery_reference?: string };
-      const next: Record<string, string> = { SUBMIT: "UNDER_REVIEW", APPROVE: "APPROVED", GENERATE: "GENERATED", DELIVER: "DELIVERED", ACKNOWLEDGE: "ACKNOWLEDGED" };
-      notice = { ...notice!, status: next[payload.action], delivery_channel: payload.delivery_channel || notice?.delivery_channel, delivery_reference: payload.delivery_reference || notice?.delivery_reference, approved_at: payload.action === "APPROVE" ? now() : notice?.approved_at, generated_at: payload.action === "GENERATE" ? now() : notice?.generated_at, delivered_at: payload.action === "DELIVER" ? now() : notice?.delivered_at, acknowledged_at: payload.action === "ACKNOWLEDGE" ? now() : notice?.acknowledged_at };
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices/notice-1/prepare-document`) && method === "POST") {
+      notice = {
+        ...notice!,
+        status: "GENERATED",
+        generated_at: now(),
+        artifact: {
+          id: "notice-artifact-1", source_type: "GENERATED", filename: `${AUDIT_REF}-notice-r1.pdf`,
+          content_type: "application/pdf", size_bytes: 128, sha256: "e".repeat(64),
+          signed_by_user_id: "quality-user-a", signed_by_name: "Quality Manager", signed_by_title: "Quality Manager",
+          signed_at: now(), created_at: now(),
+        },
+      };
       return respond(route, notice);
+    }
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/notices/notice-1/preview`) && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: { "Content-Disposition": `inline; filename="${AUDIT_REF}-notice-r1.pdf"` },
+        body: "%PDF-1.4\n% governed audit notice fixture\n%%EOF",
+      });
     }
 
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/report-composition`) && method === "GET") return respond(route, {
@@ -210,17 +292,16 @@ test.describe("governed audit lifecycle", () => {
     const setup = page.getByRole("region", { name: "Audit setup workspace" });
     await expect(setup).toBeVisible({ timeout: 30_000 });
     await expect(setup).toContainText("Audit notice");
-    await setup.getByRole("button", { name: "Create notice" }).click();
-    await expect(setup).toContainText("14 days");
-    for (const action of ["SUBMIT", "APPROVE", "GENERATE"] as const) {
-      const button = setup.getByRole("button", { name: action, exact: true });
-      await expect(button).toBeVisible();
-      await button.click();
-    }
-    await setup.getByLabel("Delivery reference").fill("MSG-QAR-MO-26-015");
-    await setup.getByRole("button", { name: "DELIVER", exact: true }).click();
-    await setup.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
-    await expect(setup).toContainText("ACKNOWLEDGED");
+    const noticeTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
+    await noticeTile.locator("summary").click();
+    await noticeTile.getByRole("button", { name: "Create notice draft" }).click();
+    await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data");
+    await expect(noticeTile).toContainText("14 days");
+    await noticeTile.getByRole("button", { name: "Generate final preview" }).click();
+    const preview = page.getByRole("dialog", { name: /Audit notice - revision 1/i });
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText("Generated and electronically signed notice");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
   });
 
   test("builds the closing report from authoritative audit data and keeps execution closure separate from follow-up", async ({ page }) => {
@@ -244,10 +325,10 @@ test.describe("governed audit lifecycle", () => {
     await prepareLifecycle(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}?tab=closeout`, { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}/closing$`));
+    await expect(page).toHaveURL(/qar-mo-26-015\/closing$/);
     await expect(page.getByRole("region", { name: "Audit closing meeting workspace" })).toBeVisible({ timeout: 30_000 });
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(new RegExp(`${AUDIT_REF}/closing$`));
+    await expect(page).toHaveURL(/qar-mo-26-015\/closing$/);
     await expect(page.getByRole("region", { name: "Audit closing meeting workspace" })).toBeVisible();
   });
 });

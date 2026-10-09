@@ -217,3 +217,5 @@ from . import intelligence_route_order as _intelligence_route_order  # noqa: F40
 from . import audit_preparation_route_order as _audit_preparation_route_order  # noqa: F401,E402
 from . import planner_assignment_guard_route_order as _planner_assignment_guard_route_order  # noqa: F401,E402
 from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
+from . import car_operational_route_order as _car_operational_route_order  # noqa: F401,E402
+from . import audit_personnel_route_order as _audit_personnel_route_order  # noqa: F401,E402

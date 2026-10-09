@@ -472,7 +472,9 @@ class QMSAudit(Base):
     title = Column(String(255), nullable=False)
 
     scope = Column(Text, nullable=True)
+    objectives = Column(Text, nullable=True)
     criteria = Column(Text, nullable=True)
+    entity_version = Column(Integer, nullable=False, default=1, server_default="1")
 
     auditee = Column(String(255), nullable=True)
     auditee_email = Column(String(255), nullable=True)
@@ -605,8 +607,10 @@ class QMSAuditFinding(Base):
     acknowledged_by_name = Column(String(255), nullable=True)
     acknowledged_by_email = Column(String(255), nullable=True)
 
+    entity_version = Column(Integer, nullable=False, default=1, server_default="1")
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     audit = relationship("QMSAudit", back_populates="findings", lazy="joined")
     cap = relationship(

@@ -182,6 +182,11 @@ async function prepare(page: Page): Promise<void> {
       return;
     }
 
+    if (path.endsWith("/quality/audits/personnel/options")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+      return;
+    }
+
     if (path.includes("/api/maintenance/tenant-a/quality/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], columns: [], limit: 25, offset: 0, has_more: false }) });
       return;

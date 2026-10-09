@@ -47,24 +47,29 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("registered as a DMS draft");
   });
 
-  it("gates Prepare on the canonical checklist-binding endpoint, not the aggregate context projection", () => {
-    expect(prepareSource).toContain("const checklistBindingsQuery = useQuery");
-    expect(prepareSource).toContain("listChecklistBindings(amoCode, auditId");
+  it("uses the immutable checklist-binding endpoint as Prepare authority", () => {
+    expect(prepareSource).toContain("const confirmChecklistBinding");
     expect(prepareSource).toContain("const confirmation = await getChecklistBinding(amoCode, auditId, binding.id);");
-    expect(prepareSource).toContain("const bindings = checklistBindingsQuery.data?.items || [];");
-    expect(prepareSource).toContain("checklistBindingsQuery.data?.total ?? bindings.length");
+    expect(prepareSource).toContain("const bindings = fullBindingsQuery.data?.items || [];");
+    expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
     expect(prepareSource).not.toContain("const cacheChecklistBinding");
     expect(prepareSource).not.toContain("refresh(binding)");
+    expect(prepareSource).toContain('["qms", "prepare-checklist-bindings", amoCode, auditId]');
+    const confirmationStart = prepareSource.indexOf("const confirmChecklistBinding");
+    const confirmationEnd = prepareSource.indexOf("const createMutation", confirmationStart);
+    const confirmationSource = prepareSource.slice(confirmationStart, confirmationEnd);
+    expect(confirmationSource).not.toContain("contextQuery.refetch()");
+    expect(confirmationSource).not.toContain("fullBindingsQuery.refetch()");
     const confirmIndex = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);");
     const successIndex = prepareSource.indexOf('setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");');
     expect(confirmIndex).toBeGreaterThan(-1);
     expect(successIndex).toBeGreaterThan(confirmIndex);
-    expect(prepareSource).toContain("Prepare has not confirmed the authoritative fieldwork binding yet");
+    expect(prepareSource).toContain("fullBindingsQuery.data?.total ?? bindings.length");
     expect(serviceSource).toContain("/checklist-bindings/${encodeURIComponent(bindingId)}");
     expect(serviceSource).toContain('query.set("limit", String(pagination.limit ?? 50))');
   });
 
-  it("uses the same authoritative confirmation for approved DMS intake", () => {
+  it("uses the same live confirmation after approved DMS intake", () => {
     const approvedIntake = prepareSource.indexOf("if (result.approved_intake === true)");
     const confirmation = prepareSource.indexOf("const confirmed = await confirmChecklistBinding(binding);", approvedIntake);
     const success = prepareSource.indexOf("The approved checklist is now current in DMS and populated for this audit.", approvedIntake);

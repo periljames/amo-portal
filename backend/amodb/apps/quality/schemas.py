@@ -300,6 +300,7 @@ class QMSAuditCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
 
     scope: Optional[str] = None
+    objectives: Optional[str] = None
     criteria: Optional[str] = None
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
@@ -328,6 +329,7 @@ class QMSAuditUpdate(BaseModel):
     audit_scope_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
 
     scope: Optional[str] = None
+    objectives: Optional[str] = None
     criteria: Optional[str] = None
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
@@ -351,6 +353,7 @@ class QMSAuditUpdate(BaseModel):
 
     report_file_ref: Optional[str] = None
     checklist_file_ref: Optional[str] = None
+    base_version: Optional[int] = Field(default=None, ge=1)
 
 
 class QMSAuditOut(BaseModel):
@@ -372,7 +375,9 @@ class QMSAuditOut(BaseModel):
     title: str
 
     scope: Optional[str]
+    objectives: Optional[str] = None
     criteria: Optional[str]
+    entity_version: int = 1
     auditee: Optional[str]
     auditee_email: Optional[str]
     auditee_user_id: Optional[str]
@@ -518,6 +523,7 @@ class QMSFindingUpdate(BaseModel):
     objective_evidence: Optional[str] = None
     safety_sensitive: Optional[bool] = None
     target_close_date: Optional[date] = None
+    base_version: Optional[int] = Field(default=None, ge=1)
 
 
 class QMSFindingReviewFlag(BaseModel):
@@ -562,8 +568,10 @@ class QMSFindingOut(BaseModel):
     acknowledged_by_name: Optional[str] = None
     acknowledged_by_email: Optional[str] = None
     created_by_user_id: Optional[str] = None
+    entity_version: int = 1
 
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class QMSFindingAttachmentOut(BaseModel):

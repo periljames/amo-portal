@@ -694,11 +694,146 @@ def _extract_pdf_content(content: bytes, filename: str | None = None) -> dict[st
     }
 
 
+def _pdf_section_heading(line: str) -> tuple[str, str, int] | None:
+    candidate = _clean_docx_text(line)
+    if not candidate or len(candidate) > 180 or len(candidate.split()) > 22:
+        return None
+
+    numbered = re.match(
+        r"^(?P<number>\d+(?:\.\d+){1,5})[.)]?\s+(?P<title>[A-Za-z][A-Za-z0-9 /&(),:'’+_-]{2,})$",
+        candidate,
+    )
+    labelled = re.match(
+        r"^(?P<label>PART|CHAPTER|SECTION|APPENDIX|ANNEX)\s+"
+        r"(?P<number>[A-Z0-9]+(?:\.[A-Z0-9]+){0,5})"
+        r"(?:\s*[-:–—]\s*|\s+)(?P<title>[^.!?]{2,150})$",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    match = numbered or labelled
+    if not match:
+        return None
+
+    number = str(match.group("number")).strip()
+    title = _clean_docx_text(match.group("title"))
+    if not title:
+        return None
+    if numbered:
+        level = max(1, min(3, number.count(".") + 1))
+        heading = f"{number} {title}"
+    else:
+        label = str(match.group("label")).upper()
+        level = 1 if label in {"PART", "CHAPTER"} else max(1, min(3, number.count(".") + 1))
+        heading = f"{label} {number} {title}"
+    return number, heading[:255], level
+
+
+def _build_numbered_pdf_sections(pages: list[dict[str, object]]) -> list[dict[str, object]]:
+    parsed_pages: list[tuple[int, list[str]]] = []
+    events: list[dict[str, object]] = []
+    seen_numbers: set[str] = set()
+
+    for page in pages:
+        page_number = int(page.get("page_number") or 0)
+        if page_number <= 0:
+            continue
+        lines = [
+            _clean_docx_text(line)
+            for line in str(page.get("text") or "").splitlines()
+            if _clean_docx_text(line)
+        ]
+        parsed_pages.append((page_number, lines))
+        for line_index, line in enumerate(lines):
+            parsed = _pdf_section_heading(line)
+            if parsed is None:
+                continue
+            section_number, heading, level = parsed
+            # Repeated running headers must not create a fresh logical section.
+            normalized_number = section_number.upper()
+            if normalized_number in seen_numbers:
+                continue
+            seen_numbers.add(normalized_number)
+            events.append(
+                {
+                    "page_number": page_number,
+                    "line_index": line_index,
+                    "section_number": section_number,
+                    "heading": heading,
+                    "level": level,
+                }
+            )
+
+    # One apparent numbered line is too weak a basis for restructuring an
+    # unbookmarked PDF. Fall back to page sections rather than invent identity.
+    if len(events) < 2:
+        return []
+
+    page_lines = {page_number: lines for page_number, lines in parsed_pages}
+    sections: list[dict[str, object]] = []
+    first_event = events[0]
+    first_page = int(first_event["page_number"])
+    if first_page > 1:
+        front_paragraphs = [
+            "\n".join(page_lines.get(page_number, [])).strip()
+            for page_number in range(1, first_page)
+            if "\n".join(page_lines.get(page_number, [])).strip()
+        ]
+        if front_paragraphs:
+            sections.append(
+                {
+                    "heading": "Front Matter",
+                    "level": 1,
+                    "anchor_slug": "front-matter",
+                    "page_start": 1,
+                    "page_end": first_page - 1,
+                    "paragraphs": front_paragraphs,
+                    "section_number": None,
+                    "section_detection": "NUMBERED_HEADING",
+                }
+            )
+
+    for index, event in enumerate(events):
+        next_event = events[index + 1] if index + 1 < len(events) else None
+        page_start = int(event["page_number"])
+        page_end = int(next_event["page_number"]) if next_event else max(page_lines or {page_start: []})
+        paragraphs: list[str] = []
+        for page_number in range(page_start, page_end + 1):
+            lines = page_lines.get(page_number, [])
+            start_index = int(event["line_index"]) + 1 if page_number == page_start else 0
+            end_index = (
+                int(next_event["line_index"])
+                if next_event is not None and page_number == int(next_event["page_number"])
+                else len(lines)
+            )
+            if end_index <= start_index:
+                continue
+            body = "\n".join(lines[start_index:end_index]).strip()
+            if body:
+                paragraphs.append(body)
+        heading = str(event["heading"])
+        sections.append(
+            {
+                "heading": heading,
+                "level": int(event["level"]),
+                "anchor_slug": _slugify_heading(heading, f"section-{index + 1}"),
+                "page_start": page_start,
+                "page_end": max(page_start, page_end),
+                "paragraphs": paragraphs,
+                "section_number": str(event["section_number"]),
+                "section_detection": "NUMBERED_HEADING",
+            }
+        )
+    return sections
+
+
 def _build_pdf_sections(pdf_payload: dict[str, object]) -> list[dict[str, object]]:
     outline = list(pdf_payload.get("outline", []))
     pages = list(pdf_payload.get("pages", []))
     page_map = {int(item.get("page_number") or 0): str(item.get("text") or "") for item in pages}
     if not outline:
+        logical_sections = _build_numbered_pdf_sections(pages)
+        if logical_sections:
+            return logical_sections
         return [
             {
                 "heading": f"Page {page_number}",
@@ -707,6 +842,8 @@ def _build_pdf_sections(pdf_payload: dict[str, object]) -> list[dict[str, object
                 "page_start": page_number,
                 "page_end": page_number,
                 "paragraphs": [page_map.get(page_number, "")],
+                "section_number": None,
+                "section_detection": "PAGE_FALLBACK",
             }
             for page_number in sorted(page_map)
         ]
@@ -726,6 +863,12 @@ def _build_pdf_sections(pdf_payload: dict[str, object]) -> list[dict[str, object
             "page_start": page_start,
             "page_end": page_end,
             "paragraphs": paragraphs,
+            "section_number": (
+                _pdf_section_heading(heading)[0]
+                if _pdf_section_heading(heading) is not None
+                else None
+            ),
+            "section_detection": "PDF_OUTLINE",
         })
     return sections
 
@@ -1291,6 +1434,14 @@ async def upload_docx_revision(
         )
         control_metadata["workflow"] = {"id": workflow.id, "state": workflow.state}
 
+    processing_job = _queue_manual_revision_job(
+        db,
+        tenant=tenant,
+        manual=manual,
+        revision=rev,
+        job_type="MANUAL_REVISION_PROCESS",
+        actor_id=str(current_user.id),
+    )
     _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {
         "filename": file.filename,
         "paragraphs": paragraph_count,
@@ -1300,6 +1451,7 @@ async def upload_docx_revision(
         "storage_path": storage_path,
         "source_sha256": source_sha,
         "control_metadata": control_metadata,
+        "processing_job_id": processing_job.id,
     })
     db.commit()
     return {
@@ -1311,6 +1463,9 @@ async def upload_docx_revision(
         "source_storage_path": storage_path,
         "source_sha256": source_sha,
         "control_metadata": control_metadata,
+        "processing_status": _revision_job_status(processing_job.status),
+        "processing_job_id": processing_job.id,
+        "search_ready": False,
     }
 
 
@@ -1413,6 +1568,8 @@ async def upload_pdf_revision(
                 "filename": file.filename,
                 "page_start": spec.get("page_start"),
                 "page_end": spec.get("page_end"),
+                "section_number": spec.get("section_number"),
+                "section_detection": spec.get("section_detection"),
                 "paragraphs": len(list(spec.get("paragraphs") or [])),
             },
         )
@@ -1503,6 +1660,14 @@ async def upload_pdf_revision(
         )
         control_metadata["workflow"] = {"id": workflow.id, "state": workflow.state}
 
+    processing_job = _queue_manual_revision_job(
+        db,
+        tenant=tenant,
+        manual=manual,
+        revision=rev,
+        job_type="MANUAL_REVISION_PROCESS",
+        actor_id=str(current_user.id),
+    )
     _audit(db, tenant.id, get_current_actor_id(), "revision.pdf_uploaded", "manual_revision", rev.id, request, {
         "filename": file.filename,
         "page_count": page_count,
@@ -1512,6 +1677,7 @@ async def upload_pdf_revision(
         "storage_path": storage_path,
         "source_sha256": source_sha,
         "control_metadata": control_metadata,
+        "processing_job_id": processing_job.id,
     })
     db.commit()
     return {
@@ -1523,6 +1689,9 @@ async def upload_pdf_revision(
         "source_storage_path": storage_path,
         "source_sha256": source_sha,
         "control_metadata": control_metadata,
+        "processing_status": _revision_job_status(processing_job.status),
+        "processing_job_id": processing_job.id,
+        "search_ready": False,
     }
 
 

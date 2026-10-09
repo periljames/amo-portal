@@ -29,6 +29,7 @@ const QualityFindingDetailPage: React.FC = () => {
   const detailQuery = useQuery({
     queryKey: ["qms-finding-detail", amoCode, findingId],
     queryFn: ({ signal }) => qmsGetAuditRegisterPage({
+      amoCode,
       findingId,
       limit: 1,
       offset: 0,

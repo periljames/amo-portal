@@ -518,8 +518,13 @@ export default function DocumentLibraryHubPage() {
               <div><dt>Review</dt><dd>{formatDate(item.profile.next_review_due)}</dd></div>
             </dl>
             <div className="dlibrary-card__context">
-              <span>{item.library.structure_path || "Standard hierarchy"}</span>
-              <span>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</span>
+              {item.library.external ? <>
+                <span>{item.library.external.provider}{item.library.external.authority ? ` · ${item.library.external.authority}` : ""}</span>
+                <span>{item.library.external.currency_status} · {item.library.external.revision_label || "Revision not recorded"} · {item.library.external.applicability_status}</span>
+              </> : <>
+                <span>{item.library.structure_path || "Standard hierarchy"}</span>
+                <span>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</span>
+              </>}
             </div>
             <footer>
               {selectedJob && canControl ? <button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button> : <>

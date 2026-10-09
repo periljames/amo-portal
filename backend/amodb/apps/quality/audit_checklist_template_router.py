@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
@@ -20,9 +20,11 @@ from amodb.apps.doc_control import knowledge_models as document_knowledge_models
 from amodb.apps.doc_control.workspace_service import can_read_manual
 from amodb.apps.manuals import core_router as manual_core
 from amodb.apps.manuals import models as manual_models
+from amodb.apps.manuals.office_layout import OfficeLayoutError, prepare_office_layout_pdf
 from amodb.database import get_read_db, get_write_db
 
 from . import models
+from .audit_checklist_response_policy import normalise_response_options
 from .audit_checklist_template_models import (
     QualityAuditChecklistBinding,
     QualityAuditChecklistMemory,
@@ -43,7 +45,19 @@ class ChecklistTemplateCreate(BaseModel):
     audit_kind: str | None = Field(default=None, max_length=32)
 
 
+class ChecklistResponseOption(BaseModel):
+    value: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=80)
+    canonical_status: Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]
+
+
 class ChecklistTemplateItem(BaseModel):
+    item_id: str = Field(default_factory=lambda: str(uuid.uuid4()), min_length=8, max_length=64)
+    section_id: str | None = Field(default=None, min_length=1, max_length=64)
+    section_code: str | None = Field(default=None, max_length=64)
+    section_title: str | None = Field(default=None, max_length=255)
+    section_description: str | None = Field(default=None, max_length=2000)
+    parent_section_id: str | None = Field(default=None, max_length=64)
     section: str | None = Field(default=None, max_length=128)
     category: str | None = Field(default=None, max_length=128)
     checklist_ref: str | None = Field(default=None, max_length=128)
@@ -52,8 +66,28 @@ class ChecklistTemplateItem(BaseModel):
     manual_source_ref: str | None = Field(default=None, max_length=500)
     prompt: str = Field(min_length=1, max_length=8000)
     expected_evidence: str | None = Field(default=None, max_length=4000)
+    guidance: str | None = Field(default=None, max_length=4000)
+    evidence_context: Literal[
+        "GENERAL",
+        "CAPABILITY_SCOPE",
+        "PERSONNEL_AUTHORIZATION",
+        "CONTRACT_SCOPE",
+        "TECHNICAL_DATA",
+        "RECORD_RETENTION",
+        "TOOLING_CALIBRATION",
+        "FACILITY",
+    ] = "GENERAL"
+    audit_method: Literal["RECORD_REVIEW", "INTERVIEW", "OBSERVATION", "SAMPLE", "TEST"] | None = None
+    sampling_requirement: str | None = Field(default=None, max_length=2000)
+    evidence_types: list[str] = Field(default_factory=list, max_length=12)
+    evidence_required_when: list[Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]] = Field(default_factory=list, max_length=5)
+    notes_required_when: list[Literal["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"]] = Field(default_factory=list, max_length=5)
+    na_justification_required: bool = False
+    conditional_logic: dict[str, Any] = Field(default_factory=dict)
     response_type: str = Field(default="COMPLIANCE", max_length=64)
+    response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
     applicability: str = Field(default="APPLICABLE", max_length=64)
+    applicability_reason: str | None = Field(default=None, max_length=2000)
     mandatory: bool = True
     finding_trigger: str = Field(
         default="NONE",
@@ -82,6 +116,8 @@ class ChecklistBindingCreate(BaseModel):
 class CurrentDocumentChecklistBindingCreate(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
     allow_existing_items: bool = False
+    response_type: str = Field(min_length=2, max_length=64)
+    response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
 
 
 class RealtimeAuditChecklistCreate(BaseModel):
@@ -104,6 +140,50 @@ class ChecklistAIDraftRequest(BaseModel):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalised_items(items: list[ChecklistTemplateItem]) -> list[dict[str, Any]]:
+    normalised: list[dict[str, Any]] = []
+    section_ids: dict[str, str] = {}
+    item_ids: set[str] = set()
+    for item in items:
+        row = item.model_dump()
+        item_id = str(row.get("item_id") or "").strip() or str(uuid.uuid4())
+        if item_id in item_ids:
+            raise HTTPException(status_code=422, detail=f"Checklist item id {item_id} is duplicated in this revision.")
+        item_ids.add(item_id)
+        row["item_id"] = item_id
+
+        section_key = str(
+            row.get("section_code")
+            or row.get("section_title")
+            or row.get("section")
+            or "GENERAL"
+        ).strip()
+        if section_key not in section_ids:
+            section_ids[section_key] = str(row.get("section_id") or "").strip() or str(uuid.uuid4())
+        row["section_id"] = str(row.get("section_id") or "").strip() or section_ids[section_key]
+        row["section_title"] = str(row.get("section_title") or row.get("section") or "").strip() or None
+        row["section"] = str(row.get("section") or row.get("section_title") or "").strip() or None
+
+        try:
+            row["response_options"] = normalise_response_options(
+                row.get("response_type"),
+                row.get("response_options"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        normalised.append(row)
+
+    known_sections = {str(row.get("section_id")) for row in normalised if row.get("section_id")}
+    for row in normalised:
+        parent = str(row.get("parent_section_id") or "").strip()
+        if parent and parent not in known_sections:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Checklist parent section {parent} is not part of this revision.",
+            )
+    return normalised
 
 
 def _hash_content(items: list[dict[str, Any]], source_references: list[Any]) -> str:
@@ -142,6 +222,7 @@ def _revision_dict(row: QualityAuditChecklistTemplateRevision) -> dict[str, Any]
         "supersedes_revision_id": row.supersedes_revision_id,
         "issued_by_user_id": row.issued_by_user_id,
         "issued_at": row.issued_at,
+        "effective_at": row.effective_at,
         "created_by_user_id": row.created_by_user_id,
         "created_at": row.created_at,
     }
@@ -321,6 +402,23 @@ def _checklist_items_from_revision(
 
 
 def _source_reference(document: manual_models.Manual, revision: manual_models.ManualRevision, source_system: str = "DOCUMENT_CONTROL") -> dict[str, Any]:
+    source_type = str(getattr(getattr(revision, "source_type_enum", None), "value", getattr(revision, "source_type_enum", "")) or "").upper()
+    offline_reader_url: str | None = None
+    offline_reader_sha256: str | None = None
+    if source_type == "PDF" and revision.source_sha256:
+        offline_reader_url = f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream.pdf"
+        offline_reader_sha256 = str(revision.source_sha256).lower()
+    elif source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+            offline_reader_url = f"/manuals/t/{{tenant}}/{document.id}/rev/{revision.id}/stream-layout.pdf"
+            offline_reader_sha256 = str(derivative.pdf_sha256).lower()
+        except (OfficeLayoutError, OSError):
+            # Keep the controlled source identity even when this deployment
+            # cannot produce an offline-safe reading derivative. Offline audit
+            # preparation will fail closed for such a field reference.
+            offline_reader_url = None
+            offline_reader_sha256 = None
     return {
         "source_system": source_system,
         "document_id": str(document.id),
@@ -332,7 +430,11 @@ def _source_reference(document: manual_models.Manual, revision: manual_models.Ma
         "revision_number": revision.rev_number,
         "revision_status": str(getattr(revision.status_enum, "value", revision.status_enum)),
         "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
+        "source_filename": revision.source_filename,
+        "source_type": source_type or None,
         "source_sha256": revision.source_sha256,
+        "offline_reader_url": offline_reader_url,
+        "offline_reader_sha256": offline_reader_sha256,
     }
 
 
@@ -435,6 +537,8 @@ def _issued_template_for_document(
     revision: manual_models.ManualRevision,
     source_system: str = "DOCUMENT_CONTROL",
     items_override: list[dict[str, Any]] | None = None,
+    response_type_override: str | None = None,
+    response_options_override: list[dict[str, Any]] | None = None,
 ) -> tuple[QualityAuditChecklistTemplate, QualityAuditChecklistTemplateRevision]:
     template = db.query(QualityAuditChecklistTemplate).filter(
         QualityAuditChecklistTemplate.amo_id == ctx.amo_id,
@@ -467,12 +571,36 @@ def _issued_template_for_document(
         QualityAuditChecklistTemplateRevision.amo_id == ctx.amo_id,
         QualityAuditChecklistTemplateRevision.template_id == template.id,
     ).order_by(QualityAuditChecklistTemplateRevision.revision_no.desc()).first()
-    if latest and latest.status == "ISSUED" and any(
-        isinstance(item, dict) and str(item.get("revision_id")) == str(revision.id)
-        for item in list(latest.source_references or [])
-    ):
+    latest_matches_source = bool(
+        latest
+        and latest.status == "ISSUED"
+        and any(
+            isinstance(item, dict) and str(item.get("revision_id")) == str(revision.id)
+            for item in list(latest.source_references or [])
+        )
+    )
+    if latest_matches_source and not response_type_override:
         return template, latest
-    items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    if latest_matches_source and response_type_override:
+        latest_items = list(latest.items or [])
+        latest_type = str(latest_items[0].get("response_type") or "") if latest_items else ""
+        latest_options = list(latest_items[0].get("response_options") or []) if latest_items else []
+        requested_options = normalise_response_options(response_type_override, response_options_override)
+        if latest_type == response_type_override and latest_options == requested_options:
+            return template, latest
+
+    raw_items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    if response_type_override:
+        governed_options = normalise_response_options(response_type_override, response_options_override)
+        raw_items = [
+            {
+                **dict(item),
+                "response_type": response_type_override,
+                "response_options": governed_options,
+            }
+            for item in raw_items
+        ]
+    items = _normalised_items([ChecklistTemplateItem.model_validate(item) for item in raw_items])
     sources = [_source_reference(document, revision, source_system)]
     issued = QualityAuditChecklistTemplateRevision(
         amo_id=ctx.amo_id,
@@ -836,7 +964,7 @@ def create_checklist_revision(
     ).order_by(QualityAuditChecklistTemplateRevision.revision_no.desc()).with_for_update().first()
     if latest is not None and latest.status == "DRAFT":
         raise HTTPException(status_code=409, detail="A DRAFT checklist revision already exists for this template.")
-    items = [item.model_dump() for item in payload.items]
+    items = _normalised_items(payload.items)
     sources = list(payload.source_references)
     row = QualityAuditChecklistTemplateRevision(
         amo_id=ctx.amo_id,
@@ -880,6 +1008,7 @@ def issue_checklist_revision(
     row.status = "ISSUED"
     row.issued_by_user_id = ctx.user_id
     row.issued_at = _utcnow()
+    row.effective_at = row.issued_at
     row.change_reason = f"{row.change_reason}\nISSUE: {payload.reason.strip()}"
     db.commit()
     db.refresh(row)
@@ -1116,12 +1245,28 @@ def bind_current_dms_checklist(
     revision = _current_effective_revision(db, document)
     if revision is None:
         raise HTTPException(status_code=409, detail="This DMS document has no current effective revision. Complete Document Control approval first.")
+    try:
+        normalise_response_options(
+            payload.response_type,
+            [item.model_dump() for item in payload.response_options],
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHECKLIST_RESPONSE_SCHEME_REQUIRED",
+                "message": "The controlled checklist response scheme is incomplete or ambiguous. Define the source values and their governed workflow meaning before binding this revision.",
+                "detail": str(exc),
+            },
+        ) from exc
     template, issued = _issued_template_for_document(
         db,
         ctx=ctx,
         audit=audit,
         document=document,
         revision=revision,
+        response_type_override=payload.response_type,
+        response_options_override=[item.model_dump() for item in payload.response_options],
     )
     existing = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.amo_id == ctx.amo_id,
@@ -1142,9 +1287,9 @@ def bind_current_dms_checklist(
         allow_existing_items=payload.allow_existing_items,
     )
     db.commit()
-    # Commit success is not enough for this workflow: re-open an authoritative
-    # tenant-scoped transaction and prove the immutable binding row is readable
-    # before returning HTTP 201 to the browser.
+    # A successful commit is not sufficient for the fieldwork gate. Re-enter
+    # tenant authority and prove the immutable binding is visible before the API
+    # tells the browser that selection succeeded.
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     persisted = db.query(QualityAuditChecklistBinding).filter(
         QualityAuditChecklistBinding.id == binding.id,
@@ -1390,21 +1535,9 @@ def create_realtime_audit_checklist(
             )
         if document is None or revision is None:
             raise HTTPException(status_code=422, detail="The selected DMS document has no current effective revision.")
-        source_references.append({
-            "source_system": "DOCUMENT_CONTROL",
-            "document_id": str(document.id),
-            "revision_id": str(revision.id),
-            "document_code": document.code,
-            "document_title": document.title,
-            "manual_type": document.manual_type,
-            "issue_number": revision.issue_number,
-            "revision_number": revision.rev_number,
-            "revision_status": _enum_value(revision.status_enum),
-            "effective_date": revision.effective_date.isoformat() if revision.effective_date else None,
-            "source_sha256": revision.source_sha256,
-        })
+        source_references.append(_source_reference(document, revision))
 
-    items = [item.model_dump() for item in payload.items]
+    items = _normalised_items(payload.items)
     now = _utcnow()
     template = QualityAuditChecklistTemplate(
         amo_id=ctx.amo_id,

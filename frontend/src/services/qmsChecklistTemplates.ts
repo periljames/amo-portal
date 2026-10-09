@@ -1,9 +1,24 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { PublicationUploadPayload } from "./publications";
+import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
+export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+export type ChecklistResponseOption = {
+  value: string;
+  label: string;
+  // Empty is permitted only while editing a draft. The backend rejects issue/
+  // revision creation until every source option has an explicit semantic map.
+  canonical_status: ChecklistCanonicalStatus | "";
+};
 
 export type ChecklistTemplateItem = {
+  item_id?: string;
+  section_id?: string | null;
+  section_code?: string | null;
+  section_title?: string | null;
+  section_description?: string | null;
+  parent_section_id?: string | null;
   section?: string | null;
   category?: string | null;
   checklist_ref?: string | null;
@@ -12,8 +27,19 @@ export type ChecklistTemplateItem = {
   manual_source_ref?: string | null;
   prompt: string;
   expected_evidence?: string | null;
+  guidance?: string | null;
+  evidence_context?: "GENERAL" | "CAPABILITY_SCOPE" | "PERSONNEL_AUTHORIZATION" | "CONTRACT_SCOPE" | "TECHNICAL_DATA" | "RECORD_RETENTION" | "TOOLING_CALIBRATION" | "FACILITY";
+  audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
+  sampling_requirement?: string | null;
+  evidence_types?: string[];
+  evidence_required_when?: ChecklistCanonicalStatus[];
+  notes_required_when?: ChecklistCanonicalStatus[];
+  na_justification_required?: boolean;
+  conditional_logic?: Record<string, unknown>;
   response_type: string;
+  response_options?: ChecklistResponseOption[];
   applicability: string;
+  applicability_reason?: string | null;
   mandatory?: boolean;
   finding_trigger?: ChecklistFindingTrigger;
   sort_order: number;
@@ -31,6 +57,7 @@ export type ChecklistTemplateRevision = {
   supersedes_revision_id?: string | null;
   issued_by_user_id?: string | null;
   issued_at?: string | null;
+  effective_at?: string | null;
   created_by_user_id?: string | null;
   created_at: string;
 };
@@ -153,19 +180,46 @@ export type ChecklistBindingPage = {
   limit: number;
 };
 
-export function listChecklistBindings(
+async function offlineChecklistBindings(amoCode: string, auditId: string): Promise<ChecklistBinding[] | null> {
+  const pack = await readAuditOfflinePack(amoCode, auditId);
+  return pack ? (projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] }).items : null;
+}
+
+function isConnectivityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("offline") || message.includes("could not be reached") || message.includes("cached copy");
+}
+
+export async function listChecklistBindings(
   amoCode: string,
   auditId: string,
   signal?: AbortSignal,
   pagination: { offset?: number; limit?: number } = {},
 ) {
+  const offset = pagination.offset ?? 0;
+  const limit = pagination.limit ?? 50;
+  const readOffline = async (): Promise<ChecklistBindingPage | null> => {
+    const items = await offlineChecklistBindings(amoCode, auditId);
+    return items ? { items: items.slice().reverse().slice(offset, offset + limit), total: items.length, offset, limit } : null;
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+  }
   const query = new URLSearchParams();
   query.set("offset", String(pagination.offset ?? 0));
   query.set("limit", String(pagination.limit ?? 50));
-  return apiRequest<ChecklistBindingPage>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings?${query.toString()}`),
-    { timeoutMs: 15_000, cacheTtlMs: 2_000, signal },
-  );
+  try {
+    return await apiRequest<ChecklistBindingPage>(
+      qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings?${query.toString()}`),
+      { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+    );
+  } catch (error) {
+    if (!isConnectivityError(error)) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
 }
 
 export type ChecklistBindingLineageItem = {
@@ -176,11 +230,41 @@ export type ChecklistBindingLineageItem = {
   source_context: ChecklistTemplateItem;
 };
 
-export function getChecklistBindingLineage(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: ChecklistBindingLineageItem[] }>(
-    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-binding-lineage`),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
-  );
+export async function getChecklistBindingLineage(amoCode: string, auditId: string, signal?: AbortSignal) {
+  const readOffline = async () => {
+    const bindings = await offlineChecklistBindings(amoCode, auditId);
+    if (!bindings) return null;
+    const items: ChecklistBindingLineageItem[] = [];
+    for (const binding of bindings) {
+      for (const [index, itemId] of binding.instantiated_item_ids.entries()) {
+        const source = binding.item_snapshot[index];
+        if (!source) continue;
+        items.push({
+          checklist_item_id: itemId,
+          template_code: binding.template_code,
+          revision_no: binding.revision_no,
+          content_sha256: binding.content_sha256,
+          source_context: source,
+        });
+      }
+    }
+    return { items };
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+  }
+  try {
+    return await apiRequest<{ items: ChecklistBindingLineageItem[] }>(
+      qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-binding-lineage`),
+      { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    );
+  } catch (error) {
+    if (!isConnectivityError(error)) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
 }
 
 export function getChecklistBinding(amoCode: string, auditId: string, bindingId: string, signal?: AbortSignal) {
@@ -259,10 +343,17 @@ export function bindCurrentDmsChecklist(
   documentId: string,
   reason: string,
   allowExistingItems: boolean,
+  responseType: string,
+  responseOptions: ChecklistResponseOption[] = [],
 ) {
   return apiRequest<ChecklistBinding>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/${encodeURIComponent(documentId)}/bind-current`),
-    json("POST", { reason, allow_existing_items: allowExistingItems }),
+    json("POST", {
+      reason,
+      allow_existing_items: allowExistingItems,
+      response_type: responseType,
+      response_options: responseOptions,
+    }),
   );
 }
 

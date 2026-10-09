@@ -47,7 +47,7 @@ from amodb.apps.quality.audit_occurrence_completion_models import (  # noqa: E40
     QualityAuditMeeting,
 )
 from amodb.apps.quality.audit_preparation_models import QualityAuditPreparationRevision  # noqa: E402
-from amodb.apps.quality.audit_preparation_router import _capture_sources  # noqa: E402
+from amodb.apps.quality.audit_preparation_router import _capture_sources, _ensure_work_package  # noqa: E402
 from amodb.apps.quality.enums import (  # noqa: E402
     CARPriority,
     CARProgram,
@@ -82,6 +82,8 @@ REALTIME_AUDIT_ID = uuid.UUID("00000000-0000-4000-8000-000000000716")
 REALTIME_CHECKLIST_ITEM_ID = uuid.UUID("00000000-0000-4000-8000-000000000717")
 REALTIME_GOVERNANCE_ID = "00000000-0000-4000-8000-000000000718"
 QUALITY_MODULE_SUBSCRIPTION_ID = "00000000-0000-4000-8000-000000000719"
+CATALOG_SKU_ID = "00000000-0000-4000-8000-000000000739"
+TENANT_LICENSE_ID = "00000000-0000-4000-8000-000000000740"
 
 CEREMONY_AUDIT_ID = uuid.UUID("00000000-0000-4000-8000-000000000720")
 CEREMONY_CHECKLIST_ITEM_ID = uuid.UUID("00000000-0000-4000-8000-000000000721")
@@ -154,7 +156,7 @@ def _quality_user(
 
 def _issue_preparation(db, *, audit: quality_models.QMSAudit, user_id: str, now: datetime) -> None:
     captured = _capture_sources(db, amo_id=audit.amo_id, audit=audit)
-    db.add(QualityAuditPreparationRevision(
+    revision = QualityAuditPreparationRevision(
         amo_id=audit.amo_id,
         audit_id=audit.id,
         revision_no=1,
@@ -170,8 +172,12 @@ def _issue_preparation(db, *, audit: quality_models.QMSAudit, user_id: str, now:
         issued_at=now,
         created_by_user_id=user_id,
         created_at=now,
-    ))
+    )
+    db.add(revision)
     db.flush()
+    _ensure_work_package(
+        db, amo_id=audit.amo_id, user_id=user_id, audit=audit, preparation=revision,
+    )
 
 
 def seed() -> None:
@@ -273,6 +279,35 @@ def seed() -> None:
 
         # A direct tenant module subscription is sufficient for module gating in
         # this disposable acceptance tenant and avoids inventing a commercial SKU.
+        # Exercise the production billing gate as well as module entitlement. The
+        # real browser stack applies require_module("quality") before canonical
+        # Quality routes, so a module row alone is intentionally insufficient.
+        sku = account_models.CatalogSKU(
+            id=CATALOG_SKU_ID,
+            code="CI-QMS-LIVE",
+            name="QMS Live Audit Browser CI",
+            description="Disposable zero-cost licence for real QMS browser acceptance.",
+            term=account_models.BillingTerm.MONTHLY,
+            trial_days=0,
+            amount_cents=0,
+            currency="USD",
+            is_active=True,
+        )
+        db.add(sku)
+        db.flush()
+        db.add(account_models.TenantLicense(
+            id=TENANT_LICENSE_ID,
+            amo_id=amo.id,
+            sku_id=sku.id,
+            term=account_models.BillingTerm.MONTHLY,
+            status=account_models.LicenseStatus.ACTIVE,
+            is_read_only=False,
+            current_period_start=now - timedelta(minutes=5),
+            current_period_end=now + timedelta(days=1),
+            notes="Disposable QMS real-browser CI licence.",
+        ))
+        db.flush()
+
         db.add(account_models.ModuleSubscription(
             id=QUALITY_MODULE_SUBSCRIPTION_ID,
             amo_id=amo.id,
@@ -284,8 +319,7 @@ def seed() -> None:
             metadata_json=json.dumps({"source": "qms_live_audit_real_browser_ci"}),
         ))
 
-        # Seed one real, current, immutable DMS checklist so the Setup -> Prepare
-        # browser journey exercises the same "Use current revision" path as production.
+        # Real current DMS checklist for the Setup -> Prepare browser journey.
         dms_tenant = manual_models.Tenant(
             id=DMS_TENANT_ID,
             amo_id=amo.id,
@@ -307,7 +341,6 @@ def seed() -> None:
         )
         db.add(dms_checklist)
         db.flush()
-
         dms_revision = manual_models.ManualRevision(
             id=DMS_CHECKLIST_REVISION_ID,
             manual_id=dms_checklist.id,

@@ -258,6 +258,18 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
       return;
     }
 
+    if (path.endsWith("/quality/excellence/cockpit")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        tenant: { amo_code: "tenant-a", amo_id: "amo-a" }, view: "global", period: new Date().getFullYear(),
+        as_of: new Date().toISOString(), metrics: {}, priority_queue: [], audit_pipeline: [],
+        finding_trend: [], closure_ageing: [], control_exposure: [], drilldowns: {},
+        readiness: { score: 78, band: "WATCH", dimensions: [], method: "cross_module_continuous_assurance_v2", disclaimer: "Not a compliance declaration." },
+        scope: { mode: "global", label: "Tenant assurance", server_resolved_user: null, note: "Tenant scope" },
+        source_health: "SUCCESS", metric_basis: {}, period_note: "Current period", warnings: [],
+      }) });
+      return;
+    }
+
     if (path.endsWith("/quality/excellence/management-review-pack")) {
       await route.fulfill({
         status: 200,
@@ -459,7 +471,10 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
 
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
   await expect(page).toHaveURL(/\/maintenance\/tenant-a\/quality\/audits\/dashboard$/);
-  await expect(page.getByLabel("Assurance workspace sections")).toBeVisible();
+  const assurancePages = page.getByLabel("Assurance pages", { exact: true });
+  await expect(assurancePages).toBeVisible();
+  await expect(assurancePages.getByRole("button", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("region", { name: "Assurance headline metrics" })).toBeVisible();
 });
 
 test("Control Room Continuous assurance opens the cockpit and returns cleanly", async ({ page }) => {
@@ -478,7 +493,7 @@ test("Control Room Continuous assurance opens the cockpit and returns cleanly", 
 
   await page.getByRole("link", { name: "Back to Control Room" }).click();
   await expect(page).toHaveURL(/\/quality$/);
-  await expect(page.getByRole("heading", { name: "Control Room" })).toBeVisible();
+  await expect(page.locator(".qms-assurance-room").getByRole("heading", { name: "Control Room", exact: true })).toBeVisible();
 });
 
 test("Evidence hub surfaces pending approvals and linked evidence for review", async ({ page }) => {
