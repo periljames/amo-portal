@@ -9,7 +9,7 @@
   --qms-authz-danger: var(--accent-danger, #b42318);
   --qms-authz-warning: var(--accent-warning, #9a6700);
   --qms-authz-positive: var(--accent-success, #16723a);
-  --qms-authz-drawer-inset: var(--qms-workspace-drawer-inset, 24px);
+  --qms-authz-drawer-inset: var(--qms-workspace-drawer-inset, var(--drawer-inset, 24px));
   --qms-authz-overlay: color-mix(in srgb, var(--qms-authz-text) 36%, transparent);
   --qms-authz-drawer-shadow: var(--qms-overlay-shadow, 0 26px 80px rgba(15, 23, 42, .28));
   display: grid;
@@ -619,8 +619,8 @@
 .qms-authz-select {
   width: 100%;
   min-width: 0;
-  min-height: 42px;
-  padding: 9px 11px;
+  min-height: var(--control-height-md, 42px);
+  padding: var(--control-padding-y, 9px) var(--control-padding-x, 11px);
   border: 1px solid var(--qms-authz-border);
   border-radius: 9px;
   background: var(--qms-authz-surface);
@@ -689,7 +689,7 @@ body:has(.qms-authz-modal) {
   position: fixed;
   /* Stretch to both viewport edges; auto width avoids the 9px native scrollbar drift
      produced by width:100% when the document scrollbar is reserved. */
-  inset: 0 var(--qms-authz-layout-viewport-gutter, 0px) 0 0;
+  inset: 0 var(--qms-authz-layout-viewport-gutter, var(--viewport-scrollbar-gutter, 0px)) 0 0;
   width: auto;
   box-sizing: border-box;
   z-index: 1350;
@@ -708,7 +708,7 @@ body:has(.qms-authz-modal) {
 .qms-authz-modal.portal-modal-top-layer--host {
   /* Use the layout viewport, not 100vw: 100vw includes the reserved scrollbar
      gutter and shifts this drawer's right edge in desktop Chromium. */
-  inset: 0 var(--qms-authz-layout-viewport-gutter, 0px) 0 0 !important;
+  inset: 0 var(--qms-authz-layout-viewport-gutter, var(--viewport-scrollbar-gutter, 0px)) 0 0 !important;
   width: auto !important;
   height: 100dvh !important;
   padding: var(--qms-authz-drawer-inset) !important;
