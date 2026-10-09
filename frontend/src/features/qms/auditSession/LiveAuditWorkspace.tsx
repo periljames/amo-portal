@@ -725,6 +725,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const selectResponse = (item: ChecklistExecutionGovernanceRow, option: ChecklistResponseOption) => {
     if (!canExecute) return;
+    // Keep the answered question in view; only explicit Save & next changes selection.
+    // Without a pinned id the NOT_VERIFIED-first fallback jumps to a different item
+    // as soon as the successful mutation changes the checklist response.
+    setSelectedId(item.checklist_item_id);
     setSyncNotice(null);
     const response = option.canonical_status as CanonicalChecklistResponse;
     const source = sourceContextByItemId.get(item.checklist_item_id) || null;
