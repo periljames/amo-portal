@@ -41,13 +41,10 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
   }));
   await page.route("**/accounts/admin/admin-profile/**", (route) => json(route, { eligible: false, active: false }));
   const handleQualityRequest = (route: Route) => qualityHandler(route, new URL(route.request().url()));
-  // Match the Quality API by parsed path, not a hard-coded host, login slug or
-  // AMO-code casing. The shell installs a catch-all mock first, so this later,
-  // specific route must intercept every tenant Quality API request before it.
-  await page.route(
-    (url) => /\/maintenance\/[^/]+\/quality(?:\/|$)/.test(url.pathname),
-    handleQualityRequest,
-  );
+  // qmsPath uses the canonical AMO code, which can differ in casing from
+  // the login slug. Match the full request URL case-insensitively so the
+  // shell's earlier **/* catch-all cannot return {} for assurance endpoints.
+  await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
 }
 
 function emptyRegister(route: Route) {
