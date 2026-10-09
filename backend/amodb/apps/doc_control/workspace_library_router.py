@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -142,8 +142,11 @@ def list_visible_documents(
     document_class: str | None = None,
     status: str | None = None,
     node_type: str | None = Query(default=None, max_length=48),
-    owner_user_id: str | None = Query(default=None, max_length=36),
-    department_id: str | None = Query(default=None, max_length=36),
+    source_type: str | None = Query(default=None, pattern="^(PDF|DOCX|DOC|ODT|RTF)$"),
+    owner: str | None = Query(default=None, max_length=160),
+    department: str | None = Query(default=None, max_length=80),
+    owner_user_id: str | None = Query(default=None, max_length=36, include_in_schema=False),
+    department_id: str | None = Query(default=None, max_length=36, include_in_schema=False),
     indexing_status: str | None = Query(default=None, max_length=32),
     unresolved_ownership: bool = False,
     unresolved_relationships: bool = False,
@@ -207,15 +210,40 @@ def list_visible_documents(
                 km.DocumentationNode.node_type == requested,
                 km.DocumentationNode.status == "ACTIVE",
             )))
-    if owner_user_id or department_id or unresolved_ownership:
+    if source_type:
+        requested_source = source_type.strip().upper()
+        query = query.filter(exists().where(and_(
+            manual_models.ManualRevision.manual_id == manual_models.Manual.id,
+            or_(
+                func.upper(cast(manual_models.ManualRevision.source_type_enum, String)) == requested_source,
+                func.upper(manual_models.ManualRevision.source_filename).like(f"%.{requested_source}"),
+            ),
+        )))
+    if owner or department or owner_user_id or department_id or unresolved_ownership:
         responsibility_conditions = [
             gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
             gm.DocumentResponsibilityAssignment.manual_id == manual_models.Manual.id,
             gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER", "RESPONSIBLE_DEPARTMENT"]),
         ]
-        if owner_user_id:
+        if owner:
+            responsibility_conditions.append(
+                gm.DocumentResponsibilityAssignment.assignee_user_id.in_(
+                    select(account_models.User.id).where(func.lower(account_models.User.full_name) == owner.strip().lower())
+                )
+            )
+        elif owner_user_id:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_user_id == owner_user_id)
-        if department_id:
+        if department:
+            requested_department = department.strip()
+            responsibility_conditions.append(
+                gm.DocumentResponsibilityAssignment.assignee_department_id.in_(
+                    select(account_models.Department.id).where(or_(
+                        func.upper(account_models.Department.code) == requested_department.upper(),
+                        func.lower(account_models.Department.name) == requested_department.lower(),
+                    ))
+                )
+            )
+        elif department_id:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.assignee_department_id == department_id)
         if unresolved_ownership:
             responsibility_conditions.append(gm.DocumentResponsibilityAssignment.confirmation_status.in_(UNRESOLVED_ASSIGNMENTS))
@@ -308,6 +336,59 @@ def list_visible_documents(
         .group_by(km.DocumentationNode.node_type)
         .all()
     )
+    owner_facets = [
+        {"value": str(name or ""), "name": str(name or "Unnamed user"), "count": int(count)}
+        for _user_id, name, count in (
+            db.query(
+                account_models.User.id,
+                account_models.User.full_name,
+                func.count(func.distinct(gm.DocumentResponsibilityAssignment.manual_id)),
+            )
+            .join(
+                gm.DocumentResponsibilityAssignment,
+                gm.DocumentResponsibilityAssignment.assignee_user_id == account_models.User.id,
+            )
+            .join(
+                visible_id_subquery,
+                visible_id_subquery.c.manual_id == gm.DocumentResponsibilityAssignment.manual_id,
+            )
+            .filter(
+                gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
+                gm.DocumentResponsibilityAssignment.responsibility_type.in_(["DOCUMENT_OWNER", "BUSINESS_OWNER"]),
+            )
+            .group_by(account_models.User.id, account_models.User.full_name)
+            .order_by(account_models.User.full_name.asc())
+            .limit(100)
+            .all()
+        )
+    ]
+    department_facets = [
+        {"value": str(code or name or ""), "code": str(code or ""), "name": str(name or code or "Unnamed department"), "count": int(count)}
+        for _department_id, code, name, count in (
+            db.query(
+                account_models.Department.id,
+                account_models.Department.code,
+                account_models.Department.name,
+                func.count(func.distinct(gm.DocumentResponsibilityAssignment.manual_id)),
+            )
+            .join(
+                gm.DocumentResponsibilityAssignment,
+                gm.DocumentResponsibilityAssignment.assignee_department_id == account_models.Department.id,
+            )
+            .join(
+                visible_id_subquery,
+                visible_id_subquery.c.manual_id == gm.DocumentResponsibilityAssignment.manual_id,
+            )
+            .filter(
+                gm.DocumentResponsibilityAssignment.tenant_id == tenant.amo_id,
+                gm.DocumentResponsibilityAssignment.responsibility_type == "RESPONSIBLE_DEPARTMENT",
+            )
+            .group_by(account_models.Department.id, account_models.Department.code, account_models.Department.name)
+            .order_by(account_models.Department.name.asc())
+            .limit(100)
+            .all()
+        )
+    ]
 
     total = query.count()
     selected = (
@@ -319,6 +400,13 @@ def list_visible_documents(
     manuals = [manual for manual, _profile in selected]
     profiles = {manual.id: profile for manual, profile in selected}
     manual_ids = [manual.id for manual in manuals]
+    favorite_ids = {
+        row.manual_id for row in db.query(manual_models.ManualReaderProgress.manual_id).filter(
+            manual_models.ManualReaderProgress.user_id == str(current_user.id),
+            manual_models.ManualReaderProgress.manual_id.in_(manual_ids or ["-"]),
+            manual_models.ManualReaderProgress.is_favorite.is_(True),
+        ).distinct().all()
+    }
 
     revisions = (
         db.query(manual_models.ManualRevision)
@@ -465,6 +553,7 @@ def list_visible_documents(
         )
         latest = latest_by_manual.get(manual.id) if controller else target
         payload = serialize_manual(manual, profile, target, target_kind, latest)
+        payload["favorite"] = manual.id in favorite_ids
         node = nodes.get(manual.id)
         payload["library"] = {
             "node_type": node.node_type if node else "MANUAL",
@@ -518,6 +607,8 @@ def list_visible_documents(
         "items": items,
         "facets": {
             "node_types": {key: int(facet_counter.get(key, 0)) for key in sorted(CONTENT_NODE_TYPES)},
+            "owners": owner_facets,
+            "departments": department_facets,
             "visible_documents": total,
         },
         "capabilities": {"read": True, "control": controller},

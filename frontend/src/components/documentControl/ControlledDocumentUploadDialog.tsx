@@ -31,6 +31,18 @@ type Props = {
 };
 
 type IntakeState = "DRAFT" | "APPROVED";
+type IntakeStep = "FILE" | "METADATA" | "BATCH";
+type BatchItemStatus = "READY" | "UPLOADING" | "COMPLETE" | "INSPECT_ERROR" | "UPLOAD_ERROR";
+
+type BatchIntakeItem = {
+  id: string;
+  file: File;
+  preview: PublicationUploadPreview | null;
+  form: FormState;
+  status: BatchItemStatus;
+  error?: string;
+  result?: ControlledDocumentIntakeResult;
+};
 
 type FormState = {
   documentType: ControlledDocumentType;
@@ -124,6 +136,41 @@ function detectedForm(file: File, preview: PublicationUploadPreview, current: Fo
   };
 }
 
+function supportedIntakeFile(file: File): boolean {
+  return /\.(docx|doc|odt|rtf|pdf)$/i.test(file.name);
+}
+
+function uploadPayload(file: File, form: FormState): PublicationUploadPayload {
+  const reviewInterval = Number(form.reviewIntervalMonths);
+  const retention = form.retentionYears ? Number(form.retentionYears) : null;
+  return {
+    code: form.code.trim(),
+    title: form.title.trim(),
+    rev_number: form.revisionNumber.trim(),
+    issue_number: form.issueNumber.trim() || "00",
+    effective_date: form.effectiveDate || undefined,
+    manual_type: form.documentType,
+    owner_role: form.ownerDepartment.trim(),
+    change_log: form.changeLog.trim() || undefined,
+    control_metadata: {
+      document_type: form.documentType,
+      document_class: form.documentType === "RECORD" ? "RECORD" : form.documentType === "REGULATION" || form.documentType === "EXTERNAL_DOCUMENT" ? "EXTERNAL" : "INTERNAL",
+      description: form.description.trim() || null,
+      owner_department: form.ownerDepartment.trim(),
+      source_issuer: form.sourceIssuer.trim() || null,
+      parent_document_id: form.parentDocumentId || null,
+      next_review_due: form.nextReviewDue || null,
+      review_interval_months: reviewInterval,
+      retention_years: retention,
+      confidentiality: form.confidentiality,
+      acknowledgement_required: form.acknowledgementRequired,
+      regulated_flag: form.documentType === "REGULATION",
+      tags: form.tags.split(",").map((item) => item.trim()).filter(Boolean),
+    },
+    file,
+  };
+}
+
 export default function ControlledDocumentUploadDialog({
   tenant,
   open,
@@ -147,7 +194,10 @@ export default function ControlledDocumentUploadDialog({
   const [parents, setParents] = useState<IntegratedLibraryItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [step, setStep] = useState<"FILE" | "METADATA">("FILE");
+  const [step, setStep] = useState<IntakeStep>("FILE");
+  const [batchItems, setBatchItems] = useState<BatchIntakeItem[]>([]);
+  const [batchType, setBatchType] = useState<ControlledDocumentType>(safeDefault);
+  const [batchDepartment, setBatchDepartment] = useState("");
   const [intakeState, setIntakeState] = useState<IntakeState>("DRAFT");
   const [approvingAuthority, setApprovingAuthority] = useState("Quality Manager");
   const [approvalReference, setApprovalReference] = useState("");
@@ -164,6 +214,9 @@ export default function ControlledDocumentUploadDialog({
     setBusy(false);
     setError("");
     setStep("FILE");
+    setBatchItems([]);
+    setBatchType(safeDefault);
+    setBatchDepartment("");
     setIntakeState("DRAFT");
     setApprovingAuthority("Quality Manager");
     setApprovalReference("");
@@ -192,7 +245,7 @@ export default function ControlledDocumentUploadDialog({
 
   const chooseFile = async (selected: File | null) => {
     if (!selected) return;
-    if (!/\.(docx|doc|odt|rtf|pdf)$/i.test(selected.name)) {
+    if (!supportedIntakeFile(selected)) {
       setError("Choose a PDF or supported Word file (DOCX, DOC, ODT, or RTF).");
       return;
     }
@@ -209,6 +262,138 @@ export default function ControlledDocumentUploadDialog({
       setError(caught instanceof Error ? caught.message : "The document could not be inspected.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const inspectBatchFiles = async (files: File[]) => {
+    const candidates = files.slice(0, 25);
+    const unsupported = candidates.filter((item) => !supportedIntakeFile(item));
+    if (unsupported.length) {
+      setError(`Unsupported files: ${unsupported.map((item) => item.name).join(", ")}. Use PDF, DOCX, DOC, ODT, or RTF.`);
+      return;
+    }
+    if (candidates.length === 1) {
+      await chooseFile(candidates[0]);
+      return;
+    }
+    if (!candidates.length) return;
+    setBusy(true);
+    setError("");
+    const inspected = await Promise.all(candidates.map(async (selected, index): Promise<BatchIntakeItem> => {
+      const base = initialForm(safeDefault);
+      try {
+        const previewResult = await previewPublicationUpload(tenant, selected);
+        return {
+          id: `${Date.now()}-${index}-${selected.name}`,
+          file: selected,
+          preview: previewResult,
+          form: detectedForm(selected, previewResult, base),
+          status: "READY",
+        };
+      } catch (caught) {
+        return {
+          id: `${Date.now()}-${index}-${selected.name}`,
+          file: selected,
+          preview: null,
+          form: { ...base, code: fallbackCode(selected.name), title: fileStem(selected.name) },
+          status: "INSPECT_ERROR",
+          error: caught instanceof Error ? caught.message : "Source inspection failed.",
+        };
+      }
+    }));
+    setBatchItems(inspected);
+    setStep("BATCH");
+    setBusy(false);
+  };
+
+  const retryBatchInspection = async (id: string) => {
+    const item = batchItems.find((candidate) => candidate.id === id);
+    if (!item) return;
+    setBatchItems((items) => items.map((candidate) => candidate.id === id ? { ...candidate, status: "UPLOADING", error: undefined } : candidate));
+    try {
+      const inspected = await previewPublicationUpload(tenant, item.file);
+      setBatchItems((items) => items.map((candidate) => candidate.id === id ? {
+        ...candidate,
+        preview: inspected,
+        form: detectedForm(candidate.file, inspected, candidate.form),
+        status: "READY",
+        error: undefined,
+      } : candidate));
+    } catch (caught) {
+      setBatchItems((items) => items.map((candidate) => candidate.id === id ? {
+        ...candidate,
+        status: "INSPECT_ERROR",
+        error: caught instanceof Error ? caught.message : "Source inspection failed.",
+      } : candidate));
+    }
+  };
+
+  const updateBatchForm = (id: string, patch: Partial<FormState>) => {
+    setBatchItems((items) => items.map((item) => item.id === id ? { ...item, form: { ...item.form, ...patch } } : item));
+  };
+
+  const applyBatchDefaults = () => {
+    setBatchItems((items) => items.map((item) => item.status === "COMPLETE" ? item : {
+      ...item,
+      form: {
+        ...item.form,
+        documentType: batchType,
+        ownerDepartment: batchDepartment.trim() || item.form.ownerDepartment,
+        reviewIntervalMonths: batchType === "CHECKLIST" ? "12" : item.form.reviewIntervalMonths || "24",
+        nextReviewDue: batchType === "CHECKLIST" ? isoAfterMonths(12) : item.form.nextReviewDue,
+        retentionYears: batchType === "RECORD" ? item.form.retentionYears || "5" : item.form.retentionYears,
+      },
+    }));
+  };
+
+  const submitBatch = async () => {
+    if (busy) return;
+    const uploadable = batchItems.filter((item) => item.status === "READY" || item.status === "UPLOAD_ERROR");
+    if (!uploadable.length) {
+      setError("No inspected files are ready to register.");
+      return;
+    }
+    const invalid = uploadable.find((item) => !item.form.code.trim() || !item.form.title.trim() || !item.form.revisionNumber.trim() || !item.form.ownerDepartment.trim());
+    if (invalid) {
+      setError(`${invalid.file.name}: code, title, revision, and responsible department are required.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const successful: ControlledDocumentIntakeResult[] = [];
+    let failed = 0;
+    for (const queued of uploadable) {
+      setBatchItems((items) => items.map((item) => item.id === queued.id ? { ...item, status: "UPLOADING", error: undefined } : item));
+      try {
+        const result = submitIntake
+          ? await submitIntake(uploadPayload(queued.file, queued.form))
+          : await uploadPublicationRevision(tenant, uploadPayload(queued.file, queued.form));
+        successful.push(result);
+        setBatchItems((items) => items.map((item) => item.id === queued.id ? { ...item, status: "COMPLETE", result, error: undefined } : item));
+      } catch (caught) {
+        failed += 1;
+        setBatchItems((items) => items.map((item) => item.id === queued.id ? {
+          ...item,
+          status: "UPLOAD_ERROR",
+          error: caught instanceof Error ? caught.message : "Registration failed.",
+        } : item));
+      }
+    }
+    setBusy(false);
+    if (successful.length) {
+      const last = successful[successful.length - 1];
+      await onUploaded({
+        ...last,
+        batch_upload: true,
+        batch_count: successful.length,
+        batch_failed: failed,
+        batch_results: successful,
+      });
+    }
+    if (!failed && successful.length === uploadable.length) {
+      onClose();
+    } else if (failed) {
+      setError(`${failed} file${failed === 1 ? "" : "s"} could not be registered. Successful uploads were retained. Correct or retry only the failed rows.`);
     }
   };
 
@@ -246,32 +431,7 @@ export default function ControlledDocumentUploadDialog({
     setBusy(true);
     setError("");
     try {
-      const payload: PublicationUploadPayload = {
-        code: form.code.trim(),
-        title: form.title.trim(),
-        rev_number: form.revisionNumber.trim(),
-        issue_number: form.issueNumber.trim() || "00",
-        effective_date: form.effectiveDate || undefined,
-        manual_type: form.documentType,
-        owner_role: form.ownerDepartment.trim(),
-        change_log: form.changeLog.trim() || undefined,
-        control_metadata: {
-          document_type: form.documentType,
-          document_class: form.documentType === "RECORD" ? "RECORD" : form.documentType === "REGULATION" || form.documentType === "EXTERNAL_DOCUMENT" ? "EXTERNAL" : "INTERNAL",
-          description: form.description.trim() || null,
-          owner_department: form.ownerDepartment.trim(),
-          source_issuer: form.sourceIssuer.trim() || null,
-          parent_document_id: form.parentDocumentId || null,
-          next_review_due: form.nextReviewDue || null,
-          review_interval_months: reviewInterval,
-          retention_years: retention,
-          confidentiality: form.confidentiality,
-          acknowledgement_required: form.acknowledgementRequired,
-          regulated_flag: form.documentType === "REGULATION",
-          tags: form.tags.split(",").map((item) => item.trim()).filter(Boolean),
-        },
-        file,
-      };
+      const payload = uploadPayload(file, form);
       const uploaded = registeredUpload || (submitIntake ? await submitIntake(payload) : await uploadPublicationRevision(tenant, payload));
       setRegisteredUpload(uploaded);
       let result: ControlledDocumentIntakeResult = { ...uploaded, intake_state: intakeState, approved_intake: false };
@@ -311,18 +471,50 @@ export default function ControlledDocumentUploadDialog({
         </header>
         <div className="controlled-intake__rail" aria-label="Upload progress">
           <span className={step === "FILE" ? "is-active" : "is-complete"}><b>1</b> Source file</span>
-          <span className={step === "METADATA" ? "is-active" : ""}><b>2</b> Confirm metadata</span>
+          <span className={step === "METADATA" || step === "BATCH" ? "is-active" : ""}><b>2</b> Inspect & map</span>
+          {step === "BATCH" ? <span><b>3</b> Register queue</span> : null}
         </div>
         {error ? <div className="controlled-intake__error" role="alert">{error}</div> : null}
         {error && registeredUpload ? <p role="status">The upload is saved. Retrying continues with this document and will not upload another copy. <a href={`/maintenance/${encodeURIComponent(tenant)}/document-control/library/${encodeURIComponent(registeredUpload.manual_id)}?tab=workflow`}>Open saved document</a></p> : null}
         {step === "FILE" ? (
           <div className="controlled-intake__file-step">
-            <label>
+            <label
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => { event.preventDefault(); if (!busy) void inspectBatchFiles(Array.from(event.dataTransfer.files)); }}
+            >
               <UploadCloud size={26} />
-              <strong>{busy ? "Inspecting source…" : "Choose a PDF or Word document"}</strong>
-              <span>PDF up to 50 MB · Word documents up to 10 MB · original source retained</span>
-              <input type="file" accept=".pdf,.docx,.doc,.odt,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,application/rtf" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0] || null)} />
+              <strong>{busy ? "Inspecting source…" : "Drop files here or choose files"}</strong>
+              <span>Up to 25 PDF/Word sources per intake · originals retained unchanged · metadata inspected before registration</span>
+              <input multiple type="file" accept=".pdf,.docx,.doc,.odt,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,application/rtf" disabled={busy} onChange={(event) => void inspectBatchFiles(Array.from(event.target.files || []))} />
             </label>
+          </div>
+        ) : step === "BATCH" ? (
+          <div className="controlled-intake__body controlled-intake__batch">
+            <div className="controlled-intake__batch-tools">
+              <div><strong>{batchItems.length} source files</strong><span>{batchItems.filter((item) => item.status === "COMPLETE").length} registered · {batchItems.filter((item) => item.status === "INSPECT_ERROR" || item.status === "UPLOAD_ERROR").length} need attention</span></div>
+              <label><span>Document type for all</span><select value={batchType} onChange={(event) => setBatchType(event.target.value as ControlledDocumentType)}>{permittedTypes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+              <label><span>Responsible department for all</span><input value={batchDepartment} onChange={(event) => setBatchDepartment(event.target.value)} placeholder="e.g. QUALITY" /></label>
+              <button type="button" disabled={busy} onClick={applyBatchDefaults}>Apply to queued</button>
+            </div>
+            <div className="controlled-intake__batch-list">
+              {batchItems.map((item) => <article key={item.id} data-status={item.status}>
+                <header>
+                  <span><strong>{item.file.name}</strong><small>{item.preview ? `${item.preview.source_type}${item.preview.page_count ? ` · ${item.preview.page_count} pages` : ""}` : "Inspection unavailable"}</small></span>
+                  <em>{item.status.replaceAll("_", " ")}</em>
+                </header>
+                {item.status === "INSPECT_ERROR" ? <div className="controlled-intake__batch-error"><span>{item.error}</span><button type="button" disabled={busy} onClick={() => void retryBatchInspection(item.id)}>Retry inspection</button></div> : <>
+                  <div className="controlled-intake__batch-fields">
+                    <label><span>Type</span><select disabled={item.status === "COMPLETE" || item.status === "UPLOADING"} value={item.form.documentType} onChange={(event) => updateBatchForm(item.id, { documentType: event.target.value as ControlledDocumentType })}>{permittedTypes.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                    <label><span>Code</span><input disabled={item.status === "COMPLETE" || item.status === "UPLOADING"} value={item.form.code} onChange={(event) => updateBatchForm(item.id, { code: event.target.value })} /></label>
+                    <label className="is-wide"><span>Title</span><input disabled={item.status === "COMPLETE" || item.status === "UPLOADING"} value={item.form.title} onChange={(event) => updateBatchForm(item.id, { title: event.target.value })} /></label>
+                    <label><span>Revision</span><input disabled={item.status === "COMPLETE" || item.status === "UPLOADING"} value={item.form.revisionNumber} onChange={(event) => updateBatchForm(item.id, { revisionNumber: event.target.value })} /></label>
+                    <label><span>Department</span><input disabled={item.status === "COMPLETE" || item.status === "UPLOADING"} value={item.form.ownerDepartment} onChange={(event) => updateBatchForm(item.id, { ownerDepartment: event.target.value })} /></label>
+                  </div>
+                  {item.error ? <div className="controlled-intake__batch-error"><span>{item.error}</span><small>Resolve the conflict or metadata issue, then retry this queue.</small></div> : null}
+                </>}
+                {item.status !== "COMPLETE" && item.status !== "UPLOADING" ? <button type="button" className="controlled-intake__batch-remove" onClick={() => setBatchItems((items) => items.filter((candidate) => candidate.id !== item.id))}>Remove</button> : null}
+              </article>)}
+            </div>
           </div>
         ) : (
           <div className="controlled-intake__body">
@@ -361,7 +553,7 @@ export default function ControlledDocumentUploadDialog({
             </details>
           </div>
         )}
-        <footer><span>{step === "METADATA" ? intakeState === "APPROVED" ? "The final PDF will become the current controlled revision." : "Registration creates a controlled draft and notifies Document Control. Open its workflow to submit for review." : "No record is created until the file is confirmed."}</span><div><button type="button" disabled={busy} onClick={onClose}>Cancel</button>{step === "METADATA" ? <button type="button" className="is-primary" disabled={busy} onClick={() => void submit()}><UploadCloud size={15} /> {busy ? "Registering…" : intakeState === "APPROVED" ? "Register approved document" : submitLabel}</button> : null}</div></footer>
+        <footer><span>{step === "BATCH" ? "Each file is registered independently. Successful files remain saved if another file fails." : step === "METADATA" ? intakeState === "APPROVED" ? "The final PDF will become the current controlled revision." : "Registration creates a controlled draft and notifies Document Control. Open its workflow to submit for review." : "No record is created until the file is confirmed."}</span><div><button type="button" disabled={busy} onClick={onClose}>Cancel</button>{step === "BATCH" ? <button type="button" className="is-primary" disabled={busy || !batchItems.some((item) => item.status === "READY" || item.status === "UPLOAD_ERROR")} onClick={() => void submitBatch()}><UploadCloud size={15} /> {busy ? "Registering queue…" : "Register queued files"}</button> : step === "METADATA" ? <button type="button" className="is-primary" disabled={busy} onClick={() => void submit()}><UploadCloud size={15} /> {busy ? "Registering…" : intakeState === "APPROVED" ? "Register approved document" : submitLabel}</button> : null}</div></footer>
       </section>
     </div>
   );

@@ -107,7 +107,7 @@ test.describe("Document Control daily operating model", () => {
 
     await library.getByRole("button", { name: /External data/i }).click();
     await expect(page).toHaveURL(/type=EXTERNAL_DOCUMENT/);
-    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    await library.getByRole("button", { name: "Cards", exact: true }).click();
     const externalCard = library.locator("article.dlibrary-card").filter({ hasText: "KCAA-CI-EXT-001" });
     await expect(externalCard).toBeVisible({ timeout: 30_000 });
     await expect(externalCard).toContainText("Kenya Civil Aviation Authority");

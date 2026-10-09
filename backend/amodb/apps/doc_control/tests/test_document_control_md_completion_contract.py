@@ -10,13 +10,27 @@ def _source(name: str) -> str:
     return (ROOT / name).read_text(encoding="utf-8")
 
 
+def test_library_saved_views_are_tenant_authoritative_and_controller_published() -> None:
+    source = _source("workspace_library_discovery_router.py")
+    assert '@router.get("/t/{tenant_slug}/library-views")' in source
+    assert '@router.post("/t/{tenant_slug}/library-views")' in source
+    assert '@router.delete("/t/{tenant_slug}/library-views/{view_id}")' in source
+    assert "require_control_user(current_user)" in source
+    assert "LIBRARY_VIEW_PARAM_KEYS" in source
+    assert "document.library_view.published" in source
+    assert "tenant.settings_json = settings" in source
+
+
 def test_library_discovery_is_permission_filtered_and_bounded() -> None:
     source = _source("workspace_library_discovery_router.py")
-    assert 'pattern="^(all|my-documents|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"' in source
+    assert 'pattern="^(all|my-documents|shared-with-me|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"' in source
     assert "per_page: int = Query(default=50, ge=1, le=100)" in source
     assert "if not controller:" in source
     assert "_scope_match" in source
     assert "ManualReaderProgress" in source
+    assert 'view == "shared-with-me"' in source
+    assert "DocumentDistributionRecipient.recipient_user_id == str(current_user.id)" in source
+    assert "DocumentDistributionCampaign.manual_id == manual_models.Manual.id" in source
     assert "ManualBlock.text_plain.ilike" in source
     assert "DocumentationNode.metadata_json" in source
     assert ".offset((page - 1) * per_page).limit(per_page)" in source

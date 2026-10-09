@@ -129,6 +129,27 @@ test.describe.serial("DMS MD completion acceptance", () => {
     await expect(page.getByText("DMS-CI-MOM", { exact: true }).first()).toBeVisible();
   });
 
+  test("Library details persist personal favorites across presentation changes and reload", async ({ page }) => {
+    await page.goto(`/maintenance/${AMO_CODE}/document-control/library?q=DMS-CI-MOM&type=MANUAL`);
+    const library = page.getByTestId("integrated-document-library");
+    await expect(library).toBeVisible({ timeout: 30_000 });
+    const listRow = library.locator(".dlibrary__list-view article").filter({ hasText: "DMS-CI-MOM" });
+    await expect(listRow).toBeVisible({ timeout: 30_000 });
+    await listRow.getByRole("button", { name: "Details", exact: true }).click();
+    let details = page.getByRole("complementary", { name: "Document details for DMS-CI-MOM" });
+    await expect(details.getByRole("button", { name: "Versions", exact: true })).toBeVisible();
+    await details.getByRole("button", { name: "Add favorite", exact: true }).click();
+    await expect(details.getByRole("button", { name: "Remove favorite", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await library.getByRole("button", { name: "Cards", exact: true }).click();
+    await expect(library.locator("article.dlibrary-card").filter({ hasText: "DMS-CI-MOM" })).toBeVisible();
+    await page.reload();
+    await library.locator("article.dlibrary-card").filter({ hasText: "DMS-CI-MOM" }).getByRole("button", { name: "Details", exact: true }).click();
+    details = page.getByRole("complementary", { name: "Document details for DMS-CI-MOM" });
+    await expect(details.getByRole("button", { name: "Remove favorite", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await details.getByRole("button", { name: "Remove favorite", exact: true }).click();
+    await expect(details.getByRole("button", { name: "Add favorite", exact: true })).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("Reports exposes the complete bounded evidence catalogue", async ({ page }) => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/reports`);
     const reports = page.getByTestId("document-control-reports");
