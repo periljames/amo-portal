@@ -10,11 +10,12 @@ type ImportRow = {
   status: string;
   supplier_id: number | null;
 };
-type ImportDetail = { batch: {id:string;filename:string;status:string}; rows: ImportRow[] };
+type ImportDetail = { batch: {id:string;filename:string;status:string;import_kind:string}; rows: ImportRow[] };
 type Preview = {
   batch_id: string;
   source_sha256: string;
   status: string;
+  import_kind: string;
   already_uploaded?: boolean;
   counts?: {total:number;ready:number;errors:number;duplicates:number};
 };
@@ -28,6 +29,9 @@ export default function ProviderImportPanel({amoCode,onImported}:{
 }) {
   const [file,setFile]=useState<File|null>(null);
   const [mapping,setMapping]=useState("{}");
+  const [importKind,setImportKind]=useState<"SUPPLIERS"|"CONTRACTS">("SUPPLIERS");
+  const [sourceSheet,setSourceSheet]=useState("");
+  const [reason,setReason]=useState("");
   const [preview,setPreview]=useState<Preview|null>(null);
   const [detail,setDetail]=useState<ImportDetail|null>(null);
   const [busy,setBusy]=useState(false);
@@ -45,6 +49,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       const parsed=JSON.parse(mapping) as unknown;
       if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("Mapping must be a JSON object.");
       const data=new FormData();data.append("file",file);data.append("mapping_json",mapping);
+      data.append("import_kind",importKind);data.append("source_sheet",sourceSheet);
       const result=await apiRequest<Preview>(`${base}/preview`,{method:"POST",body:data});
       setPreview(result);await getDetail(result.batch_id);
       if(result.already_uploaded)setMessage("This exact workbook has already been staged. Showing its existing reconciliation.");
@@ -55,9 +60,9 @@ export default function ProviderImportPanel({amoCode,onImported}:{
     if(!preview)return;
     setBusy(true);setError("");setMessage("");
     try{
-      const result=await apiRequest<{created_supplier_ids:number[];operational_eligibility_granted:boolean}>(
+      const result=await apiRequest<{created_record_ids:Array<string|number>;operational_eligibility_granted:boolean}>(
         `${base}/${encodeURIComponent(preview.batch_id)}/confirm`,{method:"POST"});
-      setMessage(`${result.created_supplier_ids.length} prospective suppliers recorded. Quality approval was not granted.`);
+      setMessage(`${result.created_record_ids.length} ${importKind==="CONTRACTS"?"draft contracts":"prospective suppliers"} recorded. Quality approval was not granted.`);
       await getDetail(preview.batch_id);await onImported();
     }catch(e){setError(e instanceof Error?e.message:"Could not confirm reconciliation.");}
     finally{setBusy(false);}
