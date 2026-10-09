@@ -12,6 +12,9 @@ import {
   Eye,
   FileWarning,
   Filter,
+  ChevronDown,
+  Save,
+  PanelLeft,
   MessageSquareText,
   Search,
   ShieldAlert,
@@ -233,6 +236,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
@@ -241,7 +245,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [evidenceCapture, setEvidenceCapture] = useState({ busy: false, hasDraft: false });
   const [checklistSearch, setChecklistSearch] = useState("");
-  const [checklistFilter, setChecklistFilter] = useState<"ALL" | "UNANSWERED" | "FINDINGS" | "EVIDENCE_REQUIRED">("ALL");
+  const [checklistFilter, setChecklistFilter] = useState<"ALL" | "UNANSWERED" | "VERIFIED" | "FINDINGS" | "EVIDENCE_REQUIRED">("ALL");
   const [connectivity, setConnectivity] = useState(() => getPortalConnectivity().state);
 
   const auditQuery = useQuery({
@@ -360,6 +364,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [amoCode, auditId, fieldworkEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
+  const itemNumberById = useMemo(() => new Map(items.map((item, index) => [item.checklist_item_id, index + 1])), [items]);
   const sourceContextByItemId = useMemo(() => {
     const map = new Map<string, LiveChecklistSourceContext>();
     for (const binding of bindingsQuery.data?.items || []) {
@@ -391,6 +396,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       ].some((value) => String(value || "").toLowerCase().includes(term));
       if (!matchesSearch) return false;
       if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED";
+      if (checklistFilter === "VERIFIED") return item.canonical_response_status !== "NOT_VERIFIED";
       if (checklistFilter === "FINDINGS") return Boolean(item.finding_id) || item.canonical_response_status === "NONCOMPLIANT" || item.canonical_response_status === "OBSERVATION";
       if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_required_when?.length);
       return true;
@@ -451,14 +457,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       },
     }));
   };
-  const unsavedDraftCount = useMemo(() => {
-    const ids = new Set([
-      ...Object.keys(noteDrafts),
-      ...Object.keys(sampleDrafts),
-      ...Object.keys(assessmentDrafts),
-    ]);
-    return ids.size;
-  }, [assessmentDrafts, noteDrafts, sampleDrafts]);
+  const dirtyItemIds = useMemo(() => new Set([
+    ...Object.keys(noteDrafts),
+    ...Object.keys(sampleDrafts),
+    ...Object.keys(assessmentDrafts),
+  ]), [assessmentDrafts, noteDrafts, sampleDrafts]);
+  const unsavedDraftCount = dirtyItemIds.size;
 
   const outboxEntries = useMemo(() => outboxQuery.data ?? [], [outboxQuery.data]);
   const outbox = useMemo(() => ({
@@ -654,6 +658,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return;
     }
     setSelectedId(itemId);
+    setNavigationOpen(false);
   };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
@@ -693,6 +698,28 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       sampledItemInformation: sampledItems,
       assessment,
     });
+  };
+
+  const saveAndNext = async () => {
+    if (!selected || !assessment || !canExecute || updateMutation.isPending || findingMutation.isPending) return;
+    const nextItemId = visibleItems[selectedIndex + 1]?.checklist_item_id;
+    if (!nextItemId || evidenceCapture.busy || evidenceCapture.hasDraft) return;
+    setSyncNotice(null);
+    setLocalError(null);
+    try {
+      // Never advance on an unacknowledged write or unresolved offline conflict.
+      await updateMutation.mutateAsync({
+        item: selected,
+        response: selected.canonical_response_status,
+        responseValue: selected.response_value || selected.canonical_response_status,
+        auditorNotes: notes,
+        sampledItemInformation: sampledItems,
+        assessment,
+      });
+      selectItem(nextItemId);
+    } catch {
+      // The mutation's onError retains the existing offline/conflict handling.
+    }
   };
 
   const selectResponse = (item: ChecklistExecutionGovernanceRow, option: ChecklistResponseOption) => {
@@ -814,9 +841,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   return (
     <div className="qms-live-audit-focus" role="region" aria-label="Live audit fieldwork workspace">
       <header className="qms-live-audit-focus__header">
-        <div>
-          <h2>Fieldwork</h2>
-          <p className="qms-live-audit-focus__helper">Record checklist responses, findings, and evidence.</p>
+        <div className="qms-live-audit-focus__identity">
+          <button type="button" className="qms-live-audit-focus__mobile-menu" aria-label={navigationOpen ? "Close question list" : "Open question list"} aria-expanded={navigationOpen} aria-controls="audit-occurrence-checklist" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
+          <div>
+            <h2>Fieldwork <span className="qms-live-audit-focus__identity-ref">{auditQuery.data.audit_ref || auditKey}</span></h2>
+            <p className="qms-live-audit-focus__helper">Answer questions · capture evidence · record findings</p>
+          </div>
         </div>
         <div className="qms-live-audit-focus__header-meta" role="status" aria-live="polite" aria-label="Fieldwork connectivity and synchronization status">
           <span>{canExecute ? "Auditor" : "Read-only"}</span>
@@ -850,24 +880,27 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       </header>
 
-      <div className="qms-live-audit-focus__schedule" role="status">
-        <strong>Planned window:</strong> {auditQuery.data.planned_start?.slice(0, 10) || "Not scheduled"} {auditQuery.data.planned_start_time?.slice(0, 5) || ""} – {auditQuery.data.planned_end?.slice(0, 10) || ""} {auditQuery.data.planned_end_time?.slice(0, 5) || ""}.
-        <span> Entry is controlled by issued preparation and audit readiness. The planned time does not lock this workspace.</span>
-      </div>
+      <details className="qms-live-audit-focus__schedule">
+        <summary>Planned window: {auditQuery.data.planned_start?.slice(0, 10) || "Not scheduled"} {auditQuery.data.planned_start_time?.slice(0, 5) || ""} – {auditQuery.data.planned_end?.slice(0, 10) || ""} {auditQuery.data.planned_end_time?.slice(0, 5) || ""} <span>Schedule details <ChevronDown size={13} /></span></summary>
+        <p>Entry is controlled by issued preparation and audit readiness. The planned time does not lock this workspace.</p>
+      </details>
       {!canExecute && !fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">{sessionQuery.data.fieldwork_access?.blocker || "Read-only: only assigned auditors can record fieldwork. The assigned lead auditor completes fieldwork."} <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Review preparation</Link></div> : null}
       {externalDraftsQuery.isError || outboxQuery.isError || evidenceOutboxQuery.isError ? <div className="qms-live-audit-focus__error" role="alert">Completion is paused because external drafts, pending device changes or evidence uploads could not be verified. <button type="button" onClick={() => { void externalDraftsQuery.refetch(); void outboxQuery.refetch(); void evidenceOutboxQuery.refetch(); }}>Retry completion checks</button></div> : null}
       {presenceQuery.isError ? <div className="qms-live-audit-focus__sync-notice" role="status">Team presence is temporarily unavailable. You can continue recording fieldwork.</div> : null}
       {fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">Fieldwork is complete. This workspace is read-only; reopen the governed lifecycle before recording further work.</div> : null}
       {localError ? <div className="qms-live-audit-focus__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
-      {!fieldworkComplete && completionBlockers.length ? <div className="qms-live-audit-focus__sync-notice" role="status">Closing remains locked: {completionBlockers.join("; ")}.</div> : null}
+      {!fieldworkComplete && completionBlockers.length ? <details className="qms-live-audit-focus__closing-checks">
+        <summary><ShieldAlert size={15} /> Closing locked · {completionBlockers.length} outstanding check{completionBlockers.length === 1 ? "" : "s"} <ChevronDown size={14} /></summary>
+        <ul>{completionBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+      </details> : null}
 
-      <div className="qms-live-audit-focus__body">
+      <div className={`qms-live-audit-focus__body${navigationOpen ? " is-navigation-open" : ""}`}>
         <aside id="audit-occurrence-checklist" className="qms-live-audit-focus__sections" aria-label="Checklist questions">
           <div className="qms-live-audit-focus__progress">
             <span style={{ width: `${percent ?? 0}%` }} />
           </div>
-          <h2 className="qms-live-audit-focus__sections-title">Checklist</h2>
+          <div className="qms-live-audit-focus__sections-heading"><h2 className="qms-live-audit-focus__sections-title">Checklist</h2><span>{visibleItems.length} / {items.length}</span></div>
           <div className="qms-live-audit-focus__tools">
             <label>
               <Search size={14} aria-hidden="true" />
@@ -880,6 +913,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <select value={checklistFilter} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
                 <option value="ALL">All items</option>
                 <option value="UNANSWERED">Unanswered</option>
+                <option value="VERIFIED">Answered</option>
                 <option value="FINDINGS">Findings / observations</option>
                 <option value="EVIDENCE_REQUIRED">Evidence required</option>
               </select>
@@ -887,10 +921,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </div>
           <div className="qms-live-audit-focus__question-list">
             {visibleItems.map((item, index) => (
-              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} onClick={() => selectItem(item.checklist_item_id)}>
-                <span>{index + 1}</span>
-                <div><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small><span>{item.section || "General"}</span></div>
-                <em data-status={item.canonical_response_status}>{statusLabel(item.canonical_response_status)}</em>
+              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} aria-current={item.checklist_item_id === selected?.checklist_item_id ? "true" : undefined} title={item.prompt} onClick={() => selectItem(item.checklist_item_id)}>
+                <span className="qms-live-audit-focus__question-number">{itemNumberById.get(item.checklist_item_id) ?? index + 1}</span>
+                <div className="qms-live-audit-focus__list-copy"><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small>{dirtyItemIds.has(item.checklist_item_id) ? <span className="qms-live-audit-focus__draft-tag">Unsaved draft</span> : null}</div>
+                <em data-status={item.canonical_response_status} aria-label={statusLabel(item.canonical_response_status)} title={statusLabel(item.canonical_response_status)}>{item.canonical_response_status === "NOT_VERIFIED" ? "Pending" : item.canonical_response_status === "NONCOMPLIANT" ? "NCR" : item.canonical_response_status === "NOT_APPLICABLE" ? "N/A" : statusLabel(item.canonical_response_status)}</em>
               </button>
             ))}
             {!visibleItems.length ? <p className="qms-live-audit-focus__empty-filter">No checklist items match the current search/filter.</p> : null}
@@ -900,7 +934,66 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <main className="qms-live-audit-focus__question">
           {selected ? (
             <>
-              <div className="qms-live-audit-focus__question-head"><div><span>{selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div><span>{selectedIndex + 1} / {visibleItems.length}</span></div>
+              <div className="qms-live-audit-focus__question-head">
+                <div><span title={selected.section || "Checklist"}>SECTION · {selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div>
+                <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
+              </div>
+              <div className="qms-live-audit-focus__question-subline">
+                <strong>{selected.checklist_ref || selected.requirement_ref || "Governed question"}</strong>
+                <span data-status={selected.canonical_response_status}>{statusLabel(selected.canonical_response_status)} · v{selected.entity_version}</span>
+                {dirtyItemIds.has(selected.checklist_item_id) ? <em>Unsaved changes</em> : null}
+              </div>
+              {selectedSource?.prompt && selectedSource.prompt.replace(/\s+/g, " ").trim() !== selected.prompt.replace(/\s+/g, " ").trim() ? (
+                <div className="qms-live-audit-focus__lineage-warning" role="alert"><AlertTriangle size={16} /> Frozen checklist question differs from the execution question. Review the issued binding before recording a response.</div>
+              ) : null}
+              <section className="qms-live-audit-focus__entry" aria-label="Auditor checklist entry">
+                <div className="qms-live-audit-focus__entry-heading"><div><h3>Record assessment</h3><p>Choose the governed response, then document what was inspected or verified. NCR and observation responses open the finding composer.</p></div></div>
+              <div className="qms-live-audit-focus__responses" role="group" aria-label="Governed checklist response">
+                {selectedResponseOptions.length ? selectedResponseOptions.map((option) => {
+                  const canonical = option.canonical_status as CanonicalChecklistResponse;
+                  const Icon = responseIcon(canonical);
+                  const active = selected.response_value
+                    ? selected.response_value === option.value
+                    : selected.canonical_response_status === canonical;
+                  return <button type="button" key={option.value} className={active ? "is-active" : ""} aria-pressed={active} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(selected, option)}><Icon size={17} /> {option.label}</button>;
+                }) : <span role="alert">This checklist item has no governed response options. Return to preparation and issue a corrected checklist revision.</span>}
+              </div>
+
+              {selectedSource?.sampling_requirement || selectedSource?.audit_method === "SAMPLE" ? <label className="qms-live-audit-focus__notes"><span>Sampled items / records</span><textarea readOnly={!canExecute} value={sampledItems} onChange={(event) => setSampleDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={3} placeholder="Record the sampled records, serials, work packs, dates or other sample identifiers." /></label> : null}
+              <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
+              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={saveCurrentAssessment}>{updateMutation.isPending ? "Saving…" : "Save notes & assessment"}</button></div>
+
+              <details id="audit-occurrence-evidence" className="qms-live-audit-focus__evidence-panel"><summary><span>Attach or review objective evidence</span><small>Upload · associate · download <ChevronDown size={14} /></small></summary>
+                <LiveAuditEvidenceStrip onCaptureStateChange={onEvidenceCaptureChange}
+                  amoCode={amoCode}
+                  auditId={auditId}
+                  item={selected}
+                  canManage={canExecute}
+                  selectedAssessmentEvidenceIds={assessment?.evidence_ids || []}
+                  onAssessmentEvidenceChange={(artifactId, checked) => {
+                    if (!assessment) return;
+                    const nextIds = new Set(assessment.evidence_ids);
+                    if (checked) nextIds.add(artifactId);
+                    else nextIds.delete(artifactId);
+                    updateAssessmentDraft({ evidence_ids: Array.from(nextIds) });
+                  }}
+                  onChanged={refreshFieldwork}
+                  onError={setLocalError}
+                  onNotice={setSyncNotice}
+                />
+              </details>
+
+              <footer className="qms-live-audit-focus__nav">
+                <button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button>
+                <div>
+                  {canExecute && selectedIndex < visibleItems.length - 1 ? <button type="button" className="is-primary" onClick={() => void saveAndNext()} disabled={updateMutation.isPending || findingMutation.isPending || evidenceCapture.busy || evidenceCapture.hasDraft}><Save size={15} /> {updateMutation.isPending ? "Saving…" : "Save & next"} <ArrowRight size={15} /></button> : null}
+                  <button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= visibleItems.length - 1}>Next <ArrowRight size={16} /></button>
+                </div>
+              </footer>
+              </section>
+              <details className="qms-live-audit-focus__source-details">
+                <summary><span>Governed references & verification plan</span><small>{selectedSource ? `${selectedSource.templateCode} · Rev ${selectedSource.revisionNo}` : "Source lineage unavailable"} <ChevronDown size={14} /></small></summary>
+                <div className="qms-live-audit-focus__source-content">
               <dl className="qms-live-audit-focus__references">
                 <div><dt>Checklist ref</dt><dd>{selected.checklist_ref || selectedSource?.checklist_ref || "—"}</dd></div>
                 <div><dt>Requirement</dt><dd>{selected.requirement_ref || selectedSource?.requirement_ref || "—"}</dd></div>
@@ -929,7 +1022,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 ) : null}
               </section>
 
-              <section className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+                </div>
+              </details>
+              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+                <summary className="qms-live-audit-focus__compliance-summary">
+                  <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
+                  <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
+                </summary>
                 <header>
                   <div><span>Compliance intelligence</span><h3>Evidence, applicability and verification</h3></div>
                   <small>{evidenceCandidatesQuery.data?.evidence_context || selectedSource?.evidence_context || "GENERAL"} · {evidenceCandidatesQuery.data?.retrieval_mode || (connectivity === "OFFLINE" ? "OFFLINE / FROZEN" : "Loading")}</small>
@@ -1071,6 +1170,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     <small>Saves the evidence basis and verification state without changing the current checklist outcome.</small>
                   </div> : null}
                 </> : null}
+              </details>
+            </> : null}
               </section>
 
               <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
@@ -1117,28 +1218,40 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </div>}
         </main>
 
-        <aside className="qms-live-audit-focus__summary">
-          <section>
-            <span>Progress</span>
-            <strong>{percent != null ? `${percent}%` : "N/A"}</strong>
-            <small>
-              {items.length ? `${completed} of ${items.length} questions resolved` : "No required checklist items"}
-            </small>
+        <aside className="qms-live-audit-focus__summary" aria-label="Fieldwork progress and audit context">
+          <section className="qms-live-audit-focus__summary-overview">
+            <span>Audit progress</span><strong>{percent != null ? `${percent}%` : "N/A"}</strong>
+            <div className="qms-live-audit-focus__progress" aria-hidden="true"><span style={{ width: `${percent ?? 0}%` }} /></div>
+            <small>{items.length ? `${completed} of ${items.length} answered` : "No governed checklist items"}</small>
+            <div className="qms-live-audit-focus__summary-stats">
+              <span><strong>{counts.COMPLIANT}</strong> Compliant</span>
+              <span><strong>{counts.NONCOMPLIANT}</strong> NCR</span>
+              <span><strong>{counts.OBSERVATION}</strong> Observations</span>
+              <span><strong>{counts.NOT_APPLICABLE}</strong> N/A</span>
+              <span><strong>{counts.NOT_VERIFIED}</strong> Pending</span>
+            </div>
           </section>
-          <section className="qms-live-audit-focus__stats"><div><strong>{counts.COMPLIANT}</strong><span>Compliant</span></div><div><strong>{counts.NONCOMPLIANT}</strong><span>NCR</span></div><div><strong>{counts.OBSERVATION}</strong><span>Observations</span></div><div><strong>{counts.NOT_VERIFIED}</strong><span>Pending</span></div></section>
-          <section><span>Device sync</span><strong>{outbox.queued + outbox.conflicts + outbox.failed}</strong><small>{outbox.queued} pending · {outbox.conflicts} conflict · {outbox.failed} failed. Conflicts require review; they are never silently overwritten.</small></section>
-          <section className="qms-live-audit-focus__presence">
-            <span><Users size={14} /> Audit team live</span>
-            <strong>{auditTeamPresence.length}</strong>
-            <ul>{auditTeamPresence.slice(0, 8).map((entry) => <li key={entry.id}><b>{entry.display_name}</b><small>{entry.role || statusLabel(entry.actor_type)}{entry.route ? ` · ${entry.route}` : ""}</small></li>)}</ul>
-          </section>
-          <section className="qms-live-audit-focus__presence">
-            <span><Eye size={14} /> Auditee viewing</span>
-            <strong>{auditeePresence.length}</strong>
+          <details className="qms-live-audit-focus__summary-details">
+            <summary>Device synchronization <b>{outbox.queued + outbox.conflicts + outbox.failed + (evidenceOutboxQuery.data?.length || 0)}</b></summary>
+            <p>{outbox.queued} checklist pending · {outbox.conflicts} conflict · {outbox.failed} failed · {evidenceOutboxQuery.data?.length || 0} evidence pending.</p>
+            <small>Device changes are not authoritative until accepted by the server. Conflicts are never silently overwritten.</small>
+          </details>
+          <details className="qms-live-audit-focus__summary-details">
+            <summary><Users size={14} /> Audit team live <b>{auditTeamPresence.length}</b></summary>
+            <ul>{auditTeamPresence.slice(0, 8).map((entry) => <li key={entry.id}><strong>{entry.display_name}</strong><small>{entry.role || statusLabel(entry.actor_type)}{entry.route ? ` · ${entry.route}` : ""}</small></li>)}</ul>
+          </details>
+          <details className="qms-live-audit-focus__summary-details">
+            <summary><Eye size={14} /> Auditee viewing <b>{auditeePresence.length}</b></summary>
             <small>{auditeePresence.length ? auditeePresence.map((entry) => entry.display_name).join(", ") : "No auditee guest with progress/presence scope is currently active."}</small>
-          </section>
-          <section id="audit-occurrence-findings"><span>Findings</span><strong>{findings.length}</strong><ul>{findings.slice(0, 6).map((finding) => <li key={finding.id}><b>{finding.finding_ref || finding.level}{finding.closed_at ? " · Closed" : ""}</b><small>{finding.description}</small></li>)}</ul></section>
-          <section className="qms-live-audit-focus__sharing"><span>Auditee live view</span><strong>Released-data boundary active</strong><small>Auditees receive only server-released findings and permitted progress/evidence projections; private checklist notes remain internal.</small></section>
+          </details>
+          <details className="qms-live-audit-focus__summary-details" id="audit-occurrence-findings">
+            <summary><FileWarning size={14} /> Findings <b>{findings.length}</b></summary>
+            <ul>{findings.slice(0, 6).map((finding) => <li key={finding.id}><strong>{finding.finding_ref || finding.level}{finding.closed_at ? " · Closed" : ""}</strong><small>{finding.description}</small></li>)}</ul>
+          </details>
+          <details className="qms-live-audit-focus__summary-details">
+            <summary><ShieldAlert size={14} /> Auditee release boundary</summary>
+            <p>Released-data boundary active. Auditees receive only server-released findings and permitted progress/evidence projections; private checklist notes remain internal.</p>
+          </details>
         </aside>
       </div>
 
