@@ -25,7 +25,8 @@ router = APIRouter(
     tags=["external provider import"],
     dependencies=[Depends(require_module("finance_inventory"))],
 )
-_EDIT = (accounts.AccountRole.PROCUREMENT_OFFICER, accounts.AccountRole.STORES_MANAGER)
+_EDIT = (accounts.AccountRole.PROCUREMENT_OFFICER, accounts.AccountRole.STORES_MANAGER,
+         accounts.AccountRole.QUALITY_MANAGER)
 _COLUMNS = {
     "supplier_code": ("supplier code", "vendor code", "vendor id", "supplier id", "code"),
     "legal_name": ("supplier name", "vendor name", "provider name", "company name", "name"),
@@ -239,7 +240,7 @@ def review(amo_code: str, batch_id: str, db: Session = Depends(get_db),
 def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
             user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
-    batch = db.execute(text("""SELECT status FROM external_provider_import_batches
+    batch = db.execute(text("""SELECT status,import_kind FROM external_provider_import_batches
             WHERE id=:batch AND amo_id=:amo FOR UPDATE"""),
             {"batch":batch_id, "amo":tenant}).mappings().first()
     if not batch: raise HTTPException(404, "Import batch not found.")
@@ -250,39 +251,84 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
         {"amo":tenant,"batch":batch_id}).mappings().all()
     if not rows or any(row["status"] != "READY" for row in rows):
         raise HTTPException(409, "Batch has unresolved errors or no records.")
+    if batch["import_kind"] == "CONTRACTS" and user.role != accounts.AccountRole.QUALITY_MANAGER:
+        raise HTTPException(403, "Only the Quality Manager can confirm governed contract drafts.")
     created = []
     for row in rows:
         fields = row["normalized_json"]
         if isinstance(fields, str):
             fields = json.loads(fields)
-        code = fields["supplier_code"].strip().upper()
-        existing = db.execute(text("""SELECT 1 FROM procurement_suppliers
-            WHERE amo_id=:amo AND upper(supplier_code)=:code"""),
-            {"amo":tenant,"code":code}).scalar()
-        if existing: raise HTTPException(409, "Concurrent duplicate supplier. Preview again.")
-        supplier = models.ProcurementSupplier(
-            amo_id=tenant, supplier_code=code, legal_name=fields["legal_name"].strip(),
-            trading_name=fields.get("trading_name"), email=fields.get("email"),
-            phone=fields.get("phone"), country=fields.get("country"),
-            physical_address=fields.get("physical_address"),
-            supplier_type="OTHER", status=models.SupplierLifecycleStatus.PROSPECTIVE,
-            is_active=True, created_by_user_id=str(user.id),
-        )
-        db.add(supplier)
-        db.flush()
-        service._event(db, amo_id=tenant, entity_type="ProcurementSupplier",
-                       entity_id=str(supplier.id), action="import_prospective",
-                       actor_user_id=str(user.id),
-                       detail={"batch_id":batch_id, "sheet":row["sheet_name"],
+        if batch["import_kind"] == "CONTRACTS":
+            supplier_id = row["supplier_id"]
+            if not supplier_id:
+                raise HTTPException(409, "Unmatched contract provider.")
+            exists = db.execute(text("""SELECT 1 FROM quality_external_provider_contracts
+                WHERE amo_id=:amo AND upper(contract_number)=upper(:number)"""),
+                {"amo":tenant,"number":fields["contract_number"]}).scalar()
+            if exists: raise HTTPException(409, "Contract number now exists. Reconcile first.")
+            contract_id = str(uuid4())
+            db.execute(text("""INSERT INTO quality_external_provider_contracts
+                (id,amo_id,supplier_id,contract_number,title,status,scope_text,
+                 effective_on,expires_on,created_by_user_id,updated_by_user_id)
+                 VALUES (:id,:amo,:supplier,:number,:title,'DRAFT',:scope,
+                         :effective,:expires,:actor,:actor)"""),
+                 {"id":contract_id,"amo":tenant,"supplier":supplier_id,
+                  "number":fields["contract_number"],"title":fields["title"],
+                  "scope":fields["scope_text"],"effective":fields.get("effective_on"),
+                  "expires":fields.get("expires_on"),"actor":str(user.id)})
+            db.execute(text("""UPDATE external_provider_import_rows
+                SET status='CREATED',contract_id=:contract
+                WHERE id=:row AND amo_id=:amo"""),
+                {"contract":contract_id,"row":row["id"],"amo":tenant})
+            record_id = contract_id
+            action = "import_contract_draft"
+        else:
+            code = fields["supplier_code"].strip().upper()
+            exists = db.execute(text("""SELECT 1 FROM procurement_suppliers
+                WHERE amo_id=:amo AND upper(supplier_code)=:code"""),
+                {"amo":tenant,"code":code}).scalar()
+            if exists: raise HTTPException(409, "Supplier was added after preview; stage again.")
+            supplier = models.ProcurementSupplier(
+                amo_id=tenant,supplier_code=code,legal_name=fields["legal_name"].strip(),
+                trading_name=fields.get("trading_name"),email=fields.get("email"),
+                phone=fields.get("phone"),country=fields.get("country"),
+                physical_address=fields.get("physical_address"),supplier_type="OTHER",
+                status=models.SupplierLifecycleStatus.PROSPECTIVE,is_active=True,
+                created_by_user_id=str(user.id),
+            )
+            db.add(supplier)
+            db.flush()
+            supplier_id = supplier.id
+            record_id = str(supplier_id)
+            action = "import_prospective"
+            db.execute(text("""INSERT INTO external_provider_source_links
+                (id,amo_id,supplier_id,source_system,source_identifier,source_row,source_digest,imported_at)
+                VALUES (:id,:amo,:supplier,'TRACKER_IMPORT',:source,:row,
+                        :digest,NOW())"""),
+                {"id":str(uuid4()),"amo":tenant,"supplier":supplier_id,
+                 "source":batch_id+":"+row["sheet_name"]+":"+str(row["row_number"]),
+                 "row":row["row_number"],"digest":batch_id})
+            db.execute(text("""UPDATE external_provider_import_rows
+                SET status='CREATED',supplier_id=:supplier
+                WHERE id=:row AND amo_id=:amo"""),
+                {"supplier":supplier_id,"row":row["id"],"amo":tenant})
+        service._event(db,amo_id=tenant,entity_type="ExternalProviderImport",
+                       entity_id=record_id,action=action,actor_user_id=str(user.id),
+                       detail={"batch_id":batch_id,"sheet":row["sheet_name"],
                                "row_number":row["row_number"]})
-        db.execute(text("""UPDATE external_provider_import_rows
-            SET status='CREATED', supplier_id=:supplier
-            WHERE id=:row AND amo_id=:amo"""),
-            {"supplier":supplier.id,"row":row["id"],"amo":tenant})
-        created.append(supplier.id)
+        db.execute(text("""INSERT INTO external_provider_change_events
+            (id,amo_id,supplier_id,event_type,actor_user_id,source_system,
+             source_identifier,after_json)
+            VALUES (:id,:amo,:supplier,:action,:actor,'TRACKER_IMPORT',:source,
+                    CAST(:payload AS JSON))"""),
+            {"id":str(uuid4()),"amo":tenant,"supplier":supplier_id,"action":action,
+             "actor":str(user.id),"source":batch_id+":"+str(row["row_number"]),
+             "payload":json.dumps({"fields":fields,"sheet":row["sheet_name"]})})
+        created.append(record_id)
     db.execute(text("""UPDATE external_provider_import_batches SET
         status='COMMITTED', committed_at=now() WHERE id=:batch AND amo_id=:amo"""),
         {"batch":batch_id,"amo":tenant})
     db.commit()
-    return {"batch_id":batch_id,"created_supplier_ids":created,
-            "operational_eligibility_granted":False}
+    return {"batch_id":batch_id,"created_record_ids":created,
+            "created_supplier_ids":created if batch["import_kind"] == "SUPPLIERS" else [],
+            "import_kind":batch["import_kind"],"operational_eligibility_granted":False}
