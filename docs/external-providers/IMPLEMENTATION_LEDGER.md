@@ -5,7 +5,9 @@
 - [ ] Confirm latest migration heads and dependency compatibility on checkout.
 - [x] Add controlled tenant-qualified role/site/contact/capability create/list/patch REST endpoints and optimistic version checks (static only).
 - [x] Add Procurement Suppliers profile panel wired to the descriptive provider REST API (unverified).
-- [ ] Implement real XLSX/XLSM import pipeline and staged reconciliation; an attempted importer was not committed.
+- [x] Added generic XLSX/XLSM upload, row-level staging, duplicate/formula screening, error-blocked confirmation and prospective supplier creation (no tests executed).
+- [x] Added a reconciliation CSV export and import review panel in Procurement Suppliers.
+- [ ] Contract-tracker-specific staging and matching, dated approvals, corrective actions, rollback/correction UI, idempotent race handling and source mappings remain incomplete.
 - [ ] Verify route registration and Quality-linked eligibility, and expand tenant-scoped integrity to all cross-table evidence references.
 - [ ] Implement real XLSX/XLSM source staging, validation, preview, idempotency, correction/rollback and reconciliation export.
 - [ ] Complete account relationships, subcontractor consent, approvals and scoped evidence references.
