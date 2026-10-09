@@ -101,6 +101,7 @@ def upgrade():
         sa.Column("created_by_user_id", sa.String(36), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("committed_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("amo_id", "source_sha256", name="uq_ext_import_tenant_file"),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"))
     op.create_index("ix_ext_import_batches_tenant", "external_provider_import_batches", ["amo_id", "status"])
     op.create_table("external_provider_import_rows",
