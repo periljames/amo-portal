@@ -294,6 +294,13 @@ test.describe("governed audit lifecycle", () => {
     await expect(setup).toContainText("Audit notice");
     const noticeTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
     await noticeTile.locator("summary").click();
+    // The planned start is within the configured 14-day minimum in this fixture.
+    // Complete the governed short-notice waiver instead of bypassing the guard.
+    const shortNoticeReason = noticeTile.getByLabel("Short-notice waiver reason");
+    if (await shortNoticeReason.count()) {
+      await shortNoticeReason.fill("Controlled short-notice acceptance for the fixture audit.");
+    }
+    await expect(noticeTile.getByRole("button", { name: "Create notice draft" })).toBeEnabled();
     await noticeTile.getByRole("button", { name: "Create notice draft" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data");
     await expect(noticeTile).toContainText("14 days");
