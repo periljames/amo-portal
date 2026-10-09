@@ -83,6 +83,12 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     if len(data) > _MAX_BYTES:
         raise HTTPException(413, "Workbook exceeds 10 MB.")
     digest = hashlib.sha256(data).hexdigest()
+    existing = db.execute(text("""SELECT id, status FROM external_provider_import_batches
+        WHERE amo_id=:amo AND source_sha256=:digest"""),
+        {"amo":tenant,"digest":digest}).mappings().first()
+    if existing:
+        return {"batch_id":existing["id"],"source_sha256":digest,
+                "status":existing["status"],"already_uploaded":True}
     try:
         workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
     except Exception as exc:
@@ -106,6 +112,8 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                 if not any(cell is not None for cell in cells):
                     continue
                 counts["total"] += 1
+                if counts["total"] > 2000:
+                    raise HTTPException(413, "Workbook exceeds the 2,000-row import safety limit.")
                 fields = {key: _value(cells[index] if index < len(cells) else None)
                           for key, index in matched.items()}
                 code = (fields.get("supplier_code") or "").upper()
