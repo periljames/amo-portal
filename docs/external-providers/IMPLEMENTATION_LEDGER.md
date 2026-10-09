@@ -1,18 +1,22 @@
-# Phase implementation ledger
-- [x] Inspected canonical Procurement master and Quality-owned provider governance source.
-- [x] Chose a single canonical Procurement supplier identity, multiple roles.
-- [x] Added additive *schema definition* for provider roles, sites, contacts, capabilities and source links.
-- [ ] Confirm latest migration heads and dependency compatibility on checkout.
-- [x] Add controlled tenant-qualified role/site/contact/capability create/list/patch REST endpoints and optimistic version checks (static only).
-- [x] Add Procurement Suppliers profile panel wired to the descriptive provider REST API (unverified).
-- [x] Added generic XLSX/XLSM upload, row-level staging, duplicate/formula screening, error-blocked confirmation and prospective supplier creation (no tests executed).
-- [x] Added a reconciliation CSV export and import review panel in Procurement Suppliers.
-- [ ] Contract-tracker-specific staging and matching, dated approvals, corrective actions, rollback/correction UI, idempotent race handling and source mappings remain incomplete.
-- [ ] Verify route registration and Quality-linked eligibility, and expand tenant-scoped integrity to all cross-table evidence references.
-- [ ] Complete full workbook-import acceptance: staging and basic export exist; date harmonization, contract reconciliation, controlled correction/rollback and concurrency safety need further work.
-- [ ] Complete account relationships, subcontractor consent, approvals and scoped evidence references.
-- [x] Retrieved indexed passages from DRAFT MOPM ISSUE 4(8).pdf (not approved) for 1.11, 2.1 and 2.23.
-- [ ] Inspect all relevant sections of the full draft and the exact vendor and contracts tracker workbooks; the two tracker files were not located.
-- [ ] Audit all affected operational supplier-use entry points.
-- [ ] Full static review of all changed code (not complete); API route ordering, PostgreSQL migration DAG and frontend integration still require confirmation.
-No tests executed per phase policy; this is not a Phase 1 completion claim.
+# Phase 1 implementation ledger
+
+## Committed implementation
+- [x] Reuse Procurement supplier as canonical tenant organization; no second Quality authority.
+- [x] Add multi-role, site, contact, capability, authority/certificate, consented provider relationship, account association, Quality scope link and provenance structures.
+- [x] Tenant-qualify provider/site/supplier/evidence, scope, parent, user and import relationships; add PostgreSQL FORCE RLS and reversible Alembic upgrade/downgrade.
+- [x] Guard create/update by tenant identity and roles; optimistic row versions and Quality verification transitions.
+- [x] Add provider profile administration frontend with role/site/contact/certification/governance views.
+- [x] Stage XLSX/XLSM suppliers and contracts with mapped headers, worksheet selection, formulas, duplicates, supplier match and dates; no source Quality approval mutation.
+- [x] Confirm prospective suppliers; Quality Manager-only creation of contract DRAFT records.
+- [x] Add source-file/row provenance, reconciliation CSV and staged supersession/guarded committed rollback.
+- [x] Retain existing supplier use gate; inspect `service.assert_supplier_eligible` for status, holds and scope validity.
+- [x] Inspect relevant real repository routes/models and indexed Draft MOPM Issue 4 excerpts.
+- [x] Keep a single feature branch and draft PR; merge latest main.
+
+## Source-dependent and deferred verification
+- [ ] Exact vendor register and contracts tracker were not available. Source-specific header and contract column mapping **cannot be confirmed** without the real workbooks.
+- [ ] Runtime migration upgrade/downgrade, full Alembic DAG-head comparison and production schema compatibility are Phase 10 verification obligations.
+- [ ] Full API/browser access, route order and import reconciliation on real source workbooks remain unexecuted by Phase 1–9 policy.
+- [ ] No pytest, Vitest, Playwright, lint, typecheck, builds, CI, or benchmark runs performed.
+
+Phase 1 code is committed; the source-dependent acceptance and testing are **not** claimed to pass.
