@@ -36,6 +36,7 @@ _COLUMNS = {
     "phone": ("phone", "telephone"),
     "country": ("country",),
     "physical_address": ("address", "physical address"),
+    "source_status": ("approval status", "status", "quality status", "vendor status"),
 }
 _CONTRACT_COLUMNS = {
     "contract_number": ("contract number", "agreement number", "agreement ref", "reference number"),
