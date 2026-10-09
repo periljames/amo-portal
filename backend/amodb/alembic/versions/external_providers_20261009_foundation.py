@@ -55,7 +55,8 @@ def upgrade():
             sa.Column("country", sa.String(80)),
             sa.Column("address", sa.Text()),
             sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.false()),
-            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "site_code",
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "id", name="uq_ext_site_tenant_ref"),
+                   sa.UniqueConstraint("amo_id", "supplier_id", "site_code",
                                        name="uq_external_provider_site"),))
     _create("external_provider_contacts",
             sa.Column("contact_name", sa.String(255), nullable=False),
@@ -63,7 +64,8 @@ def upgrade():
             sa.Column("phone", sa.String(80)),
             sa.Column("assignment", sa.String(32), nullable=False),
             sa.Column("site_id", sa.String(36)),
-            sa.ForeignKeyConstraint(["site_id"], ["external_provider_sites.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "site_id"],
+                                    ["external_provider_sites.amo_id", "external_provider_sites.supplier_id", "external_provider_sites.id"]),
             sa.CheckConstraint("assignment IN ('COMMERCIAL','TECHNICAL','QUALITY','OTHER')",
                                name="assignment_valid"))
     _create("external_provider_capabilities",
