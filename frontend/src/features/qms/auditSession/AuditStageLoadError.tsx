@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { portalErrorMessage } from "../../../services/portalError";
 
 type Props = {
   className: string;
@@ -37,7 +38,7 @@ export function AuditStageLoadError({
     ? "This stage could not be loaded."
     : looksLikeHttp
       ? "The server could not provide this audit stage right now. Retry, or return to Setup and continue from the next available action."
-      : raw;
+      : portalErrorMessage(raw, "An application problem prevented this stage from loading. Retry to load your saved audit records, or return to the prior stage.");
 
   return (
     <div className={className} role="alert">

@@ -10,6 +10,15 @@ CANONICAL_RESPONSE_VALUES = {
     "NOT_VERIFIED",
 }
 
+
+def canonical_response_from_legacy(value: str | None) -> str:
+    normalized = str(value or "PENDING").upper()
+    if normalized == "NON_CONFORMING":
+        return "NONCOMPLIANT"
+    if normalized in {"COMPLIANT", "OBSERVATION", "NOT_APPLICABLE"}:
+        return normalized
+    return "NOT_VERIFIED"
+
 _DEFAULT_SCHEMES: dict[str, list[dict[str, str]]] = {
     "COMPLIANCE": [
         {"value": "COMPLIANT", "label": "Compliant", "canonical_status": "COMPLIANT"},

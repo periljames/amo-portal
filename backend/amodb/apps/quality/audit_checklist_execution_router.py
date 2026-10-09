@@ -26,7 +26,7 @@ from .audit_checklist_execution_models import (
     QualityAuditFieldworkMutationReceipt,
     QualityAuditApplicabilityFact,
 )
-from .audit_checklist_response_policy import resolve_response_value
+from .audit_checklist_response_policy import canonical_response_from_legacy, resolve_response_value
 from .compliance_intelligence_service import (
     detect_requirement_conflicts,
     evaluate_applicability,
@@ -160,12 +160,7 @@ def _normalise_client_timestamp(value: datetime) -> datetime:
 
 
 def _canonical_from_legacy(value: str | None) -> CanonicalResponse:
-    normalized = str(value or "PENDING").upper()
-    if normalized == "NON_CONFORMING":
-        return "NONCOMPLIANT"
-    if normalized in {"COMPLIANT", "OBSERVATION", "NOT_APPLICABLE"}:
-        return normalized  # type: ignore[return-value]
-    return "NOT_VERIFIED"
+    return canonical_response_from_legacy(value)  # type: ignore[return-value]
 
 
 def _legacy_from_canonical(value: CanonicalResponse) -> str:

@@ -10,9 +10,10 @@ def _is_session_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
     methods = set(getattr(route_item, "methods", None) or ())
     is_setup_update = path.endswith("/audits/{audit_id}/setup") and "PATCH" in methods
+    is_findings_read = path.endswith("/audits/{audit_id}/findings") and "GET" in methods
     return (
         ("/quality/audits/" in path or "/qms/audits/" in path)
-        and (path.endswith("/session") or "/audits/resolve/" in path or is_setup_update)
+        and (path.endswith("/session") or "/audits/resolve/" in path or is_setup_update or is_findings_read)
     )
 
 

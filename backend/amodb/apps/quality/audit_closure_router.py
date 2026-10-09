@@ -28,12 +28,13 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
-    row = db.query(models.QMSAudit).filter(
+def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID, lock: bool = False) -> models.QMSAudit:
+    query = db.query(models.QMSAudit).filter(
         models.QMSAudit.amo_id == amo_id,
         models.QMSAudit.id == audit_id,
         models.QMSAudit.deleted_at.is_(None),
-    ).first()
+    )
+    row = (query.with_for_update() if lock else query).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit not found.")
     return row
@@ -59,19 +60,20 @@ def _linked_records(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> dict[st
     cars = []
     if finding_ids:
         cars = db.query(models.CorrectiveActionRequest).filter(
+            models.CorrectiveActionRequest.amo_id == amo_id,
             models.CorrectiveActionRequest.finding_id.in_(list(finding_ids))
         ).all()
     car_ids = {str(item.id) for item in cars}
     reference_ids = {str(audit_id), *finding_ids, *car_ids}
 
-    plans = db.query(QualityEffectivenessPlan).filter(QualityEffectivenessPlan.amo_id == amo_id).limit(1000).all()
+    plans = db.query(QualityEffectivenessPlan).filter(QualityEffectivenessPlan.amo_id == amo_id).all()
     relevant_plans = [
         item for item in plans
         if (item.source_id and str(item.source_id) in reference_ids)
         or (item.source_route and _contains_reference(item.source_route, reference_ids))
     ]
 
-    cases = db.query(QualityAssuranceCase).filter(QualityAssuranceCase.amo_id == amo_id).limit(1000).all()
+    cases = db.query(QualityAssuranceCase).filter(QualityAssuranceCase.amo_id == amo_id).all()
     relevant_cases = [item for item in cases if _contains_reference(item.source_references, reference_ids)]
     return {
         "findings": findings,
@@ -249,7 +251,7 @@ def record_execution_closed(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     readiness = _execution_readiness(db, amo_id=ctx.amo_id, audit=audit)
     if not readiness["ready"]:
         raise HTTPException(status_code=409, detail={"message": "Audit execution closure is not ready.", **readiness})
@@ -277,7 +279,7 @@ def record_follow_up_complete(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     row = _ensure_state(db, ctx=ctx, audit_id=audit_id)
     if row.execution_status != "CLOSED":
         raise HTTPException(status_code=409, detail="Audit execution must be formally closed before assurance follow-up can be completed.")
@@ -308,7 +310,7 @@ def reopen_follow_up(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     row = db.query(QualityAuditClosureState).filter(
         QualityAuditClosureState.amo_id == ctx.amo_id,
         QualityAuditClosureState.audit_id == audit_id,

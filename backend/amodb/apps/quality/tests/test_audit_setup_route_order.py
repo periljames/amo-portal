@@ -5,10 +5,20 @@ import inspect
 from amodb.apps.quality import audit_session_route_order as _audit_session_route_order  # noqa: F401
 from amodb.apps.quality.canonical_router import router
 from amodb.apps.quality.audit_session_router import AuditSetupUpdate, update_audit_setup
+from amodb.apps.quality.audit_session_router import list_audit_occurrence_findings
+from amodb.apps.quality.schemas import QMSFindingOut
+from starlette.routing import Match
 
 
 def _route_index(api_router, predicate) -> int:
     return next(index for index, route_item in enumerate(api_router.routes) if predicate(route_item))
+
+
+def test_occurrence_findings_match_the_collection_handler_before_generic_register():
+    scope = {"type": "http", "method": "GET", "path": "/api/maintenance/SAFARILINK/quality/audits/11111111-1111-4111-8111-111111111111/findings", "root_path": ""}
+    matched = next(route for route in router.routes if route.matches(scope)[0] == Match.FULL)
+    assert matched.endpoint is list_audit_occurrence_findings
+    assert matched.response_model == list[QMSFindingOut]
 
 
 def test_setup_patch_precedes_generic_catchall() -> None:

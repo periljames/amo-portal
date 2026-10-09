@@ -12,6 +12,7 @@ import {
 } from "../../../services/qmsAuditExternalAccess";
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
 import { listChecklistExecutionGovernance } from "../../../services/qmsChecklistExecutionGovernance";
+import { auditPrerequisiteLoadDetail } from "./auditStageLoadErrorMessages";
 import "../../../styles/qms-live-finding-release.css";
 
 type Props = { amoCode: string; auditKey: string };
@@ -46,27 +47,27 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const auditId = auditQuery.data?.id || "";
   const findingsQuery = useQuery({
-    queryKey: ["qms-live-audit-findings", auditId],
+    queryKey: ["qms", "live-audit-findings", amoCode, auditId],
     queryFn: () => qmsListFindings(auditId, amoCode),
-    enabled: Boolean(canManage && auditId),
+    enabled: Boolean(canManage && auditId && open),
     staleTime: 1_500,
   });
   const releasesQuery = useQuery({
     queryKey: ["qms-live-audit-finding-releases", amoCode, auditId],
     queryFn: ({ signal }) => listAuditFindingReleases(amoCode, auditId, signal),
-    enabled: Boolean(canManage && auditId),
+    enabled: Boolean(canManage && auditId && open),
     staleTime: 1_500,
   });
   const evidenceQuery = useQuery({
     queryKey: ["qms-live-audit-release-evidence", amoCode, auditId],
     queryFn: ({ signal }) => listAuditEvidence(amoCode, auditId, null, null, signal),
-    enabled: Boolean(canManage && auditId),
+    enabled: Boolean(canManage && auditId && open),
     staleTime: 1_500,
   });
   const checklistQuery = useQuery({
     queryKey: ["qms-live-audit-release-checklist", amoCode, auditId],
     queryFn: ({ signal }) => listChecklistExecutionGovernance(amoCode, auditId, signal),
-    enabled: Boolean(canManage && auditId),
+    enabled: Boolean(canManage && auditId && open),
     staleTime: 1_500,
   });
 
@@ -111,8 +112,8 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
       setError(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["qms-live-audit-finding-releases", amoCode, auditId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms-live-audit-findings", auditId] }),
-        queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", auditId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", amoCode, auditId] }),
+        queryClient.invalidateQueries({ queryKey: ["qms-closing-findings", amoCode, auditId] }),
         queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
         queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       ]);
@@ -121,6 +122,11 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   if (!canManage) return null;
+  const queries = [auditQuery, findingsQuery, releasesQuery, evidenceQuery, checklistQuery];
+  const loadError = queries.find((query) => query.isError)?.error;
+  const loading = queries.some((query) => query.isPending);
+  const dataReady = !loading && !loadError;
+  const retry = () => { for (const query of queries) void query.refetch(); };
   const findings = findingsQuery.data || [];
   const releasedCount = findings.filter((finding) => releaseByFinding.get(finding.id)?.action === "RELEASED").length;
   const draftEvidence = draft ? evidenceByFinding.get(draft.findingId) || [] : [];
@@ -128,13 +134,15 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   return (
     <>
       <button className="qms-live-release-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <Eye size={16} /> Auditee releases <span>{releasedCount}/{findings.length}</span>
+        <Eye size={16} /> Auditee releases <span>{loadError ? "Retry" : findingsQuery.isSuccess ? `${releasedCount}/${findings.length}` : "View"}</span>
       </button>
       {open ? (
         <aside className="qms-live-release-panel" aria-label="Auditee finding release controls">
           <header><div><span>EXTERNAL VISIBILITY</span><strong>Released findings</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close finding release controls"><X size={17} /></button></header>
-          <p>Recording a finding does not disclose it. Release is an explicit server-side projection. Governed evidence files must be selected individually; storage paths and free-form file references cannot cross this boundary.</p>
+          <p>Choose which findings the auditee can see. Select each evidence file to share and record a reason for the release or withdrawal. Auditor notes remain private.</p>
           {error ? <div className="qms-live-release-panel__error" role="alert"><ShieldAlert size={15} /> {error}</div> : null}
+          {loadError ? <div className="qms-live-release-panel__error" role="alert"><ShieldAlert size={15} /> {auditPrerequisiteLoadDetail(loadError, "Auditee release records are unavailable. Retry to load the saved findings.")} <button type="button" onClick={retry}>Retry release records</button></div> : null}
+          {loading ? <p role="status">Loading findings, release decisions and linked evidence…</p> : null}
           <div className="qms-live-release-panel__list">
             {findings.map((finding) => {
               const release = releaseByFinding.get(finding.id);
@@ -145,7 +153,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <article key={finding.id}>
                   <div><span>{finding.level || finding.severity || "Finding"}</span><strong>{finding.finding_ref || "Finding"}</strong><small>{finding.requirement_ref || "No requirement reference"}</small><p>{finding.description}</p><small>{availableEvidence.length} governed evidence file{availableEvidence.length === 1 ? "" : "s"} linked · {releasedFiles} currently released</small></div>
                   <div className="qms-live-release-panel__state">{isReleased ? <><Eye size={14} /> Released</> : <><EyeOff size={14} /> Auditor only</>}</div>
-                  <button type="button" onClick={() => setDraft({
+                  <button type="button" disabled={!dataReady || decisionMutation.isPending} onClick={() => setDraft({
                     findingId: finding.id,
                     action: isReleased ? "WITHDRAWN" : "RELEASED",
                     includeObjectiveEvidence: release?.include_objective_evidence || false,
@@ -155,7 +163,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </article>
               );
             })}
-            {!findings.length ? <div className="qms-live-release-panel__empty">No governed findings have been recorded yet.</div> : null}
+            {dataReady && !findings.length ? <div className="qms-live-release-panel__empty">No findings have been recorded yet. Record a finding in Fieldwork before releasing it to the auditee.</div> : null}
           </div>
         </aside>
       ) : null}
@@ -164,6 +172,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
         <div className="qms-live-release-decision-backdrop">
           <section className="qms-live-release-decision" role="dialog" aria-modal="true" aria-label={`${draft.action === "RELEASED" ? "Release" : "Withdraw"} finding`}>
             <header><strong>{draft.action === "RELEASED" ? "Release finding to auditee" : "Withdraw finding from auditee view"}</strong><button type="button" onClick={() => setDraft(null)} aria-label="Close"><X size={17} /></button></header>
+            {error || loadError ? <p role="alert">{error || "Release records changed or could not be loaded. Close this decision and retry the release records."}</p> : null}
             {draft.action === "RELEASED" ? (
               <>
                 <label className="qms-live-release-decision__check"><input type="checkbox" checked={draft.includeObjectiveEvidence} onChange={(event) => setDraft((current) => current ? { ...current, includeObjectiveEvidence: event.target.checked } : current)} /> Include the finding's objective-evidence text in the external view</label>
@@ -186,7 +195,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
             ) : null}
             <label><span>Decision reason</span><textarea rows={4} value={draft.reason} onChange={(event) => setDraft((current) => current ? { ...current, reason: event.target.value } : current)} placeholder="Record why this finding is being released or withdrawn." /></label>
             <p>Private auditor notes are never included. The server revalidates every selected artifact against this audit/finding relationship before release.</p>
-            <footer><button type="button" onClick={() => setDraft(null)}>Cancel</button><button type="button" className="is-primary" disabled={draft.reason.trim().length < 3 || decisionMutation.isPending} onClick={() => decisionMutation.mutate(draft)}>{decisionMutation.isPending ? "Saving…" : draft.action === "RELEASED" ? "Release finding" : "Withdraw finding"}</button></footer>
+            <footer><button type="button" onClick={() => setDraft(null)}>Cancel</button><button type="button" className="is-primary" disabled={!dataReady || draft.reason.trim().length < 3 || decisionMutation.isPending} onClick={() => decisionMutation.mutate(draft)}>{decisionMutation.isPending ? "Saving…" : draft.action === "RELEASED" ? "Release finding" : "Withdraw finding"}</button></footer>
           </section>
         </div>
       ) : null}

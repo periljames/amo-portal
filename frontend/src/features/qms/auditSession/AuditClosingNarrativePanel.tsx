@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, FileText, RefreshCw, Send, Users } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
-import { apiRequest, qmsPath } from "../../../services/apiClient";
+import { listAuditCorrectiveActions } from "../../../services/qmsAuditCars";
+import { AuditStageLoadError } from "./AuditStageLoadError";
+import { auditSessionPath } from "./auditSessionRoutes";
 import { qmsListFindings } from "../../../services/qms";
 import {
   listAuditFindingReleases,
@@ -21,26 +23,6 @@ import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../servic
 
 type Props = { amoCode: string; auditKey: string };
 
-type AuditCar = {
-  id: string;
-  car_number: string;
-  title: string;
-  status: string;
-  finding_id: string | null;
-  due_date: string | null;
-  target_closure_date: string | null;
-};
-
-type AuditCarRegister = { items: AuditCar[] };
-
-function listAuditCars(amoCode: string, auditId: string, signal?: AbortSignal) {
-  const params = new URLSearchParams({ audit_id: auditId, limit: "200", offset: "0" });
-  return apiRequest<AuditCarRegister>(qmsPath(amoCode, `/cars/register?${params.toString()}`), {
-    timeoutMs: 15_000,
-    cacheTtlMs: 2_000,
-    signal,
-  });
-}
 
 const emptyNarrative: AuditClosingNarrative = {
   management_summary: null,
@@ -66,7 +48,7 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const narrativeQuery = useQuery({ queryKey: narrativeQueryKey, queryFn: ({ signal }) => getAuditClosingNarrative(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const meetingsQuery = useQuery({ queryKey: ["qms-audit-meetings", amoCode, auditId], queryFn: ({ signal }) => listAuditMeetings(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const findingsQuery = useQuery({ queryKey: ["qms-closing-findings", amoCode, auditId], queryFn: () => qmsListFindings(auditId, amoCode), enabled: Boolean(auditId), staleTime: 2_000 });
-  const carsQuery = useQuery({ queryKey: ["qms-audit-cars", amoCode, auditId], queryFn: ({ signal }) => listAuditCars(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
+  const carsQuery = useQuery({ queryKey: ["qms-audit-cars", amoCode, auditId], queryFn: ({ signal }) => listAuditCorrectiveActions(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 2_000 });
   const releasesQuery = useQuery({ queryKey: ["qms-closing-finding-releases", amoCode, auditId], queryFn: ({ signal }) => listAuditFindingReleases(amoCode, auditId, signal), enabled: Boolean(auditId), staleTime: 1_500 });
   const persistedNarrative = narrativeQuery.data ?? emptyNarrative;
   const draft = draftOverride ?? persistedNarrative;
@@ -128,8 +110,8 @@ const AuditClosingNarrativePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const narrativeReady = Boolean(draft.management_summary?.trim() && draft.conclusion?.trim() && draft.positive_practices?.trim());
   const loadError = auditQuery.error || narrativeQuery.error || meetingsQuery.error || findingsQuery.error || carsQuery.error || releasesQuery.error;
 
-  if (auditQuery.isLoading || narrativeQuery.isLoading || meetingsQuery.isLoading || findingsQuery.isLoading || carsQuery.isLoading || releasesQuery.isLoading) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading closing meeting record…</section>;
-  if (loadError || !auditQuery.data) return <section className="qms-occurrence-stage qms-occurrence-stage--loading" role="alert"><AlertTriangle size={18} /> {loadError instanceof Error ? loadError.message : "Closing meeting record unavailable."}</section>;
+  if (auditQuery.isPending || (Boolean(auditId) && (narrativeQuery.isPending || meetingsQuery.isPending || findingsQuery.isPending || carsQuery.isPending || releasesQuery.isPending))) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading closing meeting record…</section>;
+  if (loadError || !auditQuery.data) return <AuditStageLoadError className="qms-occurrence-stage qms-occurrence-stage--error" title="Closing meeting records unavailable" detail={loadError instanceof Error ? loadError.message : null} onRetry={() => void refresh()} exitHref={auditSessionPath(amoCode, auditKey, "live")} exitLabel="Back to Fieldwork" />;
 
   return (
     <section className="qms-occurrence-stage qms-occurrence-stage--closing-record" aria-label="Closing meeting narrative and corrective actions">

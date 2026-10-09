@@ -25,13 +25,14 @@ export type AuditSession = {
   execution_status: string;
   follow_up_status: string;
   archive_count: number;
+  fieldwork_access?: { ready: boolean; blocker: string | null };
 };
 
 export async function getAuditSession(amoCode: string, auditId: string, signal?: AbortSignal) {
   const readOffline = async () => {
     const pack = await readAuditOfflinePack(amoCode, auditId);
     if (!pack?.fieldwork_state.authorized) return null;
-    return projectOfflineAuditSession(pack) as AuditSession;
+    return requireAuditContract(projectOfflineAuditSession(pack) as AuditSession, "session");
   };
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();

@@ -77,6 +77,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [holdKey, setHoldKey] = useState("");
   const [holdReason, setHoldReason] = useState("");
   const [holdBasis, setHoldBasis] = useState("");
+  const [holdRelease, setHoldRelease] = useState<{ key: string; reason: string; basis: string } | null>(null);
   const [reviewReason, setReviewReason] = useState("");
   const [disposeReason, setDisposeReason] = useState("");
   const [disposeConfirmation, setDisposeConfirmation] = useState("");
@@ -148,12 +149,15 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onError: (cause) => failure(cause, "Legal hold placement failed."),
   });
   const releaseMutation = useMutation({
-    mutationFn: (key: string) => releaseAuditLegalHold(amoCode, auditId, key, {
-      reason: `Controlled release of legal hold ${key}.`,
-      governing_basis: "Release authorised through the governed Quality archive workspace.",
-      manifest_id: governanceQuery.data?.manifest?.id || null,
-    }),
-    onSuccess: () => void success("Legal hold released with an append-only release event."),
+    mutationFn: () => {
+      if (!holdRelease) throw new Error("Select the legal hold and provide its release authority.");
+      return releaseAuditLegalHold(amoCode, auditId, holdRelease.key, {
+        reason: holdRelease.reason.trim(),
+        governing_basis: holdRelease.basis.trim(),
+        manifest_id: governanceQuery.data?.manifest?.id || null,
+      });
+    },
+    onSuccess: () => { setHoldRelease(null); void success("Legal hold released and its reason and authority recorded."); },
     onError: (cause) => failure(cause, "Legal hold release failed."),
   });
   const reviewMutation = useMutation({
@@ -174,16 +178,19 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const policyFormValid = policyForm.retentionClass.trim().length >= 2
     && policyForm.governingBasis.trim().length >= 8
     && policyForm.approvingCapability.trim().length >= 3
-    && (policyForm.indefinite || Number(policyForm.durationDays) > 0);
+    && (policyForm.indefinite || (Number.isSafeInteger(Number(policyForm.durationDays)) && Number(policyForm.durationDays) > 0));
   const holdFormValid = holdKey.trim().length > 0 && holdReason.trim().length >= 8 && holdBasis.trim().length >= 8;
   const canDispose = Boolean(
     canManage
     && manifest
+    && manifest.package_available !== false
     && policy
     && governance?.retention_due
     && governance.active_holds.length === 0
     && policy.disposition_mode !== "NO_DISPOSITION"
-    && governance.disposition?.event_type === "APPROVED"
+    && !policy.indefinite
+    && governance.disposition?.event_type !== "EXECUTED"
+    && (!policy.review_before_disposition || governance.disposition_review_valid === true)
     && disposeReason.trim().length >= 8
     && disposeConfirmation.trim() === expectedConfirmation,
   );
@@ -207,7 +214,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }
   };
 
-  if (auditQuery.isLoading || governanceQuery.isLoading) return <div className="qms-audit-archive qms-audit-archive--loading">Loading governed audit archive…</div>;
+  if (auditQuery.isPending || (Boolean(auditId) && governanceQuery.isPending)) return <div className="qms-audit-archive qms-audit-archive--loading">Loading governed audit archive…</div>;
   if (auditQuery.error || !auditQuery.data) {
     return (
       <AuditStageLoadError
@@ -248,6 +255,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
       {localError ? <div className="qms-audit-archive__message is-error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {notice ? <div className="qms-audit-archive__message" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
+      {!governance.archive_readiness?.ready ? <div className="qms-audit-archive__blocker" role="status"><AlertTriangle size={16} /><div><strong>Archive generation is locked</strong><ul>{governance.archive_readiness?.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>) || <li>Refresh to verify archive readiness.</li>}</ul><a href={auditSessionPath(amoCode, auditKey, "follow-up")}>Review follow-up requirements</a></div></div> : null}
 
       <div className="qms-audit-archive__grid">
         <main>
@@ -269,17 +277,25 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <div className="qms-audit-archive__groups">{itemGroups.map(([type, count]) => <span key={type}>{type.replaceAll("_", " ")} · {count}</span>)}</div>
                 <div className="qms-audit-archive__actions">
                   {manifest.package_filename ? <button type="button" onClick={() => void download()} disabled={downloadBusy || manifest.package_available === false}><Download size={15} /> {downloadBusy ? "Downloading…" : "Download verified package"}</button> : null}
-                  {canManage ? <button type="button" onClick={() => manifestMutation.mutate()} disabled={manifestMutation.isPending}>{manifestMutation.isPending ? "Generating…" : "Generate new manifest version"}</button> : null}
+                  {canManage ? <button type="button" onClick={() => manifestMutation.mutate()} disabled={!governance.archive_readiness?.ready || manifestMutation.isPending}>{manifestMutation.isPending ? "Generating…" : "Generate new manifest version"}</button> : null}
                 </div>
               </>
             ) : (
-              <div className="qms-audit-archive__empty"><p>No archive manifest exists for this audit.</p>{canManage ? <button type="button" disabled={!policy || manifestMutation.isPending} onClick={() => manifestMutation.mutate()}>{manifestMutation.isPending ? "Generating…" : "Generate governed archive"}</button> : null}</div>
+              <div className="qms-audit-archive__empty"><p>No archive manifest exists for this audit.</p>{canManage ? <button type="button" disabled={!governance.archive_readiness?.ready || manifestMutation.isPending} onClick={() => manifestMutation.mutate()}>{manifestMutation.isPending ? "Generating…" : "Generate governed archive"}</button> : null}</div>
             )}
           </article>
 
           <article className="qms-audit-archive__card">
             <header><FileLock2 size={19} /><div><strong>Legal holds</strong><small>Active holds block disposition regardless of retention due date.</small></div></header>
-            {governance.active_holds.length ? <div className="qms-audit-archive__holds">{governance.active_holds.map((hold) => <div key={hold.hold_key}><div><strong>{hold.hold_key}</strong><span>{hold.reason}</span><small>{hold.governing_basis} · {dateTime(hold.created_at)}</small></div>{canManage ? <button type="button" onClick={() => releaseMutation.mutate(hold.hold_key)} disabled={releaseMutation.isPending}><Unlock size={14} /> Release</button> : null}</div>)}</div> : <p className="qms-audit-archive__empty">No active legal holds.</p>}
+            {governance.active_holds.length ? <div className="qms-audit-archive__holds">{governance.active_holds.map((hold) => <div key={hold.hold_key}><div><strong>{hold.hold_key}</strong><span>{hold.reason}</span><small>{hold.governing_basis} · {dateTime(hold.created_at)}</small></div>{canManage ? <button type="button" onClick={() => setHoldRelease({ key: hold.hold_key, reason: "", basis: "" })} disabled={releaseMutation.isPending}><Unlock size={14} /> Release</button> : null}</div>)}</div> : <p className="qms-audit-archive__empty">No active legal holds.</p>}
+            {holdRelease ? <div className="qms-audit-archive__hold-form" role="group" aria-label={`Release legal hold ${holdRelease.key}`}>
+              <strong>Release hold {holdRelease.key}</strong>
+              <label><span>Release reason</span><textarea rows={3} value={holdRelease.reason} onChange={(event) => setHoldRelease((current) => current ? { ...current, reason: event.target.value } : null)} /></label>
+              <label><span>Authority / governing basis for release</span><textarea rows={3} value={holdRelease.basis} onChange={(event) => setHoldRelease((current) => current ? { ...current, basis: event.target.value } : null)} /></label>
+              <p>Releasing this hold removes its disposition block. Record the authority that permits the release.</p>
+              <button type="button" disabled={releaseMutation.isPending} onClick={() => setHoldRelease(null)}>Cancel</button>
+              <button type="button" disabled={holdRelease.reason.trim().length < 8 || holdRelease.basis.trim().length < 8 || releaseMutation.isPending} onClick={() => releaseMutation.mutate()}>{releaseMutation.isPending ? "Releasing…" : "Confirm hold release"}</button>
+            </div> : null}
             {canManage && policy?.legal_hold_supported ? <div className="qms-audit-archive__hold-form"><input value={holdKey} onChange={(event) => setHoldKey(event.target.value)} placeholder="Hold reference / case number" aria-label="Legal hold reference" /><textarea rows={2} value={holdReason} onChange={(event) => setHoldReason(event.target.value)} placeholder="Reason for hold" aria-label="Legal hold reason" /><textarea rows={2} value={holdBasis} onChange={(event) => setHoldBasis(event.target.value)} placeholder="Governing basis / authority" aria-label="Legal hold governing basis" /><button type="button" disabled={!holdFormValid || holdMutation.isPending} onClick={() => holdMutation.mutate()}><FileLock2 size={14} /> Place legal hold</button></div> : null}
           </article>
         </main>
@@ -293,9 +309,9 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
           <article className="qms-audit-archive__card">
             <header><Scale size={19} /><div><strong>Disposition control</strong><small>Due date, hold state, approval and exact inventory are enforced server-side.</small></div></header>
-            <ul className="qms-audit-archive__gates"><li data-ready={Boolean(manifest)}><span>Archive manifest</span><strong>{manifest ? "Ready" : "Missing"}</strong></li><li data-ready={governance.retention_due}><span>Retention due</span><strong>{governance.retention_due ? "Due" : "Not due"}</strong></li><li data-ready={governance.active_holds.length === 0}><span>No active hold</span><strong>{governance.active_holds.length ? `${governance.active_holds.length} hold(s)` : "Clear"}</strong></li><li data-ready={governance.disposition?.event_type === "APPROVED"}><span>Disposition review</span><strong>{governance.disposition?.event_type || "Pending"}</strong></li></ul>
+            <ul className="qms-audit-archive__gates"><li data-ready={Boolean(manifest)}><span>Archive manifest</span><strong>{manifest ? "Ready" : "Missing"}</strong></li><li data-ready={governance.retention_due}><span>Retention due</span><strong>{governance.retention_due ? "Due" : "Not due"}</strong></li><li data-ready={governance.active_holds.length === 0}><span>No active hold</span><strong>{governance.active_holds.length ? `${governance.active_holds.length} hold(s)` : "Clear"}</strong></li><li data-ready={!policy?.review_before_disposition || governance.disposition_review_valid === true}><span>Disposition review</span><strong>{!policy?.review_before_disposition ? "Not required by policy" : governance.disposition_review_valid ? "Approved for this package" : governance.disposition?.event_type === "EXECUTED" ? "Executed" : "Review required"}</strong></li></ul>
             {governance.disposition ? <p className="qms-audit-archive__disposition-state"><strong>{governance.disposition.event_type}</strong> · {governance.disposition.reason}</p> : null}
-            {canManage && manifest && policy && policy.disposition_mode !== "NO_DISPOSITION" ? <div className="qms-audit-archive__disposition"><textarea rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Disposition review rationale" aria-label="Disposition review rationale" /><div><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending} onClick={() => reviewMutation.mutate(true)}><CheckCircle2 size={14} /> Approve review</button><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending} onClick={() => reviewMutation.mutate(false)}><AlertTriangle size={14} /> Reject</button></div><textarea rows={2} value={disposeReason} onChange={(event) => setDisposeReason(event.target.value)} placeholder="Execution rationale" aria-label="Disposition execution rationale" /><label><span>Type <code>{expectedConfirmation}</code> to execute</span><input value={disposeConfirmation} onChange={(event) => setDisposeConfirmation(event.target.value)} /></label><button className="is-danger" type="button" disabled={!canDispose || disposeMutation.isPending} onClick={() => disposeMutation.mutate()}><Trash2 size={14} /> {disposeMutation.isPending ? "Executing…" : "Execute disposition"}</button></div> : <p className="qms-audit-archive__empty">Current policy does not permit disposition, or no package exists.</p>}
+            {canManage && manifest && policy && policy.disposition_mode !== "NO_DISPOSITION" ? <div className="qms-audit-archive__disposition"><textarea rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Disposition review rationale" aria-label="Disposition review rationale" /><div><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(true)}><CheckCircle2 size={14} /> Approve review</button><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(false)}><AlertTriangle size={14} /> Reject</button></div><textarea rows={2} value={disposeReason} onChange={(event) => setDisposeReason(event.target.value)} placeholder="Execution rationale" aria-label="Disposition execution rationale" /><label><span>Type <code>{expectedConfirmation}</code> to execute</span><input value={disposeConfirmation} onChange={(event) => setDisposeConfirmation(event.target.value)} /></label><button className="is-danger" type="button" disabled={!canDispose || disposeMutation.isPending} onClick={() => disposeMutation.mutate()}><Trash2 size={14} /> {disposeMutation.isPending ? "Executing…" : "Execute disposition"}</button></div> : <p className="qms-audit-archive__empty">Current policy does not permit disposition, or no package exists.</p>}
           </article>
         </aside>
       </div>

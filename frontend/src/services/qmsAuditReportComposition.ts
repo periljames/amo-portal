@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { getToken } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -39,7 +40,7 @@ export function getAuditReportComposition(amoCode: string, auditId: string, sign
     timeoutMs: 20_000,
     cacheTtlMs: 0,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "composition"));
 }
 
 export function generateAuditClosingReport(amoCode: string, auditId: string) {

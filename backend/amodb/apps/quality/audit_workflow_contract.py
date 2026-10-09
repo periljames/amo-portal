@@ -20,6 +20,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_active_user
 
 from . import models
+from .audit_archive_governance_models import QualityAuditArchiveManifest
 from .router import (
     _current_amo_id,
     _get_audit_for_amo,
@@ -285,6 +286,10 @@ def _workflow_facts(db: Session, audit: models.QMSAudit) -> tuple[WorkflowFacts,
         .count()
     )
     checklist_source_present = bool(audit.checklist_file_ref)
+    archive_count += db.query(QualityAuditArchiveManifest).filter(
+        QualityAuditArchiveManifest.amo_id == audit.amo_id,
+        QualityAuditArchiveManifest.audit_id == audit.id,
+    ).count()
     evidence_total = (
         int(checklist_source_present)
         + int(report_uploaded)

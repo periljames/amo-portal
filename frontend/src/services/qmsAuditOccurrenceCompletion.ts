@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
 
@@ -216,7 +217,7 @@ export function updateGovernedAuditDocumentRequest(
 }
 
 export function listAuditMeetings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ timezone_name?: string; items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  return apiRequest<{ timezone_name?: string; items: AuditMeeting[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/meetings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "meetings"));
 }
 
 export function createAuditMeeting(
@@ -248,7 +249,7 @@ export function updateAuditMeeting(
 }
 
 export function getAuditClosingNarrative(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<AuditClosingNarrative>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-narrative`), { timeoutMs: 15_000, cacheTtlMs: 1_500, signal });
+  return apiRequest<AuditClosingNarrative>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-narrative`), { timeoutMs: 15_000, cacheTtlMs: 1_500, signal }).then((data) => requireAuditContract(data, "narrative"));
 }
 
 export function updateAuditClosingNarrative(

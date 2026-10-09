@@ -1,4 +1,4 @@
-# Audit preparation and auditee CAP workflow repair
+# Audit preparation, fieldwork and auditee CAP workflow repair
 
 The blank preparation page was caused by generic Quality dispatch routes
 intercepting focused preparation APIs and returning a successful response with
@@ -63,3 +63,51 @@ removed; useful investigation reports were moved into `history/`.
 This repair does not issue a real audit revision, approve a CAP, create audit
 evidence or complete an audit on behalf of the responsible people. Those are
 governed actions performed through the repaired workflow with the actual records.
+
+## Fieldwork and later-stage safeguards — 9 October 2026
+
+The fieldwork failure was traced to a missing canonical occurrence-findings
+endpoint. Generic dispatch returned a register envelope instead of the complete
+findings array, causing the page's iteration error. The focused endpoint now
+enforces tenant and audit access, returns every finding for the occurrence, and
+precedes generic dispatch. Unknown nested audit actions fail explicitly rather
+than reading or writing an unrelated generic table.
+
+Fieldwork access follows issued preparation and current readiness. Planned dates
+are shown as scheduling information and do not impose an unconfigured time lock.
+Completion waits for saved assessments, answers, findings, external draft review,
+and all pending device changes and evidence uploads. Selected evidence files
+remain attached to their question until uploaded or explicitly cleared; reloads
+warn about unsaved work. Conflict responses refresh server state while retaining
+the local checklist drafts.
+
+Audit collections and nested assessment arrays are validated before rendering,
+including cached offline data. Optional panels have independent recovery controls.
+Errors distinguish unavailable records from verified empty collections and avoid
+showing JavaScript internals or duplicate full-page error overlays.
+
+Closing snapshots include every assigned checklist item, including untouched
+items with no execution-governance row. Report generation rejects unanswered
+items and an empty checklist. Closing and Follow-up share a complete paginated
+CAR read rather than silently stopping at the first page. Follow-up completion
+visibly requires closed execution.
+
+Archive readiness is recomputed from execution, follow-up obligations and the
+retention policy. Canonical archive manifests now count toward lifecycle
+completion. Legal-hold release requires the actual release reason and authority.
+Hold changes, archive generation, disposition and closure decisions serialize
+against the audit row. Disposition approval must match the exact inventory,
+package checksum and current disposition mode, and an executed package cannot be
+approved or disposed again.
+
+The supplied audit's Fieldwork, Closing, Follow-up and Archive pages were inspected
+using its assigned lead account without submitting business mutations. All 236
+checklist items remain preserved and await the auditor's answers. The final
+read-only page checks found no JavaScript or failed HTTP responses. Evidence draft
+protection and explicit clearing were checked locally without uploading a file.
+The production frontend build, TypeScript, modal and route-chunk checks passed.
+The focused regression checks passed: 17 frontend checks and 17 backend checks,
+including findings route ordering, malformed contracts, complete CAR pagination,
+archive integrity and reports retaining untouched checklist items. This is not a
+claim that a real audit, CAP approval, passkey ceremony or disposition was executed
+end to end; those governed decisions remain with their responsible users.

@@ -7,7 +7,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
-import { apiRequest, qmsPath } from "../../../services/apiClient";
+import { listAuditCorrectiveActions, type AuditCar } from "../../../services/qmsAuditCars";
 import {
   getAuditClosureState,
   recordAuditFollowUpComplete,
@@ -21,35 +21,6 @@ import { canGovernAudit, canManageCars } from "./qmsAuditActionGates";
 
 type Props = { amoCode: string; auditKey: string };
 
-type AuditCar = {
-  id: string;
-  car_number: string;
-  title: string;
-  summary: string;
-  status: string;
-  priority: string;
-  due_date: string | null;
-  target_closure_date: string | null;
-  closed_at: string | null;
-  escalated_at: string | null;
-  assigned_to_user_id: string | null;
-  finding_id: string | null;
-  audit_id?: string | null;
-  finding_ref?: string | null;
-  days_out?: number | null;
-  days_remaining_past?: number | null;
-};
-
-type AuditCarRegister = { items: AuditCar[]; total: number; limit: number; offset: number };
-
-function listAuditCars(amoCode: string, auditId: string, signal?: AbortSignal) {
-  const params = new URLSearchParams({ audit_id: auditId, limit: "200", offset: "0" });
-  return apiRequest<AuditCarRegister>(qmsPath(amoCode, `/cars/register?${params.toString()}`), {
-    timeoutMs: 15_000,
-    cacheTtlMs: 2_000,
-    signal,
-  });
-}
 
 function carIsClosed(car: AuditCar): boolean {
   return Boolean(car.closed_at) || ["CLOSED", "VERIFIED", "CANCELLED"].includes(car.status.toUpperCase());
@@ -82,7 +53,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const auditId = auditQuery.data?.id || "";
   const carsQuery = useQuery({
     queryKey: ["qms-audit-cars", amoCode, auditId],
-    queryFn: ({ signal }) => listAuditCars(amoCode, auditId, signal),
+    queryFn: ({ signal }) => listAuditCorrectiveActions(amoCode, auditId, signal),
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
@@ -174,7 +145,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
   ], []);
 
-  if (auditQuery.isLoading || carsQuery.isLoading || closureQuery.isLoading) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit follow-up…</section>;
+  if (auditQuery.isPending || (Boolean(auditId) && (carsQuery.isPending || closureQuery.isPending))) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit follow-up…</section>;
   if (loadError || !auditQuery.data || !closure) {
     return (
       <AuditStageLoadError
@@ -226,7 +197,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
           {selectedCar ? <article className="qms-occurrence-stage__card">
             <header><ShieldAlert size={18} /><div><h3>{selectedCar.car_number} · control state</h3><small>{selectedCar.summary || selectedCar.title}</small></div></header>
-            {selectedControlQuery.isLoading ? <p>Loading selected CAR control loop…</p> : selectedControlQuery.isError ? <div role="alert">{selectedControlQuery.error instanceof Error ? selectedControlQuery.error.message : "CAR control loop unavailable."}</div> : selectedControl ? <>
+            {selectedControlQuery.isLoading ? <p>Loading selected CAR control loop…</p> : selectedControlQuery.isError ? <div role="alert">{selectedControlQuery.error instanceof Error ? selectedControlQuery.error.message : "CAR control loop unavailable."} <button type="button" onClick={() => void selectedControlQuery.refetch()}>Retry CAR control state</button></div> : selectedControl ? <>
               <div className="qms-occurrence-stage__metrics is-compact"><div><strong>{selectedControl.health.state}</strong><span>Health</span></div><div><strong>{selectedControl.health.risk_score}</strong><span>Risk score</span></div><div><strong>{selectedControl.milestones.filter((row) => COMPLETE_MILESTONE_STATUSES.has(row.status)).length}/{selectedControl.milestones.length}</strong><span>Milestones complete</span></div><div><strong>{selectedControl.deadline_changes.filter((row) => row.status === "PENDING").length}</strong><span>Extension decisions</span></div></div>
               <ol className="qms-followup-milestones" aria-label="Corrective action milestones">{[...selectedControl.milestones].sort((left, right) => left.phase_order - right.phase_order).map((row) => <li key={row.id} data-status={row.status}><span>{row.phase_order}</span><div><strong>{row.title}</strong><small>{row.status.replaceAll("_", " ")} · due {row.current_due_date || "not set"}{row.evidence_ref ? " · evidence linked" : ""}</small></div></li>)}</ol>
               <p><strong>Next required action:</strong> {selectedControl.health.next_action}</p>
@@ -240,6 +211,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <article className="qms-occurrence-stage__card">
             <header><CheckCircle2 size={18} /><div><h3>Follow-up closure gate</h3><small>Computed by the backend from this audit's unresolved assurance obligations.</small></div></header>
             <dl><div><dt>Execution</dt><dd>{closure.execution_status}</dd></div><div><dt>Follow-up</dt><dd>{closure.follow_up_status}</dd></div></dl>
+            {closure.execution_status !== "CLOSED" ? <p role="status">Issue the report and close audit execution in <Link to={auditSessionPath(amoCode, auditKey, "closing")}>Closing</Link> before completing follow-up.</p> : null}
             {closure.follow_up_readiness.blockers.length ? <ul>{closure.follow_up_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${blocker.id || index}`}><strong>{blocker.type}{blocker.ref ? ` · ${blocker.ref}` : ""}</strong><span>{blocker.reason}</span></li>)}</ul> : <p className="is-ready"><CheckCircle2 size={14} /> No unresolved follow-up blocker remains.</p>}
             {canGovern ? <><label><span>Lifecycle decision reason</span><textarea rows={4} value={completionReason} onChange={(event) => setCompletionReason(event.target.value)} /></label><div className="qms-occurrence-stage__actions">{closure.execution_status === "CLOSED" && closure.follow_up_status !== "COMPLETE" ? <button type="button" className="is-primary" disabled={!closure.follow_up_readiness.ready || completionReason.trim().length < 8 || completeMutation.isPending} onClick={() => completeMutation.mutate()}><CheckCircle2 size={15} /> Complete follow-up</button> : null}{closure.follow_up_status === "COMPLETE" ? <button type="button" disabled={completionReason.trim().length < 8 || reopenMutation.isPending} onClick={() => reopenMutation.mutate()}><RotateCcw size={15} /> Reopen follow-up</button> : null}</div></> : null}
           </article>

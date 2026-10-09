@@ -38,7 +38,14 @@ const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey })
   );
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["qms", "external-finding-drafts", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-cars", amoCode, auditId] }),
+    ]);
   };
   const returnMutation = useMutation({
     mutationFn: ({ draftId, reviewNote }: { draftId: string; reviewNote: string }) => returnExternalFindingDraft(
@@ -59,17 +66,17 @@ const ExternalFindingDraftReviewPanel: React.FC<Props> = ({ amoCode, auditKey })
     onSuccess: refresh,
   });
 
-  if (!auditId || draftsQuery.isLoading || !actionable.length) return null;
+  if (!auditId || draftsQuery.isLoading || (!actionable.length && !draftsQuery.isError)) return null;
   const mutationError = returnMutation.error || promoteMutation.error;
 
   return (
     <aside className={`qms-external-draft-review${open ? " is-open" : ""}`} aria-label="External finding drafts pending Quality review">
       <button type="button" className="qms-external-draft-review__toggle" onClick={() => setOpen((value) => !value)}>
-        <FileWarning size={16} /> External drafts · {actionable.length}
+        <FileWarning size={16} /> {draftsQuery.isError ? "External draft review unavailable" : `External drafts · ${actionable.length}`}
       </button>
       {open ? <div className="qms-external-draft-review__body">
         <header><div><strong>External finding drafts</strong><small>{canManage ? "Submitted proposals remain drafts until Quality explicitly promotes them." : "Quality management review is required before fieldwork can be completed."}</small></div><button type="button" onClick={() => setOpen(false)} aria-label="Close external draft review"><X size={16} /></button></header>
-        {draftsQuery.error ? <div role="alert"><AlertTriangle size={14} /> {draftsQuery.error instanceof Error ? draftsQuery.error.message : "Draft review unavailable."}</div> : null}
+        {draftsQuery.error ? <div role="alert"><AlertTriangle size={14} /> Draft review could not be loaded. Completion remains paused until the saved draft status can be verified. <button type="button" onClick={() => void draftsQuery.refetch()}>Retry draft review</button></div> : null}
         {mutationError ? <div role="alert"><AlertTriangle size={14} /> {mutationError instanceof Error ? mutationError.message : "Draft review action failed."}</div> : null}
         <div className="qms-external-draft-review__list">
           {actionable.map((draft) => (
