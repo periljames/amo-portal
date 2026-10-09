@@ -48,7 +48,8 @@ from .tenant_security import TenantContext, assert_quality_permission_any, requi
 
 
 router = APIRouter(tags=["Quality audit evidence"])
-public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Released Audit Evidence"])
+# Mounted below quality_public_router (prefix="/quality"); keep this child prefix relative.
+public_router = APIRouter(prefix="/audit-access", tags=["Quality / Released Audit Evidence"])
 
 
 def _reference_list(value: str | None, *, field: str) -> list[str]:
