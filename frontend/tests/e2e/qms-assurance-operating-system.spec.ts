@@ -317,7 +317,25 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   expect(panelBox).not.toBeNull();
   expect(panelBox!.width).toBeGreaterThanOrEqual(620);
   const layoutViewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
-  expect(Math.abs((panelBox!.x + panelBox!.width) - (layoutViewportWidth - 24))).toBeLessThanOrEqual(2);
+  const geometry = await dialog.evaluate((overlay) => {
+    const drawer = overlay.querySelector(".qms-authz-modal__panel");
+    const overlayRect = overlay.getBoundingClientRect();
+    const drawerRect = drawer?.getBoundingClientRect();
+    const overlayStyle = window.getComputedStyle(overlay);
+    return {
+      windowWidth: window.innerWidth,
+      clientWidth: document.documentElement.clientWidth,
+      rootRight: document.documentElement.getBoundingClientRect().right,
+      overlayRight: overlayRect.right,
+      drawerRight: drawerRect?.right ?? null,
+      overlayInsetRight: overlayStyle.right,
+      paddingRight: overlayStyle.paddingRight,
+      viewportGutterToken: overlayStyle.getPropertyValue("--qms-authz-layout-viewport-gutter").trim(),
+      rootScrollbarGutter: window.getComputedStyle(document.documentElement).scrollbarGutter,
+    };
+  });
+  const rightEdgeDifference = Math.abs((panelBox!.x + panelBox!.width) - (layoutViewportWidth - 24));
+  expect(rightEdgeDifference, `People drawer geometry: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(2);
   const personSelect = dialog.getByLabel("Person");
   const controlHeight = await personSelect.evaluate((element) => Number.parseFloat(window.getComputedStyle(element).height));
   expect(controlHeight).toBeGreaterThanOrEqual(42);
