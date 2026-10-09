@@ -586,13 +586,14 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   // Empty checklist must not read as 100% complete.
   const percent = items.length ? Math.round((completed / items.length) * 100) : null;
   const findings = findingsQuery.data || [];
+  const pendingEvidenceCount = evidenceOutboxQuery.data?.length ?? 0;
   const completionBlockers = useMemo(() => {
     const blockers: string[] = [];
     if (connectivity !== "ONLINE") blockers.push("Reconnect before completing fieldwork");
     if (evidenceCapture.busy) blockers.push("Wait for the current evidence upload to finish");
     else if (evidenceCapture.hasDraft) blockers.push("Attach or clear the selected evidence file before completing fieldwork");
     if (evidenceOutboxQuery.isPending || evidenceOutboxQuery.isError) blockers.push("Pending evidence uploads could not yet be verified");
-    else if (evidenceOutboxQuery.data?.length) blockers.push(`${evidenceOutboxQuery.data.length} evidence file(s) still need synchronization or conflict review`);
+    else if (pendingEvidenceCount) blockers.push(`${pendingEvidenceCount} evidence file(s) still need synchronization or conflict review`);
     if (!writeWindowReady) blockers.push(sessionQuery.data?.fieldwork_access?.blocker || "Preparation readiness could not be verified");
     if (updateMutation.isPending || findingMutation.isPending) blockers.push("Wait for the current checklist or finding save to finish");
     if (findingsQuery.isPending || findingsQuery.isError) blockers.push("Finding records could not yet be verified");
@@ -629,7 +630,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (outbox.conflicts) blockers.push(`${outbox.conflicts} sync conflict${outbox.conflicts === 1 ? " requires" : "s require"} review`);
     if (outbox.failed) blockers.push(`${outbox.failed} failed sync change${outbox.failed === 1 ? " requires" : "s require"} review`);
     return blockers;
-  }, [connectivity, evidenceCapture, evidenceOutboxQuery.isPending, evidenceOutboxQuery.isError, evidenceOutboxQuery.data?.length, counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, externalDraftsQuery.isPending, findingsQuery.isPending, findingsQuery.isError, findingMutation.isPending, updateMutation.isPending, outboxQuery.isPending, outboxQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued, unsavedDraftCount, writeWindowReady, sessionQuery.data?.fieldwork_access?.blocker]);
+  }, [connectivity, evidenceCapture, evidenceOutboxQuery.isPending, evidenceOutboxQuery.isError, pendingEvidenceCount, counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, externalDraftsQuery.isPending, findingsQuery.isPending, findingsQuery.isError, findingMutation.isPending, updateMutation.isPending, outboxQuery.isPending, outboxQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued, unsavedDraftCount, writeWindowReady, sessionQuery.data?.fieldwork_access?.blocker]);
   const completeMutation = useMutation({
     mutationFn: () => completeAuditFieldwork(amoCode, auditId),
     onSuccess: async () => {
