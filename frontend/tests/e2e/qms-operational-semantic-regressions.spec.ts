@@ -40,8 +40,14 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
     color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-10T03:00:00Z",
   }));
   await page.route("**/accounts/admin/admin-profile/**", (route) => json(route, { eligible: false, active: false }));
-  await page.route("**/api/maintenance/tenant-a/quality/**", async (route) => qualityHandler(route, new URL(route.request().url())));
-  await page.route("http://127.0.0.1:8080/api/maintenance/tenant-a/quality/**", async (route) => qualityHandler(route, new URL(route.request().url())));
+  const handleQualityRequest = (route: Route) => qualityHandler(route, new URL(route.request().url()));
+  // The UI route uses the login slug (tenant-a), but qmsPath builds API URLs
+  // from amo_code (AMO-A). Intercept both canonical forms; otherwise the shared
+  // **/* shell mock fulfills AMO-A requests with {} and the case list stays empty.
+  await page.route("**/api/maintenance/tenant-a/quality/**", handleQualityRequest);
+  await page.route("**/api/maintenance/AMO-A/quality/**", handleQualityRequest);
+  await page.route("http://127.0.0.1:8080/api/maintenance/tenant-a/quality/**", handleQualityRequest);
+  await page.route("http://127.0.0.1:8080/api/maintenance/AMO-A/quality/**", handleQualityRequest);
 }
 
 function emptyRegister(route: Route) {
