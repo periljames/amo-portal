@@ -7,7 +7,7 @@
 - [x] Guard create/update by tenant identity and roles; optimistic row versions and Quality verification transitions.
 - [x] Add provider profile administration frontend with role/site/contact/certification/governance views.
 - [x] Stage XLSX/XLSM suppliers and contracts with mapped headers, worksheet selection, formulas, duplicates, supplier match and dates; no source Quality approval mutation.
-- [x] Confirm prospective suppliers; Quality Manager-only creation of contract DRAFT records.
+- [x] Confirm inactive prospective suppliers; only an existing Quality approval transition can activate them. Quality Manager-only creation of contract DRAFT records.
 - [x] Add source-file/row provenance, reconciliation CSV and staged supersession/guarded committed rollback.
 - [x] Retain existing supplier use gate; inspect `service.assert_supplier_eligible` for status, holds and scope validity.
 - [x] Inspect relevant real repository routes/models and indexed Draft MOPM Issue 4 excerpts.
