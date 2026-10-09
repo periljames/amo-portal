@@ -50,7 +50,8 @@ from .tenant_security import TenantContext, assert_quality_permission, require_q
 
 
 router = APIRouter(tags=["Quality audit completion ceremony"])
-public_router = APIRouter(prefix="/quality", tags=["Quality / Audit Completion Ceremony"])
+# Mounted below quality_public_router (prefix="/quality"); keep this child prefix relative.
+public_router = APIRouter(tags=["Quality / Audit Completion Ceremony"])
 
 
 def _utcnow() -> datetime:
