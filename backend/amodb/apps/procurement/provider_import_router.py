@@ -134,6 +134,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
              "sheet":source_sheet[:128] or None, "header_row":header_row,
              "actor": str(user.id)})
         seen = set()
+        seen_names = set()
         matched_sheet = False
         for sheet in workbook.worksheets:
             if source_sheet and sheet.title != source_sheet:
@@ -172,6 +173,15 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                     if not name: errors.append("missing_legal_name")
                     if len(code) > 64: errors.append("supplier_code_too_long")
                     if len(name) > 255: errors.append("legal_name_too_long")
+                    if name:
+                        normalized_name = " ".join(name.upper().split())
+                        if normalized_name in seen_names:
+                            errors.append("duplicate_legal_name_in_workbook")
+                        seen_names.add(normalized_name)
+                        existing_name = db.execute(text("""SELECT id FROM procurement_suppliers
+                            WHERE amo_id=:amo AND lower(trim(legal_name))=lower(trim(:name)) LIMIT 1"""),
+                            {"amo":tenant,"name":name}).scalar()
+                        if existing_name: errors.append("existing_legal_name_reconcile_first")
                     if code:
                         if code in seen: errors.append("duplicate_in_workbook")
                         seen.add(code)
@@ -223,7 +233,9 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                                 errors.append("expiry_precedes_effective_date")
                         except TypeError:
                             pass
-                if "duplicate_in_workbook" in errors or "existing_supplier" in errors or "existing_contract" in errors:
+                if any(item in errors for item in ("duplicate_in_workbook","existing_supplier",
+                       "existing_contract","duplicate_legal_name_in_workbook",
+                       "existing_legal_name_reconcile_first")):
                     counts["duplicates"] += 1
                 state = "ERROR" if errors else "READY"
                 counts["errors" if errors else "ready"] += 1
