@@ -12,7 +12,10 @@ branch_labels = None
 depends_on = None
 
 TABLES = ("external_provider_roles", "external_provider_sites", "external_provider_contacts",
-          "external_provider_capabilities", "external_provider_source_links")
+          "external_provider_capabilities", "external_provider_source_links",
+          "external_provider_certificates", "external_provider_relationships",
+          "external_provider_account_links", "external_provider_scope_links",
+          "external_provider_change_events")
 
 def _common():
     return [
@@ -82,7 +85,8 @@ def upgrade():
             sa.Column("certificate_number", sa.String(128)),
             sa.Column("valid_until", sa.Date()),
             sa.Column("evidence_id", sa.String(36)),
-            sa.ForeignKeyConstraint(["site_id"], ["external_provider_sites.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "site_id"],
+                                    ["external_provider_sites.amo_id", "external_provider_sites.supplier_id", "external_provider_sites.id"]),
             sa.ForeignKeyConstraint(["amo_id", "supplier_id", "evidence_id"],
                                     ["quality_external_provider_evidence.amo_id",
                                      "quality_external_provider_evidence.supplier_id",
@@ -95,6 +99,102 @@ def upgrade():
             sa.Column("imported_at", sa.DateTime(timezone=True)),
             extra=(sa.UniqueConstraint("amo_id", "source_system", "source_identifier",
                                        name="uq_external_provider_source_identity"),))
+
+    _create("external_provider_certificates",
+            sa.Column("certificate_type", sa.String(80), nullable=False),
+            sa.Column("certificate_number", sa.String(160), nullable=False),
+            sa.Column("issuing_authority", sa.String(160)),
+            sa.Column("jurisdiction", sa.String(80)),
+            sa.Column("approval_rating", sa.String(255)),
+            sa.Column("limitations", sa.Text()),
+            sa.Column("valid_from", sa.Date()),
+            sa.Column("valid_until", sa.Date()),
+            sa.Column("verification_state", sa.String(20), nullable=False, server_default="UNVERIFIED"),
+            sa.Column("verified_by_user_id", sa.String(36)),
+            sa.Column("verified_at", sa.DateTime(timezone=True)),
+            sa.Column("evidence_id", sa.String(36)),
+            sa.CheckConstraint("verification_state IN ('UNVERIFIED','VERIFIED','REJECTED','SUPERSEDED')",
+                               name="ck_ext_provider_certificate_verification"),
+            sa.CheckConstraint("valid_until IS NULL OR valid_from IS NULL OR valid_until >= valid_from",
+                               name="ck_ext_provider_certificate_validity"),
+            sa.ForeignKeyConstraint(["verified_by_user_id"], ["users.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "evidence_id"],
+                                    ["quality_external_provider_evidence.amo_id",
+                                     "quality_external_provider_evidence.supplier_id",
+                                     "quality_external_provider_evidence.id"]),
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "certificate_type",
+                                       "certificate_number", name="uq_ext_provider_certificate"),))
+    _create("external_provider_relationships",
+            sa.Column("parent_supplier_id", sa.Integer(), nullable=False),
+            sa.Column("contract_id", sa.String(36)),
+            sa.Column("relationship_kind", sa.String(32), nullable=False),
+            sa.Column("function_scope", sa.Text(), nullable=False),
+            sa.Column("consent_state", sa.String(24), nullable=False, server_default="PENDING"),
+            sa.Column("consent_evidence_id", sa.String(36)),
+            sa.Column("consent_issued_at", sa.DateTime(timezone=True)),
+            sa.Column("consent_expires_on", sa.Date()),
+            sa.CheckConstraint("parent_supplier_id <> supplier_id",
+                               name="ck_ext_provider_distinct_relatives"),
+            sa.CheckConstraint("relationship_kind IN ('PARENT','FURTHER_SUBCONTRACTOR','AFFILIATE')",
+                               name="ck_ext_provider_relation_kind"),
+            sa.CheckConstraint("consent_state IN ('PENDING','VERIFIED','REVOKED')",
+                               name="ck_ext_provider_relation_consent"),
+            sa.ForeignKeyConstraint(["amo_id", "parent_supplier_id"],
+                                    ["procurement_suppliers.amo_id", "procurement_suppliers.id"]),
+            sa.ForeignKeyConstraint(["contract_id"], ["quality_external_provider_contracts.id"]),
+            sa.ForeignKeyConstraint(["amo_id", "parent_supplier_id", "consent_evidence_id"],
+                                    ["quality_external_provider_evidence.amo_id",
+                                     "quality_external_provider_evidence.supplier_id",
+                                     "quality_external_provider_evidence.id"]),
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "parent_supplier_id",
+                                       "relationship_kind", name="uq_ext_provider_relation"),))
+    _create("external_provider_account_links",
+            sa.Column("user_id", sa.String(36), nullable=False),
+            sa.Column("contact_id", sa.String(36)),
+            sa.Column("account_state", sa.String(24), nullable=False, server_default="PENDING"),
+            sa.Column("requested_scopes", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column("authorized_by_user_id", sa.String(36)),
+            sa.Column("authorized_at", sa.DateTime(timezone=True)),
+            sa.CheckConstraint("account_state IN ('PENDING','VERIFIED','REVOKED')",
+                               name="ck_ext_provider_account_state"),
+            sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="RESTRICT"),
+            sa.ForeignKeyConstraint(["authorized_by_user_id"], ["users.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["contact_id"], ["external_provider_contacts.id"], ondelete="SET NULL"),
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "user_id",
+                                       name="uq_ext_provider_account_link"),))
+    _create("external_provider_scope_links",
+            sa.Column("approval_scope_id", sa.Integer(), nullable=False),
+            sa.Column("site_id", sa.String(36)),
+            sa.Column("contracted_function", sa.String(128)),
+            sa.Column("service_category", sa.String(128)),
+            sa.Column("product_family", sa.String(128)),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "approval_scope_id"],
+                                    ["procurement_supplier_approval_scopes.amo_id",
+                                     "procurement_supplier_approval_scopes.supplier_id",
+                                     "procurement_supplier_approval_scopes.id"]),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "site_id"],
+                                    ["external_provider_sites.amo_id", "external_provider_sites.supplier_id",
+                                     "external_provider_sites.id"]),
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "approval_scope_id", "site_id",
+                                       name="uq_ext_provider_scope_link"),))
+    _create("external_provider_change_events",
+            sa.Column("event_type", sa.String(100), nullable=False),
+            sa.Column("actor_user_id", sa.String(36)),
+            sa.Column("source_system", sa.String(80), nullable=False),
+            sa.Column("source_identifier", sa.String(255)),
+            sa.Column("before_json", sa.JSON()),
+            sa.Column("after_json", sa.JSON(), nullable=False),
+            sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"))
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("""CREATE FUNCTION external_provider_prevent_event_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $
+            BEGIN RAISE EXCEPTION 'External provider event provenance is immutable'; END $"""))
+        op.execute(sa.text("""CREATE TRIGGER trg_external_provider_events_immutable
+            BEFORE UPDATE OR DELETE ON external_provider_change_events
+            FOR EACH ROW EXECUTE FUNCTION external_provider_prevent_event_mutation()"""))
+    op.create_unique_constraint("uq_ext_supplier_scope_tenant_identity",
+                                "procurement_supplier_approval_scopes",
+                                ["amo_id", "supplier_id", "id"])
 
     op.create_table("external_provider_import_batches",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -142,11 +242,16 @@ def downgrade():
         if op.get_bind().dialect.name == "postgresql":
             op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
         op.drop_table(name)
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("DROP TRIGGER IF EXISTS trg_external_provider_events_immutable ON external_provider_change_events"))
+        op.execute(sa.text("DROP FUNCTION IF EXISTS external_provider_prevent_event_mutation()"))
     for name in reversed(TABLES):
         if op.get_bind().dialect.name == "postgresql":
             op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
         op.drop_index(f"ix_{name}_supplier", table_name=name)
         op.drop_table(name)
+    op.drop_constraint("uq_ext_supplier_scope_tenant_identity",
+                       "procurement_supplier_approval_scopes", type_="unique")
     op.drop_constraint("uq_ext_qms_evidence_tenant_identity",
                        "quality_external_provider_evidence", type_="unique")
     op.drop_constraint("uq_procurement_supplier_tenant_identity", "procurement_suppliers", type_="unique")
