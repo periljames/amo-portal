@@ -233,7 +233,7 @@ def upgrade():
         sa.Column("raw_json", sa.JSON(), nullable=False),
         sa.Column("normalized_json", sa.JSON(), nullable=False),
         sa.Column("diagnostics_json", sa.JSON(), nullable=False),
-        sa.Column("status", sa.String(24), nullable=False, server_default="STAGED"),
+        sa.Column("status", sa.String(24), nullable=False, server_default="READY"),
         sa.Column("supplier_id", sa.Integer()),
         sa.Column("contract_id", sa.String(36)),
         sa.CheckConstraint("status IN ('READY','ERROR','CREATED','ROLLED_BACK')", name="ck_ext_import_row_state"),
