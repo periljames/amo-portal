@@ -322,7 +322,11 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
                 created_by_user_id=str(user.id),
             )
             db.add(supplier)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError as exc:
+                db.rollback()
+                raise HTTPException(409,"Concurrent supplier insertion; re-stage the file.") from exc
             supplier_id = supplier.id
             record_id = str(supplier_id)
             action = "import_prospective"
@@ -353,7 +357,11 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
     db.execute(text("""UPDATE external_provider_import_batches SET
         status='COMMITTED', committed_at=now() WHERE id=:batch AND amo_id=:amo"""),
         {"batch":batch_id,"amo":tenant})
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409,"Import reconciliation conflict; refresh before retrying.") from exc
     return {"batch_id":batch_id,"created_record_ids":created,
             "created_supplier_ids":created if batch["import_kind"] == "SUPPLIERS" else [],
             "import_kind":batch["import_kind"],"operational_eligibility_granted":False}
