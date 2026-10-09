@@ -46,6 +46,8 @@ _CONTRACT_COLUMNS = {
     "effective_on": ("effective date", "start date"),
     "expires_on": ("expiry date", "expiration date", "end date"),
     "source_status": ("status", "approval status", "contract status"),
+    "controlled_document_id": ("dms document id", "controlled document id"),
+    "controlled_document_revision": ("dms revision id", "controlled document revision"),
 }
 
 _MAX_BYTES = 10 * 1024 * 1024
@@ -171,6 +173,8 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                     if len(contract_no) > 128: errors.append("contract_number_too_long")
                     if not fields.get("title"): errors.append("missing_contract_title")
                     if not fields.get("scope_text"): errors.append("missing_scope_of_work")
+                    if bool(fields.get("controlled_document_id")) != bool(fields.get("controlled_document_revision")):
+                        errors.append("document_and_exact_revision_required_together")
                     if key:
                         if key in seen: errors.append("duplicate_in_workbook")
                         seen.add(key)
@@ -288,13 +292,15 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
             contract_id = str(uuid4())
             db.execute(text("""INSERT INTO quality_external_provider_contracts
                 (id,amo_id,supplier_id,contract_number,title,status,scope_text,
-                 effective_on,expires_on,created_by_user_id,updated_by_user_id)
+                 effective_on,expires_on,controlled_document_id,controlled_document_revision,
+                 created_by_user_id,updated_by_user_id)
                  VALUES (:id,:amo,:supplier,:number,:title,'DRAFT',:scope,
-                         :effective,:expires,:actor,:actor)"""),
+                         :effective,:expires,:document,:revision,:actor,:actor)"""),
                  {"id":contract_id,"amo":tenant,"supplier":supplier_id,
                   "number":fields["contract_number"],"title":fields["title"],
                   "scope":fields["scope_text"],"effective":fields.get("effective_on"),
-                  "expires":fields.get("expires_on"),"actor":str(user.id)})
+                  "expires":fields.get("expires_on"),"document":fields.get("controlled_document_id"),
+                  "revision":fields.get("controlled_document_revision"),"actor":str(user.id)})
             db.execute(text("""UPDATE external_provider_import_rows
                 SET status='CREATED',contract_id=:contract
                 WHERE id=:row AND amo_id=:amo"""),
