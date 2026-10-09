@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { mkdirSync } from "node:fs";
+import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
 
 const AUDIT_ID = "22222222-2222-4222-8222-222222222222";
 const ITEM_ID = "33333333-3333-4333-8333-333333333333";
@@ -56,11 +57,31 @@ async function prepare(page: Page, state: State): Promise<void> {
     auditor_notes: state.notes, response_value: state.response, assessment: assessment(), evidence_references: evidenceReferences, governance_id: state.response === "COMPLIANT" ? "gov-1" : null,
     entity_version: state.version, updated_by_user_id: "quality-user-a", updated_at: "2026-08-20T09:00:00Z", events: [],
   });
+  const supplementalQuestions = Array.from({ length: 235 }, (_, index) => ({
+    id: `33333333-3333-4333-8333-${String(index + 2).padStart(12, "0")}`,
+    ref: `TP-${String(index + 2).padStart(3, "0")}`,
+    section: index % 3 === 0 ? "Personnel" : index % 3 === 1 ? "Training Records" : "Authorization & Supervision",
+    prompt: [
+      "Are certifying staff authorizations current, correctly scoped and properly controlled?",
+      "Are competence and continuation training records available for verification?",
+      "Are delegated supervision duties and limitations documented and understood?",
+    ][index % 3],
+  }));
+  const checklistRows = () => [
+    governanceRow(),
+    ...supplementalQuestions.map((question) => ({
+      ...governanceRow(), checklist_item_id: question.id, checklist_ref: question.ref,
+      section: question.section, prompt: question.prompt, canonical_response_status: "NOT_VERIFIED",
+      response_value: "NOT_VERIFIED", entity_version: 1, governance_id: null,
+      auditor_notes: null, assessment: { ...assessment(), human_decision: "NOT_VERIFIED" },
+    })),
+  ];
   const binding = {
     id: "binding-1", audit_id: AUDIT_ID, template_id: "template-1", template_revision_id: "template-rev-1", template_code: "TECH-PERSONNEL",
-    revision_no: 7, content_sha256: "a".repeat(64), source_references: ["KCAR-TP-01", "MPM-3.4"], instantiated_item_ids: [ITEM_ID],
+    revision_no: 7, content_sha256: "a".repeat(64), source_references: ["KCAR-TP-01", "MPM-3.4"], instantiated_item_ids: [ITEM_ID, ...supplementalQuestions.map((item) => item.id)],
     application_reason: "Issued controlled preparation", applied_by_user_id: "quality-user-a", applied_at: "2026-08-19T10:00:00Z",
-    item_snapshot: [{ section: "Personnel", checklist_ref: "TP-01", requirement_ref: "KCAR-TP-01", regulatory_source_ref: "KCAR-TP-01", manual_source_ref: "MPM-3.4", prompt: "Verify authorization and competence records for sampled certifying staff.", expected_evidence: "Current authorization record, competence evidence and applicable training records.", response_type: "COMPLIANCE", applicability: "MANDATORY", mandatory: true, finding_trigger: "ADVERSE_RESPONSE", sort_order: 10 }],
+    item_snapshot: [{ section: "Personnel", checklist_ref: "TP-01", requirement_ref: "KCAR-TP-01", regulatory_source_ref: "KCAR-TP-01", manual_source_ref: "MPM-3.4", prompt: "Verify authorization and competence records for sampled certifying staff.", expected_evidence: "Current authorization record, competence evidence and applicable training records.", response_type: "COMPLIANCE", applicability: "MANDATORY", mandatory: true, finding_trigger: "ADVERSE_RESPONSE", sort_order: 10 },
+      ...supplementalQuestions.map((question, index) => ({ section: question.section, checklist_ref: question.ref, requirement_ref: "KCAR-TP-01", regulatory_source_ref: "KCAR-TP-01", manual_source_ref: "MPM-3.4", prompt: question.prompt, expected_evidence: "Controlled staff authorizations, records and sampled objective evidence.", response_type: "COMPLIANCE", applicability: "MANDATORY", mandatory: true, finding_trigger: "ADVERSE_RESPONSE", sort_order: index + 11 }))],
   };
   const session = {
     audit_id: AUDIT_ID, current_stage_id: "live", current_stage_label: "Live", percent_complete: state.response === "COMPLIANT" ? 100 : 0,
@@ -87,7 +108,7 @@ async function prepare(page: Page, state: State): Promise<void> {
     if (path.includes("/accounts/admin/admin-profile/")) return respond(route, { eligible: false, active: false });
     if (path.endsWith(`/quality/audits/resolve/${AUDIT_REF}`) || path.endsWith("/quality/audits/resolve/qar-mo-26-016")) return respond(route, audit);
     if (path.endsWith("/quality/audits") && method === "GET") return respond(route, [audit]);
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-execution-governance`) && method === "GET") return respond(route, { items: [governanceRow()], canonical_response_values: ["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"], legacy_compatibility: { COMPLIANT: "CONFORMING", NONCOMPLIANT: "NON_CONFORMING", NOT_VERIFIED: "PENDING" } });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-execution-governance`) && method === "GET") return respond(route, { items: checklistRows(), canonical_response_values: ["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"], legacy_compatibility: { COMPLIANT: "CONFORMING", NONCOMPLIANT: "NON_CONFORMING", NOT_VERIFIED: "PENDING" } });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [binding] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/session`) && method === "GET") return respond(route, session);
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/presence`) && method === "GET") return respond(route, { items: [] });
@@ -119,6 +140,7 @@ async function prepare(page: Page, state: State): Promise<void> {
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("**/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await mockPortalBackgroundRequests(page);
 }
 
 test("executes canonical live checklist mutation with versioning, auditor notes and preserved structured evidence", async ({ page }) => {
@@ -129,7 +151,7 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
   await expect(live).toBeVisible({ timeout: 30_000 });
   await expect(live.getByRole("heading", { name: "Verify authorization and competence records for sampled certifying staff." })).toBeVisible();
-  await expect(live.getByText("NOT VERIFIED · v1")).toBeVisible();
+  await expect(live.getByText("NOT VERIFIED · v1").first()).toBeVisible();
 
   // Evidence for review: actual Chromium screenshots of the committed React Fieldwork component
   // under a deterministic governed audit fixture (not production/tenant data).
@@ -160,5 +182,5 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   expect(typeof state.mutationBody?.device_sequence).toBe("number");
 
   await expect(live.getByText(/Saved to the authoritative audit record/i)).toBeVisible();
-  await expect(live.getByText("COMPLIANT · v2")).toBeVisible();
+  await expect(live.getByText("COMPLIANT · v2").first()).toBeVisible();
 });
