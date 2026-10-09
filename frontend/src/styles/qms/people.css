@@ -706,8 +706,10 @@ body:has(.qms-authz-modal) {
    This one drawer needs its tokenized inset and a visual-viewport width so the
    root scrollbar-gutter:stable cannot shift its right edge by 15px. */
 .qms-authz-modal.portal-modal-top-layer--host {
-  inset: 0 auto 0 0 !important;
-  width: 100vw !important;
+  /* Use the layout viewport, not 100vw: 100vw includes the reserved scrollbar
+     gutter and shifts this drawer's right edge in desktop Chromium. */
+  inset: 0 var(--qms-authz-layout-viewport-gutter, 0px) 0 0 !important;
+  width: auto !important;
   height: 100dvh !important;
   padding: var(--qms-authz-drawer-inset) !important;
   box-sizing: border-box !important;
