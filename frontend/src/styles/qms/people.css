@@ -629,6 +629,11 @@
   font-size: 13.5px;
 }
 
+.qms-authz-modal__panel select,
+.qms-authz-form-grid select {
+  height: var(--control-height-md, 42px);
+}
+
 .qms-authz-select {
   display: block;
   margin-top: 14px;
@@ -687,9 +692,14 @@ body:has(.qms-authz-modal) {
 
 .qms-authz-modal {
   position: fixed;
-  /* Stretch to both viewport edges; auto width avoids the 9px native scrollbar drift
-     produced by width:100% when the document scrollbar is reserved. */
-  inset: 0 var(--qms-authz-layout-viewport-gutter, var(--viewport-scrollbar-gutter, 0px)) 0 0;
+  /*
+   * The root reserves a stable scrollbar gutter, but a top-layer popover's fixed
+   * containing block can still end at the root's content edge. Offset the right
+   * inset by the measured CSS difference between the containing block and 100vw.
+   * The result is 0px when there is no gutter and negative when a gutter is reserved.
+   */
+  --qms-authz-layout-viewport-gutter: calc(100% - 100vw);
+  inset: 0 var(--qms-authz-layout-viewport-gutter) 0 0;
   width: auto;
   box-sizing: border-box;
   z-index: 1350;
@@ -703,12 +713,9 @@ body:has(.qms-authz-modal) {
 }
 
 /* ModalTopLayerGuard owns the shared top layer and normally zeroes host padding.
-   This one drawer needs its tokenized inset and a visual-viewport width so the
-   root scrollbar-gutter:stable cannot shift its right edge by 15px. */
+   Keep the same dynamic gutter correction after top-layer promotion. */
 .qms-authz-modal.portal-modal-top-layer--host {
-  /* Use the layout viewport, not 100vw: 100vw includes the reserved scrollbar
-     gutter and shifts this drawer's right edge in desktop Chromium. */
-  inset: 0 var(--qms-authz-layout-viewport-gutter, var(--viewport-scrollbar-gutter, 0px)) 0 0 !important;
+  inset: 0 var(--qms-authz-layout-viewport-gutter, calc(100% - 100vw)) 0 0 !important;
   width: auto !important;
   height: 100dvh !important;
   padding: var(--qms-authz-drawer-inset) !important;
