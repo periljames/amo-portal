@@ -256,3 +256,87 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
                   "update_"+kind,{"fields":values,"version":row["version"]})
     db.commit()
     return dict(row)
+
+class ProviderGovernanceDecision(BaseModel):
+    action: str
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=8, max_length=2000)
+
+@router.post("/suppliers/{supplier_id}/identity/{kind}/{record_id}/governance")
+def decide_metadata(amo_code: str, supplier_id: int, kind: str, record_id: str,
+                    payload: ProviderGovernanceDecision,
+                    db: Session = Depends(get_db),
+                    current_user: accounts.User = Depends(require_roles(accounts.AccountRole.QUALITY_MANAGER))):
+    columns = {
+        "certificates": ("verification_state", {
+            "VERIFY": "VERIFIED", "REJECT": "REJECTED", "SUPERSEDE": "SUPERSEDED"}),
+        "relationships": ("consent_state", {
+            "VERIFY": "VERIFIED", "REVOKE": "REVOKED"}),
+        "account-links": ("account_state", {
+            "VERIFY": "VERIFIED", "REVOKE": "REVOKED"}),
+    }
+    if kind not in columns:
+        raise HTTPException(404, "Unsupported governance decision.")
+    status_column, allowed = columns[kind]
+    if payload.action not in allowed:
+        raise HTTPException(422, "Unsupported governance action.")
+    tenant = _tenant(db, amo_code, current_user)
+    _require_supplier(db, tenant, supplier_id)
+    table = _TABLES[kind]
+    row = db.execute(text("SELECT * FROM " + table +
+         " WHERE amo_id=:tenant AND supplier_id=:supplier AND id=:id FOR UPDATE"),
+         {"tenant":tenant,"supplier":supplier_id,"id":record_id}).mappings().first()
+    if row is None:
+        raise HTTPException(404, "Provider record not found.")
+    if row["version"] != payload.expected_version:
+        raise HTTPException(409, "Record has changed; refresh and retry.")
+    target = allowed[payload.action]
+    if row[status_column] == target:
+        raise HTTPException(409, "Record already in the requested state.")
+    if payload.action == "VERIFY" and kind == "certificates":
+        if not row["evidence_id"]:
+            raise HTTPException(409, "Link verified documentary evidence before certification.")
+        verified = db.execute(text("""SELECT 1 FROM quality_external_provider_evidence
+            WHERE amo_id=:tenant AND supplier_id=:supplier AND id=:evidence
+            AND status='VERIFIED' AND (valid_until IS NULL OR valid_until >= :today)"""),
+            {"tenant":tenant,"supplier":supplier_id,"evidence":row["evidence_id"],
+             "today":date.today()}).scalar()
+        if not verified or (row["valid_until"] and row["valid_until"] < date.today()):
+            raise HTTPException(409, "Evidence or certificate is expired or unverified.")
+    if payload.action == "VERIFY" and kind == "relationships":
+        if not row["consent_evidence_id"]:
+            raise HTTPException(409, "Written consent evidence is required.")
+        verified = db.execute(text("""SELECT 1 FROM quality_external_provider_evidence
+            WHERE amo_id=:tenant AND supplier_id=:parent AND id=:evidence
+            AND status='VERIFIED' AND (valid_until IS NULL OR valid_until >= :today)"""),
+            {"tenant":tenant,"parent":row["parent_supplier_id"],
+             "evidence":row["consent_evidence_id"],"today":date.today()}).scalar()
+        if not verified or (row["consent_expires_on"] and row["consent_expires_on"] < date.today()):
+            raise HTTPException(409, "Written subcontracting consent is not current and verified.")
+        if row["relationship_kind"] == "FURTHER_SUBCONTRACTOR":
+            current = db.execute(text("""SELECT 1 FROM quality_external_provider_contracts
+                WHERE amo_id=:tenant AND supplier_id=:parent AND id=:contract
+                AND status='ACTIVE'
+                AND (effective_on IS NULL OR effective_on <= :today)
+                AND (expires_on IS NULL OR expires_on >= :today)"""),
+                {"tenant":tenant,"parent":row["parent_supplier_id"],
+                 "contract":row["contract_id"],"today":date.today()}).scalar()
+            if not current:
+                raise HTTPException(409, "Current parent contract required for further subcontracting.")
+    updates = status_column + "=:target, version=version+1, updated_at=NOW()"
+    params = {"tenant":tenant,"supplier":supplier_id,"id":record_id,
+              "target":target,"version":payload.expected_version,"actor":str(current_user.id)}
+    if kind == "certificates":
+        updates += ", verified_by_user_id=:actor, verified_at=NOW()"
+    if kind == "account-links":
+        updates += ", authorized_by_user_id=:actor, authorized_at=NOW()"
+    updated = db.execute(text("UPDATE " + table + " SET " + updates +
+        " WHERE amo_id=:tenant AND supplier_id=:supplier AND id=:id AND version=:version RETURNING *"),
+        params).mappings().first()
+    if updated is None:
+        raise HTTPException(409, "Concurrent governance change.")
+    _audit_change(db,tenant,supplier_id,record_id,kind,str(current_user.id),
+                  "governance_"+payload.action.lower(),
+                  {"from":row[status_column],"to":target,"reason":payload.reason})
+    db.commit()
+    return dict(updated)
