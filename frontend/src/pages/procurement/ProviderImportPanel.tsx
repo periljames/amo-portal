@@ -82,6 +82,22 @@ export default function ProviderImportPanel({amoCode,onImported}:{
     anchor.download=`provider-reconciliation-${detail.batch.id}.csv`;anchor.click();
     URL.revokeObjectURL(url);
   }
+  async function changeBatch(action: "rollback" | "supersede") {
+    if(!detail||reason.trim().length<8){
+      setError("Provide a documented reason of at least 8 characters.");
+      return;
+    }
+    setBusy(true);setError("");setMessage("");
+    try{
+      const form=new FormData();form.append("reason",reason);
+      await apiRequest(base+"/"+encodeURIComponent(detail.batch.id)+"/"+action,{method:"POST",body:form});
+      await getDetail(detail.batch.id);
+      await onImported();
+      setMessage("Reconciliation "+action+" recorded.");
+      setReason("");
+    }catch(e){setError(e instanceof Error?e.message:"Reconciliation action failed.");}
+    finally{setBusy(false);}
+  }
   const errors=detail?.rows.filter(row=>row.status==="ERROR")??[];
   return <section className="proc-panel" aria-label="External provider spreadsheet import">
     <header><div><h2>Import vendor and contracts trackers</h2>
@@ -123,6 +139,10 @@ export default function ProviderImportPanel({amoCode,onImported}:{
           onClick={()=>void confirm()}>Confirm {detail.rows.length} {detail.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"}</button>}
       </div>
       {errors.length>0&&<p role="alert">Resolve {errors.length} row errors in the source workbook and stage the corrected file before confirmation.</p>}
+      {["STAGED","COMMITTED"].includes(detail.batch.status)&&<div>
+        <label>Reason for correction or rollback<textarea value={reason} onChange={e=>setReason(e.target.value)} rows={2}/></label>
+        <button type="button" disabled={busy||reason.trim().length<8} onClick={()=>void changeBatch(detail.batch.status==="COMMITTED"?"rollback":"supersede")}>{detail.batch.status==="COMMITTED"?"Controlled rollback":"Supersede preview"}</button>
+      </div>}
     </>}
   </section>;
 }
