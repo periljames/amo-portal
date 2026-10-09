@@ -49,7 +49,7 @@ describe("QMS and DMS checklist integration contract", () => {
 
   it("uses the immutable checklist-binding endpoint as Prepare authority", () => {
     expect(prepareSource).toContain("const confirmChecklistBinding");
-    expect(prepareSource).toContain("const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);");
+    expect(prepareSource).toContain("const confirmation = await getChecklistBinding(amoCode, auditId, binding.id);");
     expect(prepareSource).toContain("const bindings = fullBindingsQuery.data?.items || [];");
     expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
     expect(prepareSource).not.toContain("const cacheChecklistBinding");
@@ -64,6 +64,9 @@ describe("QMS and DMS checklist integration contract", () => {
     const successIndex = prepareSource.indexOf('setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");');
     expect(confirmIndex).toBeGreaterThan(-1);
     expect(successIndex).toBeGreaterThan(confirmIndex);
+    expect(prepareSource).toContain("fullBindingsQuery.data?.total ?? bindings.length");
+    expect(serviceSource).toContain("/checklist-bindings/${encodeURIComponent(bindingId)}");
+    expect(serviceSource).toContain('query.set("limit", String(pagination.limit ?? 50))');
   });
 
   it("uses the same live confirmation after approved DMS intake", () => {

@@ -8,7 +8,7 @@ route mocks or production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
 import os
@@ -25,6 +25,7 @@ from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.doc_control import knowledge_models as document_knowledge_models  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
     QualityAuditRetentionPolicyRevision,
 )
@@ -153,6 +154,32 @@ def _quality_user(
     )
 
 
+def _issue_preparation(db, *, audit: quality_models.QMSAudit, user_id: str, now: datetime) -> None:
+    captured = _capture_sources(db, amo_id=audit.amo_id, audit=audit)
+    revision = QualityAuditPreparationRevision(
+        amo_id=audit.amo_id,
+        audit_id=audit.id,
+        revision_no=1,
+        status="ISSUED",
+        preparation_scope="Deterministic browser-acceptance preparation snapshot.",
+        audit_snapshot=captured["audit_snapshot"],
+        checklist_snapshot=captured["checklist_snapshot"],
+        document_request_snapshot=captured["document_request_snapshot"],
+        source_references=captured["source_references"],
+        source_fingerprint=captured["source_fingerprint"],
+        change_reason="Seed the issued preparation authority required by real-browser fieldwork acceptance.",
+        issued_by_user_id=user_id,
+        issued_at=now,
+        created_by_user_id=user_id,
+        created_at=now,
+    )
+    db.add(revision)
+    db.flush()
+    _ensure_work_package(
+        db, amo_id=audit.amo_id, user_id=user_id, audit=audit, preparation=revision,
+    )
+
+
 def seed() -> None:
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=8)
@@ -204,6 +231,54 @@ def seed() -> None:
         db.add_all([user_a, user_b])
         db.flush()
 
+        lead_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_LEAD_AUDITOR",
+            title="CI lead auditor authority",
+            privilege_type="LEAD_AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        auditor_rule = quality_people_models.QualityPrivilegeRule(
+            amo_id=amo.id,
+            privilege_code="CI_AUDITOR",
+            title="CI auditor authority",
+            privilege_type="AUDITOR",
+            required_training_course_codes=[],
+            independence_required=False,
+            is_active=True,
+            created_by_user_id=user_a.id,
+        )
+        db.add_all([lead_rule, auditor_rule])
+        db.flush()
+        db.add_all([
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=lead_rule.id,
+                user_id=user_a.id,
+                privilege_code=lead_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+            quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=auditor_rule.id,
+                user_id=user_b.id,
+                privilege_code=auditor_rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today(),
+                created_by_user_id=user_a.id,
+            ),
+        ])
+        db.flush()
+
+        # A direct tenant module subscription is sufficient for module gating in
+        # this disposable acceptance tenant and avoids inventing a commercial SKU.
         # Exercise the production billing gate as well as module entitlement. The
         # real browser stack applies require_module("quality") before canonical
         # Quality routes, so a module row alone is intentionally insufficient.
@@ -369,7 +444,9 @@ def seed() -> None:
             auditee="Browser Acceptance Auditee",
             auditee_email="auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -403,6 +480,8 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=audit, user_id=user_a.id, now=now)
 
         realtime_audit = quality_models.QMSAudit(
             id=REALTIME_AUDIT_ID,
@@ -420,7 +499,9 @@ def seed() -> None:
             criteria="QMS live-audit realtime event propagation contract.",
             auditee="Internal realtime fixture",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today() + timedelta(days=1),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -453,13 +534,15 @@ def seed() -> None:
             evidence_references=[],
             entity_version=1,
         ))
+        db.flush()
+        _issue_preparation(db, audit=realtime_audit, user_id=user_a.id, now=now)
 
         ceremony_audit = quality_models.QMSAudit(
             id=CEREMONY_AUDIT_ID,
             amo_id=amo.id,
             domain=QMSDomain.AMO,
             kind=QMSAuditKind.INTERNAL,
-            status=QMSAuditStatus.CLOSED,
+            status=QMSAuditStatus.IN_PROGRESS,
             audit_ref=CEREMONY_AUDIT_REF,
             reference_family="QAR",
             unit_code="MO",
@@ -471,7 +554,9 @@ def seed() -> None:
             auditee="Closing Ceremony Auditee",
             auditee_email="closing.auditee@example.com",
             planned_start=date.today(),
+            planned_start_time=time(9, 0),
             planned_end=date.today(),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             actual_end=date.today(),
             lead_auditor_user_id=user_a.id,
@@ -506,39 +591,8 @@ def seed() -> None:
             entity_version=2,
             updated_by_user_id=user_a.id,
         ))
-        def issue_preparation(audit_row, checklist_owner):
-            captured = _capture_sources(db, amo_id=amo.id, audit=audit_row)
-            revision = QualityAuditPreparationRevision(
-                amo_id=amo.id,
-                audit_id=audit_row.id,
-                revision_no=1,
-                status="ISSUED",
-                preparation_scope="Real-browser acceptance governed preparation baseline.",
-                audit_snapshot=captured["audit_snapshot"],
-                checklist_snapshot=captured["checklist_snapshot"],
-                document_request_snapshot=captured["document_request_snapshot"],
-                source_references=captured["source_references"],
-                source_fingerprint=captured["source_fingerprint"],
-                change_reason="Issue the deterministic browser-acceptance preparation required before fieldwork.",
-                issued_by_user_id=checklist_owner.id,
-                issued_at=now,
-                created_by_user_id=checklist_owner.id,
-            )
-            db.add(revision)
-            db.flush()
-            _ensure_work_package(
-                db,
-                amo_id=amo.id,
-                user_id=checklist_owner.id,
-                audit=audit_row,
-                preparation=revision,
-            )
-            return revision
-
-        issue_preparation(audit, user_a)
-        issue_preparation(realtime_audit, user_a)
-        issue_preparation(ceremony_audit, user_a)
-
+        db.flush()
+        _issue_preparation(db, audit=ceremony_audit, user_id=user_a.id, now=now)
         db.add(QualityAuditClosingNarrative(
             id=CEREMONY_CLOSING_NARRATIVE_ID,
             amo_id=amo.id,

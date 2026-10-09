@@ -1954,7 +1954,6 @@ def create_atomic_fieldwork_finding(
             item_id=item_id,
             canonical_status=payload.canonical_response_status,
             auditor_notes=payload.auditor_notes,
-            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
         )
         response_value = _validated_response_value(

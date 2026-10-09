@@ -33,6 +33,7 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  getChecklistBinding,
   listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
@@ -356,6 +357,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-readiness", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-applicability-context", amoCode, auditId] }),
@@ -364,25 +366,24 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-current-dms-checklists", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-bindings", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-binding-lineage", amoCode, auditId] }),
     ]);
   };
 
   const confirmChecklistBinding = async (binding: ChecklistBinding): Promise<boolean> => {
     const bindingQueryKey = ["qms", "prepare-checklist-bindings", amoCode, auditId] as const;
     await Promise.all([
-      queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
       queryClient.cancelQueries({ queryKey: bindingQueryKey }),
+      queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
     ]);
+    // Confirm the exact immutable row directly so authority checks do not depend
+    // on list pagination or payload size.
+    const confirmation = await getChecklistBinding(amoCode, auditId, binding.id);
+    if (confirmation.id !== binding.id) return false;
+    await queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" });
 
-    // Checklist binding authority is the immutable binding table used by the
-    // preparation/fieldwork backend. The aggregate context is a secondary projection
-    // and must never erase or veto a binding already confirmed by canonical authority.
-    const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);
-    const confirmed = Boolean(bindingsConfirmation.items?.some((item) => item.id === binding.id));
-    if (!confirmed) return false;
-    queryClient.setQueryData(bindingQueryKey, bindingsConfirmation);
-
+    // Keep the aggregate preparation projection synchronized as a secondary read model.
+    // Its failure or lag cannot erase a binding that the canonical binding table confirms.
     try {
       const contextConfirmation = await getAuditPreparationContext(amoCode, auditId);
       queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], contextConfirmation);
@@ -827,7 +828,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const prepRevision = context.controlled_preparation?.latest_revision;
   const offlinePackStatus = offlinePackQuery.data;
   const bindings = fullBindingsQuery.data?.items || [];
-  const checklistBindings = bindings.length;
+  const checklistBindings = fullBindingsQuery.data?.total ?? bindings.length;
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;

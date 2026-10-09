@@ -130,6 +130,7 @@ jobs:
           amodb/apps/quality/audit_archive_governance_route_order.py
           amodb/apps/quality/audit_checklist_execution_models.py
           amodb/apps/quality/audit_checklist_execution_router.py
+          amodb/apps/quality/audit_checklist_execution_route_order.py
           amodb/apps/quality/compliance_intelligence_service.py
       - name: Test session projection
         run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
@@ -144,7 +145,7 @@ jobs:
       - name: Test compliance intelligence, applicability, conflict and effectiveness controls
         run: pytest -q amodb/apps/quality/tests/test_compliance_intelligence_contract.py amodb/apps/quality/tests/test_audit_workflow_enforcement.py
       - name: Test idempotent fieldwork sync contract
-        run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py
+        run: pytest -q amodb/apps/quality/tests/test_audit_fieldwork_sync_contract.py amodb/apps/quality/tests/test_audit_checklist_execution_route_order.py
       - name: Test realtime reconnect and tenant replay contract
         run: pytest -q amodb/apps/quality/tests/test_audit_realtime_contract.py
       - name: Test closing and archive governance helpers

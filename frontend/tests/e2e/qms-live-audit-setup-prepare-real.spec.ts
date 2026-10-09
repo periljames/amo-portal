@@ -66,7 +66,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
 
     await setup.getByRole("textbox", { name: "Scope", exact: true }).fill("Real browser setup scope covering controlled maintenance and Quality records.");
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
-    await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
+    await setup.getByLabel("Auditee representative", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
     await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
     await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));

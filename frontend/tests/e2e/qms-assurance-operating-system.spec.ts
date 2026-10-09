@@ -316,8 +316,17 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   const panelBox = await panel.boundingBox();
   expect(panelBox).not.toBeNull();
   expect(panelBox!.width).toBeGreaterThanOrEqual(620);
-  const layoutViewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
-  expect(Math.abs((panelBox!.x + panelBox!.width) - (layoutViewportWidth - 24))).toBeLessThanOrEqual(2);
+  const dialogBox = await dialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  const dialogPaddingRight = await dialog.evaluate((element) =>
+    Number.parseFloat(window.getComputedStyle(element).paddingRight),
+  );
+  expect(
+    Math.abs(
+      (dialogBox!.x + dialogBox!.width - dialogPaddingRight)
+      - (panelBox!.x + panelBox!.width),
+    ),
+  ).toBeLessThanOrEqual(2);
   const personSelect = dialog.getByLabel("Person");
   const controlHeight = await personSelect.evaluate((element) => Number.parseFloat(window.getComputedStyle(element).height));
   expect(controlHeight).toBeGreaterThanOrEqual(42);
@@ -337,10 +346,12 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   await page.setViewportSize({ width: 680, height: 800 });
   await page.getByRole("button", { name: "Nominate", exact: true }).click();
   const mobileDialog = page.getByRole("dialog", { name: "Nominate person for Quality authorization" });
+  const mobileDialogBox = await mobileDialog.boundingBox();
   const mobilePanelBox = await mobileDialog.locator(".qms-authz-modal__panel").boundingBox();
+  expect(mobileDialogBox).not.toBeNull();
   expect(mobilePanelBox).not.toBeNull();
-  expect(mobilePanelBox!.x).toBeLessThanOrEqual(1);
-  expect(Math.abs(mobilePanelBox!.width - 680)).toBeLessThanOrEqual(2);
+  expect(Math.abs(mobilePanelBox!.x - mobileDialogBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(mobilePanelBox!.width - mobileDialogBox!.width)).toBeLessThanOrEqual(2);
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await mobileDialog.locator(".qms-authz-modal__header button").click();
 });

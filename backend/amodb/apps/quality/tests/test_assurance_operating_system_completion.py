@@ -266,6 +266,7 @@ def test_people_assurance_intelligence_and_audit_governance_routes_precede_gener
         ("/audits/{audit_id}/issue-notice", "POST", "legacy_issue_notice_requires_controlled_document"),
         ("/audit-checklist-templates", "GET", "list_checklist_templates"),
         ("/audits/{audit_id}/checklist-bindings", "POST", "apply_checklist_revision"),
+        ("/audits/{audit_id}/checklist-binding-lineage", "GET", "get_checklist_binding_lineage"),
         ("/audits/{audit_id}/checklists/realtime", "POST", "create_realtime_audit_checklist"),
         ("/audits/{audit_id}/checklist-execution-governance", "GET", "list_checklist_execution_governance"),
         ("/audits/{audit_id}/checklist-items/{item_id}/execution-governance", "PATCH", "update_checklist_execution_governance"),
