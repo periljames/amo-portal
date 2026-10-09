@@ -214,7 +214,7 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
     params = {"id": record_id, "amo_id": tenant, "supplier_id": supplier_id, **values}
     try:
         db.execute(text(f"""INSERT INTO {_TABLES[kind]} ({', '.join(columns)})
-                      VALUES ({', '.join(':'+c for c in columns)})"""), params)
+                      VALUES ({', '.join('CAST(:'+c+' AS JSON)' if c=='requested_scopes' else ':'+c for c in columns)})"""), params)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(409, "Duplicate or conflicting provider metadata.") from exc
@@ -243,13 +243,24 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
         raise HTTPException(422, "No changes supplied.")
     _site_guard(db, tenant, supplier_id, values)
     _evidence_guard(db, tenant, supplier_id, values)
-    assignments = ", ".join(f"{key}=:{key}" for key in values)
-    row = db.execute(text(f"""UPDATE {_TABLES[kind]} SET {assignments},
+    assignments = ", ".join(f"{key}=CAST(:{key} AS JSON)" if key=="requested_scopes"
+                            else f"{key}=:{key}" for key in values)
+    if kind=="certificates":
+        assignments += ", verification_state='UNVERIFIED', verified_by_user_id=NULL, verified_at=NULL"
+    if kind=="relationships":
+        assignments += ", consent_state='PENDING'"
+    if kind=="account-links":
+        assignments += ", account_state='PENDING', authorized_by_user_id=NULL, authorized_at=NULL"
+    try:
+        row = db.execute(text(f"""UPDATE {_TABLES[kind]} SET {assignments},
                          version=version+1, updated_at=now()
                          WHERE amo_id=:tenant AND supplier_id=:supplier
                          AND id=:id AND version=:version RETURNING *"""),
                      {**values, "tenant": tenant, "supplier": supplier_id,
                       "id": record_id, "version": payload.expected_version}).mappings().first()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Duplicate or conflicting provider details.") from exc
     if row is None:
         raise HTTPException(409, "Record not found or stale version. Refresh and retry.")
     _audit_change(db,tenant,supplier_id,record_id,kind,str(current_user.id),
