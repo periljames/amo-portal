@@ -872,7 +872,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <span>EVIDENCE PENDING · {evidenceOutboxQuery.data?.length}</span>
           ) : (
             <span>{connectivity === "ONLINE" ? "No queued changes" : "Offline · no queued changes"}</span>
-          )
+          )}
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
           ) : (
