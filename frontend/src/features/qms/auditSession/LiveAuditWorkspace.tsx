@@ -1171,45 +1171,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   </div> : null}
                 </> : null}
               </details>
-            </> : null}
-              </section>
-
-              <div className="qms-live-audit-focus__responses" aria-label="Checklist response">
-                {selectedResponseOptions.length ? selectedResponseOptions.map((option) => {
-                  const canonical = option.canonical_status as CanonicalChecklistResponse;
-                  const Icon = responseIcon(canonical);
-                  const active = selected.response_value
-                    ? selected.response_value === option.value
-                    : selected.canonical_response_status === canonical;
-                  return <button type="button" key={option.value} className={active ? "is-active" : ""} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(selected, option)}><Icon size={17} /> {option.label}</button>;
-                }) : <span role="alert">This checklist item has no governed response options. Return to preparation and issue a corrected checklist revision.</span>}
-              </div>
-
-              {selectedSource?.sampling_requirement || selectedSource?.audit_method === "SAMPLE" ? <label className="qms-live-audit-focus__notes"><span>Sampled items / records</span><textarea readOnly={!canExecute} value={sampledItems} onChange={(event) => setSampleDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={3} placeholder="Record the sampled records, serials, work packs, dates or other sample identifiers." /></label> : null}
-              <label className="qms-live-audit-focus__notes"><span>Auditor note</span><textarea readOnly={!canExecute} value={notes} onChange={(event) => setNoteDrafts((current) => ({ ...current, [selected.checklist_item_id]: event.target.value }))} rows={5} placeholder="Record objective, attributable fieldwork notes." /></label>
-              <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={saveCurrentAssessment}>{updateMutation.isPending ? "Saving…" : "Save notes & assessment"}</button></div>
-
-              <div id="audit-occurrence-evidence">
-                <LiveAuditEvidenceStrip onCaptureStateChange={onEvidenceCaptureChange}
-                  amoCode={amoCode}
-                  auditId={auditId}
-                  item={selected}
-                  canManage={canExecute}
-                  selectedAssessmentEvidenceIds={assessment?.evidence_ids || []}
-                  onAssessmentEvidenceChange={(artifactId, checked) => {
-                    if (!assessment) return;
-                    const nextIds = new Set(assessment.evidence_ids);
-                    if (checked) nextIds.add(artifactId);
-                    else nextIds.delete(artifactId);
-                    updateAssessmentDraft({ evidence_ids: Array.from(nextIds) });
-                  }}
-                  onChanged={refreshFieldwork}
-                  onError={setLocalError}
-                  onNotice={setSyncNotice}
-                />
-              </div>
-
-              <footer className="qms-live-audit-focus__nav"><button type="button" onClick={() => move(-1)} disabled={selectedIndex <= 0}><ArrowLeft size={16} /> Previous</button><button type="button" onClick={() => move(1)} disabled={selectedIndex < 0 || selectedIndex >= visibleItems.length - 1}>Next <ArrowRight size={16} /></button></footer>
             </>
           ) : <div className="qms-live-audit-focus__empty">
             <strong>No governed checklist is available for fieldwork.</strong>
