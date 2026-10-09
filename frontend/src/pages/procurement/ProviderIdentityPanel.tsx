@@ -84,6 +84,18 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
     }catch(e){setError(e instanceof Error?e.message:"The provider record could not be saved.");}
     finally{setBusy(false);}
   }
+  async function decide(row:RecordRow,action:string) {
+    if(governanceReason.trim().length<8){setError("Explain the Quality decision (minimum 8 characters).");return;}
+    setBusy(true);setError("");
+    try{
+      await apiRequest(endpoint+"/"+encodeURIComponent(row.id)+"/governance",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action,reason:governanceReason,expected_version:row.version}),
+      });
+      setGovernanceReason("");await load();
+    }catch(e){setError(e instanceof Error?e.message:"Quality decision failed.");}
+    finally{setBusy(false);}
+  }
   return <section className="proc-panel" aria-label="Provider identity administration">
     <header className="proc-section-heading proc-section-heading--split"><div><h2>Provider organization profile</h2>
       <p>Descriptive roles, locations, people and capabilities. Quality approval remains separately controlled.</p></div>
@@ -96,11 +108,18 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
       rows.length?<div className="proc-table-wrap"><table className="proc-table"><thead>
        <tr><th>Record</th><th>Details</th><th>Version</th><th>Action</th></tr></thead><tbody>
        {rows.map(row=><tr key={row.id}>
-         <td>{String(row.role_code??row.site_name??row.contact_name??row.description??row.id)}</td>
-         <td>{FIELDS[kind].map(({key})=>row[key]? `${key}: ${String(row[key])}`:"").filter(Boolean).join(" · ")}</td>
-         <td>{row.version}</td><td><button type="button" disabled={busy} onClick={()=>edit(row)}>Edit</button></td>
+         <td>{String(row.role_code??row.site_name??row.contact_name??row.description??row.certificate_number??row.relationship_kind??row.user_id??row.source_identifier??row.id)}</td>
+         <td>{FIELDS[kind].map(({key})=>row[key]? `${key}: ${String(row[key])}`:"").concat(String(row.verification_state??row.consent_state??row.account_state??"")).filter(Boolean).join(" · ")}</td>
+         <td>{row.version}</td><td>{canWrite&&<button type="button" disabled={busy} onClick={()=>edit(row)}>Edit</button>}
+         {isQuality&&["certificates","relationships","account-links"].includes(kind)&&<>
+          <button type="button" disabled={busy||governanceReason.trim().length<8} onClick={()=>void decide(row,"VERIFY")}>Verify</button>
+          <button type="button" disabled={busy||governanceReason.trim().length<8} onClick={()=>void decide(row,kind==="certificates"?"REJECT":"REVOKE")}>{kind==="certificates"?"Reject":"Revoke"}</button>
+         </>}</td>
        </tr>)}</tbody></table></div>:<p>No {kind} recorded.</p>}
-    <form onSubmit={e=>void submit(e)}><h3>{editing?"Edit":"Add"} {kind.slice(0,-1)}</h3>
+    {isQuality&&["certificates","relationships","account-links"].includes(kind)&&<label>Quality decision reason
+      <textarea rows={2} value={governanceReason} onChange={e=>setGovernanceReason(e.target.value)} />
+    </label>}
+    {canWrite&&<form onSubmit={e=>void submit(e)}><h3>{editing?"Edit":"Add"} {kind.slice(0,-1)}</h3>
      {FIELDS[kind].map(field=><label key={field.key} style={{display:"block",margin:"0.5rem 0"}}>
        {field.label}
        {field.key==="role_code"||field.key==="assignment"
@@ -108,11 +127,11 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
            onChange={e=>setForm(old=>({...old,[field.key]:e.target.value}))}>
            <option value="">Select</option>{(field.key==="role_code"?roleValues:assignmentValues).map(v=>
            <option key={v} value={v}>{v.replaceAll("_"," ")}</option>)}</select>
-         :<input required={field.required} type={field.key==="valid_until"?"date":"text"}
+         :<input required={field.required} type={["valid_until","valid_from","consent_expires_on"].includes(field.key)?"date":"text"}
            value={form[field.key]??""} onChange={e=>setForm(old=>({...old,[field.key]:e.target.value}))}/>}
       </label>)}
       <button type="submit" className="proc-button proc-button--primary" disabled={busy}>{busy?"Saving…":"Save record"}</button>
       {editing&&<button type="button" className="proc-button" onClick={()=>{setEditing(null);setForm({});}}>Cancel edit</button>}
-    </form>
+    </form>}
   </section>;
 }
