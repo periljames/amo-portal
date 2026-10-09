@@ -227,8 +227,10 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     except IntegrityError as exc:
         db.rollback()
         existing = db.execute(text("""SELECT id,status FROM external_provider_import_batches
-            WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind"""),
-            {"amo":tenant,"digest":digest,"kind":import_kind}).mappings().first()
+            WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind
+            AND mapping_digest=:mapping_digest"""),
+            {"amo":tenant,"digest":digest,"kind":import_kind,
+             "mapping_digest":mapping_digest}).mappings().first()
         if existing:
             return {"batch_id":existing["id"],"source_sha256":digest,
                     "import_kind":import_kind,"status":existing["status"],"already_uploaded":True}
