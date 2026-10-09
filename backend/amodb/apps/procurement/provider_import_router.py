@@ -80,12 +80,15 @@ def _mapping(headers, overrides, columns):
 @router.post("/external-provider-imports/preview", status_code=201)
 async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str = Form("{}"),
                   import_kind: str = Form("SUPPLIERS"), source_sheet: str = Form(""),
+                  header_row: int = Form(1),
                   db: Session = Depends(get_db),
                   user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
     import_kind = import_kind.strip().upper()
     if import_kind not in ("SUPPLIERS", "CONTRACTS"):
         raise HTTPException(422, "Unknown spreadsheet import kind.")
+    if header_row < 1 or header_row > 100:
+        raise HTTPException(422, "Header row must be between 1 and 100.")
     columns = _COLUMNS if import_kind == "SUPPLIERS" else _CONTRACT_COLUMNS
     filename = file.filename or ""
     if not filename.lower().endswith((".xlsx", ".xlsm")):
@@ -99,7 +102,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
             raise ValueError()
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, "Invalid source column mapping.") from exc
-    mapping_digest = hashlib.sha256(json.dumps({"mapping":overrides,"sheet":source_sheet},
+    mapping_digest = hashlib.sha256(json.dumps({"mapping":overrides,"sheet":source_sheet,"header_row":header_row},
                                                sort_keys=True).encode("utf-8")).hexdigest()
     data = await file.read(_MAX_BYTES + 1)
     if len(data) > _MAX_BYTES:
@@ -122,13 +125,14 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     try:
         db.execute(text("""INSERT INTO external_provider_import_batches
             (id, amo_id, filename, source_sha256, mapping_json, mapping_digest,
-             import_kind, source_sheet, created_by_user_id)
+             import_kind, source_sheet, header_row, created_by_user_id)
             VALUES (:id, :amo, :filename, :digest, CAST(:mapping AS JSON), :mapping_digest,
-                    :kind, :sheet, :actor)"""),
+                    :kind, :sheet, :header_row, :actor)"""),
             {"id": batch_id, "amo": tenant, "filename": filename[:255],
              "digest": digest, "mapping":json.dumps(overrides), "mapping_digest":mapping_digest,
              "kind":import_kind,
-             "sheet":source_sheet[:128] or None, "actor": str(user.id)})
+             "sheet":source_sheet[:128] or None, "header_row":header_row,
+             "actor": str(user.id)})
         seen = set()
         matched_sheet = False
         for sheet in workbook.worksheets:
@@ -136,11 +140,13 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                 continue
             matched_sheet = True
             rows = sheet.iter_rows(values_only=True)
+            for _ in range(header_row - 1):
+                next(rows, None)
             headers = next(rows, None)
             if not headers:
                 continue
             matched = _mapping(headers, overrides, columns)
-            for row_number, cells in enumerate(rows, start=2):
+            for row_number, cells in enumerate(rows, start=header_row + 1):
                 if not any(cell is not None for cell in cells):
                     continue
                 counts["total"] += 1
