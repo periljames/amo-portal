@@ -306,6 +306,29 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     }
   }, [canManagePolicy, canPrepare, searchParams]);
 
+  useEffect(() => {
+    const drawerOpen = nominateOpen || batchOpen || reviewOpen || exemptionOpen || lifecycleOpen || ruleOpen;
+    if (!drawerOpen) return undefined;
+    // Chromium and other desktop browsers may reserve a native scrollbar gutter
+    // even after the overlay locks page scrolling. A fixed overlay is measured
+    // against the visual viewport, but workspace alignment uses clientWidth.
+    // Publish the measured difference as a layout token rather than a hardcoded
+    // offset tied to one operating system or scrollbar theme.
+    const measureLayoutGutter = () => {
+      const reserved = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+      document.documentElement.style.setProperty("--qms-authz-layout-viewport-gutter", `${reserved}px`);
+    };
+    measureLayoutGutter();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureLayoutGutter) : null;
+    observer?.observe(document.documentElement);
+    window.addEventListener("resize", measureLayoutGutter);
+    return () => {
+      window.removeEventListener("resize", measureLayoutGutter);
+      observer?.disconnect();
+      document.documentElement.style.removeProperty("--qms-authz-layout-viewport-gutter");
+    };
+  }, [nominateOpen, batchOpen, reviewOpen, exemptionOpen, lifecycleOpen, ruleOpen]);
+
   const filteredPeople = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return people;
