@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -106,6 +107,8 @@ def _clean(kind: str, values: dict[str, Any], *, creation: bool) -> dict[str, An
         raise HTTPException(422, "Requested scopes must be an array.")
     if "is_primary" in values and not isinstance(values["is_primary"], bool):
         raise HTTPException(422, "is_primary must be boolean.")
+    if "requested_scopes" in values:
+        values["requested_scopes"] = json.dumps(values["requested_scopes"])
     return values
 
 def _site_guard(db: Session, amo_id: str, supplier_id: int, values: dict[str, Any]) -> None:
@@ -127,6 +130,55 @@ def _evidence_guard(db: Session, amo_id: str, supplier_id: int, values: dict[str
                        {"tenant": amo_id, "supplier": supplier_id, "id": evidence_id}).scalar()
     if not match:
         raise HTTPException(422, "Evidence must belong to the same provider and tenant.")
+
+def _check_references(db: Session, tenant: str, supplier_id: int, kind: str,
+                      values: dict[str, Any]) -> None:
+    _check_references(db, tenant, supplier_id, kind, values)
+    for field, table, restricted in (
+        ("parent_supplier_id", "procurement_suppliers", False),
+        ("user_id", "users", False),
+        ("contact_id", "external_provider_contacts", True),
+        ("approval_scope_id", "procurement_supplier_approval_scopes", True),
+    ):
+        identifier = values.get(field)
+        if identifier is None:
+            continue
+        qualifier = " AND supplier_id=:supplier" if restricted else ""
+        match = db.execute(text("SELECT 1 FROM " + table +
+                                " WHERE amo_id=:tenant AND id=:id" + qualifier),
+                           {"tenant":tenant,"id":identifier,"supplier":supplier_id}).scalar()
+        if not match:
+            raise HTTPException(422, field + " must belong to this tenant/provider.")
+    if values.get("parent_supplier_id") == supplier_id:
+        raise HTTPException(422, "A provider cannot be its own parent.")
+    if values.get("contract_id"):
+        if not values.get("parent_supplier_id"):
+            raise HTTPException(422, "Parent provider must accompany a contract link.")
+        ok = db.execute(text("""SELECT 1 FROM quality_external_provider_contracts
+             WHERE amo_id=:tenant AND supplier_id=:parent AND id=:id"""),
+             {"tenant":tenant,"parent":values["parent_supplier_id"],"id":values["contract_id"]}).scalar()
+        if not ok:
+            raise HTTPException(422, "Contract is not owned by the parent provider.")
+    if values.get("consent_evidence_id"):
+        if not values.get("parent_supplier_id"):
+            raise HTTPException(422, "Parent provider is required for consent evidence.")
+        ok = db.execute(text("""SELECT 1 FROM quality_external_provider_evidence
+             WHERE amo_id=:tenant AND supplier_id=:parent AND id=:id"""),
+             {"tenant":tenant,"parent":values["parent_supplier_id"],
+              "id":values["consent_evidence_id"]}).scalar()
+        if not ok:
+            raise HTTPException(422, "Consent evidence does not belong to the parent provider.")
+
+def _audit_change(db: Session, tenant: str, supplier_id: int, record_id: str,
+                  kind: str, actor: str, action: str, changes: dict[str, Any]) -> None:
+    db.execute(text("""INSERT INTO external_provider_change_events
+        (id,amo_id,supplier_id,event_type,actor_user_id,source_system,source_identifier,after_json)
+        VALUES (:id,:amo,:supplier,:action,:actor,'PORTAL',:source,CAST(:payload AS JSON))"""),
+        {"id":str(uuid4()),"amo":tenant,"supplier":supplier_id,"action":action,
+         "actor":actor,"source":record_id,"payload":json.dumps(changes,default=str)})
+    service._event(db,amo_id=tenant,entity_type="ExternalProviderMetadata",
+                   entity_id=record_id,action=action,actor_user_id=actor,
+                   detail={"supplier_id":supplier_id,"kind":kind})
 
 @router.get("/suppliers/{supplier_id}/identity/{kind}")
 def list_identity(amo_code: str, supplier_id: int, kind: str,
@@ -165,10 +217,8 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(409, "Duplicate or conflicting provider metadata.") from exc
-    service._event(db, amo_id=tenant, entity_type="ExternalProviderMetadata",
-                   entity_id=record_id, action="create_" + kind,
-                   actor_user_id=str(current_user.id),
-                   detail={"supplier_id": supplier_id})
+    _audit_change(db,tenant,supplier_id,record_id,kind,str(current_user.id),
+                  "create_"+kind,{"fields":values})
     row = db.execute(text(f"SELECT * FROM {_TABLES[kind]} WHERE id=:id AND amo_id=:tenant"),
                      {"id": record_id, "tenant": tenant}).mappings().one()
     db.commit()
@@ -201,10 +251,7 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
                       "id": record_id, "version": payload.expected_version}).mappings().first()
     if row is None:
         raise HTTPException(409, "Record not found or stale version. Refresh and retry.")
-    service._event(db, amo_id=tenant, entity_type="ExternalProviderMetadata",
-                   entity_id=record_id, action="update_" + kind,
-                   actor_user_id=str(current_user.id),
-                   detail={"supplier_id": supplier_id, "changed_fields": sorted(values),
-                           "version": row["version"]})
+    _audit_change(db,tenant,supplier_id,record_id,kind,str(current_user.id),
+                  "update_"+kind,{"fields":values,"version":row["version"]})
     db.commit()
     return dict(row)
