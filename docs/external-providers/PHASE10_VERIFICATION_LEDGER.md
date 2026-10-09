@@ -7,3 +7,4 @@
 6. UI: CRUD persistence, confirmation/error states, keyboard controls, duplicate handling, tenant segregation.
 7. CI/test suites: pytest, Playwright, Vitest, lint, typecheck and builds all deferred until Phase 10.
 8. Verify all known open PR interference and main updates before final Phase 10 merge.
+\n9. Verify exact contract-tracker schema; prove no contract row is accidentally treated as an approvable supplier; implement missing contract reconciliation before Phase 1 signoff.\n10. Verify repeated-file idempotency and concurrency conflicts; confirm all import batches and row records remain tenant-isolated.\n
