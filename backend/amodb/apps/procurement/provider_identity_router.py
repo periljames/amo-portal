@@ -33,6 +33,12 @@ _COLUMNS = {
                      "certificate_number", "valid_until", "evidence_id"),
     "source-links": ("source_system", "source_identifier", "source_row",
                      "source_digest", "imported_at"),
+    "certificates": ("certificate_type", "certificate_number", "issuing_authority", "jurisdiction",
+                     "approval_rating", "limitations", "valid_from", "valid_until", "evidence_id"),
+    "relationships": ("parent_supplier_id", "contract_id", "relationship_kind", "function_scope",
+                      "consent_evidence_id", "consent_expires_on"),
+    "account-links": ("user_id", "contact_id", "requested_scopes"),
+    "scope-links": ("approval_scope_id", "site_id", "contracted_function", "service_category", "product_family"),
 }
 _TABLES = {
     "roles": "external_provider_roles",
@@ -40,14 +46,23 @@ _TABLES = {
     "contacts": "external_provider_contacts",
     "capabilities": "external_provider_capabilities",
     "source-links": "external_provider_source_links",
+    "certificates": "external_provider_certificates",
+    "relationships": "external_provider_relationships",
+    "account-links": "external_provider_account_links",
+    "scope-links": "external_provider_scope_links",
 }
 _REQUIRED = {
     "roles": {"role_code"}, "sites": {"site_code", "site_name"},
     "contacts": {"contact_name", "assignment"},
     "capabilities": {"capability_type", "description"},
     "source-links": {"source_system", "source_identifier"},
+    "certificates": {"certificate_type", "certificate_number"},
+    "relationships": {"parent_supplier_id", "relationship_kind", "function_scope"},
+    "account-links": {"user_id"},
+    "scope-links": {"approval_scope_id"},
 }
 _READ_ONLY = {"source-links"}
+_QUALITY_ONLY = {"relationships", "account-links", "scope-links"}
 _ALLOWED_ROLES = {"SUPPLIER", "VENDOR", "CONTRACTOR", "SUBCONTRACTOR", "SERVICE_PROVIDER",
                   "LABORATORY", "CALIBRATION_PROVIDER", "CONSULTANT", "OTHER"}
 _ALLOWED_ASSIGNMENTS = {"COMMERCIAL", "TECHNICAL", "QUALITY", "OTHER"}
@@ -79,11 +94,18 @@ def _clean(kind: str, values: dict[str, Any], *, creation: bool) -> dict[str, An
         raise HTTPException(422, "Unsupported provider role.")
     if "assignment" in values and values["assignment"] not in _ALLOWED_ASSIGNMENTS:
         raise HTTPException(422, "Unsupported contact assignment.")
-    if "valid_until" in values and values["valid_until"] is not None:
-        try:
-            values["valid_until"] = date.fromisoformat(str(values["valid_until"]))
-        except ValueError as exc:
-            raise HTTPException(422, "valid_until must be ISO date.") from exc
+    for field in ("valid_from", "valid_until", "consent_expires_on"):
+        if field in values and values[field] not in (None, ""):
+            try:
+                values[field] = date.fromisoformat(str(values[field]))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, field + " must be ISO date.") from exc
+    if values.get("relationship_kind") not in (None, "PARENT", "FURTHER_SUBCONTRACTOR", "AFFILIATE"):
+        raise HTTPException(422, "Unsupported provider relationship.")
+    if "requested_scopes" in values and not isinstance(values["requested_scopes"], list):
+        raise HTTPException(422, "Requested scopes must be an array.")
+    if "is_primary" in values and not isinstance(values["is_primary"], bool):
+        raise HTTPException(422, "is_primary must be boolean.")
     return values
 
 def _site_guard(db: Session, amo_id: str, supplier_id: int, values: dict[str, Any]) -> None:
@@ -127,6 +149,8 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
                     current_user: accounts.User = Depends(require_roles(*_EDIT_ROLES))):
     if kind not in _TABLES or kind in _READ_ONLY:
         raise HTTPException(404, "Unsupported resource.")
+    if kind in _QUALITY_ONLY and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
+        raise HTTPException(403, "Quality Manager authorization required.")
     tenant = _tenant(db, amo_code, current_user)
     _require_supplier(db, tenant, supplier_id)
     values = _clean(kind, dict(payload.fields), creation=True)
@@ -157,6 +181,8 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
                     current_user: accounts.User = Depends(require_roles(*_EDIT_ROLES))):
     if kind not in _TABLES or kind in _READ_ONLY:
         raise HTTPException(404, "Unsupported resource.")
+    if kind in _QUALITY_ONLY and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
+        raise HTTPException(403, "Quality Manager authorization required.")
     if payload.expected_version is None:
         raise HTTPException(428, "expected_version is required.")
     tenant = _tenant(db, amo_code, current_user)
