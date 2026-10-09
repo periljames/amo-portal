@@ -831,7 +831,7 @@ body:has(.qms-authz-modal) {
   .qms-authz-row > div:last-child { max-width: none; justify-items: start; text-align: left; }
   .qms-authz-form-grid { grid-template-columns: 1fr; }
   .qms-authz-form-grid .span-2 { grid-column: auto; }
-  .qms-authz-modal { padding: 0; }
+  .qms-authz-modal { --qms-authz-drawer-inset: 0px; padding: 0; }
   .qms-authz-modal__panel { width: 100%; max-height: 100vh; border: 0; border-radius: 0; }
 }
 
