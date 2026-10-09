@@ -240,7 +240,7 @@ def review(amo_code: str, batch_id: str, db: Session = Depends(get_db),
 def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
             user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
-    batch = db.execute(text("""SELECT status,import_kind FROM external_provider_import_batches
+    batch = db.execute(text("""SELECT status,import_kind,source_sha256 FROM external_provider_import_batches
             WHERE id=:batch AND amo_id=:amo FOR UPDATE"""),
             {"batch":batch_id, "amo":tenant}).mappings().first()
     if not batch: raise HTTPException(404, "Import batch not found.")
@@ -307,7 +307,7 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
                         :digest,NOW())"""),
                 {"id":str(uuid4()),"amo":tenant,"supplier":supplier_id,
                  "source":batch_id+":"+row["sheet_name"]+":"+str(row["row_number"]),
-                 "row":row["row_number"],"digest":batch_id})
+                 "row":row["row_number"],"digest":batch["source_sha256"]})
             db.execute(text("""UPDATE external_provider_import_rows
                 SET status='CREATED',supplier_id=:supplier
                 WHERE id=:row AND amo_id=:amo"""),
@@ -332,3 +332,99 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
     return {"batch_id":batch_id,"created_record_ids":created,
             "created_supplier_ids":created if batch["import_kind"] == "SUPPLIERS" else [],
             "import_kind":batch["import_kind"],"operational_eligibility_granted":False}
+
+
+@router.post("/external-provider-imports/{batch_id}/supersede")
+def supersede(amo_code: str, batch_id: str, reason: str = Form(...),
+              db: Session = Depends(get_db),
+              user: accounts.User = Depends(require_roles(*_EDIT))):
+    if len(reason.strip()) < 8:
+        raise HTTPException(422, "Document the replacement reason.")
+    tenant = _tenant(db, amo_code, user)
+    batch = db.execute(text("""SELECT id,status FROM external_provider_import_batches
+        WHERE amo_id=:amo AND id=:batch FOR UPDATE"""),
+        {"amo":tenant,"batch":batch_id}).mappings().first()
+    if not batch: raise HTTPException(404, "Import batch was not found.")
+    if batch["status"] != "STAGED":
+        raise HTTPException(409, "Only unconfirmed batches may be superseded.")
+    db.execute(text("""UPDATE external_provider_import_batches
+        SET status='SUPERSEDED' WHERE amo_id=:amo AND id=:batch"""),
+        {"amo":tenant,"batch":batch_id})
+    service._event(db, amo_id=tenant,entity_type="ExternalProviderImport",
+                   entity_id=batch_id,action="supersede_preview",
+                   actor_user_id=str(user.id),detail={"reason":reason})
+    db.commit()
+    return {"batch_id":batch_id,"status":"SUPERSEDED"}
+
+@router.post("/external-provider-imports/{batch_id}/rollback")
+def rollback_import(amo_code: str, batch_id: str, reason: str = Form(...),
+                    db: Session = Depends(get_db),
+                    user: accounts.User = Depends(require_roles(*_EDIT))):
+    if len(reason.strip()) < 8:
+        raise HTTPException(422,"A documented rollback reason is required.")
+    tenant = _tenant(db,amo_code,user)
+    batch = db.execute(text("""SELECT * FROM external_provider_import_batches
+        WHERE amo_id=:amo AND id=:batch FOR UPDATE"""),
+        {"amo":tenant,"batch":batch_id}).mappings().first()
+    if not batch: raise HTTPException(404,"Import batch not found.")
+    if batch["status"] != "COMMITTED":
+        raise HTTPException(409,"Only committed batches may be rolled back.")
+    if batch["import_kind"] == "CONTRACTS" and user.role != accounts.AccountRole.QUALITY_MANAGER:
+        raise HTTPException(403,"Quality Manager authority is required for contracts.")
+    rows = db.execute(text("""SELECT * FROM external_provider_import_rows
+        WHERE amo_id=:amo AND batch_id=:batch ORDER BY row_number FOR UPDATE"""),
+        {"amo":tenant,"batch":batch_id}).mappings().all()
+    for row in rows:
+        if row["status"] != "CREATED":
+            raise HTTPException(409,"Import has been modified; individual review required.")
+        if batch["import_kind"] == "CONTRACTS":
+            contract = db.execute(text("""SELECT status,version FROM quality_external_provider_contracts
+                WHERE amo_id=:amo AND supplier_id=:supplier AND id=:contract FOR UPDATE"""),
+                {"amo":tenant,"supplier":row["supplier_id"],
+                 "contract":row["contract_id"]}).mappings().first()
+            if not contract or contract["status"] != "DRAFT" or contract["version"] != 1:
+                raise HTTPException(409,"Contract has progressed beyond unmodified draft.")
+        else:
+            supplier = db.execute(text("""SELECT status,approved_at FROM procurement_suppliers
+                WHERE amo_id=:amo AND id=:supplier FOR UPDATE"""),
+                {"amo":tenant,"supplier":row["supplier_id"]}).mappings().first()
+            if not supplier or str(supplier["status"]) not in ("PROSPECTIVE",) or supplier["approved_at"]:
+                raise HTTPException(409,"Imported supplier has progressed in Quality governance.")
+            # Never archive suppliers that have become referenced in live work.
+            linked = db.execute(text("""SELECT
+                 EXISTS(SELECT 1 FROM procurement_purchase_orders
+                        WHERE amo_id=:amo AND supplier_id=:supplier)
+                 OR EXISTS(SELECT 1 FROM procurement_supplier_evaluations
+                        WHERE amo_id=:amo AND supplier_id=:supplier)
+                 OR EXISTS(SELECT 1 FROM quality_external_provider_profiles
+                        WHERE amo_id=:amo AND supplier_id=:supplier)
+                 OR EXISTS(SELECT 1 FROM quality_external_provider_contracts
+                        WHERE amo_id=:amo AND supplier_id=:supplier)
+                 OR EXISTS(SELECT 1 FROM procurement_supplier_approval_scopes
+                        WHERE amo_id=:amo AND supplier_id=:supplier)"""),
+                {"amo":tenant,"supplier":row["supplier_id"]}).scalar()
+            if linked:
+                raise HTTPException(409,"Supplier is already used or governed; rollback forbidden.")
+    for row in rows:
+        if batch["import_kind"] == "CONTRACTS":
+            db.execute(text("""UPDATE quality_external_provider_contracts
+                SET status='SUPERSEDED', version=version+1,
+                    transition_reason=:reason,updated_at=NOW()
+                WHERE amo_id=:amo AND id=:contract"""),
+                {"amo":tenant,"contract":row["contract_id"],"reason":reason})
+        else:
+            db.execute(text("""UPDATE procurement_suppliers
+                SET status='ARCHIVED',is_active=false,updated_at=NOW()
+                WHERE amo_id=:amo AND id=:supplier"""),
+                {"amo":tenant,"supplier":row["supplier_id"]})
+        db.execute(text("""UPDATE external_provider_import_rows SET status='ROLLED_BACK'
+            WHERE amo_id=:amo AND id=:row"""),{"amo":tenant,"row":row["id"]})
+    db.execute(text("""UPDATE external_provider_import_batches SET status='ROLLED_BACK'
+        WHERE amo_id=:amo AND id=:batch"""),{"amo":tenant,"batch":batch_id})
+    service._event(db,amo_id=tenant,entity_type="ExternalProviderImport",entity_id=batch_id,
+                   action="controlled_rollback",actor_user_id=str(user.id),
+                   detail={"reason":reason,"record_count":len(rows),
+                           "import_kind":batch["import_kind"]})
+    db.commit()
+    return {"batch_id":batch_id,"status":"ROLLED_BACK",
+            "records_reconciled":len(rows)}
