@@ -2166,6 +2166,7 @@ def qms_workflow_action(
     ctx: TenantContext = Depends(resolve_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    _reject_unknown_audit_operation(f"{module}/{record_id}/{action}")
     action_config = _WORKFLOW_ACTIONS.get((module, action))
     if not action_config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported QMS workflow action.")
@@ -2219,6 +2220,22 @@ def qms_workflow_action(
     }
 
 
+def _reject_unknown_audit_operation(module_path: str) -> None:
+    # An unregistered occurrence operation must never succeed as a generic
+    # table read/write. In particular, the occurrence UUID is not a finding ID.
+    parts = module_path.strip("/").split("/")
+    if len(parts) < 3 or parts[0] != "audits":
+        return
+    try:
+        uuid.UUID(parts[1])
+    except ValueError:
+        return
+    raise HTTPException(status_code=404, detail={
+        "code": "AUDIT_OPERATION_UNAVAILABLE",
+        "message": "This audit action is unavailable. Refresh the audit workspace and use its available actions.",
+    })
+
+
 @core_router.get("/{module_path:path}")
 def generic_qms_get(
     module_path: str,
@@ -2229,6 +2246,7 @@ def generic_qms_get(
     ctx: TenantContext = Depends(resolve_tenant_context),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
+    _reject_unknown_audit_operation(module_path)
     started = time.perf_counter()
     trace_id = uuid.uuid4().hex[:12]
     parts = [part for part in module_path.split("/") if part]
@@ -2319,6 +2337,7 @@ def generic_qms_create(
     ctx: TenantContext = Depends(resolve_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    _reject_unknown_audit_operation(module_path)
     parts = [part for part in module_path.split("/") if part]
     if not parts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QMS module is required.")
@@ -2342,6 +2361,7 @@ def generic_qms_update(
     ctx: TenantContext = Depends(resolve_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    _reject_unknown_audit_operation(module_path)
     parts = [part for part in module_path.split("/") if part]
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
@@ -2369,6 +2389,7 @@ def generic_qms_delete(
     ctx: TenantContext = Depends(resolve_tenant_context),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
+    _reject_unknown_audit_operation(module_path)
     parts = [part for part in module_path.split("/") if part]
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")

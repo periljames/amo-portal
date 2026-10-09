@@ -1,8 +1,9 @@
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
 
-const outDir = "d:/XLK-Assets-AMO-Portal-and-DB/amo-portal/.runtime-logs/ui-audit";
+const outDir = fileURLToPath(new URL("../../.artifacts/ui-audit/", import.meta.url));
 fs.mkdirSync(outDir, { recursive: true });
 
 function futureToken() {

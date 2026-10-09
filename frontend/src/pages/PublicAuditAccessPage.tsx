@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CalendarClock,
@@ -118,6 +118,7 @@ const PublicAuditAccessPage: React.FC = () => {
   const [evidenceBusy, setEvidenceBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const loadInFlight = useRef<{ token: string | null; request: Promise<void> } | null>(null);
 
   const loadSupplementary = async (next: AuditGuestReadModel) => {
     const isAuditee = next.participant.participant_type === "AUDITEE_GUEST";
@@ -160,7 +161,7 @@ const PublicAuditAccessPage: React.FC = () => {
     }
   };
 
-  const load = async (token: string | null = null) => {
+  const performLoad = async (token: string | null) => {
     setLoading(true);
     setError(null);
     setNotice(null);
@@ -179,6 +180,18 @@ const PublicAuditAccessPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const load = (token: string | null = null): Promise<void> => {
+    if (loadInFlight.current?.token === token) return loadInFlight.current.request;
+    // Repeated mount effects and rapid refresh clicks share one exchange/read.
+    // Completed requests are never cached, so revocation is checked on refresh.
+    const active = { token, request: performLoad(token) };
+    loadInFlight.current = active;
+    void active.request.finally(() => {
+      if (loadInFlight.current === active) loadInFlight.current = null;
+    });
+    return active.request;
   };
 
   // The invitation path is the lifecycle trigger; load intentionally captures the
@@ -275,6 +288,7 @@ const PublicAuditAccessPage: React.FC = () => {
   const canAcknowledge = data.permissions.includes("audit:acknowledge");
   const canSubmitDocuments = data.permissions.includes("audit:document_submit");
   const canReadReleasedEvidence = data.permissions.includes("audit:read_released_evidence");
+  const canRespondToCars = data.permissions.includes("car:respond");
   const requestRows: PublicGovernedAuditDocumentRequest[] = governedRequests.length ? governedRequests : data.document_requests.map((row) => ({ ...row, status: row.status as PublicGovernedAuditDocumentRequest["status"], request_type: "DOCUMENT" as const, linked_criterion: null, responsible_party: null, is_required: true, requirement_stage: "REQUIRED_BEFORE_ISSUE" as const, source_mode: "UPLOAD" as const, controlled_source_system: "QMS_LOCAL" as const, controlled_document_id: null, controlled_revision_id: null, canonical_document_id: null, canonical_revision_id: null, controlled_submission: null }));
 
   return (
@@ -287,7 +301,7 @@ const PublicAuditAccessPage: React.FC = () => {
       {notice ? <div className="qms-public-audit__success" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
 
       <div className="qms-public-audit__content">
-        <section className="qms-public-audit__card qms-public-audit__summary"><header><ShieldCheck size={19} /><div><strong>Audit scope shared with you</strong><small>Server-filtered external projection; this is not an employee session.</small></div></header><dl><div><dt>Scope</dt><dd>{data.audit.scope || "—"}</dd></div><div><dt>Criteria</dt><dd>{data.audit.criteria || "—"}</dd></div><div><dt>Planned start</dt><dd>{dateTime(data.audit.planned_start)}</dd></div><div><dt>Planned end</dt><dd>{dateTime(data.audit.planned_end)}</dd></div></dl><p className="qms-public-audit__privacy-note">{isExternalAuditor ? "Only your assigned audit data and attributable contributions are available here." : "Private auditor notes, draft findings, internal Quality deliberations and unrelated tenant data are never sent to this page."}</p></section>
+        <section className="qms-public-audit__card qms-public-audit__summary"><header><ShieldCheck size={19} /><div><strong>Audit scope shared with you</strong><small>Scope, findings and requests shared by the audit team.</small></div></header><dl><div><dt>Scope</dt><dd>{data.audit.scope || "—"}</dd></div><div><dt>Criteria</dt><dd>{data.audit.criteria || "—"}</dd></div><div><dt>Planned start</dt><dd>{dateTime(data.audit.planned_start)}</dd></div><div><dt>Planned end</dt><dd>{dateTime(data.audit.planned_end)}</dd></div></dl><p className="qms-public-audit__privacy-note">{isExternalAuditor ? "Your assigned audit records and contributions are available here." : "This workspace contains the records shared with you for this audit."}</p></section>
 
         {collaboration?.meetings.length ? <section className="qms-public-audit__card"><header><CalendarClock size={19} /><div><strong>Audit meetings</strong><small>Opening, closing and follow-up meetings explicitly scheduled for this occurrence.</small></div></header><div className="qms-public-audit__requests">{collaboration.meetings.map((meeting) => <article key={meeting.id}><div><strong>{meeting.meeting_type.replaceAll("_", " ")}</strong><small>{dateTime(meeting.scheduled_start)}{meeting.scheduled_end ? ` – ${dateTime(meeting.scheduled_end)}` : ""}</small><small>{meeting.location || "No physical location"}{meeting.conference_url ? ` · ${meeting.conference_url}` : ""} · {meeting.status.replaceAll("_", " ")}</small></div></article>)}</div></section> : null}
 
@@ -298,7 +312,21 @@ const PublicAuditAccessPage: React.FC = () => {
 
           <section className="qms-public-audit__card"><header><MessageSquareText size={19} /><div><strong>Released findings</strong><small>Only findings deliberately released by Quality are visible.</small></div></header>{!data.released_findings.length ? <p className="qms-public-audit__empty">No findings have been released to you.</p> : <div className="qms-public-audit__findings">{data.released_findings.map((finding) => { const artifacts = finding.released_evidence_refs.map(releasedEvidenceArtifact).filter((artifact): artifact is ReleasedEvidenceArtifact => Boolean(artifact)); return <article key={finding.id}><div><span>{findingClassification(finding.severity, finding.level)}</span><strong>{finding.finding_ref || "Finding"}</strong><small>{finding.requirement_ref || "No requirement reference"}</small><p>{finding.description}</p>{finding.objective_evidence ? <blockquote>{finding.objective_evidence}</blockquote> : null}{canReadReleasedEvidence && artifacts.length ? <div>{artifacts.map((artifact) => <button type="button" key={artifact.artifactId} disabled={evidenceBusy === artifact.artifactId} onClick={() => void downloadEvidence(finding.id, artifact)}><Download size={14} /> {artifact.filename}</button>)}</div> : null}</div>{canAcknowledge && !finding.acknowledged_at ? <button type="button" disabled={actionId === finding.id} onClick={() => void acknowledge(finding.id)}>Acknowledge finding</button> : <small>{finding.acknowledged_at ? `Receipt acknowledged · ${dateTime(finding.acknowledged_at)}` : ""}</small>}</article>; })}</div>}</section>
 
-          {collaboration?.cars.length ? <section className="qms-public-audit__card"><header><Wrench size={19} /><div><strong>Corrective actions shared with you</strong><small>These CARs are linked only to findings that Quality explicitly released.</small></div></header><div className="qms-public-audit__requests">{collaboration.cars.map((car) => <article key={car.id}><div><strong>{car.car_number} · {car.title}</strong><p>{car.summary}</p><small>{car.finding_ref || "Finding"} · {car.priority || "Priority not stated"} · {car.status || "Open"}</small><small>Target closure {car.target_closure_date || car.due_date || "not set"}</small></div></article>)}</div></section> : null}
+          {collaboration?.cars.length ? (
+            <section className="qms-public-audit__card" aria-label="Corrective action plans">
+              <header><Wrench size={19} /><div><strong>Corrective action plans</strong><small>Open a response to record containment, root cause, corrective and preventive actions, dates and supporting evidence.</small></div></header>
+              <div className="qms-public-audit__requests">
+                {collaboration.cars.map((car) => (
+                  <article key={car.id}>
+                    <div><strong>{car.car_number} · {car.title}</strong><p>{car.summary}</p><small>{car.finding_ref || "Finding"} · {car.priority || "Priority not stated"} · {car.status || "Open"}</small><small>Target closure {car.target_closure_date || car.due_date || "not set"}</small></div>
+                    {canRespondToCars && car.response_url?.startsWith("/qms/car-access/") ? (
+                      <a className="qms-public-audit__response-link" href={car.response_url} target="_blank" rel="noopener noreferrer">Open CAP response <span className="sr-only">for {car.car_number} in a new tab</span></a>
+                    ) : <small>{car.closed_at || car.status === "CLOSED" ? "Corrective action closed" : "Quality will provide response access to the responsible auditee."}</small>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {collaboration?.closing_narrative && (collaboration.closing_narrative.management_summary || collaboration.closing_narrative.conclusion || collaboration.closing_narrative.positive_practices) ? <section className="qms-public-audit__card"><header><FileText size={19} /><div><strong>Closing meeting narrative</strong><small>The narrative used by the governed report generator.</small></div></header>{collaboration.closing_narrative.management_summary ? <><strong>Management summary</strong><p>{collaboration.closing_narrative.management_summary}</p></> : null}{collaboration.closing_narrative.conclusion ? <><strong>Conclusion</strong><p>{collaboration.closing_narrative.conclusion}</p></> : null}{collaboration.closing_narrative.positive_practices ? <><strong>Positive practices</strong><p>{collaboration.closing_narrative.positive_practices}</p></> : null}</section> : null}
 

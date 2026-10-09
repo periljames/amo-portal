@@ -8,11 +8,11 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v10";
+const VERSION = "v11";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
-const SHELL_URLS = ["/", "/portal.webmanifest", "/login-illustration-placeholder.svg", "/vite.svg"];
+const SHELL_URLS = ["/", "/portal.webmanifest", "/login-illustration-placeholder.svg", "/portal-icon.svg"];
 // Production releases contain hundreds of lazy route chunks. Fetching every
 // manifest entry with one Promise.all can exhaust Chromium/socket resources and
 // can compete with the login/API traffic that the live portal actually needs.
@@ -145,7 +145,7 @@ function isStaticAsset(request, url) {
   if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/pdfjs/")) return true;
   if (/\.(?:svg|png|jpe?g|webp|gif|ico|woff2?)$/i.test(url.pathname)) return true;
   return [
-    "/vite.svg",
+    "/portal-icon.svg",
     "/login-illustration-placeholder.svg",
     "/portal.webmanifest",
     "/manuals-reader.webmanifest",
@@ -208,7 +208,7 @@ function looksLikeCachedStatic(url) {
       || url.startsWith("/pdfjs/")
       || /\.(?:svg|png|jpe?g|webp|gif|ico|woff2?)$/i.test(url)
       || [
-        "/vite.svg",
+        "/portal-icon.svg",
         "/login-illustration-placeholder.svg",
         "/portal.webmanifest",
         "/manuals-reader.webmanifest",

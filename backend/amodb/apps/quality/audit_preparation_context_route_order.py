@@ -4,16 +4,11 @@ from fastapi import APIRouter
 
 from . import audit_preparation_context_router
 from .canonical_router import router
+from .route_ordering import promote_route_family
 
 
 def _is_context_route(route_item) -> bool:
     return str(getattr(route_item, "path", "")).endswith("/audits/{audit_id}/preparation-context")
-
-
-def _is_generic_catchall(route_item) -> bool:
-    path = str(getattr(route_item, "path", ""))
-    methods = set(getattr(route_item, "methods", None) or ())
-    return path.endswith("/{module_path:path}") and bool(methods & {"GET", "POST", "PATCH", "DELETE"})
 
 
 def _register(api_router: APIRouter) -> None:
@@ -22,12 +17,7 @@ def _register(api_router: APIRouter) -> None:
 
 
 def _promote(api_router: APIRouter) -> None:
-    routes = [item for item in api_router.routes if _is_context_route(item)]
-    if not routes:
-        raise RuntimeError("QMS audit preparation context route was not registered")
-    remaining = [item for item in api_router.routes if not _is_context_route(item)]
-    catchall_index = next((index for index, item in enumerate(remaining) if _is_generic_catchall(item)), len(remaining))
-    api_router.routes[:] = [*remaining[:catchall_index], *routes, *remaining[catchall_index:]]
+    promote_route_family(api_router, predicate=_is_context_route, label="QMS audit preparation context")
 
 
 for api_router in (router,):

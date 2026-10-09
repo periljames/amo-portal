@@ -884,3 +884,11 @@
     text-align: left;
   }
 }
+.qms-live-audit-focus__schedule {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color, #dbe4ef);
+  color: var(--text-secondary, #475569);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: var(--surface-subtle, #f8fafc);
+}

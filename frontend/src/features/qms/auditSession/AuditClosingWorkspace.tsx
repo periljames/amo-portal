@@ -135,6 +135,9 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-passkeys", amoCode] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-assurance-artifacts", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-authority-attestation", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
     ]);
   };
   const generateMutation = useMutation({
@@ -303,7 +306,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
   const refresh = async () => { setLocalError(null); await queryClient.invalidateQueries({ queryKey: ["qms-audit-output-policy", amoCode] }); await invalidateClosing(); };
   const prerequisiteError = compositionQuery.error || revisionsQuery.error || closureQuery.error || policyQuery.error || signaturesQuery.error || acknowledgementsQuery.error || assuranceArtifactsQuery.error || passkeysQuery.error;
-  if (auditQuery.isLoading || compositionQuery.isLoading || revisionsQuery.isLoading || closureQuery.isLoading || policyQuery.isLoading || signaturesQuery.isLoading || acknowledgementsQuery.isLoading || assuranceArtifactsQuery.isLoading || (canGovern && passkeysQuery.isLoading)) return <div className="qms-audit-closing qms-audit-closing--loading">Preparing governed closing meeting workspace…</div>;
+  if (auditQuery.isPending || (Boolean(auditId) && (compositionQuery.isPending || revisionsQuery.isPending || closureQuery.isPending || policyQuery.isPending || signaturesQuery.isPending || acknowledgementsQuery.isPending || assuranceArtifactsQuery.isPending || (canGovern && passkeysQuery.isPending)))) return <div className="qms-audit-closing qms-audit-closing--loading">Preparing governed closing meeting workspace…</div>;
   if (auditQuery.error || !auditQuery.data) {
     return (
       <AuditStageLoadError
@@ -343,7 +346,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <p className="qms-audit-closing__helper">Closing meeting · Generate the report, get acknowledgement, approve, then issue.</p>
         </div>
         <div className="qms-audit-closing__header-actions">
-          <Link className="qms-audit-closing__continue" to={auditSessionPath(amoCode, auditKey, "follow-up")}>Continue to Follow-up <ArrowRight size={15} aria-hidden /></Link>
+          <Link className="qms-audit-closing__continue" to={auditSessionPath(amoCode, auditKey, "follow-up")}>{closure?.execution_status === "CLOSED" ? "Continue to Follow-up" : "View corrective actions"} <ArrowRight size={15} aria-hidden /></Link>
           <button type="button" onClick={() => void refresh()}><RefreshCw size={15} /> Refresh</button>
           <Link to={auditSessionPath(amoCode, auditKey, "live")}><X size={16} /> Back to Fieldwork</Link>
         </div>

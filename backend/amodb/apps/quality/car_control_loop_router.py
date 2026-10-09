@@ -497,6 +497,10 @@ def _initialize_control_loop(
         )
         db.add(milestone)
 
+    db.flush()
+    from .car_response_workflow import sync_response_milestones
+    sync_response_milestones(db, car, actor_user_id=ctx.user_id, record_review=False)
+
     _add_event(
         db,
         car=car,

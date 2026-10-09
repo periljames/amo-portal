@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -47,7 +48,7 @@ export function listAuditEvidence(amoCode: string, auditId: string, checklistIte
     timeoutMs: 15_000,
     cacheTtlMs: 1_000,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "evidence"));
 }
 
 function appendEvidenceContext(form: FormData, context?: AuditEvidenceContext | null): void {

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-import inspect
+import uuid
+from unittest.mock import MagicMock
 
 import fitz
 
 from amodb.apps.quality import audit_report_composition
+from amodb.apps.quality import models
+from amodb.apps.quality.audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
 from amodb.apps.quality.audit_report_composition import _canonical_hash, _render_pdf
 
 
@@ -148,14 +151,31 @@ def test_report_renderer_handles_no_findings_without_inventing_content(tmp_path:
 
 
 
-def test_report_snapshot_reads_checklist_evidence_from_authoritative_models() -> None:
-    source = inspect.getsource(audit_report_composition.build_report_snapshot)
-    checklist_source = source[
-        source.index("def checklist_snapshot"):
-        source.index("return _json_value")
-    ]
+def test_report_snapshot_includes_untouched_items_and_authoritative_evidence() -> None:
+    audit_id = uuid.uuid4()
+    audit = models.QMSAudit(id=audit_id, amo_id="tenant-1", audit_ref="QAR/26/005", title="Audit", status=models.QMSAuditStatus.IN_PROGRESS)
+    untouched = models.QualityAuditChecklistItem(id=uuid.uuid4(), audit_id=audit_id, prompt="Untouched question", response_status="PENDING", sort_order=0)
+    answered = models.QualityAuditChecklistItem(id=uuid.uuid4(), audit_id=audit_id, prompt="Answered question", response_status="COMPLIANT", objective_evidence="Authoritative evidence", sort_order=1)
+    governance = QualityAuditChecklistExecutionGovernance(checklist_item_id=answered.id, canonical_response_status="COMPLIANT", evidence_references=["artifact-1"], applicability="APPLICABLE")
+    records = {
+        models.QMSAudit: [audit],
+        models.QualityAuditChecklistItem: [untouched, answered],
+        QualityAuditChecklistExecutionGovernance: [governance],
+    }
+    db = MagicMock()
 
-    assert '"objective_evidence": item.objective_evidence if item else None' in checklist_source
-    assert '"evidence_references": row.evidence_references or []' in checklist_source
-    assert '"objective_evidence": row.objective_evidence' not in checklist_source
-    assert "row.evidence_references_json" not in checklist_source
+    def query(model):
+        result = MagicMock()
+        result.filter.return_value = result
+        result.order_by.return_value = result
+        result.all.return_value = records.get(model, [])
+        result.first.return_value = next(iter(records.get(model, [])), None)
+        return result
+
+    db.query.side_effect = query
+    snapshot = audit_report_composition.build_report_snapshot(db, amo_id="tenant-1", audit_id=audit_id)
+    assert len(snapshot["checklist"]) == 2
+    assert snapshot["checklist"][0]["canonical_response_status"] == "NOT_VERIFIED"
+    assert snapshot["checklist"][1]["objective_evidence"] == "Authoritative evidence"
+    assert snapshot["checklist"][1]["evidence_references"] == ["artifact-1"]
+    db.add.assert_not_called()

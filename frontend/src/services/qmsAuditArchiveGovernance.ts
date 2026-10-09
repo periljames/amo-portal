@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { getToken } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -76,6 +77,8 @@ export type AuditArchiveGovernance = {
   active_holds: AuditLegalHold[];
   disposition?: AuditDispositionState | null;
   retention_due: boolean;
+  archive_readiness?: { ready: boolean; blockers: Array<{ type: string; reason: string }> };
+  disposition_review_valid?: boolean;
 };
 
 export type AuditRetentionPolicyCreate = {
@@ -98,7 +101,7 @@ export function getAuditArchiveGovernance(amoCode: string, auditId: string, sign
   return apiRequest<AuditArchiveGovernance>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/archive-governance`),
     { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
-  );
+  ).then((data) => requireAuditContract(data, "archive"));
 }
 
 export function createAuditRetentionPolicyRevision(amoCode: string, payload: AuditRetentionPolicyCreate) {

@@ -26,7 +26,7 @@ from .audit_checklist_execution_models import (
     QualityAuditFieldworkMutationReceipt,
     QualityAuditApplicabilityFact,
 )
-from .audit_checklist_response_policy import resolve_response_value
+from .audit_checklist_response_policy import canonical_response_from_legacy, resolve_response_value
 from .compliance_intelligence_service import (
     detect_requirement_conflicts,
     evaluate_applicability,
@@ -160,12 +160,7 @@ def _normalise_client_timestamp(value: datetime) -> datetime:
 
 
 def _canonical_from_legacy(value: str | None) -> CanonicalResponse:
-    normalized = str(value or "PENDING").upper()
-    if normalized == "NON_CONFORMING":
-        return "NONCOMPLIANT"
-    if normalized in {"COMPLIANT", "OBSERVATION", "NOT_APPLICABLE"}:
-        return normalized  # type: ignore[return-value]
-    return "NOT_VERIFIED"
+    return canonical_response_from_legacy(value)  # type: ignore[return-value]
 
 
 def _legacy_from_canonical(value: CanonicalResponse) -> str:
@@ -885,12 +880,12 @@ def _fieldwork_write_blocker(db: Session, *, amo_id: str, audit: models.QMSAudit
     ).order_by(QualityAuditPreparationRevision.revision_no.desc()).first()
     if prepared is None or prepared.status != "ISSUED":
         return "Issue the controlled preparation revision before checklist execution, evidence capture, or finding creation."
-    from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
+    from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers, _preparation_sources_match
 
     current = _capture_sources(db, amo_id=amo_id, audit=audit)
     if _preparation_readiness_blockers(current, phase="FIELDWORK"):
         return "Preparation is incomplete. Resolve every document request governed as required before fieldwork before checklist execution continues."
-    if prepared.source_fingerprint != current["source_fingerprint"]:
+    if not _preparation_sources_match(db, amo_id=amo_id, audit=audit, preparation=prepared, captured=current):
         return "Preparation changed after its last issue. Create and issue a fresh controlled preparation revision before fieldwork continues."
     return None
 
@@ -1954,7 +1949,6 @@ def create_atomic_fieldwork_finding(
             item_id=item_id,
             canonical_status=payload.canonical_response_status,
             auditor_notes=payload.auditor_notes,
-            sampled_item_information=payload.sampled_item_information,
             evidence_references=payload.evidence_references,
         )
         response_value = _validated_response_value(

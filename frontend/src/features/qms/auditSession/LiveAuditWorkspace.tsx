@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -25,6 +25,8 @@ import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import { listOfflineMutations } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
+import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
+import { listOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
 import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
@@ -237,6 +239,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [evidenceCapture, setEvidenceCapture] = useState({ busy: false, hasDraft: false });
   const [checklistSearch, setChecklistSearch] = useState("");
   const [checklistFilter, setChecklistFilter] = useState<"ALL" | "UNANSWERED" | "FINDINGS" | "EVIDENCE_REQUIRED">("ALL");
   const [connectivity, setConnectivity] = useState(() => getPortalConnectivity().state);
@@ -248,8 +251,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const auditId = auditQuery.data?.id || "";
   const fieldworkComplete = Boolean(auditQuery.data?.actual_end);
-  const canExecute = canExecuteAssignedAudit(auditQuery.data) && !fieldworkComplete;
-  const canCompleteFieldwork = canCompleteAuditFieldwork(auditQuery.data) && !fieldworkComplete;
   const sessionQuery = useQuery({
     queryKey: ["qms", "audit-session", amoCode, auditId],
     queryFn: ({ signal }) => getAuditSession(amoCode, auditId, signal),
@@ -257,6 +258,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 2_000,
   });
   const isLiveStage = Boolean(sessionQuery.data && isAtLeastLiveStage(sessionQuery.data.current_stage_id));
+  const writeWindowReady = Boolean(sessionQuery.data && !sessionQuery.isError && (sessionQuery.data.fieldwork_access?.ready ?? sessionQuery.data.preparation_issued));
+  const canExecute = canExecuteAssignedAudit(auditQuery.data) && writeWindowReady && !fieldworkComplete;
+  const canCompleteFieldwork = canCompleteAuditFieldwork(auditQuery.data) && writeWindowReady && !fieldworkComplete;
   const fieldworkEnabled = Boolean(auditId) && isLiveStage;
 
   const checklistQuery = useQuery({
@@ -281,11 +285,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 30_000,
   });
   const findingsQuery = useQuery({
-    queryKey: ["qms", "live-audit-findings", auditId],
+    queryKey: ["qms", "live-audit-findings", amoCode, auditId],
     queryFn: async () => {
       const offline = async () => {
         const pack = await readAuditOfflinePack(amoCode, auditId);
-        return pack ? projectOfflineFindings(pack) : null;
+        return pack ? requireAuditContract(projectOfflineFindings(pack), "findings") : null;
       };
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const local = await offline();
@@ -328,6 +332,14 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     staleTime: 500,
     refetchInterval: 2_000,
   });
+  const evidenceOutboxQuery = useQuery({
+    queryKey: ["qms", "live-evidence-outbox", amoCode, auditId],
+    queryFn: () => listOfflineAuditEvidence(amoCode, auditId),
+    enabled: fieldworkEnabled,
+    networkMode: "always",
+    staleTime: 500,
+    refetchInterval: 2_000,
+  });
 
   useEffect(() => onPortalConnectivityChange((snapshot) => setConnectivity(snapshot.state)), []);
 
@@ -367,6 +379,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const visibleItems = useMemo(() => {
     const term = checklistSearch.trim().toLowerCase();
     return items.filter((item) => {
+      if ((evidenceCapture.busy || evidenceCapture.hasDraft) && item.checklist_item_id === selectedId) return true;
       const source = sourceContextByItemId.get(item.checklist_item_id);
       const matchesSearch = !term || [
         item.checklist_ref,
@@ -382,7 +395,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_required_when?.length);
       return true;
     });
-  }, [checklistFilter, checklistSearch, items, sourceContextByItemId]);
+  }, [checklistFilter, checklistSearch, items, sourceContextByItemId, evidenceCapture.busy, evidenceCapture.hasDraft, selectedId]);
   const effectiveSelectedId = useMemo(() => {
     if (!visibleItems.length) return null;
     if (selectedId && visibleItems.some((item) => item.checklist_item_id === selectedId)) return selectedId;
@@ -390,6 +403,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [selectedId, visibleItems]);
   const selectedIndex = effectiveSelectedId ? visibleItems.findIndex((item) => item.checklist_item_id === effectiveSelectedId) : -1;
   const selected = selectedIndex >= 0 ? visibleItems[selectedIndex] : null;
+  const onEvidenceCaptureChange = useCallback((state: { busy: boolean; hasDraft: boolean }) => {
+    setEvidenceCapture(state);
+    if ((state.busy || state.hasDraft) && effectiveSelectedId) setSelectedId(effectiveSelectedId);
+  }, [effectiveSelectedId]);
   const selectedSource = selected ? sourceContextByItemId.get(selected.checklist_item_id) || null : null;
   const selectedResponseOptions = useMemo(
     () => selectedSource?.response_options?.length
@@ -456,7 +473,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const refreshFieldwork = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
-      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-findings", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-bindings", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "checklist-evidence-candidates", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "external-finding-drafts", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "audit-session", amoCode, auditId] }),
@@ -498,6 +516,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       }
       setSyncNotice(null);
       setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Checklist update failed."));
+      if (error instanceof ApiClientError && error.status === 409) void refreshFieldwork();
       void outboxQuery.refetch();
     },
   });
@@ -549,6 +568,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       }
       setSyncNotice(null);
       setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Finding creation failed."));
+      if (error instanceof ApiClientError && error.status === 409) void refreshFieldwork();
       void outboxQuery.refetch();
     },
   });
@@ -564,6 +584,16 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const findings = findingsQuery.data || [];
   const completionBlockers = useMemo(() => {
     const blockers: string[] = [];
+    if (connectivity !== "ONLINE") blockers.push("Reconnect before completing fieldwork");
+    if (evidenceCapture.busy) blockers.push("Wait for the current evidence upload to finish");
+    else if (evidenceCapture.hasDraft) blockers.push("Attach or clear the selected evidence file before completing fieldwork");
+    if (evidenceOutboxQuery.isPending || evidenceOutboxQuery.isError) blockers.push("Pending evidence uploads could not yet be verified");
+    else if (evidenceOutboxQuery.data?.length) blockers.push(`${evidenceOutboxQuery.data.length} evidence file(s) still need synchronization or conflict review`);
+    if (!writeWindowReady) blockers.push(sessionQuery.data?.fieldwork_access?.blocker || "Preparation readiness could not be verified");
+    if (updateMutation.isPending || findingMutation.isPending) blockers.push("Wait for the current checklist or finding save to finish");
+    if (findingsQuery.isPending || findingsQuery.isError) blockers.push("Finding records could not yet be verified");
+    if (externalDraftsQuery.isPending) blockers.push("External finding drafts are still loading");
+    if (outboxQuery.isPending || outboxQuery.isError) blockers.push("Pending device changes could not yet be verified");
     if (!items.length) blockers.push("No governed checklist is bound");
     if (unsavedDraftCount) blockers.push(`${unsavedDraftCount} checklist item${unsavedDraftCount === 1 ? " has" : "s have"} unsaved fieldwork changes`);
     if (counts.NOT_VERIFIED) blockers.push(`${counts.NOT_VERIFIED} checklist item${counts.NOT_VERIFIED === 1 ? " is" : "s are"} not verified`);
@@ -595,7 +625,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (outbox.conflicts) blockers.push(`${outbox.conflicts} sync conflict${outbox.conflicts === 1 ? " requires" : "s require"} review`);
     if (outbox.failed) blockers.push(`${outbox.failed} failed sync change${outbox.failed === 1 ? " requires" : "s require"} review`);
     return blockers;
-  }, [counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued, unsavedDraftCount]);
+  }, [connectivity, evidenceCapture, evidenceOutboxQuery.isPending, evidenceOutboxQuery.isError, evidenceOutboxQuery.data?.length, counts.NOT_VERIFIED, externalDraftsQuery.data?.items, externalDraftsQuery.isError, externalDraftsQuery.isPending, findingsQuery.isPending, findingsQuery.isError, findingMutation.isPending, updateMutation.isPending, outboxQuery.isPending, outboxQuery.isError, items, outbox.conflicts, outbox.failed, outbox.queued, unsavedDraftCount, writeWindowReady, sessionQuery.data?.fieldwork_access?.blocker]);
   const completeMutation = useMutation({
     mutationFn: () => completeAuditFieldwork(amoCode, auditId),
     onSuccess: async () => {
@@ -607,13 +637,28 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onError: (error) => {
       setSyncNotice(null);
       setLocalError(fieldworkConflictMessage(error) || (error instanceof Error ? error.message : "Fieldwork could not be completed."));
+      if (error instanceof ApiClientError && error.status === 409) void refreshFieldwork();
     },
   });
+  useEffect(() => {
+    if (!unsavedDraftCount && !findingDraft && !evidenceCapture.busy && !evidenceCapture.hasDraft) return;
+    const warnBeforeReload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnBeforeReload);
+    return () => window.removeEventListener("beforeunload", warnBeforeReload);
+  }, [unsavedDraftCount, findingDraft, evidenceCapture]);
 
+  const selectItem = (itemId: string) => {
+    if (itemId === selected?.checklist_item_id) return;
+    if (evidenceCapture.busy || evidenceCapture.hasDraft) {
+      setLocalError(evidenceCapture.busy ? "Wait for the evidence upload to finish before changing questions." : "Attach or clear the selected evidence file before changing questions.");
+      return;
+    }
+    setSelectedId(itemId);
+  };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
     const nextIndex = Math.min(visibleItems.length - 1, Math.max(0, selectedIndex + offset));
-    setSelectedId(visibleItems[nextIndex].checklist_item_id);
+    selectItem(visibleItems[nextIndex].checklist_item_id);
   };
 
   const responseRequirementError = (
@@ -692,7 +737,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     });
   };
 
-  if (auditQuery.isLoading) {
+  if (auditQuery.isPending) {
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
   }
   if (auditQuery.isError || !auditQuery.data) {
@@ -731,7 +776,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       <AuditStageLoadError
         className="qms-live-audit-focus qms-live-audit-focus--error"
         title="Prepare the audit before fieldwork"
-        detail={`Fieldwork requires the authoritative Fieldwork stage (or later). Current stage: ${sessionQuery.data.current_stage_label}. Complete preparation and advance the lifecycle before checklist execution, presence, or findings load.`}
+        detail={`${sessionQuery.data.fieldwork_access?.blocker || "Open Prepare, complete its readiness requirements and issue the preparation revision."} Current stage: ${sessionQuery.data.current_stage_label}. The planned start time does not block entry into fieldwork.`}
+        onRetry={() => void sessionQuery.refetch()}
         exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
         exitLabel="Back to Prepare"
         secondaryHref={auditSessionPath(amoCode, auditKey, "setup")}
@@ -739,15 +785,15 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  if (checklistQuery.isLoading || bindingsQuery.isLoading) {
+  if (checklistQuery.isLoading || bindingsQuery.isLoading || findingsQuery.isLoading) {
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
   }
-  const prerequisiteError = checklistQuery.error || bindingsQuery.error;
+  const prerequisiteError = checklistQuery.error || bindingsQuery.error || findingsQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
         className="qms-live-audit-focus qms-live-audit-focus--error"
-        title="Prepare the audit before fieldwork"
+        title="Fieldwork records could not be loaded"
         detail={auditPrerequisiteLoadDetail(
           prerequisiteError,
           "Fieldwork is not initialized yet. Complete preparation and apply the governed checklist before opening Fieldwork.",
@@ -755,6 +801,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         onRetry={() => {
           void checklistQuery.refetch();
           void bindingsQuery.refetch();
+          void findingsQuery.refetch();
         }}
         exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
         exitLabel="Back to Prepare"
@@ -803,6 +850,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       </header>
 
+      <div className="qms-live-audit-focus__schedule" role="status">
+        <strong>Planned window:</strong> {auditQuery.data.planned_start?.slice(0, 10) || "Not scheduled"} {auditQuery.data.planned_start_time?.slice(0, 5) || ""} – {auditQuery.data.planned_end?.slice(0, 10) || ""} {auditQuery.data.planned_end_time?.slice(0, 5) || ""}.
+        <span> Entry is controlled by issued preparation and audit readiness. The planned time does not lock this workspace.</span>
+      </div>
+      {!canExecute && !fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">{sessionQuery.data.fieldwork_access?.blocker || "Read-only: only assigned auditors can record fieldwork. The assigned lead auditor completes fieldwork."} <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Review preparation</Link></div> : null}
+      {externalDraftsQuery.isError || outboxQuery.isError || evidenceOutboxQuery.isError ? <div className="qms-live-audit-focus__error" role="alert">Completion is paused because external drafts, pending device changes or evidence uploads could not be verified. <button type="button" onClick={() => { void externalDraftsQuery.refetch(); void outboxQuery.refetch(); void evidenceOutboxQuery.refetch(); }}>Retry completion checks</button></div> : null}
+      {presenceQuery.isError ? <div className="qms-live-audit-focus__sync-notice" role="status">Team presence is temporarily unavailable. You can continue recording fieldwork.</div> : null}
       {fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">Fieldwork is complete. This workspace is read-only; reopen the governed lifecycle before recording further work.</div> : null}
       {localError ? <div className="qms-live-audit-focus__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
@@ -818,12 +872,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <label>
               <Search size={14} aria-hidden="true" />
               <span className="sr-only">Search checklist</span>
-              <input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search checklist" />
+              <input value={checklistSearch} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search checklist" />
             </label>
             <label>
               <Filter size={14} aria-hidden="true" />
               <span className="sr-only">Filter checklist</span>
-              <select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
+              <select value={checklistFilter} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
                 <option value="ALL">All items</option>
                 <option value="UNANSWERED">Unanswered</option>
                 <option value="FINDINGS">Findings / observations</option>
@@ -833,7 +887,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </div>
           <div className="qms-live-audit-focus__question-list">
             {visibleItems.map((item, index) => (
-              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} onClick={() => setSelectedId(item.checklist_item_id)}>
+              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} onClick={() => selectItem(item.checklist_item_id)}>
                 <span>{index + 1}</span>
                 <div><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small><span>{item.section || "General"}</span></div>
                 <em data-status={item.canonical_response_status}>{statusLabel(item.canonical_response_status)}</em>
@@ -1011,7 +1065,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   </div>
                   {assessment.ai_analysis?.conclusion ? <div className="qms-live-audit-focus__ai-analysis"><strong>Structured AI assistance</strong><p>{assessment.ai_analysis.conclusion}</p><small>{assessment.ai_analysis.confidence_basis || "No confidence basis recorded."}</small></div> : null}
                   {canExecute ? <div className="qms-live-audit-focus__assessment-actions">
-                    <button type="button" disabled={updateMutation.isPending} onClick={saveCurrentAssessment}>
+                    <button type="button" disabled={updateMutation.isPending || findingMutation.isPending || completeMutation.isPending} onClick={saveCurrentAssessment}>
                       {updateMutation.isPending ? "Saving…" : "Save assessment"}
                     </button>
                     <small>Saves the evidence basis and verification state without changing the current checklist outcome.</small>
@@ -1035,7 +1089,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <div className="qms-live-audit-focus__note-actions"><button type="button" disabled={!canExecute || updateMutation.isPending} onClick={saveCurrentAssessment}>{updateMutation.isPending ? "Saving…" : "Save notes & assessment"}</button></div>
 
               <div id="audit-occurrence-evidence">
-                <LiveAuditEvidenceStrip
+                <LiveAuditEvidenceStrip onCaptureStateChange={onEvidenceCaptureChange}
                   amoCode={amoCode}
                   auditId={auditId}
                   item={selected}

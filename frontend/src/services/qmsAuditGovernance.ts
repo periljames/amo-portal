@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { apiBlob } from "./typedApi";
+import { requirePreparationContract } from "./qmsAuditPreparationContract";
 
 export type AuditPreparationRevision = {
   id: string;
@@ -175,14 +176,14 @@ export function listAuditActivity(amoCode: string, auditId: string, signal?: Abo
   return apiRequest<{ items: AuditActivityItem[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/activity`),
     { timeoutMs: 15_000, cacheTtlMs: 2_000, staleWhileOfflineMs: 24 * 60 * 60_000, signal },
-  );
+  ).then((data) => requirePreparationContract(data, "activity"));
 }
 
 export function getAuditPreparationReadiness(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<AuditPreparationReadiness>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/preparation-readiness`),
     { timeoutMs: 15_000, cacheTtlMs: 0, signal },
-  );
+  ).then((data) => requirePreparationContract(data, "readiness"));
 }
 
 export function createAuditPreparationRevision(

@@ -79,12 +79,13 @@ def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
-    row = db.query(models.QMSAudit).filter(
+def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID, lock: bool = False) -> models.QMSAudit:
+    query = db.query(models.QMSAudit).filter(
         models.QMSAudit.amo_id == amo_id,
         models.QMSAudit.id == audit_id,
         models.QMSAudit.deleted_at.is_(None),
-    ).first()
+    )
+    row = (query.with_for_update() if lock else query).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Audit not found.")
     return row
@@ -344,11 +345,20 @@ def _hold_state(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> dict[str, Q
     events = db.query(QualityAuditLegalHoldEvent).filter(
         QualityAuditLegalHoldEvent.amo_id == amo_id,
         QualityAuditLegalHoldEvent.audit_id == audit_id,
-    ).order_by(QualityAuditLegalHoldEvent.created_at.asc()).all()
+    ).order_by(QualityAuditLegalHoldEvent.created_at.asc(), QualityAuditLegalHoldEvent.id.asc()).all()
     latest: dict[str, QualityAuditLegalHoldEvent] = {}
     for event in events:
         latest[event.hold_key] = event
     return latest
+
+
+def _validate_hold_manifest(db: Session, *, amo_id: str, audit_id: uuid.UUID, manifest_id: str | None) -> None:
+    if manifest_id and db.query(QualityAuditArchiveManifest.id).filter(
+        QualityAuditArchiveManifest.amo_id == amo_id,
+        QualityAuditArchiveManifest.audit_id == audit_id,
+        QualityAuditArchiveManifest.id == manifest_id,
+    ).first() is None:
+        raise HTTPException(status_code=404, detail="Archive manifest not found for this audit.")
 
 
 def _active_holds(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> list[QualityAuditLegalHoldEvent]:
@@ -422,7 +432,8 @@ def place_legal_hold(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
+    _validate_hold_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id, manifest_id=payload.manifest_id)
     policy = _latest_policy(db, ctx.amo_id)
     if policy is None or not policy.legal_hold_supported:
         raise HTTPException(status_code=409, detail="Current retention policy does not enable legal-hold governance.")
@@ -457,6 +468,8 @@ def release_legal_hold(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
+    _validate_hold_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id, manifest_id=payload.manifest_id)
     normalized_key = hold_key.strip()[:128]
     latest = _hold_state(db, amo_id=ctx.amo_id, audit_id=audit_id).get(normalized_key)
     if latest is None or latest.event_type != "PLACED":
@@ -485,6 +498,7 @@ def review_disposition(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     policy = _latest_policy(db, ctx.amo_id)
     if policy is None:
         raise HTTPException(status_code=409, detail="Audit retention policy is not configured.")
@@ -496,6 +510,12 @@ def review_disposition(
     ).first()
     if manifest is None:
         raise HTTPException(status_code=404, detail="Archive manifest not found.")
+    if db.query(QualityAuditDispositionEvent.id).filter(
+        QualityAuditDispositionEvent.amo_id == ctx.amo_id,
+        QualityAuditDispositionEvent.manifest_id == manifest.id,
+        QualityAuditDispositionEvent.event_type == "EXECUTED",
+    ).first() is not None:
+        raise HTTPException(status_code=409, detail="Disposition has already been executed for this manifest.")
     row = QualityAuditDispositionEvent(
         amo_id=ctx.amo_id,
         audit_id=audit_id,
@@ -503,6 +523,7 @@ def review_disposition(
         event_type="APPROVED" if payload.approved else "REJECTED",
         disposition_mode=policy.disposition_mode,
         inventory_sha256=_inventory_hash(manifest),
+        package_sha256=manifest.package_sha256,
         reason=payload.reason.strip(),
         actor_user_id=ctx.user_id,
     )

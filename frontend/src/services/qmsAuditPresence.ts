@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
 
@@ -24,7 +25,7 @@ export function listAuditPresence(amoCode: string, auditId: string, signal?: Abo
     timeoutMs: 10_000,
     cacheTtlMs: 2_000,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "presence"));
 }
 
 export async function heartbeatPublicAuditPresence(route = "audit-access"): Promise<boolean> {

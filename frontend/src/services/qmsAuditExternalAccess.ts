@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 import { getToken } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -207,7 +208,7 @@ export function listAuditFindingReleases(amoCode: string, auditId: string, signa
     timeoutMs: 15_000,
     cacheTtlMs: 1_500,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "findingReleases"));
 }
 
 export function releaseAuditFinding(

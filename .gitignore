@@ -24,3 +24,13 @@ frontend/dist/
 venv/
 # Disposable local access-policy and browser verification output
 .test-artifacts/
+
+# Generated logs, browser recordings and repository snapshots
+.runtime-logs/
+frontend/test-results/
+frontend/playwright-report/
+amo-portal.zip
+backend.zip
+frontend/frontend.zip
+.runtime-logs.zip
+structure.txt

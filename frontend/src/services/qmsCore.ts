@@ -8,6 +8,7 @@
 import { ApiClientError, apiRequest, qualityPath } from "./apiClient";
 import { getToken, handleAuthFailure, getContext } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import {
   beginBackgroundLoading,
   beginLoading,
@@ -1731,13 +1732,17 @@ export async function qmsListFindings(
   auditId: string,
   amoCode?: string,
 ): Promise<QMSFindingOut[]> {
-  if (amoCode) {
-    return apiRequest<QMSFindingOut[]>(
+  const findings = amoCode
+    ? await apiRequest<QMSFindingOut[]>(
       qualityPath(amoCode, `/audits/${encodeURIComponent(auditId)}/findings`),
       { cacheTtlMs: 0 },
-    );
+    )
+    : await fetchJson<QMSFindingOut[]>(`/quality/audits/${encodeURIComponent(auditId)}/findings`);
+  requireAuditContract(findings, "findings");
+  if (findings.some((finding) => finding.audit_id !== auditId)) {
+    throw new Error("These findings could not be verified for this audit. Retry to load the correct audit record.");
   }
-  return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
+  return findings;
 }
 
 export async function qmsCreateFinding(
@@ -2094,6 +2099,7 @@ export async function qmsForwardCarExtensionRequest(
 }
 
 export interface CARInviteOut {
+  deadline_change_requires_review?: boolean;
   car_id: string;
   invite_token: string;
   invite_url: string;

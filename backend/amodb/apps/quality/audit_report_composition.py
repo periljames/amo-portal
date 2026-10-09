@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+from .audit_checklist_response_policy import canonical_response_from_legacy
 from .audit_occurrence_completion_models import QualityAuditClosingNarrative, QualityAuditMeeting
 from .audit_report_composition_models import QualityAuditReportArtifact
 from .storage_replication import (
@@ -107,13 +108,11 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         QualityAuditChecklistExecutionGovernance.amo_id == amo_id,
         QualityAuditChecklistExecutionGovernance.audit_id == audit_id,
     ).order_by(QualityAuditChecklistExecutionGovernance.created_at.asc()).all()
-    checklist_item_ids = [row.checklist_item_id for row in checklist]
     checklist_items = db.query(models.QualityAuditChecklistItem).filter(
         models.QualityAuditChecklistItem.amo_id == amo_id,
         models.QualityAuditChecklistItem.audit_id == audit_id,
-        models.QualityAuditChecklistItem.id.in_(checklist_item_ids),
-    ).all() if checklist_item_ids else []
-    checklist_item_by_id = {row.id: row for row in checklist_items}
+    ).order_by(models.QualityAuditChecklistItem.sort_order.asc(), models.QualityAuditChecklistItem.id.asc()).all()
+    governance_by_item = {row.checklist_item_id: row for row in checklist}
 
     findings = db.query(models.QMSAuditFinding).filter(
         models.QMSAuditFinding.amo_id == amo_id,
@@ -174,23 +173,23 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
         if user_id
     ]
 
-    def checklist_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[str, Any]:
-        item = checklist_item_by_id.get(row.checklist_item_id)
+    def checklist_snapshot(item: models.QualityAuditChecklistItem) -> dict[str, Any]:
+        row = governance_by_item.get(item.id)
         return {
-            "checklist_item_id": row.checklist_item_id,
-            "section": item.section if item else None,
-            "checklist_ref": item.checklist_ref if item else None,
-            "requirement_ref": item.requirement_ref if item else None,
-            "prompt": item.prompt if item else None,
-            "sort_order": item.sort_order if item else None,
-            "canonical_response_status": row.canonical_response_status,
-            "response_value": row.response_value,
-            "auditor_notes": row.auditor_notes,
-            "auditee_comments": row.auditee_comments,
-            "sampled_item_information": row.sampled_item_information,
-            "applicability": row.applicability,
-            "objective_evidence": item.objective_evidence if item else None,
-            "evidence_references": row.evidence_references or [],
+            "checklist_item_id": item.id,
+            "section": item.section,
+            "checklist_ref": item.checklist_ref,
+            "requirement_ref": item.requirement_ref,
+            "prompt": item.prompt,
+            "sort_order": item.sort_order,
+            "canonical_response_status": row.canonical_response_status if row else canonical_response_from_legacy(item.response_status),
+            "response_value": row.response_value if row else None,
+            "auditor_notes": row.auditor_notes if row else None,
+            "auditee_comments": row.auditee_comments if row else None,
+            "sampled_item_information": row.sampled_item_information if row else None,
+            "applicability": row.applicability if row else "APPLICABLE",
+            "objective_evidence": item.objective_evidence,
+            "evidence_references": (row.evidence_references or []) if row else [],
         }
 
     return _json_value({
@@ -243,7 +242,7 @@ def build_report_snapshot(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> d
             }
             for row in meetings
         ],
-        "checklist": [checklist_snapshot(row) for row in checklist],
+        "checklist": [checklist_snapshot(item) for item in checklist_items],
         "findings": [
             {
                 "id": row.id,
@@ -492,6 +491,8 @@ def generate_report_artifact(
     audit = snapshot["audit"]
     if not audit.get("actual_end"):
         raise HTTPException(status_code=409, detail="Fieldwork must be formally completed before the closing report snapshot is generated.")
+    if not snapshot["checklist"]:
+        raise HTTPException(status_code=409, detail="Assign and complete the audit checklist before generating the closing report.")
     pending = sum(1 for row in snapshot["checklist"] if row.get("canonical_response_status") == "NOT_VERIFIED")
     if pending:
         raise HTTPException(status_code=409, detail=f"{pending} checklist item(s) remain NOT_VERIFIED.")

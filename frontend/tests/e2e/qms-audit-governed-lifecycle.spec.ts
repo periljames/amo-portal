@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
 
 test.use({ ignoreHTTPSErrors: true, trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
 
@@ -268,6 +269,7 @@ async function prepareLifecycle(page: Page): Promise<void> {
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("**/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await mockPortalBackgroundRequests(page);
 }
 
 test.describe("governed audit lifecycle", () => {

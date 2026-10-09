@@ -52,8 +52,11 @@ function stringifyDetail(value: unknown): string {
 }
 
 export function portalErrorMessage(error: unknown, fallback = "The action could not be completed."): string {
-  if (error instanceof Error && error.message.trim()) return truncate(error.message);
-  if (typeof error === "string" && error.trim()) return truncate(error);
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (raw.trim()) {
+    if (/Symbol\(|not iterable|is not a function|Cannot read (?:properties|property)|Cannot destructure|(?:Type|Reference|Syntax)Error|Unexpected token|undefined is not|\[object Object\]/i.test(raw)) return fallback;
+    return truncate(raw);
+  }
   if (error && typeof error === "object") {
     const candidate = error as ErrorLike;
     const detail = candidate.detail ?? candidate.message ?? candidate.error;

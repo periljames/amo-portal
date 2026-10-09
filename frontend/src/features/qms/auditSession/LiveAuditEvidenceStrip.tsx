@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileUp, Paperclip, ShieldCheck } from "lucide-react";
 
@@ -17,7 +17,9 @@ import {
 } from "../../../services/qmsOfflineAuditEvidence";
 import type { ChecklistExecutionGovernanceRow } from "../../../services/qmsChecklistExecutionGovernance";
 import { projectOfflineEvidence, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
+import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
 import { saveDownloadedFile } from "../../../utils/downloads";
+import { portalErrorMessage } from "../../../services/portalError";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.mp4,.mov,.m4a,.wav";
 
@@ -31,6 +33,7 @@ type Props = {
   onChanged: () => Promise<void> | void;
   onError: (message: string | null) => void;
   onNotice: (message: string | null) => void;
+  onCaptureStateChange?: (state: { busy: boolean; hasDraft: boolean }) => void;
 };
 
 const LiveAuditEvidenceStrip: React.FC<Props> = ({
@@ -43,8 +46,10 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   onChanged,
   onError,
   onNotice,
+  onCaptureStateChange,
 }) => {
   const [file, setFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [description, setDescription] = useState("");
   const [contextDraft, setContextDraft] = useState({
     locationRef: "",
@@ -56,8 +61,11 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   });
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+  useEffect(() => { onCaptureStateChange?.({ busy, hasDraft: Boolean(file) }); }, [busy, file, onCaptureStateChange]);
+  useEffect(() => () => { onCaptureStateChange?.({ busy: false, hasDraft: false }); }, [onCaptureStateChange]);
 
   useEffect(() => {
+    if (fileInput.current) fileInput.current.value = "";
     setFile(null);
     setDescription("");
     setContextDraft({
@@ -75,7 +83,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     queryFn: async ({ signal }) => {
       const offline = async () => {
         const pack = await readAuditOfflinePack(amoCode, auditId);
-        return pack ? { items: projectOfflineEvidence(pack, item.checklist_item_id, null) } : null;
+        return pack ? requireAuditContract({ items: projectOfflineEvidence(pack, item.checklist_item_id, null) }, "evidence") : null;
       };
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const local = await offline();
@@ -96,6 +104,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   const pendingQuery = useQuery({
     queryKey: ["qms", "offline-audit-evidence", amoCode, auditId, item.checklist_item_id],
     queryFn: () => listOfflineAuditEvidence(amoCode, auditId, item.checklist_item_id),
+    networkMode: "always",
     staleTime: 500,
     refetchInterval: 2_000,
   });
@@ -113,6 +122,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     document_revision_ids: item.assessment?.document_revision_ids || [],
   });
   const resetCapture = () => {
+    if (fileInput.current) fileInput.current.value = "";
     setFile(null);
     setDescription("");
     setContextDraft({
@@ -246,6 +256,9 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   return (
     <section className="qms-live-audit-focus__evidence" aria-label="Governed evidence">
       <header><Paperclip size={16} /><div><strong>Governed evidence</strong><small>Immutable file objects · uploader attribution retained</small></div></header>
+      {evidenceQuery.isPending ? <p role="status">Loading saved evidence…</p> : null}
+      {evidenceQuery.isError ? <div role="alert"><p>{portalErrorMessage(evidenceQuery.error, "Saved evidence could not be loaded. Retry before selecting evidence for this assessment.")}</p><button type="button" onClick={() => void evidenceQuery.refetch()} disabled={evidenceQuery.isFetching}>Retry evidence</button></div> : null}
+      {pendingQuery.isError ? <div role="alert"><p>Local evidence waiting to synchronize could not be checked.</p><button type="button" onClick={() => void pendingQuery.refetch()} disabled={pendingQuery.isFetching}>Retry local evidence</button></div> : null}
       {artifacts.length ? (
         <ul>
           {artifacts.map((artifact) => {
@@ -259,7 +272,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
                       <input
                         type="checkbox"
                         checked={reliedUpon}
-                        disabled={!canManage}
+                        disabled={!canManage || evidenceQuery.isError}
                         onChange={(event) => onAssessmentEvidenceChange(artifact.id, event.target.checked)}
                       />
                       <span>Use in assessment</span>
@@ -271,7 +284,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
             );
           })}
         </ul>
-      ) : <p>No governed evidence file is linked to this checklist item yet.</p>}
+      ) : !evidenceQuery.isPending && !evidenceQuery.isError ? <p>No governed evidence file is linked to this checklist item yet.</p> : null}
       {pending.length ? (
         <div className="qms-live-audit-focus__evidence-pending" role="status" aria-live="polite">
           <strong>{pending.length} local evidence file{pending.length === 1 ? "" : "s"} pending</strong>
@@ -290,7 +303,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
       ) : null}
       {canManage ? (
         <div className="qms-live-audit-focus__evidence-upload">
-          <label><span>Attach evidence</span><input type="file" accept={ACCEPT} disabled={busy} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
+          <label><span>Attach evidence</span><input ref={fileInput} type="file" accept={ACCEPT} disabled={busy} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label>
           <label><span>What this demonstrates</span><input value={description} maxLength={4000} onChange={(event) => setDescription(event.target.value)} placeholder="Objective evidence observed or reviewed" /></label>
           <div className="qms-live-audit-focus__evidence-context-grid" aria-label="Structured evidence context">
             <label><span>Location</span><input value={contextDraft.locationRef} maxLength={255} onChange={(event) => setContextDraft((current) => ({ ...current, locationRef: event.target.value }))} placeholder="Base / line / station" /></label>
@@ -302,6 +315,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
           </div>
           <small className="qms-live-audit-focus__evidence-context-note">Regulation, procedure and document-revision references are inherited from the current structured assessment and stored with this evidence.</small>
           <button type="button" disabled={!file || busy} onClick={() => void upload()}><FileUp size={15} /> {busy ? "Uploading…" : "Attach to question"}</button>
+          {file ? <button type="button" disabled={busy} onClick={resetCapture}>Clear selected file</button> : null}
         </div>
       ) : null}
     </section>

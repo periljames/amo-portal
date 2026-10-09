@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { projectOfflineChecklistExecution, readAuditOfflinePack } from "./qmsAuditOfflinePack";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
 export type CanonicalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
 export type FieldworkFindingResponse = "NONCOMPLIANT" | "OBSERVATION";
@@ -257,14 +258,14 @@ function fieldworkEnvelope(clientMutationId: string, baseVersion: number) {
 export async function listChecklistExecutionGovernance(amoCode: string, auditId: string, signal?: AbortSignal) {
   const readOffline = async () => {
     const pack = await readAuditOfflinePack(amoCode, auditId);
-    return pack ? projectOfflineChecklistExecution(pack) as ChecklistExecutionGovernanceResponse : null;
+    return pack ? requireAuditContract(projectOfflineChecklistExecution(pack) as ChecklistExecutionGovernanceResponse, "checklist") : null;
   };
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();
     if (offline) return offline;
   }
   try {
-    return await apiRequest<ChecklistExecutionGovernanceResponse>(
+    return requireAuditContract(await apiRequest<ChecklistExecutionGovernanceResponse>(
       qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-execution-governance`),
       {
         timeoutMs: 15_000,
@@ -272,7 +273,7 @@ export async function listChecklistExecutionGovernance(amoCode: string, auditId:
         staleWhileOfflineMs: FIELDWORK_STALE_OFFLINE_MS,
         signal,
       },
-    );
+    ), "checklist");
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
@@ -378,7 +379,7 @@ export function getChecklistEvidenceCandidates(
       `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(itemId)}/evidence-candidates`,
     ),
     { timeoutMs: 20_000, cacheTtlMs: 15_000, signal },
-  );
+  ).then((data) => requireAuditContract(data, "candidates"));
 }
 
 export function getAuditApplicabilityContext(amoCode: string, auditId: string, signal?: AbortSignal) {

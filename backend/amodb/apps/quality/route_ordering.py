@@ -9,6 +9,24 @@ from fastapi import APIRouter
 RoutePredicate = Callable[[object], bool]
 
 
+def _is_generic_fallback(route_item: object) -> bool:
+    return str(getattr(route_item, "path", "")).endswith((
+        "/{module_path:path}", "/{module}/{record_id}/{action}",
+    ))
+
+
+def place_generic_fallbacks_last(api_router: APIRouter) -> None:
+    """Keep exact workflow handlers ahead of legacy module dispatch, stably.
+
+    Guard adapters deliberately precede their compatibility handlers. Preserve
+    that ownership order while ensuring a generic successful response cannot
+    replace a registered audit/CAR read or mutation.
+    """
+    exact = [route for route in api_router.routes if not _is_generic_fallback(route)]
+    fallbacks = [route for route in api_router.routes if _is_generic_fallback(route)]
+    api_router.routes[:] = [*exact, *fallbacks]
+
+
 def _route_shape(path: str) -> str:
     return re.sub(r"\{[^{}]+\}", "{}", path)
 
@@ -66,7 +84,7 @@ def promote_route_family(
         (
             index
             for index, route_item in enumerate(remaining)
-            if str(getattr(route_item, "path", "")).endswith("/{module_path:path}")
+            if _is_generic_fallback(route_item)
         ),
         len(remaining),
     )

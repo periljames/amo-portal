@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { requirePreparationContract } from "./qmsAuditPreparationContract";
 
 export type PreparationAuditSummary = {
   id: string;
@@ -69,5 +70,5 @@ export function getAuditPreparationContext(amoCode: string, auditId: string, sig
     timeoutMs: 20_000,
     cacheTtlMs: 3_000,
     signal,
-  });
+  }).then((data) => requirePreparationContract(data, "context"));
 }

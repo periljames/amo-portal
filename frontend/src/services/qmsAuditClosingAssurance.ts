@@ -1,3 +1,4 @@
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
 
 export type AuditOutputPolicyType = "NONE" | "REPORT_ONLY" | "APPROVAL_LETTER" | "CERTIFICATE" | "ATTESTATION";
@@ -97,21 +98,21 @@ export function getAuditOutputPolicy(amoCode: string, signal?: AbortSignal) {
     timeoutMs: 15_000,
     cacheTtlMs: 2_000,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "outputPolicy"));
 }
 
 export function listAuditSignatureEvidence(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditSignatureEvidence[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/signature-evidence`),
     { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
-  );
+  ).then((data) => requireAuditContract(data, "signatures"));
 }
 
 export function listAuditClosingAcknowledgements(amoCode: string, auditId: string, signal?: AbortSignal) {
   return apiRequest<{ items: AuditClosingAcknowledgement[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closing-acknowledgements`),
     { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
-  );
+  ).then((data) => requireAuditContract(data, "acknowledgements"));
 }
 
 export function listAuditWebAuthnCredentials(amoCode: string, signal?: AbortSignal) {
@@ -119,7 +120,7 @@ export function listAuditWebAuthnCredentials(amoCode: string, signal?: AbortSign
     timeoutMs: 15_000,
     cacheTtlMs: 1_500,
     signal,
-  });
+  }).then((data) => requireAuditContract(data, "passkeys"));
 }
 
 export function getAuditWebAuthnRegistrationOptions(amoCode: string) {
@@ -187,7 +188,7 @@ export function listAuditAssuranceArtifacts(amoCode: string, auditId: string, si
   return apiRequest<{ items: AuditAssuranceArtifact[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/assurance-artifacts`),
     { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
-  );
+  ).then((data) => requireAuditContract(data, "assuranceArtifacts"));
 }
 
 export function generateAuditAssuranceArtifact(amoCode: string, auditId: string, signatureEvidenceId: string) {

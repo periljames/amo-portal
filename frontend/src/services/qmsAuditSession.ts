@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { projectOfflineAuditSession, readAuditOfflinePack } from "./qmsAuditOfflinePack";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
 export type AuditSessionStageId = "setup" | "prepare" | "live" | "closing" | "follow-up" | "archive";
 
@@ -24,24 +25,26 @@ export type AuditSession = {
   execution_status: string;
   follow_up_status: string;
   archive_count: number;
+  fieldwork_access?: { ready: boolean; blocker: string | null };
 };
 
 export async function getAuditSession(amoCode: string, auditId: string, signal?: AbortSignal) {
   const readOffline = async () => {
     const pack = await readAuditOfflinePack(amoCode, auditId);
     if (!pack?.fieldwork_state.authorized) return null;
-    return projectOfflineAuditSession(pack) as AuditSession;
+    return requireAuditContract(projectOfflineAuditSession(pack) as AuditSession, "session");
   };
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();
     if (offline) return offline;
   }
   try {
-    return await apiRequest<AuditSession>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/session`), {
+    const session = await apiRequest<AuditSession>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/session`), {
       timeoutMs: 15_000,
       cacheTtlMs: 2_000,
       signal,
     });
+    return requireAuditContract(session, "session");
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;

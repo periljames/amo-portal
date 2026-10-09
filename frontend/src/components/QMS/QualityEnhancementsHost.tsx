@@ -13,6 +13,7 @@ import { getAuditSession } from "../../services/qmsAuditSession";
 import PortalTextScaleManager from "./PortalTextScaleManager";
 import QualityContextTabs from "./QualityContextTabs";
 import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
+import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 import "../../styles/qms-text-scale-override.css";
 import "../../styles/qms-audit-occurrence-shell.css";
 
@@ -129,7 +130,9 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
     return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
   }, [degraded]);
   const routeStage = auditSessionStageFromPath(location.pathname);
-  if (sessionQuery.data?.current_stage_id === "setup" && routeStage && routeStage !== "setup" && occurrenceQuery.data) {
+  // Preparation drafts can be composed while team eligibility is being resolved.
+  // The server readiness checks still block issue and entry into fieldwork.
+  if (sessionQuery.data?.current_stage_id === "setup" && routeStage && routeStage !== "setup" && routeStage !== "prepare" && occurrenceQuery.data) {
     const firstIssue = auditSetupIssues({
       title: occurrenceQuery.data.title || "",
       scope: occurrenceQuery.data.scope || "",
@@ -202,38 +205,38 @@ const QualityEnhancementsHost: React.FC = () => {
           <MobileAuditDeepLinkState />
 
           {auditSessionStage === "setup" ? (
-            <Suspense fallback={null}>
+            <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading audit setup…</div>}>
               <AuditSetupWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
             </Suspense>
           ) : null}
           {auditSessionStage === "prepare" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading prepare workspace…</div>}>
-              <AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
-              <AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
-              <QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} />
+              <PortalErrorBoundary inline title="Preparation workspace unavailable"><AuditPrepareWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <PortalErrorBoundary inline title="Document review unavailable"><AuditDocumentSubmissionReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <PortalErrorBoundary inline title="Audit governance controls unavailable"><QualityAuditGovernancePanelHost amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}
           {auditSessionStage === "live" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading live audit workspace…</div>}>
-              <LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
-              <LiveFindingReleasePanel amoCode={route.amoCode} auditKey={route.auditKey} />
-              <ExternalFindingDraftReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} />
+              <PortalErrorBoundary inline title="Fieldwork workspace unavailable" exitHref={auditSessionPath(route.amoCode, route.auditKey, "prepare")} exitLabel="Back to Prepare"><LiveAuditWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <PortalErrorBoundary inline title="Auditee release controls unavailable"><LiveFindingReleasePanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <PortalErrorBoundary inline title="External finding review unavailable"><ExternalFindingDraftReviewPanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}
           {auditSessionStage === "closing" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading closing workspace…</div>}>
-              <AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} />
-              <AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <PortalErrorBoundary inline title="Closing narrative unavailable"><AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <PortalErrorBoundary inline title="Closing workspace unavailable" exitHref={auditSessionPath(route.amoCode, route.auditKey, "live")} exitLabel="Back to Fieldwork"><AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}
           {auditSessionStage === "follow-up" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading follow-up workspace…</div>}>
-              <AuditFollowUpWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <PortalErrorBoundary inline title="Follow-up workspace unavailable" exitHref={auditSessionPath(route.amoCode, route.auditKey, "closing")} exitLabel="Back to Closing"><AuditFollowUpWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}
           {auditSessionStage === "archive" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading archive workspace…</div>}>
-              <AuditArchiveWorkspace amoCode={route.amoCode} auditKey={route.auditKey} />
+              <PortalErrorBoundary inline title="Archive workspace unavailable" exitHref={auditSessionPath(route.amoCode, route.auditKey, "follow-up")} exitLabel="Back to Follow-up"><AuditArchiveWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}
         </div>

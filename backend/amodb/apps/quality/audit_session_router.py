@@ -13,10 +13,12 @@ from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_closure_models import QualityAuditClosureState
+from .audit_archive_governance_models import QualityAuditArchiveManifest
 from .canonical_core_router import _log_qms_activity
 from .audit_preparation_models import QualityAuditPreparationRevision
 from .audit_schedule_rules import DEFAULT_END_TIME, DEFAULT_START_TIME, time_text, validate_planned_window
 from .audit_workflow_contract import build_authoritative_audit_workflow
+from .schemas import QMSFindingOut
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -160,6 +162,29 @@ def resolve_audit_occurrence(
     """Resolve exactly one tenant audit by immutable ID, reference or route slug."""
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _audit_payload(_resolve_audit(db, amo_id=ctx.amo_id, audit_key=audit_key))
+
+
+@router.get("/audits/{audit_id}/findings", response_model=list[QMSFindingOut])
+def list_audit_occurrence_findings(
+    audit_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.finding.view")),
+    db: Session = Depends(get_read_db),
+) -> list[QMSFindingOut]:
+    """Return the complete findings collection for this occurrence, not a register page."""
+    from amodb.apps.accounts import models as account_models
+    from .router import _require_audit_access, _serialize_finding
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _resolve_audit(db, amo_id=ctx.amo_id, audit_key=str(audit_id))
+    user = db.get(account_models.User, ctx.user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in again to load audit findings.")
+    _require_audit_access(user, audit)
+    rows = db.query(models.QMSAuditFinding).filter(
+        models.QMSAuditFinding.amo_id == ctx.amo_id,
+        models.QMSAuditFinding.audit_id == audit.id,
+    ).order_by(models.QMSAuditFinding.created_at.desc(), models.QMSAuditFinding.id.desc()).all()
+    return [_serialize_finding(row) for row in rows]
 
 
 @router.patch("/audits/{audit_id}/setup")
@@ -357,18 +382,26 @@ def get_audit_session(
         QualityAuditPreparationRevision.audit_id == audit.id,
     ).order_by(QualityAuditPreparationRevision.revision_no.desc()).first()
     preparation_issued = bool(latest_preparation and latest_preparation.status == "ISSUED")
+    fieldwork_blocker = "Open Prepare and issue the current preparation revision before recording fieldwork."
     if preparation_issued:
-        from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers
+        from .audit_preparation_router import _capture_sources, _preparation_readiness_blockers, _preparation_sources_match
 
         current_preparation = _capture_sources(
             db,
             amo_id=ctx.amo_id,
             audit=audit,
         )
-        preparation_issued = (
-            not _preparation_readiness_blockers(current_preparation)
-            and latest_preparation.source_fingerprint == current_preparation["source_fingerprint"]
-        )
+        readiness_blockers = _preparation_readiness_blockers(current_preparation, phase="FIELDWORK")
+        sources_match = _preparation_sources_match(db, amo_id=ctx.amo_id, audit=audit, preparation=latest_preparation, captured=current_preparation)
+        preparation_issued = not readiness_blockers and sources_match
+        if readiness_blockers:
+            fieldwork_blocker = "Resolve preparation requirements: " + "; ".join(str(item.get("reason") or "Review preparation readiness") for item in readiness_blockers)
+        elif not sources_match:
+            fieldwork_blocker = "The audit scope or preparation sources changed. Open Prepare, review the changes and issue an updated revision."
+        else:
+            fieldwork_blocker = None
+    if audit.actual_end or getattr(audit.status, "value", audit.status) == "CLOSED":
+        fieldwork_blocker = "Fieldwork is complete. This workspace is read-only; continue in Closing."
     closure = db.query(QualityAuditClosureState).filter(
         QualityAuditClosureState.amo_id == ctx.amo_id,
         QualityAuditClosureState.audit_id == audit.id,
@@ -377,11 +410,19 @@ def get_audit_session(
         models.QualityArchivePackage.amo_id == ctx.amo_id,
         models.QualityArchivePackage.audit_id == audit.id,
     ).count()
+    archive_count += db.query(QualityAuditArchiveManifest).filter(
+        QualityAuditArchiveManifest.amo_id == ctx.amo_id,
+        QualityAuditArchiveManifest.audit_id == audit.id,
+    ).count()
 
-    return project_audit_session(
+    session = project_audit_session(
         workflow,
         preparation_issued=preparation_issued,
         execution_status=closure.execution_status if closure else "OPEN",
         follow_up_status=closure.follow_up_status if closure else "OPEN",
         archive_count=archive_count,
     )
+    # Planned dates are scheduling information. Preparation and lifecycle state
+    # determine the write window; client pages must not invent a time lock.
+    session["fieldwork_access"] = {"ready": fieldwork_blocker is None, "blocker": fieldwork_blocker}
+    return session

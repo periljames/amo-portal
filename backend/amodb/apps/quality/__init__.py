@@ -43,7 +43,7 @@ from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
 from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
 from . import register_pagination as _register_pagination  # noqa: F401,E402
-from .route_ordering import assert_unique_routes
+from .route_ordering import assert_unique_routes, place_generic_fallbacks_last
 
 
 assert_unique_routes(router, label="QMS base API")
@@ -219,3 +219,9 @@ from . import planner_assignment_guard_route_order as _planner_assignment_guard_
 from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
 from . import car_operational_route_order as _car_operational_route_order  # noqa: F401,E402
 from . import audit_personnel_route_order as _audit_personnel_route_order  # noqa: F401,E402
+
+# Finish composition once every focused read/write adapter is registered.
+# Legacy module actions can otherwise intercept an exact POST such as issuing
+# preparation even when that route was promoted ahead of the path catch-all.
+for _api_router in (_canonical_router.core_router, _canonical_router.router):
+    place_generic_fallbacks_last(_api_router)

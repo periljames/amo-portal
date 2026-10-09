@@ -4,7 +4,7 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import case
+from sqlalchemy import and_, case
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.accounts import models as account_models
@@ -91,9 +91,13 @@ def _capacity_evidence(
     window_end = as_of + timedelta(days=90)
     rows = (
         db.query(quality_models.QMSAuditSchedule, QMSPlannerScheduleMetadata)
-        .join(QMSPlannerScheduleMetadata, QMSPlannerScheduleMetadata.schedule_id == quality_models.QMSAuditSchedule.id)
+        .join(QMSPlannerScheduleMetadata, and_(
+            QMSPlannerScheduleMetadata.schedule_id == quality_models.QMSAuditSchedule.id,
+            QMSPlannerScheduleMetadata.amo_id == quality_models.QMSAuditSchedule.amo_id,
+        ))
         .filter(
             quality_models.QMSAuditSchedule.amo_id == amo_id,
+            QMSPlannerScheduleMetadata.amo_id == amo_id,
             quality_models.QMSAuditSchedule.is_active.is_(True),
             quality_models.QMSAuditSchedule.deleted_at.is_(None),
             quality_models.QMSAuditSchedule.next_due_date >= window_start,

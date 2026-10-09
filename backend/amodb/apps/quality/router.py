@@ -344,8 +344,9 @@ def _get_schedule_for_amo(
     return schedule
 
 
-def _get_car_for_amo(db: Session, *, amo_id: str, car_id: UUID) -> models.CorrectiveActionRequest:
-    car = _car_query_for_amo(db, amo_id).filter(models.CorrectiveActionRequest.id == car_id).first()
+def _get_car_for_amo(db: Session, *, amo_id: str, car_id: UUID, lock: bool = False) -> models.CorrectiveActionRequest:
+    query = _car_query_for_amo(db, amo_id).filter(models.CorrectiveActionRequest.id == car_id)
+    car = (query.with_for_update(of=models.CorrectiveActionRequest) if lock else query).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
     return car
@@ -6607,6 +6608,8 @@ def _sync_car_review_state(db: Session, car: models.CorrectiveActionRequest, *, 
 
     has_evidence = _car_has_evidence(db, car)
     latest = _latest_reviewable_car_response(db, car.id)
+    from .car_response_workflow import sync_response_milestones
+    staged_control = sync_response_milestones(db, car, actor_user_id=actor_user_id)
 
     if car.root_cause_status == "REJECTED" or car.capa_status == "REJECTED":
         if latest is not None:
@@ -6629,6 +6632,10 @@ def _sync_car_review_state(db: Session, car: models.CorrectiveActionRequest, *, 
             car.status = models.CARStatus.IN_PROGRESS
             _mark_audit_in_progress_or_cap_open(db, car)
             return car.status, "accepted_pending_evidence"
+        if staged_control:
+            car.status = models.CARStatus.IN_PROGRESS
+            _mark_audit_in_progress_or_cap_open(db, car)
+            return car.status, "accepted_pending_control_loop"
         _close_accepted_car_workflow(db, car, actor_user_id=actor_user_id)
         return car.status, "closed"
 
@@ -6838,6 +6845,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .with_for_update(of=models.CorrectiveActionRequest)
         .first()
     )
     if not car:
@@ -6969,6 +6977,7 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .with_for_update(of=models.CorrectiveActionRequest)
         .first()
     )
     if not car:
@@ -6986,6 +6995,8 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     car.submitted_at = None
     car.root_cause_status = "PENDING"
     car.capa_status = "PENDING"
+    from .car_response_workflow import sync_response_milestones
+    sync_response_milestones(db, car, actor_user_id=None)
     add_car_action(
         db=db,
         car=car,
@@ -7381,7 +7392,7 @@ def list_car_responses_for_review(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id, lock=mark_open)
     _require_car_review_access(db, current_user, car)
     latest = _car_invite_latest_active_response(db, car.id) if car.status == models.CARStatus.PENDING_VERIFICATION else None
     responses = [latest] if latest is not None else []
@@ -7516,7 +7527,7 @@ def review_car_response(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id, lock=True)
     _require_car_not_escalated(car)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="This CAR is already closed or cancelled and cannot be reviewed again.")
@@ -7554,6 +7565,8 @@ def review_car_response(
         note_msg = f"CAR {car.car_number} response accepted, but evidence is still required before closeout."
     elif outcome == "needs_evidence":
         note_msg = f"CAR {car.car_number} requires more evidence before closeout."
+    elif outcome == "accepted_pending_control_loop":
+        note_msg = f"CAR {car.car_number} plan accepted. Implementation, evidence verification and effectiveness remain under the staged control loop."
     elif outcome == "returned":
         note_msg = f"CAR {car.car_number} response was returned with review notes."
 

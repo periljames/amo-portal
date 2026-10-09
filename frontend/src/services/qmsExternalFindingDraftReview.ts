@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import type { ExternalFindingDraft } from "./qmsExternalFindingDrafts";
 import type { ChecklistExecutionGovernanceRow } from "./qmsChecklistExecutionGovernance";
 
@@ -18,7 +19,7 @@ export function listExternalFindingDraftsForQuality(amoCode: string, auditId: st
   return apiRequest<{ items: ExternalFindingDraft[] }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/external-finding-drafts`),
     { timeoutMs: 15_000, cacheTtlMs: 1_000, signal },
-  );
+  ).then((data) => requireAuditContract(data, "externalDrafts"));
 }
 
 export function returnExternalFindingDraft(amoCode: string, auditId: string, draftId: string, payload: ExternalFindingDraftReviewPayload) {

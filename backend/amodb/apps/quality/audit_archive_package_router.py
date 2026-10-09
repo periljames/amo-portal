@@ -39,6 +39,7 @@ from .audit_archive_governance_router import (
     _utcnow,
 )
 from .audit_closure_models import QualityAuditClosureState
+from .audit_closure_router import _follow_up_readiness
 from .audit_evidence_models import QualityAuditEvidenceArtifact
 from .audit_evidence_storage import resolve_audit_evidence, safe_filename
 from .router import AUDIT_REPORT_DIR
@@ -254,6 +255,28 @@ def _package_manifest_dict(db: Session, row: QualityAuditArchiveManifest) -> dic
     return result
 
 
+def _archive_readiness(db: Session, *, amo_id: str, audit_id: uuid.UUID, policy) -> dict[str, Any]:
+    blockers: list[dict[str, str]] = []
+    if policy is None:
+        blockers.append({"type": "RETENTION_POLICY", "reason": "Configure a retention policy before generating an archive package."})
+    closure = db.query(QualityAuditClosureState).filter(
+        QualityAuditClosureState.amo_id == amo_id,
+        QualityAuditClosureState.audit_id == audit_id,
+    ).first()
+    if closure is None or closure.execution_status != "CLOSED":
+        blockers.append({"type": "EXECUTION", "reason": "Issue the report and close audit execution in Closing."})
+    if closure is None or closure.follow_up_status != "COMPLETE":
+        blockers.append({"type": "FOLLOW_UP", "reason": "Complete all corrective-action and effectiveness requirements in Follow-up."})
+    else:
+        blockers.extend(_follow_up_readiness(db, amo_id=amo_id, audit_id=audit_id)["blockers"])
+    if policy is not None and closure is not None and not blockers:
+        try:
+            _retention_start(closure, policy)
+        except HTTPException as exc:
+            blockers.append({"type": "RETENTION_START", "reason": str(exc.detail)})
+    return {"ready": not blockers, "blockers": blockers}
+
+
 @router.get("/audits/{audit_id}/archive-governance")
 def get_archive_governance_with_package(
     audit_id: uuid.UUID,
@@ -264,13 +287,22 @@ def get_archive_governance_with_package(
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
     manifest = _latest_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id)
     holds = _active_holds(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    policy = _latest_policy(db, ctx.amo_id)
     disposition = db.query(QualityAuditDispositionEvent).filter(
         QualityAuditDispositionEvent.amo_id == ctx.amo_id,
         QualityAuditDispositionEvent.audit_id == audit_id,
+        QualityAuditDispositionEvent.manifest_id == manifest.id if manifest else False,
     ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
     now = _utcnow()
     return {
-        "policy": _policy_dict(_latest_policy(db, ctx.amo_id)),
+        "policy": _policy_dict(policy),
+        "archive_readiness": _archive_readiness(db, amo_id=ctx.amo_id, audit_id=audit_id, policy=policy),
+        "disposition_review_valid": bool(
+            manifest and policy and disposition and disposition.event_type == "APPROVED"
+            and disposition.inventory_sha256 == _inventory_hash(manifest)
+            and disposition.package_sha256 == manifest.package_sha256
+            and disposition.disposition_mode == policy.disposition_mode
+        ),
         "manifest": _package_manifest_dict(db, manifest) if manifest else None,
         "active_holds": [
             {
@@ -302,8 +334,11 @@ def generate_archive_manifest_with_package(
 ) -> dict[str, Any]:
     assert_quality_permission(db, ctx, "qms.audit.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     policy = _latest_policy(db, ctx.amo_id)
+    readiness = _archive_readiness(db, amo_id=ctx.amo_id, audit_id=audit_id, policy=policy)
+    if not readiness["ready"]:
+        raise HTTPException(status_code=409, detail={"message": "Resolve archive requirements before generating a package.", "blockers": readiness["blockers"]})
     if policy is None:
         raise HTTPException(status_code=409, detail="Audit retention policy is not configured for this tenant.")
     closure = db.query(QualityAuditClosureState).filter(
@@ -431,6 +466,7 @@ def execute_package_disposition(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     policy = _latest_policy(db, ctx.amo_id)
     if policy is None:
         raise HTTPException(status_code=409, detail="Audit retention policy is not configured.")
@@ -458,6 +494,12 @@ def execute_package_disposition(
         ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
         if latest_review is None or latest_review.event_type != "APPROVED":
             raise HTTPException(status_code=409, detail="Approved disposition review is required by policy before execution.")
+        if (
+            latest_review.inventory_sha256 != _inventory_hash(manifest)
+            or latest_review.package_sha256 != manifest.package_sha256
+            or latest_review.disposition_mode != policy.disposition_mode
+        ):
+            raise HTTPException(status_code=409, detail="The package or disposition policy changed. Review this exact archive package again before execution.")
     if _latest_execution(db, amo_id=ctx.amo_id, audit_id=audit_id, manifest_id=manifest.id) is not None:
         raise HTTPException(status_code=409, detail="Disposition has already been executed for this manifest.")
     if not manifest.package_file_ref or not manifest.package_sha256:

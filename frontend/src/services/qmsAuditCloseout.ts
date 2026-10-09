@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
 export type AuditReportRevision = {
   id: string;
@@ -54,36 +55,36 @@ function json(method: string, body: unknown): RequestInit {
 }
 
 export function listAuditReportRevisions(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: AuditReportRevision[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  return apiRequest<{ items: AuditReportRevision[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "reports"));
 }
 
 export function adoptCurrentAuditReport(amoCode: string, auditId: string, reason: string) {
-  return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/adopt-current`), json("POST", { reason }));
+  return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/adopt-current`), json("POST", { reason })).then((data) => requireAuditContract(data, "report"));
 }
 
 export function adoptGeneratedAuditReport(amoCode: string, auditId: string, artifactId: string, reason: string) {
   return apiRequest<AuditReportRevision>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/adopt-generated/${encodeURIComponent(artifactId)}`),
     json("POST", { reason }),
-  );
+  ).then((data) => requireAuditContract(data, "report"));
 }
 
 export function transitionAuditReport(amoCode: string, auditId: string, revisionId: string, action: "SUBMIT" | "RETURN" | "APPROVE" | "ISSUE" | "CANCEL", reason: string) {
-  return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/${encodeURIComponent(revisionId)}/transitions`), json("POST", { action, reason }));
+  return apiRequest<AuditReportRevision>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions/${encodeURIComponent(revisionId)}/transitions`), json("POST", { action, reason })).then((data) => requireAuditContract(data, "report"));
 }
 
 export function getAuditClosureState(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "closure"));
 }
 
 export function recordAuditExecutionClosed(amoCode: string, auditId: string, reason: string) {
-  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/execution-close`), json("POST", { reason }));
+  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/execution-close`), json("POST", { reason })).then((data) => requireAuditContract(data, "closure"));
 }
 
 export function recordAuditFollowUpComplete(amoCode: string, auditId: string, reason: string) {
-  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/follow-up-complete`), json("POST", { reason }));
+  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/follow-up-complete`), json("POST", { reason })).then((data) => requireAuditContract(data, "closure"));
 }
 
 export function reopenAuditFollowUp(amoCode: string, auditId: string, reason: string) {
-  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/reopen-follow-up`), json("POST", { reason }));
+  return apiRequest<AuditClosureState>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/closure-state/reopen-follow-up`), json("POST", { reason })).then((data) => requireAuditContract(data, "closure"));
 }

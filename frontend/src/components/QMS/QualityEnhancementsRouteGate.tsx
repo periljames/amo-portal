@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 
 import { ModalTopLayerGuard } from "../shared/ModalTopLayerGuard";
 import QmsCommandPalette from "./QmsCommandPalette";
+import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 
 const QualityEnhancementsHost = lazy(
   () => import("./QualityEnhancementsHost"),
@@ -24,9 +25,11 @@ const QualityEnhancementsRouteGate: React.FC = () => {
       <ModalTopLayerGuard />
       {commandPaletteRelevant ? <QmsCommandPalette /> : null}
       {relevant ? (
-        <Suspense fallback={null}>
-          <QualityEnhancementsHost />
-        </Suspense>
+        <PortalErrorBoundary key={location.pathname}>
+          <Suspense fallback={<div role="status" className="qms-audit-stage-suspense">Loading workspace…</div>}>
+            <QualityEnhancementsHost />
+          </Suspense>
+        </PortalErrorBoundary>
       ) : null}
     </>
   );

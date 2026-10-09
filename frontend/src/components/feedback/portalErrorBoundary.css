@@ -31,10 +31,33 @@
   color: rgb(239 68 68);
 }
 
-.portal-fatal-error__card h1 {
+.portal-fatal-error__card h2 {
   margin: 0 0 0.45rem;
   font-size: 1.2rem;
 }
+
+.portal-fatal-error--inline {
+  position: static;
+  padding: 1rem 0;
+  background: transparent;
+  backdrop-filter: none;
+  z-index: auto;
+}
+
+.portal-fatal-error--inline .portal-fatal-error__card {
+  width: 100%;
+  box-shadow: none;
+}
+
+.portal-fatal-error__actions {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.portal-fatal-error__actions a { color: var(--text-primary); }
 
 .portal-fatal-error__card p {
   margin: 0.25rem 0;
@@ -67,4 +90,5 @@
   .portal-fatal-error__card button {
     grid-column: 1;
   }
+  .portal-fatal-error__actions { grid-column: 1; }
 }

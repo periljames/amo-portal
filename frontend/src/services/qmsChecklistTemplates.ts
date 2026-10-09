@@ -1,6 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { PublicationUploadPayload } from "./publications";
 import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
+import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
 export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
@@ -176,14 +177,14 @@ export function issueChecklistRevision(amoCode: string, templateId: string, revi
 export async function listChecklistBindings(amoCode: string, auditId: string, signal?: AbortSignal) {
   const readOffline = async () => {
     const pack = await readAuditOfflinePack(amoCode, auditId);
-    return pack ? projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] } : null;
+    return pack ? requireAuditContract(projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] }, "bindings") : null;
   };
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();
     if (offline) return offline;
   }
   try {
-    return await apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+    return requireAuditContract(await apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }), "bindings");
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;

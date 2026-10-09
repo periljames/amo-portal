@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
@@ -60,7 +61,10 @@ def _audit(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> models.QMSAudit:
     return row
 
 
-def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dict[str, Any]:
+def _capture_sources(
+    db: Session, *, amo_id: str, audit: models.QMSAudit,
+    legacy_audit_baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     checklist = db.query(models.QualityAuditChecklistItem).filter(
         models.QualityAuditChecklistItem.amo_id == amo_id,
         models.QualityAuditChecklistItem.audit_id == audit.id,
@@ -213,11 +217,22 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
             if isinstance(source, dict)
         ],
     ]
+    audit_inputs = {
+        key: value for key, value in audit_snapshot.items()
+        if key not in {"status", "actual_start", "actual_end", "entity_version"}
+    }
+    if legacy_audit_baseline is not None:
+        # Verify old immutable revisions using their original algorithm, while
+        # allowing execution dates/version to advance. Every scope, assignment,
+        # checklist, request and controlled-source input is still compared.
+        audit_inputs = {key: value for key, value in audit_snapshot.items() if key != "status"}
+        for field in ("actual_start", "actual_end", "entity_version"):
+            audit_inputs[field] = legacy_audit_baseline.get(field)
     fingerprint_payload = {
         # Execution status and fieldwork answers are outcomes, not preparation
         # inputs. Excluding them prevents a legitimate first fieldwork update
         # from making the issued preparation snapshot appear stale.
-        "audit": {key: value for key, value in audit_snapshot.items() if key != "status"},
+        "audit": audit_inputs,
         "checklist": [
             {
                 key: value
@@ -257,6 +272,19 @@ def _capture_sources(db: Session, *, amo_id: str, audit: models.QMSAudit) -> dic
         "source_references": source_references,
         "source_fingerprint": fingerprint,
     }
+
+
+def _preparation_sources_match(
+    db: Session, *, amo_id: str, audit: models.QMSAudit,
+    preparation: QualityAuditPreparationRevision, captured: dict[str, Any],
+) -> bool:
+    if preparation.source_fingerprint == captured["source_fingerprint"]:
+        return True
+    baseline = preparation.audit_snapshot
+    if not isinstance(baseline, dict) or not baseline:
+        return False
+    legacy = _capture_sources(db, amo_id=amo_id, audit=audit, legacy_audit_baseline=baseline)
+    return preparation.source_fingerprint == legacy["source_fingerprint"]
 
 
 def _preparation_readiness_blockers(
@@ -458,14 +486,14 @@ def _ensure_work_package(
     if existing is not None:
         return existing
 
-    snapshot = _build_work_package_snapshot(
+    snapshot = jsonable_encoder(_build_work_package_snapshot(
         db,
         amo_id=amo_id,
         audit=audit,
         preparation=preparation,
-    )
+    ))
     content_sha256 = hashlib.sha256(
-        json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     previous = (
         db.query(QualityAuditWorkPackage)
@@ -697,7 +725,7 @@ def get_audit_preparation_readiness(
         .first()
     )
     issued = latest is not None and latest.status == "ISSUED"
-    stale = bool(issued and latest.source_fingerprint != captured["source_fingerprint"])
+    stale = bool(issued and not _preparation_sources_match(db, amo_id=ctx.amo_id, audit=audit, preparation=latest, captured=captured))
     if not issued:
         fieldwork_blockers.append({
             "type": "PREPARATION_REVISION",

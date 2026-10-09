@@ -7,6 +7,10 @@ import {
 } from "./portalError";
 
 describe("portal error feedback", () => {
+  it("keeps JavaScript diagnostics out of user-facing recovery messages", () => {
+    expect(portalErrorMessage(new TypeError("object is not iterable (cannot read property Symbol(Symbol.iterator))"), "Reload saved audit records."))
+      .toBe("Reload saved audit records.");
+  });
   it("keeps useful backend validation details", () => {
     expect(portalErrorMessage({
       detail: [
