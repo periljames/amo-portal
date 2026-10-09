@@ -31,6 +31,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
   const [mapping,setMapping]=useState("{}");
   const [importKind,setImportKind]=useState<"SUPPLIERS"|"CONTRACTS">("SUPPLIERS");
   const [sourceSheet,setSourceSheet]=useState("");
+  const [headerRow,setHeaderRow]=useState(1);
   const [reason,setReason]=useState("");
   const [preview,setPreview]=useState<Preview|null>(null);
   const [detail,setDetail]=useState<ImportDetail|null>(null);
@@ -50,6 +51,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("Mapping must be a JSON object.");
       const data=new FormData();data.append("file",file);data.append("mapping_json",mapping);
       data.append("import_kind",importKind);data.append("source_sheet",sourceSheet);
+      data.append("header_row",String(headerRow));
       const result=await apiRequest<Preview>(`${base}/preview`,{method:"POST",body:data});
       setPreview(result);await getDetail(result.batch_id);
       if(result.already_uploaded)setMessage("This exact workbook has already been staged. Showing its existing reconciliation.");
@@ -106,6 +108,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
     <form onSubmit={e=>void upload(e)}>
       <label>Tracker type <select value={importKind} onChange={e=>{setImportKind(e.target.value as "SUPPLIERS"|"CONTRACTS");setPreview(null);setDetail(null);}}><option value="SUPPLIERS">Vendor register</option><option value="CONTRACTS">Contracts & agreements</option></select></label>
       <label>Worksheet (optional) <input type="text" value={sourceSheet} onChange={e=>setSourceSheet(e.target.value)} placeholder="All sheets"/></label>
+      <label>Header row <input type="number" min={1} max={100} value={headerRow} onChange={e=>setHeaderRow(Number(e.target.value)||1)}/></label>
       <label>Workbook (XLSX or XLSM)
         <input type="file" accept=".xlsx,.xlsm" required onChange={e=>{
           setFile(e.target.files?.[0]??null);setPreview(null);setDetail(null);
