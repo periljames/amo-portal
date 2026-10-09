@@ -137,36 +137,79 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                     raise HTTPException(413, "Workbook exceeds the 2,000-row import safety limit.")
                 fields = {key: _value(cells[index] if index < len(cells) else None)
                           for key, index in matched.items()}
-                code = (fields.get("supplier_code") or "").upper()
-                name = fields.get("legal_name") or ""
                 errors = []
-                if not code: errors.append("missing_supplier_code")
-                if not name: errors.append("missing_legal_name")
-                if len(code) > 64: errors.append("supplier_code_too_long")
-                if len(name) > 255: errors.append("legal_name_too_long")
+                supplier_id = None
                 if any(isinstance(cell, str) and cell.startswith("=") for cell in cells):
                     errors.append("formula_requires_manual_review")
-                if code:
-                    if code in seen:
-                        errors.append("duplicate_in_workbook")
-                    seen.add(code)
-                    existing = db.execute(text("""SELECT 1 FROM procurement_suppliers
-                        WHERE amo_id=:amo AND upper(supplier_code)=:code LIMIT 1"""),
-                        {"amo": tenant, "code": code}).scalar()
-                    if existing:
-                        errors.append("existing_supplier")
-                if "duplicate_in_workbook" in errors or "existing_supplier" in errors:
+                if import_kind == "SUPPLIERS":
+                    code = (fields.get("supplier_code") or "").strip().upper()
+                    name = fields.get("legal_name") or ""
+                    if not code: errors.append("missing_supplier_code")
+                    if not name: errors.append("missing_legal_name")
+                    if len(code) > 64: errors.append("supplier_code_too_long")
+                    if len(name) > 255: errors.append("legal_name_too_long")
+                    if code:
+                        if code in seen: errors.append("duplicate_in_workbook")
+                        seen.add(code)
+                        existing = db.execute(text("""SELECT id FROM procurement_suppliers
+                            WHERE amo_id=:amo AND upper(supplier_code)=:code LIMIT 1"""),
+                            {"amo":tenant,"code":code}).scalar()
+                        if existing: errors.append("existing_supplier")
+                else:
+                    contract_no = (fields.get("contract_number") or "").strip()
+                    key = contract_no.upper()
+                    if not contract_no: errors.append("missing_contract_number")
+                    if len(contract_no) > 128: errors.append("contract_number_too_long")
+                    if not fields.get("title"): errors.append("missing_contract_title")
+                    if not fields.get("scope_text"): errors.append("missing_scope_of_work")
+                    if key:
+                        if key in seen: errors.append("duplicate_in_workbook")
+                        seen.add(key)
+                        existing_contract = db.execute(text("""SELECT 1
+                            FROM quality_external_provider_contracts
+                            WHERE amo_id=:amo AND upper(contract_number)=:number LIMIT 1"""),
+                            {"amo":tenant,"number":key}).scalar()
+                        if existing_contract: errors.append("existing_contract")
+                    code = (fields.get("supplier_code") or "").strip().upper()
+                    name = (fields.get("supplier_name") or "").strip()
+                    if code:
+                        matches = db.execute(text("""SELECT id FROM procurement_suppliers
+                            WHERE amo_id=:amo AND upper(supplier_code)=:code LIMIT 2"""),
+                            {"amo":tenant,"code":code}).scalars().all()
+                    elif name:
+                        matches = db.execute(text("""SELECT id FROM procurement_suppliers
+                            WHERE amo_id=:amo AND lower(legal_name)=lower(:name) LIMIT 2"""),
+                            {"amo":tenant,"name":name}).scalars().all()
+                    else:
+                        matches = []
+                    if len(matches) != 1: errors.append("supplier_match_missing_or_ambiguous")
+                    else: supplier_id = matches[0]
+                    for key in ("effective_on","expires_on"):
+                        value = fields.get(key)
+                        if value:
+                            try:
+                                fields[key] = date.fromisoformat(value[:10]).isoformat()
+                            except (TypeError, ValueError):
+                                errors.append("invalid_" + key + "_use_iso_date")
+                    if fields.get("effective_on") and fields.get("expires_on"):
+                        try:
+                            if fields["expires_on"] < fields["effective_on"]:
+                                errors.append("expiry_precedes_effective_date")
+                        except TypeError:
+                            pass
+                if "duplicate_in_workbook" in errors or "existing_supplier" in errors or "existing_contract" in errors:
                     counts["duplicates"] += 1
                 state = "ERROR" if errors else "READY"
                 counts["errors" if errors else "ready"] += 1
                 db.execute(text("""INSERT INTO external_provider_import_rows
                     (id, amo_id, batch_id, sheet_name, row_number, raw_json,
-                     normalized_json, diagnostics_json, status)
-                    VALUES (:id, :amo, :batch, :sheet, :row, :raw, :norm, :errors, :state)"""),
-                    {"id": str(uuid4()), "amo": tenant, "batch": batch_id,
-                     "sheet": sheet.title[:128], "row": row_number,
-                     "raw": json.dumps([_value(cell) for cell in cells]),
-                     "norm": json.dumps(fields), "errors": json.dumps(errors), "state": state})
+                     normalized_json, diagnostics_json, status, supplier_id)
+                    VALUES (:id, :amo, :batch, :sheet, :row, CAST(:raw AS JSON),
+                            CAST(:norm AS JSON),CAST(:errors AS JSON), :state, :supplier)"""),
+                    {"id":str(uuid4()),"amo":tenant,"batch":batch_id,"sheet":sheet.title[:128],
+                     "row":row_number,"raw":json.dumps([_value(cell) for cell in cells]),
+                     "norm":json.dumps(fields),"errors":json.dumps(errors),
+                     "state":state,"supplier":supplier_id})
         if not matched_sheet:
             raise HTTPException(422, "Selected worksheet not found.")
         db.commit()
