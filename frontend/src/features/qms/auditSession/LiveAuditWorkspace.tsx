@@ -1027,7 +1027,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
                 </div>
               </details>
-              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis" open>
                 <summary className="qms-live-audit-focus__compliance-summary">
                   <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
                   <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
