@@ -87,8 +87,9 @@ def set_library_favorite(
     )
     if not payload.favorite:
         for row in rows:
-            row.bookmark_label = None
+            row.is_favorite = False
             row.updated_at = utcnow()
+        audit(db, tenant, request, "document.library.favorite.updated", "manual", manual.id, {"favorite": False})
         db.commit()
         return {"manual_id": manual.id, "favorite": False}
 
@@ -122,7 +123,7 @@ def set_library_favorite(
             user_id=str(current_user.id),
         )
         db.add(row)
-    row.bookmark_label = "DMS_FAVORITE"
+    row.is_favorite = True
     row.updated_at = utcnow()
     audit(db, tenant, request, "document.library.favorite.updated", "manual", manual.id, {"favorite": True})
     db.commit()
@@ -382,7 +383,7 @@ def library_discovery(
             func.max(manual_models.ManualReaderProgress.last_opened_at).label("last_opened_at"),
         ).filter(manual_models.ManualReaderProgress.user_id == str(current_user.id))
         if view == "favorites":
-            progress_query = progress_query.filter(manual_models.ManualReaderProgress.bookmark_label.isnot(None))
+            progress_query = progress_query.filter(manual_models.ManualReaderProgress.is_favorite.is_(True))
         else:
             progress_query = progress_query.filter(or_(
                 manual_models.ManualReaderProgress.last_page_number.isnot(None),
@@ -490,6 +491,7 @@ def library_discovery(
         .all()
     )
     progress_by_manual: dict[str, manual_models.ManualReaderProgress] = {}
+    favorite_ids = {row.manual_id for row in progress_rows if row.is_favorite}
     for progress in progress_rows:
         progress_by_manual.setdefault(progress.manual_id, progress)
 
@@ -523,7 +525,7 @@ def library_discovery(
             "read_target_revision_id": read_target.id if read_target else None,
             "next_review_due": profile.next_review_due.isoformat() if profile and profile.next_review_due else None,
             "last_opened_at": progress.last_opened_at.isoformat() if progress and progress.last_opened_at else None,
-            "favorite": bool(progress and progress.bookmark_label),
+            "favorite": manual.id in favorite_ids,
         })
 
     return {

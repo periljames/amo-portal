@@ -28,6 +28,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { currentOfflineScope } from "../../services/offlinePersistence";
 
 import ControlledDocumentUploadDialog from "../../components/documentControl/ControlledDocumentUploadDialog";
 import {
@@ -109,7 +110,7 @@ type PersonalLibraryView = {
 };
 
 function personalViewsKey(tenant: string): string {
-  return `${PERSONAL_VIEWS_STORAGE_KEY}:${tenant.toLowerCase()}`;
+  return `${PERSONAL_VIEWS_STORAGE_KEY}:${tenant.toLowerCase()}:${currentOfflineScope()}`;
 }
 
 function readPersonalViews(tenant: string): PersonalLibraryView[] {
@@ -205,6 +206,7 @@ function jobEligibility(item: IntegratedLibraryItem, job: DocumentControlJob): {
 export default function DocumentLibraryHubPage() {
   const navigate = useNavigate();
   const { tenant, basePath, readerBasePath } = useDocumentControlRoute();
+  const readerScope = currentOfflineScope();
   const [params, setParams] = useSearchParams();
   const urlQuery = params.get("q") || "";
   const [searchText, setSearchText] = useState(urlQuery);
@@ -317,7 +319,7 @@ export default function DocumentLibraryHubPage() {
         if (!cancelled) setSharedViews([]);
       });
     return () => { cancelled = true; };
-  }, [tenant]);
+  }, [tenant, readerScope]);
   useEffect(() => { setSearchText(urlQuery); }, [urlQuery]);
   useEffect(() => {
     const requestedService = params.get("library_services");
@@ -411,8 +413,13 @@ export default function DocumentLibraryHubPage() {
       presentation,
     };
     const next = [...personalViews.filter((item) => item.name.toLowerCase() !== name.toLowerCase()), view].slice(-24);
+    try {
+      window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
+    } catch {
+      setSavedViewNotice("Personal view could not be saved on this device.");
+      return;
+    }
     setPersonalViews(next);
-    window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
     setSavedViewName("");
     setSavedViewNotice(`Personal view saved: ${name}`);
   };
@@ -420,8 +427,13 @@ export default function DocumentLibraryHubPage() {
   const removePersonalView = (viewId: string) => {
     if (!tenant) return;
     const next = personalViews.filter((item) => item.id !== viewId);
+    try {
+      window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
+    } catch {
+      setSavedViewNotice("Personal view could not be removed on this device.");
+      return;
+    }
     setPersonalViews(next);
-    window.localStorage.setItem(personalViewsKey(tenant), JSON.stringify(next));
     setSavedViewNotice("Personal view removed.");
   };
 
@@ -853,7 +865,15 @@ export default function DocumentLibraryHubPage() {
                 <div><dt>Owner</dt><dd>{item.library.owner?.assignee?.name || item.profile.owner_department || item.owner_role}</dd></div>
                 <div><dt>Review</dt><dd>{formatDate(item.profile.next_review_due)}</dd></div>
               </dl>
-              <div className="dlibrary-card__context"><span>{item.library.structure_path || "Standard hierarchy"}</span><span>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</span></div>
+              <div className="dlibrary-card__context">
+                {item.library.external ? <>
+                  <span>{item.library.external.provider}{item.library.external.authority ? ` · ${item.library.external.authority}` : ""}</span>
+                  <span>{item.library.external.currency_status} · {item.library.external.revision_label || "Revision not recorded"} · {item.library.external.applicability_status}</span>
+                </> : <>
+                  <span>{item.library.structure_path || "Standard hierarchy"}</span>
+                  <span>{item.library.semantic_relationships || 0} links · {item.library.integrations?.count || 0} modules · {item.library.generated_records || 0} records</span>
+                </>}
+              </div>
               <footer>
                 {selectedJob && canControl ? <button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button> : <>
                   <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}>Read</button>
@@ -948,12 +968,14 @@ export default function DocumentLibraryHubPage() {
       </section>
 
       {selectedItem ? <DocumentLibraryDetailsPane
+        key={`${readerScope}:${tenant}:${selectedItem.item.id}`}
         tenant={tenant}
         selected={selectedItem}
         canControl={canControl}
         onClose={() => setSelectedItem(null)}
         onRead={readSelectedItem}
         onOpenWorkspace={canControl ? openSelectedWorkspace : undefined}
+        onUpdated={() => { void load(); }}
       /> : null}
     </div>
   </DocumentControlShell>;

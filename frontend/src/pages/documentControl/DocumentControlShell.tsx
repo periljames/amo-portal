@@ -1,5 +1,5 @@
 /* eslint react-refresh/only-export-components: ["error", { "allowExportNames": ["useDocumentControlRoute"] }] */
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Archive,
   BarChart3,
@@ -114,12 +114,13 @@ export default function DocumentControlShell({
   const navigate = useNavigate();
   const location = useLocation();
   const { amoCode, tenant, basePath } = useDocumentControlRoute();
-  const [navigationOpen, setNavigationOpen] = useState(false);
-  const [searchText, setSearchText] = useState(() => (
-    location.pathname.includes("/document-control/library")
-      ? new URLSearchParams(location.search).get("q") || ""
-      : ""
-  ));
+  const routeKey = `${location.pathname}${location.search}`;
+  const [navigationRoute, setNavigationRoute] = useState<string | null>(null);
+  const navigationOpen = navigationRoute === routeKey;
+  const [searchDraft, setSearchDraft] = useState<{ routeKey: string; value: string } | null>(null);
+  const searchText = searchDraft?.routeKey === routeKey
+    ? searchDraft.value
+    : new URLSearchParams(location.search).get("q") || "";
   const active = activeNavigation(location.pathname, location.search);
   const assistantDocumentId = libraryDocumentId(location.pathname);
   const assistantParams = new URLSearchParams(location.search);
@@ -135,13 +136,6 @@ export default function DocumentControlShell({
     ? <DocumentWorkflowGuide tenant={tenant} basePath={basePath} manualId={assistantDocumentId} refreshKey={workflowRefreshKey} />
     : null;
 
-  useEffect(() => {
-    setNavigationOpen(false);
-    if (location.pathname.includes("/document-control/library")) {
-      setSearchText(new URLSearchParams(location.search).get("q") || "");
-    }
-  }, [location.pathname, location.search]);
-
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const query = searchText.trim();
@@ -152,7 +146,7 @@ export default function DocumentControlShell({
 
   const navigateItem = (item: NavigationItem) => {
     navigate(`${basePath}${item.path}`);
-    setNavigationOpen(false);
+    setNavigationRoute(null);
   };
 
   const renderNavigation = (items: NavigationItem[]) => items
@@ -183,7 +177,7 @@ export default function DocumentControlShell({
           className="dc-workspace__nav-toggle"
           aria-label={navigationOpen ? "Close Document Control navigation" : "Open Document Control navigation"}
           aria-expanded={navigationOpen}
-          onClick={() => setNavigationOpen((open) => !open)}
+          onClick={() => setNavigationRoute(navigationOpen ? null : routeKey)}
         >
           {navigationOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
@@ -195,7 +189,7 @@ export default function DocumentControlShell({
           <Search size={16} aria-hidden="true" />
           <input
             value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
+            onChange={(event) => setSearchDraft({ routeKey, value: event.target.value })}
             aria-label="Search controlled company information"
             placeholder="Search documents, records, codes, owners or indexed text"
           />
@@ -214,7 +208,7 @@ export default function DocumentControlShell({
             </> : null}
           </nav>
         </aside>
-        {navigationOpen ? <button type="button" className="dc-workspace__nav-backdrop" aria-label="Close navigation" onClick={() => setNavigationOpen(false)} /> : null}
+        {navigationOpen ? <button type="button" className="dc-workspace__nav-backdrop" aria-label="Close navigation" onClick={() => setNavigationRoute(null)} /> : null}
 
         <div className="dc-workspace__main">
           <header className="dc-workspace__context-header">

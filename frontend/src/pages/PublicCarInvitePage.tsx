@@ -581,8 +581,10 @@ const PublicCarInvitePage: React.FC = () => {
       case "containment":
         return fieldHasValue(entry.form.containment_action);
       case "analysis":
+        if ((invite?.root_cause_status ?? "") === "REJECTED") return false;
         return fieldHasValue(entry.form.root_cause) || ["ACCEPTED", "APPROVED"].includes(invite?.root_cause_status ?? "");
       case "corrective":
+        if ((invite?.capa_status ?? "") === "REJECTED") return false;
         return fieldHasValue(entry.form.corrective_action) || ["ACCEPTED", "APPROVED"].includes(invite?.capa_status ?? "");
       case "evidence":
         return !invite?.evidence_required || fieldHasValue(entry.form.evidence_ref) || entry.attachments.length > 0 || Boolean(invite.evidence_received_at);

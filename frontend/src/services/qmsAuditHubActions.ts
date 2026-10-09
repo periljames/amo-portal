@@ -1,5 +1,6 @@
-import { getToken, handleAuthFailure } from "./auth";
+import { getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { qmsPath } from "./apiClient";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 import { trackProductWorkflow } from "./productAnalytics";
 
@@ -39,6 +40,13 @@ type HubRequestMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
 const READ_TIMEOUT_MS = 20_000;
 const WRITE_TIMEOUT_MS = 45_000;
+
+function activeQualityPath(path: string): string {
+  const context = getContext();
+  const amoCode = context.amoSlug || context.amoCode;
+  if (!amoCode) throw new Error("No active AMO context is available for Quality actions.");
+  return qmsPath(amoCode, path);
+}
 
 async function readApiError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") || "";
@@ -125,7 +133,7 @@ async function hubRequest<T>(
 }
 
 export async function qmsListCarActions(carId: string): Promise<CARActionOut[]> {
-  return hubRequest<CARActionOut[]>(`/quality/cars/${encodeURIComponent(carId)}/actions`);
+  return hubRequest<CARActionOut[]>(activeQualityPath(`/cars/${encodeURIComponent(carId)}/actions`));
 }
 
 export async function qmsAddCarAction(carId: string, payload: CARActionCreate): Promise<CARActionOut> {
@@ -133,7 +141,7 @@ export async function qmsAddCarAction(carId: string, payload: CARActionCreate): 
     module: "quality",
     workflow: "car-action-submit",
     source: "qms-audit-hub",
-    operation: () => hubRequest<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, {
+    operation: () => hubRequest<CARActionOut>(activeQualityPath(`/cars/${encodeURIComponent(carId)}/actions`), {
       method: "POST",
       body: {
         action_type: payload.action_type ?? "COMMENT",
@@ -159,7 +167,7 @@ export async function qmsShareAuditReport(
     module: "quality",
     workflow: "audit-report-share",
     source: "qms-audit-hub",
-    operation: () => hubRequest<QMSAuditReportShareOut>(`/quality/audits/${encodeURIComponent(auditId)}/report/share`, {
+    operation: () => hubRequest<QMSAuditReportShareOut>(activeQualityPath(`/audits/${encodeURIComponent(auditId)}/report/share`), {
       method: "POST",
       body: {
         recipient_groups: payload.recipient_groups,

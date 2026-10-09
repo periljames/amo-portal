@@ -27,6 +27,7 @@ type EnhancedCapabilities = DocumentDetailResponse["capabilities"] & {
 
 type Mode = "properties" | "upload" | "publish" | null;
 type UploadState = "DRAFT" | "APPROVED";
+type ComplianceEvidenceRole = "" | "APPROVAL_CERTIFICATE" | "SOP" | "CAPABILITY_LIST" | "CONTRACT_SCOPE" | "CONTROLLED_MANUAL" | "QWI" | "FORM_RECORD" | "OTHER";
 
 const DOCUMENT_TYPES = [
   "MANUAL", "PROCEDURE", "WORK_INSTRUCTION", "FORM", "CHECKLIST", "POLICY",
@@ -98,6 +99,9 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
   const [ackRequired, setAckRequired] = useState(document.profile.acknowledgement_required);
   const [autoIssue, setAutoIssue] = useState(policy.auto_issue_on_publish);
   const [ackDueDays, setAckDueDays] = useState(String(policy.acknowledgement_due_days));
+  const [evidenceRole, setEvidenceRole] = useState<ComplianceEvidenceRole>(
+    String(document.profile.metadata.compliance_evidence_role || "") as ComplianceEvidenceRole,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -112,7 +116,15 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
         requires_authority_approval: authority, acknowledgement_required: ackRequired,
         review_interval_months: Number(reviewInterval), next_review_due: nextReview || null,
         access_scope: document.profile.access_scope, tags: document.profile.tags,
-        metadata: { ...document.profile.metadata, distribution_policy: { auto_issue_on_publish: autoIssue, audience_mode: "ALL_ELIGIBLE_USERS", acknowledgement_due_days: Math.max(1, Math.min(365, Number(ackDueDays) || 10)) } },
+        metadata: {
+          ...document.profile.metadata,
+          compliance_evidence_role: evidenceRole || null,
+          distribution_policy: {
+            auto_issue_on_publish: autoIssue,
+            audience_mode: "ALL_ELIGIBLE_USERS",
+            acknowledgement_due_days: Math.max(1, Math.min(365, Number(ackDueDays) || 10)),
+          },
+        },
         expected_version: document.profile.version || undefined,
       });
       onChanged(); onClose();
@@ -133,6 +145,17 @@ function PropertiesDialog({ detail, tenant, onClose, onChanged }: { detail: Docu
         <label><span>Language</span><input value={language} onChange={(event) => setLanguage(event.target.value)} required /></label>
         <label><span>Review interval (months)</span><input type="number" min={1} max={120} value={reviewInterval} onChange={(event) => setReviewInterval(event.target.value)} required /></label>
         <label><span>Next review due</span><input type="date" value={nextReview} onChange={(event) => setNextReview(event.target.value)} /></label>
+        <label><span>Compliance evidence role</span><select value={evidenceRole} onChange={(event) => setEvidenceRole(event.target.value as ComplianceEvidenceRole)}>
+          <option value="">Unclassified</option>
+          <option value="APPROVAL_CERTIFICATE">Approval certificate / approval scope</option>
+          <option value="SOP">Specific operating provisions</option>
+          <option value="CAPABILITY_LIST">Capability list</option>
+          <option value="CONTRACT_SCOPE">Contract scope / subcontract approval</option>
+          <option value="CONTROLLED_MANUAL">Controlled manual</option>
+          <option value="QWI">Quality / work instruction</option>
+          <option value="FORM_RECORD">Form / implementation record</option>
+          <option value="OTHER">Other governed evidence</option>
+        </select><small>Used only by context-specific compliance retrieval. It does not create a universal legal hierarchy.</small></label>
         <label><span><input type="checkbox" checked={regulated} onChange={(event) => setRegulated(event.target.checked)} /> Regulated document</span></label>
         <label><span><input type="checkbox" checked={restricted} onChange={(event) => setRestricted(event.target.checked)} /> Restricted access</span></label>
         <label><span><input type="checkbox" checked={authority} onChange={(event) => setAuthority(event.target.checked)} /> Authority approval required</span></label>

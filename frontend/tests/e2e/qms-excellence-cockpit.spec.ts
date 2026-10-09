@@ -479,7 +479,7 @@ test("Control Room Continuous assurance opens the cockpit and returns cleanly", 
 
   await page.getByRole("link", { name: "Back to Control Room" }).click();
   await expect(page).toHaveURL(/\/quality$/);
-  await expect(page.getByRole("heading", { name: "Control Room" })).toBeVisible();
+  await expect(page.locator(".qms-assurance-room").getByRole("heading", { name: "Control Room", exact: true })).toBeVisible();
 });
 
 test("Evidence hub surfaces pending approvals and linked evidence for review", async ({ page }) => {

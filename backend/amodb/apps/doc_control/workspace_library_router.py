@@ -400,6 +400,13 @@ def list_visible_documents(
     manuals = [manual for manual, _profile in selected]
     profiles = {manual.id: profile for manual, profile in selected}
     manual_ids = [manual.id for manual in manuals]
+    favorite_ids = {
+        row.manual_id for row in db.query(manual_models.ManualReaderProgress.manual_id).filter(
+            manual_models.ManualReaderProgress.user_id == str(current_user.id),
+            manual_models.ManualReaderProgress.manual_id.in_(manual_ids or ["-"]),
+            manual_models.ManualReaderProgress.is_favorite.is_(True),
+        ).distinct().all()
+    }
 
     revisions = (
         db.query(manual_models.ManualRevision)
@@ -546,6 +553,7 @@ def list_visible_documents(
         )
         latest = latest_by_manual.get(manual.id) if controller else target
         payload = serialize_manual(manual, profile, target, target_kind, latest)
+        payload["favorite"] = manual.id in favorite_ids
         node = nodes.get(manual.id)
         payload["library"] = {
             "node_type": node.node_type if node else "MANUAL",

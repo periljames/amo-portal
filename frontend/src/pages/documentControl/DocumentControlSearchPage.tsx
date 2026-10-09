@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Archive, BookOpen, Boxes, FileSearch, LibraryBig, Search } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { currentOfflineScope } from "../../services/offlinePersistence";
 
 import {
   getWarehouseOverview,
@@ -28,20 +29,28 @@ const SCOPES: Array<{ id: WarehouseSearchScope; label: string }> = [
   { id: "external", label: "External" },
 ];
 
-function recentSearches(): string[] {
+function searchHistoryKey(tenant: string): string {
+  return `${RECENT_SEARCHES_KEY}:${tenant.toLowerCase()}:${currentOfflineScope()}`;
+}
+
+function recentSearches(tenant: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const value = JSON.parse(window.localStorage.getItem(RECENT_SEARCHES_KEY) || "[]");
+    const value = JSON.parse(window.localStorage.getItem(searchHistoryKey(tenant)) || "[]");
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 6) : [];
   } catch {
     return [];
   }
 }
 
-function saveRecentSearch(query: string): void {
+function saveRecentSearch(tenant: string, query: string): void {
   if (typeof window === "undefined" || !query.trim()) return;
-  const next = [query.trim(), ...recentSearches().filter((item) => item.toLowerCase() !== query.trim().toLowerCase())].slice(0, 6);
-  window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+  const next = [query.trim(), ...recentSearches(tenant).filter((item) => item.toLowerCase() !== query.trim().toLowerCase())].slice(0, 6);
+  try {
+    window.localStorage.setItem(searchHistoryKey(tenant), JSON.stringify(next));
+  } catch {
+    // Search remains usable when browser storage is unavailable.
+  }
 }
 
 function highlight(text: string | null | undefined, query: string) {
@@ -112,7 +121,7 @@ export default function DocumentControlSearchPage() {
   const [result, setResult] = useState<WarehouseSearchResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(query.trim()));
   const [error, setError] = useState("");
-  const [recent, setRecent] = useState<string[]>(() => recentSearches());
+  const recent = recentSearches(tenant);
   const [canControl, setCanControl] = useState(false);
 
   useEffect(() => { setInput(query); }, [query]);
@@ -155,8 +164,7 @@ export default function DocumentControlSearchPage() {
       .then((response) => {
         if (cancelled) return;
         setResult(response);
-        saveRecentSearch(query);
-        setRecent(recentSearches());
+        saveRecentSearch(tenant, query);
       })
       .catch((caught) => {
         if (!cancelled) setError(caught instanceof Error ? caught.message : "Search could not be completed.");

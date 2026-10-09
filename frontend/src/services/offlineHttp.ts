@@ -26,6 +26,7 @@ export type PortalOfflineOptions = {
   entityType?: string;
   entityId?: string;
   idempotencyKey?: string;
+  requireDurable?: boolean;
 };
 
 export type PortalFetchInit = RequestInit & {
@@ -234,6 +235,7 @@ async function queueRequest(
     entityId: init.offline?.entityId,
     idempotencyKey,
     scope: requestScope,
+    requireDurable: init.offline?.requireDurable === true,
   });
   throw new OfflineQueuedError(operation);
 }

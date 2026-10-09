@@ -53,7 +53,9 @@ type Props = { amoCode: string; auditKey: string };
 type SetupDraft = {
   title: string;
   scope: string;
+  objectives: string;
   criteria: string;
+  location: string;
   auditee: string;
   auditeeEmail: string;
   plannedStart: string;
@@ -75,6 +77,9 @@ type MeetingDraft = {
   end: string;
   location: string;
   conferenceUrl: string;
+  agenda: string;
+  auditeeDepartment: string;
+  auditorUserId: string;
 };
 
 const emptyMeeting: MeetingDraft = {
@@ -84,6 +89,9 @@ const emptyMeeting: MeetingDraft = {
   end: "",
   location: "",
   conferenceUrl: "",
+  agenda: "",
+  auditeeDepartment: "",
+  auditorUserId: "",
 };
 
 const MODALITY_OPTIONS: Array<{ value: Exclude<MeetingModality, "">; label: string; hint: string }> = [
@@ -192,6 +200,9 @@ function meetingDraftFromRow(
         ? ""
         : locationText,
     conferenceUrl: row.conference_url || "",
+    agenda: row.agenda || "",
+    auditeeDepartment: row.auditee_department || "",
+    auditorUserId: row.auditor_user_id || "",
   };
 }
 
@@ -218,7 +229,9 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
   return {
     title: audit.title || "",
     scope: audit.scope || "",
+    objectives: audit.objectives || "",
     criteria: audit.criteria || "",
+    location: audit.location || "",
     auditee: audit.auditee || "",
     auditeeEmail: audit.auditee_email || "",
     plannedStart: datePart(audit.planned_start || ""),
@@ -512,7 +525,10 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return updateAuditOccurrenceSetup(amoCode, auditId, {
         title: draft.title.trim(),
         scope: draft.scope.trim() || null,
+        objectives: draft.objectives.trim() || null,
         criteria: draft.criteria.trim() || null,
+        location: draft.location.trim() || null,
+        base_version: auditQuery.data?.entity_version || 1,
         auditee: draft.auditee.trim() || null,
         auditee_email: draft.auditeeEmail.trim() || null,
         planned_start: datePart(draft.plannedStart) || null,
@@ -574,6 +590,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         scheduled_end: snapped.end,
         location,
         conference_url: value.modality === "PHYSICAL" ? null : conferenceUrl || null,
+        agenda: value.agenda.trim() || null,
+        auditee_department: value.auditeeDepartment.trim() || null,
+        auditor_user_id: value.auditorUserId || auditQuery.data?.lead_auditor_user_id || null,
         status: row?.status ?? "PLANNED",
       };
       return row ? updateAuditMeeting(amoCode, auditId, row.id, payload) : createAuditMeeting(amoCode, auditId, payload);
@@ -901,6 +920,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       end: openingInherited.end,
       location: modality === "ONLINE" ? "" : openingDraft.location || "",
       conferenceUrl: modality === "PHYSICAL" ? "" : openingDraft.conferenceUrl || "",
+      agenda: openingDraft.agenda || "",
+      auditeeDepartment: openingDraft.auditeeDepartment || "",
+      auditorUserId: openingDraft.auditorUserId || auditQuery.data?.lead_auditor_user_id || "",
     };
     const closingValue: MeetingDraft = {
       modality,
@@ -909,6 +931,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       end: closingInherited.end,
       location: modality === "ONLINE" ? "" : closingDraft.location || "",
       conferenceUrl: modality === "PHYSICAL" ? "" : closingDraft.conferenceUrl || "",
+      agenda: closingDraft.agenda || "",
+      auditeeDepartment: closingDraft.auditeeDepartment || "",
+      auditorUserId: closingDraft.auditorUserId || auditQuery.data?.lead_auditor_user_id || "",
     };
     if (modality !== "ONLINE" && !openingValue.location.trim()) {
       openingValue.location = "Main base";
@@ -1192,6 +1217,36 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ) : null}
             </div>
 
+            <div className="qms-audit-setup-stage__fields">
+              <label>
+                <span>Auditee / department</span>
+                <input
+                  disabled={!canManage}
+                  value={value.auditeeDepartment}
+                  onChange={(event) => setValue((current) => ({ ...current, auditeeDepartment: event.target.value }))}
+                  placeholder="Department, process owner or interview group"
+                />
+              </label>
+              <label>
+                <span>Assigned auditor</span>
+                <input
+                  disabled
+                  value={value.auditorUserId || auditQuery.data?.lead_auditor_user_id || ""}
+                  placeholder="Uses the assigned lead auditor when not otherwise recorded"
+                />
+              </label>
+              <label className="qms-audit-setup-stage__field-span">
+                <span>Agenda / interview plan</span>
+                <textarea
+                  disabled={!canManage}
+                  rows={3}
+                  value={value.agenda}
+                  onChange={(event) => setValue((current) => ({ ...current, agenda: event.target.value }))}
+                  placeholder="Agenda items, interview subjects, records or areas to cover"
+                />
+              </label>
+            </div>
+
             {definitionDirty ? (
               <p role="status">Save the audit dates before updating meetings.</p>
             ) : null}
@@ -1365,6 +1420,16 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   onChange={(event) => { clearGuidance("scope"); setDraft({ ...draft, scope: event.target.value }); }}
                 />
               </label>
+              <label>
+                <span>Objectives</span>
+                <textarea
+                  disabled={!canManage}
+                  rows={2}
+                  value={draft.objectives}
+                  onChange={(event) => setDraft({ ...draft, objectives: event.target.value })}
+                  placeholder="What this audit is intended to verify or achieve"
+                />
+              </label>
               <label id="audit-setup-field-criteria" className={guidedClass("criteria")}>
                 <span>Criteria</span>
                 <textarea
@@ -1374,11 +1439,21 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   onChange={(event) => { clearGuidance("criteria"); setDraft({ ...draft, criteria: event.target.value }); }}
                 />
               </label>
+              <label>
+                <span>Site / location</span>
+                <input
+                  disabled={!canManage}
+                  value={draft.location}
+                  onChange={(event) => setDraft({ ...draft, location: event.target.value })}
+                  placeholder="Base, line station, workshop, supplier site or remote"
+                />
+              </label>
             </div>
             <div className="qms-audit-setup-stage__fields">
               <label id="audit-setup-field-auditee" className={guidedClass("auditee")}>
-                <span>Auditee representative</span>
+                <span>Auditee</span>
                 <input
+                  aria-label="Auditee"
                   disabled={!canManage}
                   value={draft.auditee}
                   onChange={(event) => { clearGuidance("auditee"); setDraft({ ...draft, auditee: event.target.value }); }}
@@ -1388,6 +1463,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label>
                 <span>Auditee email</span>
                 <input
+                  aria-label="Auditee email"
                   type="email"
                   disabled={!canManage}
                   value={draft.auditeeEmail}
@@ -1474,19 +1550,21 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 Notify auditee
               </label>
             </div>
-            {canManage && definitionScheduleChanged ? (
+            {canManage ? (
               <label className="qms-audit-setup-stage__reschedule-reason">
                 <span>Reason for rescheduling</span>
                 <textarea
                   rows={2}
                   value={rescheduleReason}
                   onChange={(event) => setRescheduleReason(event.target.value)}
-                  placeholder="Why the audit date or time is changing"
+                  placeholder={definitionScheduleChanged ? "Why the audit date or time is changing" : "Add a reason when changing the audit schedule"}
                 />
                 <small>
-                  Required for the permanent audit history. This reason will also be suggested when a revised notice is required.
+                  {definitionScheduleChanged
+                    ? "Required for the permanent audit history. This reason will also be suggested when a revised notice is required."
+                    : "Recorded only when the planned audit date or time changes."}
                 </small>
-                {rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
+                {definitionScheduleChanged && rescheduleReason.trim().length < 8 ? <small role="status">Enter at least 8 characters to save the new schedule.</small> : null}
               </label>
             ) : null}
             {canManage ? (

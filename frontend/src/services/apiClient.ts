@@ -371,6 +371,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
               entityType: offline?.entityType,
               entityId: offline?.entityId,
               idempotencyKey: offline?.idempotencyKey,
+              requireDurable: offline?.requireDurable === true,
             },
           );
 

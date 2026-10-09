@@ -28,6 +28,7 @@ export type LibraryExternalSummary = {
 };
 
 export type IntegratedLibraryItem = DocumentLibraryItem & {
+  favorite?: boolean;
   library: {
     node_type: string;
     structure_path?: string | null;
@@ -277,6 +278,13 @@ export function discoverLibrary(tenant: string, filters: { view?: LibraryDiscove
     page: filters.page || 1,
     per_page: filters.perPage || 50,
   })}`);
+}
+
+export function setLibraryFavorite(tenant: string, manualId: string, favorite: boolean): Promise<{ manual_id: string; favorite: boolean }> {
+  return api(workspacePath(tenant, `/library/${encodeURIComponent(manualId)}/favorite`), {
+    method: "PUT",
+    body: JSON.stringify({ favorite }),
+  });
 }
 
 export type LibrarySavedPresentation = "list" | "compact" | "cards" | "register";

@@ -2,12 +2,17 @@ import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { getCachedUser } from "../../../services/auth";
 import type { QMSAuditOut } from "../../../services/qms";
 
-export function canExecuteAssignedAudit(audit?: Pick<QMSAuditOut, "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id"> | null): boolean {
+export function canExecuteAssignedAudit(audit?: Pick<QMSAuditOut, "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id" | "supporting_auditor_user_ids"> | null): boolean {
   if (!hasQmsRolePermission("qms.audit.execute") && !hasQmsRolePermission("qms.audit.manage")) return false;
   const user = getCachedUser();
   if (!user) return false;
   if (!audit) return true;
-  return [audit.lead_auditor_user_id, audit.observer_auditor_user_id, audit.assistant_auditor_user_id].includes(user.id);
+  return [
+    audit.lead_auditor_user_id,
+    audit.observer_auditor_user_id,
+    audit.assistant_auditor_user_id,
+    ...(audit.supporting_auditor_user_ids || []),
+  ].includes(user.id);
 }
 
 export function canGovernAudit(): boolean {

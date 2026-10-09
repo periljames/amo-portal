@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import importlib
-from datetime import date
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from starlette.requests import Request
@@ -14,6 +15,7 @@ from amodb.apps.quality import people_models as quality_people_models
 from amodb.apps.quality import schemas as quality_schemas
 
 quality_router = importlib.import_module("amodb.apps.quality.router")
+effectiveness_response_router = importlib.import_module("amodb.apps.quality.effectiveness_response_router")
 
 
 def _req() -> Request:
@@ -164,6 +166,97 @@ def test_review_rejection_requires_reason_note(db_session):
     with pytest.raises(HTTPException) as exc:
         quality_router.review_car_response(car_id=car.id, payload=payload, request=_req(), db=db_session, current_user=quality)
     assert exc.value.status_code == 400
+
+
+def test_ineffective_effectiveness_reopen_restores_car_finding_and_cap(db_session, monkeypatch):
+    amo, quality, _, audit = _seed_audit(db_session)
+    now = datetime.now(timezone.utc)
+    finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
+        audit_id=audit.id,
+        description="Prior corrective action was verified but later proved ineffective.",
+        finding_type=quality_models.QMSFindingType.NON_CONFORMITY,
+        severity=quality_models.QMSFindingSeverity.MAJOR,
+        level=quality_models.FindingLevel.LEVEL_2,
+        closed_at=now,
+        verified_at=now,
+        verified_by_user_id=quality.id,
+    )
+    db_session.add(finding)
+    db_session.flush()
+    car = quality_models.CorrectiveActionRequest(
+        amo_id=amo.id,
+        program=quality_models.CARProgram.QUALITY,
+        car_number="Q-2026-REOPEN",
+        title="Effectiveness failed",
+        summary="Reopen after ineffective corrective action.",
+        requested_by_user_id=quality.id,
+        assigned_to_user_id=quality.id,
+        priority=quality_models.CARPriority.HIGH,
+        status=quality_models.CARStatus.CLOSED,
+        invite_token="reopen-effectiveness-token",
+        finding_id=finding.id,
+        capa_status="ACCEPTED",
+        evidence_verified_at=now,
+        closed_at=now,
+        target_closure_date=date.today(),
+    )
+    cap = quality_models.QMSCorrectiveAction(
+        amo_id=amo.id,
+        finding_id=finding.id,
+        corrective_action="Previous corrective action",
+        status=quality_models.QMSCAPStatus.CLOSED,
+        verified_at=now,
+        verified_by_user_id=quality.id,
+        created_by_user_id=quality.id,
+        updated_by_user_id=quality.id,
+    )
+    db_session.add_all([car, cap])
+    db_session.commit()
+
+    created_tasks: list[dict] = []
+    monkeypatch.setattr(
+        effectiveness_response_router.task_services,
+        "create_task",
+        lambda _db, **kwargs: created_tasks.append(kwargs) or SimpleNamespace(id="task-1"),
+    )
+
+    result = effectiveness_response_router._reopen_car_for_ineffective_action(
+        db_session,
+        ctx=SimpleNamespace(amo_id=amo.id, user_id=quality.id),
+        row=SimpleNamespace(
+            id="response-action-1",
+            target_source_type="CAR",
+            target_source_id=str(car.id),
+        ),
+        reason="Effectiveness sampling found the same control failure.",
+    )
+    db_session.flush()
+
+    db_session.refresh(car)
+    db_session.refresh(finding)
+    db_session.refresh(cap)
+    assert result["prior_status"] == "CLOSED"
+    assert car.status == quality_models.CARStatus.IN_PROGRESS
+    assert car.closed_at is None
+    assert car.evidence_verified_at is None
+    assert car.capa_status == "NEEDS_EVIDENCE"
+    assert "Effectiveness review reopened this CAR" in str(car.capa_review_note)
+    assert finding.closed_at is None
+    assert finding.verified_at is None
+    assert finding.verified_by_user_id is None
+    assert cap.status == quality_models.QMSCAPStatus.IN_PROGRESS
+    assert cap.verified_at is None
+    assert cap.verified_by_user_id is None
+    assert created_tasks and created_tasks[0]["entity_id"] == str(car.id)
+    log = (
+        db_session.query(quality_models.CARActionLog)
+        .filter(quality_models.CARActionLog.car_id == car.id)
+        .order_by(quality_models.CARActionLog.created_at.desc())
+        .first()
+    )
+    assert log is not None
+    assert "ineffective corrective-action effectiveness review" in log.message
 
 
 def test_evidence_required_blocks_invite_submission_without_attachment(db_session):

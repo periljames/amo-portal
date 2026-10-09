@@ -142,7 +142,7 @@ function resolveReportedTotal(reported: unknown, loaded: number, hasMore: unknow
   return loaded;
 }
 
-async function loadAnalysisCars(signal: AbortSignal): Promise<LoadedReport> {
+async function loadAnalysisCars(amoCode: string, signal: AbortSignal): Promise<LoadedReport> {
   const items: CAROut[] = [];
   let offset = 0;
   let total: number | null = null;
@@ -150,6 +150,7 @@ async function loadAnalysisCars(signal: AbortSignal): Promise<LoadedReport> {
 
   for (let pageIndex = 0; pageIndex < ANALYSIS_MAX_PAGES; pageIndex += 1) {
     const page = await qmsGetCarRegisterPage({
+      amoCode,
       scope: "all",
       limit: ANALYSIS_PAGE_SIZE,
       offset,
@@ -171,7 +172,7 @@ async function loadAnalysisCars(signal: AbortSignal): Promise<LoadedReport> {
   };
 }
 
-async function loadAnalysisFindings(signal: AbortSignal): Promise<LoadedFindings> {
+async function loadAnalysisFindings(amoCode: string, signal: AbortSignal): Promise<LoadedFindings> {
   const rows: QMSAuditRegisterRowOut[] = [];
   let offset = 0;
   let total: number | null = null;
@@ -179,6 +180,7 @@ async function loadAnalysisFindings(signal: AbortSignal): Promise<LoadedFindings
 
   for (let pageIndex = 0; pageIndex < ANALYSIS_MAX_PAGES; pageIndex += 1) {
     const page = await qmsGetAuditRegisterPage({
+      amoCode,
       domain: "AMO",
       limit: ANALYSIS_PAGE_SIZE,
       offset,
@@ -220,13 +222,13 @@ const QmsCarPerformanceReportPage: React.FC = () => {
 
   const reportQuery = useQuery({
     queryKey: ["qms-car-performance-live", amoCode, ANALYSIS_PAGE_SIZE],
-    queryFn: ({ signal }) => loadAnalysisCars(signal),
+    queryFn: ({ signal }) => loadAnalysisCars(amoCode, signal),
     enabled: canViewReports,
     staleTime: 30_000,
   });
   const findingsQuery = useQuery({
     queryKey: ["qms-finding-trends-live", amoCode, ANALYSIS_PAGE_SIZE],
-    queryFn: ({ signal }) => loadAnalysisFindings(signal),
+    queryFn: ({ signal }) => loadAnalysisFindings(amoCode, signal),
     enabled: canViewReports,
     staleTime: 30_000,
   });

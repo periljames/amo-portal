@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Activity,
   BookOpen,
   FileClock,
   GitBranch,
+  Heart,
   Send,
   ShieldCheck,
   X,
 } from "lucide-react";
+import { currentOfflineScope } from "../../services/offlinePersistence";
+import { setLibraryFavorite } from "../../services/documentLibrary";
 
 import {
   getDocumentControlDocument,
@@ -29,6 +33,7 @@ type Props = {
   onClose: () => void;
   onRead: () => void;
   onOpenWorkspace?: () => void;
+  onUpdated?: () => void;
 };
 
 const TABS: Array<{ id: DetailTab; label: string; icon: typeof BookOpen }> = [
@@ -117,44 +122,30 @@ export default function DocumentLibraryDetailsPane({
   onClose,
   onRead,
   onOpenWorkspace,
+  onUpdated,
 }: Props) {
   const facts = useMemo(() => selectedFacts(selected), [selected]);
-  const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<DetailTab>("details");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    setActiveTab("details");
-    void getDocumentControlDocument(tenant, facts.id)
-      .then((response) => {
-        if (!cancelled) setDetail(response);
-      })
-      .catch((caught) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Document details could not be loaded.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [facts.id, tenant]);
-
+  const detailQuery = useQuery({
+    queryKey: ["document-control", "library-details", currentOfflineScope(), tenant, facts.id],
+    queryFn: () => getDocumentControlDocument(tenant, facts.id),
+  });
+  const detail = detailQuery.data || null;
+  const loading = detailQuery.isPending;
+  const error = detailQuery.error
+    ? detailQuery.error instanceof Error ? detailQuery.error.message : "Document details could not be loaded."
+    : "";
+  const [tabSelection, setTabSelection] = useState<{ documentId: string; tab: DetailTab } | null>(null);
   const allowedTabs = visibleTabs(detail, canControl);
-  useEffect(() => {
-    if (!allowedTabs.includes(activeTab)) setActiveTab("details");
-  }, [activeTab, allowedTabs]);
-
-  const retry = () => {
-    setLoading(true);
-    setError("");
-    void getDocumentControlDocument(tenant, facts.id)
-      .then(setDetail)
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Document details could not be loaded."))
-      .finally(() => setLoading(false));
-  };
+  const selectedTab = tabSelection?.documentId === facts.id ? tabSelection.tab : "details";
+  const activeTab = allowedTabs.includes(selectedTab) ? selectedTab : "details";
+  const retry = () => { void detailQuery.refetch(); };
+  const favoriteMutation = useMutation({
+    mutationFn: ({ manualId, favorite }: { manualId: string; favorite: boolean }) => setLibraryFavorite(tenant, manualId, favorite),
+    onSuccess: () => { onUpdated?.(); },
+  });
+  const favorite = favoriteMutation.data?.manual_id === facts.id
+    ? favoriteMutation.data.favorite
+    : Boolean(selected.item.favorite);
 
   return <aside className="dlibrary-details" aria-label={`Document details for ${facts.code}`}>
     <header className="dlibrary-details__head">
@@ -168,17 +159,21 @@ export default function DocumentLibraryDetailsPane({
 
     <div className="dlibrary-details__actions">
       <button type="button" className="dc-button dc-button--primary" disabled={!facts.revision?.id} onClick={onRead}>Read</button>
+      <button type="button" className="dc-button" aria-pressed={favorite} disabled={!facts.revision?.id || favoriteMutation.isPending} onClick={() => favoriteMutation.mutate({ manualId: facts.id, favorite: !favorite })}>
+        <Heart size={14} fill={favorite ? "currentColor" : "none"} />{favorite ? "Remove favorite" : "Add favorite"}
+      </button>
       {canControl && onOpenWorkspace ? <button type="button" className="dc-button" onClick={onOpenWorkspace}>Open workspace</button> : null}
     </div>
 
     <nav className="dlibrary-details__tabs" aria-label="Document detail sections">
       {TABS.filter((tab) => allowedTabs.includes(tab.id)).map(({ id, label, icon: Icon }) =>
-        <button type="button" key={id} className={activeTab === id ? "active" : ""} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)}>
+        <button type="button" key={id} className={activeTab === id ? "active" : ""} aria-current={activeTab === id ? "page" : undefined} onClick={() => setTabSelection({ documentId: facts.id, tab: id })}>
           <Icon size={14} /><span>{label}</span>
         </button>)}
     </nav>
 
     <div className="dlibrary-details__body">
+      {favoriteMutation.isError ? <p role="alert">{favoriteMutation.error instanceof Error ? favoriteMutation.error.message : "Favorite could not be updated."}</p> : null}
       {loading ? <DocumentControlLoading label="Loading document details…" /> : null}
       {error && !loading ? <DocumentControlError message={error} retry={retry} /> : null}
 

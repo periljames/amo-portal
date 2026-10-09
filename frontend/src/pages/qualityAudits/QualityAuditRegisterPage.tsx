@@ -134,6 +134,7 @@ const QualityAuditRegisterPage: React.FC = () => {
   const registerQuery = useQuery({
     queryKey: ["qms-assurance-register", amoCode, actorView, period, findingStatus, level, auditId, stage, timing, search, pageSize, page],
     queryFn: ({ signal }) => qmsGetAuditRegisterPage({
+      amoCode,
       domain: "AMO", view: actorView, period, status: findingStatus || undefined, level: level || undefined,
       auditId: auditId || undefined,
       onlyWithCars: false,

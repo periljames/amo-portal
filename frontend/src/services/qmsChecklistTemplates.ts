@@ -1,9 +1,24 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import type { PublicationUploadPayload } from "./publications";
+import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
+export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
+export type ChecklistResponseOption = {
+  value: string;
+  label: string;
+  // Empty is permitted only while editing a draft. The backend rejects issue/
+  // revision creation until every source option has an explicit semantic map.
+  canonical_status: ChecklistCanonicalStatus | "";
+};
 
 export type ChecklistTemplateItem = {
+  item_id?: string;
+  section_id?: string | null;
+  section_code?: string | null;
+  section_title?: string | null;
+  section_description?: string | null;
+  parent_section_id?: string | null;
   section?: string | null;
   category?: string | null;
   checklist_ref?: string | null;
@@ -12,8 +27,19 @@ export type ChecklistTemplateItem = {
   manual_source_ref?: string | null;
   prompt: string;
   expected_evidence?: string | null;
+  guidance?: string | null;
+  evidence_context?: "GENERAL" | "CAPABILITY_SCOPE" | "PERSONNEL_AUTHORIZATION" | "CONTRACT_SCOPE" | "TECHNICAL_DATA" | "RECORD_RETENTION" | "TOOLING_CALIBRATION" | "FACILITY";
+  audit_method?: "RECORD_REVIEW" | "INTERVIEW" | "OBSERVATION" | "SAMPLE" | "TEST" | null;
+  sampling_requirement?: string | null;
+  evidence_types?: string[];
+  evidence_required_when?: ChecklistCanonicalStatus[];
+  notes_required_when?: ChecklistCanonicalStatus[];
+  na_justification_required?: boolean;
+  conditional_logic?: Record<string, unknown>;
   response_type: string;
+  response_options?: ChecklistResponseOption[];
   applicability: string;
+  applicability_reason?: string | null;
   mandatory?: boolean;
   finding_trigger?: ChecklistFindingTrigger;
   sort_order: number;
@@ -31,6 +57,7 @@ export type ChecklistTemplateRevision = {
   supersedes_revision_id?: string | null;
   issued_by_user_id?: string | null;
   issued_at?: string | null;
+  effective_at?: string | null;
   created_by_user_id?: string | null;
   created_at: string;
 };
@@ -146,8 +173,24 @@ export function issueChecklistRevision(amoCode: string, templateId: string, revi
   return apiRequest<ChecklistTemplateRevision>(qmsPath(amoCode, `/audit-checklist-templates/${encodeURIComponent(templateId)}/revisions/${encodeURIComponent(revisionId)}/issue`), json("POST", { reason }));
 }
 
-export function listChecklistBindings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+export async function listChecklistBindings(amoCode: string, auditId: string, signal?: AbortSignal) {
+  const readOffline = async () => {
+    const pack = await readAuditOfflinePack(amoCode, auditId);
+    return pack ? projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] } : null;
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+  }
+  try {
+    return await apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
 }
 
 export function applyChecklistRevision(amoCode: string, auditId: string, templateRevisionId: string, reason: string, allowExistingItems: boolean) {
@@ -216,10 +259,17 @@ export function bindCurrentDmsChecklist(
   documentId: string,
   reason: string,
   allowExistingItems: boolean,
+  responseType: string,
+  responseOptions: ChecklistResponseOption[] = [],
 ) {
   return apiRequest<ChecklistBinding>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/${encodeURIComponent(documentId)}/bind-current`),
-    json("POST", { reason, allow_existing_items: allowExistingItems }),
+    json("POST", {
+      reason,
+      allow_existing_items: allowExistingItems,
+      response_type: responseType,
+      response_options: responseOptions,
+    }),
   );
 }
 

@@ -29,7 +29,7 @@
   padding: 0 0.42rem;
   border: 1px solid var(--input-border);
   border-radius: 7px;
-  background: var(--input-bg);
+  background: var(--surface-elevated, var(--input-bg));
   color: var(--text-secondary);
 }
 
