@@ -70,12 +70,12 @@ export default function ProviderImportPanel({amoCode,onImported}:{
   function download() {
     if(!detail)return;
     const escape=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
-    const header=["sheet","row","supplier_code","legal_name","status","issues","supplier_id"];
+    const header=["sheet","row","supplier_code","supplier_name","contract_number","title","status","issues","supplier_id"];
     const lines=[header.map(escape).join(","),...detail.rows.map(row=>{
       const fields=unpack<Record<string,string|null>>(row.normalized_json);
       const issues=unpack<string[]>(row.diagnostics_json);
-      return [row.sheet_name,row.row_number,fields.supplier_code,fields.legal_name,
-        row.status,issues.join("; "),row.supplier_id].map(escape).join(",");
+      return [row.sheet_name,row.row_number,fields.supplier_code,fields.legal_name||fields.supplier_name,
+        fields.contract_number,fields.title,row.status,issues.join("; "),row.supplier_id].map(escape).join(",");
     })];
     const url=URL.createObjectURL(new Blob([lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));
     const anchor=document.createElement("a");anchor.href=url;
@@ -85,9 +85,11 @@ export default function ProviderImportPanel({amoCode,onImported}:{
   const errors=detail?.rows.filter(row=>row.status==="ERROR")??[];
   return <section className="proc-panel" aria-label="External provider spreadsheet import">
     <header><div><h2>Import vendor and contracts trackers</h2>
-      <p>Preview spreadsheet records before adding inactive prospective suppliers.
+      <p>Stage prospective suppliers or draft contracts.
          Contract and approval columns are not treated as authorizations.</p></div></header>
     <form onSubmit={e=>void upload(e)}>
+      <label>Tracker type <select value={importKind} onChange={e=>{setImportKind(e.target.value as "SUPPLIERS"|"CONTRACTS");setPreview(null);setDetail(null);}}><option value="SUPPLIERS">Vendor register</option><option value="CONTRACTS">Contracts & agreements</option></select></label>
+      <label>Worksheet (optional) <input type="text" value={sourceSheet} onChange={e=>setSourceSheet(e.target.value)} placeholder="All sheets"/></label>
       <label>Workbook (XLSX or XLSM)
         <input type="file" accept=".xlsx,.xlsm" required onChange={e=>{
           setFile(e.target.files?.[0]??null);setPreview(null);setDetail(null);
@@ -111,14 +113,14 @@ export default function ProviderImportPanel({amoCode,onImported}:{
         const fields=unpack<Record<string,string|null>>(row.normalized_json);
         const issues=unpack<string[]>(row.diagnostics_json);
         return <tr key={row.id}><td>{row.sheet_name} #{row.row_number}</td>
-          <td>{fields.supplier_code||"—"} — {fields.legal_name||"—"}</td>
+          <td>{fields.supplier_code||fields.contract_number||"—"} — {fields.legal_name||fields.supplier_name||fields.title||"—"}</td>
           <td>{row.status}</td><td>{issues.join(", ")||"—"}</td></tr>;
       })}</tbody></table></div>
       <div className="proc-toolbar">
         <button type="button" className="proc-button" onClick={download}>Export reconciliation CSV</button>
         {detail.batch.status==="STAGED"&&<button type="button"
           className="proc-button proc-button--primary" disabled={busy||errors.length>0||detail.rows.length===0}
-          onClick={()=>void confirm()}>Confirm {detail.rows.length} prospective records</button>}
+          onClick={()=>void confirm()}>Confirm {detail.rows.length} {detail.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"}</button>}
       </div>
       {errors.length>0&&<p role="alert">Resolve {errors.length} row errors in the source workbook and stage the corrected file before confirmation.</p>}
     </>}
