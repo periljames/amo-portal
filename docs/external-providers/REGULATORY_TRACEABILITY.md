@@ -1,9 +1,9 @@
 # Draft MOPM regulatory traceability
-These references are proposed procedures in **DRAFT MOPM Issue 4**, not evidence of KCAA approval or enacted legal compliance. Source PDF and source workbooks have not been independently inspected in this execution.
+These references are proposed procedures in **DRAFT MOPM Issue 4**, not evidence of KCAA approval or enacted legal compliance. Indexed excerpts from DRAFT MOPM ISSUE 4(8).pdf were reviewed for sections 1.11, 2.1.1, 2.1.2 and 2.23.3.3. The complete draft and the two source workbooks were not fully available for source-by-source reconciliation.
 | Draft section | Proposed system control | Verification still needed |
 |---|---|---|
 | 1.11 | Contracts and liaison contacts | Contract authority and sign-off |
-| 2.1 | Evaluation/re-evaluation, restrictions | QMS gate consistency |
+| 2.1 | Draft supplier control and supplier/vendor audits | QMS gate consistency and audit evidence |
 | 2.2 | Procurement source eligibility | All transaction entry points |
 | 2.20 | Defective component dispatch | Recipient eligibility before dispatch |
 | 2.23 | Contracting, further subcontracting | Written consent and flowdown |
