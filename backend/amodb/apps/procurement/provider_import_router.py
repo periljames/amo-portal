@@ -225,6 +225,10 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                      "state":state,"supplier":supplier_id})
         if not matched_sheet:
             raise HTTPException(422, "Selected worksheet not found.")
+        service._event(db,amo_id=tenant,entity_type="ExternalProviderImport",
+                       entity_id=batch_id,action="stage_preview",actor_user_id=str(user.id),
+                       detail={"import_kind":import_kind,"source_sha256":digest,
+                               "source_sheet":source_sheet,"counts":counts})
         db.commit()
         return {"batch_id":batch_id, "source_sha256":digest, "import_kind":import_kind,
                 "counts":counts,"status":"STAGED"}
