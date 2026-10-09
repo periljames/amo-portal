@@ -68,6 +68,8 @@ def upgrade():
                                     ["external_provider_sites.amo_id", "external_provider_sites.supplier_id", "external_provider_sites.id"]),
             sa.CheckConstraint("assignment IN ('COMMERCIAL','TECHNICAL','QUALITY','OTHER')",
                                name="assignment_valid"))
+    op.create_unique_constraint("uq_ext_qms_evidence_tenant_identity",
+                                "quality_external_provider_evidence", ["amo_id", "supplier_id", "id"])
     _create("external_provider_capabilities",
             sa.Column("site_id", sa.String(36)),
             sa.Column("capability_type", sa.String(64), nullable=False),
@@ -81,7 +83,10 @@ def upgrade():
             sa.Column("valid_until", sa.Date()),
             sa.Column("evidence_id", sa.String(36)),
             sa.ForeignKeyConstraint(["site_id"], ["external_provider_sites.id"], ondelete="SET NULL"),
-            sa.ForeignKeyConstraint(["evidence_id"], ["quality_external_provider_evidence.id"], ondelete="SET NULL"))
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "evidence_id"],
+                                    ["quality_external_provider_evidence.amo_id",
+                                     "quality_external_provider_evidence.supplier_id",
+                                     "quality_external_provider_evidence.id"]))
     _create("external_provider_source_links",
             sa.Column("source_system", sa.String(80), nullable=False),
             sa.Column("source_identifier", sa.String(255), nullable=False),
@@ -101,6 +106,7 @@ def upgrade():
         sa.Column("created_by_user_id", sa.String(36), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("committed_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("amo_id", "id", name="uq_ext_import_batch_tenant_id"),
         sa.UniqueConstraint("amo_id", "source_sha256", name="uq_ext_import_tenant_file"),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"))
     op.create_index("ix_ext_import_batches_tenant", "external_provider_import_batches", ["amo_id", "status"])
@@ -116,7 +122,8 @@ def upgrade():
         sa.Column("status", sa.String(24), nullable=False, server_default="STAGED"),
         sa.Column("supplier_id", sa.Integer()),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["batch_id"], ["external_provider_import_batches.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id", "batch_id"],
+                                ["external_provider_import_batches.amo_id", "external_provider_import_batches.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["amo_id", "supplier_id"],
                                 ["procurement_suppliers.amo_id", "procurement_suppliers.id"]),
         sa.UniqueConstraint("batch_id", "sheet_name", "row_number", name="uq_ext_import_source_row"))
@@ -140,4 +147,6 @@ def downgrade():
             op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
         op.drop_index(f"ix_{name}_supplier", table_name=name)
         op.drop_table(name)
+    op.drop_constraint("uq_ext_qms_evidence_tenant_identity",
+                       "quality_external_provider_evidence", type_="unique")
     op.drop_constraint("uq_procurement_supplier_tenant_identity", "procurement_suppliers", type_="unique")
