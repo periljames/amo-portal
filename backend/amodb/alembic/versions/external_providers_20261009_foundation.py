@@ -70,7 +70,8 @@ def upgrade():
             sa.ForeignKeyConstraint(["amo_id", "supplier_id", "site_id"],
                                     ["external_provider_sites.amo_id", "external_provider_sites.supplier_id", "external_provider_sites.id"]),
             sa.CheckConstraint("assignment IN ('COMMERCIAL','TECHNICAL','QUALITY','OTHER')",
-                               name="assignment_valid"))
+                               name="assignment_valid"),
+            extra=(sa.UniqueConstraint("amo_id", "supplier_id", "id", name="uq_ext_contact_tenant_ref"),))
     op.create_unique_constraint("uq_ext_qms_evidence_tenant_identity",
                                 "quality_external_provider_evidence", ["amo_id", "supplier_id", "id"])
     _create("external_provider_capabilities",
@@ -124,6 +125,11 @@ def upgrade():
                                      "quality_external_provider_evidence.id"]),
             extra=(sa.UniqueConstraint("amo_id", "supplier_id", "certificate_type",
                                        "certificate_number", name="uq_ext_provider_certificate"),))
+    op.create_unique_constraint("uq_ext_contract_tenant_identity",
+                                "quality_external_provider_contracts", ["amo_id", "supplier_id", "id"])
+    op.create_unique_constraint("uq_ext_supplier_scope_tenant_identity",
+                                "procurement_supplier_approval_scopes", ["amo_id", "supplier_id", "id"])
+    op.create_unique_constraint("uq_ext_user_tenant_identity", "users", ["amo_id", "id"])
     _create("external_provider_relationships",
             sa.Column("parent_supplier_id", sa.Integer(), nullable=False),
             sa.Column("contract_id", sa.String(36)),
@@ -141,7 +147,10 @@ def upgrade():
                                name="ck_ext_provider_relation_consent"),
             sa.ForeignKeyConstraint(["amo_id", "parent_supplier_id"],
                                     ["procurement_suppliers.amo_id", "procurement_suppliers.id"]),
-            sa.ForeignKeyConstraint(["contract_id"], ["quality_external_provider_contracts.id"]),
+            sa.ForeignKeyConstraint(["amo_id", "parent_supplier_id", "contract_id"],
+                                    ["quality_external_provider_contracts.amo_id",
+                                     "quality_external_provider_contracts.supplier_id",
+                                     "quality_external_provider_contracts.id"]),
             sa.ForeignKeyConstraint(["amo_id", "parent_supplier_id", "consent_evidence_id"],
                                     ["quality_external_provider_evidence.amo_id",
                                      "quality_external_provider_evidence.supplier_id",
@@ -157,9 +166,11 @@ def upgrade():
             sa.Column("authorized_at", sa.DateTime(timezone=True)),
             sa.CheckConstraint("account_state IN ('PENDING','VERIFIED','REVOKED')",
                                name="ck_ext_provider_account_state"),
-            sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="RESTRICT"),
+            sa.ForeignKeyConstraint(["amo_id", "user_id"], ["users.amo_id", "users.id"], ondelete="RESTRICT"),
             sa.ForeignKeyConstraint(["authorized_by_user_id"], ["users.id"], ondelete="SET NULL"),
-            sa.ForeignKeyConstraint(["contact_id"], ["external_provider_contacts.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(["amo_id", "supplier_id", "contact_id"],
+                                    ["external_provider_contacts.amo_id", "external_provider_contacts.supplier_id",
+                                     "external_provider_contacts.id"]),
             extra=(sa.UniqueConstraint("amo_id", "supplier_id", "user_id",
                                        name="uq_ext_provider_account_link"),))
     _create("external_provider_scope_links",
@@ -192,9 +203,6 @@ def upgrade():
         op.execute(sa.text("""CREATE TRIGGER trg_external_provider_events_immutable
             BEFORE UPDATE OR DELETE ON external_provider_change_events
             FOR EACH ROW EXECUTE FUNCTION external_provider_prevent_event_mutation()"""))
-    op.create_unique_constraint("uq_ext_supplier_scope_tenant_identity",
-                                "procurement_supplier_approval_scopes",
-                                ["amo_id", "supplier_id", "id"])
 
     op.create_table("external_provider_import_batches",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -250,6 +258,9 @@ def downgrade():
             op.execute(sa.text(f'DROP POLICY IF EXISTS "{name}_tenant" ON "{name}"'))
         op.drop_index(f"ix_{name}_supplier", table_name=name)
         op.drop_table(name)
+    op.drop_constraint("uq_ext_user_tenant_identity", "users", type_="unique")
+    op.drop_constraint("uq_ext_contract_tenant_identity",
+                       "quality_external_provider_contracts", type_="unique")
     op.drop_constraint("uq_ext_supplier_scope_tenant_identity",
                        "procurement_supplier_approval_scopes", type_="unique")
     op.drop_constraint("uq_ext_qms_evidence_tenant_identity",
