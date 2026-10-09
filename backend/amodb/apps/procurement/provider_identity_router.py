@@ -24,7 +24,8 @@ router = APIRouter(
     tags=["external provider identity"],
     dependencies=[Depends(require_module("finance_inventory"))],
 )
-_EDIT_ROLES = (accounts.AccountRole.PROCUREMENT_OFFICER, accounts.AccountRole.STORES_MANAGER)
+_EDIT_ROLES = (accounts.AccountRole.PROCUREMENT_OFFICER, accounts.AccountRole.STORES_MANAGER,
+               accounts.AccountRole.QUALITY_MANAGER)
 _COLUMNS = {
     "roles": ("role_code", "notes"),
     "sites": ("site_code", "site_name", "country", "address", "is_primary"),
