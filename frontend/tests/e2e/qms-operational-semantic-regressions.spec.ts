@@ -40,7 +40,12 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
     color_scheme: "light", accent: "tenant", version: 1, updated_at: "2026-08-10T03:00:00Z",
   }));
   await page.route("**/accounts/admin/admin-profile/**", (route) => json(route, { eligible: false, active: false }));
-  const handleQualityRequest = (route: Route) => qualityHandler(route, new URL(route.request().url()));
+  const handleQualityRequest = (route: Route) => {
+    // Nested QMS page navigations also contain /maintenance/:amo/quality/.
+    // Let the SPA document load and intercept only API/data requests.
+    if (route.request().resourceType() === "document") return route.continue();
+    return qualityHandler(route, new URL(route.request().url()));
+  };
   // The scenario-specific handler is registered after mockQualityShell's
   // catch-all, so authoritative assurance fixtures win for matching requests.
   await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
