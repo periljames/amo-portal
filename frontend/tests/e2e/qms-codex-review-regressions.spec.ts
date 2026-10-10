@@ -235,15 +235,26 @@ test("Calendar fits desktop, split screen and phone widths", async ({ page }) =>
   await page.goto("/maintenance/tenant-a/quality/calendar/month", { waitUntil: "domcontentloaded" });
   // Assert route resolution separately so a redirect or permission failure is diagnosable.
   await expect(page).toHaveURL(/\/maintenance\/tenant-a\/quality\/calendar\/month(?:\?|$)/);
-  await expect(page.locator(".qms-ops-page--calendar, .qms-module-workspace")).toBeVisible();
-  const board = page.locator(".qms-calendar-board");
-  await expect(board, "The month view should mount its calendar board after route initialization").toBeVisible({ timeout: 10_000 });
+  // Calendar paths are owned by Planner V2, not the retired canonical register calendar.
+  const planner = page.locator(".qms-modern-planner-v2");
+  await expect(planner, "Planner V2 should mount for the canonical calendar route").toBeVisible({ timeout: 10_000 });
+  const board = page.getByLabel("Quality month planner");
+  const canvas = page.locator(".qms-planner-canvas");
+  await expect(board, "The month grid should render within the Planner V2 canvas").toBeVisible();
+  await expect(canvas).toBeVisible();
+
   for (const width of [1440, 800, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    await expect.poll(async () => {
-      const box = await board.boundingBox();
-      return box ? box.x + box.width : Infinity;
-    }).toBeLessThanOrEqual(width);
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox, `Calendar canvas should remain present at ${width}px`).not.toBeNull();
+    expect(canvasBox!.x + canvasBox!.width, `Calendar canvas must stay within the ${width}px viewport`).toBeLessThanOrEqual(width + 2);
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(documentWidth, `Document must not overflow the ${width}px viewport`).toBeLessThanOrEqual(width + 2);
+
+    if (width <= 800) {
+      const scroll = await canvas.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+      expect(scroll.scrollWidth, "Narrow month views should scroll inside the canvas, not the document").toBeGreaterThan(scroll.clientWidth);
+    }
   }
   await page.screenshot({ path: "../.test-artifacts/quality-calendar-mobile.png", fullPage: true });
 });
