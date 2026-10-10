@@ -46,7 +46,7 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
   // so the scenario's authoritative assurance responses beat the shell {} fallback.
   await page.unroute("**/*");
   await mockQualityShell(page);
-  await page.route(/\\/maintenance\\/[^/]+\\/quality\\//i, handleQualityRequest);
+  await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
 }
 
 function emptyRegister(route: Route) {
