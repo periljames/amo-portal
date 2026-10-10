@@ -233,8 +233,11 @@ test("Personal to-dos save reminders, complete and reopen", async ({ page }) => 
 test("Calendar fits desktop, split screen and phone widths", async ({ page }) => {
   await prepare(page, route => emptyRegister(route));
   await page.goto("/maintenance/tenant-a/quality/calendar/month", { waitUntil: "domcontentloaded" });
+  // Assert route resolution separately so a redirect or permission failure is diagnosable.
+  await expect(page).toHaveURL(/\/maintenance\/tenant-a\/quality\/calendar\/month(?:\?|$)/);
+  await expect(page.locator(".qms-ops-page--calendar, .qms-module-workspace")).toBeVisible();
   const board = page.locator(".qms-calendar-board");
-  await expect(board).toBeVisible();
+  await expect(board, "The month view should mount its calendar board after route initialization").toBeVisible({ timeout: 10_000 });
   for (const width of [1440, 800, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(async () => {
