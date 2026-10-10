@@ -56,19 +56,6 @@ function mission(id = "mission-1") {
     completed_at: null,
     created_at: "2026-08-08T12:00:00Z",
     updated_at: "2026-08-08T12:00:00Z",
-    readiness: {
-      hard_gates: { passed: 0, total: 11 },
-      soft_gates: { passed: 0, total: 0 },
-      ready_for_quality_self_evaluation: false,
-      blocking_gates: gateCodes.map((gateCode, index) => ({
-        id: `gate-${index + 1}`,
-        gate_code: gateCode,
-        title: gateTitles[gateCode],
-        status: "PENDING",
-        evidence_status: "UNLINKED",
-        blocking_reason: null,
-      })),
-    },
     gates: gateCodes.map((gateCode, index) => ({
       id: `gate-${index + 1}`,
       gate_code: gateCode,
@@ -92,6 +79,15 @@ function mission(id = "mission-1") {
       passed_by_user_id: null,
       updated_at: "2026-08-08T12:00:00Z",
     })),
+    readiness: {
+      hard_gates: { passed: 0, total: gateCodes.length },
+      soft_gates: { passed: 0, total: 0 },
+      ready_for_quality_self_evaluation: false,
+      blocking_gates: gateCodes.map((gateCode, index) => ({
+        id: `gate-${index + 1}`, gate_code: gateCode, title: gateTitles[gateCode],
+        status: "PENDING", evidence_status: "UNLINKED",
+      })),
+    },
     decisions: [],
   };
 }
@@ -200,13 +196,13 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=missions", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "Missions", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Change & capability projects", exact: true })).toBeVisible();
   await expect(page.getByText("DHC-8-400 capability inclusion", { exact: true })).toBeVisible();
-  await expect(page.getByText("0/11", { exact: true })).toBeVisible();
-  await expect(page.getByText("11 hard gates open", { exact: true })).toBeVisible();
   await expect(page.getByText(/compliance percentage/i)).toBeVisible();
 
-  await page.getByText("DHC-8-400 capability inclusion", { exact: true }).click();
+  // The grid opens detail on its explicit action; a cell click alone only selects the row.
+  await page.getByRole("button", { name: "Manage project" }).click();
+  await expect(page.getByText("0/11", { exact: true })).toBeVisible();
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
   await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
   await expect(page.getByText("Not assigned", { exact: true })).toBeVisible();

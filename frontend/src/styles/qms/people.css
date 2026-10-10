@@ -9,6 +9,9 @@
   --qms-authz-danger: var(--accent-danger, #b42318);
   --qms-authz-warning: var(--accent-warning, #9a6700);
   --qms-authz-positive: var(--accent-success, #16723a);
+  --qms-authz-drawer-inset: var(--qms-workspace-drawer-inset, var(--drawer-inset, 24px));
+  --qms-authz-overlay: color-mix(in srgb, var(--qms-authz-text) 36%, transparent);
+  --qms-authz-drawer-shadow: var(--qms-overlay-shadow, 0 26px 80px rgba(15, 23, 42, .28));
   display: grid;
   align-content: start;
   gap: 16px;
@@ -616,14 +619,19 @@
 .qms-authz-select {
   width: 100%;
   min-width: 0;
-  min-height: 42px;
-  padding: 9px 11px;
+  min-height: var(--control-height-md, 42px);
+  padding: var(--control-padding-y, 9px) var(--control-padding-x, 11px);
   border: 1px solid var(--qms-authz-border);
   border-radius: 9px;
   background: var(--qms-authz-surface);
   color: var(--qms-authz-text);
   font: inherit;
   font-size: 13.5px;
+}
+
+.qms-authz-modal__panel select,
+.qms-authz-form-grid select {
+  height: var(--control-height-md, 42px);
 }
 
 .qms-authz-select {
@@ -684,32 +692,49 @@ body:has(.qms-authz-modal) {
 
 .qms-authz-modal {
   position: fixed;
-  inset: 0 auto 0 0;
-  width: 100%;
+  /*
+   * The root reserves a stable scrollbar gutter, but a top-layer popover's fixed
+   * containing block can still end at the root's content edge. Offset the right
+   * inset by the measured CSS difference between the containing block and 100vw.
+   * The result is 0px when there is no gutter and negative when a gutter is reserved.
+   */
+  --qms-authz-layout-viewport-gutter: calc(100% - 100vw);
+  inset: 0 var(--qms-authz-layout-viewport-gutter) 0 0;
+  width: auto;
   box-sizing: border-box;
   z-index: 1350;
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
   /* Percentage width follows the layout viewport; avoid 100vw scrollbar drift. */
-  padding: 24px;
-  background: rgba(15, 23, 42, .36);
+  padding: var(--qms-authz-drawer-inset);
+  background: var(--qms-authz-overlay);
   backdrop-filter: blur(2px);
+}
+
+/* ModalTopLayerGuard owns the shared top layer and normally zeroes host padding.
+   Keep the same dynamic gutter correction after top-layer promotion. */
+.qms-authz-modal.portal-modal-top-layer--host {
+  inset: 0 var(--qms-authz-layout-viewport-gutter, calc(100% - 100vw)) 0 0 !important;
+  width: auto !important;
+  height: 100dvh !important;
+  padding: var(--qms-authz-drawer-inset) !important;
+  box-sizing: border-box !important;
 }
 
 .qms-authz-modal__panel {
   display: grid;
   align-content: start;
   gap: 13px;
-  width: min(680px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  width: min(680px, 100%);
+  max-height: calc(100dvh - 2 * var(--qms-authz-drawer-inset));
   overflow: auto;
   padding: 0 20px 20px;
   border: 1px solid var(--qms-authz-border);
   border-radius: 14px;
   background: var(--qms-authz-surface);
   color: var(--qms-authz-text);
-  box-shadow: 0 26px 80px rgba(15, 23, 42, .28);
+  box-shadow: var(--qms-authz-drawer-shadow);
 }
 
 .qms-authz-modal__header {
@@ -815,7 +840,7 @@ body:has(.qms-authz-modal) {
   .qms-authz-row > div:last-child { max-width: none; justify-items: start; text-align: left; }
   .qms-authz-form-grid { grid-template-columns: 1fr; }
   .qms-authz-form-grid .span-2 { grid-column: auto; }
-  .qms-authz-modal { padding: 0; }
+  .qms-authz-modal { --qms-authz-drawer-inset: 0px; padding: 0; }
   .qms-authz-modal__panel { width: 100%; max-height: 100vh; border: 0; border-radius: 0; }
 }
 

@@ -14,7 +14,8 @@ from .audit_occurrence_completion_models import QualityAuditClosingNarrative, Qu
 from .audit_occurrence_completion_router import _enum_value, _meeting_dict, _narrative_dict
 
 
-router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
+# Mounted below quality_public_router (prefix="/quality"); keep this child prefix relative.
+router = APIRouter(prefix="/audit-access", tags=["Quality / Audit Occurrence Collaboration"])
 _SUMMARY_SCOPES = {"audit:read_summary", "audit:read_assigned"}
 _CAR_SCOPES = {"car:respond", "audit:read_released_findings"}
 

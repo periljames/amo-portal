@@ -89,6 +89,13 @@ body[data-color-scheme="dark"] {
   --success: var(--accent-success);
   --focus-ring: var(--accent-primary);
 
+  /* Accessible form and drawer geometry tokens shared across QMS workspaces. */
+  --control-height-md: 42px;
+  --control-padding-x: 11px;
+  --control-padding-y: 9px;
+  --drawer-inset: 24px;
+  --viewport-scrollbar-gutter: 0px;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
