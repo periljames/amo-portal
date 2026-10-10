@@ -41,17 +41,12 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
   }));
   await page.route("**/accounts/admin/admin-profile/**", (route) => json(route, { eligible: false, active: false }));
   const handleQualityRequest = (route: Route) => qualityHandler(route, new URL(route.request().url()));
-  // Register after the shell's generic route and use route.fallback() for
-  // unrelated requests so fixture-specific assurance endpoints are never
-  // swallowed by the earlier **/* handler returning {}.
-  await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
-  // Playwright invokes the most recently registered matching handler first.
-  // Install the generic shell mock above this route in future helper changes;
-  // this explicit unroute/re-register preserves that order without changing
-  // application URLs or increasing test timeouts.
+  // Install the generic catch-all first and fixture-specific route second.
+  // Playwright evaluates the most recently registered matching handler first,
+  // so the scenario's authoritative assurance responses beat the shell {} fallback.
   await page.unroute("**/*");
   await mockQualityShell(page);
-  await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
+  await page.route(/\\/maintenance\\/[^/]+\\/quality\\//i, handleQualityRequest);
 }
 
 function emptyRegister(route: Route) {
