@@ -221,7 +221,9 @@ test("Assurance refresh re-reads the selected case detail instead of retaining a
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=assurance", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: /ASC-26-099/ }).click();
+  const refreshCaseButton = page.getByRole("button", { name: /ASC-26-099/ });
+  await expect(refreshCaseButton, "Assurance list should render the mocked ASC-26-099 case").toBeVisible({ timeout: 10_000 });
+  await refreshCaseButton.click();
   await expect(page.getByText("Initial authoritative detail", { exact: true })).toBeVisible();
   await expect(page.getByText("0 investigation statements", { exact: false })).toBeVisible();
   revision = 1;
@@ -244,7 +246,9 @@ test("Assurance exposes only backend-allowed transitions and blocks evidence-fre
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=assurance", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: /ASC-26-100/ }).click();
+  const governedCaseButton = page.getByRole("button", { name: /ASC-26-100/ });
+  await expect(governedCaseButton, "Assurance list should render the mocked ASC-26-100 case").toBeVisible({ timeout: 10_000 });
+  await governedCaseButton.click();
   const nextState = page.getByLabel("Next state");
   await expect(nextState.locator("option")).toHaveText(["Action Pending", "Effectiveness Review", "Cancelled"]);
   await expect(nextState.locator('option[value="OPEN"]')).toHaveCount(0);
@@ -292,7 +296,9 @@ test("Assurance requires an evidence-backed effectiveness conclusion before clos
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=assurance", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: /ASC-26-101/ }).click();
+  const effectivenessCaseButton = page.getByRole("button", { name: /ASC-26-101/ });
+  await expect(effectivenessCaseButton, "Assurance list should render the mocked ASC-26-101 case").toBeVisible({ timeout: 10_000 });
+  await effectivenessCaseButton.click();
   const nextState = page.getByLabel("Next state");
   await expect(nextState.locator('option[value="CLOSED"]')).toHaveCount(0);
   await expect(page.getByText(/Closure gate: Conclude every effectiveness plan/)).toBeVisible();
