@@ -200,7 +200,8 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
   await expect(page.getByText("DHC-8-400 capability inclusion", { exact: true })).toBeVisible();
   await expect(page.getByText(/compliance percentage/i)).toBeVisible();
 
-  await page.getByText("DHC-8-400 capability inclusion", { exact: true }).click();
+  // The grid opens detail on its explicit action; a cell click alone only selects the row.
+  await page.getByRole("button", { name: "Manage project" }).click();
   await expect(page.getByText("0/11", { exact: true })).toBeVisible();
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
   await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
