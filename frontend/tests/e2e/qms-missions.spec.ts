@@ -56,19 +56,6 @@ function mission(id = "mission-1") {
     completed_at: null,
     created_at: "2026-08-08T12:00:00Z",
     updated_at: "2026-08-08T12:00:00Z",
-    readiness: {
-      hard_gates: { passed: 0, total: 11 },
-      soft_gates: { passed: 0, total: 0 },
-      ready_for_quality_self_evaluation: false,
-      blocking_gates: gateCodes.map((gateCode, index) => ({
-        id: `gate-${index + 1}`,
-        gate_code: gateCode,
-        title: gateTitles[gateCode],
-        status: "PENDING",
-        evidence_status: "UNLINKED",
-        blocking_reason: null,
-      })),
-    },
     gates: gateCodes.map((gateCode, index) => ({
       id: `gate-${index + 1}`,
       gate_code: gateCode,
