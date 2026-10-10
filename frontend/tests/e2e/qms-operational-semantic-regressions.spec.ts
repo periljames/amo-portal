@@ -41,11 +41,8 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
   }));
   await page.route("**/accounts/admin/admin-profile/**", (route) => json(route, { eligible: false, active: false }));
   const handleQualityRequest = (route: Route) => qualityHandler(route, new URL(route.request().url()));
-  // Install the generic catch-all first and fixture-specific route second.
-  // Playwright evaluates the most recently registered matching handler first,
-  // so the scenario's authoritative assurance responses beat the shell {} fallback.
-  await page.unroute("**/*");
-  await mockQualityShell(page);
+  // The scenario-specific handler is registered after mockQualityShell's
+  // catch-all, so authoritative assurance fixtures win for matching requests.
   await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
 }
 
