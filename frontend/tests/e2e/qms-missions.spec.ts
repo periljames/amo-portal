@@ -92,6 +92,15 @@ function mission(id = "mission-1") {
       passed_by_user_id: null,
       updated_at: "2026-08-08T12:00:00Z",
     })),
+    readiness: {
+      hard_gates: { passed: 0, total: gateCodes.length },
+      soft_gates: { passed: 0, total: 0 },
+      ready_for_quality_self_evaluation: false,
+      blocking_gates: gateCodes.map((gateCode, index) => ({
+        id: `gate-${index + 1}`, gate_code: gateCode, title: gateTitles[gateCode],
+        status: "PENDING", evidence_status: "UNLINKED",
+      })),
+    },
     decisions: [],
   };
 }
