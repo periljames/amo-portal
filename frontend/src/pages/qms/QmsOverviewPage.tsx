@@ -13,6 +13,7 @@ const QualityExcellenceCockpit = lazy(qmsPageLoaders.assuranceHub);
 const QmsIntelligencePage = lazy(qmsPageLoaders.intelligence);
 const QmsMissionsPage = lazy(qmsPageLoaders.missions);
 const QmsPeoplePage = lazy(qmsPageLoaders.people);
+const QmsAssurancePage = lazy(() => import("./QmsAssurancePage"));
 
 function decodeSegment(value: string | undefined): string {
   if (!value) return "";
@@ -78,9 +79,8 @@ const QmsOverviewPage: React.FC = () => {
     return <Navigate to={`${qualityRoot}/calendar/week`} replace />;
   }
 
-  if (workspace === "assurance") {
-    return <Navigate to={`${qualityRoot}/audits/register`} replace />;
-  }
+  // Legacy saved assurance links continue to expose case investigations and effectiveness plans.
+  // The canonical workspace navigator still enters the consolidated audits hub.
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
@@ -89,6 +89,8 @@ const QmsOverviewPage: React.FC = () => {
         ? <QualityExcellenceCockpit amoCode={amoCode} />
         : workspace === "control-room"
           ? <QmsOperationalControlCentre amoCode={amoCode} />
+          : workspace === "assurance"
+          ? <QmsAssurancePage amoCode={amoCode} />
           : workspace === "missions"
             ? <QmsMissionsPage amoCode={amoCode} />
             : workspace === "people"
