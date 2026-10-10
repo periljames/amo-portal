@@ -49,6 +49,8 @@ async function prepare(page: Page, qualityHandler: (route: Route, url: URL) => P
   // The scenario-specific handler is registered after mockQualityShell's
   // catch-all, so authoritative assurance fixtures win for matching requests.
   await page.route(/\/maintenance\/[^/]+\/quality\//i, handleQualityRequest);
+  // Include the canonical versioned Quality API path as well as the tenant route.
+  await page.route(/\/api\/v1\/quality\//i, handleQualityRequest);
 }
 
 function emptyRegister(route: Route) {
