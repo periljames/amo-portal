@@ -39,11 +39,32 @@ async function prepareFindingAndCar(page: Page, state: State): Promise<void> {
     lead_auditor_user_id: "quality-user-a", assistant_auditor_user_id: null, observer_auditor_user_id: null,
     created_at: "2026-08-01T08:00:00Z", updated_at: "2026-08-24T10:00:00Z",
   };
+  // Keep this fixture aligned with the production response contract. The
+  // structured assessment is required; without it the client correctly rejects
+  // the checklist response and never renders the executable Fieldwork workspace.
+  const assessment = () => ({
+    applicability: "APPLICABLE",
+    applicability_reason: null,
+    applicability_basis: [],
+    documentary_status: "UNVERIFIED",
+    implementation_status: "UNVERIFIED",
+    field_verification_status: "UNVERIFIED",
+    evidence_ids: [],
+    document_revision_ids: [],
+    regulation_refs: ["KCAR-145.30"],
+    procedure_refs: [],
+    conflicts: [],
+    missing_evidence: [],
+    fieldwork_requirements: [],
+    ai_analysis: null,
+  });
   const row = () => ({
     checklist_item_id: ITEM_ID, audit_id: AUDIT_ID, section: "Supplier control", checklist_ref: "SUP-01", requirement_ref: "KCAR-145.30",
     prompt: "Verify sampled supplier approvals were current at the time of purchase.", legacy_response_status: state.response === "NONCOMPLIANT" ? "NON_CONFORMING" : "PENDING",
-    canonical_response_status: state.response, objective_evidence: "Purchase order PO-017 and supplier approval register revision 4.",
-    finding_id: state.finding?.id || null, auditor_notes: null, evidence_references: [], governance_id: state.response === "NONCOMPLIANT" ? "gov-1" : null,
+    canonical_response_status: state.response, response_value: state.response,
+    objective_evidence: "Purchase order PO-017 and supplier approval register revision 4.",
+    finding_id: state.finding?.id || null, auditor_notes: null, evidence_references: [], assessment: assessment(),
+    governance_id: state.response === "NONCOMPLIANT" ? "gov-1" : null,
     entity_version: state.response === "NONCOMPLIANT" ? 2 : 1, updated_by_user_id: "quality-user-a", updated_at: "2026-08-24T10:00:00Z", events: [],
   });
   const session = {
@@ -78,6 +99,12 @@ async function prepareFindingAndCar(page: Page, state: State): Promise<void> {
     if (path.endsWith("/quality/audits") && method === "GET") return respond(route, [audit]);
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-execution-governance`) && method === "GET") return respond(route, { items: [row()], canonical_response_values: ["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"], legacy_compatibility: { NONCOMPLIANT: "NON_CONFORMING", NOT_VERIFIED: "PENDING" } });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [binding] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-finding-drafts`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-items/${ITEM_ID}/evidence-candidates`) && method === "GET") return respond(route, {
+      items: [], limitations: [], conflicts: [],
+      applicability_recommendation: { status: "UNVERIFIED", reason: "No current-approved source was returned in this traceability fixture.", basis: [] },
+      documentary_recommendation: "UNVERIFIED",
+    });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/session`) && method === "GET") return respond(route, session);
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/presence`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/presence/heartbeat`) && method === "POST") return respond(route, { ok: true });
