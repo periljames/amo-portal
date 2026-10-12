@@ -37,7 +37,7 @@ describe("paper-familiar QMS Fieldwork table", () => {
     for (const marker of [
       "createAtomicChecklistFinding",
       "assessmentIntegrityError",
-      "N/A requires an applicability basis",
+      "N/A requires an explicit governed applicability basis",
       "applicability_recommendation",
       "documentary_recommendation",
       "Current-approved documentary candidates",
