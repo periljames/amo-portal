@@ -762,7 +762,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         assessment,
       });
       selectItem(nextItemId);
-    } catch {
+    } catch (error) {
+      if (isOfflineQueuedError(error)) selectItem(nextItemId);
       // The mutation's onError retains the existing offline/conflict handling.
     }
   };
@@ -950,43 +951,45 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </details> : null}
 
       <div className={`qms-live-audit-focus__body${navigationOpen ? " is-navigation-open" : ""}`}>
-        <aside id="audit-occurrence-checklist" className="qms-live-audit-focus__sections" aria-label="Checklist questions">
-          <div className="qms-live-audit-focus__progress">
-            <span style={{ width: `${percent ?? 0}%` }} />
+        <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
+          <div className="qms-live-audit-focus__matrix-toolbar">
+            <div><strong>Checklist assessment</strong><small>{completed} of {items.length} server-confirmed · {localAnswers.size} device changes</small></div>
+            <label><Search size={15} aria-hidden="true" /><span className="sr-only">Search checklist</span><input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search questions, section or reference" /></label>
+            <label><Filter size={15} aria-hidden="true" /><span className="sr-only">Filter checklist</span><select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}><option value="ALL">All questions</option><option value="UNANSWERED">Unanswered</option><option value="VERIFIED">Server-confirmed</option><option value="FINDINGS">Findings</option><option value="EVIDENCE_REQUIRED">Evidence required</option></select></label>
           </div>
-          <div className="qms-live-audit-focus__sections-heading"><h2 className="qms-live-audit-focus__sections-title">Checklist</h2><span>{visibleItems.length} / {items.length}</span></div>
-          <div className="qms-live-audit-focus__tools">
-            <label>
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">Search checklist</span>
-              <input value={checklistSearch} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search checklist" />
-            </label>
-            <label>
-              <Filter size={14} aria-hidden="true" />
-              <span className="sr-only">Filter checklist</span>
-              <select value={checklistFilter} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
-                <option value="ALL">All items</option>
-                <option value="UNANSWERED">Unanswered</option>
-                <option value="VERIFIED">Answered</option>
-                <option value="FINDINGS">Findings / observations</option>
-                <option value="EVIDENCE_REQUIRED">Evidence required</option>
-              </select>
-            </label>
+          <div className="qms-live-audit-focus__matrix-scroll">
+            <table className="qms-live-audit-focus__matrix-table">
+              <thead><tr><th scope="col">№</th><th scope="col">Verification question / requirement</th><th scope="col">Assessment</th><th scope="col">Details</th></tr></thead>
+              <tbody>
+                {visibleItems.map((item, index) => {
+                  const source = sourceContextByItemId.get(item.checklist_item_id);
+                  const choices = source?.response_options?.length ? source.response_options : fallbackResponseOptions(source?.response_type);
+                  const local = localAnswers.get(item.checklist_item_id);
+                  const value = local?.value || item.response_value || item.canonical_response_status;
+                  const number = itemNumberById.get(item.checklist_item_id) ?? index + 1;
+                  const expanded = detailOpen && selected?.checklist_item_id === item.checklist_item_id;
+                  return <React.Fragment key={item.checklist_item_id}>
+                    {(index === 0 || visibleItems[index - 1]?.section !== item.section) ? <tr className="qms-live-audit-focus__matrix-section"><th colSpan={4} scope="rowgroup">{item.section || "Uncategorised — check source section"}</th></tr> : null}
+                    <tr className={expanded ? "is-selected" : ""}>
+                      <td>{number}</td>
+                      <td><span>{item.prompt}</span><small>{item.checklist_ref || item.requirement_ref || ""}</small></td>
+                      <td><div className="qms-live-audit-focus__matrix-choices" role="group" aria-label={`Assessment for question ${number}`}>
+                        {choices.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "is-selected" : ""} title={option.label} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(item, option)}>{option.label}</button>)}
+                      </div></td>
+                      <td><button type="button" aria-expanded={expanded} onClick={() => { selectItem(item.checklist_item_id); setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
+                        {local ? <small className="qms-live-audit-focus__matrix-device" title="Not yet server-confirmed">{local.status === "conflict" || local.status === "failed" ? "Review sync" : "On device"}</small> : null}
+                      </td>
+                    </tr>
+                  </React.Fragment>;
+                })}
+                {!visibleItems.length ? <tr><td colSpan={4}>No questions match the current search/filter.</td></tr> : null}
+              </tbody>
+            </table>
           </div>
-          <div className="qms-live-audit-focus__question-list">
-            {visibleItems.map((item, index) => (
-              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} aria-current={item.checklist_item_id === selected?.checklist_item_id ? "true" : undefined} title={item.prompt} onClick={() => selectItem(item.checklist_item_id)}>
-                <span className="qms-live-audit-focus__question-number">{itemNumberById.get(item.checklist_item_id) ?? index + 1}</span>
-                <div className="qms-live-audit-focus__list-copy"><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small>{dirtyItemIds.has(item.checklist_item_id) ? <span className="qms-live-audit-focus__draft-tag">Unsaved draft</span> : null}</div>
-                <em data-status={item.canonical_response_status} aria-label={statusLabel(item.canonical_response_status)} title={statusLabel(item.canonical_response_status)}>{item.canonical_response_status === "NOT_VERIFIED" ? "Pending" : item.canonical_response_status === "NONCOMPLIANT" ? "NCR" : item.canonical_response_status === "NOT_APPLICABLE" ? "N/A" : statusLabel(item.canonical_response_status)}</em>
-              </button>
-            ))}
-            {!visibleItems.length ? <p className="qms-live-audit-focus__empty-filter">No checklist items match the current search/filter.</p> : null}
-          </div>
-        </aside>
+        </section>
 
         <main className="qms-live-audit-focus__question">
-          {selected ? (
+          {selected && detailOpen ? (
             <>
               <div className="qms-live-audit-focus__question-head">
                 <div><span title={selected.section || "Checklist"}>SECTION · {selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div>
@@ -1078,7 +1081,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
                 </div>
               </details>
-              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis" open>
+              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
                 <summary className="qms-live-audit-focus__compliance-summary">
                   <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
                   <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
@@ -1226,7 +1229,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </> : null}
               </details>
             </>
-          ) : <div className="qms-live-audit-focus__empty">
+          ) : !items.length ? <div className="qms-live-audit-focus__empty">
             <strong>No governed checklist is available for fieldwork.</strong>
             <p>Return to Prepare, bind or create the controlled checklist, resolve readiness blockers, and issue preparation before continuing.</p>
             <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Prepare</Link>
