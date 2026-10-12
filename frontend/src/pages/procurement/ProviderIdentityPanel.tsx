@@ -110,6 +110,8 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
     <header className="proc-section-heading proc-section-heading--split"><div><h2>Provider organization profile</h2>
       <p>Descriptive roles, locations, people and capabilities. Quality approval remains separately controlled.</p></div>
       <button type="button" className="proc-button" onClick={onClose}>Close</button></header>
+    {isQuality && <p><a href={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts`}>
+      Manage provider portal accounts, invitations and access decisions</a></p>}
     <div className="proc-toolbar">{(Object.keys(FIELDS) as Kind[]).map(item=>
       <button key={item} type="button" className="proc-button" aria-pressed={kind===item}
         onClick={()=>switchKind(item)}>{item}</button>)}</div>
