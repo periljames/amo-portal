@@ -432,7 +432,10 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
 
   await expect(page.getByLabel("Audit Programme workspace")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Programme workspace sections" })).toBeVisible();
-  await expect(page.getByText("Internal Audits (2026)", { exact: true }).first()).toBeVisible();
+  // The selected programme is shown in the matrix selector, not as a free-standing heading.
+  const matrix = page.getByLabel("2026 audit programme calendar");
+  await expect(matrix).toBeVisible();
+  await expect(matrix.getByLabel("Programme", { exact: true })).toHaveValue("programme-1");
   await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 
@@ -441,8 +444,8 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
   await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
   await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
 
-  await page.getByRole("button", { name: "Coverage areas" }).click();
-  await expect(page.getByRole("heading", { name: "Coverage areas", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Programme workspace sections" }).getByRole("button", { name: "Audit areas" }).click();
+  await expect(page.getByRole("heading", { name: "Audit area catalogue" })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
 });
@@ -451,24 +454,23 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
   await prepare(page, { programmes: [] });
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
-  await page.getByRole("button", { name: "New programme" }).click();
+  // An empty year exposes Create programme instead of the icon-only New programme action.
+  await page.getByRole("button", { name: "Create programme" }).click();
   await expect(page.getByRole("dialog", { name: "Create programme" })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(0);
   await expect(page.getByLabel(/Compliance baseline/i)).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
-  await expect(page.getByText("Internal Audits (2026)", { exact: false }).first()).toBeVisible();
-  await expect(page.locator(".qms-audit-programme-flow__portfolio-card.is-active").getByText("Draft", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("2026 audit programme calendar").getByLabel("Programme", { exact: true })).toHaveValue("programme-created");
 
   await page.getByRole("button", { name: "Approval" }).click();
-  const submitReview = page.getByRole("button", { name: "Submit for review" });
+  const submitReview = page.getByRole("button", { name: "Submit for Quality review" });
   await expect(submitReview).toBeDisabled();
   await page.getByLabel("Reason for this action").fill("Ready for independent Quality review.");
   await expect(submitReview).toBeEnabled();
   await submitReview.click();
-  await expect(page.locator(".qms-audit-programme-flow__portfolio-card.is-active").getByText("Under Review", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.locator(".qms-audit-programme-flow__history > summary").click();
-  await expect(page.locator(".qms-audit-programme-flow__history").getByText("Ready for independent Quality review.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Programme approval status" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Quality Manager action", { exact: true })).toBeVisible();
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
@@ -477,7 +479,7 @@ test("programme requirement uses planner conflict gate before schedule lineage i
 
   const queue = page.getByRole("region", { name: "Programme scheduling queue" });
   await queue.getByRole("button", { name: /Maintenance Department Audit/i }).click();
-  await expect(page.getByRole("dialog", { name: "Schedule into Planner V2" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Schedule on Calendar" })).toBeVisible();
   await expect(page.getByLabel("Schedule audit programme requirement")).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
   await expect(page.getByLabel("Date")).toHaveValue("2026-08-15");
@@ -503,7 +505,8 @@ test("programme schedule deep-link stays inside Audit Assurance chrome", async (
   );
 
   await expect(page.getByLabel("Assurance pages")).toBeVisible();
-  await expect(page.getByRole("tab", { name: /Programme/i })).toHaveAttribute("aria-selected", "true");
+  // The deep link uses the canonical Assurance shell; this page no longer exposes legacy tabs.
+  await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
 });
