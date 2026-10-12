@@ -247,6 +247,41 @@ async function scopedRows(
   }
 }
 
+/** Groups of locally encrypted evidence; metadata only, never file bytes. */
+export type PendingAuditEvidenceGroup = { amoCode: string; auditId: string; count: number; conflicts: number };
+
+export async function listPendingAuditEvidenceGroups(): Promise<PendingAuditEvidenceGroup[]> {
+  const scope = currentOfflineScope();
+  const db = await openDb();
+  try {
+    const tx = db.transaction(ENTRY_STORE, "readonly");
+    const done = transactionDone(tx);
+    const index = tx.objectStore(ENTRY_STORE).index("scope_audit");
+    const groups = new Map<string, PendingAuditEvidenceGroup>();
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openCursor(IDBKeyRange.bound([scope, ""], [scope, "\uffff"]));
+      request.onerror = () => reject(request.error || new Error("Could not inspect local evidence queue."));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(); return; }
+        const row = cursor.value as StoredEntry;
+        if (row.scope === scope) {
+          const key = `${row.amoCode}:${row.auditId}`;
+          const value = groups.get(key) || { amoCode: row.amoCode, auditId: row.auditId, count: 0, conflicts: 0 };
+          value.count += 1;
+          if (row.state === "CONFLICT" || row.state === "CORRUPT") value.conflicts += 1;
+          groups.set(key, value);
+        }
+        cursor.continue();
+      };
+    });
+    await done;
+    return [...groups.values()];
+  } finally {
+    db.close();
+  }
+}
+
 export async function enqueueOfflineAuditEvidence(input: {
   amoCode: string;
   auditId: string;
@@ -340,6 +375,21 @@ function errorStatus(error: unknown): number | null {
   return typeof status === "number" ? status : null;
 }
 
+/** One uploader per audit across browser tabs (when Web Locks are supported). */
+export async function synchronizeOfflineAuditEvidence(
+  amoCode: string,
+  auditId: string,
+): Promise<{ uploaded: AuditEvidenceArtifact[]; failed: number; conflicts: number; deferred: number }> {
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return (await navigator.locks.request(
+      `amo:qms:evidence:${currentOfflineScope()}:${auditId}`,
+      { ifAvailable: true },
+      async (lock) => lock ? replayOfflineAuditEvidence(amoCode, auditId) : null,
+    )) || { uploaded: [], failed: 0, conflicts: 0, deferred: 1 };
+  }
+  return replayOfflineAuditEvidence(amoCode, auditId);
+}
+
 export async function replayOfflineAuditEvidence(
   amoCode: string,
   auditId: string,
@@ -360,13 +410,18 @@ export async function replayOfflineAuditEvidence(
   let deferred = 0;
   const pendingChecklistMutations = (await listOfflineMutations()).filter((entry) =>
     entry.entityType === "qms-audit-checklist-item"
-    && (entry.status === "queued" || entry.status === "syncing")
+    && ["queued", "syncing", "conflict", "failed"].includes(entry.status)
     && entry.path.includes(`/audits/${encodeURIComponent(auditId)}/checklist-items/`)
   );
 
   for (let row of rows) {
     if (currentOfflineScope() !== row.scope) break;
-    if (row.state === "CORRUPT") { failed += 1; continue; }
+    // A rejected or corrupt file requires a deliberate auditor action;
+    // never silently retry a governance conflict on every reconnect.
+    if (row.state === "CORRUPT" || row.state === "CONFLICT") {
+      conflicts += 1;
+      continue;
+    }
 
     const hasEarlierChecklistMutation = pendingChecklistMutations.some((entry) =>
       entry.entityId === row.checklistItemId

@@ -33,6 +33,7 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  parseUploadedAuditChecklist,
   listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
@@ -40,6 +41,7 @@ import {
   type ChecklistCanonicalStatus,
   type ChecklistResponseOption,
   type ChecklistTemplateItem,
+  type UploadedChecklistDraft,
 } from "../../../services/qmsChecklistTemplates";
 import {
   addAuditApplicabilityFact,
@@ -262,6 +264,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
   const [checklistMode, setChecklistMode] = useState<"LIBRARY" | "CREATE">("LIBRARY");
+  const [uploadedDraft, setUploadedDraft] = useState<UploadedChecklistDraft | null>(null);
+  const [uploadDraftBusy, setUploadDraftBusy] = useState(false);
   const [checklistSearch, setChecklistSearch] = useState("");
   const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
@@ -277,6 +281,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistDmsDocumentId, setChecklistDmsDocumentId] = useState("");
   const [requestDmsSearch, setRequestDmsSearch] = useState("");
   const [composerSearch, setComposerSearch] = useState("");
+  const [composerPage, setComposerPage] = useState(0);
   const [composerSection, setComposerSection] = useState("ALL");
   const [composerFilter, setComposerFilter] = useState<"ALL" | "INCOMPLETE" | "EVIDENCE_REQUIRED" | "APPLICABILITY_RULE">("ALL");
   const [applicabilitySearch, setApplicabilitySearch] = useState("");
@@ -585,6 +590,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       canonical_document_id: checklistDmsDocumentId || null,
       canonical_revision_id: null,
       allow_existing_items: allowExistingItems,
+      uploaded_source_filename: uploadedDraft?.filename || null,
+      uploaded_source_sha256: uploadedDraft?.sha256 || null,
     }),
     onSuccess: async (binding) => {
       setLocalError(null);
@@ -599,6 +606,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         setChecklistDescription("");
         setChecklistReason("Created for this audit during governed preparation.");
         setChecklistItems([emptyChecklistItem()]);
+        setUploadedDraft(null);
         setChecklistDmsDocumentId("");
         setAllowExistingItems(false);
         setLocalSuccess("Checklist created and bound to fieldwork.");
@@ -611,6 +619,45 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The realtime checklist could not be created."),
   });
+
+  const importChecklistFile = async (file: File | undefined) => {
+    if (!file || uploadDraftBusy || !auditId) return;
+    setLocalError(null);
+    setLocalSuccess(null);
+    setUploadDraftBusy(true);
+    try {
+      const draft = await parseUploadedAuditChecklist(amoCode, auditId, file);
+      if (!draft.items.length) throw new Error("No questions were extracted.");
+      setChecklistItems(draft.items.map((item) => ({
+        ...emptyChecklistItem(),
+        section: item.section || "",
+        checklistRef: item.checklist_ref || "",
+        requirementRef: item.requirement_ref || "",
+        prompt: item.prompt || "",
+        expectedEvidence: item.expected_evidence || "",
+        guidance: item.guidance || "",
+        responseType: item.response_type === "CUSTOM" ? "CUSTOM" : "COMPLIANCE",
+        responseOptions: item.response_options || [],
+        notesRequiredWhen: item.notes_required_when || [],
+        naJustificationRequired: Boolean(item.na_justification_required),
+        applicability: item.applicability || "APPLICABLE",
+        mandatory: item.mandatory !== false,
+      })));
+      setUploadedDraft(draft);
+      setChecklistMode("CREATE");
+      setChecklistTitle(file.name.replace(/\.(docx|pdf)$/i, "").slice(0, 255) || "Imported audit checklist");
+      setChecklistReason("Reviewed imported checklist draft for governed audit preparation.");
+      setComposerSearch("");
+      setComposerPage(0);
+      setComposerSection("ALL");
+      setComposerFilter("ALL");
+      setLocalSuccess(`Extracted ${draft.question_count} draft questions from ${draft.filename}. Review and edit before committing to Fieldwork.`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "The checklist could not be imported.");
+    } finally {
+      setUploadDraftBusy(false);
+    }
+  };
 
   const issuePreparationMutation = useMutation({
     mutationFn: async () => {
@@ -746,8 +793,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (composerFilter === "APPLICABILITY_RULE") return Boolean(item.applicability.trim()) && item.applicability.trim().toUpperCase() !== "APPLICABLE";
     return true;
   });
+  const composerTotalPages = Math.max(1, Math.ceil(visibleComposerItems.length / 15));
+  const safeComposerPage = Math.min(composerPage, composerTotalPages - 1);
+  const pagedComposerItems = visibleComposerItems.slice(safeComposerPage * 15, (safeComposerPage + 1) * 15);
   const preparedComposerCount = checklistItems.filter((item) =>
-    item.prompt.trim() && (!item.mandatory || item.requirementRef.trim())
+    item.prompt.trim() && (item.responseType !== "CUSTOM" || item.responseOptions.every((option) => option.canonical_status))
   ).length;
 
   const realtimeChecklistValid = Boolean(
@@ -1085,7 +1135,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
               <button type="button" role="tab" aria-selected={checklistMode === "LIBRARY"} className={checklistMode === "LIBRARY" ? "is-active" : ""} onClick={() => setChecklistMode("LIBRARY")}>Use DMS checklist</button>
-              <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Create in realtime</button>
+              <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Draft / edit questions</button>
+              <label className="qms-audit-prepare__import-button">
+                <UploadCloud size={15} /> {uploadDraftBusy ? "Extracting…" : "Upload Word/PDF to draft"}
+                <input type="file" accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" disabled={uploadDraftBusy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void importChecklistFile(file); }} />
+              </label>
             </div>
 
             {checklistMode === "LIBRARY" ? (
@@ -1120,6 +1174,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               </form>
             ) : (
               <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title, reason and every checklist question. Custom response schemes require at least two source values and an explicit workflow meaning for every value; ambiguous abbreviations are never inferred. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
+                {uploadedDraft ? <section className="qms-audit-prepare__import-review is-wide" aria-label="Imported checklist awaiting review">
+                  <strong>Imported draft · {uploadedDraft.question_count} questions · {uploadedDraft.section_count} sections</strong>
+                  <small>{uploadedDraft.filename} · SHA-256 {uploadedDraft.sha256.slice(0, 12)}…</small>
+                  <p>Nothing has been issued. Correct the extracted questions, sections, numbering and response mapping before you commit. The original upload is not automatically stored in the controlled DMS library.</p>
+                  {uploadedDraft.warnings.map((warning, index) => <p key={index} role="note">{warning}</p>)}
+                  <button type="button" onClick={() => { setUploadedDraft(null); setChecklistItems([emptyChecklistItem()]); }}>Discard imported draft</button>
+                </section> : null}
                 <label><span>Checklist title</span><input required minLength={3} value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} /></label>
                 <label><span>Creation reason</span><input required minLength={8} value={checklistReason} onChange={(event) => setChecklistReason(event.target.value)} /></label>
                 <label className="is-wide"><span>Description</span><textarea rows={2} value={checklistDescription} onChange={(event) => setChecklistDescription(event.target.value)} placeholder="Audit-specific purpose and coverage" /></label>
@@ -1135,12 +1196,17 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <div className="qms-audit-prepare__composer is-wide">
                   <header><div><strong>Checklist questions</strong><small>{preparedComposerCount}/{checklistItems.length} prepared · questions remain editable until governed preparation is issued.</small></div><button type="button" onClick={() => setChecklistItems((current) => [...current, emptyChecklistItem()])}><Plus size={14} /> Add question</button></header>
                   <div className="qms-audit-prepare__composer-tools" aria-label="Checklist preparation navigation">
-                    <label className="is-wide"><span>Search questions</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={composerSearch} onChange={(event) => setComposerSearch(event.target.value)} placeholder="Question, section, reference, evidence or guidance" /></div></label>
-                    <label><span>Section</span><select value={composerSection} onChange={(event) => setComposerSection(event.target.value)}><option value="ALL">All sections</option>{composerSections.map((section) => <option key={section} value={section}>{section}</option>)}</select></label>
-                    <label><span>Filter</span><select value={composerFilter} onChange={(event) => setComposerFilter(event.target.value as typeof composerFilter)}><option value="ALL">All questions</option><option value="INCOMPLETE">Incomplete preparation</option><option value="EVIDENCE_REQUIRED">Evidence expected / required</option><option value="APPLICABILITY_RULE">Applicability rule set</option></select></label>
+                    <label className="is-wide"><span>Search questions</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={composerSearch} onChange={(event) => { setComposerSearch(event.target.value); setComposerPage(0); }} placeholder="Question, section, reference, evidence or guidance" /></div></label>
+                    <label><span>Section</span><select value={composerSection} onChange={(event) => { setComposerSection(event.target.value); setComposerPage(0); }}><option value="ALL">All sections</option>{composerSections.map((section) => <option key={section} value={section}>{section}</option>)}</select></label>
+                    <label><span>Filter</span><select value={composerFilter} onChange={(event) => { setComposerFilter(event.target.value as typeof composerFilter); setComposerPage(0); }}><option value="ALL">All questions</option><option value="INCOMPLETE">Incomplete preparation</option><option value="EVIDENCE_REQUIRED">Evidence expected / required</option><option value="APPLICABILITY_RULE">Applicability rule set</option></select></label>
                   </div>
                   {!visibleComposerItems.length ? <p className="qms-audit-prepare__empty">No checklist questions match the current preparation filters.</p> : null}
-                  {visibleComposerItems.map((item) => {
+                  <nav className="qms-audit-prepare__composer-pages" aria-label="Checklist draft pages">
+                    <span>{visibleComposerItems.length} matching questions · page {safeComposerPage + 1} of {composerTotalPages}</span>
+                    <button type="button" disabled={safeComposerPage <= 0} onClick={() => setComposerPage((page) => Math.max(0, page - 1))}>Previous</button>
+                    <button type="button" disabled={safeComposerPage >= composerTotalPages - 1} onClick={() => setComposerPage((page) => Math.min(composerTotalPages - 1, page + 1))}>Next 15</button>
+                  </nav>
+                  {pagedComposerItems.map((item) => {
                     const index = checklistItems.findIndex((candidate) => candidate.id === item.id);
                     return (
                     <article key={item.id}>
@@ -1149,6 +1215,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         <label className="is-wide"><span>Question / verification step</span><textarea required rows={2} value={item.prompt} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, prompt: event.target.value } : entry))} /></label>
                         <label><span>Section</span><input value={item.section} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, section: event.target.value } : entry))} /></label>
                         <label><span>Checklist reference</span><input value={item.checklistRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, checklistRef: event.target.value } : entry))} /></label>
+                        <details className="qms-audit-prepare__composer-more is-wide"><summary>More: references, evidence, method and response mapping</summary><div className="qms-audit-prepare__composer-more-grid">
                         <label><span>Requirement / manual reference</span><input value={item.requirementRef} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, requirementRef: event.target.value } : entry))} /></label>
                         <label><span>Expected objective evidence</span><input value={item.expectedEvidence} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, expectedEvidence: event.target.value } : entry))} /></label>
                         <label><span>Audit method</span><select value={item.auditMethod} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, auditMethod: event.target.value as ChecklistComposerItem["auditMethod"] } : entry))}><option value="">Not specified</option><option value="RECORD_REVIEW">Record review</option><option value="INTERVIEW">Interview</option><option value="OBSERVATION">Observation</option><option value="SAMPLE">Sample</option><option value="TEST">Test</option></select></label>
@@ -1179,6 +1246,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                         }}><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="CUSTOM">Custom governed source vocabulary</option></select></label>
                         {item.responseType === "CUSTOM" ? <fieldset className="qms-audit-prepare__response-options is-wide"><legend>Custom source responses</legend><p>Map every source value explicitly. The portal will not infer ambiguous abbreviations such as U or S.</p>{item.responseOptions.map((option, optionIndex) => <div key={`${item.id}-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Value</span><input value={option.value} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate) } : entry))} /></label><label><span>Label</span><input value={option.label} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate) } : entry))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistResponseOption["canonical_status"] } : candidate) } : entry))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove response ${option.label || option.value || optionIndex + 1}`} disabled={item.responseOptions.length <= 2} onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: entry.responseOptions.filter((_, index) => index !== optionIndex) } : entry))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, responseOptions: [...entry.responseOptions, { value: "", label: "", canonical_status: "" }] } : entry))}><Plus size={14} /> Add response</button></fieldset> : null}
                         <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={item.mandatory} onChange={(event) => setChecklistItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, mandatory: event.target.checked } : entry))} /> Mandatory fieldwork item</label>
+                        </div></details>
                       </div>
                       <button type="button" aria-label={`Remove checklist question ${index + 1}`} disabled={checklistItems.length === 1} onClick={() => setChecklistItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={15} /></button>
                     </article>

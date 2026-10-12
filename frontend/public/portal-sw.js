@@ -89,15 +89,21 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  const active = new Set([SHELL_CACHE, ASSET_CACHE]);
   event.waitUntil(
     Promise.all([
       caches.keys()
-        .then((keys) => Promise.all(
-          keys
-            .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
-            .map((key) => caches.delete(key)),
-        )),
+        .then((keys) => {
+          // Retain the previous hashed asset set for an already-open auditor
+          // tab after a deployment. It may still request lazy route chunks
+          // from the old release. Do not retain authenticated API data.
+          const priorAssets = keys.filter((key) => key.startsWith("amo-portal-assets-") && key !== ASSET_CACHE).sort().reverse().slice(0, 1);
+          const active = new Set([SHELL_CACHE, ASSET_CACHE, ...priorAssets]);
+          return Promise.all(
+            keys
+              .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
+              .map((key) => caches.delete(key)),
+          );
+        }),
       self.registration.navigationPreload
         ? self.registration.navigationPreload.enable()
         : Promise.resolve(),
@@ -107,6 +113,32 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
+  if (event.data?.type === "PREPARE_AUDIT_SHELL") {
+    const port = event.ports?.[0];
+    event.waitUntil((async () => {
+      try {
+        await precacheRelease();
+        await precacheQms();
+        const manifestResponse = await fetch("/portal-precache.json", { cache: "no-store" });
+        if (!manifestResponse.ok) throw new Error("The offline application manifest was not available.");
+        const manifest = await manifestResponse.json();
+        const required = [...new Set(Array.isArray(manifest.qmsUrls) ? manifest.qmsUrls : [])]
+          .filter((url) => typeof url === "string" && /^\\/(assets|pdfjs)\\/[^?#]+$/.test(url));
+        if (!required.length) throw new Error("No QMS application files were declared for offline use.");
+        const assetCache = await caches.open(ASSET_CACHE);
+        const shellCache = await caches.open(SHELL_CACHE);
+        if (!await shellCache.match("/")) throw new Error("The offline page shell is not cached.");
+        const missing = [];
+        for (const url of required) {
+          if (!await assetCache.match(url)) missing.push(url);
+        }
+        if (missing.length) throw new Error(`${missing.length} application file(s) are not available offline; reconnect and retry.`);
+        port?.postMessage({ ok: true, assets: required.length });
+      } catch (error) {
+        port?.postMessage({ ok: false, reason: error instanceof Error ? error.message : "Offline application files could not be verified." });
+      }
+    })());
+  }
   if (event.data?.type === "PRECACHE_STATIC_SHELL") event.waitUntil(precacheStaticShell().catch(() => undefined));
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "PRECACHE_RELEASE") {
@@ -198,7 +230,18 @@ async function cacheFirstAsset(request) {
     void networkPromise;
     return cached;
   }
-  return (await networkPromise) || Response.error();
+  const fresh = await networkPromise;
+  if (fresh) return fresh;
+  // A still-open older tab might reference a hashed chunk from the previous
+  // deployment. Serve only explicitly cached immutable assets.
+  const priorNames = (await caches.keys())
+    .filter((name) => name.startsWith("amo-portal-assets-") && name !== ASSET_CACHE)
+    .sort().reverse();
+  for (const name of priorNames) {
+    const fallback = await (await caches.open(name)).match(request);
+    if (fallback) return fallback;
+  }
+  return Response.error();
 }
 
 function looksLikeCachedStatic(url) {

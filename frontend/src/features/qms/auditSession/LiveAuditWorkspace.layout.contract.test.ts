@@ -4,37 +4,36 @@ import { describe, expect, it } from "vitest";
 const live = readFileSync(new URL("./LiveAuditWorkspace.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../../styles/qms-live-audit-workspace.css", import.meta.url), "utf8");
 
-describe("auditor-first Fieldwork workspace", () => {
-  it("puts response, notes, evidence and actions ahead of optional compliance detail", () => {
-    const positions = [
-      'className="qms-live-audit-focus__entry"',
-      'className="qms-live-audit-focus__responses"',
-      '<LiveAuditEvidenceStrip',
-      'className="qms-live-audit-focus__nav"',
-      'className="qms-live-audit-focus__source-details"',
-      'className="qms-live-audit-focus__compliance"',
-    ].map((marker) => live.indexOf(marker));
-    expect(positions.every((position) => position >= 0)).toBe(true);
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    // The old dashboard below the reordered panel must not reappear as a duplicate editor.
-    expect(live.match(/className="qms-live-audit-focus__responses"/g)).toHaveLength(1);
-    expect(live.match(/<LiveAuditEvidenceStrip/g)).toHaveLength(1);
-    expect(live.match(/className="qms-live-audit-focus__nav"/g)).toHaveLength(1);
+describe("paper-familiar QMS Fieldwork table", () => {
+  it("shows multiple questions and response choices together, retaining advanced details on demand", () => {
+    expect(live).toContain('aria-label="Checklist assessment table"');
+    expect(live).toContain('className="qms-live-audit-focus__matrix-table"');
+    expect(live).toContain("visibleItems.map((item, index)");
+    expect(live).toContain("choices.map((option)");
+    expect(live).toContain("selectResponse(item, option)");
+    expect(live).toContain("selected && detailOpen");
+    expect(live).toContain("<LiveAuditEvidenceStrip");
+    expect(live).toContain('className="qms-live-audit-focus__compliance"');
+    expect(live).not.toContain('className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis" open');
+    expect(styles).toContain(".qms-live-audit-focus__matrix-table");
   });
 
-  it("only advances Save & next after a confirmed checklist mutation", () => {
+  it("continues offline after a durable queued save without claiming server confirmation", () => {
     const start = live.indexOf("const saveAndNext = async () => {");
     const end = live.indexOf("const selectResponse =", start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const handler = live.slice(start, end);
     expect(handler).toContain("await updateMutation.mutateAsync");
-    expect(handler.indexOf("await updateMutation.mutateAsync")).toBeLessThan(handler.indexOf("selectItem(nextItemId)"));
-    expect(handler).toContain("evidenceCapture.hasDraft");
-    expect(handler).toContain("catch {");
+    expect(handler).toContain("if (isOfflineQueuedError(error)) selectItem(nextItemId)");
+    expect(live).toContain("localAnswers");
+    expect(live).toContain("server-confirmed");
+    expect(live).toContain("syncFieldworkNow");
+    expect(live).toContain("prepareAuditOfflinePack");
+    expect(live).toContain("onOfflineSyncComplete");
   });
 
-  it("preserves governed execution, controlled source, finding and offline safeguards", () => {
+  it("retains existing governed backend control, evidence and release safeguards", () => {
     for (const marker of [
       "createAtomicChecklistFinding",
       "assessmentIntegrityError",
@@ -44,26 +43,20 @@ describe("auditor-first Fieldwork workspace", () => {
       "Current-approved documentary candidates",
       "Competing controlled statements",
       "LiveAuditEvidenceStrip",
-      "isOfflineQueuedError",
       "FIELDWORK_VERSION_CONFLICT",
-      "unsavedDraftCount",
       "completionBlockers",
       "canExecuteAssignedAudit",
       "canCompleteAuditFieldwork",
       "Released-data boundary active",
-    ]) {
-      expect(live).toContain(marker);
-    }
+    ]) expect(live).toContain(marker);
   });
 
-  it("supports stable item numbering, mobile question access and visible unsaved drafts", () => {
+  it("retains search, filtering, stable numbering and accessible expanded details", () => {
     expect(live).toContain("itemNumberById");
     expect(live).toContain('value="VERIFIED"');
-    expect(live).toContain("dirtyItemIds.has(item.checklist_item_id)");
-    expect(live).toContain('aria-controls="audit-occurrence-checklist"');
-    expect(live).toContain("is-navigation-open");
+    expect(live).toContain("setChecklistSearch");
+    expect(live).toContain("aria-expanded={expanded}");
     expect(live).toContain("Frozen checklist question differs from the execution question");
-    expect(styles).toContain(".qms-live-audit-focus__body.is-navigation-open .qms-live-audit-focus__sections");
     expect(styles).toContain(":focus-visible");
   });
 });
