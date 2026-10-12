@@ -104,6 +104,26 @@ def upgrade():
         sa.Column("user_agent_hash",sa.String(64)),
         sa.Column("created_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["amo_id","grant_id"],["external_tenant_grants.amo_id","external_tenant_grants.id"],name="fk_ext_session_grant"))
+    # Reuse the platform's WebAuthn library, not audit-guest invitation tokens.
+    op.create_table("external_passkey_credentials",
+        sa.Column("id",sa.String(36),primary_key=True),
+        sa.Column("identity_id",sa.String(36),sa.ForeignKey("external_identities.id",ondelete="CASCADE"),nullable=False),
+        sa.Column("credential_id",sa.LargeBinary(),nullable=False,unique=True),
+        sa.Column("public_key",sa.LargeBinary(),nullable=False),
+        sa.Column("sign_count",sa.Integer(),nullable=False,server_default="0"),
+        sa.Column("nickname",sa.String(80)),
+        sa.Column("is_active",sa.Boolean(),nullable=False,server_default=sa.text("true")),
+        sa.Column("created_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.Column("last_used_at",sa.DateTime(timezone=True)))
+    op.create_table("external_passkey_challenges",
+        sa.Column("id",sa.String(36),primary_key=True),
+        sa.Column("amo_id",sa.String(36),sa.ForeignKey("amos.id",ondelete="CASCADE"),nullable=False),
+        sa.Column("identity_id",sa.String(36),sa.ForeignKey("external_identities.id",ondelete="CASCADE"),nullable=False),
+        sa.Column("challenge_type",sa.String(20),nullable=False),
+        sa.Column("challenge_b64",sa.String(128),nullable=False),
+        sa.Column("expires_at",sa.DateTime(timezone=True),nullable=False),
+        sa.Column("consumed_at",sa.DateTime(timezone=True)),
+        sa.CheckConstraint("challenge_type IN ('REGISTER','ASSERT')",name="ck_ext_passkey_challenge_type"))
     op.create_table("external_security_events",
         sa.Column("id",sa.String(36),primary_key=True),
         sa.Column("amo_id",sa.String(36),sa.ForeignKey("amos.id",ondelete="CASCADE"),nullable=False),
@@ -115,7 +135,7 @@ def upgrade():
         sa.Column("details_json",sa.JSON(),nullable=False),
         sa.Column("occurred_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()))
     op.create_index("ix_ext_events_actor_tenant","external_security_events",["amo_id","occurred_at"])
-    for name in ("external_tenant_providers","external_tenant_grants","external_identity_tokens","external_sessions","external_security_events"):
+    for name in ("external_tenant_providers","external_tenant_grants","external_identity_tokens","external_sessions","external_passkey_challenges","external_security_events"):
         op.create_index(f"ix_{name}_tenant",name,["amo_id"])
         if op.get_bind().dialect.name == "postgresql":
             op.execute(sa.text(f'ALTER TABLE "{name}" ENABLE ROW LEVEL SECURITY'))
@@ -124,8 +144,20 @@ def upgrade():
                 USING (amo_id = NULLIF(current_setting('app.tenant_id',true),''))
                 WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true),''))"""))
 
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("""CREATE FUNCTION external_security_events_no_change()
+            RETURNS trigger LANGUAGE plpgsql AS $provider$
+            BEGIN RAISE EXCEPTION 'External security event history is immutable'; END;
+            $provider$"""))
+        op.execute(sa.text("""CREATE TRIGGER trg_ext_security_events_immutable
+            BEFORE UPDATE OR DELETE ON external_security_events
+            FOR EACH ROW EXECUTE FUNCTION external_security_events_no_change()"""))
+
 def downgrade():
-    for name in ("external_security_events","external_sessions","external_identity_tokens","external_tenant_grants","external_tenant_providers"):
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("DROP TRIGGER IF EXISTS trg_ext_security_events_immutable ON external_security_events"))
+        op.execute(sa.text("DROP FUNCTION IF EXISTS external_security_events_no_change()"))
+    for name in ("external_security_events","external_passkey_challenges","external_passkey_credentials","external_sessions","external_identity_tokens","external_tenant_grants","external_tenant_providers"):
         op.drop_table(name)
     for name in ("external_organization_memberships","external_organizations","external_credentials","external_identities"):
         op.drop_table(name)
