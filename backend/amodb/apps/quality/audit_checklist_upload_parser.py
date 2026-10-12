@@ -58,7 +58,7 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                     continue
                 # In tabular controlled checklists, heading rows carry the
                 # assessment-column titles. Autonumbered cells can be blank.
-                if len(cells) >= 4 and body.replace(" ", "").isupper() and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
+                if len(cells) >= 4 and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
                     section = re.sub(r"\s+", " ", body)[:128]
                     paper_scheme = len(cells) >= 6 and [cell.strip().upper() for cell in cells[2:6]] == ["S", "U", "N/C", "N/A"]
                     if not paper_scheme:
@@ -101,25 +101,61 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     items: list[dict[str, Any]] = []
     warnings: list[str] = []
     section = ""
+    paper_scheme = False
+    pending: dict[str, Any] | None = None
+    # The assessment-column suffix is evidence for the source vocabulary.
+    # It is not safe to map abbreviated answers without this explicit header.
+    header = re.compile(r"^(.*?)\\s+S\\s+U\\s+N/C\\s+N/A\\s*$", re.IGNORECASE)
+    ignore_prefix = (
+        "sl/qms/", "page ", "form №:", "form no", "revision:",
+        "issued ", "name & signature", "name and signature",
+        "auditor's assessment", "auditor’s assessment",
+    )
+    ignore_exact = {"Contractors Audit", "Audit Checklist"}
+
+    def flush() -> None:
+        nonlocal pending
+        if pending is not None:
+            items.append(pending)
+            pending = None
+
     for page_number, page in enumerate(reader.pages, 1):
-        text = page.extract_text() or ""
-        if not text.strip():
+        content = page.extract_text() or ""
+        if not content.strip():
             warnings.append(f"Page {page_number}: no selectable text; scanned-page OCR is not performed.")
             continue
-        for raw in text.splitlines():
-            line = re.sub(r"\s+", " ", raw).strip()
-            if _HEADING.fullmatch(line) and line not in {"S", "U", "N/C", "N/A"}:
+        for raw in content.splitlines():
+            line = re.sub(r"\\s+", " ", raw).strip()
+            if not line:
+                continue
+            if line.lower().startswith("remarks:"):
+                flush()
+                continue
+            if line in ignore_exact or line.lower().startswith(ignore_prefix):
+                continue
+            section_match = header.fullmatch(line)
+            if section_match:
+                flush()
+                section = section_match.group(1).strip()[:128]
+                paper_scheme = True
+                continue
+            if (match := _NUMBERED.match(line)):
+                flush()
+                pending = _draft_item(int(match.group(1)), section, match.group(2), paper_scheme=paper_scheme)
+                continue
+            # Other standalone headings have no explicit answer scheme;
+            # require human review of their meaning rather than inventing one.
+            if pending is None and _HEADING.fullmatch(line) and len(line) >= 6:
                 section = line[:128]
+                paper_scheme = False
                 continue
-            match = _NUMBERED.match(line)
-            if match:
-                items.append(_draft_item(int(match.group(1)), section, match.group(2)))
-            elif items and line and not line.lower().startswith(("remarks", "page ", "sl/qms/", "revision:", "issued")):
-                # Do not invent a new question from an unnumbered PDF line.
-                # An auditor must review the source for missed/continuation rows.
-                continue
+            if pending is not None:
+                # Preserve long wrapped questions and indented verification
+                # bullets. Do not silently drop text continuing onto next page.
+                proposed = f"{pending['prompt']} {line}"
+                pending["prompt"] = re.sub(r"\\s+", " ", proposed)[:8000]
+    flush()
     return items, warnings
-
 
 def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
     name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -134,7 +170,7 @@ def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
         if not data.startswith(b"%PDF"):
             raise ValueError("This file is not a valid PDF.")
         items, warnings = _pdf_items(data)
-        warnings.append("PDF response columns are not mapped automatically; confirm the assessment vocabulary in the editor.")
+        warnings.append("Confirm PDF section boundaries, wrapped text and assessment-column mapping in the draft editor.")
     else:
         raise ValueError("Only .docx and .pdf checklists are supported.")
     if not items:
