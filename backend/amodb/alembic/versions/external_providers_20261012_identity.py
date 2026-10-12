@@ -75,6 +75,7 @@ def upgrade():
         sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.ForeignKeyConstraint(["amo_id","tenant_provider_id"],["external_tenant_providers.amo_id","external_tenant_providers.id"],name="fk_ext_grant_provider"),
         sa.UniqueConstraint("amo_id","tenant_provider_id","identity_id",name="uq_ext_grant_identity"),
+        sa.UniqueConstraint("amo_id","id",name="uq_ext_tenant_grant_id"),
         sa.CheckConstraint("status IN ('PENDING','ACTIVE','SUSPENDED','REVOKED')",name="ck_ext_grant_status"))
     op.create_table("external_identity_tokens",
         sa.Column("id", sa.String(36), primary_key=True),
