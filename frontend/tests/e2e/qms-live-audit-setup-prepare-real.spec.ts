@@ -77,15 +77,26 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     }
     // Setup tiles are exclusive disclosures; ensure the definition is expanded
     // before interacting with its save control after reactive date updates.
-    const definitionTile = setup.locator("details.qms-audit-setup-tile").filter({ has: setup.getByText("Audit definition", { exact: true }) });
-    if (!(await definitionTile.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    const definitionTile = setup.locator("details.qms-audit-setup-tile").filter({
+      // The inner locator must be rooted at the page: it is evaluated relative
+      // to each <details>, not relative to the outer Setup region.
+      has: page.getByText("Audit definition", { exact: true }),
+    });
+    await expect(definitionTile).toHaveCount(1);
+    if ((await definitionTile.getAttribute("open")) === null) {
       await definitionTile.locator("summary").click();
     }
-    await setup.getByRole("button", { name: "Save audit definition" }).click();
+    await expect(definitionTile).toHaveAttribute("open", "");
+    await definitionTile.getByRole("button", { name: "Save audit definition", exact: true }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
-    const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
-    await meetingsTile.locator("summary").click();
+    const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({
+      has: page.getByText("Opening and closing meetings", { exact: true }),
+    });
+    await expect(meetingsTile).toHaveCount(1);
+    if ((await meetingsTile.getAttribute("open")) === null) {
+      await meetingsTile.locator("summary").click();
+    }
     await expect(meetingsTile).toHaveAttribute("open", "");
 
     const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
@@ -108,8 +119,13 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await closingCard.getByRole("button", { name: "Save meeting" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
-    const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
-    await noticeCard.locator("summary").click();
+    const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({
+      has: page.getByText("Audit notice", { exact: true }),
+    });
+    await expect(noticeCard).toHaveCount(1);
+    if ((await noticeCard.getAttribute("open")) === null) {
+      await noticeCard.locator("summary").click();
+    }
     await expect(noticeCard).toHaveAttribute("open", "");
     await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
