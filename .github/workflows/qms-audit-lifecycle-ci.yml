@@ -90,6 +90,14 @@ jobs:
             echo "::error title=QMS audit lifecycle browser failure::$summary"
           fi
           exit "$status"
+      - name: Upload actual Fieldwork render screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qms-fieldwork-visual-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frontend/test-results/fieldwork-*-proof.png
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Retain audit lifecycle browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v6

@@ -329,10 +329,10 @@ def patch_work_pattern_assignment(
     if not row:
         raise _error("Work pattern assignment not found", error_code="WORK_PATTERN_ASSIGNMENT_NOT_FOUND", status_code=404)
     try:
-        services.update_pattern_assignment(db, row=row, actor_user_id=current_user.id, payload=payload)
+        updated = services.update_pattern_assignment(db, row=row, actor_user_id=current_user.id, payload=payload)
         db.commit()
-        refreshed = services.list_pattern_assignments(db, amo_id=_amo(current_user), user_id=row.user_id)
-        return next(item for item in refreshed if item.id == row.id)
+        refreshed = services.list_pattern_assignments(db, amo_id=_amo(current_user), user_id=updated.user_id)
+        return next(item for item in refreshed if item.id == updated.id)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="WORK_PATTERN_ASSIGNMENT_INVALID") from exc
@@ -388,7 +388,7 @@ def list_leave_types(
 ):
     rows = services.list_leave_types(db, amo_id=_amo(current_user), include_inactive=include_inactive)
     db.commit()
-    return rows
+    return [services.serialize_leave_type(db, row, user_id=current_user.id) for row in rows]
 
 
 @router.post("/leave-types", response_model=schemas.LeaveTypeRead, status_code=status.HTTP_201_CREATED)
@@ -466,7 +466,7 @@ def list_leave_requests(
     if not permissions.any_permission(db, user=current_user, permissions=[permissions.PermissionCode.LEAVE_REVIEW, permissions.PermissionCode.LEAVE_APPROVE]):
         user_id = current_user.id
         department_id = None
-    return services.list_leave_requests(db, amo_id=_amo(current_user), page_number=page, page_size=page_size, user_id=user_id, department_id=department_id, request_status=request_status, from_date=from_date, to_date=to_date)
+    return services.list_leave_requests(db, amo_id=_amo(current_user), page_number=page, page_size=page_size, user_id=user_id, department_id=department_id, request_status=request_status, from_date=from_date, to_date=to_date, actor=current_user)
 
 
 @router.get("/leave-requests/export")
@@ -492,6 +492,7 @@ def export_leave_requests(
         request_status=request_status,
         from_date=from_date,
         to_date=to_date,
+        actor=current_user,
     )
     return PlainTextResponse(
         services.leave_requests_export_csv(result.items),
@@ -512,7 +513,7 @@ def create_leave_request(
         if payload.submit_immediately:
             services.submit_leave_request(db, row=row, actor=current_user)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_REQUEST_INVALID") from exc
@@ -529,7 +530,7 @@ def get_leave_request(
         raise _error("Leave request not found", error_code="LEAVE_REQUEST_NOT_FOUND", status_code=404)
     if row.user_id != current_user.id:
         _permission(db, current_user, permissions.PermissionCode.LEAVE_REVIEW, department_id=getattr(row.user, "department_id", None))
-    return services.serialize_leave_request(db, row)
+    return services.serialize_leave_request(db, row, actor=current_user)
 
 
 @router.patch("/leave-requests/{request_id}", response_model=schemas.LeaveRequestRead)
@@ -545,7 +546,7 @@ def patch_leave_request(
     try:
         services.update_leave_request(db, row=row, actor=current_user, payload=payload)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_REQUEST_INVALID") from exc
@@ -563,7 +564,7 @@ def submit_leave_request(
     try:
         services.submit_leave_request(db, row=row, actor=current_user)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_SUBMIT_FAILED") from exc
@@ -583,7 +584,7 @@ def supervisor_approve_leave(
     try:
         services.supervisor_approve_leave(db, row=row, actor=current_user, comment=payload.comment)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_SUPERVISOR_APPROVAL_FAILED") from exc
@@ -603,7 +604,7 @@ def hr_approve_leave(
     try:
         services.hr_approve_leave(db, row=row, actor=current_user, comment=payload.comment)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_HR_APPROVAL_FAILED") from exc
@@ -623,7 +624,7 @@ def reject_leave(
     try:
         services.reject_leave(db, row=row, actor=current_user, reason=payload.reason or payload.comment)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_REJECTION_FAILED") from exc
@@ -642,7 +643,7 @@ def cancel_leave(
     try:
         services.cancel_leave(db, row=row, actor=current_user, reason=payload.reason or payload.comment)
         _commit(db, row)
-        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id))
+        return services.serialize_leave_request(db, services.get_leave_request(db, amo_id=_amo(current_user), request_id=row.id), actor=current_user)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), error_code="LEAVE_CANCELLATION_FAILED") from exc

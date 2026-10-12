@@ -177,6 +177,9 @@ export type LeaveTypeRead = {
   amo_id: string;
   code: string;
   name: string;
+  eligible_gender: "ALL" | "FEMALE" | "MALE";
+  eligible: boolean;
+  eligibility_reason?: string | null;
   availability_type: AvailabilityType;
   description?: string | null;
   paid: boolean;
@@ -223,6 +226,7 @@ export type LeaveApprovalRead = {
 };
 
 export type LeaveRequestRead = {
+  can_approve: boolean;
   id: string;
   amo_id: string;
   user_id: string;

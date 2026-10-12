@@ -18,7 +18,8 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 
 
 router = APIRouter(tags=["Quality audit collaboration presence"])
-public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Collaboration Presence"])
+# Mounted below quality_public_router (prefix="/quality"); keep this child prefix relative.
+public_router = APIRouter(prefix="/audit-access", tags=["Quality / Audit Collaboration Presence"])
 PRESENCE_TTL_SECONDS = 60
 
 

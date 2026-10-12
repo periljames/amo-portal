@@ -273,21 +273,20 @@ async function prepareLifecycle(page: Page): Promise<void> {
 }
 
 test.describe("governed audit lifecycle", () => {
-  test("uses canonical preparation and setup surfaces for preparation revision and notice governance", async ({ page }) => {
+  test("enforces canonical preparation readiness and controlled setup notice governance", async ({ page }) => {
     await prepareLifecycle(page);
     await page.setViewportSize({ width: 1500, height: 940 });
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/prepare`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("region", { name: "Pre-audit preparation workspace" })).toBeVisible({ timeout: 30_000 });
-    const launcher = page.getByRole("button", { name: "Audit governance", exact: true });
-    await expect(launcher).toBeVisible();
-    await launcher.click();
-    const panel = page.getByRole("complementary", { name: "Audit governance" });
-    await panel.getByLabel("Preparation scope / notes").fill("Prior findings, controlled records and opening-meeting evidence.");
-    await panel.getByRole("button", { name: "Create controlled revision", exact: true }).click();
-    await expect(panel.getByRole("button", { name: "Issue revision", exact: true })).toBeVisible();
-    await panel.getByRole("button", { name: "Issue revision", exact: true }).click();
-    await expect(panel).toContainText("Rev 1 · ISSUED");
+    // Current canonical Prepare issues a controlled revision only after readiness passes.
+    // Do not reintroduce the retired 'Audit governance' drawer or bypass the
+    // authoritative preparation-checklist/readiness gate merely to satisfy a test.
+    const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
+    await expect(prepare.getByRole("navigation", { name: "Preparation sections" })).toBeVisible();
+    await expect(prepare.getByRole("status", { name: "Preparation readiness" })).toContainText("Readiness 0%");
+    await expect(prepare.getByText("Preparation is incomplete")).toBeVisible();
+    await expect(prepare.getByText("Continue to Fieldwork")).toHaveAttribute("aria-disabled", "true");
 
     await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/setup`, { waitUntil: "domcontentloaded" });
     const setup = page.getByRole("region", { name: "Audit setup workspace" });
@@ -295,6 +294,13 @@ test.describe("governed audit lifecycle", () => {
     await expect(setup).toContainText("Audit notice");
     const noticeTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
     await noticeTile.locator("summary").click();
+    // The planned start is within the configured 14-day minimum in this fixture.
+    // Complete the governed short-notice waiver instead of bypassing the guard.
+    const shortNoticeReason = noticeTile.getByLabel("Short-notice waiver reason");
+    if (await shortNoticeReason.count()) {
+      await shortNoticeReason.fill("Controlled short-notice acceptance for the fixture audit.");
+    }
+    await expect(noticeTile.getByRole("button", { name: "Create notice draft" })).toBeEnabled();
     await noticeTile.getByRole("button", { name: "Create notice draft" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data");
     await expect(noticeTile).toContainText("14 days");

@@ -244,7 +244,9 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
-  await expect(contextBar.getByRole("button", { name: "New finding" })).toBeVisible();
+  // On the canonical Findings register the Assurance rail owns local actions;
+  // the context bar intentionally avoids a second, competing creation control.
+  await expect(contextBar.getByRole("button", { name: "New finding" })).toHaveCount(0);
   await expect(page.locator(".qms-ops-page > .page-header")).toBeHidden();
 
   await page.locator(".tenant-shell__profile-trigger").click();

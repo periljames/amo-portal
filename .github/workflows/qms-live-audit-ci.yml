@@ -132,7 +132,7 @@ jobs:
           amodb/apps/quality/audit_checklist_execution_router.py
           amodb/apps/quality/compliance_intelligence_service.py
       - name: Test session projection
-        run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py
+        run: pytest -q amodb/apps/quality/tests/test_audit_session_projection.py amodb/apps/quality/tests/test_audit_presence_route_order.py
       - name: Test external access token, scope, CSRF and issued-report receipt contract
         run: pytest -q amodb/apps/quality/tests/test_audit_external_access_contract.py amodb/apps/quality/tests/test_audit_external_report_acknowledgement_contract.py
       - name: Test external finding draft and promotion contract

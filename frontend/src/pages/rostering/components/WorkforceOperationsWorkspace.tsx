@@ -275,16 +275,17 @@ function LeaveQueue({ dashboard, requests, loading, onDecision }: {
           <button type="button" className="wr-button wr-button--secondary wr-button--small" onClick={() => void downloadLeaveRequestsExport({})}><Download size={14} /> Export CSV</button>
         </div>
       </div>
+      <div className="wr-metric-grid"><div className="wr-metric-card"><span>Awaiting supervisor</span><strong>{requests.filter(item => item.status === "SUBMITTED").length}</strong></div><div className="wr-metric-card"><span>Awaiting final approval</span><strong>{requests.filter(item => item.status === "SUPERVISOR_APPROVED").length}</strong></div><div className="wr-metric-card"><span>Completed</span><strong>{requests.filter(item => ["HR_APPROVED", "REJECTED", "CANCELLED"].includes(item.status)).length}</strong></div></div>
       {loading ? <RosterLoading label="Loading leave workflow…" /> : null}
       <div className="hr-approval-list">
         {shown.map((request) => (
           <article key={request.id}>
-            <div><strong>{request.user_full_name || request.user_staff_code}</strong><span>{request.leave_type_name} · {request.starts_at.slice(0, 10)} → {request.ends_at.slice(0, 10)}</span></div>
+            <div><strong>{request.user_full_name || request.user_staff_code}</strong><span>{request.leave_type_name} · {request.starts_at.slice(0, 10)} → {request.ends_at.slice(0, 10)}</span>{request.approvals.map(approval => <small key={approval.id}>{approval.stage}: {approval.decision} · {approval.actor_name || "authorised approver"} · {approval.decided_at.slice(0, 16).replace("T", " ")}</small>)}</div>
             <StatusPill value={request.status} />
             <div className="wr-actions">
-              {request.status === "SUBMITTED" && dashboard.can_review_leave ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Supervisor review</button> : null}
+              {request.status === "SUBMITTED" && dashboard.can_review_leave && request.can_approve ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Review request</button> : null}
               {request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_leave ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-hr", record: request })}>HR approve</button> : null}
-              {["SUBMITTED", "SUPERVISOR_APPROVED"].includes(request.status) && dashboard.can_review_leave ? <button type="button" className="wr-icon-button is-danger" aria-label="Reject leave" onClick={() => onDecision({ kind: "leave-reject", record: request })}><XCircle size={15} /></button> : null}
+              {((request.status === "SUBMITTED" && request.can_approve) || (request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_leave)) ? <button type="button" className="wr-icon-button is-danger" aria-label="Reject leave" onClick={() => onDecision({ kind: "leave-reject", record: request })}><XCircle size={15} /></button> : null}
             </div>
           </article>
         ))}

@@ -75,6 +75,12 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     if (await rescheduleReason.isVisible().catch(() => false)) {
       await rescheduleReason.fill("Move this acceptance audit into the governed preparation window.");
     }
+    // Setup tiles are exclusive disclosures; ensure the definition is expanded
+    // before interacting with its save control after reactive date updates.
+    const definitionTile = setup.locator("details.qms-audit-setup-tile").filter({ has: setup.getByText("Audit definition", { exact: true }) });
+    if (!(await definitionTile.evaluate((element) => (element as HTMLDetailsElement).open))) {
+      await definitionTile.locator("summary").click();
+    }
     await setup.getByRole("button", { name: "Save audit definition" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 

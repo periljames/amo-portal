@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+import inspect
 
 import pytest
 from pydantic import ValidationError
@@ -156,3 +157,14 @@ def test_pattern_update_rejects_duplicate_cycle_days_before_persistence() -> Non
                 _day(0, None, models.PatternDayStatus.OFF),
             ],
         )
+
+
+def test_future_rotation_change_preserves_effective_dated_history() -> None:
+    source = inspect.getsource(services.update_pattern_assignment)
+    transition = source[source.index("is_future_transition"):source.index("row.work_pattern_id = next_pattern_id")]
+
+    assert "row.effective_to = next_from - timedelta(days=1)" in transition
+    assert "successor = models.EmployeeWorkPatternAssignment(" in transition
+    assert "cycle_anchor_date=next_anchor" in transition
+    assert 'action="effective_transition"' in transition
+    assert "return successor" in transition

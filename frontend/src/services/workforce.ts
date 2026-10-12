@@ -170,7 +170,7 @@ export function listLeaveTypes(includeInactive = false): Promise<LeaveTypeRead[]
   return apiJson(`${ROOT}/leave-types${queryString({ include_inactive: includeInactive })}`);
 }
 
-export function createLeaveType(payload: Omit<LeaveTypeRead, "id" | "amo_id" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">): Promise<LeaveTypeRead> {
+export function createLeaveType(payload: Omit<LeaveTypeRead, "id" | "amo_id" | "eligible" | "eligibility_reason" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">): Promise<LeaveTypeRead> {
   return apiJson(`${ROOT}/leave-types`, { method: "POST", body: jsonBody(payload) });
 }
 

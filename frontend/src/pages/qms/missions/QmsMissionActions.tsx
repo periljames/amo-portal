@@ -25,6 +25,8 @@ export default function QmsMissionActions({ amoCode, mission }: { amoCode: strin
       await client.invalidateQueries({ queryKey: ["qms-missions", amoCode] });
     },
   });
+  const personnelOptions = Array.isArray(people.data) ? people.data : [];
+  const personnelContractInvalid = Boolean(people.data && !Array.isArray(people.data));
   if (!canManage) return null;
   const actor = getCachedUser()?.id;
   const canDecide = actor === (decision.decision_type === "ACCOUNTABLE_EXECUTIVE" ? mission.sponsor_user_id : mission.owner_user_id);
@@ -32,11 +34,12 @@ export default function QmsMissionActions({ amoCode, mission }: { amoCode: strin
     <h2>Resolve readiness & record decisions</h2>
     {mutation.error ? <p role="alert">{mutation.error.message}</p> : null}
     {people.error ? <p role="alert">{people.error.message}</p> : null}
+    {personnelContractInvalid ? <p role="alert">Personnel options could not be validated. Assignment is unavailable until a valid personnel list is loaded.</p> : null}
     {mutable ? <form className="qms-workspace-form" onSubmit={event => { event.preventDefault(); mutation.mutate("assignment"); }}>
-      <label>Quality owner<select value={assignment.owner_user_id || ""} onChange={event => setAssignment({ ...assignment, owner_user_id: event.target.value || null })}><option value="">Not assigned</option>{people.data?.map(person => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
-      <label>Accountable Executive<select value={assignment.sponsor_user_id || ""} onChange={event => setAssignment({ ...assignment, sponsor_user_id: event.target.value || null })}><option value="">Not assigned</option>{people.data?.map(person => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
+      <label>Quality owner<select value={assignment.owner_user_id || ""} onChange={event => setAssignment({ ...assignment, owner_user_id: event.target.value || null })}><option value="">Not assigned</option>{personnelOptions.map(person => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
+      <label>Accountable Executive<select value={assignment.sponsor_user_id || ""} onChange={event => setAssignment({ ...assignment, sponsor_user_id: event.target.value || null })}><option value="">Not assigned</option>{personnelOptions.map(person => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></label>
       <label>Target date<input type="date" value={assignment.target_date || ""} onChange={event => setAssignment({ ...assignment, target_date: event.target.value || null })} /></label>
-      <button type="submit" disabled={mutation.isPending || people.isLoading || people.isError}>Save ownership & target</button>
+      <button type="submit" disabled={mutation.isPending || people.isLoading || people.isError || personnelContractInvalid}>Save ownership & target</button>
     </form> : null}
     {mutable ? <form className="qms-workspace-form" onSubmit={event => { event.preventDefault(); mutation.mutate("gate"); }}>
       <label>Readiness gate<select required value={gate?.id || ""} onChange={event => {

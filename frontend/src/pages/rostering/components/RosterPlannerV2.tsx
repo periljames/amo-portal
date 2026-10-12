@@ -46,6 +46,7 @@ import {
   applyRosterCoverageRecommendation,
   bulkCreateRosterAssignments,
   createRosterAssignment,
+  createRosterPeriod,
   createRosterVersion,
   deleteRosterAssignment,
   generateRosterFromPattern,
@@ -461,6 +462,7 @@ export function RosterPlannerV2() {
   const period = data.periods.find((row) => row.id === data.selectedPeriodId);
   const timezoneName = period?.timezone_name || "UTC";
   const editable = Boolean(data.selectedVersion?.can_edit && data.contracts?.capabilities.edit !== false);
+  const canCreateMonth = Boolean(data.contracts?.permissions.includes("roster.create"));
   const canGeneratePatterns = Boolean(editable && data.contracts?.permissions.includes("roster.manage_patterns"));
   const canApplyRecommendations = Boolean(
     editable
@@ -950,17 +952,25 @@ export function RosterPlannerV2() {
   };
 
   const createMonthVersion = async () => {
-    if (!period || busy) return;
+    if (busy || !canCreateMonth) return;
     setBusy("create-version"); setError(null); setNotice(null);
     try {
-      const created = await createRosterVersion(period.id, {
+      const targetPeriod = period || await createRosterPeriod({
+        period_code: format(data.month.days[0], "yyyy-MM"),
+        name: `${format(data.month.days[0], "MMMM yyyy")} roster`,
+        starts_on: data.month.from,
+        ends_on: data.month.to,
+        notes: "Monthly duty period created from the roster planner",
+        timezone_name: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      });
+      const created = await createRosterVersion(targetPeriod.id, {
         title: `${format(data.month.days[0], "MMMM yyyy")} roster`,
         change_summary: "Initial monthly roster draft",
         idempotency_key: newIdempotencyKey("monthly-roster"),
       });
       await data.refresh();
       data.setSelectedVersionId(created.id);
-      setNotice("Draft created. Generate the roster from effective work patterns.");
+      setNotice(`${period ? "Draft" : "Monthly period and draft"} created. Generate duties from effective work patterns.`);
       setPrefillOpen(true);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -1188,7 +1198,7 @@ export function RosterPlannerV2() {
             {data.selectedVersion ? <><StatusPill value={`${data.selectedVersion.status} v${data.selectedVersion.version_no}`} tone={data.selectedVersion.status.toLowerCase()} /><span className={`wr-sync-state${pendingSyncCount ? " is-pending" : ""}`}>{pendingSyncCount ? `${pendingSyncCount} offline` : data.refreshing ? "Refreshing" : "Saved"}</span></> : null}
           </div>
           <div className="wr-planner-primary-actions">
-            {!data.selectedVersion && period ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create {format(data.month.days[0], "MMM")} roster</button> : null}
+            {!data.selectedVersion && canCreateMonth ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create {format(data.month.days[0], "MMM")} roster</button> : null}
             {data.selectedVersion && canGeneratePatterns ? <button type="button" className="wr-button wr-button--primary" onClick={() => setPrefillOpen(true)} disabled={!period || Boolean(busy) || Boolean(rotationUpdatingUserId)}><WandSparkles size={16} /> Generate</button> : null}
             <button type="button" className="wr-button wr-button--secondary wr-coverage-toggle" onClick={() => setInsightsOpen(true)} disabled={!data.selectedVersion}><PanelRightOpen size={16} /> Exceptions <span>{recommendationCount + openFindingCount}</span></button>
             <button type="button" className="wr-button wr-button--primary" onClick={() => setReviewOpen(true)} disabled={!data.selectedVersion || !data.assignments.length}><ClipboardCheck size={16} /> Review &amp; submit</button>
@@ -1214,7 +1224,7 @@ export function RosterPlannerV2() {
           {notice ? <div className="wr-inline-note"><CheckCircle2 size={16} /> {notice}<button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={13} /></button></div> : null}
           {error ? <div className="wr-inline-error"><AlertTriangle size={16} /> {error}<button type="button" aria-label="Dismiss error" onClick={() => setError(null)}><X size={13} /></button></div> : null}
         </div>
-        {!data.selectedVersion ? <EmptyState title={period ? `Create ${format(data.month.days[0], "MMMM")} roster` : "No monthly period"} description={period ? "Start a draft, then generate duties from effective work patterns." : "Create the monthly period in Setup first."} action={period ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create monthly roster</button> : null} /> : <div className="wr-planner-body wr-planner-body--month">
+        {!data.selectedVersion ? <EmptyState title={`Create ${format(data.month.days[0], "MMMM")} roster`} description={period ? "Start a draft, then generate duties from effective work patterns." : "Create the monthly period and its first controlled draft in one step."} action={canCreateMonth ? <button type="button" className="wr-button wr-button--primary" onClick={() => void createMonthVersion()} disabled={Boolean(busy)}><Plus size={16} /> Create monthly roster</button> : null} /> : <div className="wr-planner-body wr-planner-body--month">
           <div className="wr-grid-scroll" aria-label={`${format(data.month.days[0], "MMMM yyyy")} monthly roster`}>
             <div className="wr-roster-grid wr-roster-grid--month" role="grid" aria-rowcount={people.length + 1} aria-colcount={data.month.days.length + 1} aria-multiselectable="true" style={{ "--wr-days": data.month.days.length } as CSSProperties}>
               <div className="wr-grid-row" role="row"><div className="wr-grid-corner" role="columnheader"><strong>Personnel</strong></div>
