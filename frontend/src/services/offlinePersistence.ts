@@ -520,6 +520,34 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
     idempotencyKey,
     nextAttemptAt: now,
   };
+  // An untransmitted checklist assessment is a device draft, not an audit event.
+  // Replace a previous unsent version of the SAME item instead of replaying
+  // two commands with the same base_version (the second would always 409).
+  // Never compact findings, attempted commands or other audit items.
+  if (input.entityType === "qms-audit-checklist-item" && input.requireDurable && input.body) {
+    let operation = "";
+    try { operation = String((JSON.parse(input.body) as { operation?: string }).operation || ""); } catch { /* fail normal validation */ }
+    if (operation === "CHECKLIST_UPDATE") {
+      const pending = await listOfflineMutations(scope);
+      const prior = [...pending].reverse().find((candidate) => {
+        if (candidate.entityType !== input.entityType || candidate.entityId !== input.entityId
+          || candidate.path !== input.path || candidate.status !== "queued" || candidate.attempts !== 0) return false;
+        try { return (JSON.parse(candidate.body || "{}") as { operation?: string }).operation === "CHECKLIST_UPDATE"; }
+        catch { return false; }
+      });
+      if (prior) {
+        const compacted = await replaceOutboxEntry(prior, {
+          ...prior, body: input.body, headers: Object.fromEntries(headers.entries()),
+          idempotencyKey, updatedAt: Math.max(Date.now(), prior.updatedAt + 1),
+          nextAttemptAt: Date.now(), error: undefined,
+        });
+        if (compacted) {
+          void requestBackgroundReplay();
+          return compacted;
+        }
+      }
+    }
+  }
   if (!(await openDatabase())) {
     if (input.requireDurable) {
       throw new Error("Durable offline storage is unavailable on this device. This governed change was not queued; reconnect or enable browser storage before continuing.");
