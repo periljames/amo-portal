@@ -240,6 +240,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [offlinePackBusy, setOfflinePackBusy] = useState(false);
   const [offlinePackReady, setOfflinePackReady] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [pendingChoices, setPendingChoices] = useState<Record<string, ChecklistResponseOption>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
@@ -567,6 +568,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onSuccess: async (_result, variables) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
+      setPendingChoices((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setNoteDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setSampleDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setAssessmentDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
@@ -580,6 +582,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         // The durable outbox owns these edits now; they must not remain
         // mistaken for unsaved in-memory notes when the auditor moves on.
         const id = variables.item.checklist_item_id;
+        setPendingChoices((current) => { const next = { ...current }; delete next[id]; return next; });
         setNoteDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
         setSampleDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
         setAssessmentDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
@@ -756,12 +759,22 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const saveCurrentAssessment = () => {
     if (!selected || !assessment || !canExecute) return;
+    const pendingChoice = pendingChoices[selected.checklist_item_id];
+    if (pendingChoice && ["NONCOMPLIANT", "OBSERVATION"].includes(pendingChoice.canonical_status)) {
+      // Findings must go through the atomic governed finding composer.
+      selectResponse(selected, pendingChoice);
+      return;
+    }
+    if (!pendingChoice && !selected.response_value && selected.canonical_response_status === "NOT_VERIFIED") {
+      setLocalError("Select a checklist assessment before saving the note, or mark a source-specific Not checked option.");
+      return;
+    }
     setSyncNotice(null);
     setLocalError(null);
     updateMutation.mutate({
       item: selected,
-      response: localAnswers.get(selected.checklist_item_id)?.canonical || selected.canonical_response_status,
-      responseValue: localAnswers.get(selected.checklist_item_id)?.value || selected.response_value || selected.canonical_response_status,
+      response: (pendingChoice?.canonical_status as CanonicalChecklistResponse | undefined) || localAnswers.get(selected.checklist_item_id)?.canonical || selected.canonical_response_status,
+      responseValue: pendingChoice?.value || localAnswers.get(selected.checklist_item_id)?.value || selected.response_value || selected.canonical_response_status,
       auditorNotes: notes,
       sampledItemInformation: sampledItems,
       assessment,
@@ -803,6 +816,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const auditorNotes = noteDrafts[item.checklist_item_id] ?? item.auditor_notes ?? "";
     const requirementError = responseRequirementError(item, source, response, auditorNotes);
     if (requirementError) {
+      setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
       setSelectedId(item.checklist_item_id);
       setDetailOpen(true);
       setLocalError(requirementError);
@@ -828,6 +842,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     )) {
       setSelectedId(item.checklist_item_id);
       setDetailOpen(true);
+      setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
       setLocalError("N/A requires an explicit governed applicability basis. Expand Compliance intelligence below before recording N/A.");
       return;
     }
@@ -990,7 +1005,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   const source = sourceContextByItemId.get(item.checklist_item_id);
                   const choices = source?.response_options?.length ? source.response_options : fallbackResponseOptions(source?.response_type);
                   const local = localAnswers.get(item.checklist_item_id);
-                  const value = local?.value || item.response_value || item.canonical_response_status;
+                  const value = pendingChoices[item.checklist_item_id]?.value || local?.value || item.response_value || item.canonical_response_status;
                   const number = itemNumberById.get(item.checklist_item_id) ?? index + 1;
                   const expanded = detailOpen && selected?.checklist_item_id === item.checklist_item_id;
                   return <React.Fragment key={item.checklist_item_id}>
