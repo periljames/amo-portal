@@ -409,11 +409,14 @@ def mfa_enroll(payload:SensitivePassword,request:Request,db:Session=Depends(get_
 @router.post("/mfa/verify")
 def mfa_verify(payload:TotpCode,request:Request,db:Session=Depends(get_db)):
     s=core.active_session(db,request,write=True)
+    core.auth_limit(request,str(s["identity_id"]),"mfa-verify")
     cred=core.one("SELECT * FROM external_credentials WHERE identity_id=:id FOR UPDATE",db,id=s["identity_id"])
     if not cred or not cred["totp_secret_encrypted"] or not core.totp_valid(cred["totp_secret_encrypted"],payload.code):
         raise HTTPException(401,"Invalid verification code")
     core.run("UPDATE external_credentials SET totp_confirmed_at=:at WHERE identity_id=:id",
              db,at=core.now(),id=s["identity_id"])
+    core.revoke_identity_sessions(db,s["identity_id"],except_session_id=s["id"])
+    core.context(db,s["amo_id"],s["identity_id"])
     core.run("UPDATE external_sessions SET mfa_verified_at=:at WHERE id=:id",db,at=core.now(),id=s["id"])
     core.event(db,amo=s["amo_id"],identity=s["identity_id"],grant=s["grant_id"],action="MFA_VERIFIED",actor_identity=s["identity_id"])
     db.commit()
@@ -433,6 +436,7 @@ def provider_invite(payload:Invitation,request:Request,db:Session=Depends(get_db
     s=core.active_session(db,request,required="members.manage",write=True)
     if s["restrict_new_work"] or s["portal_state"]!="ACTIVE":
         raise HTTPException(403,"Provider is restricted from inviting members")
+    core.require_recent_mfa(db,s)
     return _invite(db,amo=s["amo_id"],supplier_id=s["supplier_id"],inviter=s["identity_id"],
         req=payload,organization_id=s["organization_id"],cap_limit=s["capabilities_json"],internal=False)
 
@@ -589,3 +593,48 @@ def quality_unlock(amo_code:str,identity_id:str,payload:Decision,db:Session=Depe
                actor_user=str(user.id),details={"reason":payload.reason})
     db.commit()
     return {"status":"LOGIN_LOCK_CLEARED"}
+
+class ProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=2,max_length=255)
+
+@router.patch("/profile")
+def update_profile(payload:ProfileUpdate,request:Request,db:Session=Depends(get_db)):
+    session=core.active_session(db,request,required="profile.read",write=True)
+    core.run("""UPDATE external_identities SET display_name=:name,updated_at=:at
+        WHERE id=:person AND status='ACTIVE'""",db,name=payload.display_name.strip(),
+        at=core.now(),person=session["identity_id"])
+    core.event(db,amo=session["amo_id"],identity=session["identity_id"],grant=session["grant_id"],
+        action="PROFILE_UPDATED",actor_identity=session["identity_id"])
+    db.commit()
+    return {"status":"UPDATED","display_name":payload.display_name.strip()}
+
+@router.post("/members/{grant_id}/revoke")
+def member_revoke(grant_id:str,request:Request,db:Session=Depends(get_db)):
+    session=core.active_session(db,request,required="members.manage",write=True)
+    core.require_recent_mfa(db,session)
+    row=core.one("""SELECT id,identity_id,role_code,capabilities_json FROM external_tenant_grants
+        WHERE amo_id=:amo AND tenant_provider_id=:provider AND id=:target FOR UPDATE""",
+        db,amo=session["amo_id"],provider=session["tenant_provider_id"],target=grant_id)
+    if not row:raise HTTPException(404,"Member not found for this provider")
+    if row["identity_id"]==session["identity_id"]:
+        raise HTTPException(409,"Provider administrators cannot revoke their own administrative membership")
+    if set(row["capabilities_json"] or [])-set(session["capabilities_json"] or []):
+        raise HTTPException(403,"Member has privileges outside your delegated authority")
+    core.run("""UPDATE external_tenant_grants SET status='REVOKED',version=version+1
+        WHERE amo_id=:amo AND id=:id""",db,amo=session["amo_id"],id=grant_id)
+    core.run("""UPDATE external_sessions SET revoked_at=:at
+        WHERE amo_id=:amo AND grant_id=:id AND revoked_at IS NULL""",
+        db,amo=session["amo_id"],id=grant_id,at=core.now())
+    core.event(db,amo=session["amo_id"],identity=row["identity_id"],grant=grant_id,
+        action="MEMBERSHIP_ACCESS_REVOKED",actor_identity=session["identity_id"])
+    db.commit()
+    return {"status":"REVOKED"}
+
+@router.get("/mfa/methods")
+def mfa_methods(request:Request,db:Session=Depends(get_db)):
+    session=core.active_session(db,request,required="profile.read")
+    credential=core.one("""SELECT totp_confirmed_at FROM external_credentials
+        WHERE identity_id=:person""",db,person=session["identity_id"])
+    return {"totp_enabled":bool(credential and credential["totp_confirmed_at"]),
+            "passkeys_supported":False,
+            "passkey_enrollment":"NOT_ENABLED_FOR_EXTERNAL_ACCOUNTS"}
