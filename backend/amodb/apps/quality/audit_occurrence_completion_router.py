@@ -694,18 +694,33 @@ def update_governed_document_request(
         if next_status in {"REQUESTED", "UPLOADED"}:
             raise HTTPException(status_code=409, detail="Request and upload states may not be changed by a review decision.")
         if next_status in {"ACCEPTED", "REJECTED"}:
-            if row.status != "UPLOADED" or not (row.file_ref or "").startswith("audit-submission:"):
-                raise HTTPException(status_code=409, detail="A submitted document is required before Quality review.")
-            submission_id = row.file_ref.removeprefix("audit-submission:")
-            submitted = db.query(QualityAuditDocumentSubmission.id).filter(
-                QualityAuditDocumentSubmission.amo_id == ctx.amo_id,
-                QualityAuditDocumentSubmission.audit_id == audit_id,
-                QualityAuditDocumentSubmission.document_request_id == request_id,
-                QualityAuditDocumentSubmission.id == submission_id,
-                QualityAuditDocumentSubmission.source_type == "UPLOAD",
-            ).first()
-            if submitted is None:
-                raise HTTPException(status_code=409, detail="The current uploaded evidence is missing; review cannot be completed.")
+            # A governed request can be fulfilled by an uploaded submission OR
+            # an explicitly selected, validated controlled DMS revision. Do not
+            # manufacture evidence from a free-text upload reference.
+            has_controlled_revision = (
+                next_source_mode != "UPLOAD"
+                and (
+                    (qms_document_id is not None and qms_revision_id is not None)
+                    or (canonical_document_id is not None and canonical_revision_id is not None)
+                )
+            )
+            has_uploaded_submission = False
+            if row.status == "UPLOADED" and (row.file_ref or "").startswith("audit-submission:"):
+                submission_id = row.file_ref.removeprefix("audit-submission:")
+                has_uploaded_submission = db.query(QualityAuditDocumentSubmission.id).filter(
+                    QualityAuditDocumentSubmission.amo_id == ctx.amo_id,
+                    QualityAuditDocumentSubmission.audit_id == audit_id,
+                    QualityAuditDocumentSubmission.document_request_id == request_id,
+                    QualityAuditDocumentSubmission.id == submission_id,
+                    QualityAuditDocumentSubmission.source_type == "UPLOAD",
+                ).first() is not None
+            if not has_uploaded_submission and not (
+                has_controlled_revision and row.status == "REQUESTED"
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review requires a recorded document upload or an exact controlled DMS revision.",
+                )
         if next_status == "WAIVED" and (row.status != "REQUESTED" or metadata.is_required):
             raise HTTPException(status_code=409, detail="Only an optional, unsubmitted request can be waived.")
         row.status = next_status
