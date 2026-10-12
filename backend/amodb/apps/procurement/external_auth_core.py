@@ -113,10 +113,10 @@ def redeem_token(db, raw: str, kind: str):
     context(db,tenant_hint)
     row=one("""SELECT * FROM external_identity_tokens
         WHERE amo_id=:amo AND token_hash=:hash AND kind=:kind FOR UPDATE""",db,amo=tenant_hint,hash=digest(raw),kind=kind)
-    if not row or row["used_at"] or aware(row["expires_at"]) <= now():
+    if not row or row["used_at"] or row["revoked_at"] or aware(row["expires_at"]) <= now():
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
-    run("UPDATE external_identity_tokens SET used_at=:at WHERE id=:id",db,at=now(),id=row["id"])
+    run("UPDATE external_identity_tokens SET revoked_at=:at WHERE id=:id",db,at=now(),id=row["id"])
     return row
 
 def event(db, *, amo: str, identity: str | None, grant: str | None, action: str,
@@ -209,9 +209,9 @@ def consume_other_reset_tokens(db: Session, identity_id: str):
     tenants=db.execute(text("SELECT id FROM amos")).scalars().all()
     for tenant_id in tenants:
         context(db,str(tenant_id),identity_id)
-        run("""UPDATE external_identity_tokens SET used_at=:at
+        run("""UPDATE external_identity_tokens SET revoked_at=:at
           WHERE amo_id=:amo AND identity_id=:identity
-          AND kind='RESET' AND used_at IS NULL""",db,
+          AND kind='RESET' AND used_at IS NULL AND revoked_at IS NULL""",db,
           at=now(),amo=str(tenant_id),identity=identity_id)
 
 
