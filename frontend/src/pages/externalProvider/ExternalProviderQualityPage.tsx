@@ -52,11 +52,13 @@ export default function ExternalProviderQualityPage() {
   async function act(path: string, body: object, success: string, method = "POST") {
     setBusy(true);setError("");setMessage("");
     try {
-      await apiRequest(base + path, {
+      const result = await apiRequest<{delivery_status?:string}>(base + path, {
         method, headers: {"Content-Type":"application/json"}, body:JSON.stringify(body),
       });
       await refresh();
-      setMessage(success);
+      setMessage(result.delivery_status && result.delivery_status !== "SENT"
+        ? `Account record saved. Email delivery status: ${result.delivery_status}. Configure the notification provider or resend the invitation.`
+        : success);
       setEditing(null);
     } catch(e) { setError(e instanceof Error ? e.message : "Account operation failed"); }
     finally {setBusy(false);}
@@ -116,10 +118,16 @@ export default function ExternalProviderQualityPage() {
                   <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/decision`,{state:"ACTIVE",reason:reason||"Quality reviewed and approved provider user access."},"Account grant activated.")}>Approve account</button>}
                 {item.grant_state==="ACTIVE" &&
                   <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/decision`,{state:"SUSPENDED",reason:reason||"Quality suspended this external access grant."},"Account suspended and sessions revoked.")}>Suspend account</button>}
+                {item.grant_state!=="REVOKED" &&
+                  <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/decision`,{state:"REVOKED",reason:reason||"Quality revoked this external account access after review."},"Account revoked; sessions invalidated.")}>Revoke account</button>}
                 {item.portal_state!=="ACTIVE" &&
                   <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"ACTIVE",reason:reason||"Quality approved external portal organization access."},"Provider portal activated.")}>Activate portal</button>}
                 {item.portal_state==="ACTIVE" &&
                   <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"SUSPENDED",reason:reason||"Quality suspended provider portal access.",restrict_new_work:true},"Provider suspended. Corrective-action response capability may remain available.")}>Suspend portal</button>}
+                {item.portal_state==="ACTIVE" && !item.restrict_new_work &&
+                  <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"ACTIVE",reason:reason||"Quality restricted the provider to existing permitted corrective work.",restrict_new_work:true},"Provider restricted; new work is blocked.")}>Restrict new work</button>}
+                {item.portal_state==="ACTIVE" && item.restrict_new_work &&
+                  <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"ACTIVE",reason:reason||"Quality reviewed restrictions and restored approved portal capabilities.",restrict_new_work:false},"Portal capability restrictions lifted.")}>Lift restriction</button>}
                 <button disabled={busy} onClick={()=>selectGrant(item)}>Privileges</button>
                 <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/reverify`,{state:"PENDING",reason:reason||"Quality requires identity re-verification before restoration."},"One-time verification code issued and sessions revoked.")}>Reverify</button>
                 <button disabled={busy} onClick={()=>void act(`/identities/${item.identity_id}/unlock`,{state:"ACTIVE",reason:reason||"Quality reviewed login lockout and approved unlock."},"Login lockout cleared.")}>Unlock login</button>
