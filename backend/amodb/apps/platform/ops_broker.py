@@ -100,6 +100,16 @@ class PreparedSnapshotBroker:
             self._condition.notify_all()
             return message
 
+    def _perform_refresh(self, cursor: str | None, include_snapshot: bool) -> RefreshBatch:
+        """Count completed refreshes in the worker thread before waking the loop.
+
+        Counting on the event-loop side of to_thread() lets health() see a
+        background invocation before the loop has accounted for its result.
+        """
+        batch = self._refresh(cursor, include_snapshot)
+        self._refresh_count += 1
+        return batch
+
     async def _run(self) -> None:
         self._running = True
         loop = asyncio.get_running_loop()
@@ -108,8 +118,7 @@ class PreparedSnapshotBroker:
             while True:
                 include_snapshot = loop.time() >= next_snapshot_at or self._latest_snapshot is None
                 try:
-                    batch = await asyncio.to_thread(self._refresh, self._cursor, include_snapshot)
-                    self._refresh_count += 1
+                    batch = await asyncio.to_thread(self._perform_refresh, self._cursor, include_snapshot)
                     self._last_success_at = self._now()
                     self._last_error = None
                     if batch.cursor is not None:
