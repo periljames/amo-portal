@@ -278,7 +278,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const hash = location.hash.replace(/^#/, "");
     if (!hash) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(`audit-occurrence-${hash}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const target = document.getElementById(`audit-occurrence-${hash}`);
+      // A hash navigation must reveal its disclosure, not merely scroll to a closed panel.
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [location.hash, checklistQuery.isSuccess]);
