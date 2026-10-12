@@ -157,20 +157,22 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     row=one("""SELECT s.*, g.status grant_state, g.role_code, g.capabilities_json,
           g.object_scope_json, g.tenant_provider_id, p.portal_state, p.restrict_new_work,
           p.organization_id, p.supplier_id, m.status membership_state,
-          i.status identity_state, i.verified_at
+          i.status identity_state, i.verified_at, c.locked_until
         FROM external_sessions s
         JOIN external_tenant_grants g ON g.id=s.grant_id AND g.amo_id=s.amo_id
         JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=s.amo_id
         JOIN external_organization_memberships m ON m.id=g.membership_id AND m.identity_id=s.identity_id AND m.organization_id=p.organization_id
         JOIN external_identities i ON i.id=s.identity_id
+        JOIN external_credentials c ON c.identity_id=i.id
         WHERE s.amo_id=:amo AND s.session_hash=:hash""",db,amo=tenant_hint,hash=digest(raw))
     if not row:
         raise HTTPException(401,"Provider session invalid")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
-    if row["revoked_at"] or aware(row["expires_at"])<=now() or row["identity_state"]!="ACTIVE" or not row["verified_at"] or row["grant_state"]!="ACTIVE" or row["membership_state"]!="ACTIVE":
+    if row["revoked_at"] or aware(row["expires_at"])<=now() or row["identity_state"]!="ACTIVE" or not row["verified_at"] or row["grant_state"]!="ACTIVE" or row["membership_state"]!="ACTIVE" or (row["locked_until"] and aware(row["locked_until"])>now()):
         raise HTTPException(401,"Provider account or session revoked")
-    if row["portal_state"]!="ACTIVE" and not (row["portal_state"]=="SUSPENDED" and required=="capa.respond"):
-        raise HTTPException(403,"Provider portal access suspended")
+    if row["portal_state"]!="ACTIVE":
+        if row["portal_state"]!="SUSPENDED" or required not in {None,"capa.respond","profile.read","sessions.manage"}:
+            raise HTTPException(403,"Provider portal access suspended")
     caps=set(row["capabilities_json"] or [])
     if required and (required not in caps or required not in CAPABILITIES):
         raise HTTPException(403,"Provider capability not granted")
@@ -199,6 +201,15 @@ def revoke_identity_sessions(db: Session, identity_id: str):
             db,at=now(),amo=str(tenant_id),identity=identity_id)
         total+=result.rowcount
     return total
+
+def require_recent_mfa(db: Session, session, minutes: int = 15):
+    credential=one("SELECT totp_confirmed_at FROM external_credentials WHERE identity_id=:id",
+                    db,id=session["identity_id"])
+    if not credential or not credential["totp_confirmed_at"]:
+        raise HTTPException(403,"Enroll and verify MFA before this sensitive provider action")
+    if not session["mfa_verified_at"] or (now()-aware(session["mfa_verified_at"])).total_seconds()>minutes*60:
+        raise HTTPException(403,"Recent second-factor verification required")
+
 
 def password_is_valid(value):
     try:
