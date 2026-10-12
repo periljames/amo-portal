@@ -18,7 +18,7 @@ from amodb.apps.accounts import models as accounts
 from amodb.apps.quality.tenant_security import set_postgres_tenant_context
 from amodb.database import get_db
 from amodb.entitlements import require_module
-from amodb.security import get_current_active_user, require_roles
+from amodb.security import require_roles
 from . import models, service
 
 router = APIRouter(
@@ -280,7 +280,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
 
 @router.get("/external-provider-imports/{batch_id}")
 def review(amo_code: str, batch_id: str, db: Session = Depends(get_db),
-           user: accounts.User = Depends(get_current_active_user)):
+           user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
     batch = db.execute(text("""SELECT * FROM external_provider_import_batches
         WHERE id=:batch AND amo_id=:amo"""), {"batch":batch_id, "amo":tenant}).mappings().first()
