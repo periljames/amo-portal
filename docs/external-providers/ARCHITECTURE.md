@@ -22,3 +22,7 @@ Branch `codex/external-provider-platform-20261009`, single draft PR #560.
 
 ## Outstanding external evidence
 Exact vendor and contracts tracker workbooks were not found in available repository or Library files. The current parser is configurable, **not proven against those exact files**. Phase 1 source-specific acceptance cannot be confirmed without them. No test/build/typecheck was manually launched during Phase 1; GitHub's automatically triggered PR CI runs are tracked separately in the implementation and Phase 10 verification ledgers.
+
+
+## Phase 2 identity and access boundary
+Phase 2 extends (but never replaces) the Procurement supplier master with a global external-person and organization registry, tenant/supplier links, tenant Quality-approved grants, per-person Argon2id/TOTP/WebAuthn factors and short-lived revocable cookie sessions. The `external_provider_account_links` from Phase 1 remain descriptive/staged internal-user associations, **not** vendor login authority. Global credentials are kept out of staff `users`; external sessions cannot authenticate any staff-only QMS or Procurement routes. Provider Quality supplier approval, commercial activation and external portal account activation are separate decisions. Read `PHASE2_IDENTITY_ACCESS.md` for concrete routes, operational configuration and Phase 3 obligations.
