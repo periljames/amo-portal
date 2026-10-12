@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 import json
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -67,7 +67,8 @@ _REQUIRED = {
 _READ_ONLY = {"source-links"}
 _QUALITY_ONLY = {"relationships", "account-links", "scope-links"}
 _ALLOWED_ROLES = {"SUPPLIER", "VENDOR", "CONTRACTOR", "SUBCONTRACTOR", "SERVICE_PROVIDER",
-                  "LABORATORY", "CALIBRATION_PROVIDER", "CONSULTANT", "OTHER"}
+                  "SPECIALIZED_MAINTENANCE_PROVIDER", "LABORATORY",
+                  "CALIBRATION_PROVIDER", "CONSULTANT", "OTHER"}
 _ALLOWED_ASSIGNMENTS = {"COMMERCIAL", "TECHNICAL", "QUALITY", "OTHER"}
 
 class ProviderIdentityWrite(BaseModel):
