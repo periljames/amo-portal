@@ -85,7 +85,7 @@ class SensitivePassword(BaseModel):
     password: str
 
 def _authorized_quality(db,amo_code,user):
-    if user.role not in {accounts.AccountRole.QUALITY_MANAGER, accounts.AccountRole.QUALITY_INSPECTOR}:
+    if user.role not in {accounts.AccountRole.QUALITY_MANAGER, accounts.AccountRole.QUALITY_OFFICER}:
         raise HTTPException(403,"Quality account-control role required")
     tenant=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
     core.context(db,tenant,str(user.id))
