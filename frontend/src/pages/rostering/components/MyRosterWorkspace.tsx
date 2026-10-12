@@ -298,13 +298,14 @@ export function MyRosterWorkspace() {
 
   const roster = rosterQuery.data || null;
   const leaveTypes = leaveTypesQuery.data || [];
+  const eligibleLeaveTypes = leaveTypes.filter((type) => type.eligible);
   const balances = useMemo(() => balancesQuery.data || [], [balancesQuery.data]);
   const requests = useMemo(() => requestsQuery.data?.items || [], [requestsQuery.data?.items]);
   const attendance = attendanceQuery.data || null;
   const currentAttendance = currentAttendanceQuery.data || null;
   const timesheets = timesheetsQuery.data?.items || [];
   const calendarSubscription = calendarActive ? calendarQuery.data || null : null;
-  const effectiveLeaveTypeId = leaveTypeId || leaveTypes[0]?.id || "";
+  const effectiveLeaveTypeId = leaveTypeId || eligibleLeaveTypes[0]?.id || "";
   const selectedLeaveType = leaveTypes.find((type) => type.id === effectiveLeaveTypeId) || null;
   const mode = useMemo(
     () => localAttendanceMode || currentAttendance?.current_state || attendanceMode(currentAttendance?.events || []),
@@ -811,7 +812,7 @@ export function MyRosterWorkspace() {
                 onChange={(event) => setLeaveTypeId(event.target.value)}
               >
                 {leaveTypes.map((type) => (
-                  <option key={type.id} value={type.id}>{type.name}</option>
+                  <option key={type.id} value={type.id} disabled={!type.eligible}>{type.name}{type.eligible ? "" : " — not eligible"}</option>
                 ))}
               </select>
             </label>
@@ -820,10 +821,11 @@ export function MyRosterWorkspace() {
             <label className="wr-span-2"><span>Reason</span><input value={leaveReason} onChange={(event) => setLeaveReason(event.target.value)} placeholder="Optional context for approvers" /></label>
             {selectedLeaveType?.requires_attachment ? <label className="wr-span-2"><span>Attachment or document reference</span><input value={leaveAttachmentReference} onChange={(event) => setLeaveAttachmentReference(event.target.value)} placeholder="Document ID, secure file reference or URL" required /></label> : null}
           </div>
+          {!eligibleLeaveTypes.length ? <div className="wr-inline-warning" role="status">No leave type is currently available for your personnel profile. Ask HR to confirm your profile details and leave eligibility.</div> : null}
           <p className="wr-form-note">Requested hours are calculated from your effective work pattern and contracted daily hours; off days are not charged as 24-hour leave.</p>
           <div className="wr-actions wr-actions--end">
             <button type="button" className="wr-button wr-button--secondary" onClick={() => setLeaveOpen(false)}>Cancel</button>
-            <button type="button" className="wr-button wr-button--primary" onClick={() => void requestLeave()} disabled={busy === "leave" || !leaveTypes.length}><Send size={16} /> Submit request</button>
+            <button type="button" className="wr-button wr-button--primary" onClick={() => void requestLeave()} disabled={busy === "leave" || !selectedLeaveType?.eligible}><Send size={16} /> Submit request</button>
           </div>
         </section>
       ) : null}
@@ -956,6 +958,7 @@ export function MyRosterWorkspace() {
                   <span>{hoursLabel(request.requested_minutes)}</span>
                   <StatusPill value={request.status} />
                   {request.published_roster_conflicts.length ? <span className="wr-pill wr-pill--blocker">Roster conflict</span> : null}
+                  {request.approvals.length ? <details><summary>{request.approvals.length} decision{request.approvals.length === 1 ? "" : "s"}</summary>{request.approvals.map(approval => <small key={approval.id}>{approval.stage}: {approval.decision} by {approval.actor_name || "authorised approver"} · {formatDateTime(approval.decided_at)}{approval.comment ? ` · ${approval.comment}` : ""}</small>)}</details> : <small>{request.status === "SUBMITTED" ? "Awaiting supervisor or departmental head" : "No approval decision yet"}</small>}
                   {request.status === "DRAFT" ? (
                     <button
                       type="button"

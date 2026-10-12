@@ -47,6 +47,7 @@ import { useWorkforcePermissions } from "../hooks/useWorkforcePermissions";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
 import { RosterPeriodQuickActions } from "./RosterPeriodQuickActions";
 import { WorkPatternStudio } from "./WorkPatternStudio";
+import { LeaveTypeConfigurationPanel } from "./LeaveTypeConfigurationPanel";
 
 const RosterGovernancePanel = lazy(() =>
   import("./RosterGovernancePanel").then((module) => ({ default: module.RosterGovernancePanel })),
@@ -61,13 +62,14 @@ const RosterCodeRegistryPanel = lazy(() =>
   import("./RosterCodeRegistryPanel").then((module) => ({ default: module.RosterCodeRegistryPanel })),
 );
 
-type Section = "start" | "patterns" | "control" | "advanced";
+type Section = "start" | "patterns" | "control" | "leave" | "advanced";
 type ControlView = "coverage" | "governance";
 
 const SECTIONS: Array<{ id: Section; label: string }> = [
   { id: "start", label: "Get started" },
   { id: "patterns", label: "Shifts & patterns" },
   { id: "control", label: "Coverage & approvals" },
+  { id: "leave", label: "Leave" },
   { id: "advanced", label: "Advanced" },
 ];
 
@@ -75,6 +77,7 @@ function normalizeSection(value: string | null): Section {
   if (value === "shifts" || value === "patterns") return "patterns";
   if (value === "coverage" || value === "policy" || value === "control") return "control";
   if (value === "automation" || value === "advanced") return "advanced";
+  if (value === "leave") return "leave";
   return "start";
 }
 
@@ -222,6 +225,7 @@ export function RosteringSetupWorkspace() {
         />
       ) : null}
       {section === "control" ? <div className="rs-setup__stack"><nav className="rs-subnav" aria-label="Coverage and approval controls"><button type="button" className={controlView === "coverage" ? "is-active" : ""} onClick={() => setControlView("coverage")}>Coverage demand</button><button type="button" className={controlView === "governance" ? "is-active" : ""} onClick={() => setControlView("governance")}>Rules & approvals</button></nav>{controlView === "coverage" ? <CoverageDemandPanel demands={demandsQuery.data || []} loading={demandsQuery.isPending || governancePeopleQuery.isPending} error={demandsQuery.error || governancePeopleQuery.error} people={governancePeople} bases={governanceBases} timezoneName={readiness.policy.timezone_name} canManage={can("roster.allocate_work")} busy={busy} runAction={runAction} /> : <PolicyPanel rules={rulesQuery.data || []} loading={rulesQuery.isPending} authorityCount={readiness.active_approval_authority_count} canManageRules={can("roster.manage_rules")} canManageAuthorities={can("roster.manage_approval_authorities")} people={governancePeople} periods={periodsQuery.data || []} bases={governanceBases} governanceLoading={governancePeopleQuery.isPending || periodsQuery.isPending} governanceError={governancePeopleQuery.error || periodsQuery.error} />}</div> : null}
+      {section === "leave" ? <LeaveTypeConfigurationPanel canManage={can("leave.manage_balances")} /> : null}
       {section === "advanced" ? (
         <AdvancedWorkspace policy={readiness.policy} permissions={permissions} busy={busy} runAction={runAction} runs={runsQuery.data || []} loading={runsQuery.isPending} onRefresh={() => void runsQuery.refetch()} />
       ) : null}
@@ -333,12 +337,12 @@ function AutomationPanel({
     <div className="rs-setup__stack">
       <section className="wr-panel">
         <div className="wr-section-heading">
-          <div><span className="wr-eyebrow">Automatic month setup</span><h2>Create future periods automatically</h2><p>Maintain the planning horizon without creating duplicates or publishing unattended duty.</p></div>
+          <div><span className="wr-eyebrow">Automatic month setup</span><h2>Create future periods automatically</h2><p>Each scheduled run creates the selected future period. Monthly runs keep rolling forward without duplicating an existing month.</p></div>
           <label className="rs-toggle"><input type="checkbox" checked={draft.enabled} disabled={!canManage} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span>{draft.enabled ? "On" : "Off"}</span></label>
         </div>
         <div className="rs-form-grid">
           <label><span>Frequency</span><select value={draft.frequency} disabled={!canManage} onChange={(event) => changeFrequency(event.target.value as RosterAutomationFrequency)}><option value="MONTHLY">Monthly</option><option value="FORTNIGHTLY">Fortnightly</option><option value="WEEKLY">Weekly</option><option value="MANUAL">Manual only</option></select></label>
-          <label><span>Maintain ahead</span><select value={draft.lead_periods} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value} period{value === 1 ? "" : "s"}</option>)}</select></label>
+          <label><span>Generate for</span><select value={draft.lead_periods} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, lead_periods: Number(event.target.value) })}>{[1, 2, 3, 6, 12].map((value) => <option key={value} value={value}>{value === 1 ? "Next period" : `${value} periods ahead`}</option>)}</select></label>
           {draft.frequency === "MONTHLY" ? <label><span>Day of month</span><input type="number" min="1" max="28" value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })} /></label> : null}
           {draft.frequency === "WEEKLY" || draft.frequency === "FORTNIGHTLY" ? <label><span>Weekday</span><select value={draft.run_day} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_day: Number(event.target.value) })}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => <option key={day} value={index + 1}>{day}</option>)}</select></label> : null}
           <label><span>Run hour</span><input type="number" min="0" max="23" value={draft.run_hour_local} disabled={schedulingDisabled} onChange={(event) => setDraft({ ...draft, run_hour_local: Number(event.target.value) })} /></label>
@@ -353,7 +357,7 @@ function AutomationPanel({
       </section>
 
       <section className="wr-panel">
-        <div className="wr-section-heading"><div><span className="wr-eyebrow">Automatic rotation</span><h2>Generate duties from work patterns</h2><p>Use effective HR pattern assignments while preserving leave, training and Quality commitments.</p></div><label className="rs-toggle"><input type="checkbox" checked={draft.generate_from_patterns} disabled={!canManage} onChange={(event) => setDraft({ ...draft, generate_from_patterns: event.target.checked })} /><span>{draft.generate_from_patterns ? "On" : "Off"}</span></label></div>
+        <div className="wr-section-heading"><div><span className="wr-eyebrow">Automatic rotation</span><h2>Generate duties from work patterns</h2><p>Continue each person's anchored cycle across month boundaries. Leave, courses and other source commitments suppress conflicting duty without resetting the cycle.</p></div><label className="rs-toggle"><input type="checkbox" checked={draft.generate_from_patterns} disabled={!canManage} onChange={(event) => setDraft({ ...draft, generate_from_patterns: event.target.checked })} /><span>{draft.generate_from_patterns ? "On" : "Off"}</span></label></div>
         <div className="rs-check-grid">
           <label><input type="checkbox" checked={draft.validate_after_generation} disabled={!canManage} onChange={(event) => setDraft({ ...draft, validate_after_generation: event.target.checked })} /> Validate after generation</label>
         </div>

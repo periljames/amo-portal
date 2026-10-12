@@ -702,8 +702,10 @@ def _training_event_findings(db: Session, assignments: Sequence[models.RosterAss
     if not assignments:
         return []
     user_ids = sorted({row.user_id for row in assignments})
-    start_date = min(row.starts_at.date() for row in assignments)
-    end_date = max(row.ends_at.date() for row in assignments)
+    timezone_name = getattr(getattr(getattr(assignments[0], "version", None), "period", None), "timezone_name", None) or "UTC"
+    zone = workforce_calculations.get_zone(timezone_name)
+    start_date = min(workforce_calculations.ensure_aware(row.starts_at).astimezone(zone).date() for row in assignments)
+    end_date = max((workforce_calculations.ensure_aware(row.ends_at).astimezone(zone) - timedelta(microseconds=1)).date() for row in assignments)
     participants = db.query(training_models.TrainingEventParticipant).join(
         training_models.TrainingEvent,
         training_models.TrainingEventParticipant.event_id == training_models.TrainingEvent.id,
@@ -735,8 +737,8 @@ def _training_event_findings(db: Session, assignments: Sequence[models.RosterAss
         if precise:
             event_start, event_end, date_only = precise.starts_at, precise.ends_at, False
         else:
-            event_start = datetime.combine(event.starts_on, time.min, tzinfo=UTC)
-            event_end = datetime.combine((event.ends_on or event.starts_on) + timedelta(days=1), time.min, tzinfo=UTC)
+            event_start = datetime.combine(event.starts_on, time.min, tzinfo=zone).astimezone(UTC)
+            event_end = datetime.combine((event.ends_on or event.starts_on) + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
             date_only = True
         by_user[participant.user_id].append((participant, event_start, event_end, date_only))
     findings: list[FindingSpec] = []

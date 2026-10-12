@@ -104,6 +104,7 @@ const AdminUserDetailPage: React.FC = () => {
   const [profileTitle, setProfileTitle] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
   const [profileSecondaryPhone, setProfileSecondaryPhone] = useState("");
+  const [profileGender, setProfileGender] = useState<"FEMALE" | "MALE" | "UNSPECIFIED">("UNSPECIFIED");
   const [profileStandingAdmin, setProfileStandingAdmin] = useState(false);
   const [notifySubject, setNotifySubject] = useState("QMS user notification");
   const [notifyMessage, setNotifyMessage] = useState("");
@@ -165,10 +166,11 @@ const AdminUserDetailPage: React.FC = () => {
     setProfileTitle(user.position_title || "");
     setProfilePhone(user.phone || "");
     setProfileSecondaryPhone(user.secondary_phone || "");
+    setProfileGender(workspace?.profile?.gender === "FEMALE" || workspace?.profile?.gender === "MALE" ? workspace.profile.gender : "UNSPECIFIED");
     setProfileStandingAdmin(Boolean(user.is_amo_admin));
     setLifecycleDepartmentId(user.department_id || "");
     setLifecycleTitle(user.position_title || "");
-  }, [user]);
+  }, [user, workspace?.profile?.gender]);
 
   const updateUserMutation = useMutation({
     mutationFn: (payload: AdminUserUpdatePayload) => updateAdminUser(resolvedUserId, payload),
@@ -331,6 +333,7 @@ const AdminUserDetailPage: React.FC = () => {
                 <div><span>Hire date</span><strong>{workspace.profile?.hire_date || "—"}</strong></div>
                 <div><span>Employment status</span><strong>{workspace.profile?.employment_status || "—"}</strong></div>
                 <div><span>Personnel status</span><strong>{workspace.profile?.status || "—"}</strong></div>
+                <div><span>Leave eligibility profile</span><strong>{workspace.profile?.gender ? workspace.profile.gender.toLowerCase() : "Not specified"}</strong></div>
               </div>
             </article>
             <article className="aum-panel">
@@ -343,7 +346,8 @@ const AdminUserDetailPage: React.FC = () => {
                 {!user.is_superuser && !isPlatformSuperuser ? <div className="aum-note">Standing AMO Administrator: {user.is_amo_admin ? "assigned by platform superuser" : "not assigned"}. Delegated administration is managed separately in Administrator governance.</div> : null}
                 <label className="aum-field"><span>Primary phone</span><input className="aum-input" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
                 <label className="aum-field"><span>Secondary phone</span><input className="aum-input" value={profileSecondaryPhone} onChange={(event) => setProfileSecondaryPhone(event.target.value)} /></label>
-                <button type="button" className="aum-button aum-button--primary" disabled={!user.is_superuser && !profileAccessId} onClick={() => updateUserMutation.mutate({ access_profile_id: user.is_superuser ? undefined : profileAccessId, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null, is_amo_admin: isPlatformSuperuser && !user.is_superuser ? profileStandingAdmin : undefined })}>
+                <label className="aum-field"><span>Gender for leave eligibility</span><select className="aum-select" value={profileGender} onChange={(event) => setProfileGender(event.target.value as typeof profileGender)}><option value="UNSPECIFIED">Not specified</option><option value="FEMALE">Female</option><option value="MALE">Male</option></select><small>Used to enforce the leave-type eligibility configured in Rostering setup.</small></label>
+                <button type="button" className="aum-button aum-button--primary" disabled={!user.is_superuser && !profileAccessId} onClick={() => updateUserMutation.mutate({ access_profile_id: user.is_superuser ? undefined : profileAccessId, department_id: profileDepartmentId || null, position_title: profileTitle || null, phone: profilePhone || null, secondary_phone: profileSecondaryPhone || null, gender: profileGender, is_amo_admin: isPlatformSuperuser && !user.is_superuser ? profileStandingAdmin : undefined })}>
                   Save profile changes
                 </button>
               </div>

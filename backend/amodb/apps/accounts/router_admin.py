@@ -1550,6 +1550,9 @@ def update_amo(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AMO not found.")
 
     update_data = payload.model_dump(exclude_unset=True)
+    personnel_profile = _get_personnel_profile_for_user(db, user=user) if "gender" in payload.model_fields_set else None
+    if "gender" in payload.model_fields_set and personnel_profile is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Link a personnel profile before setting leave eligibility details.")
     for field, value in update_data.items():
         setattr(amo, field, value)
     db.add(amo)
@@ -2115,6 +2118,10 @@ def create_user_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    if personnel_profile is not None:
+        personnel_profile.gender = None if payload.gender == "UNSPECIFIED" else payload.gender
+        db.add(personnel_profile)
+        db.commit()
     access_control.attach_user_access(db, user)
     audit_services.log_event(
         db,
@@ -4773,6 +4780,7 @@ def get_user_workspace_admin(
             hire_date=profile_row.hire_date,
             department=profile_row.department,
             position_title=profile_row.position_title,
+            gender=profile_row.gender,
         )
 
     availability_rows = (

@@ -327,6 +327,8 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     placeholderData: keepPreviousData,
     networkMode: "offlineFirst",
     retry: 1,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 
   const peopleQuery = useInfiniteQuery({
@@ -410,6 +412,8 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
     retry: 1,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const assignments = workspaceQuery.data?.assignments || [];

@@ -123,11 +123,18 @@ def test_quality_audit_commitment_blocks_productive_assignment(monkeypatch):
         "amodb.apps.rostering.services.workforce_services.active_contract_for_user",
         lambda *_args, **_kwargs: object(),
     )
-    database = _Database([None, None, None, object()])
+    monkeypatch.setattr(
+        "amodb.apps.rostering.services.commitments.list_commitments",
+        lambda *_args, **_kwargs: SimpleNamespace(items=[SimpleNamespace(
+            user_id="user-1", blocking=True, provisional=False,
+            source_module="QUALITY", title="Quality audit QAR-1",
+            starts_at=NOW, ends_at=NOW + timedelta(hours=8),
+        )]),
+    )
 
     with pytest.raises(ValueError, match="Quality audit"):
         _ensure_source_owned_state(
-            database,
+            object(),
             amo_id="amo-1",
             user_id="user-1",
             starts_at=NOW,
@@ -143,11 +150,18 @@ def test_pending_leave_request_blocks_productive_assignment(monkeypatch):
         "amodb.apps.rostering.services.workforce_services.active_contract_for_user",
         lambda *_args, **_kwargs: object(),
     )
-    database = _Database([None, object()])
+    monkeypatch.setattr(
+        "amodb.apps.rostering.services.commitments.list_commitments",
+        lambda *_args, **_kwargs: SimpleNamespace(items=[SimpleNamespace(
+            user_id="user-1", blocking=False, provisional=True,
+            source_module="WORKFORCE", title="pending leave request",
+            starts_at=NOW, ends_at=NOW + timedelta(hours=8),
+        )]),
+    )
 
     with pytest.raises(ValueError, match="pending leave request"):
         _ensure_source_owned_state(
-            database,
+            object(),
             amo_id="amo-1",
             user_id="user-1",
             starts_at=NOW,
@@ -156,6 +170,32 @@ def test_pending_leave_request_blocks_productive_assignment(monkeypatch):
             assignment_source="MANUAL",
             source_reference_id=None,
         )
+
+
+def test_precise_course_outside_duty_window_does_not_block(monkeypatch):
+    monkeypatch.setattr(
+        "amodb.apps.rostering.services.workforce_services.active_contract_for_user",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "amodb.apps.rostering.services.commitments.list_commitments",
+        lambda *_args, **_kwargs: SimpleNamespace(items=[SimpleNamespace(
+            user_id="user-1", blocking=True, provisional=False,
+            source_module="TRAINING", title="Morning course",
+            starts_at=NOW, ends_at=NOW + timedelta(hours=2),
+        )]),
+    )
+
+    _ensure_source_owned_state(
+        object(),
+        amo_id="amo-1",
+        user_id="user-1",
+        starts_at=NOW + timedelta(hours=3),
+        ends_at=NOW + timedelta(hours=8),
+        assignment_status="DUTY",
+        assignment_source="MANUAL",
+        source_reference_id=None,
+    )
 
 
 def test_non_atomic_bulk_preserves_valid_items_and_original_conflict_indexes(monkeypatch):

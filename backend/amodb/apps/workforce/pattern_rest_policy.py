@@ -8,7 +8,10 @@ from . import models as workforce_models
 
 
 def _canonical_rd_id(db: Session, *, amo_id: str) -> str:
-    rows = db.query(roster_models.ShiftTemplate).filter(
+    rows = db.query(
+        roster_models.ShiftTemplate.id,
+        roster_models.ShiftTemplate.code,
+    ).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
         roster_models.ShiftTemplate.is_active.is_(True),
         roster_models.ShiftTemplate.kind == roster_models.ShiftTemplateKind.OFF,

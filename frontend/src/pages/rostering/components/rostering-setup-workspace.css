@@ -45,6 +45,12 @@
   display: grid;
   gap: 12px;
 }
+.rs-leave-list { display: grid; gap: 6px; }
+.rs-leave-list > button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--border-subtle, rgba(100,116,139,.2)); border-radius: 9px; background: var(--surface-raised, #fff); color: inherit; text-align: left; cursor: pointer; }
+.rs-leave-list span { display: grid; gap: 3px; }
+.rs-leave-list small { color: var(--text-muted, #64748b); }
+.rs-leave-editor { display: grid; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle, rgba(100,116,139,.2)); }
+.rs-leave-checks { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: .78rem; }
 
 .rs-readiness__summary {
   display: grid;

@@ -11,12 +11,10 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
-from ..quality import models as quality_models
-from ..training import models as training_models
 from ..work import models as work_models
 from ..workforce import calculations as workforce_calculations
 from ..workforce import models as workforce_models
@@ -183,80 +181,28 @@ def _ensure_source_owned_state(
             "Inactive, suspended, terminated and out-of-contract personnel cannot be rostered."
         )
 
-    availability = db.query(workforce_models.EmployeeAvailabilityEvent.id).filter(
-        workforce_models.EmployeeAvailabilityEvent.amo_id == amo_id,
-        workforce_models.EmployeeAvailabilityEvent.user_id == user_id,
-        workforce_models.EmployeeAvailabilityEvent.blocking.is_(True),
-        workforce_models.EmployeeAvailabilityEvent.starts_at < ends_at,
-        workforce_models.EmployeeAvailabilityEvent.ends_at > starts_at,
-    ).first()
-    if availability:
+    # Use the same canonical commitment projection as the planner. This keeps
+    # mutation safeguards aligned with live leave, precise course windows and
+    # Quality work instead of maintaining several subtly different queries.
+    source_items = commitments.list_commitments(
+        db,
+        amo_id=amo_id,
+        from_date=starts_at.date() - timedelta(days=1),
+        to_date=final_date + timedelta(days=1),
+        user_ids=[user_id],
+    ).items
+    conflict = next((
+        item for item in source_items
+        if item.user_id == user_id
+        and (item.blocking or (item.provisional and item.source_module == "WORKFORCE"))
+        and _aware(starts_at) < _aware(item.ends_at)
+        and _aware(ends_at) > _aware(item.starts_at)
+    ), None)
+    if conflict:
+        state = "pending" if conflict.provisional else "confirmed"
         raise ValueError(
-            "This person has blocking leave or unavailability in the selected period. "
-            "Resolve the Workforce source record before assigning duty."
-        )
-
-    pending_leave = db.query(workforce_models.LeaveRequest.id).filter(
-        workforce_models.LeaveRequest.amo_id == amo_id,
-        workforce_models.LeaveRequest.user_id == user_id,
-        workforce_models.LeaveRequest.status.in_([
-            workforce_models.LeaveRequestStatus.SUBMITTED,
-            workforce_models.LeaveRequestStatus.SUPERVISOR_APPROVED,
-        ]),
-        workforce_models.LeaveRequest.starts_at < ends_at,
-        workforce_models.LeaveRequest.ends_at > starts_at,
-    ).first()
-    if pending_leave:
-        raise ValueError(
-            "This person has a pending leave request in the selected period. "
-            "The dates stay protected until Workforce approves or rejects it."
-        )
-
-    training = db.query(training_models.TrainingEventParticipant.id).join(
-        training_models.TrainingEvent,
-        training_models.TrainingEventParticipant.event_id == training_models.TrainingEvent.id,
-    ).filter(
-        training_models.TrainingEventParticipant.amo_id == amo_id,
-        training_models.TrainingEventParticipant.user_id == user_id,
-        training_models.TrainingEventParticipant.status.notin_([
-            training_models.TrainingParticipantStatus.CANCELLED,
-            training_models.TrainingParticipantStatus.NO_SHOW,
-            training_models.TrainingParticipantStatus.DEFERRED,
-        ]),
-        training_models.TrainingEvent.status != training_models.TrainingEventStatus.CANCELLED,
-        training_models.TrainingEvent.starts_on <= final_date,
-        or_(
-            training_models.TrainingEvent.ends_on.is_(None),
-            training_models.TrainingEvent.ends_on >= starts_at.date(),
-        ),
-    ).first()
-    if training:
-        raise ValueError(
-            "This person is already scheduled for Training in the selected period. "
-            "The Training commitment is shown automatically and cannot be overwritten by duty."
-        )
-
-    quality_audit = db.query(quality_models.QMSAudit.id).filter(
-        quality_models.QMSAudit.amo_id == amo_id,
-        quality_models.QMSAudit.deleted_at.is_(None),
-        quality_models.QMSAudit.status != quality_models.QMSAuditStatus.CLOSED,
-        quality_models.QMSAudit.planned_start.isnot(None),
-        quality_models.QMSAudit.planned_start <= final_date,
-        or_(
-            quality_models.QMSAudit.planned_end.is_(None),
-            quality_models.QMSAudit.planned_end >= starts_at.date(),
-        ),
-        or_(
-            quality_models.QMSAudit.lead_auditor_user_id == user_id,
-            quality_models.QMSAudit.observer_auditor_user_id == user_id,
-            quality_models.QMSAudit.assistant_auditor_user_id == user_id,
-            quality_models.QMSAudit.auditee_user_id == user_id,
-        ),
-    ).first()
-    if quality_audit:
-        raise ValueError(
-            "This person is assigned to a Quality audit in the selected period. "
-            "The QMS commitment is shown automatically and cannot be overwritten by duty."
+            f"This duty overlaps {state} {conflict.title} from {conflict.source_module.title()}. "
+            f"Change the source record or schedule duty outside {conflict.starts_at.isoformat()} to {conflict.ends_at.isoformat()}."
         )
 
 

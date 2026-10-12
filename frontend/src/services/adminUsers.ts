@@ -126,6 +126,7 @@ export interface AdminUserUpdatePayload {
   is_active?: boolean;
   is_amo_admin?: boolean;
   access_profile_id?: string | null;
+  gender?: "FEMALE" | "MALE" | "UNSPECIFIED";
 }
 
 /**
@@ -938,6 +939,7 @@ export interface AdminPersonnelProfileSummary {
   hire_date: string | null;
   department: string | null;
   position_title: string | null;
+  gender: string | null;
 }
 
 export interface AdminUserAvailabilitySummary {

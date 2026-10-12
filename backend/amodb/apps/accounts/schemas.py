@@ -220,6 +220,7 @@ class UserUpdate(BaseModel):
     is_amo_admin: Optional[bool] = None
     is_auditor: Optional[bool] = None
     access_profile_id: Optional[str] = None
+    gender: Optional[Literal["FEMALE", "MALE", "UNSPECIFIED"]] = None
 
 
 class UserSelfUpdate(BaseModel):
@@ -1171,6 +1172,7 @@ class PersonnelProfileSummaryRead(BaseModel):
     hire_date: Optional[date] = None
     department: Optional[str] = None
     position_title: Optional[str] = None
+    gender: Optional[str] = None
 
 
 class UserAvailabilitySummaryRead(BaseModel):

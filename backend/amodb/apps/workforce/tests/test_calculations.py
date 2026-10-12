@@ -84,6 +84,35 @@ def test_cycle_day_is_stable_before_and_after_anchor():
     assert calculations.resolve_cycle_day(work_date=date(2026, 7, 19), cycle_anchor_date=anchor, cycle_length_days=4) == 3
 
 
+def test_cycle_rolls_across_months_without_pausing_for_blocked_dates():
+    anchor = date(2026, 1, 29)
+    cycle_length = 4
+
+    assert calculations.resolve_cycle_day(
+        work_date=date(2026, 1, 31),
+        cycle_anchor_date=anchor,
+        cycle_length_days=cycle_length,
+    ) == 2
+    assert calculations.resolve_cycle_day(
+        work_date=date(2026, 2, 1),
+        cycle_anchor_date=anchor,
+        cycle_length_days=cycle_length,
+    ) == 3
+
+    # A leave/course blocker may suppress materialisation on 2-3 February,
+    # but the calendar-based phase still advances when duty resumes.
+    assert calculations.resolve_cycle_day(
+        work_date=date(2026, 2, 4),
+        cycle_anchor_date=anchor,
+        cycle_length_days=cycle_length,
+    ) == 2
+    assert calculations.resolve_cycle_day(
+        work_date=date(2026, 3, 1),
+        cycle_anchor_date=anchor,
+        cycle_length_days=cycle_length,
+    ) == 3
+
+
 def test_interval_overlap_uses_half_open_boundaries():
     first_start = datetime(2026, 7, 21, 5, tzinfo=UTC)
     first_end = datetime(2026, 7, 21, 13, tzinfo=UTC)
