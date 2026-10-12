@@ -28,8 +28,8 @@ import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
 import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
-import { listOfflineAuditEvidence, replayOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
-import { projectOfflineFindings, readAuditOfflinePack, prepareAuditOfflinePack, auditOfflinePackStatus } from "../../../services/qmsAuditOfflinePack";
+import { listOfflineAuditEvidence, synchronizeOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
+import { projectOfflineFindings, readAuditOfflinePack, prepareAuditOfflinePack, auditOfflinePackStatus, requestAuditStoragePersistence } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
   getChecklistEvidenceCandidates,
@@ -245,6 +245,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [syncBusy, setSyncBusy] = useState(false);
   const [offlinePackBusy, setOfflinePackBusy] = useState(false);
   const [offlinePackReady, setOfflinePackReady] = useState(false);
+  const [storagePersistent, setStoragePersistent] = useState<boolean | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [pendingChoices, setPendingChoices] = useState<Record<string, ChecklistResponseOption>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
@@ -345,6 +346,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return entries.filter((entry) => entry.entityType === "qms-audit-checklist-item" && entry.path.includes(auditMarker));
     },
     enabled: fieldworkEnabled,
+    networkMode: "always",
     staleTime: 500,
     refetchInterval: 2_000,
   });
@@ -385,9 +387,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setOfflinePackBusy(true);
     setLocalError(null);
     try {
+      const granted = await requestAuditStoragePersistence();
       await prepareAuditOfflinePack(amoCode, auditId);
+      setStoragePersistent(granted);
       setOfflinePackReady(true);
-      setSyncNotice("Audit work package securely stored on this device. Offline fieldwork is available.");
+      setSyncNotice(granted === false
+        ? "Offline audit saved on this browser. Storage persistence was not granted; avoid clearing site data, using private browsing, or deleting this browser profile."
+        : "Audit work package and offline application verified on this browser. Offline fieldwork is available.");
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Unable to prepare offline fieldwork.");
     } finally { setOfflinePackBusy(false); }
@@ -543,7 +549,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setLocalError(null);
     try {
       const result = await replayOfflineMutations();
-      const evidence = await replayOfflineAuditEvidence(amoCode, auditId);
+      const evidence = await synchronizeOfflineAuditEvidence(amoCode, auditId);
       await refreshFieldwork();
       await outboxQuery.refetch();
       setSyncNotice(result.total || evidence.deferred || evidence.conflicts
