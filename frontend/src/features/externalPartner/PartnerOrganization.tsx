@@ -6,7 +6,7 @@ import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerP
 type Kind="sites"|"contacts"|"capabilities";
 type Category="IDENTITY"|"CONTACT"|"SITE"|"CAPABILITY"|"BANKING"|"RENEWAL";
 const fields:Record<Category,Array<{id:string;name:string}>>={
-  IDENTITY:[{id:"trading_name",name:"Trading name"},{id:"email",name:"Business email"},{id:"phone",name:"Phone"},
+  IDENTITY:[{id:"legal_name",name:"Legal name (review required)"},{id:"trading_name",name:"Trading name"},{id:"email",name:"Business email"},{id:"phone",name:"Phone"},
     {id:"physical_address",name:"Business address"},{id:"website",name:"Website"},{id:"country",name:"Country"}],
   CONTACT:[{id:"contact_name",name:"Contact name"},{id:"email",name:"Contact email"},{id:"phone",name:"Contact phone"},{id:"assignment",name:"Assigned function"}],
   SITE:[{id:"site_code",name:"Site code"},{id:"site_name",name:"Site name"},{id:"address",name:"Site address"},{id:"country",name:"Site country"}],
@@ -76,7 +76,7 @@ export default function PartnerOrganization({tenant,csrf,capabilities}:PartnerPr
       <form className="partner-form" onSubmit={submit}>
         <label>Change category<select value={category} onChange={event=>{
           const next=event.target.value as Category;setCategory(next);setField(fields[next][0].id);setValue("");
-        }}>{(Object.keys(fields) as Category[]).map(x=><option key={x} value={x}>{label(x)}</option>)}</select></label>
+        }}>{(Object.keys(fields) as Category[]).filter(x=>x!=="BANKING"||capabilities.includes("contract.read")).map(x=><option key={x} value={x}>{label(x)}</option>)}</select></label>
         <label>Information to update<select value={field} onChange={event=>setField(event.target.value)}>
           {fields[category].map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Proposed value<input required maxLength={500} value={value} onChange={event=>setValue(event.target.value)}/></label>
