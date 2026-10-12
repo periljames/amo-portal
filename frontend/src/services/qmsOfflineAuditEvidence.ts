@@ -255,19 +255,27 @@ export async function listPendingAuditEvidenceGroups(): Promise<PendingAuditEvid
   const db = await openDb();
   try {
     const tx = db.transaction(ENTRY_STORE, "readonly");
-    const rows = await requestResult(
-      tx.objectStore(ENTRY_STORE).index("scope_audit").getAll(),
-    ) as StoredEntry[];
-    await transactionDone(tx);
+    const done = transactionDone(tx);
+    const index = tx.objectStore(ENTRY_STORE).index("scope_audit");
     const groups = new Map<string, PendingAuditEvidenceGroup>();
-    for (const row of rows) {
-      if (row.scope !== scope) continue;
-      const key = `${row.amoCode}:${row.auditId}`;
-      const value = groups.get(key) || { amoCode: row.amoCode, auditId: row.auditId, count: 0, conflicts: 0 };
-      value.count += 1;
-      if (row.state === "CONFLICT" || row.state === "CORRUPT") value.conflicts += 1;
-      groups.set(key, value);
-    }
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openCursor(IDBKeyRange.bound([scope, ""], [scope, "\uffff"]));
+      request.onerror = () => reject(request.error || new Error("Could not inspect local evidence queue."));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(); return; }
+        const row = cursor.value as StoredEntry;
+        if (row.scope === scope) {
+          const key = `${row.amoCode}:${row.auditId}`;
+          const value = groups.get(key) || { amoCode: row.amoCode, auditId: row.auditId, count: 0, conflicts: 0 };
+          value.count += 1;
+          if (row.state === "CONFLICT" || row.state === "CORRUPT") value.conflicts += 1;
+          groups.set(key, value);
+        }
+        cursor.continue();
+      };
+    });
+    await done;
     return [...groups.values()];
   } finally {
     db.close();
