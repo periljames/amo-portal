@@ -8,7 +8,8 @@ type RecordRow = { id: string; version: number; [key: string]: unknown };
 const FIELDS: Record<Kind, {key: string; label: string; required?: boolean}[]> = {
   roles: [{key:"role_code",label:"Role",required:true},{key:"notes",label:"Notes"}],
   sites: [{key:"site_code",label:"Site code",required:true},{key:"site_name",label:"Site name",required:true},
-          {key:"country",label:"Country"},{key:"address",label:"Address"}],
+          {key:"country",label:"Country"},{key:"address",label:"Address"},
+          {key:"is_primary",label:"Primary location"}],
   contacts: [{key:"contact_name",label:"Name",required:true},{key:"assignment",label:"Assignment",required:true},
              {key:"email",label:"Email"},{key:"phone",label:"Phone"},{key:"site_id",label:"Site ID"}],
   capabilities: [{key:"capability_type",label:"Type",required:true},{key:"description",label:"Description",required:true},
@@ -72,10 +73,15 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
   }
   async function submit(event:React.FormEvent<HTMLFormElement>){
     event.preventDefault();setBusy(true);setError("");
-    const fields:Record<string,unknown>=Object.fromEntries(Object.entries(form).filter(([,value])=>value.trim()!==""));
+    const fields:Record<string,unknown>=Object.fromEntries(
+      Object.entries(form)
+        .filter(([,value])=>editing||value.trim()!=="")
+        .map(([key,value])=>[key,value.trim()===""?null:value])
+    );
     if(typeof fields.parent_supplier_id==="string")fields.parent_supplier_id=Number(fields.parent_supplier_id);
     if(typeof fields.approval_scope_id==="string")fields.approval_scope_id=Number(fields.approval_scope_id);
     if(typeof fields.requested_scopes==="string")fields.requested_scopes=fields.requested_scopes.split(",").map(v=>v.trim()).filter(Boolean);
+    if(editing&&fields.requested_scopes===null)fields.requested_scopes=[];
     if(typeof fields.is_primary==="string")fields.is_primary=fields.is_primary==="true";
     try{
       await apiRequest(editing?`${endpoint}/${encodeURIComponent(editing.id)}`:endpoint,{
@@ -125,7 +131,12 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
     {canWrite&&<form onSubmit={e=>void submit(e)}><h3>{editing?"Edit":"Add"} {kind.slice(0,-1)}</h3>
      {FIELDS[kind].map(field=><label key={field.key} style={{display:"block",margin:"0.5rem 0"}}>
        {field.label}
-       {field.key==="role_code"||field.key==="assignment"
+       {field.key==="is_primary"
+         ?<select value={form[field.key]??""}
+            onChange={e=>setForm(old=>({...old,[field.key]:e.target.value}))}>
+            <option value="">Not specified</option><option value="true">Yes</option>
+            <option value="false">No</option></select>
+         :field.key==="role_code"||field.key==="assignment"
          ?<select required={field.required} value={form[field.key]??""}
            onChange={e=>setForm(old=>({...old,[field.key]:e.target.value}))}>
            <option value="">Select</option>{(field.key==="role_code"?roleValues:assignmentValues).map(v=>
