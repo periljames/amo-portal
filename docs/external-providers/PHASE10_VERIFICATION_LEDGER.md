@@ -19,3 +19,8 @@
 15. Verify that malicious formula-like source cells cannot become executable on reconciliation CSV export; verify edits can clear nullable fields and properly persist a site's `is_primary` flag.
 16. Once tests are permitted, inspect the latest CI checks of PR #560, including the four migration-failed workflows from run IDs `37931784210`, `37931784254`, `37931784319`, `37931784300`; investigate any newly exposed failures instead of interpreting earlier blocked jobs as clean.
 17. Inspect code and migration graph against intervening main/PR changes and reconcile the real vendor register and contracts tracker inputs. If either workbook is unavailable, keep source-specific reconciliation explicitly unverified.
+
+18. Repeat the automatically failed migration path from runs `38210809633`, `38210809642`, and `38210809599`: assert PostgreSQL accepts both child and parent composite supplier foreign keys on `external_provider_relationships` without duplicate generated constraint names, and downgrade removes them cleanly.
+19. Verify `PreparedSnapshotBroker` health refresh counts remain consistent with completed source callbacks at 100+ subscribers (original failing platform CI job `114684307638`) and failed worker callbacks preserve existing failure semantics. Do not relax the existing equality assertion.
+20. Confirm tenant-authorized GET controls deny unprivileged access to provider administrative identity and import reconciliation records; confirm the frontend still reaches those endpoints for Procurement Officer, Stores Manager and Quality Manager.
+21. Confirm blank header columns never bind to source mapping fields, and verify `SPECIALIZED_MAINTENANCE_PROVIDER` roles can be created and edited end-to-end without any implicit QMS approval.
