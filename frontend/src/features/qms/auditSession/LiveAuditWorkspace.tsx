@@ -826,7 +826,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     )) {
       setSelectedId(item.checklist_item_id);
       setDetailOpen(true);
-      setLocalError("N/A requires an applicability basis. Expand Compliance intelligence below before recording N/A.");
+      setLocalError("N/A requires an explicit governed applicability basis. Expand Compliance intelligence below before recording N/A.");
       return;
     }
     updateMutation.mutate({
