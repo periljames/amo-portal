@@ -43,6 +43,15 @@ async function syncAuditQueues(): Promise<void> {
   }
 }
 
+/** Manually invoked full replay: checklist commands first, then encrypted evidence. */
+export function synchronizeAuditOfflineNow(): Promise<void> {
+  if (!canSynchronize()) return Promise.resolve();
+  if (inFlight) return inFlight;
+  lastAttemptAt = Date.now();
+  inFlight = syncAuditQueues().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
 /** Visible sessions sync on recovery, focus, tab reopen, or timed retry. */
 export function requestAuditOfflineSync(force = false): void {
   if (typeof window === "undefined" || !canSynchronize()) return;
@@ -53,10 +62,7 @@ export function requestAuditOfflineSync(force = false): void {
   scheduled = window.setTimeout(() => {
     scheduled = null;
     if (!canSynchronize() || inFlight) return;
-    lastAttemptAt = Date.now();
-    inFlight = syncAuditQueues()
-      .catch(() => undefined)
-      .finally(() => { inFlight = null; });
+    void synchronizeAuditOfflineNow().catch(() => undefined);
   }, force ? 0 : 300);
 }
 
