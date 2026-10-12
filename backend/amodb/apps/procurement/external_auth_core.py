@@ -190,15 +190,16 @@ def scope_allows(session, *, contract_id=None, document_id=None, assignment_id=N
     return True
 
 
-def revoke_identity_sessions(db: Session, identity_id: str):
+def revoke_identity_sessions(db: Session, identity_id: str, except_session_id: str | None = None):
     """Revoke every tenant session even with FORCE RLS on session rows."""
     tenants=db.execute(text("SELECT id FROM amos")).scalars().all()
     total=0
     for tenant_id in tenants:
         context(db,str(tenant_id),identity_id)
         result=run("""UPDATE external_sessions SET revoked_at=:at
-            WHERE amo_id=:amo AND identity_id=:identity AND revoked_at IS NULL""",
-            db,at=now(),amo=str(tenant_id),identity=identity_id)
+            WHERE amo_id=:amo AND identity_id=:identity AND revoked_at IS NULL
+            AND (:except_id IS NULL OR id<>:except_id)""",
+            db,at=now(),amo=str(tenant_id),identity=identity_id,except_id=except_session_id)
         total+=result.rowcount
     return total
 
