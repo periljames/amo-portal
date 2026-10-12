@@ -145,7 +145,14 @@ def _evidence_guard(db: Session, amo_id: str, supplier_id: int, values: dict[str
         raise HTTPException(422, "Evidence must belong to the same provider and tenant.")
 
 def _check_references(db: Session, tenant: str, supplier_id: int, kind: str,
-                      values: dict[str, Any]) -> None:
+                      values: dict[str, Any], record_id: str | None = None) -> None:
+    # PATCH may change consent or contract without resubmitting its parent.
+    parent_supplier_id = values.get("parent_supplier_id")
+    if kind == "relationships" and parent_supplier_id is None and record_id:
+        parent_supplier_id = db.execute(text("""
+            SELECT parent_supplier_id FROM external_provider_relationships
+            WHERE amo_id=:tenant AND supplier_id=:supplier AND id=:record
+        """), {"tenant": tenant, "supplier": supplier_id, "record": record_id}).scalar()
     for field, table, restricted in (
         ("parent_supplier_id", "procurement_suppliers", False),
         ("user_id", "users", False),
@@ -175,23 +182,23 @@ def _check_references(db: Session, tenant: str, supplier_id: int, kind: str,
                 WHERE relation.amo_id=:tenant
                   AND relation.relationship_kind IN ('PARENT','FURTHER_SUBCONTRACTOR')
         ) SELECT 1 FROM ancestors WHERE id=:child LIMIT 1"""),
-        {"tenant":tenant,"parent":values["parent_supplier_id"],"child":supplier_id}).scalar()
+        {"tenant":tenant,"parent":parent_supplier_id,"child":supplier_id}).scalar()
         if cycle:
             raise HTTPException(409, "Provider relationship would introduce a subcontracting cycle.")
     if values.get("contract_id"):
-        if not values.get("parent_supplier_id"):
+        if not parent_supplier_id:
             raise HTTPException(422, "Parent provider must accompany a contract link.")
         ok = db.execute(text("""SELECT 1 FROM quality_external_provider_contracts
              WHERE amo_id=:tenant AND supplier_id=:parent AND id=:id"""),
-             {"tenant":tenant,"parent":values["parent_supplier_id"],"id":values["contract_id"]}).scalar()
+             {"tenant":tenant,"parent":parent_supplier_id,"id":values["contract_id"]}).scalar()
         if not ok:
             raise HTTPException(422, "Contract is not owned by the parent provider.")
     if values.get("consent_evidence_id"):
-        if not values.get("parent_supplier_id"):
+        if not parent_supplier_id:
             raise HTTPException(422, "Parent provider is required for consent evidence.")
         ok = db.execute(text("""SELECT 1 FROM quality_external_provider_evidence
              WHERE amo_id=:tenant AND supplier_id=:parent AND id=:id"""),
-             {"tenant":tenant,"parent":values["parent_supplier_id"],
+             {"tenant":tenant,"parent":parent_supplier_id,
               "id":values["consent_evidence_id"]}).scalar()
         if not ok:
             raise HTTPException(422, "Consent evidence does not belong to the parent provider.")
@@ -270,7 +277,7 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
         raise HTTPException(422, "No changes supplied.")
     _site_guard(db, tenant, supplier_id, values)
     _evidence_guard(db, tenant, supplier_id, values)
-    _check_references(db, tenant, supplier_id, kind, values)
+    _check_references(db, tenant, supplier_id, kind, values, record_id)
     assignments = ", ".join(f"{key}=CAST(:{key} AS JSON)" if key=="requested_scopes"
                             else f"{key}=:{key}" for key in values)
     if kind=="certificates":
