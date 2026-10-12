@@ -107,6 +107,32 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
+  if (event.data?.type === "PREPARE_AUDIT_SHELL") {
+    const port = event.ports?.[0];
+    event.waitUntil((async () => {
+      try {
+        await precacheRelease();
+        await precacheQms();
+        const manifestResponse = await fetch("/portal-precache.json", { cache: "no-store" });
+        if (!manifestResponse.ok) throw new Error("The offline application manifest was not available.");
+        const manifest = await manifestResponse.json();
+        const required = [...new Set(Array.isArray(manifest.qmsUrls) ? manifest.qmsUrls : [])]
+          .filter((url) => typeof url === "string" && /^\\/(assets|pdfjs)\\/[^?#]+$/.test(url));
+        if (!required.length) throw new Error("No QMS application files were declared for offline use.");
+        const assetCache = await caches.open(ASSET_CACHE);
+        const shellCache = await caches.open(SHELL_CACHE);
+        if (!await shellCache.match("/")) throw new Error("The offline page shell is not cached.");
+        const missing = [];
+        for (const url of required) {
+          if (!await assetCache.match(url)) missing.push(url);
+        }
+        if (missing.length) throw new Error(`${missing.length} application file(s) are not available offline; reconnect and retry.`);
+        port?.postMessage({ ok: true, assets: required.length });
+      } catch (error) {
+        port?.postMessage({ ok: false, reason: error instanceof Error ? error.message : "Offline application files could not be verified." });
+      }
+    })());
+  }
   if (event.data?.type === "PRECACHE_STATIC_SHELL") event.waitUntil(precacheStaticShell().catch(() => undefined));
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "PRECACHE_RELEASE") {
