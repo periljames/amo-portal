@@ -1622,8 +1622,23 @@
 .qms-live-audit-focus__matrix-choices button:disabled { opacity: 0.65; cursor: not-allowed; }
 .qms-live-audit-focus__matrix-device { display: block; white-space: nowrap; font-size: 0.65rem; color: var(--qms-muted); }
 .qms-live-audit-focus__question { padding: 0; margin-top: 0.65rem; max-height: none; overflow: visible; }
-.qms-live-audit-focus__summary { display: none; }
+/* Table-first fieldwork must not remove findings, team presence, sync state or
+   release-boundary controls. Keep this secondary area below the checklist as
+   compact disclosures instead of a third scroll-heavy sidebar. */
+.qms-live-audit-focus__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-content: start;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border-left: 0;
+  border-top: 1px solid var(--qms-line);
+  margin-top: 0.75rem;
+  padding: 0.65rem 0;
+}
 @media(max-width: 720px) {
+  .qms-live-audit-focus__summary { grid-template-columns: 1fr; }
   .qms-live-audit-focus__body { display: block; padding: 0.5rem; }
   .qms-live-audit-focus__matrix-toolbar label { width: 100%; }
   .qms-live-audit-focus__matrix-toolbar input { width: 100%; }
