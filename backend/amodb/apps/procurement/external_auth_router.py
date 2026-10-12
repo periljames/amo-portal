@@ -117,6 +117,10 @@ def _scope(value):
     return value
 
 def _send(db,amo,email,code,kind):
+    # Invitation issuance commits before delivery; restore SET LOCAL tenant
+    # context in the new transaction so notification preferences and log RLS
+    # continue to resolve against the right AMO.
+    core.context(db,amo)
     # Token travels only in the email body, not a URL, log, API response or telemetry.
     # The existing essential account-message template is reused.
     msg=f"AMO Portal external account {kind} code: {code}. Enter this code in the vendor portal. The code expires and can be used once."
