@@ -33,6 +33,7 @@ import {
 import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
+  parseUploadedAuditChecklist,
   listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
@@ -40,6 +41,7 @@ import {
   type ChecklistCanonicalStatus,
   type ChecklistResponseOption,
   type ChecklistTemplateItem,
+  type UploadedChecklistDraft,
 } from "../../../services/qmsChecklistTemplates";
 import {
   addAuditApplicabilityFact,
@@ -262,6 +264,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
   const [checklistMode, setChecklistMode] = useState<"LIBRARY" | "CREATE">("LIBRARY");
+  const [uploadedDraft, setUploadedDraft] = useState<UploadedChecklistDraft | null>(null);
+  const [uploadDraftBusy, setUploadDraftBusy] = useState(false);
   const [checklistSearch, setChecklistSearch] = useState("");
   const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
@@ -585,6 +589,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       canonical_document_id: checklistDmsDocumentId || null,
       canonical_revision_id: null,
       allow_existing_items: allowExistingItems,
+      uploaded_source_filename: uploadedDraft?.filename || null,
+      uploaded_source_sha256: uploadedDraft?.sha256 || null,
     }),
     onSuccess: async (binding) => {
       setLocalError(null);
@@ -599,6 +605,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         setChecklistDescription("");
         setChecklistReason("Created for this audit during governed preparation.");
         setChecklistItems([emptyChecklistItem()]);
+        setUploadedDraft(null);
         setChecklistDmsDocumentId("");
         setAllowExistingItems(false);
         setLocalSuccess("Checklist created and bound to fieldwork.");
@@ -611,6 +618,44 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "The realtime checklist could not be created."),
   });
+
+  const importChecklistFile = async (file: File | undefined) => {
+    if (!file || uploadDraftBusy || !auditId) return;
+    setLocalError(null);
+    setLocalSuccess(null);
+    setUploadDraftBusy(true);
+    try {
+      const draft = await parseUploadedAuditChecklist(amoCode, auditId, file);
+      if (!draft.items.length) throw new Error("No questions were extracted.");
+      setChecklistItems(draft.items.map((item) => ({
+        ...emptyChecklistItem(),
+        section: item.section || "",
+        checklistRef: item.checklist_ref || "",
+        requirementRef: item.requirement_ref || "",
+        prompt: item.prompt || "",
+        expectedEvidence: item.expected_evidence || "",
+        guidance: item.guidance || "",
+        responseType: item.response_type === "CUSTOM" ? "CUSTOM" : "COMPLIANCE",
+        responseOptions: item.response_options || [],
+        notesRequiredWhen: item.notes_required_when || [],
+        naJustificationRequired: Boolean(item.na_justification_required),
+        applicability: item.applicability || "APPLICABLE",
+        mandatory: item.mandatory !== false,
+      })));
+      setUploadedDraft(draft);
+      setChecklistMode("CREATE");
+      setChecklistTitle(file.name.replace(/\.(docx|pdf)$/i, "").slice(0, 255) || "Imported audit checklist");
+      setChecklistReason("Reviewed imported checklist draft for governed audit preparation.");
+      setComposerSearch("");
+      setComposerSection("ALL");
+      setComposerFilter("ALL");
+      setLocalSuccess(`Extracted ${draft.question_count} draft questions from ${draft.filename}. Review and edit before committing to Fieldwork.`);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "The checklist could not be imported.");
+    } finally {
+      setUploadDraftBusy(false);
+    }
+  };
 
   const issuePreparationMutation = useMutation({
     mutationFn: async () => {
@@ -747,7 +792,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return true;
   });
   const preparedComposerCount = checklistItems.filter((item) =>
-    item.prompt.trim() && (!item.mandatory || item.requirementRef.trim())
+    item.prompt.trim() && (item.responseType !== "CUSTOM" || item.responseOptions.every((option) => option.canonical_status))
   ).length;
 
   const realtimeChecklistValid = Boolean(
@@ -1085,7 +1130,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
               <button type="button" role="tab" aria-selected={checklistMode === "LIBRARY"} className={checklistMode === "LIBRARY" ? "is-active" : ""} onClick={() => setChecklistMode("LIBRARY")}>Use DMS checklist</button>
-              <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Create in realtime</button>
+              <button type="button" role="tab" aria-selected={checklistMode === "CREATE"} className={checklistMode === "CREATE" ? "is-active" : ""} onClick={() => setChecklistMode("CREATE")}>Draft / edit questions</button>
+              <label className="qms-audit-prepare__import-button">
+                <UploadCloud size={15} /> {uploadDraftBusy ? "Extracting…" : "Upload Word/PDF to draft"}
+                <input type="file" accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" disabled={uploadDraftBusy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void importChecklistFile(file); }} />
+              </label>
             </div>
 
             {checklistMode === "LIBRARY" ? (
@@ -1120,6 +1169,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               </form>
             ) : (
               <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!realtimeChecklistValid) { setLocalError("Enter a title, reason and every checklist question. Custom response schemes require at least two source values and an explicit workflow meaning for every value; ambiguous abbreviations are never inferred. Any selected DMS source must have a current effective revision."); return; } createChecklistMutation.mutate(); }}>
+                {uploadedDraft ? <section className="qms-audit-prepare__import-review is-wide" aria-label="Imported checklist awaiting review">
+                  <strong>Imported draft · {uploadedDraft.question_count} questions · {uploadedDraft.section_count} sections</strong>
+                  <small>{uploadedDraft.filename} · SHA-256 {uploadedDraft.sha256.slice(0, 12)}…</small>
+                  <p>Nothing has been issued. Correct the extracted questions, sections, numbering and response mapping before you commit.</p>
+                  {uploadedDraft.warnings.map((warning, index) => <p key={index} role="note">{warning}</p>)}
+                  <button type="button" onClick={() => { setUploadedDraft(null); setChecklistItems([emptyChecklistItem()]); }}>Discard imported draft</button>
+                </section> : null}
                 <label><span>Checklist title</span><input required minLength={3} value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} /></label>
                 <label><span>Creation reason</span><input required minLength={8} value={checklistReason} onChange={(event) => setChecklistReason(event.target.value)} /></label>
                 <label className="is-wide"><span>Description</span><textarea rows={2} value={checklistDescription} onChange={(event) => setChecklistDescription(event.target.value)} placeholder="Audit-specific purpose and coverage" /></label>
