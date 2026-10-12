@@ -46,3 +46,11 @@
 36. Verify all vendor frontend routes, form validators, actual backend controls, cookie session recovery after reload, screen accessibility, mobile responsive layout, wrong-account/revoked/denied states, internal Quality screen and links from staff login and supplier profile.
 37. Test suspended/restricted provider can submit only controlled preexisting CAPA response (when assigned), and cannot start new work, view unrelated records, or elevate privileges. Phase 3–9 integrations MUST use `require_provider(capability)` plus exact `scope_allows` and tenant-bound business queries; Phase 2 alone must not expose unrestricted vendor object APIs.
 38. Review existing six cross-module QMS CI failures before adding any test weakening; all automatic CI/build outputs during Phase 2 must be treated as **unverified** and reconciled only in permitted validation work.
+
+
+## Phase 2 upstream reconciliation verification
+39. Inspect source diff against merged upstream `7b3d406f92cea52a5d9d5b42ed5f4aa06871d276`, prove both halves of the two overlapping QMS files remain functional, and rerun exact N/C checklist semantics alongside the controlled-document acceptance guard.
+40. Run adversarial Provider Administrator delegation: request subordinate contract/document/assignment scope IDs absent from the inviter's object_scope_json; expect 403. Ensure own scoped IDs are preserved and authorized by tenant Quality.
+41. Verify prospective/import-hold/suspended/expired/restricted/inactive canonical suppliers cannot initiate new vendor work despite a still-active portal account; confirm auditee CAPA continuation is bounded to already assigned issues when future business routes are integrated.
+42. Check Quality Officer/Manager read/invite and Manager-only grant/provider mutations, transaction-bound email notification RLS after commits, exact email provider statuses and no leaking of invitation/reset values to logs.
+43. Test TOTP/passkey-enrolled identity password changes and new MFA enrollment require appropriate recent factor verification, brute-force limits on code redemption, and that MFA step-up survives upstream runtime changes.
