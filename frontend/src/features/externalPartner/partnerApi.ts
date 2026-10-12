@@ -38,7 +38,9 @@ export type Evidence = { id: string; evidence_type: string; filename: string; st
 export type QualityPage = {
   notices: Page<{ id:string; subject:string; status:string; notice_date:string; audit_ref:string; revision_no:number }>;
   document_requests: Page<{ id:string; title:string; status:string; due_date:string; audit_ref:string; description:string | null }>;
-  cars: Page<{ id:string; car_number:string; title:string; status:string; due_date:string; root_cause_status:string; capa_status:string }>;
+  findings: Page<{ id:string; finding_ref:string|null; description:string; requirement_ref:string|null; severity:string; target_close_date:string|null; closed_at:string|null }>;
+  cars: Page<{ id:string; car_number:string; title:string; status:string; due_date:string; root_cause_status:string; capa_status:string; assignment_id:string }>;
+  accepted_evidence: Page<{ id:string;filename:string;evidence_type:string;related_id:string;status:string }>;
   submission_policy: string;
 };
 export type ProcurementPage = {
