@@ -30,3 +30,13 @@ Branch: `codex/external-provider-platform-20261009`; consolidated draft PR #560 
 
 ## Phase 3 handoff — do not implement in Phase 2
 Build tenant/provider-scoped onboarding and external workspaces for assigned tasks, procurement RFQs/PO acknowledgment when authorized, linked contract obligations and governed DMS uploads/downloads. Enforce exact tenant/provider/contract/document/assignment guards in every backend query and RLS. Persist source, actor, obligation, deadlines, hashes and records; integrate notification and Quality review states. Reuse the account/session authorization above. Never treat commercial supplier activation, Quality provider approval and portal account activation as interchangeable. Keep the consolidated PR draft, continue the same feature branch, and defer full testing to Phase 10.
+
+
+## Source reconciliation and final static hardening
+- Upstream `main` was integrated into the same feature branch on 12 October 2026. The QMS audit checklist N/C handling and browser-based offline preparation/checklist import now coexist with this branch's previous evidence-acceptance safeguards.
+- Delegation enforces a per-key subset of the acting Provider Administrator's exact tenant-scoped `contracts`, `documents` and `assignments`, in addition to the allowed capability intersection. A Provider Administrator cannot invent object IDs for subordinate grants.
+- The vendor session checks the canonical Procurement supplier lifecycle and the imported-supplier activation hold; it restricts new delegated operations unless that supplier is active and approved or conditionally approved. A prospective or suspended supplier's portal account is not sufficient for operational authority.
+- Quality Manager and Quality Officer tenant read/invitation access now matches the QMS frontend route guard; only the Quality Manager may approve, restore, suspend, revoke or edit account/provider privileges.
+- TOTP/passkey-enrolled identities require a recent second factor when changing a password or adding another factor. Invitation acceptance, verified-email code redemption, password changes and MFA enrollment are rate limited.
+- Essential email delivery re-establishes transaction-local tenant context after the invitation/verification commit. Revoked session cookies can be discarded through logout without reactivating access.
+- `/vendor/denied` and `/vendor/revoked` are dedicated navigable views backed by current session authorization responses, rather than implying that a stale client-side token confers access.
