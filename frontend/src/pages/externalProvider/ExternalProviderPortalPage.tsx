@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getApiBaseUrl } from "../../services/config";
+import {
+  createCredential, decodeCreationOptions, decodeRequestOptions,
+  getAssertion, isSecureContextAvailable, isWebAuthnSupported,
+  serializeRegistrationCredential, serializeAssertionCredential,
+} from "../../lib/webauthn";
 import "./external-provider-portal.css";
 
 type Account = {
@@ -65,6 +70,7 @@ export default function ExternalProviderPortalPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState("");
+  const [passkeys, setPasskeys] = useState<Array<{id: string;nickname: string;created_at:string}>>([]);
   const [newRole, setNewRole] = useState("READ_ONLY");
   const [profileName, setProfileName] = useState("");
 
@@ -103,6 +109,48 @@ export default function ExternalProviderPortalPage() {
       setError(reason instanceof Error ? reason.message : "Unable to complete action.");
     } finally { setBusy(false); }
   }
+
+  const refreshPasskeys = useCallback(async () => {
+    const result = await vendorFetch<{items:Array<{id:string;nickname:string;created_at:string}>}>("/passkeys");
+    setPasskeys(result.items);
+  }, []);
+  useEffect(() => {
+    if (mode === "account" && account) {
+      void refreshPasskeys().catch(() => setPasskeys([]));
+    }
+  }, [mode, account?.identity_id, refreshPasskeys]);
+
+  const registerPasskey = () => {
+    if (!account || !isSecureContextAvailable() || !isWebAuthnSupported()) {
+      setError("Passkeys require a secure HTTPS browser context.");
+      return;
+    }
+    void perform(async () => {
+      const start = await vendorFetch<{challenge_id:string;options:Record<string,unknown>}>(
+        "/passkeys/register/options", { password }, account.csrf);
+      const credential = await createCredential(decodeCreationOptions(start.options));
+      if (!credential) throw new Error("Passkey registration cancelled");
+      await vendorFetch("/passkeys/register/verify", {
+        challenge_id: start.challenge_id, credential: serializeRegistrationCredential(credential),
+      }, account.csrf);
+      await refreshPasskeys();
+    }, "Passkey registered. It can now verify sensitive account actions.");
+  };
+  const verifyPasskey = () => {
+    if (!account || !isSecureContextAvailable() || !isWebAuthnSupported()) {
+      setError("Passkeys require a secure HTTPS browser context.");
+      return;
+    }
+    void perform(async () => {
+      const start = await vendorFetch<{challenge_id:string;options:Record<string,unknown>}>(
+        "/passkeys/challenge/options", {}, account.csrf);
+      const credential = await getAssertion(decodeRequestOptions(start.options));
+      if (!credential) throw new Error("Passkey verification cancelled");
+      await vendorFetch("/passkeys/challenge/verify", {
+        challenge_id: start.challenge_id, credential: serializeAssertionCredential(credential),
+      }, account.csrf);
+    }, "Passkey verified for this session.");
+  };
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -220,11 +268,28 @@ export default function ExternalProviderPortalPage() {
               const value = await vendorFetch<{ secret: string }>("/mfa/enroll", { password }, account.csrf);
               setTotpSeed(value.secret);
             }, "Enter the secret in your authenticator, then verify the six-digit code.")}>Start MFA enrollment</button>}
+            <div className="vendor-actions">
+              <Field title="MFA challenge code" value={totpCode} onChange={setTotpCode} />
+              <button type="button" disabled={busy || totpCode.length !== 6} onClick={() => void perform(
+                () => vendorFetch("/mfa/challenge", { code: totpCode }, account.csrf),
+                "Second factor re-verified for sensitive actions.",
+              )}>Reverify MFA</button>
+            </div>
+            <h3>Passkey security</h3>
+            <p>Registered passkeys: {passkeys.length}. Registration requires your current password and an HTTPS browser.</p>
+            <div className="vendor-actions">
+              <button type="button" disabled={busy || !isWebAuthnSupported()} onClick={registerPasskey}>Register passkey</button>
+              <button type="button" disabled={busy || passkeys.length === 0} onClick={verifyPasskey}>Verify with passkey</button>
+            </div>
+            <p>Passkey verification authorizes sensitive actions for a limited time. Password login remains available.</p>
             {totpSeed && <div>
               <p>Authenticator setup secret (shown once): <code>{totpSeed}</code></p>
               <Field title="Authenticator 6-digit code" value={totpCode} onChange={setTotpCode} />
               <button type="button" disabled={busy} onClick={() => void perform(
-                () => vendorFetch("/mfa/verify", { code: totpCode }, account.csrf),
+                async () => {
+                  await vendorFetch("/mfa/verify", { code: totpCode }, account.csrf);
+                  setTotpSeed("");
+                },
                 "MFA verified and active.",
               )}>Verify and activate MFA</button>
             </div>}
