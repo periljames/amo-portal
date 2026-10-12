@@ -21,7 +21,7 @@ _SOURCE_SCHEME = [
 ]
 
 
-def _draft_item(number: int, section: str, prompt: str) -> dict[str, Any]:
+def _draft_item(number: int, section: str, prompt: str, *, paper_scheme: bool = False) -> dict[str, Any]:
     return {
         "section": section or "Uncategorised",
         "checklist_ref": str(number),
@@ -29,9 +29,9 @@ def _draft_item(number: int, section: str, prompt: str) -> dict[str, Any]:
         "prompt": re.sub(r"\s+", " ", prompt).strip()[:8000],
         "expected_evidence": "",
         "guidance": "",
-        "response_type": "CUSTOM",
-        "response_options": [dict(row) for row in _SOURCE_SCHEME],
-        "notes_required_when": ["NOT_VERIFIED"],
+        "response_type": "CUSTOM" if paper_scheme else "COMPLIANCE",
+        "response_options": [dict(row) for row in _SOURCE_SCHEME] if paper_scheme else [],
+        "notes_required_when": ["NOT_VERIFIED"] if paper_scheme else [],
         "na_justification_required": True,
         "applicability": "APPLICABLE",
         "mandatory": True,
@@ -45,6 +45,7 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     items: list[dict[str, Any]] = []
     warnings: list[str] = []
     section = ""
+    paper_scheme = False
     if doc.tables:
         for table in doc.tables:
             for row in table.rows:
@@ -57,8 +58,11 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                     continue
                 # In tabular controlled checklists, heading rows carry the
                 # assessment-column titles. Autonumbered cells can be blank.
-                if len(cells) >= 4 and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
+                if len(cells) >= 4 and body.replace(" ", "").isupper() and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
                     section = re.sub(r"\s+", " ", body)[:128]
+                    paper_scheme = len(cells) >= 6 and [cell.strip().upper() for cell in cells[2:6]] == ["S", "U", "N/C", "N/A"]
+                    if not paper_scheme:
+                        warnings.append(f"Section {section}: assessment vocabulary needs explicit reviewer verification.")
                     continue
                 if body.lower().startswith(("remarks:", "auditor's assessment", "auditor’s assessment", "name & signature")):
                     continue
@@ -73,7 +77,7 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 number = int(explicit.group(1)) if explicit else len(items) + 1
                 prompt = explicit.group(2) if explicit else body
                 if len(prompt) > 4:
-                    items.append(_draft_item(number, section, prompt))
+                    items.append(_draft_item(number, section, prompt, paper_scheme=paper_scheme))
     else:
         warnings.append("No Word table was found; paragraph-number detection may need manual review.")
         section = ""
@@ -130,6 +134,7 @@ def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
         if not data.startswith(b"%PDF"):
             raise ValueError("This file is not a valid PDF.")
         items, warnings = _pdf_items(data)
+        warnings.append("PDF response columns are not mapped automatically; confirm the assessment vocabulary in the editor.")
     else:
         raise ValueError("Only .docx and .pdf checklists are supported.")
     if not items:
