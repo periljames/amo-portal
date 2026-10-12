@@ -116,7 +116,7 @@ def redeem_token(db, raw: str, kind: str):
     if not row or row["used_at"] or row["revoked_at"] or aware(row["expires_at"]) <= now():
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
-    run("UPDATE external_identity_tokens SET revoked_at=:at WHERE id=:id",db,at=now(),id=row["id"])
+    run("UPDATE external_identity_tokens SET used_at=:at WHERE id=:id",db,at=now(),id=row["id"])
     return row
 
 def event(db, *, amo: str, identity: str | None, grant: str | None, action: str,
