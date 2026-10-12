@@ -81,7 +81,18 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
     await page.getByRole("button", { name: "Save containment and continue" }).click();
   }
-  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  // A returned CAR retains its previous complete stages. Open the actual
+  // returned root-cause stage instead of assuming a fresh first-incomplete
+  // editor is visible after an earlier submitted response.
+  if (suffix === "rework") {
+    await page.getByLabel("Corrective action response progress")
+      .getByRole("button", { name: /Root cause analysis/ }).click();
+    await expect(page.getByText(/Return for rework: identify the missing management-control checkpoint/i))
+      .toBeVisible({ timeout: 30_000 });
+  }
+  const rootCauseEditor = structuredEditor(page, "Root cause analysis");
+  await expect(rootCauseEditor).toBeVisible({ timeout: 30_000 });
+  await rootCauseEditor.fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);

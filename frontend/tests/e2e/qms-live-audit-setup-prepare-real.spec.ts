@@ -86,7 +86,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     });
     await expect(definitionTile).toHaveCount(1);
     if ((await definitionTile.getAttribute("open")) === null) {
-      await definitionTile.locator("summary").click();
+      await definitionTile.locator(":scope > summary").click();
     }
     await expect(definitionTile).toHaveAttribute("open", "");
     await definitionTile.getByRole("button", { name: "Save audit definition", exact: true }).click();
@@ -97,7 +97,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     });
     await expect(meetingsTile).toHaveCount(1);
     if ((await meetingsTile.getAttribute("open")) === null) {
-      await meetingsTile.locator("summary").click();
+      await meetingsTile.locator(":scope > summary").click();
     }
     await expect(meetingsTile).toHaveAttribute("open", "");
 
@@ -126,7 +126,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     });
     await expect(noticeCard).toHaveCount(1);
     if ((await noticeCard.getAttribute("open")) === null) {
-      await noticeCard.locator("summary").click();
+      await noticeCard.locator(":scope > summary").click();
     }
     await expect(noticeCard).toHaveAttribute("open", "");
     const noticePath = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/audits/${encodeURIComponent(data.realtime_audit_id)}/notices`;
