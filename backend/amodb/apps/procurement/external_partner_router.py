@@ -32,7 +32,7 @@ quality_router = APIRouter(prefix="/api/maintenance/{amo_code}/quality/external-
 
 MAX_PAGE = 50
 ALLOWED_CHANGE_FIELDS = {
-    "IDENTITY": frozenset({"trading_name","website","country","physical_address","phone","email"}),
+    "IDENTITY": frozenset({"legal_name","trading_name","website","country","physical_address","phone","email"}),
     "CONTACT": frozenset({"contact_name","email","phone","assignment","site_id"}),
     "SITE": frozenset({"site_code","site_name","country","address","is_primary"}),
     "CAPABILITY": frozenset({"capability_type","description","rating","limitations","aircraft_type",
@@ -213,13 +213,28 @@ def propose(tenant_slug:str,payload:ChangeProposal,request:Request,db:Session=De
         raise HTTPException(413,"Proposed changes exceed the supported size")
     # PII and bank-account numbers are not accepted into freeform JSON;
     # bank account details require the later approved commercial workflow.
-    if payload.category=="BANKING" and set(payload.fields)-{"payment_terms","default_currency"}:
-        raise HTTPException(403,"Sensitive banking account details require the controlled commercial process")
+    if payload.category=="BANKING":
+        if "contract.read" not in set(user["capabilities_json"] or []):
+            raise HTTPException(403,"Commercial change privilege not granted")
+        auth.require_recent_mfa(db,user)
+        if set(payload.fields)-{"payment_terms","default_currency"}:
+            raise HTTPException(403,"Sensitive banking account details require the controlled commercial process")
     if payload.category=="RENEWAL":
         ident=payload.fields.get("certificate_id") or payload.fields.get("contract_id")
         if not ident:raise HTTPException(422,"Identify the certificate or assigned contract to renew")
         if "contract_id" in payload.fields:
             _require_object(user,"contracts",str(payload.fields["contract_id"]))
+            if not _row("""SELECT id FROM quality_external_provider_contracts
+                WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id""",db,
+                **_context(user),id=str(payload.fields["contract_id"])):
+                raise HTTPException(404,"Assigned renewal contract not found")
+        if "certificate_id" in payload.fields:
+            if not _row("""SELECT id FROM external_provider_certificates
+                WHERE amo_id=:amo AND supplier_id=:supplier
+                AND CAST(id AS TEXT)=:id""",db,
+                **_context(user),id=str(payload.fields["certificate_id"])):
+                raise HTTPException(404,"Certificate is not part of this provider")
+    auth.auth_limit(request,str(user["identity_id"]),"partner-change-proposal")
     ctx=_context(user);id=auth.new_id()
     auth.run("""INSERT INTO external_partner_change_requests
         (id,amo_id,tenant_provider_id,identity_id,category,proposed_json,reason,source_version)
@@ -509,6 +524,7 @@ def evidence_upload(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     related_id:str=Form("")):
     user=_ctx(db,request,tenant_slug,cap="document.submit",write=True)
     ctx=_context(user)
+    auth.auth_limit(request,str(user["identity_id"]),"partner-evidence-upload")
     if related_kind=="CONTRACT":_require_object(user,"contracts",related_id)
     if related_kind=="ASSIGNMENT":_require_object(user,"assignments",related_id)
     if related_kind!="PROVIDER" and not related_id:
