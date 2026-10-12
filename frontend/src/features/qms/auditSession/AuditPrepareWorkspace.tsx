@@ -1236,7 +1236,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     {request.canonical_document_id ? <code><Link2 size={13} /> DMS document {request.canonical_document_id}{request.canonical_revision_id ? ` · revision ${request.canonical_revision_id}` : ""}</code> : null}
                     {request.review_note ? <blockquote>{request.review_note}</blockquote> : null}
                   </div>
-                  {canManage && request.status === "UPLOADED" ? (
+                  {canManage && (request.status === "UPLOADED" ||
+                     (request.status === "REQUESTED" && request.source_mode !== "UPLOAD" &&
+                      Boolean(
+                        (request.controlled_document_id && request.controlled_revision_id) ||
+                        (request.canonical_document_id && request.canonical_revision_id)
+                      ))) ? (
                     <div className="qms-audit-prepare__review">
                       <textarea rows={2} value={reviewNotes[request.id] || ""} onChange={(event) => setReviewNotes((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Review note / return instructions" />
                       <div><button type="button" onClick={() => reviewMutation.mutate({ request, status: "REJECTED" })} disabled={reviewMutation.isPending}>Return / reject</button><button type="button" className="is-primary" onClick={() => reviewMutation.mutate({ request, status: "ACCEPTED" })} disabled={reviewMutation.isPending}><CheckCircle2 size={14} /> Accept</button></div>
