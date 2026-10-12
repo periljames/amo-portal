@@ -892,3 +892,633 @@
   line-height: 1.55;
   background: var(--surface-subtle, #f8fafc);
 }
+
+
+/* Auditor-first Fieldwork: keep governed detail accessible without burying response entry.
+   These rules intentionally override the legacy three-panel dashboard styles above. */
+.qms-live-audit-focus:not(.qms-live-audit-focus--loading):not(.qms-live-audit-focus--error) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.qms-live-audit-focus__header {
+  flex: 0 0 auto;
+  min-height: 4.2rem;
+  padding: 0.65rem 1rem;
+}
+
+.qms-live-audit-focus__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.qms-live-audit-focus__identity h2 {
+  margin: 0;
+  font-size: 1.13rem;
+  line-height: 1.3;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.qms-live-audit-focus__identity-ref {
+  display: inline-block;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  margin-inline-start: 0.45rem;
+  font-weight: 550 !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}
+
+.qms-live-audit-focus__mobile-menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 9px;
+  background: var(--qms-panel);
+  color: var(--qms-text);
+}
+
+.qms-live-audit-focus__header-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.qms-live-audit-focus__header-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  white-space: nowrap;
+}
+
+.qms-live-audit-focus__header-meta a,
+.qms-live-audit-focus__closing-link {
+  min-height: 2.25rem;
+  padding: 0.4rem 0.65rem;
+}
+
+.qms-live-audit-focus__error,
+.qms-live-audit-focus__sync-notice {
+  position: static;
+  left: auto;
+  top: auto;
+  transform: none;
+  flex: 0 0 auto;
+  max-width: none;
+  margin: 0.3rem 1rem;
+  box-shadow: none;
+}
+
+.qms-live-audit-focus__schedule {
+  padding: 0;
+  flex: 0 0 auto;
+  background: var(--qms-panel);
+}
+
+.qms-live-audit-focus__schedule summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  min-height: 2rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.qms-live-audit-focus__schedule summary span,
+.qms-live-audit-focus__evidence-panel summary small,
+.qms-live-audit-focus__source-details summary small {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.qms-live-audit-focus__schedule p {
+  margin: 0;
+  padding: 0.2rem 1rem 0.65rem;
+  color: var(--qms-muted);
+}
+
+.qms-live-audit-focus__closing-checks {
+  flex: 0 0 auto;
+  margin: 0.25rem 1rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--accent-warning, #d97706) 32%, var(--qms-line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-warning, #d97706) 5%, var(--qms-panel));
+  color: var(--qms-text);
+}
+
+.qms-live-audit-focus__closing-checks summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.77rem;
+  font-weight: 700;
+}
+
+.qms-live-audit-focus__closing-checks summary svg:last-child {
+  margin-inline-start: auto;
+}
+
+.qms-live-audit-focus__closing-checks ul {
+  margin: 0;
+  padding: 0.15rem 1rem 0.75rem 2rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+
+.qms-live-audit-focus details > summary {
+  list-style: none;
+}
+
+.qms-live-audit-focus details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.qms-live-audit-focus__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-columns: minmax(225px, 265px) minmax(0, 1fr) minmax(225px, 255px);
+}
+
+.qms-live-audit-focus__sections {
+  padding: 0.85rem 0.7rem;
+}
+
+.qms-live-audit-focus__sections-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.qms-live-audit-focus__sections-heading span {
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-live-audit-focus__question-list {
+  gap: 0.22rem;
+}
+
+.qms-live-audit-focus__question-list button {
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  position: relative;
+  gap: 0.55rem;
+  align-items: start;
+  padding: 0.65rem 0.55rem;
+  min-height: 4.5rem;
+  border: 1px solid transparent;
+  border-radius: 9px;
+}
+
+.qms-live-audit-focus__question-list button.is-selected {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 32%, var(--qms-line));
+  background: var(--qms-selected);
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--accent-primary, #2563eb) 70%, transparent);
+}
+
+.qms-live-audit-focus__question-list .qms-live-audit-focus__question-number {
+  margin-top: 0.1rem;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-live-audit-focus__list-copy {
+  display: grid;
+  gap: 0.22rem;
+  padding-inline-end: 4.2rem;
+  min-width: 0;
+}
+
+.qms-live-audit-focus__list-copy strong {
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
+.qms-live-audit-focus__question-list .qms-live-audit-focus__list-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  line-height: 1.35;
+  font-size: 0.73rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.qms-live-audit-focus__question-list em {
+  position: absolute;
+  top: 0.72rem;
+  right: 0.45rem;
+  max-width: 4.4rem;
+  font-size: 0.62rem;
+}
+
+.qms-live-audit-focus__draft-tag {
+  color: var(--accent-warning, #d97706);
+  font-size: 0.67rem;
+  font-weight: 700;
+}
+
+.qms-live-audit-focus__question {
+  padding: 1rem clamp(0.85rem, 1.8vw, 1.75rem) 2rem;
+  scroll-padding-top: 1rem;
+}
+
+.qms-live-audit-focus__question-head {
+  align-items: flex-start;
+}
+
+.qms-live-audit-focus__question-head > div {
+  min-width: 0;
+}
+
+.qms-live-audit-focus__question-head > div > span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+}
+
+.qms-live-audit-focus__question-head h2 {
+  margin: 0.35rem 0 0;
+  font-size: clamp(1.24rem, 1.7vw, 1.55rem);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.qms-live-audit-focus__question-head .qms-live-audit-focus__question-position {
+  flex: 0 0 auto;
+  padding: 0.28rem 0.5rem;
+  background: var(--qms-line-soft);
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-live-audit-focus__question-subline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  margin: 0.65rem 0 0.8rem;
+  color: var(--qms-muted);
+  font-size: 0.75rem;
+}
+
+.qms-live-audit-focus__question-subline strong {
+  color: var(--qms-text);
+}
+
+.qms-live-audit-focus__question-subline em {
+  font-style: normal;
+  font-weight: 750;
+  color: var(--accent-warning, #d97706);
+}
+
+.qms-live-audit-focus__lineage-warning {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  margin-bottom: 0.8rem;
+  padding: 0.65rem;
+  border: 1px solid var(--accent-warning, #d97706);
+  border-radius: 9px;
+  font-size: 0.78rem;
+}
+
+.qms-live-audit-focus__entry {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 12px;
+  background: var(--qms-panel);
+}
+
+.qms-live-audit-focus__entry-heading h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.qms-live-audit-focus__entry-heading p {
+  margin: 0.25rem 0 0;
+  color: var(--qms-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.qms-live-audit-focus__responses {
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  gap: 0.45rem;
+  margin: 0.85rem 0;
+}
+
+.qms-live-audit-focus__responses button {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.5rem;
+  justify-content: flex-start;
+  font-size: 0.78rem;
+}
+
+.qms-live-audit-focus__responses button.is-active {
+  border-color: var(--accent-primary, #2563eb);
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 10%, var(--qms-panel));
+  box-shadow: inset 0 0 0 1px var(--accent-primary, #2563eb);
+}
+
+.qms-live-audit-focus__responses button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.qms-live-audit-focus__notes {
+  margin-top: 0.75rem;
+  font-size: 0.78rem;
+}
+
+.qms-live-audit-focus__notes textarea {
+  min-height: 5.25rem;
+  line-height: 1.5;
+  font-size: 0.83rem;
+}
+
+.qms-live-audit-focus__note-actions button {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 7%, var(--qms-panel));
+}
+
+.qms-live-audit-focus__evidence-panel,
+.qms-live-audit-focus__source-details,
+.qms-live-audit-focus__compliance {
+  margin-top: 0.75rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
+}
+
+.qms-live-audit-focus__evidence-panel summary,
+.qms-live-audit-focus__source-details summary,
+.qms-live-audit-focus__compliance-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2.6rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.qms-live-audit-focus__evidence-panel .qms-live-audit-focus__evidence {
+  margin: 0 0.7rem 0.7rem;
+  box-shadow: none;
+}
+
+.qms-live-audit-focus__source-content {
+  padding: 0 0.75rem 0.75rem;
+}
+
+.qms-live-audit-focus__references {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 0.6rem;
+}
+
+.qms-live-audit-focus__references div {
+  box-shadow: none;
+}
+
+.qms-live-audit-focus__expected-evidence {
+  padding: 0.55rem 0.65rem;
+  background: var(--qms-line-soft);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.qms-live-audit-focus__expected-evidence p {
+  margin: 0.35rem 0;
+}
+
+.qms-live-audit-focus__compliance {
+  display: block;
+  padding: 0;
+  background: var(--qms-panel);
+}
+
+.qms-live-audit-focus__compliance-summary small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--qms-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.qms-live-audit-focus__verification-status {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--qms-muted);
+  font-size: 0.69rem;
+  text-align: right;
+}
+
+.qms-live-audit-focus__compliance > header,
+.qms-live-audit-focus__compliance > .qms-live-audit-focus__recommendations,
+.qms-live-audit-focus__compliance > .qms-live-audit-focus__assessment-grid,
+.qms-live-audit-focus__compliance > .qms-live-audit-focus__candidate-list,
+.qms-live-audit-focus__compliance > .qms-live-audit-focus__scope-context {
+  margin: 0.75rem;
+}
+
+.qms-live-audit-focus__compliance > header {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--qms-line-soft);
+}
+
+.qms-live-audit-focus__compliance > :not(summary):not(header) {
+  margin: 0.75rem;
+}
+
+.qms-live-audit-focus__nav {
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+}
+
+.qms-live-audit-focus__nav > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.qms-live-audit-focus__nav button.is-primary {
+  color: #fff;
+  background: var(--accent-primary, #2563eb);
+  border-color: var(--accent-primary, #2563eb);
+}
+
+.qms-live-audit-focus__nav button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.qms-live-audit-focus__summary {
+  gap: 0.55rem;
+  padding: 0.75rem;
+}
+
+.qms-live-audit-focus__summary > section,
+.qms-live-audit-focus__summary > details {
+  padding: 0.75rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
+  box-shadow: none;
+}
+
+.qms-live-audit-focus__summary-overview > strong {
+  display: block;
+  margin: 0.3rem 0;
+  font-size: 1.55rem;
+}
+
+.qms-live-audit-focus__summary-overview > small {
+  color: var(--qms-muted);
+}
+
+.qms-live-audit-focus__summary-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+
+.qms-live-audit-focus__summary-stats span {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.4rem;
+  border-radius: 7px;
+  background: var(--qms-line-soft);
+  color: var(--qms-muted);
+  font-size: 0.68rem;
+}
+
+.qms-live-audit-focus__summary-stats strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--qms-text);
+}
+
+.qms-live-audit-focus__summary-details summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.75rem;
+  font-size: 0.75rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.qms-live-audit-focus__summary-details summary b {
+  margin-inline-start: auto;
+  font-size: 0.77rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.qms-live-audit-focus__summary-details p,
+.qms-live-audit-focus__summary-details small {
+  color: var(--qms-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.qms-live-audit-focus__summary-details ul {
+  margin-top: 0.65rem;
+}
+
+.qms-live-audit-focus__summary-details li strong {
+  font-size: 0.75rem;
+}
+
+.qms-live-audit-focus button:focus-visible,
+.qms-live-audit-focus summary:focus-visible,
+.qms-live-audit-focus input:focus-visible,
+.qms-live-audit-focus select:focus-visible,
+.qms-live-audit-focus textarea:focus-visible {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1120px) {
+  .qms-live-audit-focus__body {
+    grid-template-columns: 220px minmax(0, 1fr);
+    overflow: auto;
+  }
+  .qms-live-audit-focus__sections { grid-column: 1; grid-row: 1; }
+  .qms-live-audit-focus__question { grid-column: 2; grid-row: 1; }
+  .qms-live-audit-focus__summary {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: visible;
+    border-top: 1px solid var(--qms-line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .qms-live-audit-focus__header {
+    padding: 0.55rem 0.75rem;
+    gap: 0.45rem;
+  }
+  .qms-live-audit-focus__identity-ref { max-width: 11rem; }
+  .qms-live-audit-focus__mobile-menu { display: inline-flex; }
+  .qms-live-audit-focus__header-meta { justify-content: flex-start; }
+  .qms-live-audit-focus__body { display: block; overflow-y: auto; }
+  .qms-live-audit-focus__sections { display: none; border-right: 0; max-height: 45vh; overflow: auto; }
+  .qms-live-audit-focus__body.is-navigation-open .qms-live-audit-focus__sections {
+    display: block;
+    border-bottom: 1px solid var(--qms-line);
+  }
+  .qms-live-audit-focus__question { overflow: visible; padding: 0.85rem 0.75rem; }
+  .qms-live-audit-focus__question-head { flex-direction: column-reverse; gap: 0.35rem; }
+  .qms-live-audit-focus__question-head > div > span { white-space: normal; }
+  .qms-live-audit-focus__entry { padding: 0.75rem; }
+  .qms-live-audit-focus__responses { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-live-audit-focus__references { grid-template-columns: 1fr; }
+  .qms-live-audit-focus__nav { position: sticky; bottom: 0; z-index: 2; background: var(--qms-panel); }
+  .qms-live-audit-focus__nav button { flex: 1 0 auto; }
+  .qms-live-audit-focus__summary { display: grid; grid-template-columns: 1fr; border-left: 0; }
+  .qms-live-audit-focus__verification-status { max-width: 50%; }
+  .qms-live-audit-focus__closing-checks { margin: 0.2rem 0.75rem; }
+}
+
+@media (max-width: 420px) {
+  .qms-live-audit-focus__responses { grid-template-columns: 1fr; }
+  .qms-live-audit-focus__compliance-summary { align-items: flex-start; flex-direction: column; }
+  .qms-live-audit-focus__verification-status { max-width: none; }
+}

@@ -24,7 +24,8 @@ from .tenant_security import TenantContext, require_quality_permission, set_post
 
 
 router = APIRouter(tags=["Quality audit controlled document collaboration"])
-public_router = APIRouter(prefix="/quality/audit-access", tags=["Quality / Audit Controlled Document Collaboration"])
+# Mounted below quality_public_router (prefix="/quality"); keep this child prefix relative.
+public_router = APIRouter(prefix="/audit-access", tags=["Quality / Audit Controlled Document Collaboration"])
 
 
 class ControlledDocumentLinkCreate(BaseModel):

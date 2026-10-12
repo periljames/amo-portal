@@ -8,7 +8,7 @@ route mocks or production credentials.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
 import os
@@ -25,6 +25,7 @@ from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.doc_control import knowledge_models as document_knowledge_models  # noqa: E402
 from amodb.apps.manuals import models as manual_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.quality.audit_archive_governance_models import (  # noqa: E402
     QualityAuditRetentionPolicyRevision,
 )
@@ -204,6 +205,37 @@ def seed() -> None:
         db.add_all([user_a, user_b])
         db.flush()
 
+        # These disposable CI users must hold real, tenant-scoped governed
+        # auditor privileges. Otherwise the authoritative session remains in
+        # Setup and a browser cannot legitimately exercise Live fieldwork.
+        for privilege_code, privilege_type, assignee in (
+            ("CI_LEAD_AUDITOR", "LEAD_AUDITOR", user_a),
+            ("CI_OBSERVER_AUDITOR", "AUDITOR", user_b),
+        ):
+            rule = quality_people_models.QualityPrivilegeRule(
+                amo_id=amo.id,
+                privilege_code=privilege_code,
+                title=f"CI {privilege_type.replace('_', ' ').title()}",
+                privilege_type=privilege_type,
+                required_training_course_codes=[],
+                independence_required=True,
+                is_active=True,
+                created_by_user_id=user_a.id,
+            )
+            db.add(rule)
+            db.flush()
+            db.add(quality_people_models.QualityPrivilege(
+                amo_id=amo.id,
+                rule_id=rule.id,
+                user_id=assignee.id,
+                privilege_code=rule.privilege_code,
+                scope_key="GLOBAL",
+                status="ACTIVE",
+                effective_from=date.today() - timedelta(days=1),
+                created_by_user_id=user_a.id,
+            ))
+        db.flush()
+
         # Exercise the production billing gate as well as module entitlement. The
         # real browser stack applies require_module("quality") before canonical
         # Quality routes, so a module row alone is intentionally insufficient.
@@ -368,8 +400,10 @@ def seed() -> None:
             criteria="Approved QMS manual and applicable regulatory requirements.",
             auditee="Browser Acceptance Auditee",
             auditee_email="auditee@example.com",
-            planned_start=date.today(),
-            planned_end=date.today() + timedelta(days=1),
+            planned_start=date.today() + timedelta(days=1),
+            planned_end=date.today() + timedelta(days=2),
+            planned_start_time=time(9, 0),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
@@ -419,8 +453,10 @@ def seed() -> None:
             scope="Two authenticated Quality users collaborating on the same live audit.",
             criteria="QMS live-audit realtime event propagation contract.",
             auditee="Internal realtime fixture",
-            planned_start=date.today(),
-            planned_end=date.today() + timedelta(days=1),
+            planned_start=date.today() + timedelta(days=1),
+            planned_end=date.today() + timedelta(days=2),
+            planned_start_time=time(9, 0),
+            planned_end_time=time(17, 0),
             actual_start=date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,

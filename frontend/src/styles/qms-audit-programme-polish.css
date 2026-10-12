@@ -519,8 +519,20 @@
   padding: 0;
 }
 
-.qms-audit-programme-drawer .qms-audit-programme__form > footer {
+.qms-audit-programme-drawer:not(.qms-audit-programme-drawer--schedule) .qms-audit-programme__form > footer {
   display: none;
+}
+
+/* Scheduling owns its action footer. Hiding it makes the approved requirement
+   impossible to publish to Calendar from the embedded drawer. */
+.qms-audit-programme-drawer--schedule .qms-audit-programme__form > footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.75rem var(--s-4);
+  border-top: 1px solid var(--qms-line-soft);
 }
 
 .qms-audit-programme-drawer button.is-primary {

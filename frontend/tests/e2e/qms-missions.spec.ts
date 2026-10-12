@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
 
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -56,19 +57,6 @@ function mission(id = "mission-1") {
     completed_at: null,
     created_at: "2026-08-08T12:00:00Z",
     updated_at: "2026-08-08T12:00:00Z",
-    readiness: {
-      hard_gates: { passed: 0, total: 11 },
-      soft_gates: { passed: 0, total: 0 },
-      ready_for_quality_self_evaluation: false,
-      blocking_gates: gateCodes.map((gateCode, index) => ({
-        id: `gate-${index + 1}`,
-        gate_code: gateCode,
-        title: gateTitles[gateCode],
-        status: "PENDING",
-        evidence_status: "UNLINKED",
-        blocking_reason: null,
-      })),
-    },
     gates: gateCodes.map((gateCode, index) => ({
       id: `gate-${index + 1}`,
       gate_code: gateCode,
@@ -92,6 +80,15 @@ function mission(id = "mission-1") {
       passed_by_user_id: null,
       updated_at: "2026-08-08T12:00:00Z",
     })),
+    readiness: {
+      hard_gates: { passed: 0, total: gateCodes.length },
+      soft_gates: { passed: 0, total: 0 },
+      ready_for_quality_self_evaluation: false,
+      blocking_gates: gateCodes.map((gateCode, index) => ({
+        id: `gate-${index + 1}`, gate_code: gateCode, title: gateTitles[gateCode],
+        status: "PENDING", evidence_status: "UNLINKED",
+      })),
+    },
     decisions: [],
   };
 }
@@ -101,12 +98,15 @@ async function prepare(page: Page): Promise<void> {
   let currentMission = mission();
 
   await page.addInitScript(({ storedToken }) => {
+    sessionStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_portal_token", storedToken);
     localStorage.setItem("amo_code", "AMO-A");
     localStorage.setItem("amo_slug", "tenant-a");
     localStorage.setItem("amo_department", "quality");
     localStorage.setItem("amo_color_scheme", "light");
     localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    sessionStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true, missing: [] }));
+    localStorage.setItem("amo_session_last_user_activity", String(Date.now()));
     localStorage.setItem("amo_current_user", JSON.stringify({
       id: "quality-user-a",
       amo_id: "amo-a",
@@ -130,6 +130,15 @@ async function prepare(page: Page): Promise<void> {
     const url = new URL(request.url());
     const path = url.pathname;
 
+    // Avoid a synthetic login being evicted by background session checks.
+    if (path === "/auth/me" || path === "/auth/me/") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        id: "quality-user-a", amo_id: "amo-a", role: "QUALITY_MANAGER",
+        department_id: "department-quality", email: "quality@tenant-a.test",
+        first_name: "Quality", last_name: "Manager", is_active: true,
+      }) });
+      return;
+    }
     if (path === "/auth/portal-preferences/") {
       await route.fulfill({
         status: 200,
@@ -182,6 +191,15 @@ async function prepare(page: Page): Promise<void> {
       return;
     }
 
+    // Audit personnel options is a bare array. A generic paginated-object
+    // fallback causes QmsMissionActions to crash when rendering assignment selects.
+    if (path === "/api/maintenance/tenant-a/quality/audits/personnel/options") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([
+        { id: "quality-user-a", full_name: "Quality Manager", email: "quality@tenant-a.test" },
+      ]) });
+      return;
+    }
+
     if (path.includes("/api/maintenance/tenant-a/quality/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], columns: [], limit: 25, offset: 0, has_more: false }) });
       return;
@@ -190,29 +208,34 @@ async function prepare(page: Page): Promise<void> {
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not configured in Mission browser test" }) });
   };
 
+  await page.route("**/auth/me", fulfil);
+  await page.route("**/auth/me/", fulfil);
   await page.route("**/auth/portal-preferences/", fulfil);
   await page.route("**/accounts/admin/admin-profile/**", fulfil);
   await page.route("**/api/maintenance/tenant-a/quality/**", fulfil);
   await page.route("http://127.0.0.1:8080/**", fulfil);
+  await mockPortalBackgroundRequests(page);
 }
 
 test("Mission portfolio uses hard readiness gates rather than a compliance percentage", async ({ page }) => {
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=missions", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "Missions", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Change & capability projects", exact: true })).toBeVisible();
   await expect(page.getByText("DHC-8-400 capability inclusion", { exact: true })).toBeVisible();
-  await expect(page.getByText("0/11", { exact: true })).toBeVisible();
-  await expect(page.getByText("11 hard gates open", { exact: true })).toBeVisible();
   await expect(page.getByText(/compliance percentage/i)).toBeVisible();
 
-  await page.getByText("DHC-8-400 capability inclusion", { exact: true }).click();
+  // The grid opens detail on its explicit action; a cell click alone only selects the row.
+  await page.getByRole("button", { name: "Manage project" }).click();
+  await expect(page).toHaveURL(/missionId=mission-1/);
+  await expect(page.locator(".qms-mission-detail")).toBeVisible();
+  await expect(page.getByText("0/11", { exact: true })).toBeVisible();
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
   await expect(page.getByText("Accountable Executive", { exact: true })).toBeVisible();
-  await expect(page.getByText("Not assigned", { exact: true })).toBeVisible();
+  await expect(page.locator(".qms-mission-detail__summary article").filter({ hasText: "Accountable Executive" }).getByText("Not assigned", { exact: true })).toBeVisible();
   await expect(page.locator(".qms-mission-detail__gate")).toHaveCount(11);
-  await expect(page.getByText("Tooling and test equipment", { exact: true })).toBeVisible();
-  await expect(page.getByText("Training and competence evidence", { exact: true })).toBeVisible();
+  await expect(page.locator(".qms-mission-detail__gates").getByText("Tooling and test equipment", { exact: true })).toBeVisible();
+  await expect(page.locator(".qms-mission-detail__gates").getByText("Training and competence evidence", { exact: true })).toBeVisible();
 });
 
 test("Quality Manager can create a capability Mission and receives seeded hard gates", async ({ page }) => {
