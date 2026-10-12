@@ -160,5 +160,8 @@ test("MD scenarios 11 and 13 — records a structured finding atomically from Li
     objective_evidence: "Purchase order PO-017 and supplier approval register revision 4.",
   });
   await expect(live.getByText(/Finding, checklist response and governed CAR\/task consequences committed as one authoritative transaction/i)).toBeVisible();
-  await expect(live.getByText("QAR-MO-26-020-F-001")).toBeVisible();
+  // Findings remain in a collapsed progress disclosure until requested.
+  const findingsDisclosure = live.locator("#audit-occurrence-findings");
+  await findingsDisclosure.locator("summary").click();
+  await expect(findingsDisclosure.getByText("QAR-MO-26-020-F-001")).toBeVisible();
 });
