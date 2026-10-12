@@ -53,7 +53,8 @@ export default function ExternalPartnerPage(){
   if(error)return <main className="partner-shell"><ActionNotice value={error} error/><button onClick={()=>setRevision(v=>v+1)}>Retry access</button><Link to="/vendor/login">Secure vendor login</Link></main>;
   if(!session)return <main className="partner-shell"><Link to="/vendor/login">Sign in to your partner account</Link></main>;
   const capabilities=new Set(session.capabilities);
-  const authorized=sections.filter(s=>capabilities.has(s.cap));
+  const authorized=sections.filter(s=>capabilities.has(s.cap) ||
+    (s.id==="quality" && capabilities.has("capa.respond")));
   const current=authorized.find(s=>s.id===section);
   const props:PartnerProps={tenant,csrf,capabilities:session.capabilities,reloadSummary:()=>setRevision(v=>v+1)};
   return <div className="partner-shell">
