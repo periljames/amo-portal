@@ -449,7 +449,7 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
   await page.getByRole("navigation", { name: "Programme workspace sections" }).getByRole("button", { name: "Audit areas" }).click();
   await expect(page.getByRole("heading", { name: "Audit area catalogue" })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("workforce · DEPARTMENT", { exact: true })).toBeVisible();
+  await expect(page.getByRole("gridcell", { name: "Tenant area" })).toBeVisible();
 });
 
 test("creates a hybrid draft without a methodology choice and requires a reason before review", async ({ page }) => {
