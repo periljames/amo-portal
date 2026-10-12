@@ -64,14 +64,19 @@ export default function ProviderImportPanel({amoCode,onImported}:{
     try{
       const result=await apiRequest<{created_record_ids:Array<string|number>;operational_eligibility_granted:boolean}>(
         `${base}/${encodeURIComponent(preview.batch_id)}/confirm`,{method:"POST"});
-      setMessage(`${result.created_record_ids.length} ${importKind==="CONTRACTS"?"draft contracts":"prospective suppliers"} recorded. Quality approval was not granted.`);
+      setMessage(`${result.created_record_ids.length} ${detail?.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"} recorded. Quality approval was not granted.`);
       await getDetail(preview.batch_id);await onImported();
     }catch(e){setError(e instanceof Error?e.message:"Could not confirm reconciliation.");}
     finally{setBusy(false);}
   }
   function download() {
     if(!detail)return;
-    const escape=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
+    // Spreadsheet programs can execute untrusted CSV cells as formulas.
+    const escape=(value:unknown)=>{
+      const raw=String(value??"");
+      const safe=/^[\\s\\uFEFF]*[=+\\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replaceAll('"','""')}"`;
+    };
     const header=["sheet","row","supplier_code","supplier_name","contract_number","title","source_status","effective_on","expires_on","status","issues","supplier_id"];
     const lines=[header.map(escape).join(","),...detail.rows.map(row=>{
       const fields=unpack<Record<string,string|null>>(row.normalized_json);
@@ -108,15 +113,15 @@ export default function ProviderImportPanel({amoCode,onImported}:{
          Contract and approval columns are not treated as authorizations.</p></div></header>
     <form onSubmit={e=>void upload(e)}>
       <label>Tracker type <select value={importKind} onChange={e=>{setImportKind(e.target.value as "SUPPLIERS"|"CONTRACTS");setPreview(null);setDetail(null);}}><option value="SUPPLIERS">Vendor register</option><option value="CONTRACTS">Contracts & agreements</option></select></label>
-      <label>Worksheet (optional) <input type="text" value={sourceSheet} onChange={e=>setSourceSheet(e.target.value)} placeholder="All sheets"/></label>
-      <label>Header row <input type="number" min={1} max={100} value={headerRow} onChange={e=>setHeaderRow(Number(e.target.value)||1)}/></label>
+      <label>Worksheet (optional) <input type="text" value={sourceSheet} onChange={e=>{setSourceSheet(e.target.value);setPreview(null);setDetail(null);}} placeholder="All sheets"/></label>
+      <label>Header row <input type="number" min={1} max={100} value={headerRow} onChange={e=>{setHeaderRow(Number(e.target.value)||1);setPreview(null);setDetail(null);}}/></label>
       <label>Workbook (XLSX or XLSM)
         <input type="file" accept=".xlsx,.xlsm" required onChange={e=>{
           setFile(e.target.files?.[0]??null);setPreview(null);setDetail(null);
         }}/>
       </label>
       <label style={{display:"block",margin:"0.8rem 0"}}>Optional source header mapping (JSON object)
-        <textarea rows={2} value={mapping} onChange={e=>setMapping(e.target.value)}
+        <textarea rows={2} value={mapping} onChange={e=>{setMapping(e.target.value);setPreview(null);setDetail(null);}}
           aria-label="Source column mappings" />
       </label>
       <button type="submit" className="proc-button proc-button--primary" disabled={!file||busy}>
