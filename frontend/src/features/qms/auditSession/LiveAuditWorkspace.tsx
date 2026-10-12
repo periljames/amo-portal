@@ -245,7 +245,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [syncBusy, setSyncBusy] = useState(false);
   const [offlinePackBusy, setOfflinePackBusy] = useState(false);
   const [offlinePackReady, setOfflinePackReady] = useState(false);
-  const [storagePersistent, setStoragePersistent] = useState<boolean | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [pendingChoices, setPendingChoices] = useState<Record<string, ChecklistResponseOption>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
@@ -389,7 +388,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     try {
       const granted = await requestAuditStoragePersistence();
       await prepareAuditOfflinePack(amoCode, auditId);
-      setStoragePersistent(granted);
       setOfflinePackReady(true);
       setSyncNotice(granted === false
         ? "Offline audit saved on this browser. Storage persistence was not granted; avoid clearing site data, using private browsing, or deleting this browser profile."
