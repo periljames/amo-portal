@@ -89,15 +89,21 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  const active = new Set([SHELL_CACHE, ASSET_CACHE]);
   event.waitUntil(
     Promise.all([
       caches.keys()
-        .then((keys) => Promise.all(
-          keys
-            .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
-            .map((key) => caches.delete(key)),
-        )),
+        .then((keys) => {
+          // Retain the previous hashed asset set for an already-open auditor
+          // tab after a deployment. It may still request lazy route chunks
+          // from the old release. Do not retain authenticated API data.
+          const priorAssets = keys.filter((key) => key.startsWith("amo-portal-assets-") && key !== ASSET_CACHE).sort().reverse().slice(0, 1);
+          const active = new Set([SHELL_CACHE, ASSET_CACHE, ...priorAssets]);
+          return Promise.all(
+            keys
+              .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
+              .map((key) => caches.delete(key)),
+          );
+        }),
       self.registration.navigationPreload
         ? self.registration.navigationPreload.enable()
         : Promise.resolve(),
@@ -224,7 +230,18 @@ async function cacheFirstAsset(request) {
     void networkPromise;
     return cached;
   }
-  return (await networkPromise) || Response.error();
+  const fresh = await networkPromise;
+  if (fresh) return fresh;
+  // A still-open older tab might reference a hashed chunk from the previous
+  // deployment. Serve only explicitly cached immutable assets.
+  const priorNames = (await caches.keys())
+    .filter((name) => name.startsWith("amo-portal-assets-") && name !== ASSET_CACHE)
+    .sort().reverse();
+  for (const name of priorNames) {
+    const fallback = await (await caches.open(name)).match(request);
+    if (fallback) return fallback;
+  }
+  return Response.error();
 }
 
 function looksLikeCachedStatic(url) {
