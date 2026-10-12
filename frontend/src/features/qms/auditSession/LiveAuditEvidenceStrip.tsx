@@ -13,7 +13,7 @@ import {
   enqueueOfflineAuditEvidence,
   listOfflineAuditEvidence,
   onOfflineAuditEvidenceChanged,
-  replayOfflineAuditEvidence,
+  synchronizeOfflineAuditEvidence,
 } from "../../../services/qmsOfflineAuditEvidence";
 import type { ChecklistExecutionGovernanceRow } from "../../../services/qmsChecklistExecutionGovernance";
 import { projectOfflineEvidence, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
@@ -156,7 +156,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   const syncPending = async () => {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     try {
-      const result = await replayOfflineAuditEvidence(amoCode, auditId);
+      const result = await synchronizeOfflineAuditEvidence(amoCode, auditId);
       await pendingQuery.refetch();
       if (result.uploaded.length) {
         await evidenceQuery.refetch();
@@ -174,20 +174,9 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     }
   };
 
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const onOnline = () => void syncPending();
-    const onStructuredSync = () => {
-      if (pending.length && navigator.onLine !== false) void syncPending();
-    };
-    window.addEventListener("online", onOnline);
-    window.addEventListener("amo:offline-sync-complete", onStructuredSync);
-    if (pending.length && navigator.onLine !== false) void syncPending();
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("amo:offline-sync-complete", onStructuredSync);
-    };
-  }, [amoCode, auditId, pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Automatic audit-wide replay runs once per authenticated browser session
+  // via qmsAuditOfflineSync. This component only keeps its queue view fresh.
+  // Avoid a second independent uploader racing the global replay.
 
   const upload = async () => {
     if (!file || busy) return;

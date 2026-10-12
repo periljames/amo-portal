@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+from io import BytesIO
+
+import pytest
+from docx import Document
+
+from amodb.apps.quality.audit_checklist_upload_parser import draft_from_upload
+
+
+def _paper_form() -> bytes:
+    document = Document()
+    table = document.add_table(rows=0, cols=6)
+    for values in [
+        ("", "ORGANIZATION/ MANAGEMENT", "S", "U", "N/C", "N/A"),
+        ("", "Is there a description and organogram?", "", "", "", ""),
+        ("", "Are approved key post holders in place?", "", "", "", ""),
+        ("", "Remarks:", "", "", "", ""),
+        ("", "FLIGHT SAFETY MANAGEMENT", "S", "U", "N/C", "N/A"),
+        ("", "Are risk assessments conducted for all identified hazards?", "", "", "", ""),
+        ("", "Remarks:", "", "", "", ""),
+    ]:
+        cells = table.add_row().cells
+        for cell, value in zip(cells, values):
+            cell.text = value
+    result = BytesIO()
+    document.save(result)
+    return result.getvalue()
+
+
+def test_word_form_extraction_keeps_order_sections_and_explicit_source_vocabulary():
+    source = _paper_form()
+    draft = draft_from_upload(source, "SL-QMS-20.docx")
+    assert draft["question_count"] == 3
+    assert draft["section_count"] == 2
+    assert [item["checklist_ref"] for item in draft["items"]] == ["1", "2", "3"]
+    assert [item["section"] for item in draft["items"]] == [
+        "ORGANIZATION/ MANAGEMENT", "ORGANIZATION/ MANAGEMENT", "FLIGHT SAFETY MANAGEMENT",
+    ]
+    assert draft["items"][2]["prompt"].startswith("Are risk assessments")
+    assert [item["response_options"][i]["value"] for i in range(4)] == ["S", "U", "N/C", "N/A"]
+    assert draft["items"][0]["response_options"][2]["canonical_status"] == "NOT_VERIFIED"
+    assert draft["sha256"] and len(draft["sha256"]) == 64
+
+
+@pytest.mark.parametrize("name,data", [
+    ("fake.pdf", b"not a PDF"),
+    ("fake.docx", b"not a Word file"),
+    ("bad.txt", b"anything"),
+    ("empty.docx", b""),
+])
+def test_invalid_uploads_fail_closed(name: str, data: bytes):
+    with pytest.raises(ValueError):
+        draft_from_upload(data, name)
+
+
+def _pdf_form() -> bytes:
+    from reportlab.pdfgen import canvas
+
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=(595, 842))
+    for index, line in enumerate([
+        "ORGANIZATION/ MANAGEMENT S U N/C N/A",
+        "1. Is there a description and organogram?",
+        "2. Are approved key post holders in place with",
+        "defined responsibilities and authorization?",
+        "Remarks:",
+        "FLIGHT SAFETY MANAGEMENT S U N/C N/A",
+        "3. Are risk assessments conducted for all identified",
+        "hazards and organizational changes?",
+        "Remarks:",
+        "RECURRENT TRAINING/ SIX MONTHLY PROFICIENCY",
+        "CHECKS",
+        "S U N/C N/A",
+        "4. Are training records reviewed and signed?",
+    ]):
+        pdf.drawString(35, 800 - 22 * index, line)
+    pdf.save()
+    return output.getvalue()
+
+
+def test_pdf_import_preserves_multiline_questions_and_wrapped_section_headers():
+    draft = draft_from_upload(_pdf_form(), "Audit checklist.pdf")
+    assert [item["checklist_ref"] for item in draft["items"]] == ["1", "2", "3", "4"]
+    assert draft["question_count"] == 4
+    assert draft["section_count"] == 3
+    assert draft["items"][1]["prompt"].endswith("defined responsibilities and authorization?")
+    assert draft["items"][2]["section"] == "FLIGHT SAFETY MANAGEMENT"
+    assert draft["items"][2]["prompt"].endswith("hazards and organizational changes?")
+    assert draft["items"][3]["section"] == "RECURRENT TRAINING/ SIX MONTHLY PROFICIENCY CHECKS"
+    assert draft["items"][0]["response_options"][0]["value"] == "S"

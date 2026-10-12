@@ -2139,14 +2139,30 @@ def complete_audit_fieldwork(
     ).all()
     if not checklist:
         raise HTTPException(status_code=409, detail="A governed checklist is required before fieldwork can be completed.")
-    pending = [item for item in checklist if item.response_status == "PENDING"]
-
     from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
     governance_rows = db.query(QualityAuditChecklistExecutionGovernance).filter(
         QualityAuditChecklistExecutionGovernance.amo_id == audit.amo_id,
         QualityAuditChecklistExecutionGovernance.audit_id == audit.id,
     ).all()
     governance_by_item = {row.checklist_item_id: row for row in governance_rows}
+
+    # An explicitly selected N/C on a frozen source checklist is a documented
+    # 'Not Checked' audit disposition only when accompanied by an attributable
+    # reason. An untouched NOT_VERIFIED/PENDING item remains incomplete.
+    # The response-value validation happens when fieldwork is recorded.
+    def documented_not_checked(item: models.QualityAuditChecklistItem) -> bool:
+        row = governance_by_item.get(item.id)
+        return bool(
+            row
+            and str(row.canonical_response_status or "").upper() == "NOT_VERIFIED"
+            and str(row.response_value or "").strip().upper() == "N/C"
+            and str(row.auditor_notes or "").strip()
+        )
+
+    pending = [
+        item for item in checklist
+        if item.response_status == "PENDING" and not documented_not_checked(item)
+    ]
     structured_incomplete: list[dict[str, Any]] = []
     for item in checklist:
         if item.response_status == "PENDING":

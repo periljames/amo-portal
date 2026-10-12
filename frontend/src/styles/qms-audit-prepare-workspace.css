@@ -1143,3 +1143,52 @@
     flex-direction: column;
   }
 }
+
+
+.qms-audit-prepare__mode { align-items: center; flex-wrap: wrap; }
+.qms-audit-prepare__import-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.8rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--qms-panel);
+  position: relative;
+}
+.qms-audit-prepare__import-button:focus-within {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 2px;
+}
+.qms-audit-prepare__import-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+.qms-audit-prepare__import-review {
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: var(--qms-line-soft);
+}
+.qms-audit-prepare__import-review small { overflow-wrap: anywhere; color: var(--qms-muted); }
+.qms-audit-prepare__import-review p { margin: 0; font-size: 0.79rem; }
+.qms-audit-prepare__import-review button { justify-self: start; }
+
+
+.qms-audit-prepare__composer-pages { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.4rem 0.5rem; border: 1px solid var(--qms-line); border-radius: 7px; }
+.qms-audit-prepare__composer-pages span { margin-right: auto; color: var(--qms-muted); font-size: 0.8rem; }
+.qms-audit-prepare__composer-more { border: 1px solid var(--qms-line); border-radius: 7px; }
+.qms-audit-prepare__composer-more > summary { cursor: pointer; padding: 0.52rem 0.65rem; font-size: 0.78rem; font-weight: 700; }
+.qms-audit-prepare__composer-more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; padding: 0.65rem; border-top: 1px solid var(--qms-line); }
+.qms-audit-prepare__composer-more-grid > label { display: grid; gap: 0.3rem; min-width: 0; }
+.qms-audit-prepare__composer-more-grid .is-wide { grid-column: 1 / -1; }
+@media (max-width: 720px) { .qms-audit-prepare__composer-more-grid { grid-template-columns: 1fr; } .qms-audit-prepare__composer-more-grid .is-wide { grid-column: auto; } }

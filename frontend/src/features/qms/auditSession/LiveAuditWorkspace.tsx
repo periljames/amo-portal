@@ -14,7 +14,6 @@ import {
   Filter,
   ChevronDown,
   Save,
-  PanelLeft,
   MessageSquareText,
   Search,
   ShieldAlert,
@@ -26,11 +25,11 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
-import { listOfflineMutations } from "../../../services/offlinePersistence";
+import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
 import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
-import { listOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
-import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
+import { listOfflineAuditEvidence, synchronizeOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
+import { projectOfflineFindings, readAuditOfflinePack, prepareAuditOfflinePack, auditOfflinePackStatus, requestAuditStoragePersistence } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
   getChecklistEvidenceCandidates,
@@ -136,6 +135,12 @@ function findingClassification(draft: FindingDraft): { severity: FieldworkFindin
   return { severity: selected.severity, level: selected.value };
 }
 
+function isRecordedNotChecked(item: ChecklistExecutionGovernanceRow): boolean {
+  return item.canonical_response_status === "NOT_VERIFIED"
+    && (item.response_value || "").toUpperCase() === "N/C"
+    && Boolean(item.auditor_notes?.trim());
+}
+
 function statusLabel(value: string | null | undefined): string {
   return (value || "NOT_VERIFIED").replaceAll("_", " ");
 }
@@ -236,8 +241,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [offlinePackBusy, setOfflinePackBusy] = useState(false);
+  const [offlinePackReady, setOfflinePackReady] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [pendingChoices, setPendingChoices] = useState<Record<string, ChecklistResponseOption>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
   const [findingDraft, setFindingDraft] = useState<FindingDraft | null>(null);
@@ -336,6 +345,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return entries.filter((entry) => entry.entityType === "qms-audit-checklist-item" && entry.path.includes(auditMarker));
     },
     enabled: fieldworkEnabled,
+    networkMode: "always",
     staleTime: 500,
     refetchInterval: 2_000,
   });
@@ -366,7 +376,41 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [amoCode, auditId, fieldworkEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!auditId) return;
+    void auditOfflinePackStatus(amoCode, auditId).then((status) => setOfflinePackReady(status.ready)).catch(() => setOfflinePackReady(false));
+  }, [amoCode, auditId]);
+
+  const downloadOfflinePack = async () => {
+    if (!auditId || offlinePackBusy || connectivity !== "ONLINE") return;
+    setOfflinePackBusy(true);
+    setLocalError(null);
+    try {
+      const granted = await requestAuditStoragePersistence();
+      await prepareAuditOfflinePack(amoCode, auditId);
+      setOfflinePackReady(true);
+      setSyncNotice(granted === false
+        ? "Offline audit saved on this browser. Storage persistence was not granted; avoid clearing site data, using private browsing, or deleting this browser profile."
+        : "Audit work package and offline application verified on this browser. Offline fieldwork is available.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Unable to prepare offline fieldwork.");
+    } finally { setOfflinePackBusy(false); }
+  };
+
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
+  const localAnswers = useMemo(() => {
+    const result = new Map<string, { value: string; canonical: CanonicalChecklistResponse; status: string }>();
+    for (const entry of outboxQuery.data || []) {
+      if (!["queued", "syncing", "conflict", "failed"].includes(entry.status)) continue;
+      try {
+        const body = JSON.parse(entry.body || "{}") as { response_value?: string; canonical_response_status?: string };
+        if (body.canonical_response_status && entry.entityId) {
+          result.set(entry.entityId, { value: body.response_value || body.canonical_response_status, canonical: body.canonical_response_status as CanonicalChecklistResponse, status: entry.status });
+        }
+      } catch { /* Invalid entries remain in the outbox for review. */ }
+    }
+    return result;
+  }, [outboxQuery.data]);
   const itemNumberById = useMemo(() => new Map<string, number>(items.map((item, index): [string, number] => [item.checklist_item_id, index + 1])), [items]);
   const sourceContextByItemId = useMemo(() => {
     const map = new Map<string, LiveChecklistSourceContext>();
@@ -398,8 +442,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         source?.manual_source_ref,
       ].some((value) => String(value || "").toLowerCase().includes(term));
       if (!matchesSearch) return false;
-      if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED";
-      if (checklistFilter === "VERIFIED") return item.canonical_response_status !== "NOT_VERIFIED";
+      if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED" && !isRecordedNotChecked(item);
+      if (checklistFilter === "VERIFIED") return item.canonical_response_status !== "NOT_VERIFIED" || isRecordedNotChecked(item);
       if (checklistFilter === "FINDINGS") return Boolean(item.finding_id) || item.canonical_response_status === "NONCOMPLIANT" || item.canonical_response_status === "OBSERVATION";
       if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_required_when?.length);
       return true;
@@ -490,6 +534,32 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     ]);
   };
 
+  useEffect(() => onOfflineSyncComplete((detail) => {
+    if (detail.reason === "synced" && detail.entityTypes.includes("qms-audit-checklist-item")) {
+      void refreshFieldwork();
+      void outboxQuery.refetch();
+    }
+  }), [auditId, amoCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncFieldworkNow = async () => {
+    if (syncBusy || connectivity !== "ONLINE" || !auditId) return;
+    setSyncBusy(true);
+    setLocalError(null);
+    try {
+      const result = await replayOfflineMutations();
+      const evidence = await synchronizeOfflineAuditEvidence(amoCode, auditId);
+      await refreshFieldwork();
+      await outboxQuery.refetch();
+      setSyncNotice(result.total || evidence.deferred || evidence.conflicts
+        ? "Some device changes still require synchronization or conflict review."
+        : "Eligible device changes have been checked against the server.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Synchronization failed; local changes are retained.");
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const updateMutation = useMutation({
     mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation, assessment: assessmentState }: FieldworkUpdateInput) => {
       const normalized = normalisedAssessment(item, response, assessmentState);
@@ -508,16 +578,24 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     onSuccess: async (_result, variables) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
+      setPendingChoices((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setNoteDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setSampleDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setAssessmentDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       await refreshFieldwork();
       void outboxQuery.refetch();
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       if (isOfflineQueuedError(error)) {
         setLocalError(null);
         setSyncNotice("Saved securely on this device · pending ordered sync. The authoritative audit state will not change until the server accepts the mutation.");
+        // The durable outbox owns these edits now; they must not remain
+        // mistaken for unsaved in-memory notes when the auditor moves on.
+        const id = variables.item.checklist_item_id;
+        setPendingChoices((current) => { const next = { ...current }; delete next[id]; return next; });
+        setNoteDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+        setSampleDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+        setAssessmentDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
         void outboxQuery.refetch();
         return;
       }
@@ -582,9 +660,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const counts = useMemo(() => {
     const base: Record<CanonicalChecklistResponse, number> = { COMPLIANT: 0, NONCOMPLIANT: 0, OBSERVATION: 0, NOT_APPLICABLE: 0, NOT_VERIFIED: 0 };
-    items.forEach((item) => { const status = (item.canonical_response_status || "NOT_VERIFIED") as CanonicalChecklistResponse; if (status in base) base[status] += 1; else base.NOT_VERIFIED += 1; });
+    items.forEach((item) => { if (isRecordedNotChecked(item)) return; const status = (item.canonical_response_status || "NOT_VERIFIED") as CanonicalChecklistResponse; if (status in base) base[status] += 1; else base.NOT_VERIFIED += 1; });
     return base;
   }, [items]);
+  const notCheckedCount = items.filter(isRecordedNotChecked).length;
   const completed = items.length - counts.NOT_VERIFIED;
   // Empty checklist must not read as 100% complete.
   const percent = items.length ? Math.round((completed / items.length) * 100) : null;
@@ -662,7 +741,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return;
     }
     setSelectedId(itemId);
-    setNavigationOpen(false);
   };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
@@ -692,12 +770,22 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const saveCurrentAssessment = () => {
     if (!selected || !assessment || !canExecute) return;
+    const pendingChoice = pendingChoices[selected.checklist_item_id];
+    if (pendingChoice && ["NONCOMPLIANT", "OBSERVATION"].includes(pendingChoice.canonical_status)) {
+      // Findings must go through the atomic governed finding composer.
+      selectResponse(selected, pendingChoice);
+      return;
+    }
+    if (!pendingChoice && !selected.response_value && selected.canonical_response_status === "NOT_VERIFIED") {
+      setLocalError("Select a checklist assessment before saving the note, or mark a source-specific Not checked option.");
+      return;
+    }
     setSyncNotice(null);
     setLocalError(null);
     updateMutation.mutate({
       item: selected,
-      response: selected.canonical_response_status,
-      responseValue: selected.response_value || selected.canonical_response_status,
+      response: (pendingChoice?.canonical_status as CanonicalChecklistResponse | undefined) || localAnswers.get(selected.checklist_item_id)?.canonical || selected.canonical_response_status,
+      responseValue: pendingChoice?.value || localAnswers.get(selected.checklist_item_id)?.value || selected.response_value || selected.canonical_response_status,
       auditorNotes: notes,
       sampledItemInformation: sampledItems,
       assessment,
@@ -710,18 +798,35 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (!nextItemId || evidenceCapture.busy || evidenceCapture.hasDraft) return;
     setSyncNotice(null);
     setLocalError(null);
+    const pending = pendingChoices[selected.checklist_item_id];
+    const local = localAnswers.get(selected.checklist_item_id);
+    const response = (pending?.canonical_status as CanonicalChecklistResponse | undefined) || local?.canonical || selected.canonical_response_status;
+    const responseValue = pending?.value || local?.value || selected.response_value || selected.canonical_response_status;
+    if (response === "NOT_VERIFIED" && !pending && !local && !selected.response_value) {
+      setLocalError("Choose an assessment before saving and advancing.");
+      return;
+    }
+    if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
+      setLocalError("Record the finding through the governed finding composer before advancing.");
+      return;
+    }
+    const requirementError = responseRequirementError(selected, selectedSource, response, notes);
+    if (requirementError) {
+      setLocalError(requirementError);
+      return;
+    }
     try {
-      // Never advance on an unacknowledged write or unresolved offline conflict.
       await updateMutation.mutateAsync({
         item: selected,
-        response: selected.canonical_response_status,
-        responseValue: selected.response_value || selected.canonical_response_status,
+        response,
+        responseValue,
         auditorNotes: notes,
         sampledItemInformation: sampledItems,
         assessment,
       });
       selectItem(nextItemId);
-    } catch {
+    } catch (error) {
+      if (isOfflineQueuedError(error)) selectItem(nextItemId);
       // The mutation's onError retains the existing offline/conflict handling.
     }
   };
@@ -738,6 +843,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const auditorNotes = noteDrafts[item.checklist_item_id] ?? item.auditor_notes ?? "";
     const requirementError = responseRequirementError(item, source, response, auditorNotes);
     if (requirementError) {
+      setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
+      setSelectedId(item.checklist_item_id);
+      setDetailOpen(true);
       setLocalError(requirementError);
       return;
     }
@@ -759,15 +867,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       || !assessmentState.applicability_reason?.trim()
       || !assessmentState.applicability_basis.length
     )) {
-      setLocalError("N/A requires an explicit governed applicability basis. Review the applicability recommendation/evidence panel before recording N/A.");
+      setSelectedId(item.checklist_item_id);
+      setDetailOpen(true);
+      setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
+      setLocalError("N/A requires an explicit governed applicability basis. Expand Compliance intelligence below before recording N/A.");
       return;
     }
     updateMutation.mutate({
       item,
       response,
       responseValue: option.value,
-      auditorNotes: notes,
-      sampledItemInformation: sampledItems,
+      auditorNotes,
+      sampledItemInformation: sampleDrafts[item.checklist_item_id] ?? item.sampled_item_information ?? "",
       assessment: assessmentState,
     });
   };
@@ -850,7 +961,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     <div className="qms-live-audit-focus" role="region" aria-label="Live audit fieldwork workspace">
       <header className="qms-live-audit-focus__header">
         <div className="qms-live-audit-focus__identity">
-          <button type="button" className="qms-live-audit-focus__mobile-menu" aria-label={navigationOpen ? "Close question list" : "Open question list"} aria-expanded={navigationOpen} aria-controls="audit-occurrence-checklist" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
           <div>
             <h2>Fieldwork <span className="qms-live-audit-focus__identity-ref">{auditQuery.data.audit_ref || auditKey}</span></h2>
             <p className="qms-live-audit-focus__helper">Answer questions · capture evidence · record findings</p>
@@ -881,6 +991,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           ) : (
             <span>{connectivity === "ONLINE" ? "No queued changes" : "Offline · no queued changes"}</span>
           )}
+          {connectivity === "ONLINE" && !offlinePackReady ? <button type="button" disabled={offlinePackBusy} onClick={() => void downloadOfflinePack()}><CloudOff size={14} /> {offlinePackBusy ? "Preparing…" : "Enable offline fieldwork"}</button> : null}
+          {outbox.queued + outbox.conflicts + outbox.failed + (evidenceOutboxQuery.data?.length || 0) > 0 && connectivity === "ONLINE" ? <button type="button" disabled={syncBusy} onClick={() => void syncFieldworkNow()}>{syncBusy ? "Syncing…" : "Sync device changes"}</button> : null}
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
           ) : (
@@ -905,44 +1017,46 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <ul>{completionBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </details> : null}
 
-      <div className={`qms-live-audit-focus__body${navigationOpen ? " is-navigation-open" : ""}`}>
-        <aside id="audit-occurrence-checklist" className="qms-live-audit-focus__sections" aria-label="Checklist questions">
-          <div className="qms-live-audit-focus__progress">
-            <span style={{ width: `${percent ?? 0}%` }} />
+      <div className="qms-live-audit-focus__body">
+        <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
+          <div className="qms-live-audit-focus__matrix-toolbar">
+            <div><strong>Checklist assessment</strong><small>{completed} of {items.length} server-confirmed · {localAnswers.size} device changes</small></div>
+            <label><Search size={15} aria-hidden="true" /><span className="sr-only">Search checklist</span><input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search questions, section or reference" /></label>
+            <label><Filter size={15} aria-hidden="true" /><span className="sr-only">Filter checklist</span><select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}><option value="ALL">All questions</option><option value="UNANSWERED">Unanswered</option><option value="VERIFIED">Server-confirmed</option><option value="FINDINGS">Findings</option><option value="EVIDENCE_REQUIRED">Evidence required</option></select></label>
           </div>
-          <div className="qms-live-audit-focus__sections-heading"><h2 className="qms-live-audit-focus__sections-title">Checklist</h2><span>{visibleItems.length} / {items.length}</span></div>
-          <div className="qms-live-audit-focus__tools">
-            <label>
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">Search checklist</span>
-              <input value={checklistSearch} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Search checklist" />
-            </label>
-            <label>
-              <Filter size={14} aria-hidden="true" />
-              <span className="sr-only">Filter checklist</span>
-              <select value={checklistFilter} disabled={evidenceCapture.busy || evidenceCapture.hasDraft} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}>
-                <option value="ALL">All items</option>
-                <option value="UNANSWERED">Unanswered</option>
-                <option value="VERIFIED">Answered</option>
-                <option value="FINDINGS">Findings / observations</option>
-                <option value="EVIDENCE_REQUIRED">Evidence required</option>
-              </select>
-            </label>
+          <div className="qms-live-audit-focus__matrix-scroll">
+            <table className="qms-live-audit-focus__matrix-table">
+              <thead><tr><th scope="col">№</th><th scope="col">Verification question / requirement</th><th scope="col">Assessment</th><th scope="col">Details</th></tr></thead>
+              <tbody>
+                {visibleItems.map((item, index) => {
+                  const source = sourceContextByItemId.get(item.checklist_item_id);
+                  const choices = source?.response_options?.length ? source.response_options : fallbackResponseOptions(source?.response_type);
+                  const local = localAnswers.get(item.checklist_item_id);
+                  const value = pendingChoices[item.checklist_item_id]?.value || local?.value || item.response_value || item.canonical_response_status;
+                  const number = itemNumberById.get(item.checklist_item_id) ?? index + 1;
+                  const expanded = detailOpen && selected?.checklist_item_id === item.checklist_item_id;
+                  return <React.Fragment key={item.checklist_item_id}>
+                    {(index === 0 || visibleItems[index - 1]?.section !== item.section) ? <tr className="qms-live-audit-focus__matrix-section"><th colSpan={4} scope="rowgroup">{item.section || "Uncategorised — check source section"}</th></tr> : null}
+                    <tr className={expanded ? "is-selected" : ""}>
+                      <td>{number}</td>
+                      <td><span>{item.prompt}</span><small>{item.checklist_ref || item.requirement_ref || ""}</small></td>
+                      <td><div className="qms-live-audit-focus__matrix-choices" role="group" aria-label={`Assessment for question ${number}`}>
+                        {choices.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "is-selected" : ""} title={option.label} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(item, option)}>{option.label}</button>)}
+                      </div></td>
+                      <td><button type="button" aria-expanded={expanded} onClick={() => { selectItem(item.checklist_item_id); setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
+                        {local ? <small className="qms-live-audit-focus__matrix-device" title="Not yet server-confirmed">{local.status === "conflict" || local.status === "failed" ? "Review sync" : "On device"}</small> : null}
+                      </td>
+                    </tr>
+                  </React.Fragment>;
+                })}
+                {!visibleItems.length ? <tr><td colSpan={4}>No questions match the current search/filter.</td></tr> : null}
+              </tbody>
+            </table>
           </div>
-          <div className="qms-live-audit-focus__question-list">
-            {visibleItems.map((item, index) => (
-              <button type="button" key={item.checklist_item_id} className={item.checklist_item_id === selected?.checklist_item_id ? "is-selected" : ""} aria-current={item.checklist_item_id === selected?.checklist_item_id ? "true" : undefined} title={item.prompt} onClick={() => selectItem(item.checklist_item_id)}>
-                <span className="qms-live-audit-focus__question-number">{itemNumberById.get(item.checklist_item_id) ?? index + 1}</span>
-                <div className="qms-live-audit-focus__list-copy"><strong>{item.checklist_ref || item.requirement_ref || `Question ${index + 1}`}</strong><small>{item.prompt}</small>{dirtyItemIds.has(item.checklist_item_id) ? <span className="qms-live-audit-focus__draft-tag">Unsaved draft</span> : null}</div>
-                <em data-status={item.canonical_response_status} aria-label={statusLabel(item.canonical_response_status)} title={statusLabel(item.canonical_response_status)}>{item.canonical_response_status === "NOT_VERIFIED" ? "Pending" : item.canonical_response_status === "NONCOMPLIANT" ? "NCR" : item.canonical_response_status === "NOT_APPLICABLE" ? "N/A" : statusLabel(item.canonical_response_status)}</em>
-              </button>
-            ))}
-            {!visibleItems.length ? <p className="qms-live-audit-focus__empty-filter">No checklist items match the current search/filter.</p> : null}
-          </div>
-        </aside>
+        </section>
 
         <main className="qms-live-audit-focus__question">
-          {selected ? (
+          {selected && detailOpen ? (
             <>
               <div className="qms-live-audit-focus__question-head">
                 <div><span title={selected.section || "Checklist"}>SECTION · {selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div>
@@ -1034,7 +1148,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
                 </div>
               </details>
-              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis" open>
+              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
                 <summary className="qms-live-audit-focus__compliance-summary">
                   <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
                   <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
@@ -1182,11 +1296,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 </> : null}
               </details>
             </>
-          ) : <div className="qms-live-audit-focus__empty">
+          ) : !items.length ? <div className="qms-live-audit-focus__empty">
             <strong>No governed checklist is available for fieldwork.</strong>
             <p>Return to Prepare, bind or create the controlled checklist, resolve readiness blockers, and issue preparation before continuing.</p>
             <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Prepare</Link>
-          </div>}
+          </div> : null}
         </main>
 
         <aside className="qms-live-audit-focus__summary" aria-label="Fieldwork progress and audit context">
@@ -1199,6 +1313,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <span><strong>{counts.NONCOMPLIANT}</strong> NCR</span>
               <span><strong>{counts.OBSERVATION}</strong> Observations</span>
               <span><strong>{counts.NOT_APPLICABLE}</strong> N/A</span>
+              <span><strong>{notCheckedCount}</strong> N/C (reason recorded)</span>
               <span><strong>{counts.NOT_VERIFIED}</strong> Pending</span>
             </div>
           </section>
