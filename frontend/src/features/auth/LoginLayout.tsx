@@ -345,6 +345,11 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                       ) : null}
                     </div>
                   ) : null}
+                  <div className={styles.switchRow}>
+                    <a href="/vendor/login" className={styles.switchBtn}>
+                      External provider or vendor sign in
+                    </a>
+                  </div>
                 </form>
               </section>
 
