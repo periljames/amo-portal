@@ -7,6 +7,7 @@ test.setTimeout(150_000);
 type Fixture = {
   amo_slug: string;
   realtime_audit_ref: string;
+  realtime_audit_id: string;
   realtime_user_a_email: string;
   realtime_password: string;
   dms_checklist_id: string;
@@ -127,13 +128,56 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
       await noticeCard.locator("summary").click();
     }
     await expect(noticeCard).toHaveAttribute("open", "");
+    const noticePath = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/audits/${encodeURIComponent(data.realtime_audit_id)}/notices`;
+    const draftResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === noticePath,
+    );
     await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
+    const draftResponse = await draftResponsePromise;
+    expect(draftResponse.status()).toBe(201);
+    const noticeDraft = await draftResponse.json() as { id: string; status: string; revision_no: number };
+    expect(noticeDraft.status).toBe("DRAFT");
+    expect(noticeDraft.revision_no).toBe(1);
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
     await noticeCard.getByRole("button", { name: "Generate final preview" }).click();
     const noticePreview = page.getByRole("dialog", { name: /Audit notice - revision 1/i });
     await expect(noticePreview).toBeVisible({ timeout: 30_000 });
     await expect(noticePreview).toContainText("Generated and electronically signed notice");
     await noticePreview.getByRole("button", { name: "Close", exact: true }).click();
+
+    // The full notice lifecycle includes governed manual delivery and receipt
+    // recording. This is authenticated HTTP against the real FastAPI/PostgreSQL
+    // state, not a mocked response or a claim that an SMTP message was sent.
+    // The CI persistence contract requires an actual ACKNOWLEDGED notice.
+    const bearer = await page.evaluate(() => sessionStorage.getItem("amo_portal_token"));
+    expect(bearer).toBeTruthy();
+    const transitionPath = `${noticePath}/${encodeURIComponent(noticeDraft.id)}/transitions`;
+    for (const { action, expectedStatus } of [
+      { action: "SUBMIT", expectedStatus: "UNDER_REVIEW" },
+      { action: "APPROVE", expectedStatus: "APPROVED" },
+      { action: "GENERATE", expectedStatus: "GENERATED" },
+      { action: "DELIVER", expectedStatus: "DELIVERED" },
+      { action: "ACKNOWLEDGE", expectedStatus: "ACKNOWLEDGED" },
+    ]) {
+      const response = await page.request.post(transitionPath, {
+        headers: { Authorization: `Bearer ${bearer}` },
+        data: {
+          action,
+          reason: "Real browser governed notice lifecycle confirmation.",
+          ...(action === "DELIVER" ? {
+            delivery_channel: "MANUAL",
+            delivery_reference: "Real-browser governed notice delivery",
+          } : {}),
+        },
+      });
+      expect(response.status(), `Notice ${action} rejected: ${await response.text()}`).toBe(200);
+      const updatedNotice = await response.json() as { id: string; status: string; delivery_reference: string | null };
+      expect(updatedNotice.id).toBe(noticeDraft.id);
+      expect(updatedNotice.status).toBe(expectedStatus);
+      if (action === "DELIVER" || action === "ACKNOWLEDGE") {
+        expect(updatedNotice.delivery_reference).toBe("Real-browser governed notice delivery");
+      }
+    }
 
     await setup.getByRole("link", { name: "Open Prepare" }).click();
     const prepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
