@@ -101,9 +101,17 @@ def upgrade():
         for name in _TABLES:
             op.execute(sa.text(f'ALTER TABLE "{name}" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text(f'ALTER TABLE "{name}" FORCE ROW LEVEL SECURITY'))
+            # The external request sets app.external_provider_id; internal Quality
+            # review has no provider context and remains scoped by tenant+role.
+            # RLS therefore protects cross-provider access even if a future
+            # read-projection query accidentally omits its supplier predicate.
+            provider_guard = """(
+                NULLIF(current_setting('app.external_provider_id',true),'') IS NULL
+                OR tenant_provider_id = NULLIF(current_setting('app.external_provider_id',true),'')
+            )"""
             op.execute(sa.text(f"""CREATE POLICY "{name}_tenant" ON "{name}"
-                USING (amo_id = NULLIF(current_setting('app.tenant_id',true),''))
-                WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true),''))"""))
+                USING (amo_id = NULLIF(current_setting('app.tenant_id',true),'') AND {provider_guard})
+                WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true),'') AND {provider_guard})"""))
 
 def downgrade():
     for name in reversed(_TABLES):
