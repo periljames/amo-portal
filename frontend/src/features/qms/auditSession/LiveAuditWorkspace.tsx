@@ -26,10 +26,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
-import { listOfflineMutations } from "../../../services/offlinePersistence";
+import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
 import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
-import { listOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
+import { listOfflineAuditEvidence, replayOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
 import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
@@ -237,6 +237,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
@@ -367,6 +369,19 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   }, [amoCode, auditId, fieldworkEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
+  const localAnswers = useMemo(() => {
+    const result = new Map<string, { value: string; status: string }>();
+    for (const entry of outboxQuery.data || []) {
+      if (!["queued", "syncing", "conflict", "failed"].includes(entry.status)) continue;
+      try {
+        const body = JSON.parse(entry.body || "{}") as { response_value?: string; canonical_response_status?: string };
+        if (body.canonical_response_status && entry.entityId) {
+          result.set(entry.entityId, { value: body.response_value || body.canonical_response_status, status: entry.status });
+        }
+      } catch { /* Invalid entries remain in the outbox for review. */ }
+    }
+    return result;
+  }, [outboxQuery.data]);
   const itemNumberById = useMemo(() => new Map<string, number>(items.map((item, index): [string, number] => [item.checklist_item_id, index + 1])), [items]);
   const sourceContextByItemId = useMemo(() => {
     const map = new Map<string, LiveChecklistSourceContext>();
@@ -488,6 +503,32 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-session", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) }),
     ]);
+  };
+
+  useEffect(() => onOfflineSyncComplete((detail) => {
+    if (detail.reason === "synced" && detail.entityTypes.includes("qms-audit-checklist-item")) {
+      void refreshFieldwork();
+      void outboxQuery.refetch();
+    }
+  }), [auditId, amoCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncFieldworkNow = async () => {
+    if (syncBusy || connectivity !== "ONLINE" || !auditId) return;
+    setSyncBusy(true);
+    setLocalError(null);
+    try {
+      const result = await replayOfflineMutations();
+      const evidence = await replayOfflineAuditEvidence(amoCode, auditId);
+      await refreshFieldwork();
+      await outboxQuery.refetch();
+      setSyncNotice(result.total || evidence.deferred || evidence.conflicts
+        ? "Some device changes still require synchronization or conflict review."
+        : "Eligible device changes have been checked against the server.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Synchronization failed; local changes are retained.");
+    } finally {
+      setSyncBusy(false);
+    }
   };
 
   const updateMutation = useMutation({
@@ -759,15 +800,17 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       || !assessmentState.applicability_reason?.trim()
       || !assessmentState.applicability_basis.length
     )) {
-      setLocalError("N/A requires an explicit governed applicability basis. Review the applicability recommendation/evidence panel before recording N/A.");
+      setSelectedId(item.checklist_item_id);
+      setDetailOpen(true);
+      setLocalError("N/A requires an applicability basis. Expand Compliance intelligence below before recording N/A.");
       return;
     }
     updateMutation.mutate({
       item,
       response,
       responseValue: option.value,
-      auditorNotes: notes,
-      sampledItemInformation: sampledItems,
+      auditorNotes,
+      sampledItemInformation: sampleDrafts[item.checklist_item_id] ?? item.sampled_item_information ?? "",
       assessment: assessmentState,
     });
   };
@@ -881,6 +924,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           ) : (
             <span>{connectivity === "ONLINE" ? "No queued changes" : "Offline · no queued changes"}</span>
           )}
+          {outbox.queued + outbox.conflicts + outbox.failed + (evidenceOutboxQuery.data?.length || 0) > 0 && connectivity === "ONLINE" ? <button type="button" disabled={syncBusy} onClick={() => void syncFieldworkNow()}>{syncBusy ? "Syncing…" : "Sync device changes"}</button> : null}
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
           ) : (
