@@ -471,8 +471,17 @@ def quality_decision(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
       JOIN external_organization_memberships m ON m.id=g.membership_id
       WHERE g.id=:id AND g.amo_id=:amo FOR UPDATE OF g""",db,id=grant_id,amo=amo)
     if not row:raise HTTPException(404,"Grant not found")
-    if payload.state=="ACTIVE" and (not row["verified_at"] or row["identity_state"]!="ACTIVE" or row["member_state"]!="ACTIVE"):
-        raise HTTPException(409,"Email verification and membership acceptance required")
+    if payload.state=="ACTIVE":
+        accepted=core.one("""SELECT id FROM external_identity_tokens WHERE amo_id=:amo
+            AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL
+            LIMIT 1""",db,amo=amo,grant=grant_id)
+        if not row["verified_at"] or row["identity_state"]!="ACTIVE" or row["member_state"]!="ACTIVE" or not accepted:
+            raise HTTPException(409,"This exact tenant invitation must be accepted and email verified before activation")
+        reverify=core.one("""SELECT id,used_at FROM external_identity_tokens
+            WHERE amo_id=:amo AND grant_id=:grant AND kind='VERIFY'
+            ORDER BY created_at DESC LIMIT 1""",db,amo=amo,grant=grant_id)
+        if reverify and reverify["used_at"] is None:
+            raise HTTPException(409,"Complete required identity re-verification before restoring access")
     core.run("""UPDATE external_tenant_grants SET status=:state,
       approved_by_user_id=:actor,approved_at=:at,version=version+1 WHERE id=:id AND amo_id=:amo""",
       db,state=payload.state,actor=str(user.id),at=core.now(),id=grant_id,amo=amo)
@@ -583,8 +592,13 @@ def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
       JOIN external_identities i ON i.id=g.identity_id
       WHERE g.amo_id=:amo AND g.id=:grant FOR UPDATE OF g""",db,amo=amo,grant=grant_id)
     if not grant:raise HTTPException(404,"Invitation grant not found")
-    if grant["status"]!="PENDING" or grant["verified_at"]:
-        raise HTTPException(409,"Only an unverified pending invitation can be resent")
+    if grant["status"]!="PENDING":
+        raise HTTPException(409,"Only pending invitations can be resent")
+    accepted=core.one("""SELECT id FROM external_identity_tokens
+        WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL
+        LIMIT 1""",db,amo=amo,grant=grant_id)
+    if accepted:
+        raise HTTPException(409,"Invitation already accepted; use controlled account decisions")
     core.run("""UPDATE external_identity_tokens SET used_at=:at
       WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL""",
       db,at=core.now(),amo=amo,grant=grant_id)
