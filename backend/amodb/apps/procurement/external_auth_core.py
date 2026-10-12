@@ -206,8 +206,10 @@ def revoke_identity_sessions(db: Session, identity_id: str, except_session_id: s
 def require_recent_mfa(db: Session, session, minutes: int = 15):
     credential=one("SELECT totp_confirmed_at FROM external_credentials WHERE identity_id=:id",
                     db,id=session["identity_id"])
-    if not credential or not credential["totp_confirmed_at"]:
-        raise HTTPException(403,"Enroll and verify MFA before this sensitive provider action")
+    passkey=one("""SELECT id FROM external_passkey_credentials
+        WHERE identity_id=:id AND is_active=true LIMIT 1""",db,id=session["identity_id"])
+    if not (credential and credential["totp_confirmed_at"]) and not passkey:
+        raise HTTPException(403,"Enroll and verify MFA or a passkey before this sensitive provider action")
     if not session["mfa_verified_at"] or (now()-aware(session["mfa_verified_at"])).total_seconds()>minutes*60:
         raise HTTPException(403,"Recent second-factor verification required")
 
