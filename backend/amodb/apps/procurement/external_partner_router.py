@@ -486,3 +486,97 @@ def evidence_download(tenant_slug:str,submission_id:str,request:Request,db:Sessi
     return FileResponse(path,media_type=row["content_type"],filename=row["filename"],
         headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
 
+
+class EvidenceDecision(BaseModel):
+    status: Literal["ACCEPTED","REJECTED"]
+    note: str = Field(min_length=8,max_length=2000)
+
+def _quality_context(db:Session,amo_code:str,user):
+    from .external_auth_router import _authorized_quality
+    return _authorized_quality(db,amo_code,user)
+
+@quality_router.get("/partner-change-requests")
+def quality_changes(amo_code:str,db:Session=Depends(get_db),
+                    user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user),
+                    limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
+    amo=_quality_context(db,amo_code,user)
+    return _paged(db,"""SELECT c.id,c.category,c.status,c.proposed_json,c.reason,
+        c.source_version,c.created_at,c.review_note,c.reviewed_at,s.legal_name,
+        s.supplier_code,i.email,i.display_name
+        FROM external_partner_change_requests c
+        JOIN external_tenant_providers p ON p.amo_id=c.amo_id AND p.id=c.tenant_provider_id
+        JOIN procurement_suppliers s ON s.amo_id=p.amo_id AND s.id=p.supplier_id
+        JOIN external_identities i ON i.id=c.identity_id
+        WHERE c.amo_id=:amo ORDER BY c.created_at DESC,c.id DESC""",
+        {"amo":amo},limit,offset)
+
+@quality_router.post("/partner-change-requests/{change_id}/review")
+def review_change(amo_code:str,change_id:str,payload:ReviewDecision,
+                  db:Session=Depends(get_db),
+                  user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user)):
+    from .external_auth_router import _quality_manager
+    _quality_manager(user);amo=_quality_context(db,amo_code,user)
+    change=_row("""SELECT * FROM external_partner_change_requests
+        WHERE amo_id=:amo AND id=:id FOR UPDATE""",db,amo=amo,id=change_id)
+    if not change:raise HTTPException(404,"Partner change request not found")
+    if change["status"] not in {"PENDING","UNDER_REVIEW"}:
+        raise HTTPException(409,"Request is already finalized")
+    auth.run("""UPDATE external_partner_change_requests
+        SET status=:state,review_note=:note,reviewed_by_user_id=:actor,
+        reviewed_at=:at,version=version+1
+        WHERE amo_id=:amo AND id=:id""",db,amo=amo,id=change_id,
+        state=payload.state,note=payload.note,actor=str(user.id),at=auth.now())
+    auth.run("""INSERT INTO external_partner_notifications
+       (id,amo_id,tenant_provider_id,identity_id,category,title,message,resource_kind,resource_id)
+       VALUES(:id,:amo,:provider,:person,'REVIEW',:title,:message,'CHANGE',:resource)""",
+       db,id=auth.new_id(),amo=amo,provider=change["tenant_provider_id"],
+       person=change["identity_id"],title="Provider change review updated",
+       message=f"Your proposal is {payload.state.lower().replace('_',' ')}. Approved master data does not change until its domain owner applies the decision.",
+       resource=change_id)
+    auth.event(db,amo=amo,identity=change["identity_id"],grant=None,
+        actor_user=str(user.id),action="PARTNER_CHANGE_REVIEWED",
+        details={"proposal_id":change_id,"status":payload.state,"reason":payload.note})
+    db.commit()
+    return {"status":payload.state,"applied_to_supplier":False}
+
+@quality_router.get("/partner-evidence")
+def quality_evidence(amo_code:str,db:Session=Depends(get_db),
+                     user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user),
+                     limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
+    amo=_quality_context(db,amo_code,user)
+    return _paged(db,"""SELECT e.id,e.evidence_type,e.filename,e.status,e.related_kind,
+        e.related_id,e.created_at,e.review_note,e.sha256,e.size_bytes,
+        s.legal_name,s.supplier_code,i.email
+        FROM external_partner_evidence_submissions e
+        JOIN external_tenant_providers p ON p.amo_id=e.amo_id AND p.id=e.tenant_provider_id
+        JOIN procurement_suppliers s ON s.amo_id=p.amo_id AND s.id=p.supplier_id
+        JOIN external_identities i ON i.id=e.identity_id
+        WHERE e.amo_id=:amo ORDER BY e.created_at DESC,e.id DESC""",{"amo":amo},limit,offset)
+
+@quality_router.post("/partner-evidence/{submission_id}/review")
+def quality_review_evidence(amo_code:str,submission_id:str,payload:EvidenceDecision,
+                            db:Session=Depends(get_db),
+                            user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user)):
+    from .external_auth_router import _quality_manager
+    _quality_manager(user);amo=_quality_context(db,amo_code,user)
+    evidence=_row("""SELECT * FROM external_partner_evidence_submissions
+        WHERE amo_id=:amo AND id=:id FOR UPDATE""",db,amo=amo,id=submission_id)
+    if not evidence:raise HTTPException(404,"Evidence submission not found")
+    if evidence["status"]!="PENDING_REVIEW":
+        raise HTTPException(409,"Evidence has already been reviewed")
+    auth.run("""UPDATE external_partner_evidence_submissions
+        SET status=:state,review_note=:note,reviewed_by_user_id=:actor,reviewed_at=:at
+        WHERE amo_id=:amo AND id=:id""",db,amo=amo,id=submission_id,
+        state=payload.status,note=payload.note,actor=str(user.id),at=auth.now())
+    auth.run("""INSERT INTO external_partner_notifications
+       (id,amo_id,tenant_provider_id,identity_id,category,title,message,resource_kind,resource_id)
+       VALUES(:id,:amo,:provider,:person,'EVIDENCE',:title,:message,'EVIDENCE',:resource)""",
+       db,id=auth.new_id(),amo=amo,provider=evidence["tenant_provider_id"],
+       person=evidence["identity_id"],title="Evidence reviewed",
+       message=f"Your submission was {payload.status.lower()}. Formal documentary verification remains within the authoritative QMS review.",
+       resource=submission_id)
+    auth.event(db,amo=amo,identity=evidence["identity_id"],grant=None,
+        actor_user=str(user.id),action="PARTNER_EVIDENCE_REVIEWED",
+        details={"submission_id":submission_id,"status":payload.status})
+    db.commit()
+    return {"status":payload.status,"regulatory_approval":False}
