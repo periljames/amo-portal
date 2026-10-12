@@ -212,8 +212,24 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await prepare.getByLabel("Purpose / records required", { exact: true }).fill("Provide the current authorization and competence evidence for the sampled certifying personnel before fieldwork.");
     await prepare.getByLabel("Linked criterion / requirement", { exact: true }).fill("QMSM 5.4 and approved personnel authorization procedure");
     await prepare.getByLabel("Submission source", { exact: true }).selectOption("UPLOAD");
+    const requestPath = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/audits/${encodeURIComponent(data.realtime_audit_id)}/governed-document-requests`;
+    const creationResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === requestPath,
+    );
     await prepare.getByRole("button", { name: "Create governed request" }).click();
+    const requestCreation = await creationResponsePromise;
+    expect(requestCreation.status()).toBe(201);
+    const governedRequest = await requestCreation.json() as { id: string; status: string };
+    expect(governedRequest.status).toBe("REQUESTED");
     await expect(prepare.getByText("Current authorization and competence evidence", { exact: true })).toBeVisible({ timeout: 30_000 });
+    // A request may never be marked accepted before actual evidence is received.
+    const prematureAcceptance = await page.request.patch(
+      `${requestPath}/${encodeURIComponent(governedRequest.id)}`, {
+        headers: { Authorization: `Bearer ${bearer}` },
+        data: { status: "ACCEPTED", review_note: "Must reject acceptance before auditee submission." },
+      },
+    );
+    expect(prematureAcceptance.status(), await prematureAcceptance.text()).toBe(409);
     await expect(prepare.getByText(/QMSM 5\.4/)).toBeVisible();
 
     await prepare.getByRole("button", { name: "Invite" }).click();
