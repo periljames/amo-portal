@@ -155,6 +155,8 @@ const TechnicalRecordsPages = {
 
 
 const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
+const ExternalProviderPortalPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderPortalPage"));
+const ExternalProviderQualityPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderQualityPage"));
 const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
 const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
 const PlatformUsersPage = lazyDefault(() => import("./pages/platform/PlatformUsersPage"));
@@ -465,6 +467,11 @@ export const AppRouter: React.FC = () => {
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+      {/* External principals are authenticated by a separate HttpOnly cookie,
+          never the staff JWT or employee RequireAuth hierarchy. */}
+      <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
+      <Route path="/maintenance/:amoCode/quality/external-accounts"
+        element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
 
       {/* Platform superuser control plane */}
       <Route
