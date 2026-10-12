@@ -352,6 +352,10 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         CAST(f.severity AS TEXT) severity,f.target_close_date,f.closed_at
         FROM qms_audit_findings f
         WHERE f.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
+        AND (SELECT release.action FROM quality_audit_finding_release_events release
+             WHERE release.amo_id=f.amo_id AND release.audit_id=f.audit_id
+             AND release.finding_id=f.id
+             ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'
         ORDER BY f.created_at DESC,f.id LIMIT :limit OFFSET :offset""").bindparams(
           bindparam("assigned",expanding=True)),params) if read_operations else []
     cars=_rows_compiled(db,text("""SELECT c.id,c.car_number,c.title,c.status,c.due_date,
@@ -359,6 +363,10 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         FROM quality_cars c
         JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
         WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
+        AND (SELECT release.action FROM quality_audit_finding_release_events release
+             WHERE release.amo_id=f.amo_id AND release.audit_id=f.audit_id
+             AND release.finding_id=f.id
+             ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'
         ORDER BY c.due_date NULLS LAST,c.id LIMIT :limit OFFSET :offset""").bindparams(
           bindparam("assigned",expanding=True)),params)
     evidence=_rows_compiled(db,text("""SELECT id,related_id,filename,evidence_type,status
@@ -394,7 +402,11 @@ def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmi
         CAST(f.audit_id AS TEXT) assignment_id FROM quality_cars c
         JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
         WHERE c.amo_id=:amo AND CAST(c.id AS TEXT)=:id
-        AND CAST(f.audit_id AS TEXT) IN :assignments""").bindparams(bindparam("assignments",expanding=True)),
+        AND CAST(f.audit_id AS TEXT) IN :assignments
+        AND (SELECT release.action FROM quality_audit_finding_release_events release
+             WHERE release.amo_id=f.amo_id AND release.audit_id=f.audit_id
+             AND release.finding_id=f.id
+             ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'""").bindparams(bindparam("assignments",expanding=True)),
         {**ctx,"id":car_id,"assignments":sorted(assigned)})
     if len(car)!=1:raise HTTPException(404,"Assigned corrective action not found")
     evidence_reference=None
