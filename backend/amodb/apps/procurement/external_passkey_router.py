@@ -92,6 +92,10 @@ def register_options(payload:RegistrationStart,request:Request,db:Session=Depend
                         db,id=session["identity_id"])
     if not credential or not verify_password(payload.password,credential["password_hash"]):
         raise HTTPException(401,"Password reauthentication required")
+    existing_totp=core.one("""SELECT totp_confirmed_at FROM external_credentials
+        WHERE identity_id=:id""",db,id=session["identity_id"])
+    if existing_totp and existing_totp["totp_confirmed_at"]:
+        core.require_recent_mfa(db,session)
     rp,_=_rp(request)
     ident=core.one("SELECT email,display_name FROM external_identities WHERE id=:id",
                    db,id=session["identity_id"])
