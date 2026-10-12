@@ -1250,7 +1250,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <strong>No governed checklist is available for fieldwork.</strong>
             <p>Return to Prepare, bind or create the controlled checklist, resolve readiness blockers, and issue preparation before continuing.</p>
             <Link to={auditSessionPath(amoCode, auditKey, "prepare")}>Open Prepare</Link>
-          </div>}
+          </div> : null}
         </main>
 
         <aside className="qms-live-audit-focus__summary" aria-label="Fieldwork progress and audit context">
