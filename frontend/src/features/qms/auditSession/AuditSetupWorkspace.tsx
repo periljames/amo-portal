@@ -1508,7 +1508,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <span>Planned end time</span>
                 <input
                   type="time"
-                  min={draft.plannedStartTime || "09:00"}
+                  min={draft.plannedEnd === draft.plannedStart ? (draft.plannedStartTime || "09:00") : "09:00"}
                   max="17:00"
                   step={900}
                   disabled={!canManage}
