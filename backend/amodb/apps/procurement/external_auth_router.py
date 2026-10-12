@@ -357,6 +357,7 @@ def change_password(payload:PasswordChange,request:Request,response:Response,db:
         password_version=password_version+1,changed_at=:at WHERE identity_id=:id""",
         db,hash=get_password_hash(payload.new_password),at=core.now(),id=s["identity_id"])
     core.revoke_identity_sessions(db,s["identity_id"])
+    core.consume_other_reset_tokens(db,s["identity_id"])
     core.context(db,s["amo_id"],s["identity_id"])
     core.event(db,amo=s["amo_id"],identity=s["identity_id"],grant=s["grant_id"],action="PASSWORD_CHANGED",actor_identity=s["identity_id"])
     db.commit();core.cookie(response,None)
@@ -389,6 +390,7 @@ def reset(payload:PasswordReset,response:Response,db:Session=Depends(get_db)):
         db,hash=get_password_hash(payload.password),at=core.now(),identity=t["identity_id"])
     # A reset never removes the verified TOTP requirement.
     core.revoke_identity_sessions(db,t["identity_id"])
+    core.consume_other_reset_tokens(db,t["identity_id"])
     core.context(db,t["amo_id"],t["identity_id"])
     core.event(db,amo=t["amo_id"],identity=t["identity_id"],grant=t["grant_id"],action="PASSWORD_RESET")
     db.commit();core.cookie(response,None)
