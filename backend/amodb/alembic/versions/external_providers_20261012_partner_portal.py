@@ -48,12 +48,13 @@ def upgrade():
 
     op.create_table("external_partner_contract_receipts",*_tenant_columns(),
         sa.Column("contract_id",sa.String(36),nullable=False),
+        sa.Column("supplier_id",sa.Integer(),nullable=False),
         sa.Column("contract_version",sa.Integer(),nullable=False),
         sa.Column("document_revision",sa.String(64)),
         sa.Column("acknowledgement",sa.String(24),nullable=False),
         sa.Column("note",sa.Text()),
-        sa.ForeignKeyConstraint(["amo_id","contract_id"],
-            ["quality_external_provider_contracts.amo_id","quality_external_provider_contracts.id"],ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id","supplier_id","contract_id"],
+            ["quality_external_provider_contracts.amo_id","quality_external_provider_contracts.supplier_id","quality_external_provider_contracts.id"],ondelete="RESTRICT"),
         sa.UniqueConstraint("amo_id","tenant_provider_id","identity_id","contract_id","contract_version",
             name="uq_ext_partner_contract_receipt"),
         sa.CheckConstraint("acknowledgement IN ('RECEIVED','REQUEST_CLARIFICATION')",name="ck_ext_partner_contract_ack"))
