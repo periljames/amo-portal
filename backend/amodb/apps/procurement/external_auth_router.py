@@ -354,8 +354,13 @@ def change_password(payload:PasswordChange,request:Request,response:Response,db:
     credential=core.one("SELECT * FROM external_credentials WHERE identity_id=:id FOR UPDATE",db,id=s["identity_id"])
     if not verify_password(payload.current_password,credential["password_hash"]):
         raise HTTPException(401,"Invalid current credentials")
-    if credential["totp_confirmed_at"] and (not payload.totp_code or not core.totp_valid(credential["totp_secret_encrypted"],payload.totp_code)):
-        raise HTTPException(403,"Verified second factor required")
+    enrolled_passkey=core.one("""SELECT id FROM external_passkey_credentials
+        WHERE identity_id=:identity AND is_active=true LIMIT 1""",db,identity=s["identity_id"])
+    if credential["totp_confirmed_at"]:
+        if not payload.totp_code or not core.totp_valid(credential["totp_secret_encrypted"],payload.totp_code):
+            raise HTTPException(403,"Verified second factor required")
+    elif enrolled_passkey:
+        core.require_recent_mfa(db,s)
     core.password_is_valid(payload.new_password)
     core.run("""UPDATE external_credentials SET password_hash=:hash,
         password_version=password_version+1,changed_at=:at WHERE identity_id=:id""",
@@ -408,6 +413,12 @@ def mfa_enroll(payload:SensitivePassword,request:Request,db:Session=Depends(get_
         raise HTTPException(401,"Reauthentication required")
     if cred["totp_confirmed_at"]:
         raise HTTPException(409,"MFA already enrolled; Quality-assisted recovery required")
+    # A signed-in identity that already owns a passkey must step up before
+    # adding a new authentication method, preventing credential takeover.
+    enrolled_passkey=core.one("""SELECT id FROM external_passkey_credentials
+        WHERE identity_id=:id AND is_active=true LIMIT 1""",db,id=s["identity_id"])
+    if enrolled_passkey:
+        core.require_recent_mfa(db,s)
     raw=base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
     encrypted=core.secret_box().encrypt(raw.encode()).decode()
     core.run("""UPDATE external_credentials SET totp_secret_encrypted=:secret,
