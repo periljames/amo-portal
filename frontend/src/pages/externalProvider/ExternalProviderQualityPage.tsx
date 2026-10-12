@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { apiRequest } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
+import ExternalPartnerQualityReview from "./ExternalPartnerQualityReview";
 import "./external-provider-portal.css";
 
 type Grant = {
@@ -169,6 +170,7 @@ export default function ExternalProviderQualityPage() {
           <button type="button" onClick={()=>setEditing(null)}>Cancel</button>
         </div>
       </section>}
+      <ExternalPartnerQualityReview amoCode={amoCode} manager={manager} />
       <section className="vendor-card">
         <h2>Security event history</h2>
         <div className="vendor-table-wrap"><table className="vendor-table">
