@@ -146,7 +146,6 @@ def _evidence_guard(db: Session, amo_id: str, supplier_id: int, values: dict[str
 
 def _check_references(db: Session, tenant: str, supplier_id: int, kind: str,
                       values: dict[str, Any]) -> None:
-    _check_references(db, tenant, supplier_id, kind, values)
     for field, table, restricted in (
         ("parent_supplier_id", "procurement_suppliers", False),
         ("user_id", "users", False),
@@ -236,6 +235,7 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
     values = _clean(kind, dict(payload.fields), creation=True)
     _site_guard(db, tenant, supplier_id, values)
     _evidence_guard(db, tenant, supplier_id, values)
+    _check_references(db, tenant, supplier_id, kind, values)
     record_id = str(uuid4())
     columns = ["id", "amo_id", "supplier_id", *values]
     params = {"id": record_id, "amo_id": tenant, "supplier_id": supplier_id, **values}
@@ -270,6 +270,7 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
         raise HTTPException(422, "No changes supplied.")
     _site_guard(db, tenant, supplier_id, values)
     _evidence_guard(db, tenant, supplier_id, values)
+    _check_references(db, tenant, supplier_id, kind, values)
     assignments = ", ".join(f"{key}=CAST(:{key} AS JSON)" if key=="requested_scopes"
                             else f"{key}=:{key}" for key in values)
     if kind=="certificates":
