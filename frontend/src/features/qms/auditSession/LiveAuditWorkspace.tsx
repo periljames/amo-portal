@@ -573,10 +573,16 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       await refreshFieldwork();
       void outboxQuery.refetch();
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       if (isOfflineQueuedError(error)) {
         setLocalError(null);
         setSyncNotice("Saved securely on this device · pending ordered sync. The authoritative audit state will not change until the server accepts the mutation.");
+        // The durable outbox owns these edits now; they must not remain
+        // mistaken for unsaved in-memory notes when the auditor moves on.
+        const id = variables.item.checklist_item_id;
+        setNoteDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+        setSampleDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+        setAssessmentDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
         void outboxQuery.refetch();
         return;
       }
