@@ -230,6 +230,13 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
       },
     );
     expect(prematureAcceptance.status(), await prematureAcceptance.text()).toBe(409);
+    const legacyBypass = await page.request.patch(
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/audits/${encodeURIComponent(data.realtime_audit_id)}/document-requests/${encodeURIComponent(governedRequest.id)}`, {
+        headers: { Authorization: `Bearer ${bearer}` },
+        data: { status: "ACCEPTED", file_ref: "unverified-manual-reference" },
+      },
+    );
+    expect(legacyBypass.status(), await legacyBypass.text()).toBe(409);
     await expect(prepare.getByText(/QMSM 5\.4/)).toBeVisible();
 
     await prepare.getByRole("button", { name: "Invite" }).click();
