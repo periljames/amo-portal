@@ -803,6 +803,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     const auditorNotes = noteDrafts[item.checklist_item_id] ?? item.auditor_notes ?? "";
     const requirementError = responseRequirementError(item, source, response, auditorNotes);
     if (requirementError) {
+      setSelectedId(item.checklist_item_id);
+      setDetailOpen(true);
       setLocalError(requirementError);
       return;
     }
