@@ -203,6 +203,18 @@ def revoke_identity_sessions(db: Session, identity_id: str, except_session_id: s
         total+=result.rowcount
     return total
 
+def consume_other_reset_tokens(db: Session, identity_id: str):
+    """A successful password operation invalidates pending recovery codes from
+    every tenant sharing this identity, respecting FORCE RLS."""
+    tenants=db.execute(text("SELECT id FROM amos")).scalars().all()
+    for tenant_id in tenants:
+        context(db,str(tenant_id),identity_id)
+        run("""UPDATE external_identity_tokens SET used_at=:at
+          WHERE amo_id=:amo AND identity_id=:identity
+          AND kind='RESET' AND used_at IS NULL""",db,
+          at=now(),amo=str(tenant_id),identity=identity_id)
+
+
 def require_recent_mfa(db: Session, session, minutes: int = 15):
     credential=one("SELECT totp_confirmed_at FROM external_credentials WHERE identity_id=:id",
                     db,id=session["identity_id"])
