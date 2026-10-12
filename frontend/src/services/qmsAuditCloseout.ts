@@ -55,7 +55,7 @@ function json(method: string, body: unknown): RequestInit {
 }
 
 export function listAuditReportRevisions(amoCode: string, auditId: string, signal?: AbortSignal) {
-  return apiRequest<{ items: AuditReportRevision[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "reports"));
+  return apiRequest<{ items: AuditReportRevision[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/report-revisions`), { timeoutMs: 15_000, cacheTtlMs: 0, signal }).then((data) => requireAuditContract(data, "reports"));
 }
 
 export function adoptCurrentAuditReport(amoCode: string, auditId: string, reason: string) {
