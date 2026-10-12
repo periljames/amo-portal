@@ -385,7 +385,7 @@ def reset(payload:PasswordReset,response:Response,db:Session=Depends(get_db)):
     core.password_is_valid(payload.password)
     t=core.redeem_token(db,payload.code,"RESET")
     core.run("""UPDATE external_credentials SET password_hash=:hash,password_version=password_version+1,
-        changed_at=:at WHERE identity_id=:identity""",
+        failed_attempts=0,locked_until=NULL,changed_at=:at WHERE identity_id=:identity""",
         db,hash=get_password_hash(payload.password),at=core.now(),identity=t["identity_id"])
     # A reset never removes the verified TOTP requirement.
     core.revoke_identity_sessions(db,t["identity_id"])
@@ -629,6 +629,19 @@ def quality_unlock(amo_code:str,identity_id:str,payload:Decision,db:Session=Depe
     if not core.one("""SELECT id FROM external_tenant_grants
         WHERE amo_id=:amo AND identity_id=:id""",db,amo=amo,id=identity_id):
         raise HTTPException(404,"Identity not associated with this tenant")
+    # The identity credential is global. Tenant Quality cannot clear a
+    # cross-tenant login lock; the person must use verified email recovery.
+    linked=[]
+    for tenant_id in db.execute(__import__("sqlalchemy").text("SELECT id FROM amos")).scalars().all():
+        core.context(db,str(tenant_id),identity_id)
+        result=core.one("""SELECT id FROM external_tenant_grants
+            WHERE amo_id=:amo AND identity_id=:person LIMIT 1""",
+            db,amo=str(tenant_id),person=identity_id)
+        if result:linked.append(str(tenant_id))
+        if len(linked)>1:break
+    core.context(db,amo,str(user.id))
+    if len(linked)>1:
+        raise HTTPException(409,"Shared identity login lock requires verified account recovery; tenant Quality cannot unlock other AMOs")
     core.run("""UPDATE external_credentials SET failed_attempts=0,locked_until=NULL
         WHERE identity_id=:id""",db,id=identity_id)
     core.event(db,amo=amo,identity=identity_id,grant=None,action="LOGIN_LOCK_CLEARED",
