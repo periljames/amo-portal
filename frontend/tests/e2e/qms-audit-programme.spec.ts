@@ -476,6 +476,10 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
+  // This scenario intentionally schedules 2026-08-15. Pin its clock to the
+  // programme's planning period so a historical fixture does not fail date validation
+  // before the conflict and governed-override behavior can be exercised.
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00Z") });
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
