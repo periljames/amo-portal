@@ -559,7 +559,10 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
     return entry;
   }
   const storedEntry = await protectOutboxEntry(entry);
-  await putRecord(OUTBOX_STORE, storedEntry);
+  if (!(await putRecord(OUTBOX_STORE, storedEntry))) {
+    throw new Error("Durable browser storage rejected the audit change. This change is not saved; check browser storage permissions.");
+  }
+  // A successful transaction commit is required before showing "saved on device".
   memoryOutbox.set(entry.id, entry);
   notifyOfflineStateChanged();
   void requestBackgroundReplay();
