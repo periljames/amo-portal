@@ -86,6 +86,7 @@ def upgrade():
         sa.Column("token_hash",sa.String(64),nullable=False,unique=True),
         sa.Column("expires_at",sa.DateTime(timezone=True),nullable=False),
         sa.Column("used_at",sa.DateTime(timezone=True)),
+        sa.Column("revoked_at",sa.DateTime(timezone=True)),
         sa.Column("created_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["amo_id","grant_id"],["external_tenant_grants.amo_id","external_tenant_grants.id"],name="fk_ext_token_grant"),
         sa.CheckConstraint("kind IN ('INVITE','RESET','VERIFY')",name="ck_ext_token_kind"))
