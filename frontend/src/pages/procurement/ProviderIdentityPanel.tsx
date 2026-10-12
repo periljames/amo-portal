@@ -70,7 +70,7 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
   function switchKind(next:Kind){setKind(next);setEditing(null);setForm({});}
   function edit(row:RecordRow){
     setEditing(row);
-    setForm(Object.fromEntries(FIELDS[kind].map(({key})=>[key,String(row[key]??"")])));
+    setForm(Object.fromEntries(FIELDS[kind].map(({key})=>[key,Array.isArray(row[key]) ? (row[key] as string[]).join(", ") : String(row[key]??"").toLowerCase() === "true" ? "true" : String(row[key]??"").toLowerCase() === "false" ? "false" : String(row[key]??"")])));
   }
   async function submit(event:React.FormEvent<HTMLFormElement>){
     event.preventDefault();setBusy(true);setError("");
@@ -83,7 +83,7 @@ export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
     if(typeof fields.approval_scope_id==="string")fields.approval_scope_id=Number(fields.approval_scope_id);
     if(typeof fields.requested_scopes==="string")fields.requested_scopes=fields.requested_scopes.split(",").map(v=>v.trim()).filter(Boolean);
     if(editing&&fields.requested_scopes===null)fields.requested_scopes=[];
-    if(typeof fields.is_primary==="string")fields.is_primary=fields.is_primary==="true";
+    if(typeof fields.is_primary==="string")fields.is_primary=fields.is_primary.toLowerCase()==="true";
     try{
       await apiRequest(editing?`${endpoint}/${encodeURIComponent(editing.id)}`:endpoint,{
         method:editing?"PATCH":"POST",
