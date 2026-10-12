@@ -328,8 +328,8 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     assignments=_allowed(user,"assignments")
     empty={"items":[],"limit":limit,"offset":offset,"has_more":False}
     if not assignments:
-        return {"notices":empty,"document_requests":empty,"cars":empty,
-                "accepted_evidence":empty,"submission_policy":"No assigned audit work"}
+        return {"notices":empty,"document_requests":empty,"findings":empty,
+                "cars":empty,"accepted_evidence":empty,"submission_policy":"No assigned audit work"}
     params={**ctx,**_page(limit,offset),"assigned":sorted(assignments)}
     read_operations=("task.read" in capabilities and user["portal_state"]=="ACTIVE"
         and not user["restrict_new_work"] and user["supplier_active"]
@@ -348,6 +348,12 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         WHERE r.amo_id=:amo AND CAST(r.audit_id AS TEXT) IN :assigned
         ORDER BY r.due_date NULLS LAST,r.id LIMIT :limit OFFSET :offset""").bindparams(
           bindparam("assigned",expanding=True)),params) if read_operations else []
+    findings=_rows_compiled(db,text("""SELECT f.id,f.finding_ref,f.description,f.requirement_ref,
+        CAST(f.severity AS TEXT) severity,f.target_close_date,f.closed_at
+        FROM qms_audit_findings f
+        WHERE f.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
+        ORDER BY f.created_at DESC,f.id LIMIT :limit OFFSET :offset""").bindparams(
+          bindparam("assigned",expanding=True)),params) if read_operations else []
     cars=_rows_compiled(db,text("""SELECT c.id,c.car_number,c.title,c.status,c.due_date,
         c.root_cause_status,c.capa_status,CAST(f.audit_id AS TEXT) assignment_id
         FROM quality_cars c
@@ -363,6 +369,7 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
           bindparam("assigned",expanding=True)),params)
     return {"notices":{"items":notices,"limit":limit,"offset":offset},
         "document_requests":{"items":requests,"limit":limit,"offset":offset},
+        "findings":{"items":findings,"limit":limit,"offset":offset},
         "cars":{"items":cars,"limit":limit,"offset":offset},
         "accepted_evidence":{"items":evidence,"limit":limit,"offset":offset},
         "submission_policy":"CARs are submitted through the authoritative Quality response handler; supporting uploads require Quality review."}
