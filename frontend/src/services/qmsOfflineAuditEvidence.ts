@@ -247,6 +247,33 @@ async function scopedRows(
   }
 }
 
+/** Groups of locally encrypted evidence; metadata only, never file bytes. */
+export type PendingAuditEvidenceGroup = { amoCode: string; auditId: string; count: number; conflicts: number };
+
+export async function listPendingAuditEvidenceGroups(): Promise<PendingAuditEvidenceGroup[]> {
+  const scope = currentOfflineScope();
+  const db = await openDb();
+  try {
+    const tx = db.transaction(ENTRY_STORE, "readonly");
+    const rows = await requestResult(
+      tx.objectStore(ENTRY_STORE).index("scope_audit").getAll(),
+    ) as StoredEntry[];
+    await transactionDone(tx);
+    const groups = new Map<string, PendingAuditEvidenceGroup>();
+    for (const row of rows) {
+      if (row.scope !== scope) continue;
+      const key = `${row.amoCode}:${row.auditId}`;
+      const value = groups.get(key) || { amoCode: row.amoCode, auditId: row.auditId, count: 0, conflicts: 0 };
+      value.count += 1;
+      if (row.state === "CONFLICT" || row.state === "CORRUPT") value.conflicts += 1;
+      groups.set(key, value);
+    }
+    return [...groups.values()];
+  } finally {
+    db.close();
+  }
+}
+
 export async function enqueueOfflineAuditEvidence(input: {
   amoCode: string;
   auditId: string;
@@ -366,7 +393,12 @@ export async function replayOfflineAuditEvidence(
 
   for (let row of rows) {
     if (currentOfflineScope() !== row.scope) break;
-    if (row.state === "CORRUPT") { failed += 1; continue; }
+    // A rejected or corrupt file requires a deliberate auditor action;
+    // never silently retry a governance conflict on every reconnect.
+    if (row.state === "CORRUPT" || row.state === "CONFLICT") {
+      conflicts += 1;
+      continue;
+    }
 
     const hasEarlierChecklistMutation = pendingChecklistMutations.some((entry) =>
       entry.entityId === row.checklistItemId
