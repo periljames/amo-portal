@@ -216,11 +216,11 @@ def upgrade():
             sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"))
     if op.get_bind().dialect.name == "postgresql":
         op.execute(sa.text("""CREATE FUNCTION external_provider_prevent_event_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $
+            RETURNS trigger LANGUAGE plpgsql AS $extprov$
             BEGIN
                 RAISE EXCEPTION 'External provider event provenance is immutable';
             END;
-            $"""))
+            $extprov$"""))
         op.execute(sa.text("""CREATE TRIGGER trg_external_provider_events_immutable
             BEFORE UPDATE OR DELETE ON external_provider_change_events
             FOR EACH ROW EXECUTE FUNCTION external_provider_prevent_event_mutation()"""))
