@@ -21,6 +21,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
+from amodb.security import get_current_active_user
 from amodb import storage
 from . import external_auth_core as auth
 
@@ -168,6 +169,8 @@ def organization(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
        WHERE amo_id=:amo AND supplier_id=:supplier""",db,**ctx)
     roles=_rows("""SELECT role_code,notes FROM external_provider_roles
        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY role_code LIMIT 40""",db,**ctx)
+    if "contract.read" not in set(user["capabilities_json"] or []):
+        supplier.pop("payment_terms",None)
     return {"supplier":supplier,"profile":profile,"roles":roles,
             "change_policy":"PROPOSE_THEN_QUALITY_REVIEW",
             "banking_change_policy":"NO_DIRECT_BANK_DETAILS"}
@@ -497,7 +500,7 @@ def _quality_context(db:Session,amo_code:str,user):
 
 @quality_router.get("/partner-change-requests")
 def quality_changes(amo_code:str,db:Session=Depends(get_db),
-                    user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user),
+                    user=Depends(get_current_active_user),
                     limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
     amo=_quality_context(db,amo_code,user)
     return _paged(db,"""SELECT c.id,c.category,c.status,c.proposed_json,c.reason,
@@ -513,7 +516,7 @@ def quality_changes(amo_code:str,db:Session=Depends(get_db),
 @quality_router.post("/partner-change-requests/{change_id}/review")
 def review_change(amo_code:str,change_id:str,payload:ReviewDecision,
                   db:Session=Depends(get_db),
-                  user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user)):
+                  user=Depends(get_current_active_user)):
     from .external_auth_router import _quality_manager
     _quality_manager(user);amo=_quality_context(db,amo_code,user)
     change=_row("""SELECT * FROM external_partner_change_requests
@@ -541,7 +544,7 @@ def review_change(amo_code:str,change_id:str,payload:ReviewDecision,
 
 @quality_router.get("/partner-evidence")
 def quality_evidence(amo_code:str,db:Session=Depends(get_db),
-                     user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user),
+                     user=Depends(get_current_active_user),
                      limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
     amo=_quality_context(db,amo_code,user)
     return _paged(db,"""SELECT e.id,e.evidence_type,e.filename,e.status,e.related_kind,
@@ -556,7 +559,7 @@ def quality_evidence(amo_code:str,db:Session=Depends(get_db),
 @quality_router.post("/partner-evidence/{submission_id}/review")
 def quality_review_evidence(amo_code:str,submission_id:str,payload:EvidenceDecision,
                             db:Session=Depends(get_db),
-                            user=Depends(__import__("amodb.apps.accounts.dependencies",fromlist=["get_current_active_user"]).get_current_active_user)):
+                            user=Depends(get_current_active_user)):
     from .external_auth_router import _quality_manager
     _quality_manager(user);amo=_quality_context(db,amo_code,user)
     evidence=_row("""SELECT * FROM external_partner_evidence_submissions
