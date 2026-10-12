@@ -323,7 +323,15 @@ def rotate(request:Request,response:Response,db:Session=Depends(get_db)):
 
 @router.post("/logout")
 def logout(request:Request,response:Response,db:Session=Depends(get_db)):
-    s=core.active_session(db,request,write=True)
+    try:
+        s=core.active_session(db,request,write=True)
+    except HTTPException as exc:
+        # A revoked/expired cookie has no authority, but its holder must be
+        # able to clear it even after Quality has terminated access.
+        if exc.status_code not in {401,403}:
+            raise
+        core.cookie(response,None)
+        return {"status":"SIGNED_OUT"}
     core.run("UPDATE external_sessions SET revoked_at=:at WHERE id=:id",db,at=core.now(),id=s["id"])
     core.event(db,amo=s["amo_id"],identity=s["identity_id"],grant=s["grant_id"],action="LOGOUT",actor_identity=s["identity_id"])
     db.commit();core.cookie(response,None)
