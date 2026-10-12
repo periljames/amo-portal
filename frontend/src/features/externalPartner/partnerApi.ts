@@ -10,6 +10,7 @@ export type Summary = {
   expiring_certificates: Array<{ certificate_type: string; certificate_number: string; valid_until: string; verification_state: string }>;
   expiring_contracts: Array<{ id: string; title: string; contract_number: string; expires_on: string; status: string }>;
   open_change_requests: number; unread_notifications: number;
+  outstanding_tasks: {rfqs:number;purchase_orders:number;audit_requests:number;cars:number};
   actions: Array<{ kind: string; title: string; due: string; to: string }>;
   operational_sections_available: boolean;
 };
