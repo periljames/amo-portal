@@ -17,7 +17,7 @@
 - [ ] Exact vendor register and contracts tracker were not available. Source-specific header and contract column mapping **cannot be confirmed** without the real workbooks.
 - [ ] Runtime migration upgrade/downgrade, full Alembic DAG-head comparison and production schema compatibility are Phase 10 verification obligations.
 - [ ] Full API/browser access, route order and import reconciliation on real source workbooks remain unexecuted by Phase 1–9 policy.
-- [ ] No pytest, Vitest, Playwright, lint, typecheck, builds, CI, or benchmark runs performed.
+- [ ] No test, lint, typecheck, build, benchmark or CI jobs were manually invoked during Phase 1. GitHub Actions did execute automatically for PR #560, exposing four migration failures; their fixes are committed but the newest CI run is not yet verified green.
 
 Phase 1 code is committed; the source-dependent acceptance and testing are **not** claimed to pass.
 
@@ -29,3 +29,6 @@ Phase 1 code is committed; the source-dependent acceptance and testing are **not
 - Corrected `ProviderIdentityPanel.tsx`: exposes site primary location and allows clearing nullable fields during controlled edits.
 - No additional CI, migrations or test suites were manually launched as part of this remediation. These fixes address confirmed code defects; **green CI and 100% Phase 1 acceptance are not claimed.**
 - The exact vendor register and Contracts & Agreements Tracker workbooks are still unverified. Source-specific import/header reconciliation remains an evidence dependency, not an assumed pass.
+
+- Upstream reconciliation: current `main` commit `93537611f6edb50268d27875a1682587be6a7487` merged into PR #560 as `da15f94b342d9d2443f045980baa809e99a5d20e`. Comparison after merge confirmed 0 commits behind and exactly the same 15 Phase 1 file paths.
+- Repaired import idempotency after failed transactions: restore transaction-local PostgreSQL tenant context before retry lookup; RLS otherwise hides the already-staged import.
