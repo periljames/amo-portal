@@ -139,16 +139,47 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
         FROM external_provider_certificates
         WHERE amo_id=:amo AND supplier_id=:supplier AND valid_until<=:cutoff
         ORDER BY valid_until ASC LIMIT 8""",db,**ctx,cutoff=cutoff)
-    contracts=_rows("""SELECT id,contract_number,title,expires_on,status
+    assigned_contracts=sorted(_allowed(user,"contracts"))
+    contracts=_rows_compiled(db,text("""SELECT id,contract_number,title,expires_on,status
         FROM quality_external_provider_contracts
         WHERE amo_id=:amo AND supplier_id=:supplier AND expires_on<=:cutoff
-        ORDER BY expires_on ASC LIMIT 8""",db,**ctx,cutoff=cutoff)
+        AND CAST(id AS TEXT) IN :ids
+        ORDER BY expires_on ASC LIMIT 8""").bindparams(bindparam("ids",expanding=True)),
+        {**ctx,"cutoff":cutoff,"ids":assigned_contracts}) if assigned_contracts else []
     pending=_row("""SELECT count(*) proposals FROM external_partner_change_requests
         WHERE amo_id=:amo AND tenant_provider_id=:provider AND status IN ('PENDING','UNDER_REVIEW')""",db,**ctx)
     unread=_row("""SELECT count(*) unread FROM external_partner_notifications
         WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person AND read_at IS NULL""",db,**ctx)
+    can_view_tasks=("task.read" in set(user["capabilities_json"] or [])
+       and user["portal_state"]=="ACTIVE" and not user["restrict_new_work"]
+       and user["supplier_active"] and not user["import_pending"]
+       and str(user["supplier_lifecycle"]).split(".")[-1] in {"APPROVED","CONDITIONALLY_APPROVED"})
+    counts={"rfqs":0,"purchase_orders":0,"audit_requests":0,"cars":0}
+    if can_view_tasks:
+        counts["rfqs"]=int(_row("""SELECT count(*) n FROM procurement_rfq_suppliers t
+            JOIN procurement_rfqs r ON r.id=t.rfq_id AND r.amo_id=:amo
+            WHERE t.supplier_id=:supplier AND r.status NOT IN ('DRAFT','CANCELLED')
+            AND t.responded_at IS NULL AND t.declined_at IS NULL""",db,**ctx)["n"])
+        counts["purchase_orders"]=int(_row("""SELECT count(*) n FROM procurement_purchase_orders
+            WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
+            AND acknowledged_at IS NULL""",db,**ctx)["n"])
+        assigned=sorted(_allowed(user,"assignments"))
+        if assigned:
+            counts["audit_requests"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM
+                quality_audit_document_requests WHERE amo_id=:amo
+                AND CAST(audit_id AS TEXT) IN :assigned AND status='REQUESTED'""").bindparams(
+                bindparam("assigned",expanding=True)),{**ctx,"assigned":assigned})[0]["n"])
+            counts["cars"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM quality_cars c
+                JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
+                WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
+                AND c.closed_at IS NULL
+                AND (SELECT release.action FROM quality_audit_finding_release_events release
+                     WHERE release.amo_id=f.amo_id AND release.finding_id=f.id
+                     AND release.audit_id=f.audit_id
+                     ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'""").bindparams(
+                bindparam("assigned",expanding=True)),{**ctx,"assigned":assigned})[0]["n"])
     return {"supplier":supplier,"expiring_certificates":certificates,
-            "expiring_contracts":[c for c in contracts if str(c["id"]) in _allowed(user,"contracts")],
+            "expiring_contracts":contracts,"outstanding_tasks":counts,
             "open_change_requests":int(pending["proposals"] or 0),
             "unread_notifications":int(unread["unread"] or 0),
             "actions":[{"kind":"CERTIFICATE_RENEWAL","title":f"Renew {c['certificate_type']}",
