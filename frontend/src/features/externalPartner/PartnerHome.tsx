@@ -48,11 +48,13 @@ export default function PartnerHome({tenant}:PartnerProps){
             </Link>):<p className="partner-empty">No assigned agreements currently nearing expiry.</p>}
         </Section>
       </div>
-      <Section title="Open partner workflows" description="Operational work is shown only when assigned in the current Quality-approved grant.">
+      <Section title="Outstanding assigned work" description="Counts are calculated in the authoritative Procurement and QMS registers for your approved assignment, not static dashboard figures.">
         <div className="partner-shortcuts">
-          <Link to={`/partner/${tenant}/quality`}>Assigned audits, requests & CARs</Link>
-          <Link to={`/partner/${tenant}/procurement`}>RFQs, POs & delivery commitments</Link>
-          <Link to={`/partner/${tenant}/activity`}>Notifications and attributable history</Link>
+          <Link to={`/partner/${tenant}/procurement`}>RFQs awaiting quotation <strong>{data.outstanding_tasks.rfqs}</strong></Link>
+          <Link to={`/partner/${tenant}/procurement`}>PO acknowledgements pending <strong>{data.outstanding_tasks.purchase_orders}</strong></Link>
+          <Link to={`/partner/${tenant}/quality`}>Audit document requests <strong>{data.outstanding_tasks.audit_requests}</strong></Link>
+          <Link to={`/partner/${tenant}/quality`}>Released open CARs <strong>{data.outstanding_tasks.cars}</strong></Link>
+          <Link to={`/partner/${tenant}/activity`}>Notifications & attributable history →</Link>
         </div>
       </Section>
     </>}
