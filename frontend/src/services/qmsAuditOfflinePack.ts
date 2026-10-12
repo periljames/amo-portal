@@ -197,10 +197,46 @@ function governedOfflineReferenceCount(pack: AuditOfflinePack): number {
   ).size;
 }
 
+/** Audit preparation requires working offline SPA chunks, not only cached JSON. */
+export async function verifyBrowserAuditShell(): Promise<number> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    throw new Error("This browser cannot retain the audit application for offline use.");
+  }
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    throw new Error("Secure HTTPS is required for browser offline fieldwork.");
+  }
+  await navigator.serviceWorker.ready;
+  const controller = navigator.serviceWorker.controller;
+  if (!controller) {
+    throw new Error("The offline service worker is not controlling this page yet. Reload once while online and retry.");
+  }
+  return new Promise<number>((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timeout = window.setTimeout(() => {
+      channel.port1.close();
+      reject(new Error("Timed out while caching the audit page. Stay connected and retry."));
+    }, 90_000);
+    channel.port1.onmessage = (event: MessageEvent<{ ok?: boolean; assets?: number; reason?: string }>) => {
+      window.clearTimeout(timeout);
+      channel.port1.close();
+      if (event.data?.ok && Number(event.data.assets) > 0) resolve(Number(event.data.assets));
+      else reject(new Error(event.data?.reason || "The offline audit page could not be prepared."));
+    };
+    controller.postMessage({ type: "PREPARE_AUDIT_SHELL" }, [channel.port2]);
+  });
+}
+
+/** Best effort: persistent storage is browser-policy-controlled, not guaranteed. */
+export async function requestAuditStoragePersistence(): Promise<boolean | null> {
+  if (typeof navigator === "undefined" || !navigator.storage?.persist) return null;
+  try { return await navigator.storage.persist(); } catch { return false; }
+}
+
 export async function prepareAuditOfflinePack(
   amoCode: string,
   auditId: string,
 ): Promise<{ pack: AuditOfflinePack; status: AuditOfflinePackStatus }> {
+  await verifyBrowserAuditShell();
   const pack = await fetchAuditOfflinePack(amoCode, auditId);
   const scope = currentOfflineScope();
   if (scope.startsWith("anonymous:")) throw new Error("Sign in before storing a controlled audit package on this device.");
