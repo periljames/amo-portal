@@ -1,0 +1,103 @@
+/** Browser-only, authenticated QMS offline synchronization.
+ *
+ * The service worker cannot access the session credentials or encryption keys.
+ * Once a portal tab is reopened/authenticated, replay the encrypted outbox
+ * first, then evidence. Never report "synced" for device-only changes.
+ */
+import { getToken, getTokenSecondsRemaining } from "./auth";
+import { currentOfflineScope, onOfflineStateChanged, replayOfflineMutations } from "./offlinePersistence";
+import { onOfflineAuditEvidenceChanged, listPendingAuditEvidenceGroups, replayOfflineAuditEvidence } from "./qmsOfflineAuditEvidence";
+import { getPortalConnectivity, isPortalReady, onPortalConnectivityChange } from "./portalConnectivity";
+
+const PERIODIC_RETRY_MS = 30_000;
+let inFlight: Promise<void> | null = null;
+let scheduled: number | null = null;
+let lastAttemptAt = 0;
+
+function canSynchronize(): boolean {
+  const remaining = getTokenSecondsRemaining();
+  return isPortalReady() && Boolean(getToken()) && (remaining === null || remaining > 0)
+    && (typeof navigator === "undefined" || navigator.onLine !== false);
+}
+
+async function syncAuditQueues(): Promise<void> {
+  if (!canSynchronize()) return;
+  const scope = currentOfflineScope();
+  await replayOfflineMutations();
+  if (!canSynchronize() || scope !== currentOfflineScope()) return;
+  const groups = await listPendingAuditEvidenceGroups();
+  for (const group of groups) {
+    if (!canSynchronize() || scope !== currentOfflineScope()) break;
+    if (group.count <= group.conflicts) continue;
+    // Browser Web Locks make competing tabs serialize evidence uploads.
+    // In browsers without Web Locks, server idempotency still guards retries.
+    const upload = async () => {
+      const remaining = await listPendingAuditEvidenceGroups();
+      if (!remaining.some((item) => item.amoCode === group.amoCode && item.auditId === group.auditId
+        && item.count > item.conflicts)) return;
+      await replayOfflineAuditEvidence(group.amoCode, group.auditId);
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.locks) {
+        await navigator.locks.request(
+          `amo:qms:evidence:${scope}:${group.auditId}`,
+          { ifAvailable: true },
+          async (lock) => { if (lock) await upload(); },
+        );
+      } else {
+        await upload();
+      }
+    } catch {
+      // Encrypted records remain on this device. Retry on a subsequent
+      // connectivity check; visible per-file failure/conflict stays intact.
+    }
+  }
+}
+
+/** Visible sessions sync on recovery, focus, tab reopen, or timed retry. */
+export function requestAuditOfflineSync(force = false): void {
+  if (typeof window === "undefined" || !canSynchronize()) return;
+  if (inFlight) return;
+  const now = Date.now();
+  if (!force && now - lastAttemptAt < 5_000) return;
+  if (scheduled !== null) window.clearTimeout(scheduled);
+  scheduled = window.setTimeout(() => {
+    scheduled = null;
+    if (!canSynchronize() || inFlight) return;
+    lastAttemptAt = Date.now();
+    inFlight = syncAuditQueues()
+      .catch(() => undefined)
+      .finally(() => { inFlight = null; });
+  }, force ? 0 : 300);
+}
+
+export function startAuditOfflineSync(): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const recheck = () => requestAuditOfflineSync();
+  const ready = onPortalConnectivityChange((connection) => {
+    if (connection.state === "ONLINE") requestAuditOfflineSync(true);
+  });
+  const device = onOfflineStateChanged(recheck);
+  const evidence = onOfflineAuditEvidenceChanged(recheck);
+  const visible = () => { if (document.visibilityState === "visible") requestAuditOfflineSync(true); };
+  const online = () => requestAuditOfflineSync(true);
+  const period = window.setInterval(() => {
+    if (document.visibilityState === "visible" && getPortalConnectivity().state === "ONLINE") {
+      requestAuditOfflineSync(true);
+    }
+  }, PERIODIC_RETRY_MS);
+  document.addEventListener("visibilitychange", visible);
+  window.addEventListener("focus", online);
+  window.addEventListener("online", online);
+  requestAuditOfflineSync();
+  return () => {
+    ready();
+    device();
+    evidence();
+    window.clearInterval(period);
+    if (scheduled !== null) window.clearTimeout(scheduled);
+    document.removeEventListener("visibilitychange", visible);
+    window.removeEventListener("focus", online);
+    window.removeEventListener("online", online);
+  };
+}
