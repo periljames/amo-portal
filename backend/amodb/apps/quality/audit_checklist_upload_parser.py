@@ -91,12 +91,17 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
-    from pypdf import PdfReader
+    import fitz
 
-    reader = PdfReader(io.BytesIO(data))
-    if reader.is_encrypted:
+    try:
+        reader = fitz.open(stream=data, filetype="pdf")
+    except (fitz.FileDataError, ValueError) as exc:
+        raise ValueError("The PDF is invalid or cannot be opened.") from exc
+    if reader.needs_pass:
+        reader.close()
         raise ValueError("Password-protected PDFs cannot be imported. Provide an accessible controlled copy.")
-    if len(reader.pages) > 120:
+    if len(reader) > 120:
+        reader.close()
         raise ValueError("The PDF has too many pages for checklist drafting.")
     items: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -105,7 +110,7 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     pending: dict[str, Any] | None = None
     # The assessment-column suffix is evidence for the source vocabulary.
     # It is not safe to map abbreviated answers without this explicit header.
-    header = re.compile(r"^(.*?)\\s+S\\s+U\\s+N/C\\s+N/A\\s*$", re.IGNORECASE)
+    header = re.compile(r"^(.*?)\s+S\s+U\s+N/C\s+N/A\s*$", re.IGNORECASE)
     ignore_prefix = (
         "sl/qms/", "page ", "form №:", "form no", "revision:",
         "issued ", "name & signature", "name and signature",
@@ -119,12 +124,26 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
             items.append(pending)
             pending = None
 
-    for page_number, page in enumerate(reader.pages, 1):
-        content = page.extract_text() or ""
+    for page_number, page in enumerate(reader, 1):
+        content = page.get_text("text") or ""
         if not content.strip():
             warnings.append(f"Page {page_number}: no selectable text; scanned-page OCR is not performed.")
             continue
-        lines = [re.sub(r"\\s+", " ", raw).strip() for raw in content.splitlines()]
+        raw_lines = [re.sub(r"\s+", " ", raw).strip() for raw in content.splitlines()]
+        lines: list[str] = []
+        cursor = 0
+        while cursor < len(raw_lines):
+            token = raw_lines[cursor]
+            if [part.upper() for part in raw_lines[cursor:cursor + 4]] == ["S", "U", "N/C", "N/A"]:
+                lines.append("S U N/C N/A")
+                cursor += 4
+                continue
+            if re.fullmatch(r"\d{1,4}[.)]", token) and cursor + 1 < len(raw_lines):
+                lines.append(token + " " + raw_lines[cursor + 1])
+                cursor += 2
+                continue
+            lines.append(token)
+            cursor += 1
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -154,7 +173,7 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 if last >= len(lines) or lines[last].upper() != "S U N/C N/A":
                     continue
                 fragments = lines[i:last]
-                if all(re.fullmatch(r"[A-Z0-9(/][A-Z0-9 /()&,.:\\-]{2,130}", part) for part in fragments):
+                if all(part and not _NUMBERED.match(part) and not part.startswith(("*", "•")) for part in fragments):
                     flush()
                     section = " ".join(fragments)[:128]
                     paper_scheme = True
@@ -177,9 +196,10 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 # Preserve wrapped audit criteria, including continuations
                 # across page boundaries, instead of dropping their text.
                 proposed = f"{pending['prompt']} {line}"
-                pending["prompt"] = re.sub(r"\\s+", " ", proposed)[:8000]
+                pending["prompt"] = re.sub(r"\s+", " ", proposed)[:8000]
             i += 1
     flush()
+    reader.close()
     return items, warnings
 
 def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
