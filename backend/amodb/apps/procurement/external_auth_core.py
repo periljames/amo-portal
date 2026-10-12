@@ -157,13 +157,17 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     row=one("""SELECT s.*, g.status grant_state, g.role_code, g.capabilities_json,
           g.object_scope_json, g.tenant_provider_id, p.portal_state, p.restrict_new_work,
           p.organization_id, p.supplier_id, m.status membership_state,
-          i.status identity_state, i.verified_at, c.locked_until
+          i.status identity_state, i.verified_at, c.locked_until,
+          supplier.status supplier_lifecycle, supplier.is_active supplier_active,
+          supplier.external_import_pending_activation import_pending
         FROM external_sessions s
         JOIN external_tenant_grants g ON g.id=s.grant_id AND g.amo_id=s.amo_id
         JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=s.amo_id
         JOIN external_organization_memberships m ON m.id=g.membership_id AND m.identity_id=s.identity_id AND m.organization_id=p.organization_id
         JOIN external_identities i ON i.id=s.identity_id
         JOIN external_credentials c ON c.identity_id=i.id
+        JOIN procurement_suppliers supplier
+          ON supplier.amo_id=p.amo_id AND supplier.id=p.supplier_id
         WHERE s.amo_id=:amo AND s.session_hash=:hash""",db,amo=tenant_hint,hash=digest(raw))
     if not row:
         raise HTTPException(401,"Provider session invalid")
@@ -176,8 +180,21 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     caps=set(row["capabilities_json"] or [])
     if required and (required not in caps or required not in CAPABILITIES):
         raise HTTPException(403,"Provider capability not granted")
-    if row["restrict_new_work"] and required not in {None,"capa.respond","profile.read","sessions.manage"}:
-        raise HTTPException(403,"Provider restricted to existing corrective actions")
+    # A portal account is independent of procurement and Quality approval.
+    # Authentication does not authorize work while the canonical supplier is
+    # prospective, unapproved, expired, inactive or suspended.
+    supplier_state=str(row["supplier_lifecycle"] or "")
+    if "." in supplier_state:
+        supplier_state=supplier_state.rsplit(".",1)[-1]
+    supplier_eligible=(
+        bool(row["supplier_active"])
+        and not bool(row["import_pending"])
+        and supplier_state in {"APPROVED","CONDITIONALLY_APPROVED"}
+    )
+    if (row["restrict_new_work"] or not supplier_eligible) and required not in {
+        None,"capa.respond","profile.read","sessions.manage"
+    }:
+        raise HTTPException(403,"Provider is restricted to account control and existing corrective actions")
     if write:
         require_csrf(request,row["csrf_hash"])
     return row
