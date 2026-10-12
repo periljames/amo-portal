@@ -226,7 +226,8 @@ def quality_invite(amo_code:str,payload:QualityInvite, db:Session=Depends(get_db
                    req=payload,organization_id=payload.organization_id)
 
 @router.post("/invitations/accept")
-def accept_invitation(payload:AccountAction,db:Session=Depends(get_db)):
+def accept_invitation(payload:AccountAction,request:Request,db:Session=Depends(get_db)):
+    core.auth_limit(request,core.digest(payload.code),"invitation-accept")
     t=core.redeem_token(db,payload.code,"INVITE")
     person=core.one("SELECT * FROM external_identities WHERE id=:id FOR UPDATE",db,id=t["identity_id"])
     if not person or person["status"] in {"LOCKED","REVOKED"}:
@@ -362,6 +363,7 @@ def logout_all(request:Request,response:Response,db:Session=Depends(get_db)):
 @router.post("/password/change")
 def change_password(payload:PasswordChange,request:Request,response:Response,db:Session=Depends(get_db)):
     s=core.active_session(db,request,write=True)
+    core.auth_limit(request,str(s["identity_id"]),"password-change")
     credential=core.one("SELECT * FROM external_credentials WHERE identity_id=:id FOR UPDATE",db,id=s["identity_id"])
     if not verify_password(payload.current_password,credential["password_hash"]):
         raise HTTPException(401,"Invalid current credentials")
@@ -402,7 +404,8 @@ def forgot(payload:RecoveryRequest,request:Request,db:Session=Depends(get_db)):
     return msg
 
 @router.post("/password/reset")
-def reset(payload:PasswordReset,response:Response,db:Session=Depends(get_db)):
+def reset(payload:PasswordReset,request:Request,response:Response,db:Session=Depends(get_db)):
+    core.auth_limit(request,core.digest(payload.code),"password-reset")
     core.password_is_valid(payload.password)
     t=core.redeem_token(db,payload.code,"RESET")
     core.run("""UPDATE external_credentials SET password_hash=:hash,password_version=password_version+1,
@@ -419,6 +422,7 @@ def reset(payload:PasswordReset,response:Response,db:Session=Depends(get_db)):
 @router.post("/mfa/enroll")
 def mfa_enroll(payload:SensitivePassword,request:Request,db:Session=Depends(get_db)):
     s=core.active_session(db,request,write=True)
+    core.auth_limit(request,str(s["identity_id"]),"mfa-enrollment")
     cred=core.one("SELECT * FROM external_credentials WHERE identity_id=:id FOR UPDATE",db,id=s["identity_id"])
     if not verify_password(payload.password,cred["password_hash"]):
         raise HTTPException(401,"Reauthentication required")
@@ -686,7 +690,8 @@ def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
     return {"status":"REVERIFICATION_REQUIRED","delivery_status":delivery}
 
 @router.post("/verification/confirm")
-def verify_again(payload:AccountAction,db:Session=Depends(get_db)):
+def verify_again(payload:AccountAction,request:Request,db:Session=Depends(get_db)):
+    core.auth_limit(request,core.digest(payload.code),"reverification")
     row=core.redeem_token(db,payload.code,"VERIFY")
     core.run("""UPDATE external_identities SET verified_at=:at,updated_at=:at
         WHERE id=:id AND status='ACTIVE'""",db,at=core.now(),id=row["identity_id"])
