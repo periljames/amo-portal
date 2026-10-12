@@ -74,7 +74,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
     // Spreadsheet programs can execute untrusted CSV cells as formulas.
     const escape=(value:unknown)=>{
       const raw=String(value??"");
-      const safe=/^[\\s\\uFEFF]*[=+\\-@]/.test(raw) ? `'${raw}` : raw;
+      const safe=/^[\s\uFEFF]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
       return `"${safe.replaceAll('"','""')}"`;
     };
     const header=["sheet","row","supplier_code","supplier_name","contract_number","title","source_status","effective_on","expires_on","status","issues","supplier_id"];
