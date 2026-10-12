@@ -114,6 +114,8 @@ export default function ExternalProviderQualityPage() {
             <td>{item.grant_state}</td><td>{item.portal_state}{item.restrict_new_work?" · restricted":""}</td>
             <td><div className="vendor-actions">
               {manager && <>
+                {!item.verified_at && item.grant_state==="PENDING" &&
+                  <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/resend-invitation`,{},"One-time invitation reissued.")}>Resend invitation</button>}
                 {item.verified_at && item.grant_state!=="ACTIVE" &&
                   <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/decision`,{state:"ACTIVE",reason:reason||"Quality reviewed and approved provider user access."},"Account grant activated.")}>Approve account</button>}
                 {item.grant_state==="ACTIVE" &&
