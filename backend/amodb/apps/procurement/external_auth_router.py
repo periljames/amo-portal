@@ -475,7 +475,7 @@ def quality_decision(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
     if not row:raise HTTPException(404,"Grant not found")
     if payload.state=="ACTIVE":
         accepted=core.one("""SELECT id FROM external_identity_tokens WHERE amo_id=:amo
-            AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL
+            AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL AND revoked_at IS NULL
             LIMIT 1""",db,amo=amo,grant=grant_id)
         if not row["verified_at"] or row["identity_state"]!="ACTIVE" or row["member_state"]!="ACTIVE" or not accepted:
             raise HTTPException(409,"This exact tenant invitation must be accepted and email verified before activation")
@@ -597,12 +597,12 @@ def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
     if grant["status"]!="PENDING":
         raise HTTPException(409,"Only pending invitations can be resent")
     accepted=core.one("""SELECT id FROM external_identity_tokens
-        WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL
+        WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NOT NULL AND revoked_at IS NULL
         LIMIT 1""",db,amo=amo,grant=grant_id)
     if accepted:
         raise HTTPException(409,"Invitation already accepted; use controlled account decisions")
-    core.run("""UPDATE external_identity_tokens SET used_at=:at
-      WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL""",
+    core.run("""UPDATE external_identity_tokens SET revoked_at=:at
+      WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL AND revoked_at IS NULL""",
       db,at=core.now(),amo=amo,grant=grant_id)
     raw=core.token(db,tenant_id=amo,grant_id=grant_id,
                    identity_id=grant["identity_id"],kind="INVITE",hours=48)
