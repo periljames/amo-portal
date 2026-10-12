@@ -118,7 +118,7 @@ def _send(db,amo,email,code,kind):
     # Token travels only in the email body, not a URL, log, API response or telemetry.
     # The existing essential account-message template is reused.
     msg=f"AMO Portal external account {kind} code: {code}. Enter this code in the vendor portal. The code expires and can be used once."
-    notifications.send_email(
+    outcome=notifications.send_email(
         template_key="password-reset", recipient=email,
         subject=f"AMO Portal external provider {kind}",
         context={"message":msg,"action_url":None},
@@ -127,6 +127,7 @@ def _send(db,amo,email,code,kind):
         critical=False,email_class="ESSENTIAL",
         recipient_user_id=None,amo_id=amo,db=db,
     )
+    return str(getattr(outcome.status,"value",outcome.status))
 
 def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=None,
             cap_limit=None,internal=True):
@@ -199,9 +200,10 @@ def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=No
     core.event(db,amo=amo,identity=identity_id,grant=grant,action="INVITED",
                actor_user=inviter if internal else None,actor_identity=None if internal else inviter)
     db.commit()
-    _send(db,amo,email,raw,"invitation")
+    delivery=_send(db,amo,email,raw,"invitation")
     db.commit()
-    return {"id":grant,"status":"PENDING","organization_id":org_id,"supplier_id":supplier_id}
+    return {"id":grant,"status":"PENDING","delivery_status":delivery,
+            "organization_id":org_id,"supplier_id":supplier_id}
 
 @quality_router.post("/invitations",status_code=201)
 def quality_invite(amo_code:str,payload:QualityInvite, db:Session=Depends(get_db),
@@ -586,8 +588,8 @@ def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
     raw=core.token(db,tenant_id=amo,grant_id=grant_id,identity_id=grant["identity_id"],kind="VERIFY",hours=24)
     core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,action="REVERIFICATION_REQUIRED",
                actor_user=str(user.id),details={"reason":payload.reason})
-    db.commit();_send(db,amo,grant["email"],raw,"reverification");db.commit()
-    return {"status":"REVERIFICATION_REQUIRED"}
+    db.commit();delivery=_send(db,amo,grant["email"],raw,"reverification");db.commit()
+    return {"status":"REVERIFICATION_REQUIRED","delivery_status":delivery}
 
 @router.post("/verification/confirm")
 def verify_again(payload:AccountAction,db:Session=Depends(get_db)):
