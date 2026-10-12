@@ -191,6 +191,15 @@ async function prepare(page: Page): Promise<void> {
       return;
     }
 
+    // Audit personnel options is a bare array. A generic paginated-object
+    // fallback causes QmsMissionActions to crash when rendering assignment selects.
+    if (path === "/api/maintenance/tenant-a/quality/audits/personnel/options") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([
+        { id: "quality-user-a", full_name: "Quality Manager", email: "quality@tenant-a.test" },
+      ]) });
+      return;
+    }
+
     if (path.includes("/api/maintenance/tenant-a/quality/")) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], columns: [], limit: 25, offset: 0, has_more: false }) });
       return;
