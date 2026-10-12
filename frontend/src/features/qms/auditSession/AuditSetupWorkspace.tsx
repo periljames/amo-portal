@@ -1554,6 +1554,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label className="qms-audit-setup-stage__reschedule-reason">
                 <span>Reason for rescheduling</span>
                 <textarea
+                  aria-label="Reason for rescheduling"
                   rows={2}
                   value={rescheduleReason}
                   onChange={(event) => setRescheduleReason(event.target.value)}
