@@ -240,8 +240,6 @@ async function configurePortalServiceWorker(): Promise<void> {
       .map((registration) => registration.unregister()),
   );
 
-  const hadController = Boolean(navigator.serviceWorker.controller);
-  let reloadScheduled = false;
   const registration = await navigator.serviceWorker.register("/portal-sw.js", { scope: "/", updateViaCache: "none" });
   const activateWaitingWorker = () => registration.waiting?.postMessage({ type: "SKIP_WAITING" });
 
@@ -253,11 +251,9 @@ async function configurePortalServiceWorker(): Promise<void> {
     });
   });
 
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!hadController || reloadScheduled) return;
-    reloadScheduled = true;
-    window.location.reload();
-  });
+  // Never reload a Fieldwork page just because a new service worker takes over:
+  // that could discard unsaved notes or an unsubmitted evidence selection.
+  // The new worker controls the next navigation naturally.
 
   activateWaitingWorker();
   await registration.update().catch(() => undefined);
