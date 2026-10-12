@@ -71,7 +71,7 @@ def _value(value):
 def _mapping(headers, overrides, columns):
     mapping = {}
     for field, aliases in columns.items():
-        allowed = {_key(value) for value in (*aliases, overrides.get(field, ""))}
+        allowed = {_key(value) for value in (*aliases, overrides.get(field, "")) if _key(value)}
         for index, header in enumerate(headers):
             if _key(header) in allowed:
                 mapping[field] = index
