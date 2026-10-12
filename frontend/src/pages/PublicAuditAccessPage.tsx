@@ -261,7 +261,7 @@ const PublicAuditAccessPage: React.FC = () => {
     try {
       await recordAuditGuestClosingAcknowledgement({ reportRevisionId: closing.report.id, reportSha256: closing.report.sha256, acknowledgementStatus: closingStatus, comments: closingComments });
       setClosing(await getAuditGuestClosingContext());
-      setNotice("Closing-meeting response recorded against this draft revision. It does not imply acceptance of the findings.");
+      setNotice("Closing-meeting response recorded against the exact draft revision and SHA-256. It does not imply acceptance of the findings.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Closing-meeting acknowledgement failed."); }
     finally { setClosingBusy(false); }
   };
