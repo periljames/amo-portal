@@ -216,6 +216,8 @@ def quality_invite(amo_code:str,payload:QualityInvite, db:Session=Depends(get_db
 def accept_invitation(payload:AccountAction,db:Session=Depends(get_db)):
     t=core.redeem_token(db,payload.code,"INVITE")
     person=core.one("SELECT * FROM external_identities WHERE id=:id FOR UPDATE",db,id=t["identity_id"])
+    if not person or person["status"] in {"LOCKED","REVOKED"}:
+        raise HTTPException(409,"Identity is locked or revoked; contact Quality for controlled recovery")
     cred=core.one("SELECT * FROM external_credentials WHERE identity_id=:id FOR UPDATE",db,id=t["identity_id"])
     if not cred["password_hash"]:
         if not payload.password:
