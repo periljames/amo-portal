@@ -124,36 +124,61 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
         if not content.strip():
             warnings.append(f"Page {page_number}: no selectable text; scanned-page OCR is not performed.")
             continue
-        for raw in content.splitlines():
-            line = re.sub(r"\\s+", " ", raw).strip()
+        lines = [re.sub(r"\\s+", " ", raw).strip() for raw in content.splitlines()]
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             if not line:
+                i += 1
                 continue
             if line.lower().startswith("remarks:"):
                 flush()
+                i += 1
                 continue
             if line in ignore_exact or line.lower().startswith(ignore_prefix):
+                i += 1
                 continue
             section_match = header.fullmatch(line)
             if section_match:
                 flush()
                 section = section_match.group(1).strip()[:128]
                 paper_scheme = True
+                i += 1
+                continue
+            # In PDFs a wide section heading and its S/U/N/C/N/A labels
+            # may wrap over up to three physical lines. Use the explicit
+            # assessment header as an anchor before classifying the text.
+            wrapped_heading = False
+            for length in (1, 2, 3):
+                last = i + length
+                if last >= len(lines) or lines[last].upper() != "S U N/C N/A":
+                    continue
+                fragments = lines[i:last]
+                if all(re.fullmatch(r"[A-Z0-9(/][A-Z0-9 /()&,.:\\-]{2,130}", part) for part in fragments):
+                    flush()
+                    section = " ".join(fragments)[:128]
+                    paper_scheme = True
+                    i = last + 1
+                    wrapped_heading = True
+                    break
+            if wrapped_heading:
                 continue
             if (match := _NUMBERED.match(line)):
                 flush()
                 pending = _draft_item(int(match.group(1)), section, match.group(2), paper_scheme=paper_scheme)
+                i += 1
                 continue
-            # Other standalone headings have no explicit answer scheme;
-            # require human review of their meaning rather than inventing one.
             if pending is None and _HEADING.fullmatch(line) and len(line) >= 6:
                 section = line[:128]
                 paper_scheme = False
+                i += 1
                 continue
             if pending is not None:
-                # Preserve long wrapped questions and indented verification
-                # bullets. Do not silently drop text continuing onto next page.
+                # Preserve wrapped audit criteria, including continuations
+                # across page boundaries, instead of dropping their text.
                 proposed = f"{pending['prompt']} {line}"
                 pending["prompt"] = re.sub(r"\\s+", " ", proposed)[:8000]
+            i += 1
     flush()
     return items, warnings
 
