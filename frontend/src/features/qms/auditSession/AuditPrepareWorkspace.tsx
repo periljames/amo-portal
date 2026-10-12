@@ -1177,7 +1177,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 {uploadedDraft ? <section className="qms-audit-prepare__import-review is-wide" aria-label="Imported checklist awaiting review">
                   <strong>Imported draft · {uploadedDraft.question_count} questions · {uploadedDraft.section_count} sections</strong>
                   <small>{uploadedDraft.filename} · SHA-256 {uploadedDraft.sha256.slice(0, 12)}…</small>
-                  <p>Nothing has been issued. Correct the extracted questions, sections, numbering and response mapping before you commit.</p>
+                  <p>Nothing has been issued. Correct the extracted questions, sections, numbering and response mapping before you commit. The original upload is not automatically stored in the controlled DMS library.</p>
                   {uploadedDraft.warnings.map((warning, index) => <p key={index} role="note">{warning}</p>)}
                   <button type="button" onClick={() => { setUploadedDraft(null); setChecklistItems([emptyChecklistItem()]); }}>Discard imported draft</button>
                 </section> : null}
