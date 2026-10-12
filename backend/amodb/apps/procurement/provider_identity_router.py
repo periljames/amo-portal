@@ -16,7 +16,7 @@ from amodb.apps.accounts import models as accounts
 from amodb.apps.quality.tenant_security import set_postgres_tenant_context
 from amodb.database import get_db
 from amodb.entitlements import require_module
-from amodb.security import get_current_active_user, require_roles
+from amodb.security import require_roles
 from . import service
 
 router = APIRouter(
@@ -219,7 +219,7 @@ def _audit_change(db: Session, tenant: str, supplier_id: int, record_id: str,
 def list_identity(amo_code: str, supplier_id: int, kind: str,
                   limit: int = Query(200, ge=1, le=500),
                   db: Session = Depends(get_db),
-                  current_user: accounts.User = Depends(get_current_active_user)):
+                  current_user: accounts.User = Depends(require_roles(*_EDIT_ROLES))):
     if kind not in _TABLES:
         raise HTTPException(404, "Unknown resource.")
     tenant = _tenant(db, amo_code, current_user)
