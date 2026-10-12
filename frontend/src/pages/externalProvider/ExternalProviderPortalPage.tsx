@@ -17,7 +17,12 @@ type Member = { id: string; email: string; display_name: string; role_code: stri
 type Session = { id: string; created_at: string; last_seen_at: string | null; expires_at: string; revoked_at: string | null };
 const BASE = "/api/external-provider";
 class VendorHttpError extends Error {
-  constructor(public readonly status: number, message: string) { super(message); }
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "VendorHttpError";
+    this.status = status;
+  }
 }
 const roles = [
   "PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTATIVE",
