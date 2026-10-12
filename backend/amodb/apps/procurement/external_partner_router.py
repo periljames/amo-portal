@@ -70,6 +70,9 @@ def _ctx(db:Session,request:Request,tenant_slug:str,*,cap:str="profile.read",wri
         str(tenant["login_slug"] or "").lower(),str(tenant["amo_code"] or "").lower()
     }:
         raise HTTPException(404,"Partner tenant not found")
+    if db.get_bind().dialect.name=="postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id',:provider,true)"),
+                   {"provider":str(user["tenant_provider_id"])})
     return user
 
 def _context(user):
@@ -631,7 +634,10 @@ class EvidenceDecision(BaseModel):
 
 def _quality_context(db:Session,amo_code:str,user):
     from .external_auth_router import _authorized_quality
-    return _authorized_quality(db,amo_code,user)
+    amo=_authorized_quality(db,amo_code,user)
+    if db.get_bind().dialect.name=="postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','',true)"))
+    return amo
 
 @quality_router.get("/partner-change-requests")
 def quality_changes(amo_code:str,db:Session=Depends(get_db),
