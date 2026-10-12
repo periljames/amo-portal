@@ -99,6 +99,8 @@ def _caps(role,proposed=None,bound=None):
     if role not in core.ROLE_CAPS and role!="CUSTOM":
         raise HTTPException(422,"Unknown external role")
     allowed=set(core.ROLE_CAPS.get(role,core.CAPABILITIES))
+    if role=="CUSTOM" and not proposed:
+        raise HTTPException(422,"Custom external profiles require an explicit nonempty capability subset")
     requested=set(proposed if proposed is not None else allowed)
     if requested-allowed or requested-core.CAPABILITIES or (bound is not None and requested-set(bound)):
         raise HTTPException(403,"External capability exceeds authorized profile")
