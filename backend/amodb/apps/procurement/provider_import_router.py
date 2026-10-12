@@ -260,6 +260,9 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
                 "counts":counts,"status":"STAGED"}
     except IntegrityError as exc:
         db.rollback()
+        # SET LOCAL tenant context is lost on rollback; restore it before the
+        # idempotency lookup, otherwise an RLS-protected replay looks absent.
+        set_postgres_tenant_context(db, amo_id=tenant, user_id=str(user.id))
         existing = db.execute(text("""SELECT id,status FROM external_provider_import_batches
             WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind
             AND mapping_digest=:mapping_digest"""),
