@@ -74,3 +74,13 @@ Phase 1 code is committed; the source-dependent acceptance and testing are **not
 - [ ] Previously observed QMS browser CI failures from the Phase 1 remediation remain separate verification obligations and are not quietly claimed resolved by Phase 2.
 
 Phase 3 implementation handoff: `docs/external-providers/PHASE2_IDENTITY_ACCESS.md`. Do not begin Phase 3 in Phase 2. Keep the same draft PR branch until Phase 10.
+
+
+### Phase 2 upstream reconciliation and security review — 12 October 2026
+- Reconciled upstream `main` commit `7b3d406f92cea52a5d9d5b42ed5f4aa06871d276` into the **same** branch with a two-parent merge commit `8da371fc6b273a33a2343f22afc56e3b8497c6ce`, zero commits behind at verification. Two overlapping files were resolved preserving both sides: `quality/router.py` retained upstream documented N/C checklist disposition **and** local legacy-document forgery guard; `AuditPrepareWorkspace.tsx` retained upstream offline preparation and PDF/Word checklist composer/upload flows **and** local evidence-backed document review guard. Confirmed the four expected code markers by file re-read; no execution.
+- Static security review added strict delegated document/contract/assignment scope subset checks for Provider Administrator invitations; no self-generated expansion of assigned work.
+- Canonical Procurement supplier lifecycle gate now restricts new provider actions if Quality approval is missing, prospect/import activation is pending, status is expired/suspended/restricted or the supplier is inactive; only account continuity and controlled CAPA response remain potential exceptions. This is an **additional gate**, never a new Quality approval.
+- Fixed Quality screen/frontend role mismatch: tenant Quality Manager and Quality Officer may inspect and invite; Quality Manager alone issues state-changing account/provider/privilege/identity decisions.
+- Tightened sensitive credential operations: when a passkey is registered, password change and new TOTP enrollment require recent MFA verification. One-use token exchange, password changes and TOTP enrollments use the existing shared abuse limiter.
+- Restored PostgreSQL transaction-local tenant context before sending the essential invitation/recovery email after an earlier commit; response still reports actual email-provider status and does not assume delivery.
+- No manual test/build/lint/CI, database upgrade or browser automation was run. The separate previous CI defects remain subject to Phase 10 acceptance.
