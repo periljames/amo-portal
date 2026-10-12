@@ -519,7 +519,7 @@
   padding: 0;
 }
 
-.qms-audit-programme-drawer .qms-audit-programme__form > footer {
+.qms-audit-programme-drawer:not(.qms-audit-programme-drawer--schedule) .qms-audit-programme__form > footer {
   display: none;
 }
 
