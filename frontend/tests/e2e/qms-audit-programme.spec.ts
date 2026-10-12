@@ -352,7 +352,8 @@ async function prepare(page: Page, options?: { programmes?: ReturnType<typeof pr
         supported_source_types: [],
         unsupported_source_types: {},
         scopes: [{ id: "scope-internal", code: "INT", name: "Internal quality audit", party_level: "INTERNAL", default_kind: "INTERNAL" }],
-        people: [{ id: "quality-user-a", full_name: "Quality Manager", email: "quality@tenant-a.test", role: "QUALITY_MANAGER", department_name: "Quality" }],
+        locations: [{ id: "location-1", code: "HANGAR_1", name: "Hangar 1" }],
+        people: [{ id: "quality-user-a", full_name: "Quality Manager", email: "quality@tenant-a.test", role: "QUALITY_MANAGER", department_name: "Quality", auditor_roles: ["LEAD_AUDITOR", "AUDITOR"] }],
       }) });
       return;
     }
@@ -483,7 +484,7 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await expect(page.getByLabel("Schedule audit programme requirement")).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
   await expect(page.getByLabel("Date")).toHaveValue("2026-08-15");
-  await page.getByLabel("Location").fill("Hangar 1");
+  await page.getByLabel("Location").selectOption("HANGAR_1");
   await page.getByLabel("Lead auditor").selectOption("quality-user-a");
   await page.getByRole("button", { name: "Create authoritative schedule" }).click();
 
