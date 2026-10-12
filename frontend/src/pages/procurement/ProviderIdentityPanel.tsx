@@ -43,7 +43,8 @@ const FIELDS: Record<Kind, {key: string; label: string; required?: boolean}[]> =
                   {key:"source_row",label:"Source row"},{key:"source_digest",label:"File digest"}],
 };
 const roleValues = ["SUPPLIER","VENDOR","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
-                    "LABORATORY","CALIBRATION_PROVIDER","CONSULTANT","OTHER"];
+                    "SPECIALIZED_MAINTENANCE_PROVIDER","LABORATORY",
+                    "CALIBRATION_PROVIDER","CONSULTANT","OTHER"];
 const assignmentValues = ["COMMERCIAL","TECHNICAL","QUALITY","OTHER"];
 export default function ProviderIdentityPanel({amoCode,supplierId,onClose}:{
   amoCode:string; supplierId:number; onClose:()=>void;
