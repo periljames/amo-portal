@@ -787,12 +787,28 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (!nextItemId || evidenceCapture.busy || evidenceCapture.hasDraft) return;
     setSyncNotice(null);
     setLocalError(null);
+    const pending = pendingChoices[selected.checklist_item_id];
+    const local = localAnswers.get(selected.checklist_item_id);
+    const response = (pending?.canonical_status as CanonicalChecklistResponse | undefined) || local?.canonical || selected.canonical_response_status;
+    const responseValue = pending?.value || local?.value || selected.response_value || selected.canonical_response_status;
+    if (response === "NOT_VERIFIED" && !pending && !local && !selected.response_value) {
+      setLocalError("Choose an assessment before saving and advancing.");
+      return;
+    }
+    if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
+      setLocalError("Record the finding through the governed finding composer before advancing.");
+      return;
+    }
+    const requirementError = responseRequirementError(selected, selectedSource, response, notes);
+    if (requirementError) {
+      setLocalError(requirementError);
+      return;
+    }
     try {
-      // Never advance on an unacknowledged write or unresolved offline conflict.
       await updateMutation.mutateAsync({
         item: selected,
-        response: selected.canonical_response_status,
-        responseValue: selected.response_value || selected.canonical_response_status,
+        response,
+        responseValue,
         auditorNotes: notes,
         sampledItemInformation: sampledItems,
         assessment,
