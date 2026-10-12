@@ -97,7 +97,7 @@ def cookie(response: Response, raw: str | None):
                                samesite="strict", path=COOKIE_PATH)
 
 def token(db, *, tenant_id: str, grant_id: str, identity_id: str, kind: str, hours: int):
-    raw = secrets.token_urlsafe(40)
+    raw = f"{tenant_id}.{secrets.token_urlsafe(40)}"
     run("""INSERT INTO external_identity_tokens
         (id,amo_id,identity_id,grant_id,kind,token_hash,expires_at)
         VALUES (:id,:amo,:person,:grant,:kind,:hash,:expires)""",
@@ -107,8 +107,12 @@ def token(db, *, tenant_id: str, grant_id: str, identity_id: str, kind: str, hou
 
 def redeem_token(db, raw: str, kind: str):
     # Transaction is locked around redemption; a consumed code cannot be replayed.
+    tenant_hint, separator, _ = raw.partition(".")
+    if not separator or len(tenant_hint) != 36:
+        raise HTTPException(400,"Invalid or expired verification code")
+    context(db,tenant_hint)
     row=one("""SELECT * FROM external_identity_tokens
-        WHERE token_hash=:hash AND kind=:kind FOR UPDATE""",db,hash=digest(raw),kind=kind)
+        WHERE amo_id=:amo AND token_hash=:hash AND kind=:kind FOR UPDATE""",db,amo=tenant_hint,hash=digest(raw),kind=kind)
     if not row or row["used_at"] or aware(row["expires_at"]) <= now():
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
@@ -125,7 +129,7 @@ def event(db, *, amo: str, identity: str | None, grant: str | None, action: str,
         actor_user=actor_user,action=action,details=__import__("json").dumps(details or {}))
 
 def issue_session(db, response, *, amo: str, identity: str, grant: str, request: Request, mfa: bool = False):
-    raw=secrets.token_urlsafe(48)
+    raw=f"{amo}.{secrets.token_urlsafe(48)}"
     csrf=secrets.token_urlsafe(32)
     ident=one("SELECT password_version FROM external_credentials WHERE identity_id=:id",db,id=identity)
     if ident is None:
@@ -146,6 +150,10 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     raw=request.cookies.get(COOKIE)
     if not raw:
         raise HTTPException(401,"Provider login required")
+    tenant_hint, separator, _ = raw.partition(".")
+    if not separator or len(tenant_hint) != 36:
+        raise HTTPException(401,"Provider session invalid")
+    context(db,tenant_hint)
     row=one("""SELECT s.*, g.status grant_state, g.role_code, g.capabilities_json,
           g.object_scope_json, g.tenant_provider_id, p.portal_state, p.restrict_new_work,
           p.organization_id, p.supplier_id, m.status membership_state,
@@ -155,7 +163,7 @@ def active_session(db: Session, request: Request, required: str | None = None, w
         JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=s.amo_id
         JOIN external_organization_memberships m ON m.id=g.membership_id AND m.identity_id=s.identity_id AND m.organization_id=p.organization_id
         JOIN external_identities i ON i.id=s.identity_id
-        WHERE s.session_hash=:hash""",db,hash=digest(raw))
+        WHERE s.amo_id=:amo AND s.session_hash=:hash""",db,amo=tenant_hint,hash=digest(raw))
     if not row:
         raise HTTPException(401,"Provider session invalid")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
@@ -201,7 +209,7 @@ def totp_valid(encrypted: str, code: str) -> bool:
             value=int.from_bytes(payload[offset:offset+4],"big")&0x7fffffff
             if hmac.compare_digest(f"{value%1000000:06d}",code):
                 return True
-    except (ValueError,TypeError,Exception):
+    except Exception:
         return False
     return False
 
