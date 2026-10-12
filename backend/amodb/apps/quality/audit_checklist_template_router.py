@@ -25,6 +25,7 @@ from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_checklist_response_policy import normalise_response_options
+from .audit_checklist_upload_parser import MAX_UPLOAD_BYTES, draft_from_upload
 from .audit_checklist_template_models import (
     QualityAuditChecklistBinding,
     QualityAuditChecklistMemory,
@@ -128,6 +129,8 @@ class RealtimeAuditChecklistCreate(BaseModel):
     canonical_document_id: str | None = Field(default=None, max_length=36)
     canonical_revision_id: str | None = Field(default=None, max_length=36)
     allow_existing_items: bool = False
+    uploaded_source_filename: str | None = Field(default=None, max_length=255)
+    uploaded_source_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class ChecklistAIDraftRequest(BaseModel):
@@ -1418,6 +1421,33 @@ def apply_checklist_revision(
     return _binding_dict(binding)
 
 
+@router.post("/audits/{audit_id}/checklists/parse-upload")
+async def parse_uploaded_checklist_draft(
+    audit_id: uuid.UUID,
+    file: UploadFile = File(...),
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    """Preview editable candidates only. Never change the issued checklist."""
+    assert_quality_permission(db, ctx, "qms.audit.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    _assert_checklist_can_change(audit)
+    filename = (file.filename or "").strip()
+    if not filename.lower().endswith((".docx", ".pdf")):
+        raise HTTPException(status_code=422, detail="Upload a Word .docx or selectable-text PDF checklist.")
+    try:
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        try:
+            return draft_from_upload(data, filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="The document could not be parsed. Verify that it is an intact, selectable-text Word/PDF checklist.") from exc
+    finally:
+        await file.close()
+
+
 @router.post("/audits/{audit_id}/checklists/realtime", status_code=status.HTTP_201_CREATED)
 def create_realtime_audit_checklist(
     audit_id: uuid.UUID,
@@ -1467,6 +1497,15 @@ def create_realtime_audit_checklist(
             raise HTTPException(status_code=422, detail="The selected DMS document has no current effective revision.")
         source_references.append(_source_reference(document, revision))
 
+    if payload.uploaded_source_filename and not payload.uploaded_source_sha256:
+        raise HTTPException(status_code=422, detail="Uploaded source provenance requires a SHA-256 digest.")
+    if payload.uploaded_source_sha256:
+        source_references.append({
+            "source_system": "AUDIT_CHECKLIST_UPLOAD_REVIEWED_DRAFT",
+            "source_filename": payload.uploaded_source_filename,
+            "source_sha256": payload.uploaded_source_sha256,
+            "original_file_retained_in_dms": False,
+        })
     items = _normalised_items(payload.items)
     now = _utcnow()
     template = QualityAuditChecklistTemplate(
