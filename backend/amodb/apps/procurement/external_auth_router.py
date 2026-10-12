@@ -553,6 +553,22 @@ def require_provider(capability:str):
                                    write=request.method.upper() not in {"GET","HEAD"})
     return _dependency
 
+
+@router.post("/mfa/challenge")
+def challenge_mfa(payload:TotpCode,request:Request,db:Session=Depends(get_db)):
+    session=core.active_session(db,request,write=True)
+    core.auth_limit(request,str(session["identity_id"]),"mfa-challenge")
+    cred=core.one("SELECT totp_secret_encrypted,totp_confirmed_at FROM external_credentials WHERE identity_id=:id",
+        db,id=session["identity_id"])
+    if not cred or not cred["totp_confirmed_at"] or not core.totp_valid(cred["totp_secret_encrypted"],payload.code):
+        raise HTTPException(401,"Second-factor verification failed")
+    core.run("UPDATE external_sessions SET mfa_verified_at=:at WHERE id=:id",
+        db,at=core.now(),id=session["id"])
+    core.event(db,amo=session["amo_id"],identity=session["identity_id"],grant=session["grant_id"],
+        action="MFA_REAUTHENTICATED",actor_identity=session["identity_id"])
+    db.commit()
+    return {"status":"MFA_VERIFIED"}
+
 @quality_router.post("/grants/{grant_id}/reverify")
 def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depends(get_db),
                      user:accounts.User=Depends(get_current_active_user)):
