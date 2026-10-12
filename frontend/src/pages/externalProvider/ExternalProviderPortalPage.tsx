@@ -66,6 +66,7 @@ export default function ExternalProviderPortalPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState("");
   const [newRole, setNewRole] = useState("READ_ONLY");
+  const [profileName, setProfileName] = useState("");
 
   const reload = useCallback(async () => {
     try {
@@ -188,6 +189,14 @@ export default function ExternalProviderPortalPage() {
             <div><dt>Tenant access</dt><dd>{account.portal_state}</dd></div>
             <div><dt>New work</dt><dd>{account.restricted ? "Restricted" : "As assigned"}</dd></div>
           </dl>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            void perform(() => vendorFetch("/profile", { display_name: profileName }, account.csrf, "PATCH"),
+              "Profile name updated.");
+          }} className="vendor-profile-form">
+            <Field title="Update profile display name" value={profileName} onChange={setProfileName} required />
+            <button type="submit" disabled={busy || profileName.trim().length < 2}>Save profile</button>
+          </form>
           <h3>Granted capabilities</h3>
           <p>{account.capabilities.map(labelRole).join(" · ")}</p>
           <p>Record, contract and document access is additionally restricted by the assignments granted by your AMO.</p>
@@ -247,6 +256,11 @@ export default function ExternalProviderPortalPage() {
           <ul className="vendor-list">{members.map((member) => <li key={member.id}>
             <div><strong>{member.display_name}</strong><small>{member.email}</small></div>
             <span>{labelRole(member.role_code)} · {member.status}</span>
+            {account.capabilities.includes("members.manage") && member.status !== "REVOKED" &&
+              <button disabled={busy} onClick={() => void perform(
+                () => vendorFetch(`/members/${encodeURIComponent(member.id)}/revoke`, {}, account.csrf),
+                "Member access revoked. All of their sessions for this provider are invalidated.",
+              )}>Revoke access</button>}
           </li>)}</ul>
           {account.capabilities.includes("members.manage") && <form onSubmit={(event) => {
             event.preventDefault();
