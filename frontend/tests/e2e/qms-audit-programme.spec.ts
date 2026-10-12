@@ -443,8 +443,9 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
   await page.getByRole("button", { name: /How this programme works/i }).click();
   await expect(page.getByRole("dialog", { name: "How this programme works" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Hybrid assurance optimizer" })).toBeVisible();
-  await expect(page.getByText("2 repeat finding signal(s)", { exact: false })).toBeVisible();
+  await expect(page.getByText("2 repeat finding(s)", { exact: false })).toBeVisible();
 
+  await page.getByRole("dialog", { name: "How this programme works" }).getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("navigation", { name: "Programme workspace sections" }).getByRole("button", { name: "Audit areas" }).click();
   await expect(page.getByRole("heading", { name: "Audit area catalogue" })).toBeVisible();
   await expect(page.getByText("Maintenance Department", { exact: true }).first()).toBeVisible();
