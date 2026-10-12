@@ -644,6 +644,18 @@ def quality_evidence(amo_code:str,db:Session=Depends(get_db),
         JOIN external_identities i ON i.id=e.identity_id
         WHERE e.amo_id=:amo ORDER BY e.created_at DESC,e.id DESC""",{"amo":amo},limit,offset)
 
+@quality_router.get("/partner-evidence/{submission_id}/download")
+def quality_download_evidence(amo_code:str,submission_id:str,
+    db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    amo=_quality_context(db,amo_code,user)
+    row=_row("""SELECT object_uri,sha256,filename,content_type
+      FROM external_partner_evidence_submissions WHERE amo_id=:amo AND id=:id""",
+      db,amo=amo,id=submission_id)
+    if not row:raise HTTPException(404,"Evidence not found")
+    path=storage.materialize(row["object_uri"],expected_sha256=row["sha256"])
+    return FileResponse(path,media_type=row["content_type"],filename=row["filename"],
+        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+
 @quality_router.post("/partner-evidence/{submission_id}/review")
 def quality_review_evidence(amo_code:str,submission_id:str,payload:EvidenceDecision,
                             db:Session=Depends(get_db),
