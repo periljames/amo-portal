@@ -6,7 +6,7 @@
  */
 import { getToken, getTokenSecondsRemaining } from "./auth";
 import { currentOfflineScope, onOfflineStateChanged, replayOfflineMutations } from "./offlinePersistence";
-import { onOfflineAuditEvidenceChanged, listPendingAuditEvidenceGroups, replayOfflineAuditEvidence } from "./qmsOfflineAuditEvidence";
+import { onOfflineAuditEvidenceChanged, listPendingAuditEvidenceGroups, synchronizeOfflineAuditEvidence } from "./qmsOfflineAuditEvidence";
 import { getPortalConnectivity, isPortalReady, onPortalConnectivityChange } from "./portalConnectivity";
 
 const PERIODIC_RETRY_MS = 30_000;
@@ -29,27 +29,16 @@ async function syncAuditQueues(): Promise<void> {
   for (const group of groups) {
     if (!canSynchronize() || scope !== currentOfflineScope()) break;
     if (group.count <= group.conflicts) continue;
-    // Browser Web Locks make competing tabs serialize evidence uploads.
-    // In browsers without Web Locks, server idempotency still guards retries.
-    const upload = async () => {
-      const remaining = await listPendingAuditEvidenceGroups();
-      if (!remaining.some((item) => item.amoCode === group.amoCode && item.auditId === group.auditId
-        && item.count > item.conflicts)) return;
-      await replayOfflineAuditEvidence(group.amoCode, group.auditId);
-    };
     try {
-      if (typeof navigator !== "undefined" && navigator.locks) {
-        await navigator.locks.request(
-          `amo:qms:evidence:${scope}:${group.auditId}`,
-          { ifAvailable: true },
-          async (lock) => { if (lock) await upload(); },
-        );
-      } else {
-        await upload();
+      // Recheck the scoped queue before uploading. In-progress work in another
+      // tab is protected by the evidence sync Web Lock.
+      const pending = await listPendingAuditEvidenceGroups();
+      if (pending.some((item) => item.amoCode === group.amoCode && item.auditId === group.auditId
+        && item.count > item.conflicts)) {
+        await synchronizeOfflineAuditEvidence(group.amoCode, group.auditId);
       }
     } catch {
-      // Encrypted records remain on this device. Retry on a subsequent
-      // connectivity check; visible per-file failure/conflict stays intact.
+      // Device-encrypted files remain queued and will retry in a later pass.
     }
   }
 }
