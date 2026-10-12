@@ -573,6 +573,28 @@ def challenge_mfa(payload:TotpCode,request:Request,db:Session=Depends(get_db)):
     db.commit()
     return {"status":"MFA_VERIFIED"}
 
+@quality_router.post("/grants/{grant_id}/resend-invitation")
+def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
+                      user:accounts.User=Depends(get_current_active_user)):
+    amo=_authorized_quality(db,amo_code,user)
+    grant=core.one("""SELECT g.*,i.email,i.verified_at FROM external_tenant_grants g
+      JOIN external_identities i ON i.id=g.identity_id
+      WHERE g.amo_id=:amo AND g.id=:grant FOR UPDATE OF g""",db,amo=amo,grant=grant_id)
+    if not grant:raise HTTPException(404,"Invitation grant not found")
+    if grant["status"]!="PENDING" or grant["verified_at"]:
+        raise HTTPException(409,"Only an unverified pending invitation can be resent")
+    core.run("""UPDATE external_identity_tokens SET used_at=:at
+      WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL""",
+      db,at=core.now(),amo=amo,grant=grant_id)
+    raw=core.token(db,tenant_id=amo,grant_id=grant_id,
+                   identity_id=grant["identity_id"],kind="INVITE",hours=48)
+    core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,
+               action="INVITATION_RESENT",actor_user=str(user.id))
+    db.commit()
+    delivery=_send(db,amo,grant["email"],raw,"invitation")
+    db.commit()
+    return {"status":"PENDING","delivery_status":delivery}
+
 @quality_router.post("/grants/{grant_id}/reverify")
 def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depends(get_db),
                      user:accounts.User=Depends(get_current_active_user)):
