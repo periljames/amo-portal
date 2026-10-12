@@ -205,7 +205,14 @@ export async function verifyBrowserAuditShell(): Promise<number> {
   if (typeof window !== "undefined" && !window.isSecureContext) {
     throw new Error("Secure HTTPS is required for browser offline fieldwork.");
   }
-  await navigator.serviceWorker.ready;
+  // Do not hang forever if the browser blocks service-worker registration.
+  await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<never>((_, reject) => window.setTimeout(
+      () => reject(new Error("The browser service worker did not become ready. Reload once online and retry.")),
+      12_000,
+    )),
+  ]);
   const controller = navigator.serviceWorker.controller;
   if (!controller) {
     throw new Error("The offline service worker is not controlling this page yet. Reload once while online and retry.");
