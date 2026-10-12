@@ -32,6 +32,7 @@ import {
   replayOfflineMutations,
 } from "./services/offlinePersistence";
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
+import { requestAuditOfflineSync, startAuditOfflineSync } from "./services/qmsAuditOfflineSync";
 import {
   isPortalReady,
   getPortalConnectivity,
@@ -179,6 +180,7 @@ installActiveAmoStorageGuard();
 ensureManifest();
 onlineManager.setOnline(false);
 startPortalConnectivity();
+startAuditOfflineSync();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -304,6 +306,7 @@ if (typeof window !== "undefined") {
       onlineManager.setOnline(true);
       await queryClient.resumePausedMutations();
       await replayOfflineMutations();
+      requestAuditOfflineSync(true); // synchronize encrypted QMS evidence after checklist replay
       await queryClient.invalidateQueries();
     })().finally(() => {
       recoverySequence = null;
@@ -315,7 +318,7 @@ if (typeof window !== "undefined") {
     if (detail.type === "authenticated") {
       clearIfTenantScopeChanged();
       void queryClient.invalidateQueries({ queryKey: ["workforce", "permissions"] });
-      if (!recoverySequence) void replayOfflineMutations();
+      if (!recoverySequence) void replayOfflineMutations().finally(() => requestAuditOfflineSync(true));
       if (detail.reason === "session-recovered") void queryClient.invalidateQueries();
       return;
     }
@@ -356,7 +359,7 @@ if (typeof window !== "undefined") {
 
   navigator.serviceWorker?.addEventListener("message", (event) => {
     if (event.data?.type === "PORTAL_CONNECTIVITY_RECHECK" || event.data?.type === "PORTAL_SYNC_REQUESTED") {
-      void probePortalReadiness(true);
+      void probePortalReadiness(true).then(() => requestAuditOfflineSync(true));
     }
   });
 }
