@@ -22,6 +22,8 @@ import {
   type OfflineOutboxSummary,
   type OfflineReplayProgress,
 } from "../../services/offlinePersistence";
+import { listPendingAuditEvidenceGroups, onOfflineAuditEvidenceChanged } from "../../services/qmsOfflineAuditEvidence";
+import { synchronizeAuditOfflineNow } from "../../services/qmsAuditOfflineSync";
 import {
   isQmsFieldworkConflict,
   keepServerVersionForQmsFieldwork,
@@ -71,6 +73,7 @@ function compactFieldworkState(value: Record<string, unknown> | null): string {
 export function OfflineSyncIndicator() {
   const [connectivity, setConnectivity] = useState<PortalConnectivitySnapshot>(getPortalConnectivity);
   const [summary, setSummary] = useState<OfflineOutboxSummary>(EMPTY);
+  const [evidenceTotals, setEvidenceTotals] = useState({ pending: 0, conflicts: 0 });
   const [entries, setEntries] = useState<OfflineOutboxEntry[]>([]);
   const [progress, setProgress] = useState<OfflineReplayProgress>(EMPTY_PROGRESS);
   const [manualSync, setManualSync] = useState(false);
@@ -80,12 +83,14 @@ export function OfflineSyncIndicator() {
   const online = connectivity.state === "ONLINE";
 
   const refresh = useCallback(async () => {
-    const [nextSummary, nextEntries] = await Promise.all([
+    const [nextSummary, nextEntries, evidence] = await Promise.all([
       getOfflineOutboxSummary().catch(() => EMPTY),
       listOfflineMutations().catch(() => [] as OfflineOutboxEntry[]),
+      listPendingAuditEvidenceGroups().catch(() => []),
     ]);
     setSummary(nextSummary);
     setEntries(nextEntries);
+    setEvidenceTotals({ pending: evidence.reduce((n, row) => n + row.count, 0), conflicts: evidence.reduce((n, row) => n + row.conflicts, 0) });
   }, []);
 
   const sync = useCallback(async () => {
@@ -97,7 +102,7 @@ export function OfflineSyncIndicator() {
     setManualSync(true);
     setActionError(null);
     try {
-      setSummary(await replayOfflineMutations());
+      await synchronizeAuditOfflineNow();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -187,6 +192,7 @@ export function OfflineSyncIndicator() {
       void refresh();
     });
     const removeState = onOfflineStateChanged(() => void refresh());
+    const removeEvidence = onOfflineAuditEvidenceChanged(() => void refresh());
     const removeProgress = onOfflineReplayProgress((next) => {
       setProgress(next);
       void refresh();
@@ -196,14 +202,10 @@ export function OfflineSyncIndicator() {
       removeConnectivity();
       removeState();
       removeProgress();
+      removeEvidence();
     };
   }, [refresh]);
 
-  useEffect(() => {
-    if (!online || summary.queued <= 0) return;
-    const timer = window.setInterval(() => void replayOfflineMutations().then(() => refresh()), 15_000);
-    return () => window.clearInterval(timer);
-  }, [online, refresh, summary.queued]);
 
   useEffect(() => {
     if (!open) return;
@@ -215,18 +217,18 @@ export function OfflineSyncIndicator() {
   }, [open]);
 
   const state: IndicatorState = useMemo(() => {
-    if (summary.conflict > 0 || summary.failed > 0) return "conflict";
+    if (summary.conflict + summary.failed + evidenceTotals.conflicts > 0) return "conflict";
     if (manualSync || progress.phase === "sending" || summary.syncing > 0) return "syncing";
     if (connectivity.state === "DEGRADED" || connectivity.state === "RECOVERING") return "degraded";
     if (!online) return "offline";
-    if (summary.queued > 0) return "queued";
+    if (summary.queued + evidenceTotals.pending > 0) return "queued";
     return "online";
-  }, [connectivity.state, manualSync, online, progress.phase, summary]);
+  }, [connectivity.state, manualSync, online, progress.phase, summary, evidenceTotals.pending, evidenceTotals.conflicts]);
 
   if (state === "online") return null;
 
-  const pending = summary.total;
-  const issueCount = summary.conflict + summary.failed;
+  const pending = summary.total + evidenceTotals.pending;
+  const issueCount = summary.conflict + summary.failed + evidenceTotals.conflicts;
   const title = state === "degraded"
     ? "Server reachable; database recovery in progress"
     : state === "offline"
@@ -299,7 +301,7 @@ export function OfflineSyncIndicator() {
           ) : null}
 
           <div className="portal-offline-recovery__summary">
-            <span><strong>{summary.queued + summary.syncing}</strong> waiting</span>
+            <span><strong>{summary.queued + summary.syncing + evidenceTotals.pending}</strong> waiting (including evidence)</span>
             <span><strong>{issueCount}</strong> review</span>
             <span><strong>{connectivity.attempt}</strong> retry attempt{connectivity.attempt === 1 ? "" : "s"}</span>
           </div>
@@ -364,7 +366,7 @@ export function OfflineSyncIndicator() {
             <button type="button" onClick={() => void probePortalReadiness(true)} disabled={manualSync}>
               <RefreshCw size={15} aria-hidden="true" />Check server
             </button>
-            {summary.queued > 0 ? (
+            {summary.queued + evidenceTotals.pending > 0 ? (
               <button type="button" className="portal-offline-recovery__primary" onClick={() => void sync()} disabled={!online || manualSync}>
                 <CloudUpload size={15} aria-hidden="true" />Sync now
               </button>
