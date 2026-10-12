@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-_NUMBERED = re.compile(r"^\\s*(\\d{1,4})[.)]\\s+(.+)$")
+_NUMBERED = re.compile(r"^\s*(\d{1,4})[.)]\s+(.+)$")
 _HEADING = re.compile(r"^[A-Z][A-Z0-9 /()&,.:\\-]{3,120}$")
 _SOURCE_SCHEME = [
     {"value": "S", "label": "S", "canonical_status": "COMPLIANT"},
@@ -26,7 +26,7 @@ def _draft_item(number: int, section: str, prompt: str) -> dict[str, Any]:
         "section": section or "Uncategorised",
         "checklist_ref": str(number),
         "requirement_ref": "",
-        "prompt": re.sub(r"\\s+", " ", prompt).strip()[:8000],
+        "prompt": re.sub(r"\s+", " ", prompt).strip()[:8000],
         "expected_evidence": "",
         "guidance": "",
         "response_type": "CUSTOM",
@@ -58,7 +58,7 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 # In tabular controlled checklists, heading rows carry the
                 # assessment-column titles. Autonumbered cells can be blank.
                 if len(cells) >= 4 and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
-                    section = re.sub(r"\\s+", " ", body)[:128]
+                    section = re.sub(r"\s+", " ", body)[:128]
                     continue
                 if body.lower().startswith(("remarks:", "auditor's assessment", "auditor’s assessment", "name & signature")):
                     continue
@@ -103,7 +103,7 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
             warnings.append(f"Page {page_number}: no selectable text; scanned-page OCR is not performed.")
             continue
         for raw in text.splitlines():
-            line = re.sub(r"\\s+", " ", raw).strip()
+            line = re.sub(r"\s+", " ", raw).strip()
             if _HEADING.fullmatch(line) and line not in {"S", "U", "N/C", "N/A"}:
                 section = line[:128]
                 continue
@@ -118,7 +118,7 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
-    name = filename.rsplit("/", 1)[-1].rsplit("\\\\", 1)[-1]
+    name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if not data or len(data) > MAX_UPLOAD_BYTES:
         raise ValueError("Choose a nonempty Word or PDF checklist under 10 MB.")
     suffix = name.lower().rsplit(".", 1)[-1] if "." in name else ""
