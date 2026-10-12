@@ -202,6 +202,25 @@ export function applyChecklistRevision(amoCode: string, auditId: string, templat
   }));
 }
 
+export type UploadedChecklistDraft = {
+  filename: string;
+  sha256: string;
+  question_count: number;
+  section_count: number;
+  items: ChecklistTemplateItem[];
+  warnings: string[];
+};
+
+/** Extract editable candidates; the upload itself never binds or issues a checklist. */
+export function parseUploadedAuditChecklist(amoCode: string, auditId: string, file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return apiRequest<UploadedChecklistDraft>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklists/parse-upload`),
+    { method: "POST", body, timeoutMs: 120_000, offline: { queueMutation: false } },
+  );
+}
+
 export function createRealtimeAuditChecklist(
   amoCode: string,
   auditId: string,
@@ -213,6 +232,8 @@ export function createRealtimeAuditChecklist(
     canonical_document_id?: string | null;
     canonical_revision_id?: string | null;
     allow_existing_items: boolean;
+    uploaded_source_filename?: string | null;
+    uploaded_source_sha256?: string | null;
   },
 ) {
   return apiRequest<ChecklistBinding>(
