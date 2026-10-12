@@ -45,9 +45,19 @@ def _create(name, *columns, extra=()):
 def upgrade():
     # Existing supplier IDs are globally primary keyed, but composite uniqueness
     # is needed to enforce tenant-matched references at the database boundary.
-    op.add_column("procurement_suppliers",
-                  sa.Column("external_import_pending_activation", sa.Boolean(),
-                            nullable=False, server_default=sa.false()))
+    # Clean databases may already contain the column because the earlier bootstrap
+    # uses the current model metadata. Existing installations may not. Never
+    # overwrite an existing column or remove a column we did not create.
+    existing = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("procurement_suppliers")}
+    if "external_import_pending_activation" not in existing:
+        op.add_column("procurement_suppliers",
+                      sa.Column("external_import_pending_activation", sa.Boolean(),
+                                nullable=False, server_default=sa.false()))
+        if op.get_bind().dialect.name == "postgresql":
+            op.execute(sa.text(
+                "COMMENT ON COLUMN procurement_suppliers.external_import_pending_activation "
+                "IS 'created_by:extprov_261009_foundation'"
+            ))
     op.create_unique_constraint("uq_procurement_supplier_tenant_identity",
                                 "procurement_suppliers", ["amo_id", "id"])
     _create("external_provider_roles",
@@ -206,7 +216,10 @@ def upgrade():
     if op.get_bind().dialect.name == "postgresql":
         op.execute(sa.text("""CREATE FUNCTION external_provider_prevent_event_mutation()
             RETURNS trigger LANGUAGE plpgsql AS $
-            BEGIN RAISE EXCEPTION 'External provider event provenance is immutable'; END $"""))
+            BEGIN
+                RAISE EXCEPTION 'External provider event provenance is immutable';
+            END;
+            $"""))
         op.execute(sa.text("""CREATE TRIGGER trg_external_provider_events_immutable
             BEFORE UPDATE OR DELETE ON external_provider_change_events
             FOR EACH ROW EXECUTE FUNCTION external_provider_prevent_event_mutation()"""))
@@ -287,4 +300,9 @@ def downgrade():
     op.drop_constraint("uq_ext_qms_evidence_tenant_identity",
                        "quality_external_provider_evidence", type_="unique")
     op.drop_constraint("uq_procurement_supplier_tenant_identity", "procurement_suppliers", type_="unique")
-    op.drop_column("procurement_suppliers", "external_import_pending_activation")
+    # Downgrade only the column introduced by this revision. A pre-existing
+    # bootstrap column must survive downgrade to preserve earlier schema state.
+    column = next((item for item in sa.inspect(op.get_bind()).get_columns("procurement_suppliers")
+                   if item["name"] == "external_import_pending_activation"), None)
+    if column is not None and column.get("comment") == "created_by:extprov_261009_foundation":
+        op.drop_column("procurement_suppliers", "external_import_pending_activation")
