@@ -130,6 +130,9 @@ export default function ExternalProviderQualityPage() {
                   <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"ACTIVE",reason:reason||"Quality restricted the provider to existing permitted corrective work.",restrict_new_work:true},"Provider restricted; new work is blocked.")}>Restrict new work</button>}
                 {item.portal_state==="ACTIVE" && item.restrict_new_work &&
                   <button disabled={busy} onClick={()=>void act(`/providers/${item.provider_id}/decision`,{state:"ACTIVE",reason:reason||"Quality reviewed restrictions and restored approved portal capabilities.",restrict_new_work:false},"Portal capability restrictions lifted.")}>Lift restriction</button>}
+                <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/sessions/revoke`,
+                  {state:"PENDING",reason:reason||"Quality revoked all active sessions pending identity access review."},
+                  "All provider account sessions revoked without changing the account grant.")}>End sessions</button>
                 <button disabled={busy} onClick={()=>selectGrant(item)}>Privileges</button>
                 <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/reverify`,{state:"PENDING",reason:reason||"Quality requires identity re-verification before restoration."},"One-time verification code issued and sessions revoked.")}>Reverify</button>
                 <button disabled={busy} onClick={()=>void act(`/identities/${item.identity_id}/unlock`,{state:"ACTIVE",reason:reason||"Quality reviewed login lockout and approved unlock."},"Login lockout cleared.")}>Unlock login</button>
