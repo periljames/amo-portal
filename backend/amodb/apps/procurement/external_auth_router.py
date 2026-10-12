@@ -586,6 +586,35 @@ def challenge_mfa(payload:TotpCode,request:Request,db:Session=Depends(get_db)):
     db.commit()
     return {"status":"MFA_VERIFIED"}
 
+
+@quality_router.get("/grants/{grant_id}/sessions")
+def quality_sessions(amo_code:str,grant_id:str,db:Session=Depends(get_db),
+                     user:accounts.User=Depends(get_current_active_user)):
+    amo=_authorized_quality(db,amo_code,user)
+    if not core.one("""SELECT id FROM external_tenant_grants WHERE amo_id=:amo
+        AND id=:grant""",db,amo=amo,grant=grant_id):
+        raise HTTPException(404,"Provider account not found")
+    return {"items":core.many("""SELECT id,created_at,last_seen_at,expires_at,revoked_at
+       FROM external_sessions WHERE amo_id=:amo AND grant_id=:grant
+       ORDER BY created_at DESC LIMIT 100""",db,amo=amo,grant=grant_id)}
+
+@quality_router.post("/grants/{grant_id}/sessions/revoke")
+def quality_revoke_sessions(amo_code:str,grant_id:str,payload:Decision,
+                            db:Session=Depends(get_db),
+                            user:accounts.User=Depends(get_current_active_user)):
+    _quality_manager(user);amo=_authorized_quality(db,amo_code,user)
+    grant=core.one("""SELECT identity_id FROM external_tenant_grants WHERE
+       amo_id=:amo AND id=:grant""",db,amo=amo,grant=grant_id)
+    if not grant:raise HTTPException(404,"Provider account not found")
+    result=core.run("""UPDATE external_sessions SET revoked_at=:at
+       WHERE amo_id=:amo AND grant_id=:grant AND revoked_at IS NULL""",
+       db,at=core.now(),amo=amo,grant=grant_id)
+    core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,
+        action="QUALITY_SESSIONS_REVOKED",actor_user=str(user.id),
+        details={"reason":payload.reason,"sessions_revoked":result.rowcount})
+    db.commit()
+    return {"sessions_revoked":result.rowcount}
+
 @quality_router.post("/grants/{grant_id}/resend-invitation")
 def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
                       user:accounts.User=Depends(get_current_active_user)):
