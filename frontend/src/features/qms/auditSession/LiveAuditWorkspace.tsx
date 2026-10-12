@@ -14,7 +14,6 @@ import {
   Filter,
   ChevronDown,
   Save,
-  PanelLeft,
   MessageSquareText,
   Search,
   ShieldAlert,
@@ -236,7 +235,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [navigationOpen, setNavigationOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
@@ -894,7 +892,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     <div className="qms-live-audit-focus" role="region" aria-label="Live audit fieldwork workspace">
       <header className="qms-live-audit-focus__header">
         <div className="qms-live-audit-focus__identity">
-          <button type="button" className="qms-live-audit-focus__mobile-menu" aria-label={navigationOpen ? "Close question list" : "Open question list"} aria-expanded={navigationOpen} aria-controls="audit-occurrence-checklist" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
           <div>
             <h2>Fieldwork <span className="qms-live-audit-focus__identity-ref">{auditQuery.data.audit_ref || auditKey}</span></h2>
             <p className="qms-live-audit-focus__helper">Answer questions · capture evidence · record findings</p>
@@ -950,7 +947,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <ul>{completionBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </details> : null}
 
-      <div className={`qms-live-audit-focus__body${navigationOpen ? " is-navigation-open" : ""}`}>
+      <div className="qms-live-audit-focus__body">
         <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
           <div className="qms-live-audit-focus__matrix-toolbar">
             <div><strong>Checklist assessment</strong><small>{completed} of {items.length} server-confirmed · {localAnswers.size} device changes</small></div>
