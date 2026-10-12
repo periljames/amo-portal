@@ -367,6 +367,21 @@ function errorStatus(error: unknown): number | null {
   return typeof status === "number" ? status : null;
 }
 
+/** One uploader per audit across browser tabs (when Web Locks are supported). */
+export async function synchronizeOfflineAuditEvidence(
+  amoCode: string,
+  auditId: string,
+): Promise<{ uploaded: AuditEvidenceArtifact[]; failed: number; conflicts: number; deferred: number }> {
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return (await navigator.locks.request(
+      `amo:qms:evidence:${currentOfflineScope()}:${auditId}`,
+      { ifAvailable: true },
+      async (lock) => lock ? replayOfflineAuditEvidence(amoCode, auditId) : null,
+    )) || { uploaded: [], failed: 0, conflicts: 0, deferred: 1 };
+  }
+  return replayOfflineAuditEvidence(amoCode, auditId);
+}
+
 export async function replayOfflineAuditEvidence(
   amoCode: string,
   auditId: string,
@@ -387,7 +402,7 @@ export async function replayOfflineAuditEvidence(
   let deferred = 0;
   const pendingChecklistMutations = (await listOfflineMutations()).filter((entry) =>
     entry.entityType === "qms-audit-checklist-item"
-    && (entry.status === "queued" || entry.status === "syncing")
+    && ["queued", "syncing", "conflict", "failed"].includes(entry.status)
     && entry.path.includes(`/audits/${encodeURIComponent(auditId)}/checklist-items/`)
   );
 
