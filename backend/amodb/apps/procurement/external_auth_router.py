@@ -251,7 +251,13 @@ def login(payload:Login,request:Request,response:Response,db:Session=Depends(get
     active=[g for g in candidates if g["status"]=="ACTIVE" and g["portal_state"] in {"ACTIVE","SUSPENDED"}
             and g["member_status"]=="ACTIVE"
             and (not payload.vendor_key or hmac.compare_digest(str(g["supplier_code"]).casefold(),payload.vendor_key.casefold()))]
-    if not identity or not identity["password_hash"] or not verify_password(payload.password,identity["password_hash"]) or not active:
+    authenticated=bool(identity and identity["password_hash"] and verify_password(payload.password,identity["password_hash"]))
+    if not authenticated or not active:
+        if identity and not authenticated:
+            attempts=int(identity["failed_attempts"] or 0)+1
+            core.run("""UPDATE external_credentials SET failed_attempts=:attempts,
+                locked_until=:until WHERE identity_id=:id""",db,attempts=attempts,
+                until=core.now()+timedelta(minutes=30) if attempts>=5 else None,id=identity["id"])
         core.event(db,amo=amo,identity=identity["id"] if identity else None,grant=None,action="LOGIN_REJECTED")
         db.commit()
         raise HTTPException(401,"Invalid credentials or access not enabled")
@@ -328,8 +334,8 @@ def revoke_session(session_id:str,request:Request,response:Response,db:Session=D
 @router.post("/logout-all")
 def logout_all(request:Request,response:Response,db:Session=Depends(get_db)):
     s=core.active_session(db,request,required="sessions.manage",write=True)
-    core.run("""UPDATE external_sessions SET revoked_at=:at
-       WHERE identity_id=:identity AND revoked_at IS NULL""",db,at=core.now(),identity=s["identity_id"])
+    core.revoke_identity_sessions(db,s["identity_id"])
+    core.context(db,s["amo_id"],s["identity_id"])
     core.event(db,amo=s["amo_id"],identity=s["identity_id"],grant=s["grant_id"],action="ALL_SESSIONS_REVOKED",actor_identity=s["identity_id"])
     db.commit();core.cookie(response,None)
     return {"status":"ALL_REVOKED"}
@@ -346,8 +352,8 @@ def change_password(payload:PasswordChange,request:Request,response:Response,db:
     core.run("""UPDATE external_credentials SET password_hash=:hash,
         password_version=password_version+1,changed_at=:at WHERE identity_id=:id""",
         db,hash=get_password_hash(payload.new_password),at=core.now(),id=s["identity_id"])
-    core.run("UPDATE external_sessions SET revoked_at=:at WHERE identity_id=:id AND revoked_at IS NULL",
-             db,at=core.now(),id=s["identity_id"])
+    core.revoke_identity_sessions(db,s["identity_id"])
+    core.context(db,s["amo_id"],s["identity_id"])
     core.event(db,amo=s["amo_id"],identity=s["identity_id"],grant=s["grant_id"],action="PASSWORD_CHANGED",actor_identity=s["identity_id"])
     db.commit();core.cookie(response,None)
     return {"status":"PASSWORD_CHANGED_RELOGIN"}
@@ -378,8 +384,8 @@ def reset(payload:PasswordReset,response:Response,db:Session=Depends(get_db)):
         changed_at=:at WHERE identity_id=:identity""",
         db,hash=get_password_hash(payload.password),at=core.now(),identity=t["identity_id"])
     # A reset never removes the verified TOTP requirement.
-    core.run("UPDATE external_sessions SET revoked_at=:at WHERE identity_id=:identity AND revoked_at IS NULL",
-        db,at=core.now(),identity=t["identity_id"])
+    core.revoke_identity_sessions(db,t["identity_id"])
+    core.context(db,t["amo_id"],t["identity_id"])
     core.event(db,amo=t["amo_id"],identity=t["identity_id"],grant=t["grant_id"],action="PASSWORD_RESET")
     db.commit();core.cookie(response,None)
     return {"status":"PASSWORD_RESET_RELOGIN"}
@@ -523,15 +529,18 @@ def quality_lock(amo_code:str,identity_id:str,payload:Decision,db:Session=Depend
           WHERE amo_id=:amo AND identity_id=:identity LIMIT 1""",db,amo=amo,identity=identity_id)
     if not member:raise HTTPException(404,"Identity not granted for this tenant")
     state="LOCKED" if payload.state in {"SUSPENDED","REVOKED"} else "ACTIVE"
-    # Global lock is deliberately a Quality Manager action affecting all tenants.
-    core.run("UPDATE external_identities SET status=:state,updated_at=:at WHERE id=:id",
-             db,state=state,at=core.now(),id=identity_id)
-    core.run("UPDATE external_sessions SET revoked_at=:at WHERE identity_id=:id AND revoked_at IS NULL",
-             db,at=core.now(),id=identity_id)
-    core.event(db,amo=amo,identity=identity_id,grant=None,action=f"IDENTITY_{state}",
+    # Tenant Quality may lock this tenant's grants, never another AMO's
+    # identity. Global identity access requires platform governance.
+    core.run("""UPDATE external_tenant_grants SET status=:state,version=version+1
+      WHERE amo_id=:amo AND identity_id=:identity""",
+      db,state="SUSPENDED" if state=="LOCKED" else "PENDING",amo=amo,identity=identity_id)
+    core.run("""UPDATE external_sessions SET revoked_at=:at WHERE amo_id=:amo
+      AND identity_id=:identity AND revoked_at IS NULL""",
+      db,at=core.now(),amo=amo,identity=identity_id)
+    core.event(db,amo=amo,identity=identity_id,grant=None,action=f"TENANT_IDENTITY_{state}",
                actor_user=str(user.id),details={"reason":payload.reason})
     db.commit()
-    return {"identity_status":state}
+    return {"tenant_identity_access":state,"restore_requires_grant_review":state=="ACTIVE"}
 
 def require_provider(capability:str):
     """Future provider APIs call this and scope_allows(); never staff OAuth2."""
@@ -539,3 +548,44 @@ def require_provider(capability:str):
         return core.active_session(db,request,required=capability,
                                    write=request.method.upper() not in {"GET","HEAD"})
     return _dependency
+
+@quality_router.post("/grants/{grant_id}/reverify")
+def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depends(get_db),
+                     user:accounts.User=Depends(get_current_active_user)):
+    _quality_manager(user);amo=_authorized_quality(db,amo_code,user)
+    grant=core.one("""SELECT g.id,g.identity_id,i.email FROM external_tenant_grants g
+      JOIN external_identities i ON i.id=g.identity_id
+      WHERE g.amo_id=:amo AND g.id=:id FOR UPDATE OF g""",db,amo=amo,id=grant_id)
+    if not grant:raise HTTPException(404,"Account grant not found")
+    core.run("""UPDATE external_tenant_grants SET status='PENDING',version=version+1
+       WHERE amo_id=:amo AND id=:id""",db,amo=amo,id=grant_id)
+    core.run("""UPDATE external_sessions SET revoked_at=:at WHERE amo_id=:amo
+       AND grant_id=:id AND revoked_at IS NULL""",db,at=core.now(),amo=amo,id=grant_id)
+    raw=core.token(db,tenant_id=amo,grant_id=grant_id,identity_id=grant["identity_id"],kind="VERIFY",hours=24)
+    core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,action="REVERIFICATION_REQUIRED",
+               actor_user=str(user.id),details={"reason":payload.reason})
+    db.commit();_send(db,amo,grant["email"],raw,"reverification");db.commit()
+    return {"status":"REVERIFICATION_REQUIRED"}
+
+@router.post("/verification/confirm")
+def verify_again(payload:AccountAction,db:Session=Depends(get_db)):
+    row=core.redeem_token(db,payload.code,"VERIFY")
+    core.run("""UPDATE external_identities SET verified_at=:at,updated_at=:at
+        WHERE id=:id AND status='ACTIVE'""",db,at=core.now(),id=row["identity_id"])
+    core.event(db,amo=row["amo_id"],identity=row["identity_id"],grant=row["grant_id"],action="IDENTITY_REVERIFIED")
+    db.commit()
+    return {"status":"REVERIFIED_AWAITING_QUALITY_ACTIVATION"}
+
+@quality_router.post("/identities/{identity_id}/unlock")
+def quality_unlock(amo_code:str,identity_id:str,payload:Decision,db:Session=Depends(get_db),
+                   user:accounts.User=Depends(get_current_active_user)):
+    _quality_manager(user);amo=_authorized_quality(db,amo_code,user)
+    if not core.one("""SELECT id FROM external_tenant_grants
+        WHERE amo_id=:amo AND identity_id=:id""",db,amo=amo,id=identity_id):
+        raise HTTPException(404,"Identity not associated with this tenant")
+    core.run("""UPDATE external_credentials SET failed_attempts=0,locked_until=NULL
+        WHERE identity_id=:id""",db,id=identity_id)
+    core.event(db,amo=amo,identity=identity_id,grant=None,action="LOGIN_LOCK_CLEARED",
+               actor_user=str(user.id),details={"reason":payload.reason})
+    db.commit()
+    return {"status":"LOGIN_LOCK_CLEARED"}
