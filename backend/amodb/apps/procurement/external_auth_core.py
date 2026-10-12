@@ -187,6 +187,19 @@ def scope_allows(session, *, contract_id=None, document_id=None, assignment_id=N
             raise HTTPException(403,f"Provider {key} access not assigned")
     return True
 
+
+def revoke_identity_sessions(db: Session, identity_id: str):
+    """Revoke every tenant session even with FORCE RLS on session rows."""
+    tenants=db.execute(text("SELECT id FROM amos")).scalars().all()
+    total=0
+    for tenant_id in tenants:
+        context(db,str(tenant_id),identity_id)
+        result=run("""UPDATE external_sessions SET revoked_at=:at
+            WHERE amo_id=:amo AND identity_id=:identity AND revoked_at IS NULL""",
+            db,at=now(),amo=str(tenant_id),identity=identity_id)
+        total+=result.rowcount
+    return total
+
 def password_is_valid(value):
     try:
         services._validate_password_strength(value)
