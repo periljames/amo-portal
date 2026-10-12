@@ -1236,13 +1236,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     {request.canonical_document_id ? <code><Link2 size={13} /> DMS document {request.canonical_document_id}{request.canonical_revision_id ? ` · revision ${request.canonical_revision_id}` : ""}</code> : null}
                     {request.review_note ? <blockquote>{request.review_note}</blockquote> : null}
                   </div>
-                  {canManage && ["UPLOADED", "REJECTED"].includes(request.status) ? (
+                  {canManage && request.status === "UPLOADED" ? (
                     <div className="qms-audit-prepare__review">
                       <textarea rows={2} value={reviewNotes[request.id] || ""} onChange={(event) => setReviewNotes((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Review note / return instructions" />
                       <div><button type="button" onClick={() => reviewMutation.mutate({ request, status: "REJECTED" })} disabled={reviewMutation.isPending}>Return / reject</button><button type="button" className="is-primary" onClick={() => reviewMutation.mutate({ request, status: "ACCEPTED" })} disabled={reviewMutation.isPending}><CheckCircle2 size={14} /> Accept</button></div>
                     </div>
                   ) : null}
-                  {canManage && request.status === "REQUESTED" && !request.is_required ? <button type="button" onClick={() => reviewMutation.mutate({ request, status: "WAIVED" })} disabled={reviewMutation.isPending}>Waive optional request</button> : null}
+                  {request.status === "REJECTED" ? <p className="qms-audit-prepare-stage__notice is-warning" role="status">Returned for correction. Await a new document submission before reviewing it again.</p> : null}
+                   {canManage && request.status === "REQUESTED" && !request.is_required ? <button type="button" onClick={() => reviewMutation.mutate({ request, status: "WAIVED" })} disabled={reviewMutation.isPending}>Waive optional request</button> : null}
                 </article>
               ))}
             </div>
