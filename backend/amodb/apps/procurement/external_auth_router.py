@@ -23,8 +23,10 @@ from amodb.apps.accounts import models as accounts
 from amodb.apps.notifications import service as notifications
 from . import service
 from . import external_auth_core as core
+from .external_passkey_router import router as provider_passkey_router
 
 router=APIRouter(prefix="/api/external-provider",tags=["External provider authentication"])
+router.include_router(provider_passkey_router)
 quality_router=APIRouter(prefix="/api/maintenance/{amo_code}/quality/external-accounts",
                         tags=["Quality external account governance"])
 
@@ -651,6 +653,8 @@ def mfa_methods(request:Request,db:Session=Depends(get_db)):
     session=core.active_session(db,request,required="profile.read")
     credential=core.one("""SELECT totp_confirmed_at FROM external_credentials
         WHERE identity_id=:person""",db,person=session["identity_id"])
+    registered=core.one("""SELECT count(*) AS total FROM external_passkey_credentials
+        WHERE identity_id=:id AND is_active=true""",db,id=session["identity_id"])
     return {"totp_enabled":bool(credential and credential["totp_confirmed_at"]),
-            "passkeys_supported":False,
-            "passkey_enrollment":"NOT_ENABLED_FOR_EXTERNAL_ACCOUNTS"}
+            "passkeys_supported":True,
+            "registered_passkeys":registered["total"] if registered else 0}
