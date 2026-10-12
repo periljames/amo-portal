@@ -436,7 +436,7 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
   // The selected programme is shown in the matrix selector, not as a free-standing heading.
   const matrix = page.getByLabel("2026 audit programme calendar");
   await expect(matrix).toBeVisible();
-  await expect(matrix.getByLabel("Programme", { exact: true })).toHaveValue("programme-1");
+  await expect(matrix.locator(".qms-programme-matrix__programme-select select")).toHaveValue("programme-1");
   await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("region", { name: "Programme scheduling queue" })).toBeVisible();
 
@@ -462,7 +462,7 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
   await expect(page.getByLabel(/Compliance baseline/i)).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
-  await expect(page.getByLabel("2026 audit programme calendar").getByLabel("Programme", { exact: true })).toHaveValue("programme-created");
+  await expect(page.getByLabel("2026 audit programme calendar").locator(".qms-programme-matrix__programme-select select")).toHaveValue("programme-created");
 
   await page.getByRole("button", { name: "Approval" }).click();
   const submitReview = page.getByRole("button", { name: "Submit for Quality review" });
