@@ -351,6 +351,59 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         "cars":{"items":cars,"limit":limit,"offset":offset},
         "submission_policy":"Only issued assignments and prior Quality-controlled invite links may submit formal CAR responses."}
 
+
+class CorrectiveActionSubmission(BaseModel):
+    containment_action: str = Field(min_length=2,max_length=500)
+    root_cause: str = Field(min_length=12,max_length=500)
+    corrective_action: str = Field(min_length=12,max_length=500)
+    preventive_action: str = Field(default="",max_length=500)
+    evidence_submission_id: str | None = Field(default=None,max_length=36)
+
+@router.post("/quality/cars/{car_id}/submit")
+def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmission,
+                        request:Request,db:Session=Depends(get_db)):
+    """Invoke the existing Quality CAR submission workflow, never a parallel CAR."""
+    user=_ctx(db,request,tenant_slug,cap="capa.respond",write=True)
+    ctx=_context(user)
+    assigned=_allowed(user,"assignments")
+    if not assigned:raise HTTPException(403,"No issued audit/CAR assignment")
+    car=_rows_compiled(db,text("""SELECT c.id,c.invite_token,c.evidence_required,
+        CAST(f.audit_id AS TEXT) assignment_id FROM quality_cars c
+        JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
+        WHERE c.amo_id=:amo AND CAST(c.id AS TEXT)=:id
+        AND CAST(f.audit_id AS TEXT) IN :assignments""").bindparams(bindparam("assignments",expanding=True)),
+        {**ctx,"id":car_id,"assignments":sorted(assigned)})
+    if len(car)!=1:raise HTTPException(404,"Assigned corrective action not found")
+    evidence_reference=None
+    if payload.evidence_submission_id:
+        evidence=_row("""SELECT id,sha256,related_kind,related_id,status
+            FROM external_partner_evidence_submissions
+            WHERE amo_id=:amo AND tenant_provider_id=:provider AND id=:id""",
+            db,**ctx,id=payload.evidence_submission_id)
+        if not evidence or evidence["status"]!="ACCEPTED" or
+                evidence["related_kind"]!="ASSIGNMENT" or evidence["related_id"]!=car[0]["assignment_id"]:
+            raise HTTPException(409,"Attach Quality-reviewed evidence assigned to this exact audit")
+        evidence_reference=f"PARTNER:{evidence['id']}:{evidence['sha256']}"
+    if car[0]["evidence_required"] and not evidence_reference:
+        raise HTTPException(409,"This CAR requires reviewed and linked objective evidence")
+    from amodb.apps.quality.router import submit_car_from_invite
+    from amodb.apps.quality.schemas import CARInviteUpdate
+    actor=_row("SELECT display_name,email FROM external_identities WHERE id=:id",db,id=ctx["person"])
+    submit_car_from_invite(str(car[0]["invite_token"]),CARInviteUpdate(
+        containment_action=payload.containment_action,root_cause=payload.root_cause,
+        corrective_action=payload.corrective_action,preventive_action=payload.preventive_action,
+        evidence_ref=evidence_reference,
+        submitted_by_name=actor["display_name"],submitted_by_email=actor["email"]),request,db)
+    # The reused authoritative function commits; re-establish tenant context.
+    auth.context(db,ctx["amo"],ctx["person"])
+    auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+        action="PARTNER_CAR_RESPONSE_SUBMITTED",actor_identity=ctx["person"],
+        details={"car_id":car_id,"assignment_id":car[0]["assignment_id"]})
+    _notify(db,user,"QUALITY","Corrective action submitted",
+        "Your response is now in the authoritative Quality CAR review queue.","CAR",car_id)
+    db.commit()
+    return {"status":"SUBMITTED","authoritative_domain":"QUALITY_CAR"}
+
 @router.get("/procurement")
 def procurement(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                 limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
