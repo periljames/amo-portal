@@ -1182,3 +1182,13 @@
 .qms-audit-prepare__import-review small { overflow-wrap: anywhere; color: var(--qms-muted); }
 .qms-audit-prepare__import-review p { margin: 0; font-size: 0.79rem; }
 .qms-audit-prepare__import-review button { justify-self: start; }
+
+
+.qms-audit-prepare__composer-pages { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.4rem 0.5rem; border: 1px solid var(--qms-line); border-radius: 7px; }
+.qms-audit-prepare__composer-pages span { margin-right: auto; color: var(--qms-muted); font-size: 0.8rem; }
+.qms-audit-prepare__composer-more { border: 1px solid var(--qms-line); border-radius: 7px; }
+.qms-audit-prepare__composer-more > summary { cursor: pointer; padding: 0.52rem 0.65rem; font-size: 0.78rem; font-weight: 700; }
+.qms-audit-prepare__composer-more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; padding: 0.65rem; border-top: 1px solid var(--qms-line); }
+.qms-audit-prepare__composer-more-grid > label { display: grid; gap: 0.3rem; min-width: 0; }
+.qms-audit-prepare__composer-more-grid .is-wide { grid-column: 1 / -1; }
+@media (max-width: 720px) { .qms-audit-prepare__composer-more-grid { grid-template-columns: 1fr; } .qms-audit-prepare__composer-more-grid .is-wide { grid-column: auto; } }
