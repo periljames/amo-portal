@@ -320,36 +320,52 @@ def contract_receipt(tenant_slug:str,contract_id:str,payload:ContractReceipt,
 @router.get("/quality")
 def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
             limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
-    user=_ctx(db,request,tenant_slug,cap="task.read")
+    user=_ctx(db,request,tenant_slug,cap="profile.read")
+    capabilities=set(user["capabilities_json"] or [])
+    if not capabilities.intersection({"task.read","capa.respond"}):
+        raise HTTPException(403,"Assigned Quality tasks are not granted")
     ctx=_context(user)
     assignments=_allowed(user,"assignments")
+    empty={"items":[],"limit":limit,"offset":offset,"has_more":False}
     if not assignments:
-        empty={"items":[],"limit":limit,"offset":offset,"has_more":False}
-        return {"notices":empty,"document_requests":empty,"cars":empty}
+        return {"notices":empty,"document_requests":empty,"cars":empty,
+                "accepted_evidence":empty,"submission_policy":"No assigned audit work"}
     params={**ctx,**_page(limit,offset),"assigned":sorted(assignments)}
+    read_operations=("task.read" in capabilities and user["portal_state"]=="ACTIVE"
+        and not user["restrict_new_work"] and user["supplier_active"]
+        and not user["import_pending"]
+        and str(user["supplier_lifecycle"]).split(".")[-1] in {"APPROVED","CONDITIONALLY_APPROVED"})
     notices=_rows_compiled(db,text("""SELECT n.id,n.subject,n.status,n.revision_no,n.notice_date,
         a.audit_ref,a.title FROM quality_audit_notices n
         JOIN qms_audits a ON a.id=n.audit_id AND a.amo_id=n.amo_id
         WHERE n.amo_id=:amo AND CAST(n.audit_id AS TEXT) IN :assigned
         AND n.status IN ('DELIVERED','ACKNOWLEDGED')
         ORDER BY n.notice_date DESC LIMIT :limit OFFSET :offset""").bindparams(
-          bindparam("assigned",expanding=True)),params)
+          bindparam("assigned",expanding=True)),params) if read_operations else []
     requests=_rows_compiled(db,text("""SELECT r.id,r.title,r.description,r.due_date,r.status,
         a.audit_ref FROM quality_audit_document_requests r
         JOIN qms_audits a ON a.amo_id=r.amo_id AND a.id=r.audit_id
         WHERE r.amo_id=:amo AND CAST(r.audit_id AS TEXT) IN :assigned
         ORDER BY r.due_date NULLS LAST,r.id LIMIT :limit OFFSET :offset""").bindparams(
-          bindparam("assigned",expanding=True)),params)
+          bindparam("assigned",expanding=True)),params) if read_operations else []
     cars=_rows_compiled(db,text("""SELECT c.id,c.car_number,c.title,c.status,c.due_date,
-        c.root_cause_status,c.capa_status FROM quality_cars c
+        c.root_cause_status,c.capa_status,CAST(f.audit_id AS TEXT) assignment_id
+        FROM quality_cars c
         JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
         WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
         ORDER BY c.due_date NULLS LAST,c.id LIMIT :limit OFFSET :offset""").bindparams(
           bindparam("assigned",expanding=True)),params)
+    evidence=_rows_compiled(db,text("""SELECT id,related_id,filename,evidence_type,status
+        FROM external_partner_evidence_submissions
+        WHERE amo_id=:amo AND tenant_provider_id=:provider
+        AND related_kind='ASSIGNMENT' AND related_id IN :assigned
+        AND status='ACCEPTED' ORDER BY created_at DESC LIMIT :limit OFFSET :offset""").bindparams(
+          bindparam("assigned",expanding=True)),params)
     return {"notices":{"items":notices,"limit":limit,"offset":offset},
         "document_requests":{"items":requests,"limit":limit,"offset":offset},
         "cars":{"items":cars,"limit":limit,"offset":offset},
-        "submission_policy":"Only issued assignments and prior Quality-controlled invite links may submit formal CAR responses."}
+        "accepted_evidence":{"items":evidence,"limit":limit,"offset":offset},
+        "submission_policy":"CARs are submitted through the authoritative Quality response handler; supporting uploads require Quality review."}
 
 
 class CorrectiveActionSubmission(BaseModel):
