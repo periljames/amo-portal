@@ -135,6 +135,12 @@ function findingClassification(draft: FindingDraft): { severity: FieldworkFindin
   return { severity: selected.severity, level: selected.value };
 }
 
+function isRecordedNotChecked(item: ChecklistExecutionGovernanceRow): boolean {
+  return item.canonical_response_status === "NOT_VERIFIED"
+    && (item.response_value || "").toUpperCase() === "N/C"
+    && Boolean(item.auditor_notes?.trim());
+}
+
 function statusLabel(value: string | null | undefined): string {
   return (value || "NOT_VERIFIED").replaceAll("_", " ");
 }
@@ -432,8 +438,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         source?.manual_source_ref,
       ].some((value) => String(value || "").toLowerCase().includes(term));
       if (!matchesSearch) return false;
-      if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED";
-      if (checklistFilter === "VERIFIED") return item.canonical_response_status !== "NOT_VERIFIED";
+      if (checklistFilter === "UNANSWERED") return item.canonical_response_status === "NOT_VERIFIED" && !isRecordedNotChecked(item);
+      if (checklistFilter === "VERIFIED") return item.canonical_response_status !== "NOT_VERIFIED" || isRecordedNotChecked(item);
       if (checklistFilter === "FINDINGS") return Boolean(item.finding_id) || item.canonical_response_status === "NONCOMPLIANT" || item.canonical_response_status === "OBSERVATION";
       if (checklistFilter === "EVIDENCE_REQUIRED") return Boolean(source?.expected_evidence?.trim()) || Boolean(source?.evidence_required_when?.length);
       return true;
@@ -650,9 +656,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const counts = useMemo(() => {
     const base: Record<CanonicalChecklistResponse, number> = { COMPLIANT: 0, NONCOMPLIANT: 0, OBSERVATION: 0, NOT_APPLICABLE: 0, NOT_VERIFIED: 0 };
-    items.forEach((item) => { const status = (item.canonical_response_status || "NOT_VERIFIED") as CanonicalChecklistResponse; if (status in base) base[status] += 1; else base.NOT_VERIFIED += 1; });
+    items.forEach((item) => { if (isRecordedNotChecked(item)) return; const status = (item.canonical_response_status || "NOT_VERIFIED") as CanonicalChecklistResponse; if (status in base) base[status] += 1; else base.NOT_VERIFIED += 1; });
     return base;
   }, [items]);
+  const notCheckedCount = items.filter(isRecordedNotChecked).length;
   const completed = items.length - counts.NOT_VERIFIED;
   // Empty checklist must not read as 100% complete.
   const percent = items.length ? Math.round((completed / items.length) * 100) : null;
@@ -1302,6 +1309,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <span><strong>{counts.NONCOMPLIANT}</strong> NCR</span>
               <span><strong>{counts.OBSERVATION}</strong> Observations</span>
               <span><strong>{counts.NOT_APPLICABLE}</strong> N/A</span>
+              <span><strong>{notCheckedCount}</strong> N/C (reason recorded)</span>
               <span><strong>{counts.NOT_VERIFIED}</strong> Pending</span>
             </div>
           </section>
