@@ -174,7 +174,7 @@ export default function ExternalProviderPortalPage() {
           email: email.trim(), password, totp_code: totpCode.trim() || null,
         });
         setAccount((old) => old ? { ...old, csrf: result.csrf } : null);
-        navigate(pathFor("account"));
+        navigate(`/partner/${encodeURIComponent(amoSlug.trim())}/home`);
       }, "Signed in.");
     } else if (mode === "invite") {
       void perform(() => vendorFetch("/invitations/accept", {
