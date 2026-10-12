@@ -16,6 +16,9 @@ type Account = {
 type Member = { id: string; email: string; display_name: string; role_code: string; status: string };
 type Session = { id: string; created_at: string; last_seen_at: string | null; expires_at: string; revoked_at: string | null };
 const BASE = "/api/external-provider";
+class VendorHttpError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
 const roles = [
   "PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTATIVE",
   "COMMERCIAL_REPRESENTATIVE", "DOCUMENT_SUBMITTER", "READ_ONLY",
@@ -35,7 +38,8 @@ async function vendorFetch<T>(path: string, data?: object, csrf?: string, method
   });
   const body = await response.json().catch(() => ({})) as { detail?: string } & T;
   if (!response.ok) {
-    throw new Error(typeof body.detail === "string" ? body.detail : `Request rejected (${response.status})`);
+    throw new VendorHttpError(response.status,
+      typeof body.detail === "string" ? body.detail : `Request rejected (${response.status})`);
   }
   return body;
 }
@@ -79,11 +83,15 @@ export default function ExternalProviderPortalPage() {
       const session = await vendorFetch<Account>("/session");
       setAccount(session);
       return session;
-    } catch {
+    } catch (reason) {
       setAccount(null);
+      if (mode === "account" && reason instanceof VendorHttpError) {
+        if (reason.status === 403) navigate(pathFor("denied"), { replace: true });
+        else if (reason.status === 401) navigate(pathFor("revoked"), { replace: true });
+      }
       return null;
     } finally { setLoading(false); }
-  }, []);
+  }, [mode, navigate]);
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
     if (mode !== "account" || !account) return;
@@ -224,6 +232,13 @@ export default function ExternalProviderPortalPage() {
           <Link to={pathFor("reset")}>Enter recovery code</Link>
           <Link to={pathFor("verify")}>Re-verification</Link>
         </div>
+      </section>}
+      {["denied","revoked"].includes(mode) && !authenticated && <section className="vendor-card vendor-auth" role="alert">
+        <h2>{mode === "denied" ? "Provider access denied" : "Provider session unavailable"}</h2>
+        <p>{mode === "denied"
+          ? "Your tenant or provider has restricted this operation. Contact the Quality Department for an authorized access review."
+          : "Your session has expired, ended or been revoked. Sign in again to verify current account privileges."}</p>
+        <p><Link to={pathFor("login")}>Return to secure vendor login</Link></p>
       </section>}
       {mode === "account" && !authenticated && <section className="vendor-card" role="alert">
         Your session has ended or access has been revoked. <Link to={pathFor("login")}>Sign in again</Link>.
