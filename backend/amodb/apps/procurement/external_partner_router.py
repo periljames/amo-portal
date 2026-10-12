@@ -380,8 +380,8 @@ def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmi
             FROM external_partner_evidence_submissions
             WHERE amo_id=:amo AND tenant_provider_id=:provider AND id=:id""",
             db,**ctx,id=payload.evidence_submission_id)
-        if not evidence or evidence["status"]!="ACCEPTED" or
-                evidence["related_kind"]!="ASSIGNMENT" or evidence["related_id"]!=car[0]["assignment_id"]:
+        if (not evidence or evidence["status"]!="ACCEPTED" or
+                evidence["related_kind"]!="ASSIGNMENT" or evidence["related_id"]!=car[0]["assignment_id"]):
             raise HTTPException(409,"Attach Quality-reviewed evidence assigned to this exact audit")
         evidence_reference=f"PARTNER:{evidence['id']}:{evidence['sha256']}"
     if car[0]["evidence_required"] and not evidence_reference:
