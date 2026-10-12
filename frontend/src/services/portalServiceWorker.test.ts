@@ -71,7 +71,7 @@ describe("QMS service-worker caching", () => {
       vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })),
     );
     stores.set(
-      "amo-portal-shell-v10",
+      "amo-portal-shell-v11",
       new Map([["/", new Response("offline shell", { headers: { "Content-Type": "text/html" } })]]),
     );
     const sandbox = { ...context, waitUntil };
@@ -81,7 +81,27 @@ describe("QMS service-worker caching", () => {
     )) as Response;
     expect(await result.text()).toBe("offline shell");
     await Promise.all(background);
-    expect(await stores.get("amo-portal-shell-v10")!.get("/")!.clone().text()).toBe("offline shell");
+    expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("offline shell");
+  });
+
+  it("acknowledges browser-only audit readiness only after QMS chunks are cached", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/portal-precache.json") {
+        return Response.json({ urls: ["/", "/index.html"], qmsUrls: ["/assets/fieldwork.js"] });
+      }
+      return new Response("asset", { status: 200, headers: { "Content-Type": url === "/" ? "text/html" : "application/javascript" } });
+    });
+    const { handlers, background, waitUntil } = worker(fetch);
+    const sent: Array<{ ok: boolean; assets?: number; reason?: string }> = [];
+    handlers.get("message")!({
+      data: { type: "PREPARE_AUDIT_SHELL" },
+      ports: [{ postMessage: (message: { ok: boolean; assets?: number; reason?: string }) => sent.push(message) }],
+      waitUntil,
+    });
+    await Promise.all(background);
+    expect(sent).toEqual([{ ok: true, assets: 1 }]);
+    expect(fetch).not.toHaveBeenCalledWith("/api/maintenance/a/quality", expect.anything());
   });
 
   it("leaves authenticated API and document requests outside Cache Storage", () => {
@@ -104,7 +124,7 @@ describe("QMS service-worker caching", () => {
         finish = resolve;
       });
       const { context, stores, background, waitUntil } = worker(vi.fn().mockReturnValue(pending));
-      stores.set("amo-portal-shell-v10", new Map([["/", new Response("saved shell")]]));
+      stores.set("amo-portal-shell-v11", new Map([["/", new Response("saved shell")]]));
       const sandbox = { ...context, waitUntil };
       const result = runInNewContext(
         "cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })",
@@ -114,7 +134,7 @@ describe("QMS service-worker caching", () => {
       expect(await (await result).text()).toBe("saved shell");
       finish(new Response("fresh shell", { headers: { "Content-Type": "text/html" } }));
       await Promise.all(background);
-      expect(await stores.get("amo-portal-shell-v10")!.get("/")!.clone().text()).toBe("fresh shell");
+      expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("fresh shell");
     } finally {
       vi.useRealTimers();
     }
