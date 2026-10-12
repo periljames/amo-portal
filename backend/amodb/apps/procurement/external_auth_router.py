@@ -132,7 +132,7 @@ def _send(db,amo,email,code,kind):
     return str(getattr(outcome.status,"value",outcome.status))
 
 def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=None,
-            cap_limit=None,internal=True):
+            cap_limit=None,caller_scope=None,internal=True):
     supplier=core.one("""SELECT id, legal_name, supplier_code FROM procurement_suppliers
           WHERE amo_id=:amo AND id=:supplier""",db,amo=amo,supplier=supplier_id)
     if not supplier:
@@ -186,6 +186,13 @@ def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=No
           db,id=member_id,org=org_id,identity=identity_id,role=req.role_code)
     caps=_caps(req.role_code,req.capabilities,cap_limit)
     scopes=_scope(req.object_scope)
+    if not internal:
+        # A Provider Administrator can delegate only the exact records granted
+        # to their own tenant/provider membership, never new contract or DMS IDs.
+        parent_scope=_scope(caller_scope or {})
+        for key in ("contracts","documents","assignments"):
+            if set(scopes.get(key,[]))-set(parent_scope.get(key,[])):
+                raise HTTPException(403,"Cannot delegate an object outside the administrator's assigned scope")
     existing=core.one("""SELECT id FROM external_tenant_grants WHERE amo_id=:amo
                          AND tenant_provider_id=:provider AND identity_id=:identity""",
                       db,amo=amo,provider=tenant_provider_id,identity=identity_id)
@@ -459,7 +466,8 @@ def provider_invite(payload:Invitation,request:Request,db:Session=Depends(get_db
         raise HTTPException(403,"Provider is restricted from inviting members")
     core.require_recent_mfa(db,s)
     return _invite(db,amo=s["amo_id"],supplier_id=s["supplier_id"],inviter=s["identity_id"],
-        req=payload,organization_id=s["organization_id"],cap_limit=s["capabilities_json"],internal=False)
+        req=payload,organization_id=s["organization_id"],cap_limit=s["capabilities_json"],
+        caller_scope=s["object_scope_json"],internal=False)
 
 @quality_router.get("")
 def quality_list(amo_code:str,db:Session=Depends(get_db),
