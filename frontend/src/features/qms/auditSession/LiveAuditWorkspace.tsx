@@ -29,7 +29,7 @@ import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete } f
 import { qmsListFindings } from "../../../services/qms";
 import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
 import { listOfflineAuditEvidence, replayOfflineAuditEvidence } from "../../../services/qmsOfflineAuditEvidence";
-import { projectOfflineFindings, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
+import { projectOfflineFindings, readAuditOfflinePack, prepareAuditOfflinePack, auditOfflinePackStatus } from "../../../services/qmsAuditOfflinePack";
 import {
   createAtomicChecklistFinding,
   getChecklistEvidenceCandidates,
@@ -237,6 +237,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [offlinePackBusy, setOfflinePackBusy] = useState(false);
+  const [offlinePackReady, setOfflinePackReady] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [sampleDrafts, setSampleDrafts] = useState<Record<string, string>>({});
   const [assessmentDrafts, setAssessmentDrafts] = useState<Record<string, ChecklistAssessmentState>>({});
@@ -366,15 +368,33 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [amoCode, auditId, fieldworkEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!auditId) return;
+    void auditOfflinePackStatus(amoCode, auditId).then((status) => setOfflinePackReady(status.ready)).catch(() => setOfflinePackReady(false));
+  }, [amoCode, auditId]);
+
+  const downloadOfflinePack = async () => {
+    if (!auditId || offlinePackBusy || connectivity !== "ONLINE") return;
+    setOfflinePackBusy(true);
+    setLocalError(null);
+    try {
+      await prepareAuditOfflinePack(amoCode, auditId);
+      setOfflinePackReady(true);
+      setSyncNotice("Audit work package securely stored on this device. Offline fieldwork is available.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Unable to prepare offline fieldwork.");
+    } finally { setOfflinePackBusy(false); }
+  };
+
   const items = useMemo(() => checklistQuery.data?.items ?? [], [checklistQuery.data?.items]);
   const localAnswers = useMemo(() => {
-    const result = new Map<string, { value: string; status: string }>();
+    const result = new Map<string, { value: string; canonical: CanonicalChecklistResponse; status: string }>();
     for (const entry of outboxQuery.data || []) {
       if (!["queued", "syncing", "conflict", "failed"].includes(entry.status)) continue;
       try {
         const body = JSON.parse(entry.body || "{}") as { response_value?: string; canonical_response_status?: string };
         if (body.canonical_response_status && entry.entityId) {
-          result.set(entry.entityId, { value: body.response_value || body.canonical_response_status, status: entry.status });
+          result.set(entry.entityId, { value: body.response_value || body.canonical_response_status, canonical: body.canonical_response_status as CanonicalChecklistResponse, status: entry.status });
         }
       } catch { /* Invalid entries remain in the outbox for review. */ }
     }
@@ -701,7 +721,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       return;
     }
     setSelectedId(itemId);
-    setNavigationOpen(false);
   };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
@@ -735,8 +754,8 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     setLocalError(null);
     updateMutation.mutate({
       item: selected,
-      response: selected.canonical_response_status,
-      responseValue: selected.response_value || selected.canonical_response_status,
+      response: localAnswers.get(selected.checklist_item_id)?.canonical || selected.canonical_response_status,
+      responseValue: localAnswers.get(selected.checklist_item_id)?.value || selected.response_value || selected.canonical_response_status,
       auditorNotes: notes,
       sampledItemInformation: sampledItems,
       assessment,
@@ -922,6 +941,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           ) : (
             <span>{connectivity === "ONLINE" ? "No queued changes" : "Offline · no queued changes"}</span>
           )}
+          {connectivity === "ONLINE" && !offlinePackReady ? <button type="button" disabled={offlinePackBusy} onClick={() => void downloadOfflinePack()}><CloudOff size={14} /> {offlinePackBusy ? "Preparing…" : "Enable offline fieldwork"}</button> : null}
           {outbox.queued + outbox.conflicts + outbox.failed + (evidenceOutboxQuery.data?.length || 0) > 0 && connectivity === "ONLINE" ? <button type="button" disabled={syncBusy} onClick={() => void syncFieldworkNow()}>{syncBusy ? "Syncing…" : "Sync device changes"}</button> : null}
           {fieldworkComplete ? (
             <Link className="qms-live-audit-focus__closing-link is-primary" to={auditSessionPath(amoCode, auditKey, "closing")}><ClipboardCheck size={16} /> Open Closing</Link>
