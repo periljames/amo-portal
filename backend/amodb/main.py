@@ -39,6 +39,7 @@ from .security import (
 from .apps.accounts import models as accounts_models
 
 from .apps.accounts.router_public import router as accounts_public_router
+from .apps.procurement.external_auth_router import router as external_provider_router, quality_router as external_provider_quality_router
 from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
@@ -713,6 +714,9 @@ apply_module_access_boundary(technical_records_router, "technical_records")
 apply_module_access_boundary(aerodoc_router, "documents")
 
 app.include_router(accounts_public_router)
+# External principals have isolated opaque-cookie sessions; never staff JWTs.
+app.include_router(external_provider_router)
+app.include_router(external_provider_quality_router)
 app.include_router(platform_router)
 app.include_router(training_workbook_support_router)
 app.include_router(ai_router)
