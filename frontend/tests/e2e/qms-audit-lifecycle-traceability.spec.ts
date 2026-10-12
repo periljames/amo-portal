@@ -140,8 +140,14 @@ test("MD scenarios 11 and 13 — records a structured finding atomically from Li
 
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
   await expect(live).toBeVisible({ timeout: 30_000 });
+  // Fieldwork now opens on the paper-form-like checklist table. Select the
+  // intended question before using its governed assessment/finding controls.
+  await live.getByRole("row").filter({
+    hasText: "Verify sampled supplier approvals were current at the time of purchase.",
+  }).getByRole("button", { name: /^Details for question / }).click();
   await expect(live.getByRole("heading", { name: "Verify sampled supplier approvals were current at the time of purchase." })).toBeVisible();
-  await live.getByRole("button", { name: "NCR" }).click();
+  await live.getByRole("group", { name: "Governed checklist response" })
+    .getByRole("button", { name: "NCR", exact: true }).click();
 
   const finding = page.getByRole("dialog", { name: "Raise finding" });
   await finding.getByLabel("Classification").selectOption("LEVEL_3");
