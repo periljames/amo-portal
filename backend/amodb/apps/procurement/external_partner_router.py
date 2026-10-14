@@ -254,9 +254,8 @@ def changes(tenant_slug:str,request:Request,db:Session=Depends(get_db),
 
 @router.post("/change-requests",status_code=201)
 def propose(tenant_slug:str,payload:ChangeProposal,request:Request,db:Session=Depends(get_db)):
-    user=_ctx(db,request,tenant_slug,cap="profile.read",write=True)
-    if user["portal_state"]!="ACTIVE" or user["restrict_new_work"]:
-        raise HTTPException(403,"New provider change proposals are suspended")
+    user=_ctx(db,request,tenant_slug,cap="profile.propose",write=True)
+    _cap(user,"profile.propose")
     allowed=ALLOWED_CHANGE_FIELDS[payload.category]
     if not payload.fields or set(payload.fields)-allowed:
         raise HTTPException(422,"Unsupported or empty governed change fields")
@@ -352,7 +351,8 @@ def _rows_compiled(db,sql,args):
 @router.post("/contracts/{contract_id}/receipt",status_code=201)
 def contract_receipt(tenant_slug:str,contract_id:str,payload:ContractReceipt,
                      request:Request,db:Session=Depends(get_db)):
-    user=_ctx(db,request,tenant_slug,cap="contract.read",write=True)
+    user=_ctx(db,request,tenant_slug,cap="contract.acknowledge",write=True)
+    _cap(user,"contract.acknowledge")
     _require_object(user,"contracts",contract_id)
     ctx=_context(user)
     row=_row("""SELECT id,version,status,controlled_document_revision
