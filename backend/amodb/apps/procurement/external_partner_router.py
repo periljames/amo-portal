@@ -866,7 +866,9 @@ def _quality_context(db:Session,amo_code:str,user):
     from .external_auth_router import _authorized_quality
     amo=_authorized_quality(db,amo_code,user)
     if db.get_bind().dialect.name=="postgresql":
-        db.execute(text("SELECT set_config('app.external_provider_id','',true)"))
+        # The explicit marker is reachable only after authenticated tenant
+        # Quality authorization, never by an unauthenticated provider request.
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
     return amo
 
 @quality_router.get("/partner-change-requests")
