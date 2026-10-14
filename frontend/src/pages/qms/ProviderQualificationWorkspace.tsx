@@ -64,6 +64,8 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
       apiRequest<Alerts>(path+"/alerts",{cacheTtlMs:0}),
     ]);
     setData(overview);setPolicies(policy.items);setAlerts(alertData);
+    setCategory(current=>policy.items.some(p=>p.category===current)
+      ? current : (policy.items[0]?.category||current));
   },[path,supplierId]);
   useEffect(()=>{void refresh().catch(x=>setError(messageOf(x)));},[refresh]);
   const open=async(id:string)=>{
