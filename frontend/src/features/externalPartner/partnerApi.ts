@@ -11,6 +11,9 @@ export type Summary = {
   expiring_contracts: Array<{ id: string; title: string; contract_number: string; expires_on: string; status: string }>;
   open_change_requests: number; unread_notifications: number;
   outstanding_tasks: {rfqs:number;purchase_orders:number;audit_requests:number;cars:number};
+  urgent_tasks: Array<{kind:string;title:string;due:string|null;to:string}>;
+  approved_scope: Array<{category:string;product_family:string;site_code:string;approval_number:string|null}>;
+  recent_notifications: Array<{id:string;title:string;category:string;created_at:string;read_at:string|null}>;
   actions: Array<{ kind: string; title: string; due: string; to: string }>;
   operational_sections_available: boolean;
 };
