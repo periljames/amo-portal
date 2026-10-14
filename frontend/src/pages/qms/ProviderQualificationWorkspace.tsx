@@ -13,7 +13,7 @@ type QualCase={id:string;status:string;version:number;technical_state:string;saf
   authority_state:string;case_kind:string;category:string;checks:Check[];evaluation_id:string|null;
   audit_id:string|null;answers_json:Record<string,string>;technical_scope_json:unknown;
   policy_snapshot_json:{questionnaire:Array<{key:string;label:string;required?:boolean}>;manual_references:string[]}};
-type Policy={category:string;revision:number;surveillance_days:number|null;manual_references_json:string[]};
+type Policy={category:string;revision:number;surveillance_days:number|null;manual_references_json:string[];evaluation_template_id:string|null};
 const BASE_CHECKS=["LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY","SCOPE_CAPABILITY",
   "REGULATORY_APPROVAL","FACILITIES_AND_SITES","CONTRACT_REQUIREMENTS","SAFETY_MOC",
   "QMS_EVALUATION","QUALIFYING_AUDIT_OR_REVIEW","TECHNICAL_ACCEPTANCE","QUALITY_CONCLUSION"];
@@ -44,6 +44,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const [restrictionDimension,setRestrictionDimension]=useState("ORGANIZATION");
   const [restrictionTarget,setRestrictionTarget]=useState("*");
   const [interval,setInterval]=useState("365");
+  const [templateId,setTemplateId]=useState("");
   const [policyQuestions,setPolicyQuestions]=useState('[{"key":"REGULATORY_BASIS","label":"Regulatory applicability basis","kind":"TEXT","required":true}]');
   const [manuals,setManuals]=useState("");
   const [tab,setTab]=useState("qualification");
@@ -183,10 +184,11 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
         URL.revokeObjectURL(url);}}>Export displayed governance history</button></section>}
     {tab==="policy"&&<section className="qp-panel"><h4>Tenant category policy</h4>
       <p>Safarilink annual audits are not assumed for every tenant; an approved category interval controls scheduling.</p>
-      {policies.map(p=><p key={p.category}>{p.category} Rev {p.revision} · {p.surveillance_days||"Risk-assessed"} days
+      {policies.map(p=><p key={p.category}>{p.category} Rev {p.revision} · Evaluation {p.evaluation_template_id||"Not configured"} · {p.surveillance_days||"Risk-assessed"} days
         · {p.manual_references_json.join("; ")}</p>)}
       {manager&&<div className="qp-fields">
         <label>Category<input value={category} onChange={e=>setCategory(e.target.value.toUpperCase())}/></label>
+        <label>Active QMS supplier evaluation template UUID<input value={templateId} onChange={e=>setTemplateId(e.target.value)} placeholder="Use canonical Procurement/QMS evaluation templates"/></label>
         <label>Surveillance days (blank = risk-based)<input type="number" min={30} max={3650} value={interval}
           onChange={e=>setInterval(e.target.value)}/></label>
         <label>Questionnaire JSON<textarea rows={4} value={policyQuestions} onChange={e=>setPolicyQuestions(e.target.value)}/></label>
@@ -197,6 +199,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
             void change("/policies/"+encodeURIComponent(category),{
               questionnaire:questions,required_checks:BASE_CHECKS,
               surveillance_days:interval?Number(interval):null,
+              evaluation_template_id:templateId||null,
               manual_references:manuals.split(";").map(x=>x.trim()).filter(Boolean),reason:note,
             },"PUT");}
           catch{setError("Questionnaire must be an array in JSON");}
