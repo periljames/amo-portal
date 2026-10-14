@@ -85,11 +85,14 @@ export async function getExternalSession(signal?:AbortSignal):Promise<{csrf:stri
   return response.json() as Promise<{csrf:string}>;
 }
 export function partnerUpload(tenant:string,csrf:string,file:File,
-  metadata:{evidence_type:string;related_kind:"PROVIDER"|"CONTRACT"|"ASSIGNMENT";related_id:string},
+  metadata:({evidence_type:string;related_kind:"PROVIDER"|"CONTRACT"|"ASSIGNMENT";related_id:string} |
+    {related_kind:"DOCUMENT_REQUEST";request_id:string;response_comment?:string}),
   onProgress:(percent:number)=>void,signal?:AbortSignal):Promise<{id:string;filename:string;sha256:string;status:string}> {
   return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();
-    xhr.open("POST",partnerUrl(tenant,"evidence"));
+    const uploadPath=metadata.related_kind==="DOCUMENT_REQUEST" ?
+      `quality/document-requests/${encodeURIComponent(metadata.request_id)}/submit` : "evidence";
+    xhr.open("POST",partnerUrl(tenant,uploadPath));
     xhr.withCredentials=true;
     xhr.setRequestHeader("X-External-CSRF",csrf);
     xhr.upload.onprogress=(event)=>{if(event.lengthComputable)onProgress(Math.round(event.loaded*100/event.total));};
@@ -105,9 +108,14 @@ export function partnerUpload(tenant:string,csrf:string,file:File,
       else reject(new PartnerRequestError(xhr.status,body.detail||"Evidence upload was not accepted"));
     };
     const data=new FormData();
-    data.append("file",file);data.append("evidence_type",metadata.evidence_type);
-    data.append("related_kind",metadata.related_kind);
-    if(metadata.related_id)data.append("related_id",metadata.related_id);
+    data.append("file",file);
+    if(metadata.related_kind==="DOCUMENT_REQUEST"){
+      if(metadata.response_comment)data.append("response_comment",metadata.response_comment);
+    }else{
+      data.append("evidence_type",metadata.evidence_type);
+      data.append("related_kind",metadata.related_kind);
+      if(metadata.related_id)data.append("related_id",metadata.related_id);
+    }
     xhr.send(data);
   });
 }
