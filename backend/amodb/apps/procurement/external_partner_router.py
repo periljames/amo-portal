@@ -697,8 +697,9 @@ def partner_qualification(tenant_slug:str,request:Request,db:Session=Depends(get
 @router.post("/qualification/{case_id}/answers")
 def partner_submit_qualification(tenant_slug:str,case_id:str,
     payload:PartnerQualificationAnswers,request:Request,db:Session=Depends(get_db)):
+    # Qualification submission is preparation, not permission to start work.
+    # Explicitly delegated applicants may be prospective or restricted.
     user=_ctx(db,request,tenant_slug,cap="profile.propose",write=True)
-    _cap(user,"profile.propose")
     ctx=_context(user)
     row=_row("""SELECT id,status,version,policy_snapshot_json FROM
         quality_provider_qualification_cases WHERE amo_id=:amo
