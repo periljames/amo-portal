@@ -42,6 +42,7 @@ import {
   type ProviderStatus,
 } from "../../services/qmsProviders";
 import "../../styles/qms-external-providers.css";
+import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
@@ -66,7 +67,7 @@ const PROVIDER_STATUSES: ProviderStatus[] = [
 ];
 const PROVIDER_RISKS: ProviderRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
-type DetailTab = "overview" | "approval" | "contracts" | "evidence" | "monitoring";
+type DetailTab = "overview" | "approval" | "contracts" | "evidence" | "monitoring" | "qualification";
 
 function titleCase(value: string | null | undefined): string {
   return String(value || "")
@@ -417,7 +418,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   if (loading) return <div className="qms-provider-loading"><RefreshCw className="is-spinning" size={20} />Loading governed provider record…</div>;
   if (!provider) return <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error || "Provider record is unavailable."}</div>;
 
-  const tabs: Array<[DetailTab, string]> = [["overview", "Overview"], ["approval", "Approval & scope"], ["contracts", "Contracts"], ["evidence", "Evidence"], ["monitoring", "Monitoring"]];
+  const tabs: Array<[DetailTab, string]> = [["overview", "Overview"], ["approval", "Approval & scope"], ["contracts", "Contracts"], ["evidence", "Evidence"], ["monitoring", "Monitoring"], ["qualification", "Qualification & surveillance"]];
   const approvalBlocked = provider.contract_required && provider.active_contract_count === 0;
 
   return (
@@ -483,6 +484,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
 
       {tab === "contracts" && <ContractPanel amoCode={amoCode} provider={provider} onChanged={load} />}
       {tab === "evidence" && <EvidencePanel amoCode={amoCode} provider={provider} onChanged={load} />}
+      {tab === "qualification" && <ProviderQualificationWorkspace amoCode={amoCode} supplierId={provider.id} />}
       {tab === "monitoring" && (
         <div className="qms-provider-detail-grid">
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Review cycle</span><h3>Oversight</h3></div></div><dl className="qms-provider-definition-list"><div><dt>Last reviewed</dt><dd>{dateLabel(provider.last_reviewed_on)}</dd></div><div><dt>Next review</dt><dd className={provider.review_due ? "is-alert" : ""}>{dateLabel(provider.next_review_due_on)}</dd></div><div><dt>Interval</dt><dd>{provider.review_interval_days ? `${provider.review_interval_days} days` : "Not set"}</dd></div></dl></section>
@@ -497,7 +499,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const detailMatch = location.pathname.match(/\/suppliers\/(\d+)(?:\/(overview|approval|contracts|evidence|monitoring))?\/?$/i);
+  const detailMatch = location.pathname.match(/\/suppliers\/(\d+)(?:\/(overview|approval|contracts|evidence|monitoring|qualification))?\/?$/i);
   const detailId = detailMatch ? Number(detailMatch[1]) : null;
   const detailTab = (detailMatch?.[2]?.toLowerCase() || "overview") as DetailTab;
   const [summary, setSummary] = useState<ProviderGovernanceSummary | null>(null);
