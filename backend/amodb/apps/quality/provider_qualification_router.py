@@ -396,7 +396,7 @@ def link_audit(amo_code:str,case_id:str,payload:AuditLink,db:Session=Depends(get
         FROM qms_audits WHERE amo_id=:amo AND CAST(id AS TEXT)=:audit""",
         amo=amo,audit=payload.audit_id)
     if not audit:raise HTTPException(404,"Existing tenant QMS audit not found")
-    if str(audit["kind"]).upper() not in {"EXTERNAL","SECOND_PARTY","SUPPLIER"}:
+    if str(audit["kind"]).upper() not in {"EXTERNAL","THIRD_PARTY"}:
         raise HTTPException(409,"Linked QMS audit must be classified as external")
     if audit["lead_auditor_user_id"] and str(audit["lead_auditor_user_id"])==str(user.id):
         raise HTTPException(403,"Auditor cannot administer approval of their own audit")
@@ -480,11 +480,16 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
     if payload.action in {"APPROVE","CONDITIONALLY_APPROVE"}:
         blockers=_requirements(db,amo,row)
         if blockers:raise HTTPException(409,{"code":"QUALIFICATION_GATES_PENDING","blockers":blockers})
-        evaluation_service.decide_supplier(
-            db,amo_id=amo,supplier_id=row["supplier_id"],
-            payload=procurement_schemas.SupplierDecision(
-                action=payload.action,reason=payload.reason),
-            actor_user_id=str(user.id))
+        # Marker is scoped to this SQLAlchemy transaction/request only.
+        db.info["phase4_qualification_approval"]=(str(amo),int(row["supplier_id"]))
+        try:
+            evaluation_service.decide_supplier(
+                db,amo_id=amo,supplier_id=row["supplier_id"],
+                payload=procurement_schemas.SupplierDecision(
+                    action=payload.action,reason=payload.reason),
+                actor_user_id=str(user.id))
+        finally:
+            db.info.pop("phase4_qualification_approval",None)
         new_status="APPROVED" if payload.action=="APPROVE" else "CONDITIONALLY_APPROVED"
     elif payload.action=="REJECT":
         new_status="REJECTED"
