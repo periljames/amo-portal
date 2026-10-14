@@ -3,6 +3,7 @@ import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUpload,type QualityPage} from "./partnerApi";
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 type Car=QualityPage["cars"]["items"][number];
+type AuditDocumentRequest=QualityPage["document_requests"]["items"][number];
 type Draft={containment_action:string;root_cause:string;corrective_action:string;preventive_action:string;evidence_submission_id:string};
 const empty:Draft={containment_action:"",root_cause:"",corrective_action:"",preventive_action:"",evidence_submission_id:""};
 export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
@@ -10,12 +11,32 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
   const data=usePartnerLoad((signal)=>partnerRequest<QualityPage>(tenant,
     `quality?limit=15&offset=${offset}`,{signal}),`${tenant}:${offset}`);
   const [activeCar,setActiveCar]=useState<Car|null>(null);
+  const [activeRequest,setActiveRequest]=useState<AuditDocumentRequest|null>(null);
+  const [requestFile,setRequestFile]=useState<File|null>(null);
+  const [requestComment,setRequestComment]=useState("");
   const [draft,setDraft]=useState<Draft>(empty);
   const [busy,setBusy]=useState(false);const [error,setError]=useState("");
   const [notice,setNotice]=useState("");const [file,setFile]=useState<File|null>(null);
   const [progress,setProgress]=useState(0);const abortRef=useRef<AbortController|null>(null);
   useEffect(()=>()=>abortRef.current?.abort(),[]);
   const canSubmit=capabilities.includes("capa.respond");
+  const canSubmitRequests=capabilities.includes("document.submit")&&capabilities.includes("task.read");
+  const uploadRequestedDocument=(event:React.FormEvent)=>{
+    event.preventDefault();if(!activeRequest||!requestFile)return;
+    const controller=new AbortController();abortRef.current=controller;
+    setBusy(true);setProgress(0);setError("");setNotice("");
+    void partnerUpload(tenant,csrf,requestFile,{
+      related_kind:"DOCUMENT_REQUEST",request_id:activeRequest.id,
+      response_comment:requestComment.trim(),
+    },setProgress,controller.signal)
+      .then(result=>{
+        setNotice(`${result.filename} uploaded into the governed QMS document request. Quality review is still required.`);
+        setActiveRequest(null);setRequestFile(null);setRequestComment("");data.reload();
+      })
+      .catch(reason=>{
+        if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:"QMS document upload failed");
+      }).finally(()=>{abortRef.current=null;setBusy(false);});
+  };
   const upload=(event:React.FormEvent)=>{
     event.preventDefault();if(!file||!activeCar)return;
     const controller=new AbortController();abortRef.current=controller;
@@ -48,9 +69,30 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
       <Section title="Document requests" description="Requests are controlled by the audit. Upload supporting records through the evidence facility when authorized.">
         {data.value.document_requests.items.map(x=><div className="partner-row" key={x.id}>
           <div><strong>{x.audit_ref} · {x.title}</strong>
-            {x.description&&<small>{x.description}</small>}<small>Due {friendlyDate(x.due_date)}</small></div>
-          <Status value={x.status}/></div>)}
+            {x.description&&<small>{x.description}</small>}<small>Due {friendlyDate(x.due_date)}</small>
+            {canSubmitRequests&&!["ACCEPTED","WAIVED"].includes(x.status)&&
+              <button type="button" disabled={busy} onClick={()=>{
+                setActiveRequest(x);setRequestFile(null);setRequestComment("");setError("");setNotice("");
+              }}>Submit requested document</button>}
+          </div><Status value={x.status}/>
+        </div>)}
         {!data.value.document_requests.items.length&&<p className="partner-empty">No document requests assigned for display.</p>}
+        {activeRequest&&canSubmitRequests&&<form className="partner-form" onSubmit={uploadRequestedDocument}>
+          <h3>QMS document request: {activeRequest.title}</h3>
+          <p className="partner-muted">This upload goes directly into the existing authoritative audit request history. It does not approve the evidence.</p>
+          <label>Requested file<input type="file" required accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.png,.jpg,.jpeg,.webp"
+            onChange={event=>setRequestFile(event.target.files?.[0]||null)}/></label>
+          <label>Response comment<textarea maxLength={4000} rows={2} value={requestComment}
+            onChange={event=>setRequestComment(event.target.value)}/></label>
+          {busy&&<div className="partner-progress"><progress max={100} value={progress}/><span>{progress}%</span></div>}
+          <div className="partner-buttons">
+            <button type="submit" className="partner-primary" disabled={busy||!requestFile}>
+              Upload to QMS for review</button>
+            <button type="button" disabled={busy} onClick={()=>setActiveRequest(null)}>Cancel</button>
+            {busy&&<button type="button" onClick={()=>abortRef.current?.abort()}>Cancel upload</button>}
+          </div>
+          <ActionNotice value={error} error/><ActionNotice value={notice}/>
+        </form>}
       </Section>
       <Section title="Audit findings" description="The audit team retains finding classification and closure authority.">
         {data.value.findings.items.map(x=><div className="partner-row" key={x.id}>
