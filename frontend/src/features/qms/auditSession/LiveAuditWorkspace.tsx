@@ -1025,7 +1025,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <label><Filter size={15} aria-hidden="true" /><span className="sr-only">Filter checklist</span><select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}><option value="ALL">All questions</option><option value="UNANSWERED">Unanswered</option><option value="VERIFIED">Server-confirmed</option><option value="FINDINGS">Findings</option><option value="EVIDENCE_REQUIRED">Evidence required</option></select></label>
           </div>
           <div className="qms-live-audit-focus__matrix-scroll">
-            <table className="qms-live-audit-focus__matrix-table">
+            <table className="qms-live-audit-focus__matrix-table" aria-label="Checklist assessment table">
               <thead><tr><th scope="col">№</th><th scope="col">Verification question / requirement</th><th scope="col">Assessment</th><th scope="col">Details</th></tr></thead>
               <tbody>
                 {visibleItems.map((item, index) => {
