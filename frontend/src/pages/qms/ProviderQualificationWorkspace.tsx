@@ -48,6 +48,9 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const [restrictionTarget,setRestrictionTarget]=useState("*");
   const [interval,setInterval]=useState("365");
   const [templateId,setTemplateId]=useState("");
+  const [initialAudit,setInitialAudit]=useState(false);
+  const [authorityRequired,setAuthorityRequired]=useState(false);
+  const [safetyRequired,setSafetyRequired]=useState(false);
   const [policyQuestions,setPolicyQuestions]=useState('[{"key":"REGULATORY_BASIS","label":"Regulatory applicability basis","kind":"TEXT","required":true}]');
   const [manuals,setManuals]=useState("");
   const [tab,setTab]=useState("qualification");
@@ -209,6 +212,9 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
         <label>Active QMS supplier evaluation template UUID<input value={templateId} onChange={e=>setTemplateId(e.target.value)} placeholder="Use canonical Procurement/QMS evaluation templates"/></label>
         <label>Surveillance days (blank = risk-based)<input type="number" min={30} max={3650} value={interval}
           onChange={e=>setInterval(e.target.value)}/></label>
+        <label><input type="checkbox" checked={initialAudit} onChange={e=>setInitialAudit(e.target.checked)}/> Require initial QMS audit (rather than qualifying document review)</label>
+        <label><input type="checkbox" checked={authorityRequired} onChange={e=>setAuthorityRequired(e.target.checked)}/> Require verified authority or State-of-Registry approval</label>
+        <label><input type="checkbox" checked={safetyRequired} onChange={e=>setSafetyRequired(e.target.checked)}/> Require Safety Manager risk assessment</label>
         <label>Questionnaire JSON<textarea rows={4} value={policyQuestions} onChange={e=>setPolicyQuestions(e.target.value)}/></label>
         <label>Exact manual references (semicolon separated)<textarea value={manuals} onChange={e=>setManuals(e.target.value)}/></label>
         <button disabled={busy||note.length<8} onClick={()=>{
@@ -218,6 +224,8 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
               questionnaire:questions,required_checks:BASE_CHECKS,
               surveillance_days:interval?Number(interval):null,
               evaluation_template_id:templateId||null,
+              initial_audit_required:initialAudit,authority_required:authorityRequired,
+              safety_assessment_required:safetyRequired,
               manual_references:manuals.split(";").map(x=>x.trim()).filter(Boolean),reason:note,
             },"PUT");}
           catch{setError("Questionnaire must be an array in JSON");}
