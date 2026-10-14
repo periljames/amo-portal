@@ -592,9 +592,14 @@ def quality_grant_update(amo_code:str,grant_id:str,payload:GrantUpdate,db:Sessio
 def quality_events(amo_code:str,db:Session=Depends(get_db),
                    user:accounts.User=Depends(get_current_active_user)):
     amo=_authorized_quality(db,amo_code,user)
-    return {"items":core.many("""SELECT id,identity_id,grant_id,actor_user_id,actor_identity_id,
-        event_type,details_json,occurred_at FROM external_security_events
-        WHERE amo_id=:amo ORDER BY occurred_at DESC LIMIT 250""",db,amo=amo)}
+    return {"items":core.many("""SELECT e.id,e.event_type,e.details_json,e.occurred_at,
+        COALESCE(target.email,'Provider organization') identity_label,
+        COALESCE(staff.full_name,origin.email,'System account') actor_label
+        FROM external_security_events e
+        LEFT JOIN external_identities target ON target.id=e.identity_id
+        LEFT JOIN external_identities origin ON origin.id=e.actor_identity_id
+        LEFT JOIN users staff ON staff.id=e.actor_user_id AND staff.amo_id=e.amo_id
+        WHERE e.amo_id=:amo ORDER BY e.occurred_at DESC,e.id DESC LIMIT 250""",db,amo=amo)}
 
 @quality_router.post("/identities/{identity_id}/lock")
 def quality_lock(amo_code:str,identity_id:str,payload:Decision,db:Session=Depends(get_db),
