@@ -27,14 +27,15 @@ COOKIE = "amo_external_session"
 SESSION_HOURS = 8
 CAPABILITIES = frozenset({
     "profile.read", "document.read", "document.submit", "capa.respond",
-    "task.read", "task.respond", "contract.read", "members.read",
+    "task.read", "task.respond", "contract.read", "contract.acknowledge",
+    "profile.propose", "members.read",
     "members.manage", "sessions.manage",
 })
 ROLE_CAPS = {
     "PROVIDER_ADMIN": CAPABILITIES,
-    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage"}),
-    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage"}),
-    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","document.read","contract.read","task.read","sessions.manage"}),
+    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage"}),
+    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage"}),
+    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","contract.read","contract.acknowledge","task.read","sessions.manage"}),
     "DOCUMENT_SUBMITTER": frozenset({"profile.read","document.read","document.submit","task.read","sessions.manage"}),
     "READ_ONLY": frozenset({"profile.read","document.read","task.read","sessions.manage"}),
 }
