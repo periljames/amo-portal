@@ -117,6 +117,9 @@ class PolicyWrite(BaseModel):
     required_checks: list[str] = Field(default_factory=lambda: list(BASE_CHECKS), min_length=1, max_length=50)
     surveillance_days: int | None = Field(default=None,ge=30,le=3650)
     evaluation_template_id: str | None = Field(default=None,max_length=36)
+    initial_audit_required: bool = False
+    authority_required: bool = False
+    safety_assessment_required: bool = False
     manual_references: list[str] = Field(default_factory=list,max_length=30)
     reason: str = Field(min_length=8,max_length=1000)
 
@@ -127,7 +130,8 @@ def policies(amo_code:str, db:Session=Depends(get_db),
     amo=_tenant(db,amo_code,user)
     _require(user,QUALITY|MAINTENANCE|SAFETY)
     return {"items":_all(db,"""SELECT category,revision,evaluation_template_id,questionnaire_json,
-        required_checks_json,surveillance_days,manual_references_json,updated_at
+        required_checks_json,surveillance_days,initial_audit_required,
+        authority_required,safety_assessment_required,manual_references_json,updated_at
         FROM quality_provider_qualification_policies WHERE amo_id=:amo
         ORDER BY category""",amo=amo),
         "default_annual_audit":False}
@@ -170,7 +174,8 @@ def configure_policy(amo_code:str,category:str,payload:PolicyWrite,
            updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=NOW()"""),
        {"amo":amo,"category":category,"questions":json.dumps(payload.questionnaire),
         "checks":json.dumps(required),"template":payload.evaluation_template_id,
-        "days":payload.surveillance_days,
+        "days":payload.surveillance_days,"initial_audit":payload.initial_audit_required,
+        "authority":payload.authority_required,"safety":payload.safety_assessment_required,
         "manuals":json.dumps(payload.manual_references),"actor":str(user.id)})
     # Tenant-wide category policy audit is attributable; zero is an administrative
     # supplier sentinel, not an issued supplier approval.
@@ -222,6 +227,9 @@ def create_case(amo_code:str,payload:CreateCase,db:Session=Depends(get_db),
               "required_checks":policy["required_checks_json"],
               "evaluation_template_id":policy["evaluation_template_id"],
               "surveillance_days":policy["surveillance_days"],
+              "initial_audit_required":policy["initial_audit_required"],
+              "authority_required":policy["authority_required"],
+              "safety_assessment_required":policy["safety_assessment_required"],
               "manual_references":policy["manual_references_json"]}
     db.execute(text("""INSERT INTO quality_provider_qualification_cases
       (id,amo_id,supplier_id,category,case_kind,policy_revision,policy_snapshot_json,
@@ -320,7 +328,7 @@ def verify_check(amo_code:str,case_id:str,requirement_key:str,payload:CheckDecis
     # Documentary checks must resolve to evidence already independently verified
     # in the existing canonical QMS evidence register, not a free-text file ref.
     documented={"LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY","SCOPE_CAPABILITY",
-                "FACILITIES_AND_SITES","CONTRACT_REQUIREMENTS"}
+                "FACILITIES_AND_SITES","CONTRACT_REQUIREMENTS","QUALIFYING_AUDIT_OR_REVIEW"}
     if key in documented and payload.status=="VERIFIED":
         if not payload.evidence_reference:
             raise HTTPException(422,"Documentary verification requires existing QMS evidence")
@@ -370,6 +378,10 @@ def domain_review(amo_code:str,case_id:str,domain:Literal["technical","safety","
     if domain=="authority" and payload.state=="VERIFIED" and (
         not payload.reference or (payload.expires_on and payload.expires_on<date.today())):
         raise HTTPException(422,"Current regulatory authorization requires reference and valid expiry")
+    if domain=="authority" and payload.state=="NOT_REQUIRED" and row["policy_snapshot_json"].get("authority_required"):
+        raise HTTPException(409,"This category requires verified State/Authority approval; revise the governed policy instead")
+    if domain=="safety" and payload.state=="NOT_REQUIRED" and row["policy_snapshot_json"].get("safety_assessment_required"):
+        raise HTTPException(409,"This category requires appointed Safety Manager assessment")
     if domain=="technical" and payload.state=="ACCEPTED" and not payload.technical_scope:
         raise HTTPException(422,"Technical acceptance must define exact proposed scope")
     fields={"technical":"technical_state","safety":"safety_state","authority":"authority_state"}
@@ -471,7 +483,11 @@ def _requirements(db,amo,row):
             blockers.append("QUESTION:"+str(q.get("key")))
     if row["technical_state"]!="ACCEPTED":blockers.append("TECHNICAL_OWNER")
     if row["safety_state"] not in {"ACCEPTED","NOT_REQUIRED"}:blockers.append("SAFETY")
+    if policy.get("safety_assessment_required") and row["safety_state"]!="ACCEPTED":
+        blockers.append("CATEGORY_REQUIRES_SAFETY_ASSESSMENT")
     if row["authority_state"] not in {"VERIFIED","NOT_REQUIRED"}:blockers.append("REGULATORY_APPLICABILITY")
+    if policy.get("authority_required") and row["authority_state"]!="VERIFIED":
+        blockers.append("CATEGORY_REQUIRES_REGULATORY_APPROVAL")
     if not row["evaluation_template_id"]:
         blockers.append("CATEGORY_SCORING_TEMPLATE_REQUIRED")
     if not row["evaluation_id"]:blockers.append("GOVERNED_EVALUATION")
@@ -525,8 +541,8 @@ def _requirements(db,amo,row):
             WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT)=:id
               AND c.closed_at IS NULL""",amo=amo,id=row["audit_id"])
         if open_cars and open_cars["n"]:blockers.append("AUDIT_CORRECTIVE_ACTION_OPEN")
-    elif policy.get("surveillance_days"):
-        blockers.append("REQUIRED_QMS_QUALIFICATION_AUDIT")
+    elif policy.get("initial_audit_required"):
+        blockers.append("REQUIRED_INITIAL_QMS_AUDIT")
     return blockers
 
 
