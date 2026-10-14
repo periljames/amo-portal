@@ -659,6 +659,80 @@ def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmi
     db.commit()
     return {"status":"SUBMITTED","authoritative_domain":"QUALITY_CAR"}
 
+
+class PartnerQualificationAnswers(BaseModel):
+    case_version:int=Field(ge=1)
+    answers:dict[str,str]
+    note:str=Field(min_length=8,max_length=2000)
+
+
+@router.get("/qualification")
+def partner_qualification(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
+    """Only the canonical supplier's partner-facing qualification items.
+    Staff-only evidence verdicts, internal risk deliberations and raw IDs are
+    excluded. Qualification does not grant the provider approval rights.
+    """
+    user=_ctx(db,request,tenant_slug,cap="profile.read")
+    ctx=_context(user)
+    rows=_rows("""SELECT id,category,case_kind,status,version,
+        policy_snapshot_json,answers_json,submitted_at,next_review_due_on,
+        technical_state,safety_state,authority_state
+        FROM quality_provider_qualification_cases
+        WHERE amo_id=:amo AND supplier_id=:supplier
+        ORDER BY created_at DESC LIMIT 20""",db,**ctx)
+    # Keep internal-only decisions out of the partner projection.
+    for row in rows:
+        policy=row.pop("policy_snapshot_json") or {}
+        row["questionnaire"]=policy.get("questionnaire",[])
+        row["can_submit"]=row["status"] in {"DRAFT","RETURNED","SUBMITTED"}
+    restrictions=_rows("""SELECT dimension,target_key,effective_on,ends_on
+        FROM quality_provider_restrictions WHERE amo_id=:amo AND supplier_id=:supplier
+        AND status='ACTIVE' AND effective_on<=CURRENT_DATE
+        AND (ends_on IS NULL OR ends_on>=CURRENT_DATE)
+        ORDER BY effective_on DESC LIMIT 40""",db,**ctx)
+    return {"items":rows,"restrictions":restrictions,
+            "approval_notice":"Only authorized AMO Quality management approves scope, evidence and provider status."}
+
+
+@router.post("/qualification/{case_id}/answers")
+def partner_submit_qualification(tenant_slug:str,case_id:str,
+    payload:PartnerQualificationAnswers,request:Request,db:Session=Depends(get_db)):
+    user=_ctx(db,request,tenant_slug,cap="profile.propose",write=True)
+    _cap(user,"profile.propose")
+    ctx=_context(user)
+    row=_row("""SELECT id,status,version,policy_snapshot_json FROM
+        quality_provider_qualification_cases WHERE amo_id=:amo
+        AND supplier_id=:supplier AND id=:case FOR UPDATE""",db,
+        **ctx,case=case_id)
+    if not row:raise HTTPException(404,"Assigned qualification request unavailable")
+    if row["status"] not in {"DRAFT","RETURNED","SUBMITTED"}:
+        raise HTTPException(409,"Qualification is currently under internal review")
+    if int(row["version"])!=payload.case_version:
+        raise HTTPException(409,"Qualification was updated; refresh its current version")
+    questionnaire=row["policy_snapshot_json"].get("questionnaire",[])
+    keys={str(q["key"]) for q in questionnaire}
+    if set(payload.answers)-keys:
+        raise HTTPException(422,"Response contains an unapproved questionnaire key")
+    if any(q.get("required") and not str(payload.answers.get(q["key"],"")).strip()
+           for q in questionnaire):
+        raise HTTPException(422,"Complete mandatory qualification responses")
+    if any(len(str(value))>4000 for value in payload.answers.values()):
+        raise HTTPException(413,"Qualification response field too long")
+    db.execute(text("""UPDATE quality_provider_qualification_cases
+       SET answers_json=CAST(:answers AS JSON),status='SUBMITTED',
+       submitted_at=NOW(),version=version+1,updated_at=NOW()
+       WHERE amo_id=:amo AND supplier_id=:supplier AND id=:case"""),
+       {**ctx,"case":case_id,"answers":json.dumps(payload.answers)})
+    auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+       action="PARTNER_QUALIFICATION_SUBMITTED",actor_identity=ctx["person"],
+       details={"case_id":case_id,"case_version":row["version"],"note":payload.note})
+    _notify(db,user,"QUALITY","Qualification questionnaire submitted",
+        "The AMO Quality Department will independently evaluate your response.",
+        "QUALIFICATION",case_id)
+    db.commit()
+    return {"status":"SUBMITTED","approval_granted":False}
+
+
 @router.get("/procurement")
 def procurement(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                 limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
