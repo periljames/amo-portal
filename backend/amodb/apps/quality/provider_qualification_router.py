@@ -116,6 +116,7 @@ class PolicyWrite(BaseModel):
     questionnaire: list[dict[str, Any]] = Field(default_factory=list, max_length=80)
     required_checks: list[str] = Field(default_factory=lambda: list(BASE_CHECKS), min_length=1, max_length=50)
     surveillance_days: int | None = Field(default=None,ge=30,le=3650)
+    evaluation_template_id: str | None = Field(default=None,max_length=36)
     manual_references: list[str] = Field(default_factory=list,max_length=30)
     reason: str = Field(min_length=8,max_length=1000)
 
@@ -125,8 +126,8 @@ def policies(amo_code:str, db:Session=Depends(get_db),
              user=Depends(get_current_active_user)):
     amo=_tenant(db,amo_code,user)
     _require(user,QUALITY|MAINTENANCE|SAFETY)
-    return {"items":_all(db,"""SELECT category,revision,questionnaire_json,required_checks_json,
-        surveillance_days,manual_references_json,updated_at
+    return {"items":_all(db,"""SELECT category,revision,evaluation_template_id,questionnaire_json,
+        required_checks_json,surveillance_days,manual_references_json,updated_at
         FROM quality_provider_qualification_policies WHERE amo_id=:amo
         ORDER BY category""",amo=amo),
         "default_annual_audit":False}
@@ -146,23 +147,30 @@ def configure_policy(amo_code:str,category:str,payload:PolicyWrite,
     required=[x.strip().upper() for x in payload.required_checks]
     if len(set(required))!=len(required) or not set(BASE_CHECKS).issubset(set(required)):
         raise HTTPException(422,"Cannot remove baseline qualification checks")
+    if payload.evaluation_template_id:
+        tmpl=_one(db,"""SELECT id FROM procurement_supplier_evaluation_templates
+           WHERE amo_id=:amo AND id=:id AND status='ACTIVE'""",
+           amo=amo,id=payload.evaluation_template_id)
+        if not tmpl:raise HTTPException(409,"Category template must be an active canonical QMS evaluation template")
     for item in payload.questionnaire:
         if str(item.get("kind","TEXT")) not in {"TEXT","YES_NO","NUMBER","DATE"}:
             raise HTTPException(422,"Unsupported questionnaire answer type")
     db.execute(text("""INSERT INTO quality_provider_qualification_policies
-       (amo_id,category,revision,questionnaire_json,required_checks_json,
-        surveillance_days,manual_references_json,updated_by_user_id)
-       VALUES(:amo,:category,1,CAST(:questions AS JSON),CAST(:checks AS JSON),
+       (amo_id,category,revision,evaluation_template_id,questionnaire_json,
+        required_checks_json,surveillance_days,manual_references_json,updated_by_user_id)
+       VALUES(:amo,:category,1,:template,CAST(:questions AS JSON),CAST(:checks AS JSON),
         :days,CAST(:manuals AS JSON),:actor)
        ON CONFLICT(amo_id,category) DO UPDATE
        SET revision=quality_provider_qualification_policies.revision+1,
+           evaluation_template_id=EXCLUDED.evaluation_template_id,
            questionnaire_json=EXCLUDED.questionnaire_json,
            required_checks_json=EXCLUDED.required_checks_json,
            surveillance_days=EXCLUDED.surveillance_days,
            manual_references_json=EXCLUDED.manual_references_json,
            updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=NOW()"""),
        {"amo":amo,"category":category,"questions":json.dumps(payload.questionnaire),
-        "checks":json.dumps(required),"days":payload.surveillance_days,
+        "checks":json.dumps(required),"template":payload.evaluation_template_id,
+        "days":payload.surveillance_days,
         "manuals":json.dumps(payload.manual_references),"actor":str(user.id)})
     # Tenant-wide category policy audit is attributable; zero is an administrative
     # supplier sentinel, not an issued supplier approval.
@@ -212,16 +220,18 @@ def create_case(amo_code:str,payload:CreateCase,db:Session=Depends(get_db),
     case_id=uid()
     snapshot={"questionnaire":policy["questionnaire_json"],
               "required_checks":policy["required_checks_json"],
+              "evaluation_template_id":policy["evaluation_template_id"],
               "surveillance_days":policy["surveillance_days"],
               "manual_references":policy["manual_references_json"]}
     db.execute(text("""INSERT INTO quality_provider_qualification_cases
       (id,amo_id,supplier_id,category,case_kind,policy_revision,policy_snapshot_json,
-       answers_json,technical_scope_json,risk_level,created_by_user_id)
+       evaluation_template_id,answers_json,technical_scope_json,risk_level,created_by_user_id)
       VALUES(:id,:amo,:supplier,:category,:kind,:revision,CAST(:policy AS JSON),
-      CAST('{}' AS JSON),CAST('[]' AS JSON),:risk,:actor)"""),
+      :template,CAST('{}' AS JSON),CAST('[]' AS JSON),:risk,:actor)"""),
       {"id":case_id,"amo":amo,"supplier":payload.supplier_id,"category":payload.category.upper(),
        "kind":payload.case_kind,"revision":policy["revision"],
-       "policy":json.dumps(snapshot),"risk":payload.risk_level,"actor":str(user.id)})
+       "policy":json.dumps(snapshot),"template":policy["evaluation_template_id"],
+       "risk":payload.risk_level,"actor":str(user.id)})
     for key in snapshot["required_checks"]:
         db.execute(text("""INSERT INTO quality_provider_qualification_checks
           (id,amo_id,case_id,requirement_key) VALUES(:id,:amo,:case,:key)"""),
@@ -259,10 +269,13 @@ def update_case(amo_code:str,case_id:str,payload:CaseAnswer,db:Session=Depends(g
     keys={q["key"] for q in row["policy_snapshot_json"].get("questionnaire",[])}
     if set(payload.answers)-keys:raise HTTPException(422,"Unknown questionnaire response key")
     if payload.evaluation_id:
-        evaluation=_one(db,"""SELECT id FROM procurement_supplier_evaluations
+        evaluation=_one(db,"""SELECT id,template_id FROM procurement_supplier_evaluations
             WHERE amo_id=:amo AND supplier_id=:supplier AND id=:evaluation""",
             amo=amo,supplier=row["supplier_id"],evaluation=payload.evaluation_id)
         if not evaluation:raise HTTPException(404,"Governed supplier evaluation is unavailable")
+        if (row["evaluation_template_id"] and
+            str(evaluation["template_id"])!=str(row["evaluation_template_id"])):
+            raise HTTPException(409,"Evaluation uses a different category-specific template")
     db.execute(text("""UPDATE quality_provider_qualification_cases
        SET answers_json=CAST(:answers AS JSON),evaluation_id=:evaluation,
        conclusion=:note,status='IN_REVIEW',version=version+1,updated_at=NOW()
@@ -459,12 +472,16 @@ def _requirements(db,amo,row):
     if row["technical_state"]!="ACCEPTED":blockers.append("TECHNICAL_OWNER")
     if row["safety_state"] not in {"ACCEPTED","NOT_REQUIRED"}:blockers.append("SAFETY")
     if row["authority_state"] not in {"VERIFIED","NOT_REQUIRED"}:blockers.append("REGULATORY_APPLICABILITY")
+    if not row["evaluation_template_id"]:
+        blockers.append("CATEGORY_SCORING_TEMPLATE_REQUIRED")
     if not row["evaluation_id"]:blockers.append("GOVERNED_EVALUATION")
     else:
         evaluation=evaluation_service._latest_valid_evaluation(
             db,amo_id=amo,supplier_id=row["supplier_id"])
         if not evaluation or str(evaluation.id)!=str(row["evaluation_id"]):
             blockers.append("VALID_INDEPENDENT_EVALUATION")
+        elif str(evaluation.template_id)!=str(row["evaluation_template_id"]):
+            blockers.append("WRONG_CATEGORY_EVALUATION_TEMPLATE")
     if not row["technical_scope_json"]:blockers.append("APPROVED_TECHNICAL_SCOPE")
     else:
         approved=_all(db,"""SELECT category,site_code,product_family FROM
