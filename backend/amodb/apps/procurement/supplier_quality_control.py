@@ -93,6 +93,43 @@ def _assert_required_contract_current(
         )
 
 
+
+def assert_provider_restrictions_allowed(
+    db: Session, *, amo_id: str, supplier_id: int, categories: Iterable[str],
+    site_code: str | None = None, product_family: str | None = None,
+    capability: str | None = None, contracted_function: str | None = None,
+    contract_id: str | None = None,
+) -> None:
+    """Transactional fail-closed Quality restrictions; no override bypass."""
+    if not inspect(db.get_bind()).has_table("quality_provider_restrictions"):
+        return
+    _set_provider_tenant_context(db, amo_id=amo_id)
+    restrictions = db.execute(text("""
+        SELECT dimension,target_key FROM quality_provider_restrictions
+        WHERE amo_id=:amo AND supplier_id=:supplier AND status='ACTIVE'
+        AND effective_on<=CURRENT_DATE
+        AND (ends_on IS NULL OR ends_on>=CURRENT_DATE)
+    """), {"amo":str(amo_id),"supplier":supplier_id}).mappings().all()
+    category_set={str(x).upper() for x in categories}
+    fields={"SITE":site_code, "PRODUCT_FAMILY":product_family,
+            "CAPABILITY":capability,"FUNCTION":contracted_function,
+            "CONTRACT":contract_id}
+    for restriction in restrictions:
+        dim=restriction["dimension"];target=str(restriction["target_key"])
+        if dim=="ORGANIZATION":
+            blocked=True
+        elif dim=="CATEGORY":
+            blocked=not category_set or target=="*" or target.upper() in category_set
+        else:
+            actual=fields.get(dim)
+            blocked=actual is None or target=="*" or str(actual).casefold()==target.casefold()
+        if blocked:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={
+                "code":"PROVIDER_QUALITY_RESTRICTION","dimension":dim,"target":target,
+                "message":"Active QMS restriction prohibits this supplier-use transition",
+            })
+
+
 def assert_supplier_usage_allowed(
     db: Session,
     *,
@@ -102,6 +139,11 @@ def assert_supplier_usage_allowed(
     allow_controlled_override: bool = False,
     override_reference: Optional[str] = None,
     override_reason: Optional[str] = None,
+    site_code: Optional[str] = None,
+    product_family: Optional[str] = None,
+    capability: Optional[str] = None,
+    contracted_function: Optional[str] = None,
+    contract_id: Optional[str] = None,
 ) -> models.ProcurementSupplier:
     """Canonical cross-module gate for every supplier-use decision.
 
@@ -117,6 +159,12 @@ def assert_supplier_usage_allowed(
         allow_controlled_override=allow_controlled_override,
         override_reference=override_reference,
         override_reason=override_reason,
+    )
+    assert_provider_restrictions_allowed(
+        db, amo_id=amo_id, supplier_id=supplier_id, categories=categories,
+        site_code=site_code, product_family=product_family,
+        capability=capability, contracted_function=contracted_function,
+        contract_id=contract_id,
     )
     _assert_required_contract_current(
         db,
