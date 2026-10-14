@@ -840,6 +840,72 @@ def escalate_provider_overdue(amo_code:str,payload:EscalationRequest,
             "car_count":outstanding["car_count"]}
 
 
+
+@router.get("/providers/{supplier_id}/export")
+def regulatory_export(amo_code:str,supplier_id:int,db:Session=Depends(get_db),
+                      user=Depends(get_current_active_user)):
+    """Controlled structured export of source-linked governance records.
+    DMS binaries and raw security credentials are deliberately excluded.
+    """
+    _require(user,QUALITY)
+    amo=_tenant(db,amo_code,user)
+    supplier=_supplier(db,amo,supplier_id)
+    cases=_all(db,"""SELECT * FROM quality_provider_qualification_cases
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY created_at""",
+        amo=amo,supplier=supplier_id)
+    for row in cases:
+        row["checks"]=_all(db,"""SELECT requirement_key,status,evidence_reference,
+            approval_reference,expires_on,conclusion,verified_by_user_id,verified_at
+            FROM quality_provider_qualification_checks
+            WHERE amo_id=:amo AND case_id=:case ORDER BY requirement_key""",
+            amo=amo,case=row["id"])
+    evaluations=_all(db,"""SELECT id,template_id,template_revision_no,status,score,outcome,
+        valid_until,reviewed_at,reviewed_by_user_id
+        FROM procurement_supplier_evaluations
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY created_at""",
+        amo=amo,supplier=supplier_id)
+    scopes=_all(db,"""SELECT id,category,product_family,site_code,authority,approval_number,
+        CAST(status AS TEXT) status,effective_on,expires_on,qms_evaluation_id,qms_audit_id,
+        evidence_reference,restrictions,approved_at,approved_by_user_id
+        FROM procurement_supplier_approval_scopes
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY category,site_code""",
+        amo=amo,supplier=supplier_id)
+    contracts=_all(db,"""SELECT id,contract_number,title,status,version,
+        controlled_document_id,controlled_document_revision,effective_on,expires_on
+        FROM quality_external_provider_contracts
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY created_at""",
+        amo=amo,supplier=supplier_id)
+    verified=_all(db,"""SELECT id,evidence_type,source_system,source_id,title,status,
+        valid_from,valid_until,contract_id,verified_at,verified_by_user_id
+        FROM quality_external_provider_evidence
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY created_at""",
+        amo=amo,supplier=supplier_id)
+    audits=_all(db,"""SELECT s.audit_id,s.kind,s.risk_level,s.due_on,s.outcome,
+        s.conclusion,a.audit_ref,CAST(a.status AS TEXT) status,a.actual_end,
+        (SELECT count(*) FROM quality_cars c JOIN qms_audit_findings f ON
+            f.amo_id=c.amo_id AND f.id=c.finding_id
+            WHERE c.amo_id=s.amo_id AND CAST(f.audit_id AS TEXT)=s.audit_id
+            AND c.closed_at IS NULL) open_cars
+        FROM quality_provider_surveillance s
+        JOIN qms_audits a ON a.amo_id=s.amo_id AND CAST(a.id AS TEXT)=s.audit_id
+        WHERE s.amo_id=:amo AND s.supplier_id=:supplier
+        ORDER BY s.created_at""",amo=amo,supplier=supplier_id)
+    restrictions=_all(db,"""SELECT * FROM quality_provider_restrictions
+        WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY created_at""",
+        amo=amo,supplier=supplier_id)
+    events=_all(db,"""SELECT action,actor_user_id,details_json,occurred_at FROM
+        quality_provider_qualification_events
+        WHERE amo_id=:amo AND supplier_id=:supplier
+        ORDER BY occurred_at,id""",amo=amo,supplier=supplier_id)
+    return {"export_type":"QMS_PROVIDER_REGULATORY_TRACE",
+            "exported_at":datetime.now(timezone.utc).isoformat(),
+            "manual_scope":"Tenant-approved category procedure references in policy snapshots",
+            "supplier":supplier,"cases":cases,"evaluations":evaluations,
+            "approved_scopes":scopes,"contracts":contracts,"evidence":verified,
+            "audits":audits,"restrictions":restrictions,"events":events,
+            "document_note":"Controlled binaries are available only via independent DMS release."}
+
+
 @router.get("/providers/{supplier_id}/overview")
 def provider_overview(amo_code:str,supplier_id:int,db:Session=Depends(get_db),
                       user=Depends(get_current_active_user)):
