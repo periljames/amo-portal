@@ -68,7 +68,7 @@ export default function PartnerHome({tenant,capabilities}:PartnerProps){
         </Section>
       </div>
       <Section title="Upcoming assigned deadlines" description="Current RFQ, PO, audit and released corrective-action commitments.">
-        {visibleTasks.length?visibleTasks.map((x,i)=>>
+        {visibleTasks.length?visibleTasks.map((x,i)=>
           <Link key={`${x.kind}-${i}`} to={`/partner/${tenant}/${x.to}`} className="partner-action">
             <div><strong>{x.title}</strong><small>{label(x.kind)} · Due {friendlyDate(x.due)}</small></div>
             <span>View</span>
