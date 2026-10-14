@@ -198,8 +198,61 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
                      AND release.audit_id=f.audit_id
                      ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'""").bindparams(
                 bindparam("assigned",expanding=True)),{**ctx,"assigned":assigned})[0]["n"])
+    # Bounded authoritative due-work projections. No internal employee IDs,
+    # hidden draft items or unpublished CARs are surfaced to partners.
+    urgent_tasks=[]
+    if can_view_tasks:
+        urgent_tasks.extend([{"kind":"RFQ","title":f"Quotation: {x['rfq_number']}",
+            "due":x["response_due_at"],"to":"procurement"} for x in _rows("""
+            SELECT r.rfq_number,r.response_due_at FROM procurement_rfqs r
+            JOIN procurement_rfq_suppliers t ON t.rfq_id=r.id
+            WHERE r.amo_id=:amo AND t.supplier_id=:supplier
+            AND r.status NOT IN ('DRAFT','CANCELLED')
+            AND t.responded_at IS NULL AND t.declined_at IS NULL
+            ORDER BY r.response_due_at NULLS LAST,r.id LIMIT 5""",db,**ctx)])
+        urgent_tasks.extend([{"kind":"PURCHASE_ORDER","title":f"Acknowledge PO {x['po_number']}",
+            "due":x["promised_delivery_date"],"to":"procurement"} for x in _rows("""
+            SELECT po_number,promised_delivery_date FROM procurement_purchase_orders
+            WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
+            AND acknowledged_at IS NULL
+            ORDER BY promised_delivery_date NULLS LAST,id LIMIT 5""",db,**ctx)])
+    assigned=sorted(_allowed(user,"assignments"))
+    if assigned and can_view_tasks:
+        args={**ctx,"assigned":assigned}
+        urgent_tasks.extend([{"kind":"AUDIT_DOCUMENT","title":f"Audit {x['audit_ref']}: {x['title']}",
+            "due":x["due_date"],"to":"quality"} for x in _rows_compiled(db,text("""
+            SELECT r.title,r.due_date,a.audit_ref FROM quality_audit_document_requests r
+            JOIN qms_audits a ON a.id=r.audit_id AND a.amo_id=r.amo_id
+            WHERE r.amo_id=:amo AND CAST(r.audit_id AS TEXT) IN :assigned
+            AND r.status='REQUESTED'
+            ORDER BY r.due_date NULLS LAST,r.id LIMIT 5""").bindparams(
+            bindparam("assigned",expanding=True)),args)])
+    if assigned and (can_view_tasks or "capa.respond" in set(user["capabilities_json"] or [])):
+        urgent_tasks.extend([{"kind":"CAR","title":f"Corrective action {x['car_number']}",
+            "due":x["due_date"],"to":"quality"} for x in _rows_compiled(db,text("""
+            SELECT c.car_number,c.due_date FROM quality_cars c
+            JOIN qms_audit_findings f ON f.amo_id=c.amo_id AND f.id=c.finding_id
+            WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
+            AND c.closed_at IS NULL
+            AND (SELECT re.action FROM quality_audit_finding_release_events re
+                WHERE re.amo_id=f.amo_id AND re.audit_id=f.audit_id
+                AND re.finding_id=f.id
+                ORDER BY re.created_at DESC,re.id DESC LIMIT 1)='RELEASED'
+            ORDER BY c.due_date NULLS LAST,c.id LIMIT 5""").bindparams(
+            bindparam("assigned",expanding=True)),{**ctx,"assigned":assigned})])
+    urgent_tasks.sort(key=lambda item: (str(item["due"] or "9999-12-31"),item["kind"]))
+    latest_notifications=_rows("""SELECT id,title,category,created_at,read_at FROM
+        external_partner_notifications WHERE amo_id=:amo AND tenant_provider_id=:provider
+        AND identity_id=:person ORDER BY created_at DESC,id DESC LIMIT 5""",db,**ctx)
+    approved_scope=_rows("""SELECT category,product_family,site_code,approval_number
+        FROM procurement_supplier_approval_scopes
+        WHERE amo_id=:amo AND supplier_id=:supplier AND status='ACTIVE'
+        AND (expires_on IS NULL OR expires_on>=CURRENT_DATE)
+        ORDER BY category,product_family,id LIMIT 8""",db,**ctx)
     return {"supplier":supplier,"expiring_certificates":certificates,
             "expiring_contracts":contracts,"outstanding_tasks":counts,
+            "urgent_tasks":urgent_tasks[:16],
+            "recent_notifications":latest_notifications,"approved_scope":approved_scope,
             "open_change_requests":int(pending["proposals"] or 0),
             "unread_notifications":int(unread["unread"] or 0),
             "actions":[{"kind":"CERTIFICATE_RENEWAL","title":f"Renew {c['certificate_type']}",
