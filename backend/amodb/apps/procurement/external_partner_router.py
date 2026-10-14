@@ -642,8 +642,13 @@ def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmi
         corrective_action=payload.corrective_action,preventive_action=payload.preventive_action,
         evidence_ref=evidence_reference,
         submitted_by_name=actor["display_name"],submitted_by_email=actor["email"]),request,db)
-    # The reused authoritative function commits; re-establish tenant context.
+    # The authoritative CAR handler commits, ending SET LOCAL RLS context.
+    # Restore BOTH tenant and external provider before recording partner events
+    # and notifications in the new transaction.
     auth.context(db,ctx["amo"],ctx["person"])
+    if db.get_bind().dialect.name=="postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id',:provider,true)"),
+                   {"provider":ctx["provider"]})
     auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
         action="PARTNER_CAR_RESPONSE_SUBMITTED",actor_identity=ctx["person"],
         details={"car_id":car_id,"assignment_id":car[0]["assignment_id"]})
