@@ -315,15 +315,17 @@ def compliance(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     blank={"items":[],"limit":page["limit"],"offset":page["offset"],"has_more":False,
            "next_offset":page["offset"]}
     if "document.read" in set(user["capabilities_json"] or []):
-        evidence=_paged(db,"""SELECT id,evidence_type,title,status,valid_until,source_system,created_at
-            FROM quality_external_provider_evidence WHERE amo_id=:amo AND supplier_id=:supplier
-            AND (contract_id IS NULL OR CAST(contract_id AS TEXT) IN :contracts)
-            ORDER BY created_at DESC,id DESC""".replace("CAST(contract_id AS TEXT) IN :contracts",
-            # This clause requires SQLAlchemy expanding parameters; use the
-            # compiled statement below rather than textual interpolation.
-            "CAST(contract_id AS TEXT) IN (NULL)"),ctx,limit,offset)
         scope={"contracts":sorted(_allowed(user,"contracts")),
                "assignments":sorted(_allowed(user,"assignments"))}
+        q=text("""SELECT id,evidence_type,title,status,valid_until,source_system,created_at
+            FROM quality_external_provider_evidence
+            WHERE amo_id=:amo AND supplier_id=:supplier
+            AND (contract_id IS NULL OR CAST(contract_id AS TEXT) IN :contracts)
+            ORDER BY created_at DESC,id DESC LIMIT :limit OFFSET :offset""").bindparams(
+            bindparam("contracts",expanding=True))
+        governed=_rows_compiled(db,q,{**ctx,**page,"contracts":scope["contracts"]})
+        evidence={**page,"items":governed,"has_more":len(governed)==page["limit"],
+                  "next_offset":page["offset"]+len(governed)}
         sql=text("""SELECT id,evidence_type,filename,status,related_kind,related_id,
              created_at,review_note FROM external_partner_evidence_submissions
              WHERE amo_id=:amo AND tenant_provider_id=:provider
