@@ -3,7 +3,7 @@ import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,type Contract,type Page,type ProcurementPage} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
-function Contracts({tenant,csrf}:PartnerProps){
+function Contracts({tenant,csrf,capabilities}:PartnerProps){
   const [search,setSearch]=useState("");const [offset,setOffset]=useState(0);
   const [expanded,setExpanded]=useState("");const [reason,setReason]=useState("");
   const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");const [error,setError]=useState("");
@@ -33,7 +33,7 @@ function Contracts({tenant,csrf}:PartnerProps){
       <div className="partner-inline"><span>Controlled document revision</span>
         <strong>{item.controlled_document_revision||"Not linked"}</strong></div>
       {item.controlled_document_id&&<p className="partner-muted">The controlled DMS file is not released for partner download through this account. Obtain a specific document-release grant from Document Control; a contract summary is not the governing document.</p>}
-      {expanded===item.id?<div className="partner-form">
+      {capabilities.includes("contract.acknowledge") && expanded===item.id?<div className="partner-form">
         <label>Receipt or clarification note<textarea rows={3} maxLength={2000} value={reason}
           onChange={e=>setReason(e.target.value)}/></label>
         <div className="partner-buttons">
@@ -42,7 +42,8 @@ function Contracts({tenant,csrf}:PartnerProps){
             onClick={()=>receipt(item,"REQUEST_CLARIFICATION")}>Request clarification</button>
           <button type="button" onClick={()=>setExpanded("")}>Cancel</button>
         </div>
-      </div>:<button type="button" disabled={busy} onClick={()=>setExpanded(item.id)}>Receipt / clarification</button>}
+      </div>:capabilities.includes("contract.acknowledge") ?
+        <button type="button" disabled={busy} onClick={()=>setExpanded(item.id)}>Receipt / clarification</button>:null}
     </div>)}
     <ActionNotice value={error} error/><ActionNotice value={message}/>
     {query.value&&<Pager value={query.value} onChange={setOffset}/>}
