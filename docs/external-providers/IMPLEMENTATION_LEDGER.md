@@ -107,3 +107,19 @@ Phase 3 implementation handoff: `docs/external-providers/PHASE2_IDENTITY_ACCESS.
 - Added exact-document checksum verification on controlled DMS source materialization; the revised frontend downloads only granted, currently published contract revisions.
 - Persistent vendor account controls are separate from staff JWT, QMS personnel privileges, and Procurement supplier lifecycle. Cross-module pages remain task-oriented projections.
 - No tests, migration upgrades, lint, frontend build, Playwright/browser acceptance or manual CI have been run. Remaining Phase 3 limitations and user-approved Phase 10 checks are tracked separately; no full production certification is claimed.
+
+## Phase 4 QMS Provider Qualification — source handoff, 14 October 2026
+
+- [x] Continuation of original codex/external-provider-platform-20261009 branch and ONE draft PR #560. Preserved all Phase 1–3 canonical tables and external principal separation; no Phase 5 scope.
+- [x] New tenant-qualified PostgreSQL revision extprov_261014_quality after Phase 3 with category policy, qualification cases/checks, restriction scope, surveillance audit links and append-only events/RLS. Active QMS supplier evaluation template and manual reference are category policy inputs; snapshots are frozen per case.
+- [x] Registration -> qualification -> category/regulatory applicability -> evidence and technical/Safety review -> approved independent evaluation -> Quality decision -> surveillance/requalification/restriction/reinstatement workflows connected to canonical Procurement supplier and existing QMS audit and CAR records.
+- [x] Required check sources validated to verified current Quality provider evidence; Authority acceptance requires an actual Quality-verified current certificate; technical scope must match evaluation-linked canonical approval scope; Safety decision requires appointed Manager's traceable SMS/MOC reference.
+- [x] Final Quality case decision invokes existing scored supplier-governance service. Older direct Procurement supplier decision path now uses the governed service; legacy QMS provider transition rejects approval bypass where Phase 4 is configured. Provider cannot self-approve.
+- [x] Granular active restrictions guard existing supplier-use service transactionally with conservative scope fail-closed behavior. Reinstatement is separate QM decision tied to a successful case and closed/effectiveness-checked existing QMS CARs, not a silent status rewrite.
+- [x] Existing QMS provider record includes qualification, surveillance, overdue cases and CAR escalation, policy, restrictions, history/export; Phase 2–3 partner workspace includes applicant questionnaire with explicit grant and attributable response, active restrictions and inbox deep links.
+- [x] Existing scheduled worker scans overdue cases and posts deduplicated Quality Manager notifications; QMS CAR reminders and Live Audit execution remain canonical.
+- [x] Draft MOPM Issue 4 procedural trace, Safarilink proposed annual subcontractor surveillance policy and unresolved Authority/Safety decisions documented in PHASE4_QMS_QUALIFICATION.md.
+- [ ] **NOT runtime accepted:** no manual tests, lint, typecheck, build, CI, Alembic upgrade/downgrade or real guest/auditee browser flows executed, as required in Phases 1–9. Automated CI may launch upon commits without operator invocation. No green status or regulatory compliance certification is claimed.
+- [ ] Validated signed final tenant procedures, State-of-Registry requirements, Safety source records, exact workbooks, antivirus/CDR, site-level regulatory limitation cases and full operational transition coverage remain Phase 10 acceptance inputs. Full trace in PHASE10_VERIFICATION_LEDGER.md (Phase 4 items 58–70).
+
+**Next permitted implementation:** only Phase 5 on a separate user instruction, still this same branch and PR. Do not merge until Phase 10.
