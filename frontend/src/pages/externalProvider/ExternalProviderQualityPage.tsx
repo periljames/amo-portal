@@ -14,8 +14,8 @@ type Grant = {
   verified_at: string | null; restrict_new_work: boolean;
 };
 type AuditEvent = {
-  id: string; event_type: string; identity_id: string | null;
-  actor_user_id: string | null; occurred_at: string; details_json: Record<string, unknown>;
+  id: string; event_type: string; identity_label: string;
+  actor_label: string; occurred_at: string; details_json: Record<string, unknown>;
 };
 const ROLES = ["PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTATIVE",
   "COMMERCIAL_REPRESENTATIVE", "DOCUMENT_SUBMITTER", "READ_ONLY", "CUSTOM"];
@@ -216,7 +216,7 @@ export default function ExternalProviderQualityPage() {
         <div className="vendor-table-wrap"><table className="vendor-table">
           <thead><tr><th>Event</th><th>Identity</th><th>Actor</th><th>Timestamp</th></tr></thead>
           <tbody>{events.map((e)=><tr key={e.id}><td>{LABEL(e.event_type)}</td>
-            <td>{e.identity_id||"Provider"}</td><td>{e.actor_user_id||"External user"}</td>
+            <td>{e.identity_label}</td><td>{e.actor_label}</td>
             <td>{new Date(e.occurred_at).toLocaleString()}</td></tr>)}</tbody>
         </table></div>
       </section>
