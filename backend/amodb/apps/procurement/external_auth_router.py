@@ -485,6 +485,23 @@ def provider_invite(payload:Invitation,request:Request,db:Session=Depends(get_db
         req=payload,organization_id=s["organization_id"],cap_limit=s["capabilities_json"],
         caller_scope=s["object_scope_json"],internal=False)
 
+@quality_router.get("/suppliers")
+def eligible_supplier_search(amo_code:str,search:str="",limit:int=30,offset:int=0,
+                             db:Session=Depends(get_db),
+                             user:accounts.User=Depends(get_current_active_user)):
+    """Tenant-scoped canonical supplier selector; never guess numeric vendor IDs."""
+    amo=_authorized_quality(db,amo_code,user)
+    limit=max(1,min(50,limit))
+    offset=max(0,min(10000,offset))
+    query=f"%{search.strip().lower()[:100]}%"
+    rows=core.many("""SELECT id,supplier_code,legal_name,status,is_active,
+          external_import_pending_activation
+        FROM procurement_suppliers
+        WHERE amo_id=:amo AND (lower(legal_name) LIKE :query OR lower(supplier_code) LIKE :query)
+        ORDER BY legal_name,id LIMIT :limit OFFSET :offset""",
+        db,amo=amo,query=query,limit=limit,offset=offset)
+    return {"items":rows,"limit":limit,"offset":offset,"has_more":len(rows)==limit}
+
 @quality_router.get("")
 def quality_list(amo_code:str,db:Session=Depends(get_db),
                  user:accounts.User=Depends(get_current_active_user)):
