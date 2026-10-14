@@ -385,6 +385,19 @@ def domain_review(amo_code:str,case_id:str,domain:Literal["technical","safety","
         raise HTTPException(409,"This category requires verified State/Authority approval; revise the governed policy instead")
     if domain=="safety" and payload.state=="NOT_REQUIRED" and row["policy_snapshot_json"].get("safety_assessment_required"):
         raise HTTPException(409,"This category requires appointed Safety Manager assessment")
+    if domain=="safety" and payload.state=="ACCEPTED" and not payload.reference:
+        raise HTTPException(422,"Safety Manager acceptance requires the SMS/MOC assessment reference")
+    if domain=="authority" and payload.state=="VERIFIED":
+        verified=_one(db,"""SELECT id,valid_until FROM external_provider_certificates
+            WHERE amo_id=:amo AND supplier_id=:supplier
+            AND certificate_number=:reference AND verification_state='VERIFIED'
+            AND (valid_from IS NULL OR valid_from<=CURRENT_DATE)
+            AND (valid_until IS NULL OR valid_until>=CURRENT_DATE)
+            LIMIT 1""",amo=amo,supplier=row["supplier_id"],reference=payload.reference)
+        if not verified:
+            raise HTTPException(409,"Referenced authority certificate is not Quality-verified and current")
+        if payload.expires_on and verified["valid_until"] and payload.expires_on>verified["valid_until"]:
+            raise HTTPException(409,"Claimed Authority expiry exceeds independently verified certificate")
     if domain=="technical" and payload.state=="ACCEPTED" and not payload.technical_scope:
         raise HTTPException(422,"Technical acceptance must define exact proposed scope")
     fields={"technical":"technical_state","safety":"safety_state","authority":"authority_state"}
@@ -491,6 +504,16 @@ def _requirements(db,amo,row):
     if row["authority_state"] not in {"VERIFIED","NOT_REQUIRED"}:blockers.append("REGULATORY_APPLICABILITY")
     if policy.get("authority_required") and row["authority_state"]!="VERIFIED":
         blockers.append("CATEGORY_REQUIRES_REGULATORY_APPROVAL")
+    if row["authority_state"]=="VERIFIED":
+        certificate=_one(db,"""SELECT id FROM external_provider_certificates
+            WHERE amo_id=:amo AND supplier_id=:supplier
+            AND certificate_number=:reference AND verification_state='VERIFIED'
+            AND (valid_from IS NULL OR valid_from<=CURRENT_DATE)
+            AND (valid_until IS NULL OR valid_until>=CURRENT_DATE) LIMIT 1""",
+            amo=amo,supplier=row["supplier_id"],reference=row["authority_reference"])
+        if not certificate or (
+            row["authority_expires_on"] and row["authority_expires_on"]<date.today()):
+            blockers.append("REGULATORY_CERTIFICATE_NO_LONGER_CURRENT")
     if not row["evaluation_template_id"]:
         blockers.append("CATEGORY_SCORING_TEMPLATE_REQUIRED")
     if not row["evaluation_id"]:blockers.append("GOVERNED_EVALUATION")
