@@ -734,13 +734,14 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => window.removeEventListener("beforeunload", warnBeforeReload);
   }, [unsavedDraftCount, findingDraft, evidenceCapture]);
 
-  const selectItem = (itemId: string) => {
-    if (itemId === selected?.checklist_item_id) return;
+  const selectItem = (itemId: string): boolean => {
+    if (itemId === selected?.checklist_item_id) return true;
     if (evidenceCapture.busy || evidenceCapture.hasDraft) {
       setLocalError(evidenceCapture.busy ? "Wait for the evidence upload to finish before changing questions." : "Attach or clear the selected evidence file before changing questions.");
-      return;
+      return false;
     }
     setSelectedId(itemId);
+    return true;
   };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
@@ -1043,7 +1044,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       <td><div className="qms-live-audit-focus__matrix-choices" role="group" aria-label={`Assessment for question ${number}`}>
                         {choices.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "is-selected" : ""} title={option.label} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(item, option)}>{option.label}</button>)}
                       </div></td>
-                      <td><button type="button" aria-expanded={expanded} onClick={() => { selectItem(item.checklist_item_id); setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
+                      <td><button type="button" aria-expanded={expanded} onClick={() => { if (selectItem(item.checklist_item_id)) setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
                         {local ? <small className="qms-live-audit-focus__matrix-device" title="Not yet server-confirmed">{local.status === "conflict" || local.status === "failed" ? "Review sync" : "On device"}</small> : null}
                       </td>
                     </tr>
