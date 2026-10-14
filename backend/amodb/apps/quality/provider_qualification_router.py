@@ -161,15 +161,18 @@ def configure_policy(amo_code:str,category:str,payload:PolicyWrite,
             raise HTTPException(422,"Unsupported questionnaire answer type")
     db.execute(text("""INSERT INTO quality_provider_qualification_policies
        (amo_id,category,revision,evaluation_template_id,questionnaire_json,
-        required_checks_json,surveillance_days,manual_references_json,updated_by_user_id)
+        required_checks_json,surveillance_days,initial_audit_required,authority_required,safety_assessment_required,manual_references_json,updated_by_user_id)
        VALUES(:amo,:category,1,:template,CAST(:questions AS JSON),CAST(:checks AS JSON),
-        :days,CAST(:manuals AS JSON),:actor)
+        :days,:initial_audit,:authority,:safety,CAST(:manuals AS JSON),:actor)
        ON CONFLICT(amo_id,category) DO UPDATE
        SET revision=quality_provider_qualification_policies.revision+1,
            evaluation_template_id=EXCLUDED.evaluation_template_id,
            questionnaire_json=EXCLUDED.questionnaire_json,
            required_checks_json=EXCLUDED.required_checks_json,
            surveillance_days=EXCLUDED.surveillance_days,
+            initial_audit_required=EXCLUDED.initial_audit_required,
+            authority_required=EXCLUDED.authority_required,
+            safety_assessment_required=EXCLUDED.safety_assessment_required,
            manual_references_json=EXCLUDED.manual_references_json,
            updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=NOW()"""),
        {"amo":amo,"category":category,"questions":json.dumps(payload.questionnaire),
@@ -795,6 +798,8 @@ def surveillance_review(amo_code:str,surveillance_id:str,payload:SurveillanceDec
     row=_one(db,"""SELECT * FROM quality_provider_surveillance
       WHERE amo_id=:amo AND id=:id FOR UPDATE""",amo=amo,id=surveillance_id)
     if not row:raise HTTPException(404,"Linked surveillance audit not found")
+    if row["outcome"] in {"SATISFACTORY","UNSATISFACTORY","CANCELLED"}:
+        raise HTTPException(409,"Final surveillance outcome is immutable; link a follow-up QMS audit")
     if payload.outcome=="SATISFACTORY":
         audit=_one(db,"""SELECT actual_end,CAST(status AS TEXT) status
             FROM qms_audits WHERE amo_id=:amo AND CAST(id AS TEXT)=:audit""",
