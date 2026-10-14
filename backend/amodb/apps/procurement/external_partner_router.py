@@ -478,7 +478,9 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
         filepath=storage.materialize(uri)
     except (OSError,ValueError,RuntimeError) as exc:
         raise HTTPException(409,"Controlled document source is temporarily unavailable") from exc
-    filename=Path(revision["source_filename"] or "controlled-agreement.pdf").name
+    source_name=Path(revision["source_filename"] or "controlled-agreement").name
+    filename=(str(Path(source_name).with_suffix(".pdf")) if revision["stamped_export_uri"]
+              else source_name)
     content_type="application/pdf" if revision["stamped_export_uri"] else (
         revision["source_mime_type"] or "application/octet-stream"
     )
