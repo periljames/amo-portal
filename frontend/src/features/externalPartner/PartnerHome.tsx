@@ -4,7 +4,7 @@ import type {PartnerProps} from "./ExternalPartnerPage";
 import {partnerRequest,friendlyDate,label,type Summary} from "./partnerApi";
 import {Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
-export default function PartnerHome({tenant}:PartnerProps){
+export default function PartnerHome({tenant,capabilities}:PartnerProps){
   const query=usePartnerLoad((signal)=>partnerRequest<Summary>(tenant,"home",{signal}),tenant);
   const data=query.value;
   return <div className="partner-stack">
@@ -48,12 +48,42 @@ export default function PartnerHome({tenant}:PartnerProps){
             </Link>):<p className="partner-empty">No assigned agreements currently nearing expiry.</p>}
         </Section>
       </div>
+      <div className="partner-columns">
+        <Section title="Current approved scope" description="Live categories under the canonical Procurement supplier approval register.">
+          {data.approved_scope.length?data.approved_scope.map((x,i)=><div key={i} className="partner-row">
+            <div><strong>{x.category} · {x.product_family}</strong>
+              <small>{x.site_code} · {x.approval_number||"Scope reference not recorded"}</small></div></div>)
+            :<p className="partner-empty">No currently ACTIVE approval scopes.</p>}
+        </Section>
+        <Section title="Most recent notifications">
+          {data.recent_notifications.length?data.recent_notifications.map(x)=><Link
+            to={`/partner/${tenant}/activity`} key={x.id} className="partner-action">
+            <div><strong>{x.title}</strong><small>{x.category} · {friendlyDate(x.created_at)}</small></div>
+            {!x.read_at&&<span>Unread</span>}
+          </Link>):<p className="partner-empty">No portal notifications yet.</p>}
+        </Section>
+      </div>
+      <Section title="Upcoming assigned deadlines" description="Current RFQ, PO, audit and released corrective-action commitments.">
+        {data.urgent_tasks.filter(x=>(x.to==="quality" ?
+          capabilities.includes("task.read")||capabilities.includes("capa.respond"):
+          capabilities.includes("task.read"))).length?
+          data.urgent_tasks.filter(x=>(x.to==="quality" ?
+          capabilities.includes("task.read")||capabilities.includes("capa.respond"):
+          capabilities.includes("task.read"))).map((x,i)=>
+          <Link key={`${x.kind}-${i}`} to={`/partner/${tenant}/${x.to}`} className="partner-action">
+            <div><strong>{x.title}</strong><small>{label(x.kind)} · Due {friendlyDate(x.due)}</small></div>
+            <span>View</span>
+          </Link>):<p className="partner-empty">No overdue or upcoming assigned tasks.</p>}
+      </Section>
       <Section title="Outstanding assigned work" description="Counts are calculated in the authoritative Procurement and QMS registers for your approved assignment, not static dashboard figures.">
         <div className="partner-shortcuts">
-          <Link to={`/partner/${tenant}/procurement`}>RFQs awaiting quotation <strong>{data.outstanding_tasks.rfqs}</strong></Link>
-          <Link to={`/partner/${tenant}/procurement`}>PO acknowledgements pending <strong>{data.outstanding_tasks.purchase_orders}</strong></Link>
-          <Link to={`/partner/${tenant}/quality`}>Audit document requests <strong>{data.outstanding_tasks.audit_requests}</strong></Link>
-          <Link to={`/partner/${tenant}/quality`}>Released open CARs <strong>{data.outstanding_tasks.cars}</strong></Link>
+          {capabilities.includes("task.read")&&<>
+            <Link to={`/partner/${tenant}/procurement`}>RFQs awaiting quotation <strong>{data.outstanding_tasks.rfqs}</strong></Link>
+            <Link to={`/partner/${tenant}/procurement`}>PO acknowledgements pending <strong>{data.outstanding_tasks.purchase_orders}</strong></Link>
+            <Link to={`/partner/${tenant}/quality`}>Audit document requests <strong>{data.outstanding_tasks.audit_requests}</strong></Link>
+          </>}
+          {(capabilities.includes("task.read")||capabilities.includes("capa.respond"))&&
+            <Link to={`/partner/${tenant}/quality`}>Released open CARs <strong>{data.outstanding_tasks.cars}</strong></Link>}
           <Link to={`/partner/${tenant}/activity`}>Notifications & attributable history →</Link>
         </div>
       </Section>
