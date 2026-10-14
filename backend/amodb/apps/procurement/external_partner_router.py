@@ -64,7 +64,7 @@ def _row(q: str, db: Session, **params):
 def _rows(q: str,db:Session,**params):
     return [dict(x) for x in db.execute(text(q),params).mappings().all()]
 
-def _ctx(db:Session,request:Request,tenant_slug:str,*,cap:str="profile.read",write:bool=False):
+def _ctx(db:Session,request:Request,tenant_slug:str,*,cap:str|None="profile.read",write:bool=False):
     user=auth.active_session(db,request,required=cap,write=write)
     tenant=_row("SELECT login_slug,amo_code FROM amos WHERE id=:id",db,id=user["amo_id"])
     if not tenant or tenant_slug.strip().lower() not in {
@@ -132,7 +132,8 @@ def _notify(db:Session,user,category:str,title:str,message:str,resource_kind:str
 
 @router.get("/session")
 def partner_session(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
-    user=_ctx(db,request,tenant_slug)
+    # Custom task/CAPA-only members must resolve their shell before work access.
+    user=_ctx(db,request,tenant_slug,cap=None)
     supplier=_row("""SELECT s.supplier_code,s.legal_name,s.trading_name,s.status,s.is_active,
        s.external_import_pending_activation,p.portal_state,p.restrict_new_work,
        i.display_name,i.email
@@ -530,7 +531,8 @@ def contract_receipt(tenant_slug:str,contract_id:str,payload:ContractReceipt,
 @router.get("/quality")
 def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
             limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
-    user=_ctx(db,request,tenant_slug,cap="profile.read")
+    # This read projection admits either task.read or capa.respond below.
+    user=_ctx(db,request,tenant_slug,cap=None)
     capabilities=set(user["capabilities_json"] or [])
     if not capabilities.intersection({"task.read","capa.respond"}):
         raise HTTPException(403,"Assigned Quality tasks are not granted")
