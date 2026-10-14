@@ -1,12 +1,14 @@
-import React,{useState} from "react";
+import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
-import {friendlyDate,partnerRequest,type Contract,type Page,type ProcurementPage} from "./partnerApi";
+import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page,type ProcurementPage} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
 function Contracts({tenant,csrf,capabilities}:PartnerProps){
   const [search,setSearch]=useState("");const [offset,setOffset]=useState(0);
   const [expanded,setExpanded]=useState("");const [reason,setReason]=useState("");
   const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");const [error,setError]=useState("");
+  const abortRef=useRef<AbortController|null>(null);
+  useEffect(()=>()=>abortRef.current?.abort(),[]);
   const query=usePartnerLoad((signal)=>partnerRequest<Page<Contract>>(tenant,
     `contracts?offset=${offset}&limit=15&search=${encodeURIComponent(search)}`,{signal}),
     `${tenant}:${offset}:${search}`);
@@ -17,6 +19,36 @@ function Contracts({tenant,csrf,capabilities}:PartnerProps){
     }).then(()=>{setMessage("Receipt recorded against this exact agreement version. This is not a contractual signature.");
       setReason("");setExpanded("");query.reload();
     }).catch(e=>setError(e instanceof Error?e.message:"Receipt was not recorded")).finally(()=>setBusy(false));
+  }
+  async function download(item:Contract){
+    if(item.controlled_document_access!=="PUBLISHED_REVISION_CHECK_REQUIRED"){
+      setError("Document Control has not granted this exact revision to your external account.");
+      return;
+    }
+    const abort=new AbortController();abortRef.current=abort;
+    setBusy(true);setError("");setMessage("");
+    try{
+      const response=await fetch(partnerUrl(tenant,`contracts/${encodeURIComponent(item.id)}/document`),{
+        credentials:"include",cache:"no-store",signal:abort.signal,
+      });
+      if(!response.ok){
+        const detail=await response.json().catch(()=>({detail:"Document release was denied"})) as {detail?:string};
+        throw new Error(typeof detail.detail==="string"?detail.detail:"Controlled document is unavailable");
+      }
+      const binary=await response.blob();
+      if(abort.signal.aborted)return;
+      const url=URL.createObjectURL(binary);
+      try{
+        const link=document.createElement("a");link.href=url;
+        const ext=response.headers.get("Content-Type")?.includes("wordprocessingml")?".docx":".pdf";
+        const safeNumber=item.contract_number.replace(/[^a-zA-Z0-9_-]/g,"_");
+        link.download=`${safeNumber}-revision-${item.version}${ext}`;
+        link.click();
+        setMessage("Controlled published revision downloaded. Verify the displayed revision and validity before use.");
+      }finally{window.setTimeout(()=>URL.revokeObjectURL(url),1500);}
+    }catch(reason){
+      if(!abort.signal.aborted)setError(reason instanceof Error?reason.message:"Controlled document download failed");
+    }finally{abortRef.current=null;setBusy(false);}
   }
   return <Section title="My assigned agreements" description="These are Quality-governed agreement records individually granted to your provider membership.">
     <div className="partner-toolbar"><label className="partner-search">
@@ -32,7 +64,12 @@ function Contracts({tenant,csrf,capabilities}:PartnerProps){
       <p className="partner-muted">{item.scope_text}</p>
       <div className="partner-inline"><span>Controlled document revision</span>
         <strong>{item.controlled_document_revision||"Not linked"}</strong></div>
-      {item.controlled_document_id&&<p className="partner-muted">The controlled DMS file is not released for partner download through this account. Obtain a specific document-release grant from Document Control; a contract summary is not the governing document.</p>}
+      {item.controlled_document_id&&(
+        item.controlled_document_access==="PUBLISHED_REVISION_CHECK_REQUIRED"?
+        <button type="button" disabled={busy} onClick={()=>void download(item)}>
+          Download granted published revision</button>:
+        <p className="partner-muted">The controlled DMS file is not released to this member. Request explicit document access from your AMO. Agreement metadata alone does not authorize a download.</p>
+      )}
       {capabilities.includes("contract.acknowledge") && expanded===item.id?<div className="partner-form">
         <label>Receipt or clarification note<textarea rows={3} maxLength={2000} value={reason}
           onChange={e=>setReason(e.target.value)}/></label>
