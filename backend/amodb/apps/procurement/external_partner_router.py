@@ -362,7 +362,7 @@ def compliance(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     scopes=_paged(db,"""SELECT category,product_family,site_code,authority,status,expires_on,
         restrictions,approval_number,evidence_reference FROM procurement_supplier_approval_scopes
         WHERE amo_id=:amo AND supplier_id=:supplier ORDER BY expires_on NULLS LAST,id""",ctx,limit,offset)
-    certificates=_paged(db,"""SELECT certificate_type,certificate_number,issuing_authority,
+    certificates=_paged(db,"""SELECT id,certificate_type,certificate_number,issuing_authority,
        approval_rating,verification_state,valid_from,valid_until,limitations
        FROM external_provider_certificates WHERE amo_id=:amo AND supplier_id=:supplier
        ORDER BY valid_until NULLS LAST,id""",ctx,limit,offset)
