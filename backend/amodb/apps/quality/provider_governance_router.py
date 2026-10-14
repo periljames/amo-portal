@@ -801,6 +801,25 @@ def transition_external_provider(
             detail=f"Provider transition {current} → {target} is not allowed.",
         )
     if target in {"APPROVED", "CONDITIONALLY_APPROVED"}:
+        # This older QMS transition must not bypass the independent
+        # evaluation and qualification case decisions introduced in Phase 4.
+        from amodb.apps.procurement import supplier_governance_service
+        evaluated = supplier_governance_service._latest_valid_evaluation(
+            db, amo_id=ctx.amo_id, supplier_id=provider_id)
+        if not evaluated or (target == "APPROVED" and evaluated.status != "APPROVED"):
+            raise HTTPException(status_code=409,detail=
+                "Current independently reviewed supplier evaluation is required for Quality approval")
+        if inspect(db.get_bind()).has_table("quality_provider_qualification_cases"):
+            phase4 = db.execute(text("""
+                SELECT EXISTS(SELECT 1 FROM quality_provider_qualification_cases
+                    WHERE amo_id=:amo AND supplier_id=:supplier)
+                    OR EXISTS(SELECT 1 FROM quality_provider_qualification_policies
+                    WHERE amo_id=:amo AND category=upper(:kind))
+            """),{"amo":ctx.amo_id,"supplier":provider_id,
+                   "kind":str(provider.get("provider_kind") or "")}).scalar()
+            if phase4:
+                raise HTTPException(status_code=409,detail=
+                    "Use the independently reviewed QMS qualification case decision to approve or reinstate")
         if provider.get("contract_required") and not _active_contract_exists(db, amo_id=ctx.amo_id, provider_id=provider_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
