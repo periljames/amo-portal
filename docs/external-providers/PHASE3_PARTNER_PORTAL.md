@@ -54,3 +54,13 @@ Controlled agreement binaries are now accessible through the guarded partner con
 Audit document requests now have a distinct, assignment-bound upload within the partner Quality page. It invokes the existing governed QMS submission model/storage and enters the same QMS review queue; generic provider evidence upload remains a separate record used for supplier approval and CAR supporting evidence.
 
 No Phase 10 migration/test/build/lint/browser run occurred during this source integration review. Do not equate committed source with a fully verified production workflow. Explicit document-release approvals, scanning, legacy DMS storage path compatibility, user-managed grant migrations and actual email/MFA behavior remain acceptance gates.
+
+
+## Final source contract audit
+Checked code presence and route inclusion for all eight lazy workspaces, vendor security UI, staff Quality review UI, four external FastAPI route mounts and Alembic Phase 1 → Phase 2 → Phase 3 revision parent links. This is *not* proof of database or TypeScript compilation success.
+
+Phase 3 record ownership is enforced by the explicit tenant/supplier/member object queries and the partner-specific PostgreSQL RLS policy; the policy now fails closed if an external provider context is absent, while authorized internal Quality inspection sets a distinct marker.
+
+Browser sign-out and account switching now invalidate the old active session. DMS current published revision download requires both the contract and document grants. The QMS document-request upload uses the existing QMS submission and storage system, not a second review queue.
+
+Accepted provider organization change proposals remain pending controlled domain-owner application; no master data is rewritten simply because an external representative submitted a form or a Quality reviewer accepted it for processing. The user-requested no-test policy means this implementation **cannot yet be certified end to end**.
