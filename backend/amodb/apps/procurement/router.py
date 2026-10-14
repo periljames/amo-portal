@@ -173,7 +173,8 @@ def supplier_decision(
     current_user: account_models.User = Depends(require_roles(*QUALITY_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
-    supplier = service.decide_supplier(
+    from . import supplier_governance_service as governed_supplier_service
+    supplier = governed_supplier_service.decide_supplier(
         db,
         amo_id=amo_id,
         supplier_id=supplier_id,
