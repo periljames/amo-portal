@@ -7,6 +7,10 @@ import {Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 export default function PartnerHome({tenant,capabilities}:PartnerProps){
   const query=usePartnerLoad((signal)=>partnerRequest<Summary>(tenant,"home",{signal}),tenant);
   const data=query.value;
+  const visibleTasks=(data?.urgent_tasks||[]).filter(task=>
+    task.to==="quality"
+      ? capabilities.includes("task.read")||capabilities.includes("capa.respond")
+      : capabilities.includes("task.read"));
   return <div className="partner-stack">
     <State pending={query.pending} error={query.error} retry={query.reload}/>
     {data&&<>
@@ -64,12 +68,7 @@ export default function PartnerHome({tenant,capabilities}:PartnerProps){
         </Section>
       </div>
       <Section title="Upcoming assigned deadlines" description="Current RFQ, PO, audit and released corrective-action commitments.">
-        {data.urgent_tasks.filter(x=>(x.to==="quality" ?
-          capabilities.includes("task.read")||capabilities.includes("capa.respond"):
-          capabilities.includes("task.read"))).length?
-          data.urgent_tasks.filter(x=>(x.to==="quality" ?
-          capabilities.includes("task.read")||capabilities.includes("capa.respond"):
-          capabilities.includes("task.read"))).map((x,i)=>
+        {visibleTasks.length?visibleTasks.map((x,i)=>>
           <Link key={`${x.kind}-${i}`} to={`/partner/${tenant}/${x.to}`} className="partner-action">
             <div><strong>{x.title}</strong><small>{label(x.kind)} · Due {friendlyDate(x.due)}</small></div>
             <span>View</span>
