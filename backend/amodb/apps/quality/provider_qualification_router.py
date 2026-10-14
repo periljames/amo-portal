@@ -222,7 +222,7 @@ def create_case(amo_code:str,payload:CreateCase,db:Session=Depends(get_db),
     policy=_policy(db,amo,payload.category.upper())
     current=_one(db,"""SELECT id FROM quality_provider_qualification_cases
         WHERE amo_id=:amo AND supplier_id=:supplier
-        AND status IN ('DRAFT','SUBMITTED','IN_REVIEW','READY') LIMIT 1""",
+        AND status IN ('DRAFT','RETURNED','SUBMITTED','IN_REVIEW','READY') LIMIT 1""",
         amo=amo,supplier=payload.supplier_id)
     if current:raise HTTPException(409,"Complete or return the existing open qualification case first")
     case_id=uid()
@@ -445,7 +445,7 @@ def link_audit(amo_code:str,case_id:str,payload:AuditLink,db:Session=Depends(get
                user=Depends(get_current_active_user)):
     _require(user,QUALITY)
     amo=_tenant(db,amo_code,user);row=_case(db,amo,case_id,True)
-    if row["status"] in {"APPROVED","REJECTED"}:raise HTTPException(409,"Open requalification for a new audit")
+    if row["status"] in {"APPROVED","CONDITIONALLY_APPROVED","REJECTED"}:raise HTTPException(409,"Open requalification for a new audit")
     try: UUID(payload.audit_id)
     except ValueError as exc:raise HTTPException(422,"Invalid existing QMS audit identifier") from exc
     audit=_one(db,"""SELECT id,audit_ref,title,CAST(kind AS TEXT) kind,
