@@ -86,6 +86,23 @@ def _require_object(user,key:str,value:str):
     if str(value) not in _allowed(user,key):
         raise HTTPException(403,f"{key} object is not assigned to this provider member")
 
+def _require_existing_related(db:Session,user,kind:str,value:str):
+    """The scoped ID must also belong to this actual canonical tenant supplier."""
+    if kind=="CONTRACT":
+        _require_object(user,"contracts",value)
+        found=_row("""SELECT id FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier AND id=:item""",
+            db,**_context(user),item=value)
+    elif kind=="ASSIGNMENT":
+        _require_object(user,"assignments",value)
+        found=_row("""SELECT id FROM qms_audits
+            WHERE amo_id=:amo AND CAST(id AS TEXT)=:item""",
+            db,amo=user["amo_id"],item=value)
+    else:
+        raise HTTPException(422,"Unsupported related record type")
+    if not found:
+        raise HTTPException(404,"Assigned record is unavailable in this tenant")
+
 def _cap(user,code:str):
     if code not in set(user["capabilities_json"] or []):
         raise HTTPException(403,"External privilege not granted")
@@ -142,7 +159,7 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
         FROM external_provider_certificates
         WHERE amo_id=:amo AND supplier_id=:supplier AND valid_until<=:cutoff
         ORDER BY valid_until ASC LIMIT 8""",db,**ctx,cutoff=cutoff)
-    assigned_contracts=sorted(_allowed(user,"contracts"))
+    assigned_contracts=sorted(_allowed(user,"contracts")) if "contract.read" in set(user["capabilities_json"] or []) else []
     contracts=_rows_compiled(db,text("""SELECT id,contract_number,title,expires_on,status
         FROM quality_external_provider_contracts
         WHERE amo_id=:amo AND supplier_id=:supplier AND expires_on<=:cutoff
@@ -560,8 +577,8 @@ def evidence_upload(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     user=_ctx(db,request,tenant_slug,cap="document.submit",write=True)
     ctx=_context(user)
     auth.auth_limit(request,str(user["identity_id"]),"partner-evidence-upload")
-    if related_kind=="CONTRACT":_require_object(user,"contracts",related_id)
-    if related_kind=="ASSIGNMENT":_require_object(user,"assignments",related_id)
+    if related_kind in {"CONTRACT","ASSIGNMENT"}:
+        _require_existing_related(db,user,related_kind,related_id)
     if related_kind!="PROVIDER" and not related_id:
         raise HTTPException(422,"An authorized related record is required")
     original=Path(file.filename or "evidence").name.strip()
@@ -622,8 +639,8 @@ def evidence_download(tenant_slug:str,submission_id:str,request:Request,db:Sessi
         FROM external_partner_evidence_submissions WHERE amo_id=:amo
         AND tenant_provider_id=:provider AND id=:id""",db,**_context(user),id=submission_id)
     if not row:raise HTTPException(404,"Evidence not found")
-    if row["related_kind"]=="CONTRACT":_require_object(user,"contracts",row["related_id"])
-    if row["related_kind"]=="ASSIGNMENT":_require_object(user,"assignments",row["related_id"])
+    if row["related_kind"] in {"CONTRACT","ASSIGNMENT"}:
+        _require_existing_related(db,user,row["related_kind"],row["related_id"])
     path=storage.materialize(row["object_uri"],expected_sha256=row["sha256"])
     return FileResponse(path,media_type=row["content_type"],filename=row["filename"],
         headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
