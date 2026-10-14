@@ -106,8 +106,8 @@ def upgrade():
             # RLS therefore protects cross-provider access even if a future
             # read-projection query accidentally omits its supplier predicate.
             provider_guard = """(
-                NULLIF(current_setting('app.external_provider_id',true),'') IS NULL
-                OR tenant_provider_id = NULLIF(current_setting('app.external_provider_id',true),'')
+                tenant_provider_id = NULLIF(current_setting('app.external_provider_id',true),'')
+                OR current_setting('app.external_provider_id',true) = '__INTERNAL_QUALITY_REVIEW__'
             )"""
             op.execute(sa.text(f"""CREATE POLICY "{name}_tenant" ON "{name}"
                 USING (amo_id = NULLIF(current_setting('app.tenant_id',true),'') AND {provider_guard})
