@@ -457,7 +457,7 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
         raise HTTPException(404,"No controlled document revision linked to this agreement")
     _require_object(user,"documents",str(manual_id))
     revision=_row("""SELECT r.id,r.rev_number,r.source_filename,
-           r.stamped_export_uri,r.source_storage_path,r.source_mime_type
+           r.stamped_export_uri,r.source_storage_path,r.source_mime_type,r.source_sha256
         FROM manuals m
         JOIN manual_tenants t ON t.id=m.tenant_id
         JOIN manual_revisions r ON r.id=m.current_published_rev_id
@@ -475,7 +475,8 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
     # Only our storage adapter can resolve the controlled binary. Never redirect
     # the provider to a raw signed S3/internal manual URL.
     try:
-        filepath=storage.materialize(uri)
+        filepath=storage.materialize(uri,
+            expected_sha256=None if revision["stamped_export_uri"] else revision["source_sha256"])
     except (OSError,ValueError,RuntimeError) as exc:
         raise HTTPException(409,"Controlled document source is temporarily unavailable") from exc
     source_name=Path(revision["source_filename"] or "controlled-agreement").name
