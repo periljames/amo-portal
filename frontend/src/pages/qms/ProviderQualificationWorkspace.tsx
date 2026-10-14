@@ -148,7 +148,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
             }}>Maintenance Manager: approve technical scope</button></>}
           {safety&&["ACCEPTED","NOT_REQUIRED","REJECTED"].map(state=>
             <button key={state} disabled={busy||note.length<8} onClick={()=>void change(
-              "/cases/"+caseItem.id+"/review/safety",{state,reason:note})}>Safety {state}</button>)}
+              "/cases/"+caseItem.id+"/review/safety",{state,reason:note,reference:reference||null})}>Safety {state}</button>)}
           {manager&&["VERIFIED","NOT_REQUIRED","REJECTED"].map(state=>
             <button key={state} disabled={busy||note.length<8} onClick={()=>void change(
               "/cases/"+caseItem.id+"/review/authority",
