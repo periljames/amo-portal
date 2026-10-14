@@ -19,8 +19,8 @@ type AuditEvent = {
 };
 const ROLES = ["PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTATIVE",
   "COMMERCIAL_REPRESENTATIVE", "DOCUMENT_SUBMITTER", "READ_ONLY", "CUSTOM"];
-const CAPS = ["profile.read", "document.read", "document.submit", "capa.respond",
-  "task.read", "task.respond", "contract.read", "members.read", "members.manage", "sessions.manage"];
+const CAPS = ["profile.read", "profile.propose", "document.read", "document.submit", "capa.respond",
+  "task.read", "task.respond", "contract.read", "contract.acknowledge", "members.read", "members.manage", "sessions.manage"];
 const LABEL = (value: string) => value.replaceAll("_", " ");
 export default function ExternalProviderQualityPage() {
   const { amoCode = "" } = useParams();
