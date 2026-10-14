@@ -1,6 +1,7 @@
 import React,{lazy,Suspense,useEffect,useState} from "react";
 import {Link,NavLink,useLocation,useNavigate,useParams} from "react-router-dom";
 import {getExternalSession,partnerRequest,PartnerRequestError,type PartnerSession} from "./partnerApi";
+import {getApiBaseUrl} from "../../services/config";
 import {ActionNotice} from "./PartnerPrimitives";
 import "./partner.css";
 
@@ -49,6 +50,18 @@ export default function ExternalPartnerPage(){
     }).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
   },[tenant,navigate,revision]);
+  const signOut=async()=>{
+    try{
+      const response=await fetch(`${getApiBaseUrl()}/api/external-provider/logout`,{
+        method:"POST",credentials:"include",cache:"no-store",
+        headers:{"Content-Type":"application/json","X-External-CSRF":csrf},
+        body:"{}",
+      });
+      if(!response.ok)throw new Error("Unable to revoke your vendor session. Use account security to retry.");
+      setSession(null);
+      navigate("/vendor/login",{replace:true});
+    }catch(reason){setError(reason instanceof Error?reason.message:"Unable to sign out");}
+  };
   if(loading)return <main className="partner-shell partner-loading" role="status">Checking authorized partner session…</main>;
   if(error)return <main className="partner-shell"><ActionNotice value={error} error/><button onClick={()=>setRevision(v=>v+1)}>Retry access</button><Link to="/vendor/login">Secure vendor login</Link></main>;
   if(!session)return <main className="partner-shell"><Link to="/vendor/login">Sign in to your partner account</Link></main>;
@@ -65,7 +78,7 @@ export default function ExternalPartnerPage(){
       <div className="partner-topbar-actions">
         <span className="partner-tenant">{tenant.toUpperCase()}</span>
         <Link to="/vendor/account">Account security</Link>
-        <Link to="/vendor/login">Change account</Link>
+        <button type="button" onClick={()=>void signOut()}>Sign out / change account</button>
       </div>
     </header>
     <div className="partner-layout">
