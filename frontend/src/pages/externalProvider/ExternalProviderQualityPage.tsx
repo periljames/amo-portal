@@ -28,6 +28,13 @@ export default function ExternalProviderQualityPage() {
   const [items, setItems] = useState<Grant[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [supplier, setSupplier] = useState("");
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierOffset,setSupplierOffset] = useState(0);
+  const [supplierOptions,setSupplierOptions] = useState<Array<{
+    id:number;supplier_code:string;legal_name:string;status:string;is_active:boolean;
+    external_import_pending_activation:boolean;
+  }>>([]);
+  const [hasMoreSuppliers,setHasMoreSuppliers]=useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("READ_ONLY");
@@ -49,6 +56,22 @@ export default function ExternalProviderQualityPage() {
     setItems(accounts.items); setEvents(audit.items);
   };
   useEffect(() => { void refresh().catch((e) => setError(e instanceof Error ? e.message : "Could not load accounts")); }, [amoCode]);
+  useEffect(() => {
+    if (!manager) return;
+    const abort = new AbortController();
+    void apiRequest<{items:typeof supplierOptions;has_more:boolean}>(
+      `${base}/suppliers?search=${encodeURIComponent(supplierSearch)}&limit=25&offset=${supplierOffset}`,
+      {cacheTtlMs:0,signal:abort.signal}
+    ).then(data=>{
+      if (!abort.signal.aborted) {
+        setSupplierOptions(data.items);
+        setHasMoreSuppliers(data.has_more);
+      }
+    }).catch(e=>{
+      if (!abort.signal.aborted) setError(e instanceof Error?e.message:"Supplier list unavailable");
+    });
+    return () => abort.abort();
+  },[amoCode,manager,supplierSearch,supplierOffset]);
 
   async function act(path: string, body: object, success: string, method = "POST") {
     setBusy(true);setError("");setMessage("");
@@ -90,15 +113,32 @@ export default function ExternalProviderQualityPage() {
             supplier_id:Number(supplier), name,email,role_code:role,capabilities:null,object_scope:{},
           },"Invitation sent. User must verify their email; Quality must separately activate the grant and provider portal.");
         }}>
-          <label className="vendor-field"><span>Canonical supplier ID</span>
-            <input type="number" min="1" required value={supplier} onChange={(e)=>setSupplier(e.target.value)}/></label>
+          <label className="vendor-field"><span>Find canonical supplier</span>
+            <input type="search" value={supplierSearch} placeholder="Search supplier name or vendor code"
+              onChange={e=>{setSupplierSearch(e.target.value);setSupplierOffset(0);setSupplier("");}}/>
+          </label>
+          <label className="vendor-field"><span>Provider organization</span>
+            <select required value={supplier} onChange={e=>setSupplier(e.target.value)}>
+              <option value="">Select a registered supplier</option>
+              {supplierOptions.map(item=><option value={item.id} key={item.id}>
+                {item.legal_name} · {item.supplier_code} · {item.status}
+                {item.external_import_pending_activation?" · import pending":""}
+              </option>)}
+            </select>
+          </label>
+          <div className="vendor-actions">
+            <button type="button" disabled={supplierOffset===0}
+              onClick={()=>{setSupplierOffset(v=>Math.max(0,v-25));setSupplier("");}}>Previous suppliers</button>
+            <button type="button" disabled={!hasMoreSuppliers}
+              onClick={()=>{setSupplierOffset(v=>v+25);setSupplier("");}}>More suppliers</button>
+          </div>
           <label className="vendor-field"><span>Full name</span>
             <input required minLength={2} value={name} onChange={(e)=>setName(e.target.value)}/></label>
           <label className="vendor-field"><span>Email</span>
             <input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)}/></label>
           <label className="vendor-field"><span>External role</span>
             <select value={role} onChange={(e)=>setRole(e.target.value)}>{ROLES.filter(x=>x!=="CUSTOM").map(x=><option key={x} value={x}>{LABEL(x)}</option>)}</select></label>
-          <button type="submit" disabled={busy}>Issue one-time email invitation</button>
+          <button type="submit" disabled={busy||!supplier}>Issue one-time email invitation</button>
         </form>
       </section>}
       <section className="vendor-card">
