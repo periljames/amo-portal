@@ -4,7 +4,7 @@ import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,type Notification,type Page} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 type Event={id:string;event_type:string;occurred_at:string};
-const destination:Record<string,string>={CHANGE:"organization",CONTRACT:"contracts",CAR:"quality",EVIDENCE:"compliance"};
+const destination:Record<string,string>={CHANGE:"organization",CONTRACT:"contracts",CAR:"quality",EVIDENCE:"compliance",QUALIFICATION:"qualification",RESTRICTION:"qualification"};
 export default function PartnerActivity({tenant,csrf}:PartnerProps){
   const [offset,setOffset]=useState(0);const [historyOffset,setHistoryOffset]=useState(0);
   const [unreadOnly,setUnreadOnly]=useState(false);
