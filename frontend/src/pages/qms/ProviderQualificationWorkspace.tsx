@@ -13,7 +13,7 @@ type QualCase={id:string;status:string;version:number;technical_state:string;saf
   authority_state:string;case_kind:string;category:string;checks:Check[];evaluation_id:string|null;
   audit_id:string|null;answers_json:Record<string,string>;technical_scope_json:unknown;
   policy_snapshot_json:{questionnaire:Array<{key:string;label:string;required?:boolean}>;manual_references:string[]}};
-type Policy={category:string;revision:number;surveillance_days:number|null;manual_references_json:string[];evaluation_template_id:string|null};
+type Policy={category:string;revision:number;surveillance_days:number|null;manual_references_json:string[];evaluation_template_id:string|null;questionnaire_json:Array<Record<string,unknown>>;initial_audit_required:boolean;authority_required:boolean;safety_assessment_required:boolean};
 type Alerts={overdue_qualification_reviews:Array<{supplier_id:number;id:string;next_review_due_on:string}>;
   overdue_cars:Array<{supplier_id:number;car_number:string;due_date:string}>};
 const BASE_CHECKS=["LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY","SCOPE_CAPABILITY",
@@ -68,6 +68,17 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
       ? current : (policy.items[0]?.category||current));
   },[path,supplierId]);
   useEffect(()=>{void refresh().catch(x=>setError(messageOf(x)));},[refresh]);
+  useEffect(()=>{
+    const policy=policies.find(p=>p.category===category);
+    if(!policy)return;
+    setTemplateId(policy.evaluation_template_id||"");
+    setInterval(policy.surveillance_days?String(policy.surveillance_days):"");
+    setInitialAudit(Boolean(policy.initial_audit_required));
+    setAuthorityRequired(Boolean(policy.authority_required));
+    setSafetyRequired(Boolean(policy.safety_assessment_required));
+    setPolicyQuestions(JSON.stringify(policy.questionnaire_json||[],null,2));
+    setManuals((policy.manual_references_json||[]).join("; "));
+  },[category,policies]);
   const open=async(id:string)=>{
     try{
       const value=await apiRequest<QualCase>(path+"/cases/"+encodeURIComponent(id),{cacheTtlMs:0});
