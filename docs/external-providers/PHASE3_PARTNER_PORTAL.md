@@ -44,3 +44,13 @@ Same branch: `codex/external-provider-platform-20261009`. One draft PR #560 agai
 
 ## Phase 4 handoff
 Build verified **partner onboarding and approval/evidence governance** on these contracts. Integrate Quality-approved certificate evidence, controlled source-chain, expiry monitoring, organization change requests, QMS response/request-specific document review, DMS controlled revision release and independently audited reviewer decisions. Continue the one consolidated draft PR and defer acceptance tests to Phase 10.
+
+
+## Integration follow-through — 14 October 2026
+The Phase 1–3 contract review repaired the approval scope enum mismatch, exposed canonical supplier lookup for Quality invitations, added explicit write-only capabilities for organization proposals and agreement receipts, hardened cross-member evidence metadata boundaries, and connected real assigned deadlines in Home.
+
+Controlled agreement binaries are now accessible through the guarded partner contract document route, but **only** when member grants include both contract and manual IDs and DMS marks the matching revision as current PUBLISHED. The frontend uses a bounded authenticated download, never the internal DMS interface or a raw storage URL.
+
+Audit document requests now have a distinct, assignment-bound upload within the partner Quality page. It invokes the existing governed QMS submission model/storage and enters the same QMS review queue; generic provider evidence upload remains a separate record used for supplier approval and CAR supporting evidence.
+
+No Phase 10 migration/test/build/lint/browser run occurred during this source integration review. Do not equate committed source with a fully verified production workflow. Explicit document-release approvals, scanning, legacy DMS storage path compatibility, user-managed grant migrations and actual email/MFA behavior remain acceptance gates.
