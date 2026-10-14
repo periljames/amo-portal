@@ -446,6 +446,7 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
              ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'
         ORDER BY f.created_at DESC,f.id LIMIT :limit OFFSET :offset""").bindparams(
           bindparam("assigned",expanding=True)),params) if read_operations else []
+    may_read_cars=read_operations or "capa.respond" in capabilities
     cars=_rows_compiled(db,text("""SELECT c.id,c.car_number,c.title,c.status,c.due_date,
         c.root_cause_status,c.capa_status,CAST(f.audit_id AS TEXT) assignment_id
         FROM quality_cars c
@@ -456,13 +457,15 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
              AND release.finding_id=f.id
              ORDER BY release.created_at DESC,release.id DESC LIMIT 1)='RELEASED'
         ORDER BY c.due_date NULLS LAST,c.id LIMIT :limit OFFSET :offset""").bindparams(
-          bindparam("assigned",expanding=True)),params)
+          bindparam("assigned",expanding=True)),params) if may_read_cars else []
     evidence=_rows_compiled(db,text("""SELECT id,related_id,filename,evidence_type,status
         FROM external_partner_evidence_submissions
         WHERE amo_id=:amo AND tenant_provider_id=:provider
         AND related_kind='ASSIGNMENT' AND related_id IN :assigned
-        AND status='ACCEPTED' ORDER BY created_at DESC LIMIT :limit OFFSET :offset""").bindparams(
-          bindparam("assigned",expanding=True)),params)
+        AND status='ACCEPTED'
+        AND (identity_id=:person OR :can_read)
+        ORDER BY created_at DESC LIMIT :limit OFFSET :offset""").bindparams(
+          bindparam("assigned",expanding=True)),{**params,"can_read":"document.read" in capabilities}) if may_read_cars else []
     return {"notices":{"items":notices,"limit":limit,"offset":offset},
         "document_requests":{"items":requests,"limit":limit,"offset":offset},
         "findings":{"items":findings,"limit":limit,"offset":offset},
