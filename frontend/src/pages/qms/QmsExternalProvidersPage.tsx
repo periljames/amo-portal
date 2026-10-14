@@ -20,6 +20,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import {getCachedUser} from "../../services/auth";
 
 import {
   createExternalProvider,
@@ -373,6 +374,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   onBack: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
+  const qualityManager=getCachedUser()?.role==="QUALITY_MANAGER";
   const [provider, setProvider] = useState<ProviderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -457,7 +459,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
           </section>
           <section className="qms-provider-detail-section">
             <div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Lifecycle decision</span><h3>Change provider state</h3></div></div>
-            {provider.allowed_transitions.length === 0 ? <div className="qms-provider-empty">No further lifecycle transitions are available.</div> : (
+            {!qualityManager ? <div className="qms-provider-empty">Quality lifecycle approval and restriction are reserved for the appointed Quality Manager.</div> : provider.allowed_transitions.length === 0 ? <div className="qms-provider-empty">No further lifecycle transitions are available.</div> : (
               <div className="qms-provider-transition">
                 <label>Next state<select value={transitionTarget} onChange={(e) => setTransitionTarget(e.target.value as ProviderStatus)}><option value="">Select state</option>{provider.allowed_transitions.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select></label>
                 <label>Attributable reason<textarea value={transitionReason} onChange={(e) => setTransitionReason(e.target.value)} placeholder="Explain the approval, restriction, suspension or reinstatement decision." /></label>
