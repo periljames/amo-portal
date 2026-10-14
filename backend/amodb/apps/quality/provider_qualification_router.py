@@ -546,6 +546,10 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
             {"reason":payload.reason,"evaluation_id":row["evaluation_id"],
              "audit_id":row["audit_id"],"policy_revision":row["policy_revision"],
              "next_due_on":due},case_id)
+    _notify_provider_members(db,amo,row["supplier_id"],user,
+        "Provider qualification review",
+        "The AMO Quality Department has recorded the outcome of the qualification review.",
+        "QUALIFICATION",case_id)
     db.commit()
     return _case_details(db,_case(db,amo,case_id))
 
@@ -655,6 +659,132 @@ def lift_restriction(amo_code:str,restriction_id:str,payload:LiftRestriction,
              "reason":payload.reason},case["id"])
     db.commit()
     return {"id":restriction_id,"status":"LIFTED"}
+
+
+
+
+def _notify_provider_members(db, amo:str, supplier:int, user, title:str, body:str,
+                             kind:str="QUALIFICATION", reference:str|None=None):
+    """Reuse Phase 3 partner inbox; never expose staff-only raw review records.
+    Quality authorization is checked BEFORE the internal-review RLS marker.
+    """
+    _require(user,{"QUALITY_MANAGER"})
+    if db.get_bind().dialect.name=="postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
+    recipients=_all(db,"""SELECT DISTINCT p.id provider,g.identity_id
+        FROM external_tenant_providers p JOIN external_tenant_grants g
+        ON g.amo_id=p.amo_id AND g.tenant_provider_id=p.id
+        WHERE p.amo_id=:amo AND p.supplier_id=:supplier AND g.status='ACTIVE'""",
+        amo=amo,supplier=supplier)
+    for dest in recipients:
+        db.execute(text("""INSERT INTO external_partner_notifications
+          (id,amo_id,tenant_provider_id,identity_id,category,title,message,
+           resource_kind,resource_id)
+          VALUES(:id,:amo,:provider,:identity,'QUALITY',:title,:message,:kind,:ref)"""),
+          {"id":uid(),"amo":amo,"provider":dest["provider"],
+           "identity":dest["identity_id"],"title":title,"message":body,
+           "kind":kind,"ref":reference})
+
+
+@router.get("/alerts")
+def surveillance_alerts(amo_code:str,db:Session=Depends(get_db),
+                        user=Depends(get_current_active_user)):
+    _require(user,QUALITY|MAINTENANCE|SAFETY)
+    amo=_tenant(db,amo_code,user)
+    review_due=_all(db,"""SELECT q.id,q.supplier_id,q.category,q.next_review_due_on,s.legal_name
+      FROM quality_provider_qualification_cases q JOIN procurement_suppliers s
+      ON s.amo_id=q.amo_id AND s.id=q.supplier_id
+      WHERE q.amo_id=:amo AND q.status IN ('APPROVED','CONDITIONALLY_APPROVED')
+      AND q.next_review_due_on<=CURRENT_DATE
+      AND NOT EXISTS(SELECT 1 FROM quality_provider_qualification_cases newer
+          WHERE newer.amo_id=q.amo_id AND newer.supplier_id=q.supplier_id
+          AND newer.created_at>q.created_at AND newer.status IN
+          ('APPROVED','CONDITIONALLY_APPROVED'))
+      ORDER BY q.next_review_due_on,q.supplier_id LIMIT 100""",amo=amo)
+    overdue_cars=_all(db,"""SELECT c.id,c.car_number,c.due_date,s.supplier_id,a.audit_ref
+        FROM quality_cars c
+        JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
+        JOIN qms_audits a ON a.amo_id=f.amo_id AND a.id=f.audit_id
+        JOIN quality_provider_surveillance s ON s.amo_id=f.amo_id
+             AND s.audit_id=CAST(f.audit_id AS TEXT)
+        WHERE c.amo_id=:amo AND c.closed_at IS NULL AND c.due_date<CURRENT_DATE
+        ORDER BY c.due_date LIMIT 100""",amo=amo)
+    return {"overdue_qualification_reviews":review_due,"overdue_cars":overdue_cars,
+            "policy":"Existing QMS CAR escalation/acceptance remains authoritative"}
+
+
+class SurveillanceDecision(BaseModel):
+    outcome:Literal["IN_PROGRESS","SATISFACTORY","UNSATISFACTORY","CANCELLED"]
+    reason:str=Field(min_length=12,max_length=2000)
+
+
+@router.post("/surveillance/{surveillance_id}/review")
+def surveillance_review(amo_code:str,surveillance_id:str,payload:SurveillanceDecision,
+                        db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    _require(user,{"QUALITY_MANAGER"})
+    amo=_tenant(db,amo_code,user)
+    row=_one(db,"""SELECT * FROM quality_provider_surveillance
+      WHERE amo_id=:amo AND id=:id FOR UPDATE""",amo=amo,id=surveillance_id)
+    if not row:raise HTTPException(404,"Linked surveillance audit not found")
+    if payload.outcome=="SATISFACTORY":
+        audit=_one(db,"""SELECT actual_end,CAST(status AS TEXT) status
+            FROM qms_audits WHERE amo_id=:amo AND CAST(id AS TEXT)=:audit""",
+            amo=amo,audit=row["audit_id"])
+        if not audit or not audit["actual_end"] or audit["status"]!="CLOSED":
+            raise HTTPException(409,"Only a completed and closed canonical QMS audit may be satisfactory")
+        cars=_one(db,"""SELECT count(*) n FROM quality_cars c
+            JOIN qms_audit_findings f ON f.amo_id=c.amo_id AND f.id=c.finding_id
+            WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT)=:audit
+            AND c.closed_at IS NULL""",amo=amo,audit=row["audit_id"])
+        if cars and cars["n"]:
+            raise HTTPException(409,"Open canonical QMS corrective actions block satisfactory surveillance")
+    db.execute(text("""UPDATE quality_provider_surveillance
+      SET outcome=:state,conclusion=:reason WHERE amo_id=:amo AND id=:id"""),
+      {"state":payload.outcome,"reason":payload.reason,"amo":amo,"id":surveillance_id})
+    _record(db,amo,row["supplier_id"],user,"SURVEILLANCE_"+payload.outcome,
+            {"audit_id":row["audit_id"],"reason":payload.reason},row["case_id"])
+    _notify_provider_members(db,amo,row["supplier_id"],user,
+        "Quality surveillance outcome updated",
+        "Your provider surveillance record has been reviewed by the AMO Quality Department.",
+        "QUALIFICATION",row["case_id"])
+    db.commit()
+    return {"id":surveillance_id,"outcome":payload.outcome}
+
+
+class EscalationRequest(BaseModel):
+    supplier_id:int=Field(ge=1)
+    reason:str=Field(min_length=12,max_length=2000)
+
+
+@router.post("/alerts/escalate")
+def escalate_provider_overdue(amo_code:str,payload:EscalationRequest,
+                             db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    _require(user,{"QUALITY_MANAGER"})
+    amo=_tenant(db,amo_code,user);_supplier(db,amo,payload.supplier_id)
+    outstanding=_one(db,"""SELECT
+      (SELECT count(*) FROM quality_provider_qualification_cases q
+       WHERE q.amo_id=:amo AND q.supplier_id=:supplier
+       AND q.status IN ('APPROVED','CONDITIONALLY_APPROVED')
+       AND q.next_review_due_on<CURRENT_DATE) review_count,
+      (SELECT count(*) FROM quality_cars c
+       JOIN qms_audit_findings f ON f.amo_id=c.amo_id AND f.id=c.finding_id
+       JOIN quality_provider_surveillance a ON a.amo_id=f.amo_id
+            AND a.audit_id=CAST(f.audit_id AS TEXT)
+       WHERE c.amo_id=:amo AND a.supplier_id=:supplier
+       AND c.closed_at IS NULL AND c.due_date<CURRENT_DATE) car_count""",
+       amo=amo,supplier=payload.supplier_id)
+    if not outstanding or not (outstanding["review_count"] or outstanding["car_count"]):
+        raise HTTPException(409,"No overdue QMS surveillance or corrective action to escalate")
+    _record(db,amo,payload.supplier_id,user,"OVERDUE_PROVIDER_ESCALATED",
+        {"reason":payload.reason,"review_count":outstanding["review_count"],
+         "car_count":outstanding["car_count"]})
+    _notify_provider_members(db,amo,payload.supplier_id,user,
+        "Overdue Quality obligations",
+        "Quality has escalated outstanding surveillance or corrective actions; review assigned QMS work.",
+        "QUALIFICATION")
+    db.commit()
+    return {"status":"ESCALATED","review_count":outstanding["review_count"],
+            "car_count":outstanding["car_count"]}
 
 
 @router.get("/providers/{supplier_id}/overview")
