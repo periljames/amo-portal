@@ -12,6 +12,7 @@ import re
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
+import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -711,6 +712,72 @@ def activity(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     return _paged(db,"""SELECT e.id,e.event_type,e.occurred_at FROM external_security_events e
         WHERE e.amo_id=:amo AND e.identity_id=:person AND e.grant_id=:grant
         ORDER BY e.occurred_at DESC,e.id DESC""",{**ctx,"grant":user["grant_id"]},limit,offset)
+
+@router.post("/quality/document-requests/{request_id}/submit",status_code=201)
+async def submit_partner_audit_document(tenant_slug:str,request_id:str,
+    request:Request,db:Session=Depends(get_db),
+    file:UploadFile=File(...),
+    response_comment:str|None=Form(default=None,max_length=4000)):
+    """Use the SAME QMS document-request submission and storage models as
+    existing guest/auditee users. No forged status, free-text file refs, or
+    internal staff identity may be supplied by the external account.
+    """
+    user=_ctx(db,request,tenant_slug,cap="document.submit",write=True)
+    assignments=_allowed(user,"assignments")
+    if not assignments or "task.read" not in set(user["capabilities_json"] or []):
+        raise HTTPException(403,"Audit document submissions require an issued work assignment")
+    try:
+        request_uuid=uuid.UUID(request_id)
+    except (ValueError,TypeError):
+        raise HTTPException(404,"Assigned audit document request not found")
+    ctx=_context(user)
+    from amodb.apps.quality import models as quality_models
+    from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
+    from amodb.apps.quality.audit_guest_document_storage import (
+        resolve_guest_document, store_guest_document,
+    )
+    # Row lock serializes return/review/closure transitions with the upload.
+    row=(db.query(quality_models.QualityAuditDocumentRequest)
+        .filter(quality_models.QualityAuditDocumentRequest.amo_id==ctx["amo"],
+                quality_models.QualityAuditDocumentRequest.id==request_uuid)
+        .with_for_update(of=quality_models.QualityAuditDocumentRequest).first())
+    if not row or str(row.audit_id) not in assignments:
+        raise HTTPException(404,"Assigned audit document request not found")
+    if row.status in {"ACCEPTED","WAIVED"}:
+        raise HTTPException(409,"This request is already closed to new submissions")
+    auth.auth_limit(request,str(user["identity_id"]),"partner-audit-document-upload")
+    stored=await store_guest_document(file,amo_id=ctx["amo"],
+        audit_id=str(row.audit_id),request_id=str(row.id))
+    try:
+        submission=QualityAuditDocumentSubmission(
+            amo_id=ctx["amo"],audit_id=row.audit_id,
+            document_request_id=row.id,participant_id=None,source_type="UPLOAD",
+            filename=stored.filename,content_type=stored.content_type,
+            size_bytes=stored.size_bytes,sha256=stored.sha256,
+            storage_ref=stored.storage_ref,
+            response_comment=(response_comment or "").strip() or None,
+            submitted_by_user_id=None,
+        )
+        db.add(submission);db.flush()
+        row.status="UPLOADED"
+        row.file_ref=f"audit-submission:{submission.id}"
+        row.uploaded_at=submission.created_at
+        row.uploaded_by_user_id=None
+        auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+            actor_identity=ctx["person"],action="PARTNER_QMS_DOCUMENT_SUBMITTED",
+            details={"audit_id":str(row.audit_id),"request_id":str(row.id),
+                     "submission_id":submission.id,"sha256":stored.sha256})
+        _notify(db,user,"QUALITY","Requested audit evidence submitted",
+            "QMS received your document for independent audit review.",
+            "AUDIT_DOCUMENT",str(row.id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        resolve_guest_document(stored.storage_ref).unlink(missing_ok=True)
+        raise
+    return {"id":submission.id,"filename":submission.filename,
+            "request_id":str(row.id),"status":"UPLOADED",
+            "sha256":stored.sha256,"review_status":"AWAITING_QMS_REVIEW"}
 
 @router.post("/evidence",status_code=201)
 def evidence_upload(tenant_slug:str,request:Request,db:Session=Depends(get_db),
