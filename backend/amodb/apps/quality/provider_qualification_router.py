@@ -450,6 +450,35 @@ def _requirements(db,amo,row):
         if not evaluation or str(evaluation.id)!=str(row["evaluation_id"]):
             blockers.append("VALID_INDEPENDENT_EVALUATION")
     if not row["technical_scope_json"]:blockers.append("APPROVED_TECHNICAL_SCOPE")
+    else:
+        approved=_all(db,"""SELECT category,site_code,product_family FROM
+          procurement_supplier_approval_scopes WHERE amo_id=:amo
+          AND supplier_id=:supplier AND qms_evaluation_id=:evaluation
+          AND CAST(status AS TEXT) IN ('DRAFT','ACTIVE')""",
+          amo=amo,supplier=row["supplier_id"],evaluation=row["evaluation_id"])
+        keys={(str(x["category"]).upper(),str(x["site_code"]).upper(),
+               str(x["product_family"]).upper()) for x in approved}
+        for proposed in row["technical_scope_json"]:
+            if not isinstance(proposed,dict):
+                blockers.append("INVALID_TECHNICAL_SCOPE_FORMAT")
+                continue
+            key=(str(proposed.get("category","")).upper(),
+                 str(proposed.get("site_code") or proposed.get("site") or "").upper(),
+                 str(proposed.get("product_family","")).upper())
+            if key not in keys:
+                blockers.append("TECHNICAL_SCOPE_NOT_LINKED_TO_GOVERNED_EVALUATION")
+                break
+    contract_required=_one(db,"""SELECT contract_required FROM
+        quality_external_provider_profiles WHERE amo_id=:amo AND supplier_id=:supplier""",
+        amo=amo,supplier=row["supplier_id"])
+    if contract_required and contract_required["contract_required"]:
+        active_contract=_one(db,"""SELECT id FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier AND status='ACTIVE'
+            AND (effective_on IS NULL OR effective_on<=CURRENT_DATE)
+            AND (expires_on IS NULL OR expires_on>=CURRENT_DATE) LIMIT 1""",
+            amo=amo,supplier=row["supplier_id"])
+        if not active_contract:blockers.append("CURRENT_QUALITY_CONTRACT_REQUIRED")
+
     if row["audit_id"]:
         audit=_one(db,"""SELECT actual_end FROM qms_audits
             WHERE amo_id=:amo AND CAST(id AS TEXT)=:id""",amo=amo,id=row["audit_id"])
@@ -605,10 +634,17 @@ def lift_restriction(amo_code:str,restriction_id:str,payload:LiftRestriction,
         case["status"] not in {"APPROVED","CONDITIONALLY_APPROVED"}):
         raise HTTPException(409,"Current Quality-approved reinstatement case for this provider required")
     for car_id in row["required_cars_json"]:
-        closed=_one(db,"""SELECT closed_at FROM quality_cars WHERE amo_id=:amo
-               AND CAST(id AS TEXT)=:car""",amo=amo,car=car_id)
-        if not closed or not closed["closed_at"]:
-            raise HTTPException(409,"All linked CARs require Quality closure and effectiveness verification")
+        closed=_one(db,"""SELECT c.closed_at,p.effectiveness_required,
+               (SELECT m.status FROM quality_car_milestones m
+                WHERE m.amo_id=c.amo_id AND m.car_id=c.id
+                AND m.milestone_key='EFFECTIVENESS_REVIEW'
+                ORDER BY m.updated_at DESC LIMIT 1) effectiveness_status
+               FROM quality_cars c LEFT JOIN quality_car_control_profiles p
+               ON p.amo_id=c.amo_id AND p.car_id=c.id
+               WHERE c.amo_id=:amo AND CAST(c.id AS TEXT)=:car""",amo=amo,car=car_id)
+        if not closed or not closed["closed_at"] or (
+             closed["effectiveness_required"] and closed["effectiveness_status"] not in {"ACCEPTED","COMPLETED"}):
+            raise HTTPException(409,"Linked CAR requires canonical Quality closure and accepted effectiveness verification")
     db.execute(text("""UPDATE quality_provider_restrictions
        SET status='LIFTED',lifted_by_user_id=:actor,lifted_at=NOW(),
        lift_reason=:reason,reinstatement_case_id=:case WHERE amo_id=:amo AND id=:id"""),
