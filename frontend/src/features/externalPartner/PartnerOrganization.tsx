@@ -46,7 +46,7 @@ export default function PartnerOrganization({tenant,csrf,capabilities}:PartnerPr
   const org=usePartnerLoad((signal)=>partnerRequest<Organization>(tenant,"organization",{signal}),tenant);
   const proposals=usePartnerLoad((signal)=>partnerRequest<Page<Change>>(tenant,
     `change-requests?limit=12&offset=${offset}`,{signal}),`${tenant}:${offset}`);
-  const canPropose=capabilities.includes("profile.read");
+  const canPropose=capabilities.includes("profile.propose") && capabilities.includes("profile.read");
   const submit=(event:React.FormEvent)=>{
     event.preventDefault();setBusy(true);setMessage("");setError("");
     void partnerRequest(tenant,"change-requests",{
