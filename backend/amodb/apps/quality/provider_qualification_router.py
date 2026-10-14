@@ -324,8 +324,13 @@ def verify_check(amo_code:str,case_id:str,requirement_key:str,payload:CheckDecis
             raise HTTPException(422,"Verified gate requires an attributable evidence or approval reference")
         if payload.expires_on and payload.expires_on<date.today():
             raise HTTPException(409,"Expired evidence cannot support current approval")
-    if key in {"REGULATORY_APPROVAL","QMS_EVALUATION","TECHNICAL_ACCEPTANCE","SAFETY_MOC"} and payload.status=="NOT_REQUIRED":
-        raise HTTPException(409,"Use the appointed departmental gate to determine this requirement")
+    required_verified={"LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY",
+        "SCOPE_CAPABILITY","QUALIFYING_AUDIT_OR_REVIEW","QMS_EVALUATION",
+        "TECHNICAL_ACCEPTANCE","QUALITY_CONCLUSION"}
+    if payload.status=="NOT_REQUIRED" and key in required_verified:
+        raise HTTPException(409,"Mandatory evidence/qualification gates cannot be waived")
+    if key in {"REGULATORY_APPROVAL","SAFETY_MOC"} and payload.status=="NOT_REQUIRED":
+        raise HTTPException(409,"Use the appointed departmental gate to determine applicability")
     if key=="REGULATORY_APPROVAL" and payload.status=="VERIFIED" and not payload.approval_reference:
         raise HTTPException(422,"Regulatory approval verification requires an authority reference")
     # Documentary checks must resolve to evidence already independently verified
@@ -555,13 +560,14 @@ def _requirements(db,amo,row):
         if not active_contract:blockers.append("CURRENT_QUALITY_CONTRACT_REQUIRED")
 
     if row["audit_id"]:
-        audit=_one(db,"""SELECT actual_end FROM qms_audits
+        audit=_one(db,"""SELECT actual_end,CAST(status AS TEXT) status FROM qms_audits
             WHERE amo_id=:amo AND CAST(id AS TEXT)=:id""",amo=amo,id=row["audit_id"])
-        if not audit or not audit["actual_end"]:blockers.append("AUDIT_FIELDWORK_NOT_COMPLETED")
+        if not audit or not audit["actual_end"] or audit["status"]!="CLOSED":
+            blockers.append("QMS_AUDIT_REQUIRES_CONTROLLED_CLOSEOUT")
         notice=_one(db,"""SELECT id FROM quality_audit_notices
             WHERE amo_id=:amo AND CAST(audit_id AS TEXT)=:id
-            AND status IN ('DELIVERED','ACKNOWLEDGED') LIMIT 1""",amo=amo,id=row["audit_id"])
-        if not notice:blockers.append("AUDIT_NOTICE_NOT_ISSUED")
+            AND status='ACKNOWLEDGED' LIMIT 1""",amo=amo,id=row["audit_id"])
+        if not notice:blockers.append("QMS_AUDIT_NOTICE_ACKNOWLEDGMENT_REQUIRED")
         open_cars=_one(db,"""SELECT count(*) AS n FROM quality_cars c
             JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
             WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT)=:id
