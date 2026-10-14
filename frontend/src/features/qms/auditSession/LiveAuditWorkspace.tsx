@@ -1017,7 +1017,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <ul>{completionBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </details> : null}
 
-      <div className="qms-live-audit-focus__body">
+      <div className={`qms-live-audit-focus__body${detailOpen && selected ? " is-detail-open" : ""}`}>
         <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
           <div className="qms-live-audit-focus__matrix-toolbar">
             <div><strong>Checklist assessment</strong><small>{completed} of {items.length} server-confirmed · {localAnswers.size} device changes</small></div>
@@ -1060,6 +1060,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <>
               <div className="qms-live-audit-focus__question-head">
                 <div><span title={selected.section || "Checklist"}>SECTION · {selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div>
+                <button type="button" className="qms-live-audit-focus__close-details" onClick={() => setDetailOpen(false)} aria-label="Close question details">Close details <X size={15} /></button>
                 <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
               </div>
               <div className="qms-live-audit-focus__question-subline">
