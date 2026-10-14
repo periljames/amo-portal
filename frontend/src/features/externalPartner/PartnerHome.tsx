@@ -60,7 +60,7 @@ export default function PartnerHome({tenant,capabilities}:PartnerProps){
             :<p className="partner-empty">No currently ACTIVE approval scopes.</p>}
         </Section>
         <Section title="Most recent notifications">
-          {data.recent_notifications.length?data.recent_notifications.map(x)=><Link
+          {data.recent_notifications.length?data.recent_notifications.map(x=><Link
             to={`/partner/${tenant}/activity`} key={x.id} className="partner-action">
             <div><strong>{x.title}</strong><small>{x.category} · {friendlyDate(x.created_at)}</small></div>
             {!x.read_at&&<span>Unread</span>}
