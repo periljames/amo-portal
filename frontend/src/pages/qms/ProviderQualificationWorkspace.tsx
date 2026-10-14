@@ -14,6 +14,8 @@ type QualCase={id:string;status:string;version:number;technical_state:string;saf
   audit_id:string|null;answers_json:Record<string,string>;technical_scope_json:unknown;
   policy_snapshot_json:{questionnaire:Array<{key:string;label:string;required?:boolean}>;manual_references:string[]}};
 type Policy={category:string;revision:number;surveillance_days:number|null;manual_references_json:string[];evaluation_template_id:string|null};
+type Alerts={overdue_qualification_reviews:Array<{supplier_id:number;id:string;next_review_due_on:string}>;
+  overdue_cars:Array<{supplier_id:number;car_number:string;due_date:string}>};
 const BASE_CHECKS=["LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY","SCOPE_CAPABILITY",
   "REGULATORY_APPROVAL","FACILITIES_AND_SITES","CONTRACT_REQUIREMENTS","SAFETY_MOC",
   "QMS_EVALUATION","QUALIFYING_AUDIT_OR_REVIEW","TECHNICAL_ACCEPTANCE","QUALITY_CONCLUSION"];
@@ -31,6 +33,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const safety=role==="SAFETY_MANAGER";
   const [data,setData]=useState<Overview|null>(null);
   const [policies,setPolicies]=useState<Policy[]>([]);
+  const [alerts,setAlerts]=useState<Alerts|null>(null);
   const [caseItem,setCase]=useState<QualCase|null>(null);
   const [category,setCategory]=useState("SUBCONTRACTOR");
   const [reason,setReason]=useState("");
@@ -52,11 +55,12 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const [notice,setNotice]=useState("");
   const [busy,setBusy]=useState(false);
   const refresh=useCallback(async()=>{
-    const [overview,policy]=await Promise.all([
+    const [overview,policy,alertData]=await Promise.all([
       apiRequest<Overview>(path+"/providers/"+supplierId+"/overview",{cacheTtlMs:0}),
       apiRequest<{items:Policy[]}>(path+"/policies",{cacheTtlMs:0}),
+      apiRequest<Alerts>(path+"/alerts",{cacheTtlMs:0}),
     ]);
-    setData(overview);setPolicies(policy.items);
+    setData(overview);setPolicies(policy.items);setAlerts(alertData);
   },[path,supplierId]);
   useEffect(()=>{void refresh().catch(x=>setError(messageOf(x)));},[refresh]);
   const open=async(id:string)=>{
@@ -159,6 +163,14 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
       </article>}
     </section>}
     {tab==="surveillance"&&<section className="qp-panel"><h4>Linked QMS audits</h4>
+      <h4>Overdue review and corrective-action escalation</h4>
+      {alerts?.overdue_qualification_reviews.filter(x=>x.supplier_id===supplierId).map(x=>
+        <p key={x.id}>Qualification review overdue since {x.next_review_due_on}</p>)}
+      {alerts?.overdue_cars.filter(x=>x.supplier_id===supplierId).map(x=>
+        <p key={x.car_number}>CAR {x.car_number} overdue since {x.due_date}</p>)}
+      {manager&&<button disabled={busy||note.length<12} onClick={()=>void change(
+        "/alerts/escalate",{supplier_id:supplierId,reason:note})}>
+        Record Quality escalation and notify provider</button>
       <p>These are existing audit occurrences, not a second audit engine.</p>
       {data?.audits.map(a=><p key={a.audit_id}>{a.audit_ref} · {a.audit_status} · {a.audit_id}</p>)}
       {!data?.audits.length&&<p>No linked audit occurrences.</p>}</section>}
@@ -178,10 +190,16 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
     </section>}
     {tab==="history"&&<section className="qp-panel"><h4>Attributable decisions</h4>
       {data?.history.map((item,i)=><p key={i}>{item.action} · {new Date(item.occurred_at).toLocaleString()}</p>)}
-      <button onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-        const url=URL.createObjectURL(blob);const link=document.createElement("a");
-        link.href=url;link.download="provider-"+supplierId+"-quality-history.json";link.click();
-        URL.revokeObjectURL(url);}}>Export displayed governance history</button></section>}
+      {preparer&&<button disabled={busy} onClick={()=>{
+        setBusy(true);setError("");
+        void apiRequest<Record<string,unknown>>(path+"/providers/"+supplierId+"/export",{cacheTtlMs:0})
+          .then(payload=>{
+            const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+            const url=URL.createObjectURL(blob);const link=document.createElement("a");
+            link.href=url;link.download="provider-"+supplierId+"-regulatory-trace.json";link.click();
+            window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+          }).catch(e=>setError(messageOf(e))).finally(()=>setBusy(false));
+      }}>Export full source-linked regulatory trace</button>}</section>}
     {tab==="policy"&&<section className="qp-panel"><h4>Tenant category policy</h4>
       <p>Safarilink annual audits are not assumed for every tenant; an approved category interval controls scheduling.</p>
       {policies.map(p=><p key={p.category}>{p.category} Rev {p.revision} · Evaluation {p.evaluation_template_id||"Not configured"} · {p.surveillance_days||"Risk-assessed"} days
