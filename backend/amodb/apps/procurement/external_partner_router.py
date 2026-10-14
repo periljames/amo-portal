@@ -514,7 +514,8 @@ def contracted_work(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     scopes=_rows("""SELECT s.category,s.site_code,s.product_family,s.status,s.restrictions,s.expires_on
         FROM procurement_supplier_approval_scopes s
         WHERE s.amo_id=:amo AND s.supplier_id=:supplier
-        AND s.status IN ('APPROVED','CONDITIONALLY_APPROVED')
+        AND s.status='ACTIVE'
+        AND (s.expires_on IS NULL OR s.expires_on >= CURRENT_DATE)
         ORDER BY s.category,s.site_code LIMIT 30""",db,**ctx)
     return {"approved_scopes":scopes,"assigned_work_count":len(_allowed(user,"assignments")),
        "execution_enabled":False,
