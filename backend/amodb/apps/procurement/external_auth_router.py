@@ -291,6 +291,18 @@ def login(payload:Login,request:Request,response:Response,db:Session=Depends(get
     if len(active)>1:
         raise HTTPException(409,"Multiple provider accounts found. Specify the vendor key.")
     grant=active[0]
+    # Switching an authenticated browser to another external organization
+    # must revoke its previous cookie session; do not leave both principals
+    # active merely because the browser replaces its HttpOnly cookie.
+    previous=request.cookies.get(core.COOKIE)
+    if previous:
+        previous_tenant,sep,_=previous.partition(".")
+        if sep and len(previous_tenant)==36:
+            core.context(db,previous_tenant)
+            core.run("""UPDATE external_sessions SET revoked_at=:at
+                WHERE amo_id=:amo AND session_hash=:hash AND revoked_at IS NULL""",
+                db,at=core.now(),amo=previous_tenant,hash=core.digest(previous))
+            core.context(db,amo,identity["id"])
     csrf=core.issue_session(db,response,amo=amo,identity=identity["id"],grant=grant["grant_id"],
                             request=request,mfa=bool(identity["totp_confirmed_at"]))
     core.run("UPDATE external_credentials SET failed_attempts=0,locked_until=NULL WHERE identity_id=:id",
