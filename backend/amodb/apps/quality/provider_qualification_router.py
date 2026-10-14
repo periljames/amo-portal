@@ -643,6 +643,10 @@ def impose_restriction(amo_code:str,payload:RestrictionCreate,
         "actor":str(user.id)})
     _record(db,amo,payload.supplier_id,user,"RESTRICTION_IMPOSED",
             payload.model_dump(mode="json"),None)
+    _notify_provider_members(db,amo,payload.supplier_id,user,
+        "Quality restriction issued",
+        "Your AMO issued a Quality restriction on provider activity. View the scope in your Qualification workspace.",
+        "RESTRICTION",ident)
     db.commit()
     return {"id":ident,"status":"ACTIVE","scope":payload.dimension,"target":payload.target_key}
 
@@ -685,6 +689,10 @@ def lift_restriction(amo_code:str,restriction_id:str,payload:LiftRestriction,
     _record(db,amo,row["supplier_id"],user,"RESTRICTION_LIFTED",
             {"restriction_id":restriction_id,"reinstatement_case":case["id"],
              "reason":payload.reason},case["id"])
+    _notify_provider_members(db,amo,row["supplier_id"],user,
+        "Quality restriction updated",
+        "A Quality restriction has been lifted after authorized reinstatement and verification.",
+        "RESTRICTION",restriction_id)
     db.commit()
     return {"id":restriction_id,"status":"LIFTED"}
 
