@@ -304,6 +304,22 @@ def verify_check(amo_code:str,case_id:str,requirement_key:str,payload:CheckDecis
         raise HTTPException(409,"Use the appointed departmental gate to determine this requirement")
     if key=="REGULATORY_APPROVAL" and payload.status=="VERIFIED" and not payload.approval_reference:
         raise HTTPException(422,"Regulatory approval verification requires an authority reference")
+    # Documentary checks must resolve to evidence already independently verified
+    # in the existing canonical QMS evidence register, not a free-text file ref.
+    documented={"LEGAL_IDENTITY","CLASSIFICATION_AND_APPLICABILITY","SCOPE_CAPABILITY",
+                "FACILITIES_AND_SITES","CONTRACT_REQUIREMENTS"}
+    if key in documented and payload.status=="VERIFIED":
+        if not payload.evidence_reference:
+            raise HTTPException(422,"Documentary verification requires existing QMS evidence")
+        evidence=_one(db,"""SELECT id FROM quality_external_provider_evidence
+            WHERE amo_id=:amo AND supplier_id=:supplier
+            AND (id=:ref OR source_id=:ref)
+            AND status='VERIFIED'
+            AND (valid_from IS NULL OR valid_from<=CURRENT_DATE)
+            AND (valid_until IS NULL OR valid_until>=CURRENT_DATE) LIMIT 1""",
+            amo=amo,supplier=row["supplier_id"],ref=payload.evidence_reference)
+        if not evidence:
+            raise HTTPException(409,"Verification reference is not current Quality-verified evidence for this provider")
     db.execute(text("""UPDATE quality_provider_qualification_checks
        SET status=:status,evidence_reference=:evidence,approval_reference=:approval,
            expires_on=:expires,conclusion=:note,verified_by_user_id=:actor,verified_at=NOW()
@@ -508,6 +524,18 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
         raise HTTPException(409,"Stale qualification version")
     if payload.action in {"APPROVE","CONDITIONALLY_APPROVE"}:
         blockers=_requirements(db,amo,row)
+        if row["audit_id"]:
+            auditor=_one(db,"""SELECT lead_auditor_user_id,observer_auditor_user_id,
+                assistant_auditor_user_id,supporting_auditor_user_ids
+                FROM qms_audits WHERE amo_id=:amo AND CAST(id AS TEXT)=:audit""",
+                amo=amo,audit=row["audit_id"])
+            if auditor and str(user.id) in {
+                str(auditor.get("lead_auditor_user_id")),
+                str(auditor.get("observer_auditor_user_id")),
+                str(auditor.get("assistant_auditor_user_id")),
+                *[str(x) for x in (auditor.get("supporting_auditor_user_ids") or [])]
+            }:
+                blockers.append("AUDIT_TEAM_INDEPENDENCE_CONFLICT")
         if blockers:raise HTTPException(409,{"code":"QUALIFICATION_GATES_PENDING","blockers":blockers})
         # Marker is scoped to this SQLAlchemy transaction/request only.
         db.info["phase4_qualification_approval"]=(str(amo),int(row["supplier_id"]))
