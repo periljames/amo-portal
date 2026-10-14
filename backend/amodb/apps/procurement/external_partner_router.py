@@ -416,12 +416,77 @@ def _page_contracts(db,user,ids,limit,offset,search=""):
        LIMIT :limit OFFSET :offset""").bindparams(bindparam("assigned",expanding=True))
     args={**_context(user),"assigned":sorted(ids),**_page(limit,offset),"search":f"%{search.strip().lower()}%"}
     found=_rows_compiled(db,sql,args)
-    return {"items":[{**x,"controlled_document_access":"REQUIRES_EXPLICIT_DMS_RELEASE"}
+    document_grants=_allowed(user,"documents")
+    has_doc_read="document.read" in set(user["capabilities_json"] or [])
+    return {"items":[{**x,"controlled_document_access":(
+                  "PUBLISHED_REVISION_CHECK_REQUIRED" if has_doc_read
+                  and str(x["controlled_document_id"]) in document_grants
+                  and x["controlled_document_revision"] else "REQUIRES_EXPLICIT_DMS_RELEASE")}
                     for x in found],"limit":args["limit"],"offset":args["offset"],
             "has_more":len(found)==args["limit"],"next_offset":args["offset"]+len(found)}
 
 def _rows_compiled(db,sql,args):
     return [dict(r) for r in db.execute(sql,args).mappings().all()]
+
+@router.get("/contracts/{contract_id}/document")
+def download_controlled_agreement(tenant_slug:str,contract_id:str,
+                                 request:Request,db:Session=Depends(get_db)):
+    """Permit only a published, exact-revision DMS attachment assigned to the
+    current provider, contract and external identity. Internal DMS routes remain
+    inaccessible to vendor cookie sessions.
+    """
+    user=_ctx(db,request,tenant_slug,cap="document.read")
+    if "contract.read" not in set(user["capabilities_json"] or []):
+        raise HTTPException(403,"Agreement read privilege required")
+    _require_existing_related(db,user,"CONTRACT",contract_id)
+    ctx=_context(user)
+    contract=_row("""SELECT status,controlled_document_id,controlled_document_revision,
+            effective_on,expires_on FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier AND id=:contract""",
+            db,**ctx,contract=contract_id)
+    if not contract or contract["status"]!="ACTIVE":
+        raise HTTPException(404,"No active controlled agreement available")
+    if contract["effective_on"] and contract["effective_on"]>date.today():
+        raise HTTPException(403,"Agreement is not effective")
+    if contract["expires_on"] and contract["expires_on"]<date.today():
+        raise HTTPException(403,"Agreement has expired")
+    manual_id=contract["controlled_document_id"]
+    desired_revision=contract["controlled_document_revision"]
+    if not manual_id or not desired_revision:
+        raise HTTPException(404,"No controlled document revision linked to this agreement")
+    _require_object(user,"documents",str(manual_id))
+    revision=_row("""SELECT r.id,r.rev_number,r.source_filename,
+           r.stamped_export_uri,r.source_storage_path,r.source_mime_type
+        FROM manuals m
+        JOIN manual_tenants t ON t.id=m.tenant_id
+        JOIN manual_revisions r ON r.id=m.current_published_rev_id
+           AND r.manual_id=m.id
+        WHERE t.amo_id=:amo AND m.id=:manual
+        AND r.status_enum='PUBLISHED'
+        AND (r.id=:revision OR r.rev_number=:revision)
+        AND r.published_at IS NOT NULL""",
+        db,amo=ctx["amo"],manual=str(manual_id),revision=str(desired_revision))
+    if not revision:
+        raise HTTPException(409,"The assigned DMS revision is not the current published revision")
+    uri=revision["stamped_export_uri"] or revision["source_storage_path"]
+    if not uri:
+        raise HTTPException(409,"The published document has no secured source attachment")
+    # Only our storage adapter can resolve the controlled binary. Never redirect
+    # the provider to a raw signed S3/internal manual URL.
+    try:
+        filepath=storage.materialize(uri)
+    except (OSError,ValueError,RuntimeError) as exc:
+        raise HTTPException(409,"Controlled document source is temporarily unavailable") from exc
+    filename=Path(revision["source_filename"] or "controlled-agreement.pdf").name
+    content_type="application/pdf" if revision["stamped_export_uri"] else (
+        revision["source_mime_type"] or "application/octet-stream"
+    )
+    auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+        action="PARTNER_CONTROLLED_REVISION_DOWNLOADED",actor_identity=ctx["person"],
+        details={"contract_id":contract_id,"manual_id":manual_id,"revision_id":revision["id"]})
+    db.commit()
+    return FileResponse(filepath,media_type=content_type,filename=filename,
+        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 @router.post("/contracts/{contract_id}/receipt",status_code=201)
 def contract_receipt(tenant_slug:str,contract_id:str,payload:ContractReceipt,
