@@ -1030,8 +1030,7 @@ def quality_review_evidence(amo_code:str,submission_id:str,payload:EvidenceDecis
                             db:Session=Depends(get_db),
                             user=Depends(get_current_active_user)):
     from .external_auth_router import _quality_manager
-    if payload.status=="ACCEPTED":
-        raise HTTPException(409,"Accept through Phase 5 controlled document review to create the authoritative QMS evidence link")
+    raise HTTPException(410,"Legacy evidence review is retired. Use Phase 5 controlled submission review.")
     _quality_manager(user);amo=_quality_context(db,amo_code,user)
     evidence=_row("""SELECT * FROM external_partner_evidence_submissions
         WHERE amo_id=:amo AND id=:id FOR UPDATE""",db,amo=amo,id=submission_id)
