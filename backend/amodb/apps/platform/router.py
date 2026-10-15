@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db, get_read_db
@@ -100,6 +100,56 @@ def create_tenant(payload: dict[str, Any], db: Session = Depends(get_db), user=D
         return services.create_tenant(db, payload=payload, actor_id=_actor_id(user))
     except Exception as exc:
         _bad(exc)
+
+
+@router.post("/tenants/{tenant_id}/owner-invitation")
+def send_tenant_owner_invitation(
+    tenant_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    """Send a one-time password setup link without revealing credentials."""
+    from amodb.apps.accounts import router_public as auth_router
+    from amodb.apps.accounts import services as account_services
+    from datetime import timedelta
+
+    tenant = db.get(account_models.AMO, tenant_id)
+    if tenant is None or not tenant.is_active:
+        raise HTTPException(status_code=404, detail="Active tenant not found")
+    if not auth_router.RESET_LINK_BASE_URL:
+        raise HTTPException(status_code=503, detail="PORTAL_BASE_URL must be configured before invitations can be sent")
+    owner = db.query(account_models.User).filter(
+        account_models.User.amo_id == tenant_id,
+        account_models.User.is_amo_admin.is_(True),
+        account_models.User.staff_code.like("OWNER-%"),
+        account_models.User.is_active.is_(True),
+    ).order_by(account_models.User.created_at.asc()).first()
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Initial tenant owner account not found")
+    recent = db.query(account_models.PasswordResetToken.id).filter(
+        account_models.PasswordResetToken.user_id == owner.id,
+        account_models.PasswordResetToken.issued_at >= datetime.now(timezone.utc) - timedelta(minutes=2),
+    ).first()
+    if recent:
+        raise HTTPException(status_code=429, detail="Please allow two minutes between owner invitations")
+    raw = account_services.create_password_reset_token(db, owner)
+    link = auth_router._build_reset_link(amo_slug=tenant.login_slug, token=raw)
+    if not link:
+        raise HTTPException(status_code=503, detail="Owner invitation link is not configured")
+    auth_router._maybe_send_email(
+        background_tasks, owner.email, "Set up your Venspera tenant administrator account",
+        "Your organization has been provisioned. Use the secure one-time link to set your password: " + link,
+        db=db, amo_id=tenant_id, user_id=str(owner.id), action_url=link,
+    )
+    services.audit(
+        db, actor_user_id=_actor_id(user), action="tenant.owner_invitation.sent",
+        tenant_id=tenant_id, entity_type="user", entity_id=owner.id,
+        reason="Initial tenant administrator password setup",
+        details={"delivery": "email", "email": owner.email},
+    )
+    db.commit()
+    return {"tenant_id": tenant_id, "owner_email": owner.email, "status": "INVITATION_REQUESTED"}
 
 
 @router.get("/tenants/{tenant_id}")
