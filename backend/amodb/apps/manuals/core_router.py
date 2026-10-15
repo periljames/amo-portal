@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
+from amodb import storage as shared_storage
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
@@ -605,6 +606,20 @@ def _ensure_upload_dir(path: Path) -> None:
 
 def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
+    if shared_storage.shared_storage_enabled():
+        digest = hashlib.sha256(content).hexdigest()
+        try:
+            stored = shared_storage.put_stream(
+                BytesIO(content),
+                key=f"manuals/{tenant_slug}/{re.sub(r'[^A-Za-z0-9._-]+', '_', manual_code or 'manual')}/{revision_id}/{safe_name}",
+                content_type=office_mime_type(safe_name) or "application/octet-stream",
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Manual original could not be persisted in shared storage") from exc
+        if int(stored.size_bytes) != len(content):
+            shared_storage.delete(stored.uri)
+            raise HTTPException(status_code=503, detail="Manual original retention size check failed")
+        return stored.uri, digest
     target_dir = MANUAL_UPLOAD_DIR / tenant_slug / re.sub(r"[^A-Za-z0-9._-]+", "_", manual_code or "manual") / revision_id
     _ensure_upload_dir(target_dir)
     target = (target_dir / safe_name).resolve()
@@ -1803,7 +1818,12 @@ def read_revision(
     )
     source_type = rev.source_type_enum.value if getattr(rev, "source_type_enum", None) else None
     source_path = (rev.source_storage_path or "").strip() or None
-    source_exists = bool(source_path and Path(source_path).exists())
+    source_exists = bool(
+        source_path and (
+            shared_storage.exists(source_path)
+            if source_path.startswith("s3://") else Path(source_path).is_file()
+        )
+    )
 
     _audit(
         db,
@@ -1975,7 +1995,13 @@ def get_revision_source(
         raise HTTPException(status_code=403, detail="The current user is not permitted to download this source")
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
-    source_path = Path(rev.source_storage_path)
+    if str(rev.source_storage_path).startswith("s3://"):
+        try:
+            source_path = shared_storage.materialize(rev.source_storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Revision source file missing from storage") from exc
+    else:
+        source_path = Path(rev.source_storage_path)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
@@ -2038,7 +2064,13 @@ def get_browser_office_source(
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
 
-    source_path = Path(rev.source_storage_path)
+    if str(rev.source_storage_path).startswith("s3://"):
+        try:
+            source_path = shared_storage.materialize(rev.source_storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Revision source file missing from storage") from exc
+    else:
+        source_path = Path(rev.source_storage_path)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
 
