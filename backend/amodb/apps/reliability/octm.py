@@ -390,6 +390,51 @@ def entry_readiness(entry_id: str, ctx=Depends(context)):
     return {"errors": errors, "warnings": warnings, "ready_for_verification": not errors}
 
 
+def summarize_daily_coverage(snapshots, entries) -> dict:
+    """Reconcile observed engine-flight legs, never infer that absent legs did not fly."""
+    expected = {}
+    for flight in snapshots:
+        if flight.flight_leg:
+            key = (flight.aircraft_serial_number, flight.engine_position, flight.flight_leg.strip().upper())
+            expected[key] = {
+                "aircraft_serial_number": flight.aircraft_serial_number,
+                "engine_position": flight.engine_position,
+                "flight_leg": flight.flight_leg,
+                "engine_serial_number": flight.engine_serial_number,
+            }
+    observed = set()
+    for row in entries:
+        if row.sector_ref and row.event_type != "NO_OPERATION":
+            observed.add((row.aircraft_serial_number, row.engine_position, row.sector_ref.strip().upper()))
+    pending = [value for key, value in expected.items() if key not in observed]
+    return {
+        "registered_snapshot_sectors": len(expected),
+        "matched_sectors": len(expected) - len(pending),
+        "unmatched_sectors": pending,
+        "entered_octm_observations": len(entries),
+        "verified_observations": sum(row.review_status == "VERIFIED" for row in entries),
+        "unverified_observations": sum(row.review_status != "VERIFIED" for row in entries),
+        "coverage_basis": "RECORDED_ENGINE_FLIGHT_SNAPSHOTS_ONLY",
+        "important": "Unmatched is a reconciliation prompt, not proof a flight or techsheet is missing. No snapshot data does not mean the aircraft did not operate.",
+    }
+
+
+@router.get("/octm/daily-coverage")
+def daily_coverage(operating_date: date, ctx=Depends(context)):
+    require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    snapshots = (db.query(EngineFlightSnapshot).filter(
+        EngineFlightSnapshot.amo_id == amo_id, EngineFlightSnapshot.flight_date == operating_date,
+    ).order_by(EngineFlightSnapshot.id.desc()).limit(5000).all())
+    entries = (db.query(OCTMEntry).filter(
+        OCTMEntry.amo_id == amo_id, OCTMEntry.event_date == operating_date,
+    ).order_by(OCTMEntry.event_sequence.asc()).limit(5000).all())
+    result = summarize_daily_coverage(snapshots, entries)
+    result["operating_date"] = operating_date.isoformat()
+    result["truncated"] = len(snapshots) >= 5000 or len(entries) >= 5000
+    return result
+
+
 @router.get("/octm/entries", response_model=list[EntryRead])
 def entries(aircraft: str | None = None, status: str | None = None, limit: int = Query(200, ge=1, le=500),
             offset: int = Query(0, ge=0), ctx=Depends(context)):
