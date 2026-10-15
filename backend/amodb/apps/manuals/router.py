@@ -5,7 +5,9 @@ Core Manuals routes and focused reader routes are composed here under the stable
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from fastapi.routing import APIRoute
+from fastapi.dependencies.utils import get_parameterless_sub_dependant
 
 # Bind hardened indexer, hierarchy, signature, and retained-record implementations
 # before reader/workspace modules import stable knowledge-service callables.
@@ -13,6 +15,7 @@ from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # no
 from amodb.apps.doc_control.knowledge_access_router import publication_tree_router
 
 from . import core_router as _core
+from .tenant_route_guard import require_manuals_tenant_access
 from amodb.apps.doc_control.workspace_service import require_control_user as _require_control_user
 
 # Keep the legacy Manuals intake helper aligned with the canonical Document
@@ -56,6 +59,19 @@ router.include_router(_knowledge_reader_router)
 router.include_router(_approved_intake_router)
 router.include_router(_core.router)
 router.include_router(_publications_router)
+
+# Starlette selects the first matching route. Attach this dependency after every
+# legacy/modern Manuals router has been composed, but before application mount
+# copies these APIRoutes into the main app. This covers aliases and extensions.
+for _route in router.routes:
+    if not isinstance(_route, APIRoute) or "{tenant_slug}" not in _route.path:
+        continue
+    _guard = Depends(require_manuals_tenant_access)
+    _route.dependencies.append(_guard)
+    _route.dependant.dependencies.insert(
+        0,
+        get_parameterless_sub_dependant(depends=_guard, path=_route.path_format),
+    )
 
 
 def __getattr__(name: str):
