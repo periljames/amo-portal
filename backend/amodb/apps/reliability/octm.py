@@ -266,6 +266,10 @@ def create_entry(payload: EntryPayload, ctx=Depends(context)):
     entry = OCTMEntry(**entry_dict(payload), amo_id=amo_id,
                       created_by_user_id=str(actor.id), review_status="DRAFT")
     db.add(entry)
+    db.flush()
+    access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=entry.id,
+                        action="SOURCE_REGISTERED", payload={"source": entry.source_type, "techsheet": entry.techsheet_ref},
+                        actor_user_id=str(actor.id))
     db.commit()
     db.refresh(entry)
     return entry
@@ -286,6 +290,9 @@ def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
     row.review_note = payload.note
     row.reviewed_by_user_id = str(actor.id)
     row.reviewed_at = utcnow()
+    access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=row.id,
+                        action="SOURCE_" + payload.decision,
+                        payload={"note": payload.note, "source": row.techsheet_ref}, actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
     return row
@@ -319,6 +326,9 @@ def correct_entry(entry_id: str, payload: EntryCorrection, ctx=Depends(context))
                         before_json={k: v.isoformat() if isinstance(v, date) else v for k,v in before.items()},
                         after_json={k: v.isoformat() if isinstance(v, date) else v for k,v in after.items()},
                         reason=payload.reason, actor_user_id=str(actor.id)))
+    access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=row.id,
+                        action="SOURCE_CORRECTED", payload={"reason": payload.reason, "changed_fields": [
+                            key for key in after if before.get(key) != after[key]]}, actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
     return row
@@ -352,6 +362,10 @@ def create_profile(payload: ProfilePayload, ctx=Depends(context)):
     row = OCTMProfile(**payload.model_dump(), amo_id=amo_id, status="DRAFT",
                       version=(prev.version + 1 if prev else 1), created_by_user_id=str(actor.id))
     db.add(row)
+    db.flush()
+    access.append_audit(db, amo_id=amo_id, entity_type="OCTM_PROFILE", entity_id=row.id,
+                        action="PROFILE_DRAFTED", payload={"version": row.version, "technical_data_ref": row.technical_data_ref},
+                        actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
     return row
@@ -371,6 +385,10 @@ def approve_profile(profile_id: str, ctx=Depends(context)):
     row.status = "APPROVED"
     row.approved_by_user_id = str(actor.id)
     row.approved_at = utcnow()
+    access.append_audit(db, amo_id=amo_id, entity_type="OCTM_PROFILE", entity_id=row.id,
+                        action="PROFILE_APPROVED", payload={"version": row.version, "limit_qt_per_fh": row.limit_qt_per_fh,
+                        "technical_data_ref": row.technical_data_ref, "technical_data_revision": row.technical_data_revision},
+                        actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
     return row
