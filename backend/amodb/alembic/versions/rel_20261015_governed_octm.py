@@ -43,6 +43,7 @@ def upgrade():
         sa.Column("review_note", sa.Text()),
         sa.Column("created_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL")),
         sa.Column("reviewed_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL")),
+        sa.Column("last_changed_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reviewed_at", sa.DateTime(timezone=True)),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
