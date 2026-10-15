@@ -183,6 +183,17 @@ class EntryRead(EntryPayload):
 class EntryReview(BaseModel):
     decision: Literal["VERIFIED", "RETURNED"]
     note: str = Field(min_length=3, max_length=2000)
+    source_checked: bool = False
+    engine_identity_checked: bool = False
+    exposure_checked: bool = False
+
+    @model_validator(mode="after")
+    def validate_attestation(self):
+        if self.decision == "VERIFIED" and not (
+            self.source_checked and self.engine_identity_checked and self.exposure_checked
+        ):
+            raise ValueError("Verification requires confirmation of source, engine identity and exposure")
+        return self
 
 
 class EntryCorrection(BaseModel):
@@ -199,6 +210,17 @@ class ProfilePayload(BaseModel):
     technical_data_ref: str = Field(min_length=3, max_length=200)
     technical_data_revision: str = Field(min_length=1, max_length=100)
     effective_from: date
+
+
+class ProfileApproval(BaseModel):
+    confirmed_current_technical_data: bool
+    note: str = Field(min_length=5, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_confirmation(self):
+        if not self.confirmed_current_technical_data:
+            raise ValueError("Approve only after checking the referenced current manufacturer instructions")
+        return self
 
 
 class ProfileRead(ProfilePayload):
@@ -460,7 +482,10 @@ def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
     row.reviewed_at = utcnow()
     access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=row.id,
                         action="SOURCE_" + payload.decision,
-                        payload={"note": payload.note, "source": row.techsheet_ref}, actor_user_id=str(actor.id))
+                        payload={"note": payload.note, "source": row.techsheet_ref,
+                                 "source_checked": payload.source_checked,
+                                 "engine_identity_checked": payload.engine_identity_checked,
+                                 "exposure_checked": payload.exposure_checked}, actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
     return row
@@ -550,7 +575,7 @@ def create_profile(payload: ProfilePayload, ctx=Depends(context)):
 
 
 @router.post("/octm/profiles/{profile_id}/approve", response_model=ProfileRead)
-def approve_profile(profile_id: str, ctx=Depends(context)):
+def approve_profile(profile_id: str, payload: ProfileApproval, ctx=Depends(context)):
     require(ctx, "reliability.programme.approve")
     db, amo_id, actor = ctx
     row = db.query(OCTMProfile).filter_by(amo_id=amo_id, id=profile_id).first()
@@ -565,7 +590,9 @@ def approve_profile(profile_id: str, ctx=Depends(context)):
     row.approved_at = utcnow()
     access.append_audit(db, amo_id=amo_id, entity_type="OCTM_PROFILE", entity_id=row.id,
                         action="PROFILE_APPROVED", payload={"version": row.version, "limit_qt_per_fh": row.limit_qt_per_fh,
-                        "technical_data_ref": row.technical_data_ref, "technical_data_revision": row.technical_data_revision},
+                        "technical_data_ref": row.technical_data_ref,
+                        "technical_data_revision": row.technical_data_revision, "note": payload.note,
+                        "confirmed_current_technical_data": payload.confirmed_current_technical_data},
                         actor_user_id=str(actor.id))
     db.commit()
     db.refresh(row)
