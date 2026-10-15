@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from "react";
+import ExternalProviderDocumentsReview from "./ExternalProviderDocumentsReview";
 import {apiRequest} from "../../services/apiClient";
 import {authHeaders} from "../../services/auth";
 import {getApiBaseUrl} from "../../services/config";
@@ -85,7 +86,7 @@ export default function ExternalPartnerQualityReview({amoCode,manager}:{
       <button disabled={busy===row.id} onClick={()=>void download(row)}>Download for review</button>
       {row.review_note&&<p>Review note: {row.review_note}</p>}
       {manager&&row.status==="PENDING_REVIEW"&&<div className="vendor-actions">
-        <button disabled={busy===row.id} onClick={()=>void decide("evidence",row.id,"ACCEPTED")}>Accept submission</button>
+        <small>Acceptance requires controlled intake and canonical QMS linkage below.</small>
         <button disabled={busy===row.id} onClick={()=>void decide("evidence",row.id,"REJECTED")}>Reject submission</button>
       </div>}
     </div>)}
@@ -93,5 +94,6 @@ export default function ExternalPartnerQualityReview({amoCode,manager}:{
       <button disabled={offset===0||Boolean(busy)} onClick={()=>setOffset(Math.max(0,offset-25))}>Previous</button>
       <button disabled={Boolean(busy)||(!proposals.length&&!evidence.length)} onClick={()=>setOffset(offset+25)}>Next</button>
     </div>
+    <ExternalProviderDocumentsReview amoCode={amoCode} manager={manager}/>
   </section>;
 }
