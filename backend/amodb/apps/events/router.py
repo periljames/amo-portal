@@ -10,7 +10,6 @@ from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
