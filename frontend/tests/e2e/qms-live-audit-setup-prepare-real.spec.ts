@@ -276,8 +276,18 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
       buffer: Buffer.from("Controlled acceptance evidence for the real QMS setup and preparation browser journey.\n", "utf-8"),
     });
     await guestPage.getByLabel("Response / context", { exact: true }).fill("Submitted from the purpose-bound auditee browser session for internal review.");
+    const documentSubmissionResponse = guestPage.waitForResponse((response) =>
+      response.request().method() === "POST"
+      && new URL(response.url()).pathname === `/quality/audit-access/document-requests/${encodeURIComponent(governedRequest.id)}/submit`,
+      { timeout: 30_000 },
+    );
     await guestPage.getByRole("button", { name: "Submit securely" }).click();
-    await expect(guestPage.getByRole("status")).toContainText("authorization-competence-evidence.txt submitted · SHA-256", { timeout: 30_000 });
+    const submittedDocument = await documentSubmissionResponse;
+    expect(submittedDocument.status()).toBe(201);
+    const submittedRecord = await submittedDocument.json() as { filename: string; sha256: string };
+    expect(submittedRecord.filename).toBe("authorization-competence-evidence.txt");
+    expect(submittedRecord.sha256).toMatch(/^[a-f0-9]{64}$/i);
+    await expect(guestPage.getByRole("status")).toContainText("authorization-competence-evidence.txt submitted", { timeout: 30_000 });
 
     await page.reload({ waitUntil: "domcontentloaded" });
     const reloadedPrepare = page.getByRole("region", { name: "Pre-audit preparation workspace" });
