@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from amodb.database import Base, get_write_db
 from amodb.security import get_current_active_user
@@ -350,6 +351,8 @@ def entry_readiness(entry_id: str, ctx=Depends(context)):
         errors.append("A different authorized person must verify this entry")
     if row.review_status == "VERIFIED":
         errors.append("Verified entries require a recorded correction before re-review")
+    if row.review_status == "RETURNED":
+        errors.append("Returned entries must be corrected and resubmitted before verification")
     warnings = []
     if row.source_type != "PAPER_TECHSHEET":
         warnings.append("Confirm extracted/imported values against the original source")
@@ -411,7 +414,18 @@ def create_entry(payload: EntryPayload, ctx=Depends(context)):
     access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=entry.id,
                         action="SOURCE_REGISTERED", payload={"source": entry.source_type, "techsheet": entry.techsheet_ref},
                         actor_user_id=str(actor.id))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        conflict = db.query(OCTMEntry).filter_by(
+            amo_id=amo_id, aircraft_serial_number=payload.aircraft_serial_number,
+            techsheet_ref=payload.techsheet_ref, engine_serial_number=payload.engine_serial_number,
+            event_sequence=payload.event_sequence,
+        ).first()
+        if conflict and all(getattr(conflict, key) == value for key, value in entry_dict(payload).items()):
+            return conflict
+        raise HTTPException(409, "A concurrent entry created a conflicting source event") from exc
     db.refresh(entry)
     return entry
 
@@ -423,6 +437,8 @@ def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
     row = get_entry(ctx, entry_id, for_update=True)
     if row.review_status == "VERIFIED":
         raise HTTPException(409, "Verified source records require a recorded correction")
+    if row.review_status == "RETURNED" and payload.decision == "VERIFIED":
+        raise HTTPException(409, "Returned entries must be corrected and resubmitted before verification")
     if payload.decision == "VERIFIED" and str(actor.id) in {
         str(row.created_by_user_id), str(row.last_changed_by_user_id)
     }:
