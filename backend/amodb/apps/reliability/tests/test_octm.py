@@ -189,7 +189,7 @@ def test_daily_coverage_uses_snapshots_without_inventing_operational_completenes
     ]
     entries = [
         Row(aircraft_serial_number="AC-001", engine_position="1", sector_ref="SL-001",
-            event_type="TOP_UP", review_status="DRAFT"),
+            engine_serial_number="ENGINE-123", event_type="TOP_UP", review_status="DRAFT"),
     ]
     report = summarize_daily_coverage(snapshots, entries)
     assert report["registered_snapshot_sectors"] == 2
