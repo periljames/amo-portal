@@ -40,6 +40,53 @@ claim manufacturer limits or Avi Pro vendor interfaces have been verified.
 - Plot interval consumption alongside approved and effective manufacturer
   limits; distinguish OEM-limit exceedances from configured trend alerts.
 
+## Daily personnel workflow and enforced safeguards
+
+1. Select an **existing registered aircraft** (including historical/inactive
+   aircraft when entering old source records). Never create an OCTM event
+   against an unregistered or foreign-tenant aircraft.
+2. Inspect the physical technical-log/engine-installation history. A prior
+   engine serial and installation reference is offered only as a **hint**.
+   Record the actual physical engine serial, position, installation reference,
+   operating date, techsheet, sector and within-techsheet event sequence.
+3. Choose exactly what the source establishes: TOP_UP, CHECK_ZERO, MISSING,
+   NO_OPERATION or a separately identified nonroutine maintenance service.
+   The interface does not equate an empty oil field with a zero uplift.
+   Preserve original units and oil specification; quantity fields reject
+   non-finite/negative figures. Records with flight-hour exposure must
+   identify a sector to prevent duplicate exposure.
+4. Register and identify the actual source evidence in Tech Records/DMS.
+   Include maintenance-completion status; crew-only EFB closure must
+   **not** be represented as maintenance completion.
+5. Save an incomplete draft if source information is outstanding. The
+   inline verification checklist identifies incomplete requirements.
+   Authoritative monitoring calculations exclude draft/returned records.
+6. An independent, capability-authorized reviewer sees server-derived
+   readiness findings before verification and must explicitly confirm
+   original source, physical engine/installation and sector-flight-hour
+   exposure. Creator or latest correction actor cannot verify their own
+   submission. A returned entry must first be corrected.
+7. Corrections retain the before/after record, actor and reason, invalidate
+   the prior verified state and require another review. Correctors can
+   inspect the history from the Source register. Concurrent duplicate
+   submissions cannot silently create conflicting records.
+8. The **Daily coverage** screen reconciles entered OCTM sector references
+   with existing engine-flight snapshots. Unmatched sectors require follow-up
+   but are explicitly **not definitive proof** of missing techsheets or flights.
+   Missing snapshots are not interpreted as evidence that no aircraft flew.
+9. Engine trend calculations group multiple servicing events on the same
+   engine/sector and count their flight hours once; valid windows use
+   consistent oil-reference conditions, installation and 40 ± 10 FH.
+   Nonroutine service, missing data and reference changes reset the
+   monitoring chain. Out-of-range windows withhold a formal rate.
+10. Manufacturer limits require entered technical-data reference and revision,
+    then review and signed attestation by another authorized person.
+    The software does not authorize operation or continued dispatch.
+
+**Historical source register:** Both unverified queue and complete record
+listing have server-side pagination (200 rows per page); filters apply to
+the loaded page. Correction history is available for source entries.
+
 ## Important boundaries and follow-on integration
 
 - The workbook \`OCTM.xlsm\` has 23 worksheets and must be treated as a
@@ -57,7 +104,9 @@ claim manufacturer limits or Avi Pro vendor interfaces have been verified.
 - Engine installation references currently come from operator-entered
   technical records. Cross-check against the authoritative historic
   component installation register before approving operational use.
-- Daily completeness reconciliation, stores reconciliation, FRACAS
+- Daily **snapshot-to-OCTM** reconciliation is available. It is not a
+  complete authoritative techsheet receipt register until linked to
+  Flight Operations/Technical Records. Stores reconciliation, FRACAS
   investigation workflow links and signed quarterly report embedding
   remain separate integration steps, not deployed features of this PR.
 - No software result authorizes dispatch or substitutes for current
