@@ -225,13 +225,18 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     executionClosed: closure?.execution_status === "CLOSED",
   });
 
+  // Public verification is authorized by the ISSUED revision and exact-SHA
+  // WebAuthn signature, not by the separate execution-close gate. Keep the
+  // verification section operable without unlocking controlled closeout.
+  const verificationAvailable = Boolean(issuedRevision && currentSignature);
   const closingCardClass = (step: number) => {
+    if (step === 7 && verificationAvailable) return "qms-audit-closing__card is-verifiable";
     const tone = closingCardTone(step, activeClosingStep);
     if (tone === "current") return "qms-audit-closing__card is-current";
     if (tone === "complete") return "qms-audit-closing__card is-complete";
     return "qms-audit-closing__card is-locked";
   };
-  const lockedReason = (step: number) => closingLockedReason(step, activeClosingStep);
+  const lockedReason = (step: number) => step === 7 && verificationAvailable ? null : closingLockedReason(step, activeClosingStep);
   const stepAllowsActions = (step: number) => closingStepAllowsActions(step, activeClosingStep);
   const counts = useMemo(() => ({
     compliant: composition?.checklist_counts?.COMPLIANT || 0,
