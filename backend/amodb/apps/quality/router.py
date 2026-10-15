@@ -7446,6 +7446,13 @@ def _close_legacy_cap_for_car(
 ) -> None:
     if not getattr(car, "finding_id", None):
         return
+    # Post-cutover migration c8d1e2f3a4b5 renamed this legacy CAP
+    # table, and gated migration d9e2f3a4b5c6 may delete it.
+    # The authoritative quality_cars/finding closure must not query a
+    # retired table. Only synchronize during an actual legacy coexistence.
+    from sqlalchemy import inspect as sa_inspect
+    if not sa_inspect(db.get_bind()).has_table("qms_corrective_actions"):
+        return
     cap = (
         db.query(models.QMSCorrectiveAction)
         .filter(
