@@ -67,6 +67,6 @@ claim manufacturer limits or Avi Pro vendor interfaces have been verified.
 
 ## Verification
 
-Focused tests are in \`backend/amodb/apps/reliability/test_octm.py\`.
+Focused tests are in \`backend/amodb/apps/reliability/tests/test_octm.py\`.
 Run database migrations and backend + frontend build/tests in CI against
 the exact PR head. Do not merge on the strength of source inspection alone.
