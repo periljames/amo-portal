@@ -50,7 +50,7 @@ EXT_MIME = {
 }
 KINDS = frozenset({"ALL","SUPPLIER","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
     "CONSULTANT","LABORATORY","CALIBRATION_PROVIDER","OTHER"})
-CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,47}$")
 
 
 def _one(db, sql, **kw):
@@ -173,7 +173,7 @@ def _staff(db, amo_code, user, manage=False):
 
 class RequirementWrite(BaseModel):
     provider_kind: str = Field(max_length=32)
-    code: str = Field(max_length=64)
+    code: str = Field(max_length=48)
     title: str = Field(min_length=2,max_length=255)
     description: str = Field(default="",max_length=4000)
     mandatory: bool = False
