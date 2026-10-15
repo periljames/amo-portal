@@ -178,6 +178,7 @@ class RequirementWrite(BaseModel):
     description: str = Field(default="",max_length=4000)
     mandatory: bool = False
     expiry_required: bool = False
+    reminder_days: int = Field(default=0,ge=0,le=365)
     form_manual_id: str | None = Field(default=None,max_length=36)
     form_revision_id: str | None = Field(default=None,max_length=36)
     retention_policy_ref: str | None = Field(default=None,max_length=128)
@@ -214,20 +215,22 @@ def save_requirement(amo_code:str,code:str,payload:RequirementWrite,
     id=existing["id"] if existing else str(uuid4())
     db.execute(text("""INSERT INTO external_provider_document_requirements
         (id,amo_id,provider_kind,code,title,description,mandatory,expiry_required,
-         form_manual_id,form_revision_id,retention_policy_ref,enabled,created_by_user_id)
+         form_manual_id,form_revision_id,retention_policy_ref,enabled,reminder_days,created_by_user_id)
         VALUES(:id,:amo,:kind,:code,:title,:description,:mandatory,:expiry,
-          :manual,:revision,:retention,:enabled,:actor)
+          :manual,:revision,:retention,:enabled,:reminder,:actor)
         ON CONFLICT (amo_id,provider_kind,code) DO UPDATE SET
           title=EXCLUDED.title,description=EXCLUDED.description,
           mandatory=EXCLUDED.mandatory,expiry_required=EXCLUDED.expiry_required,
           form_manual_id=EXCLUDED.form_manual_id,
           form_revision_id=EXCLUDED.form_revision_id,
           retention_policy_ref=EXCLUDED.retention_policy_ref,
+          reminder_days=EXCLUDED.reminder_days,
           enabled=EXCLUDED.enabled,version=external_provider_document_requirements.version+1,
           updated_at=NOW()"""),{"id":id,"amo":amo,"kind":kind,"code":key,"title":payload.title,
           "description":payload.description,"mandatory":payload.mandatory,"expiry":payload.expiry_required,
           "manual":payload.form_manual_id,"revision":payload.form_revision_id,
-          "retention":payload.retention_policy_ref,"enabled":payload.enabled,"actor":str(user.id)})
+          "retention":payload.retention_policy_ref,"enabled":payload.enabled,
+          "reminder":payload.reminder_days,"actor":str(user.id)})
     auth.event(db,amo=amo,identity=None,grant=None,actor_user=str(user.id),
        action="EXTERNAL_DOCUMENT_POLICY_UPDATED",
        details={"requirement_id":id,"category":kind,"code":key,"version":(existing["version"]+1 if existing else 1)})
@@ -240,7 +243,7 @@ def my_requirements(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     user=partner._ctx(db,request,tenant_slug,cap="document.read")
     ctx=partner._context(user)
     rows=_all(db,"""SELECT r.id,r.code,r.title,r.description,r.mandatory,
-        r.expiry_required,r.form_manual_id,r.form_revision_id,r.version
+        r.expiry_required,r.reminder_days,r.form_manual_id,r.form_revision_id,r.version
         FROM external_provider_document_requirements r
         LEFT JOIN quality_external_provider_profiles p
           ON p.amo_id=r.amo_id AND p.supplier_id=:supplier
