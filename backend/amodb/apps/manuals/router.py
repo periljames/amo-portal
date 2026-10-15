@@ -15,7 +15,11 @@ from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # no
 from amodb.apps.doc_control.knowledge_access_router import publication_tree_router
 
 from . import core_router as _core
-from .tenant_route_guard import require_manuals_tenant_access
+from .tenant_route_guard import (
+    require_manuals_tenant_access,
+    require_manuals_record_access,
+    require_manuals_export_access,
+)
 from amodb.apps.doc_control.workspace_service import require_control_user as _require_control_user
 
 # Keep the legacy Manuals intake helper aligned with the canonical Document
@@ -64,14 +68,23 @@ router.include_router(_publications_router)
 # legacy/modern Manuals router has been composed, but before application mount
 # copies these APIRoutes into the main app. This covers aliases and extensions.
 for _route in router.routes:
-    if not isinstance(_route, APIRoute) or "{tenant_slug}" not in _route.path:
+    if not isinstance(_route, APIRoute):
         continue
-    _guard = Depends(require_manuals_tenant_access)
-    _route.dependencies.append(_guard)
-    _route.dependant.dependencies.insert(
-        0,
-        get_parameterless_sub_dependant(depends=_guard, path=_route.path_format),
-    )
+    _path = str(_route.path)
+    _guards = []
+    if "{tenant_slug}" in _path:
+        _guards.append(require_manuals_tenant_access)
+        if "{manual_id}" in _path:
+            _guards.append(require_manuals_record_access)
+    elif "{export_id}" in _path and _path.startswith("/manuals/exports/"):
+        _guards.append(require_manuals_export_access)
+    for _guard_function in _guards:
+        _guard = Depends(_guard_function)
+        _route.dependencies.append(_guard)
+        _route.dependant.dependencies.insert(
+            0,
+            get_parameterless_sub_dependant(depends=_guard, path=_route.path_format),
+        )
 
 
 def __getattr__(name: str):
