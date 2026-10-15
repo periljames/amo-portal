@@ -44,6 +44,7 @@ import {
 } from "../../services/qmsProviders";
 import "../../styles/qms-external-providers.css";
 import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
+import ProviderAgreementControls from "./ProviderAgreementControls";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
@@ -277,6 +278,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
               {contract.status === "ACTIVE" && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUSPENDED")}>Suspend</button>}
               {["ACTIVE", "SUSPENDED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "TERMINATED")}>Terminate</button>}
             </div>
+            <ProviderAgreementControls amoCode={amoCode} contract={contract} onChanged={onChanged} />
           </article>
         ))}
       </div>
