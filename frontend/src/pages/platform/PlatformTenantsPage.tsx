@@ -26,7 +26,7 @@ type ModuleDraft = {
 };
 
 type TenantDetailView = {
-  tenant?: { name?: unknown; amo_code?: unknown; login_slug?: unknown } | null;
+  tenant?: { id?: unknown; name?: unknown; amo_code?: unknown; login_slug?: unknown } | null;
   subscription?: { status?: unknown; sku_code?: unknown } | null;
   users?: { total?: unknown } | null;
   assets?: { total?: unknown } | null;
@@ -50,6 +50,9 @@ export default function PlatformTenantsPage() {
     amo_code: "",
     login_slug: "",
     owner_email: "",
+    owner_full_name: "",
+    country: "Kenya",
+    is_demo: false,
     reason: "Initial tenant provisioning",
   });
 
@@ -134,6 +137,39 @@ export default function PlatformTenantsPage() {
       modules.reload();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const provisionTenant = async () => {
+    if (!form.name.trim() || !form.amo_code.trim() || !form.login_slug.trim() || !form.owner_email.trim() || !form.owner_full_name.trim() || !form.reason.trim()) {
+      setActionError("Enter company name, AMO code, login slug, administrator name/email and reason.");
+      return;
+    }
+    setActionError(null);
+    setNotice(null);
+    try {
+      const created = await platformApi.createTenant(form);
+      const record = created.tenant as { id?: string } | undefined;
+      const id = String(record?.id || "");
+      if (id) selectTenant(id);
+      setNotice("Organization and initial administrator created. Send the owner invitation to activate the account.");
+      tenants.reload();
+      detail.reload();
+      tenantUsers.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const inviteOwner = async () => {
+    if (!selected) return;
+    setActionError(null);
+    setNotice(null);
+    try {
+      const invitation = await platformApi.sendTenantOwnerInvitation(selected);
+      setNotice("Owner invitation requested for " + String(invitation.owner_email || "the administrator") + ".");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -222,14 +258,35 @@ export default function PlatformTenantsPage() {
 
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Provision tenant</h2><p>Create the AMO and its initial owner through an audited platform action.</p></div></div>
-          <div className="platform-form"><input placeholder="Tenant name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><input placeholder="AMO code" value={form.amo_code} onChange={(event) => setForm({ ...form, amo_code: event.target.value })} /><input placeholder="Login slug" value={form.login_slug} onChange={(event) => setForm({ ...form, login_slug: event.target.value })} /><input placeholder="Owner email" value={form.owner_email} onChange={(event) => setForm({ ...form, owner_email: event.target.value })} /><textarea placeholder="Reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /><button className="platform-btn primary" onClick={() => execute(() => platformApi.createTenant(form), "Tenant provisioned.")}>Provision new tenant</button></div>
+          <div className="platform-form">
+            <p><strong>1. Organization profile</strong><br /><small>The organization code and login slug must be unique.</small></p>
+            <label><span>Organization name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+            <label><span>AMO code</span><input required value={form.amo_code} onChange={(event) => setForm({ ...form, amo_code: event.target.value.toUpperCase() })} /></label>
+            <label><span>Login URL slug</span><input required value={form.login_slug} onChange={(event) => setForm({ ...form, login_slug: event.target.value.toLowerCase() })} /></label>
+            <label><span>Country</span><input value={form.country} onChange={(event) => setForm({ ...form, country: event.target.value })} /></label>
+            <label><span>Demo account</span><input type="checkbox" checked={form.is_demo} onChange={(event) => setForm({ ...form, is_demo: event.target.checked })} /></label>
+            <p><strong>2. Initial administrator</strong><br /><small>The administrator receives a one-time password setup link. No password is shown in this console.</small></p>
+            <label><span>Administrator full name</span><input required value={form.owner_full_name} onChange={(event) => setForm({ ...form, owner_full_name: event.target.value })} /></label>
+            <label><span>Administrator email</span><input required type="email" value={form.owner_email} onChange={(event) => setForm({ ...form, owner_email: event.target.value })} /></label>
+            <p><strong>3. Approval record</strong></p>
+            <label><span>Provisioning reason</span><textarea required value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /></label>
+            <button className="platform-btn primary" onClick={() => void provisionTenant()}>Create organization and administrator</button>
+            <small>Billing plans and storage allowances must be activated separately; creating an account does not record payment.</small>
+          </div>
         </div>
       </section>
 
       <section className="platform-two">
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Tenant control</h2><p>Time-boxed support access and high-impact tenant state controls.</p></div></div>
-          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p><p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>{integrationSetupPath ? <Link className="platform-btn primary" to={integrationSetupPath}>Open integrations & pipeline</Link> : null}<button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button><button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button></div><details><summary>Advanced tenant record</summary><pre className="platform-json">{JSON.stringify(selectedDetail, null, 2)}</pre></details></> : <EmptyState label="Select a tenant to inspect details." />}
+          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p><p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>
+              <button className="platform-btn primary" onClick={() => void inviteOwner()}>Send owner invitation</button>
+              {selected ? <Link className="platform-btn" to={`/platform/billing?tenant=${encodeURIComponent(selected)}`}>Manage billing</Link> : null}
+              {integrationSetupPath ? <Link className="platform-btn" to={integrationSetupPath}>Integrations & setup</Link> : null}
+              <button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, access_level: "READ_ONLY", expires_in_hours: 1 }), "Read-only support session started.")}>Start support session</button>
+              <button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button>
+              <button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button>
+            </div><p><small>Owner setup is sent to the organization's administrator. Account access is separate from commercial subscription and storage allocations.</small></p></> : <EmptyState label="Select a tenant to inspect details." />}
         </div>
 
         <div className="platform-card">
