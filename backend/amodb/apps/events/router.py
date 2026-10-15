@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import queue
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/api", tags=["events"])
 REPLAY_RETENTION_DAYS = 7
 REPLAY_MAX_EVENTS = 500
 DURABLE_SWEEP_SECONDS = 3.0
+STREAM_REAUTHORIZE_SECONDS = max(5.0, float(os.getenv("EVENT_STREAM_REAUTHORIZE_SECONDS", "15")))
 DURABLE_SWEEP_MAX_EVENTS = 250
 
 
@@ -299,7 +301,7 @@ async def _event_generator(
             # Previously accepted streams must stop after revocation, password
             # reset or suspension; checking only on initial connection is unsafe.
             now = time.monotonic()
-            if now - last_reauthorization >= DURABLE_SWEEP_SECONDS:
+            if now - last_reauthorization >= STREAM_REAUTHORIZE_SECONDS:
                 if not await asyncio.to_thread(
                     _stream_still_authorized, token, effective_amo_id, request,
                 ):
