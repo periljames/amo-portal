@@ -262,6 +262,7 @@ export default function BillingWorkbench() {
 
   return <PlatformShell title="Billing & Revenue Operations" subtitle="Commercial control centre · Accounts, payments, subscriptions and provider jobs"
     actions={<div className="platform-actions"><StatusBadge value={mode === "REAL" ? "LIVE COMMERCIAL DATA" : "DEMO DATA"} /><button className="platform-btn" onClick={refresh}>Refresh</button></div>}>
+    <div className="platform-billing-workbench">
     {error ? <div role="alert" className="platform-error">{error}</div> : null}
     {notice ? <p role="status"><StatusBadge value="SUCCEEDED" /> {notice}</p> : null}
     {overview.error ? <ErrorState error={overview.error} retry={overview.reload} /> : null}
@@ -491,5 +492,6 @@ export default function BillingWorkbench() {
       <label><span>Reason for cancellations</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       <p><Link to="/platform/integrations?tab=providers">Configure payment and tax providers</Link></p>
     </section> : null}
+    </div>
   </PlatformShell>;
 }
