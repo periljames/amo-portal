@@ -77,7 +77,7 @@ def _requirement(db, amo, supplier, requirement_id):
         ON p.amo_id=r.amo_id AND p.supplier_id=:supplier
       WHERE r.amo_id=:amo AND r.id=:id AND r.enabled=true
         AND (r.provider_kind='ALL' OR r.provider_kind=COALESCE(p.provider_kind,'SUPPLIER'))""",
-      db,amo=amo,supplier=supplier,id=requirement_id)
+      amo=amo,supplier=supplier,id=requirement_id)
     if not requirement:
         raise HTTPException(404,"The document requirement is not assigned to this provider category")
     return requirement
