@@ -164,10 +164,8 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       onEvent: (event) => {
         if (!isQualityRealtimeEvent(event)) return;
         const currentMarkers = occurrenceMarkers();
-        // React Query invalidation alone can return a 30-second cached GET.
-        // Clear the HTTP response cache before refetching committed SSE state.
-        clearQmsApiResponseCache();
         if (event.event === "reset") {
+          clearQmsApiResponseCache();
           // Replay-window reset is scoped to the active Quality occurrence. It
           // must not refetch unrelated modules or every active query in the app.
           void invalidateOccurrence(currentMarkers);
@@ -177,6 +175,8 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
           // audit identifier may still affect the active occurrence and are
           // therefore scoped to this occurrence only.
           if (eventAuditId && !currentMarkers.has(eventAuditId)) return;
+          // React Query invalidation must not serve a stale HTTP cache entry.
+          clearQmsApiResponseCache();
           void invalidateOccurrence(currentMarkers);
         }
       },
