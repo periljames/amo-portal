@@ -297,6 +297,7 @@ export const platformApi = {
   tenants: (params: { q?: string; status?: string; data_mode?: string; limit?: number; offset?: number } = {}) => request<PlatformList<PlatformTenant>>(`/platform/tenants${qs(params)}`),
   tenantDetail: (id: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}`),
   createTenant: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/tenants", { method: "POST", body: JSON.stringify(payload) }),
+  sendTenantOwnerInvitation: (tenantId: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(tenantId)}/owner-invitation`, { method: "POST", body: "{}" }),
   tenantAction: (id: string, action: "suspend" | "reactivate" | "lock" | "unlock" | "read-only", payload: Record<string, unknown>) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}/${action}`, { method: "POST", body: JSON.stringify(payload) }),
   tenantEntitlements: (id: string, payload: Record<string, unknown>) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}/entitlements`, { method: "PATCH", body: JSON.stringify(payload) }),
   startSupportSession: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/support-sessions", { method: "POST", body: JSON.stringify(payload) }),
