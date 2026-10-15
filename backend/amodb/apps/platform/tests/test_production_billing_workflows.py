@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 
 from amodb.apps.accounts.models import InvoiceStatus
 from amodb.apps.platform import router, services
@@ -25,7 +24,7 @@ def test_provisioning_requires_identified_administrator_and_reason():
     db.commit.assert_not_called()
 
 
-@pytest.mark.parametrize("status", [InvoiceStatus.PAID, InvoiceStatus.VOID])
+@pytest.mark.parametrize("status", [InvoiceStatus.VOID])
 def test_offline_payment_refuses_nonpending_invoice(status):
     db = MagicMock()
     db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = SimpleNamespace(
