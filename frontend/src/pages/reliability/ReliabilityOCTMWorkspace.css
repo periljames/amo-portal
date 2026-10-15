@@ -35,3 +35,10 @@
 .octm__row-actions .btn { padding: .55rem .75rem; }
 .octm__review h3 { margin-top: 0; }
 .octm__panel:focus-within { scroll-margin-top: 1rem; }
+
+.octm__pagination { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: flex-end; padding-top: .8rem; }
+.octm__pagination span { margin-right: auto; }
+.octm__attestations { display: grid; gap: .6rem; padding: .75rem; background: color-mix(in srgb, #0f766e 6%, Canvas); border-radius: .5rem; }
+.octm__attestations label { display: flex; flex-direction: row; align-items: flex-start; font-weight: 500; }
+.octm__attestations input[type="checkbox"] { width: 1.25rem; min-height: 1.25rem; height: 1.25rem; flex: 0 0 1.25rem; margin-top: .1rem; }
+.octm__hint { opacity: .86; max-width: 90ch; }
