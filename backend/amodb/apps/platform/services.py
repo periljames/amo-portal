@@ -292,23 +292,83 @@ def latest_resource_snapshot(db: Session, tenant_id: str) -> dict[str, Any] | No
 
 
 def create_tenant(db: Session, *, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
-    required = ["name", "amo_code", "login_slug"]
+    """Provision the AMO, first owner and access profiles in one transaction.
+
+    No administrator password or reset token is returned to the console.
+    The owner activates the account using the normal one-time reset flow.
+    No paid subscription is invented during provisioning.
+    """
+    from amodb.apps.accounts import access_control
+    from amodb.security import get_password_hash
+
+    required = ["name", "amo_code", "login_slug", "owner_email", "owner_full_name", "reason"]
     missing = [key for key in required if not str(payload.get(key) or "").strip()]
     if missing:
         raise ValueError("Missing required fields: " + ", ".join(missing))
-    amo = account_models.AMO(
-        name=str(payload["name"]).strip(),
-        amo_code=str(payload["amo_code"]).strip().upper(),
-        login_slug=str(payload["login_slug"]).strip().lower(),
-        contact_email=payload.get("owner_email") or payload.get("contact_email"),
-        country=payload.get("region") or payload.get("country"),
-        is_active=str(payload.get("initial_status") or "ACTIVE").upper() != "INACTIVE",
-    )
-    db.add(amo)
-    db.flush()
-    audit(db, actor_user_id=actor_id, action="tenant.provisioned", tenant_id=amo.id, entity_type="tenant", entity_id=amo.id, reason=payload.get("reason"), details={"name": amo.name, "plan": payload.get("plan")})
-    db.commit()
-    return get_tenant_detail(db, amo.id)
+    owner_email = str(payload["owner_email"]).strip().lower()
+    if "@" not in owner_email or len(owner_email) > 255:
+        raise ValueError("A valid owner email is required")
+    owner_name = str(payload["owner_full_name"]).strip()
+    if len(owner_name) < 3:
+        raise ValueError("Owner name must contain at least three characters")
+    code = str(payload["amo_code"]).strip().upper()
+    slug = str(payload["login_slug"]).strip().lower()
+    if not code or not slug or code == "ROOT" or slug in {"root", "system"}:
+        raise ValueError("Reserved or invalid tenant code / login slug")
+    if db.query(account_models.AMO.id).filter(
+        (account_models.AMO.amo_code == code) | (account_models.AMO.login_slug == slug)
+    ).first():
+        raise ValueError("Tenant code or login slug already exists")
+    pieces = owner_name.split(" ", 1)
+    first_name = pieces[0]
+    last_name = pieces[1] if len(pieces) > 1 else "-"
+    # A cryptographically random unrecoverable password is stored only as a
+    # verifier; ownership requires the email setup/reset verification process.
+    password = "V" + secrets.token_urlsafe(36) + "a1"
+    try:
+        tenant = account_models.AMO(
+            name=str(payload["name"]).strip(), amo_code=code, login_slug=slug,
+            contact_email=owner_email, country=str(payload.get("country") or "").strip() or None,
+            time_zone=str(payload.get("time_zone") or "Africa/Nairobi").strip(),
+            is_demo=bool(payload.get("is_demo", False)),
+            is_active=bool(payload.get("is_active", True)),
+        )
+        db.add(tenant)
+        db.flush()
+        owner = account_models.User(
+            amo_id=tenant.id, staff_code="OWNER-" + secrets.token_hex(5).upper(),
+            email=owner_email, first_name=first_name, last_name=last_name,
+            full_name=owner_name, role=account_models.AccountRole.USER,
+            hashed_password=get_password_hash(password),
+            is_active=True, is_superuser=False, is_amo_admin=True,
+            is_auditor=False, must_change_password=True,
+            approved_by_user_id=actor_id, approved_at=now_utc(),
+            approval_notes="Initial tenant administrator provisioned by platform superuser",
+        )
+        db.add(owner)
+        db.flush()
+        access_control.ensure_tenant_access_profiles(db, amo_id=tenant.id)
+        if access_control.primary_access_profile(db, user=owner) is None:
+            raise ValueError("Unable to assign initial owner's tenant access profile")
+        audit(
+            db, actor_user_id=actor_id, action="tenant.provisioned",
+            tenant_id=tenant.id, entity_type="tenant", entity_id=tenant.id,
+            reason=str(payload["reason"]).strip(),
+            details={"name": tenant.name, "owner_user_id": owner.id,
+                     "owner_email": owner.email, "status": "PASSWORD_SETUP_REQUIRED"},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    result = get_tenant_detail(db, tenant.id)
+    result["onboarding"] = {
+        "status": "PASSWORD_SETUP_REQUIRED",
+        "owner_user_id": owner.id, "owner_email": owner.email,
+        "setup_delivery": "Send secure owner invitation from the platform tenant controls",
+        "paid_subscription_active": False,
+    }
+    return result
 
 
 def set_tenant_active(db: Session, *, tenant_id: str, active: bool, actor_id: str, reason: str) -> dict[str, Any]:
