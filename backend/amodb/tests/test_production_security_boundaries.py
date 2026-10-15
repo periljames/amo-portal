@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
 from amodb.database import Base
-from amodb.apps.accounts import models as accounts, session_service
+from amodb.apps.accounts import models as accounts, session_service, services
 from amodb.apps.manuals import models as manuals
 from amodb.apps.manuals.core_router import transition_revision, transition_revision_lifecycle
 from amodb.apps.manuals.tenant_route_guard import (
@@ -36,6 +36,8 @@ def security_db():
         accounts.RefreshSessionToken.__table__,
         accounts.PortalRefreshSession.__table__,
         accounts.UserActiveContext.__table__,
+        accounts.AccountSecurityEvent.__table__,
+        accounts.PasswordResetToken.__table__,
         manuals.Tenant.__table__,
         manuals.Manual.__table__,
         manuals.ManualRevision.__table__,
@@ -160,6 +162,27 @@ def test_refresh_cannot_survive_revocation_or_tenant_suspension(security_db):
     security_db.commit()
     with pytest.raises(session_service.RefreshRejected):
         session_service.rotate_session(security_db, raw_token=second.refresh_token)
+
+
+def test_password_reset_token_is_indexed_single_use_and_revokes_session(security_db):
+    amo = _amo(security_db, "alpha")
+    user = _user(security_db, amo, "person")
+    issued = session_service.create_session(
+        security_db, user=user, ip_address=None, user_agent="test",
+    )
+    raw = services.create_password_reset_token(security_db, user=user)
+    row = services._find_matching_reset_token(security_db, raw)
+    assert row is not None
+    assert row.token_hash.startswith("hmac-sha256:")
+    assert raw not in row.token_hash
+
+    changed = services.redeem_password_reset_token(
+        security_db, raw_token=raw, new_password="StrongNewPassword2026!",
+    )
+    assert changed is not None
+    assert services._find_matching_reset_token(security_db, raw) is None
+    with pytest.raises(session_service.RefreshRejected):
+        session_service.rotate_session(security_db, raw_token=issued.refresh_token)
 
 
 def test_must_change_password_rejects_direct_business_api(security_db):
