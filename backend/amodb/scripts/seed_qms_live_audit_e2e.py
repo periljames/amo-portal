@@ -572,7 +572,10 @@ def seed() -> None:
             return revision
 
         issue_preparation(audit, user_a)
-        issue_preparation(realtime_audit, user_a)
+        # Setup/Prepare acceptance starts before the first governed issue.
+        # Real-time fieldwork journeys still require the issued baseline.
+        if os.getenv("QMS_E2E_PREPARE_UNSTARTED") != "1":
+            issue_preparation(realtime_audit, user_a)
         issue_preparation(ceremony_audit, user_a)
 
         db.add(QualityAuditClosingNarrative(
