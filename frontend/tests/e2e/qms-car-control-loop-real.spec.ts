@@ -223,7 +223,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     await publicPage.reload({ waitUntil: "domcontentloaded" });
     await expect(publicPage.getByText("Closed", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(publicPage.getByText(/This CAR is closed/i)).toBeVisible();
+    await expect(publicPage.locator(".car-invite-readonly").first()).toContainText(/This CAR is closed/i);
 
     expect(publicFailures).toEqual([]);
     expect(internalFailures).toEqual([]);
