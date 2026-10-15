@@ -30,12 +30,14 @@ export type PlatformBillingTenant = {
   pending_invoice_amount_cents: number;
   paid_invoice_amount_cents: number;
   actionable_invoice_id?: string | null;
+  invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
 };
 export type PlatformBillingControl = {
   data_mode: string;
   generated_at: string;
   counts: Record<string, number>;
   invoices: Record<string, number>;
+  invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
   tenants: PlatformBillingTenant[];
 };
 export type PlatformBillingInvoice = {
