@@ -358,10 +358,19 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
 
     await auditeePage.getByRole("button", { name: "Refresh" }).click();
     await expect(auditeePage.getByLabel("Issued audit report")).toBeVisible({ timeout: 30_000 });
-    const issuedDownloadPromise = auditeePage.waitForEvent("download");
+    // The guest downloads through authenticated fetch -> Blob. Assert the
+    // actual governed PDF response rather than depending on a browser download
+    // event (which is not guaranteed for a client-generated Blob).
+    const issuedPdfResponse = auditeePage.waitForResponse((response) =>
+      response.request().method() === "GET"
+      && new URL(response.url()).pathname === "/quality/audit-access/issued-report/download",
+      { timeout: 30_000 },
+    );
     await auditeePage.getByRole("button", { name: "Download issued report" }).click();
-    const issuedDownload = await issuedDownloadPromise;
-    expect(await issuedDownload.path()).toBeTruthy();
+    const issuedPdf = await issuedPdfResponse;
+    expect(issuedPdf.status(), await issuedPdf.text().catch(() => "PDF response unavailable")).toBe(200);
+    const issuedPdfBytes = await issuedPdf.body();
+    expect(issuedPdfBytes.subarray(0, 5).toString("utf8")).toBe("%PDF-");
     await auditeePage.getByRole("button", { name: "Acknowledge issued report" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision and checksum", { timeout: 30_000 });
 
