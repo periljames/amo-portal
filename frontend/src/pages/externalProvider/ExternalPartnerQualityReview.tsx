@@ -85,10 +85,7 @@ export default function ExternalPartnerQualityReview({amoCode,manager}:{
       <div><strong>{row.legal_name} · {row.filename}</strong><small>{row.evidence_type} · {row.size_bytes} bytes · {row.status}</small></div>
       <button disabled={busy===row.id} onClick={()=>void download(row)}>Download for review</button>
       {row.review_note&&<p>Review note: {row.review_note}</p>}
-      {manager&&row.status==="PENDING_REVIEW"&&<div className="vendor-actions">
-        <small>Acceptance requires controlled intake and canonical QMS linkage below.</small>
-        <button disabled={busy===row.id} onClick={()=>void decide("evidence",row.id,"REJECTED")}>Reject submission</button>
-      </div>}
+      {row.status==="PENDING_REVIEW"&&<p>Legacy unclassified evidence is preserved for historical review. Submit a new classified response through the controlled documents queue below.</p>}
     </div>)}
     <div className="vendor-actions">
       <button disabled={offset===0||Boolean(busy)} onClick={()=>setOffset(Math.max(0,offset-25))}>Previous</button>
