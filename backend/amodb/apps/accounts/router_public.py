@@ -40,6 +40,8 @@ REFRESH_COOKIE_SECURE = (
     or os.getenv("REFRESH_COOKIE_SECURE")  # legacy name
     or ("true" if _APP_ENV in {"prod", "production"} else "false")
 ).lower() in {"1", "true", "yes"}
+if _APP_ENV in {"prod", "production", "staging"} and not REFRESH_COOKIE_SECURE:
+    raise RuntimeError("PORTAL_REFRESH_COOKIE_SECURE=true is required for production/staging HTTPS authentication.")
 
 
 def _set_refresh_cookie(response: Response, *, raw_token: str, expires_at: datetime) -> None:
