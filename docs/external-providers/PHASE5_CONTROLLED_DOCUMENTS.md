@@ -33,3 +33,4 @@ Document Control first publishes the latest authorized form/revision in DMS and 
 - None of the modified sources, schemas or screens have been migrated, built, linted, typechecked, exercised in a browser, load-tested or run through tests/CI by this implementation. Automatic GitHub CI triggered by commits is not an accepted green result without inspection. See `PHASE10_VERIFICATION_LEDGER.md` for exact verification obligations. Do not merge PR #560 or claim production readiness until Phase 10.
 
 **Next permitted implementation phase:** Phase 6 only on explicit instruction, on the **same branch and same PR**. No Phase 6 code is included here.
+- Maintenance amendments/renewals can create a new independent DRAFT linked by a tenant/provider-qualified predecessor FK, with an explicit change reason. Earlier executed revisions remain immutable; a former agreement can be marked SUPERSEDED only after its linked successor is ACTIVE. This is not automatic commercial approval.
