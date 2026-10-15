@@ -368,7 +368,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     );
     await auditeePage.getByRole("button", { name: "Download issued report" }).click();
     const issuedPdf = await issuedPdfResponse;
-    expect(issuedPdf.status(), await issuedPdf.text().catch(() => "PDF response unavailable")).toBe(200);
+    expect(issuedPdf.status()).toBe(200);
     const issuedPdfBytes = await issuedPdf.body();
     expect(issuedPdfBytes.subarray(0, 5).toString("utf8")).toBe("%PDF-");
     await auditeePage.getByRole("button", { name: "Acknowledge issued report" }).click();
