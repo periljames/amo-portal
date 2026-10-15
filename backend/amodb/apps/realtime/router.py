@@ -32,7 +32,8 @@ realtime_bearer = HTTPBearer(auto_error=False)
 
 def get_current_active_realtime_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(realtime_bearer),
-    db: Session = Depends(get_read_db),
+    db: Session = Depends(get_db),
+    request: Request = None,
 ) -> account_models.User:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
@@ -41,7 +42,7 @@ def get_current_active_realtime_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     current_user = get_current_user(token=credentials.credentials, db=db)
-    return get_current_active_user(current_user=current_user, db=db)
+    return get_current_active_user(current_user=current_user, db=db, request=request)
 
 
 def _flush_outbox() -> None:
