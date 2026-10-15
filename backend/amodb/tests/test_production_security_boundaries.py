@@ -4,7 +4,6 @@ Full PostgreSQL/RLS, two-browser and external-provider acceptance is separate.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
