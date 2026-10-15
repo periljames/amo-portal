@@ -402,11 +402,15 @@ def summarize_daily_coverage(snapshots, entries) -> dict:
                 "flight_leg": flight.flight_leg,
                 "engine_serial_number": flight.engine_serial_number,
             }
-    observed = set()
+    observed = {}
     for row in entries:
         if row.sector_ref and row.event_type != "NO_OPERATION":
-            observed.add((row.aircraft_serial_number, row.engine_position, row.sector_ref.strip().upper()))
-    pending = [value for key, value in expected.items() if key not in observed]
+            key = (row.aircraft_serial_number, row.engine_position, row.sector_ref.strip().upper())
+            observed.setdefault(key, set()).add(row.engine_serial_number.strip().upper())
+    pending = [value for key, value in expected.items()
+               if key not in observed or (
+                   value["engine_serial_number"] and
+                   value["engine_serial_number"].strip().upper() not in observed[key])]
     return {
         "registered_snapshot_sectors": len(expected),
         "matched_sectors": len(expected) - len(pending),
