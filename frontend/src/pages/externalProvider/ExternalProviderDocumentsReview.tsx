@@ -38,7 +38,8 @@ type Submission={id:string;filename:string;status:string;evidence_type:string;
   related_kind:string;related_id:string|null;requirement_title:string|null;
   legal_name:string;supplier_id:number;email:string;sha256:string;size_bytes:number;
   valid_until:string|null;form_revision_id:string|null;dms_revision_id:string|null;
-  qms_evidence_id:string|null;review_note:string|null;created_at:string};
+  qms_evidence_id:string|null;review_note:string|null;created_at:string;
+  dms_retention_status:string|null;dms_legal_hold:boolean|null;dms_retention_until:string|null};
 type DmsOption={id:string;code:string;title:string;revision_id:string;rev_number:string};
 type Decision="ACCEPTED"|"RETURNED"|"REJECTED";
 const blank={code:"",provider_kind:"ALL",title:"",description:"",
@@ -192,6 +193,7 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       {s.review_note&&<p>Review: {s.review_note}</p>}
       {s.qms_evidence_id&&<p>Canonical QMS evidence ID: {s.qms_evidence_id} (separate verification required)</p>}
       {s.dms_revision_id&&<p>Exact linked DMS revision: {s.dms_revision_id}</p>}
+      {s.dms_revision_id&&<p>DMS retention: {s.dms_retention_status||"Not registered"} · Legal hold: {s.dms_legal_hold?"Yes":"No"} · Until {s.dms_retention_until||"No prescribed date"} (manage disposition in DMS)</p>}
       <div className="vendor-actions">
         <button type="button" disabled={busy===s.id} onClick={()=>void download(s)}>Download original</button>
         {s.status==="PENDING_REVIEW"&&<React.Fragment>
