@@ -1088,8 +1088,8 @@ def _reset_failed_logins(
     user.login_attempts = 0
     user.locked_until = None
     user.lockout_count = 0
-    if hasattr(user, "token_revoked_at"):
-        user.token_revoked_at = None
+    # Do not erase the revocation boundary at login: old access tokens and
+    # recovery credentials must remain invalid even after a new login.
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
@@ -1470,6 +1470,10 @@ def change_password(
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
     user.password_changed_at = datetime.now(timezone.utc)
+    from . import session_service
+    session_service.revoke_user_sessions(
+        db, user=user, reason="password_changed",
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -1588,6 +1592,10 @@ def redeem_password_reset_token(
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
     user.password_changed_at = datetime.now(timezone.utc)
+    from . import session_service
+    session_service.revoke_user_sessions(
+        db, user=user, reason="password_changed",
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
