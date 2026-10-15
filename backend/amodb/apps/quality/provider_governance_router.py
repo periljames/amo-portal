@@ -1173,6 +1173,21 @@ def decide_provider_evidence(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rejected or superseded evidence cannot be re-verified; link a new authoritative revision.")
     if target == "VERIFIED" and row.get("valid_until") and row["valid_until"] < _today():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Expired evidence cannot be verified as current.")
+    # Phase 5 staged provider originals may be VERIFIED only through canonical
+    # QMS, after the tenant/provider-scoped intake decision is ACCEPTED.
+    intake = None
+    if row["source_system"] == "EXTERNAL_PROVIDER_STAGING" and target == "VERIFIED":
+        intake = db.execute(text("""
+            SELECT s.id,s.supersedes_submission_id,s.requirement_id,s.sha256
+            FROM external_partner_evidence_submissions s
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=s.amo_id AND p.supplier_id=:supplier
+            WHERE s.amo_id=:amo AND s.id=:submission AND s.qms_evidence_id=:qms
+              AND s.status='ACCEPTED'
+        """), {"amo":ctx.amo_id,"supplier":provider_id,
+               "submission":row["source_id"],"qms":evidence_id}).mappings().first()
+        if not intake:
+            raise HTTPException(status_code=409, detail="Provider original has not completed the controlled intake review")
     db.execute(
         text(
             """
@@ -1194,6 +1209,40 @@ def decide_provider_evidence(
             "id": evidence_id,
         },
     )
+    # Supersession follows successful independent QMS verification, not merely
+    # upload/acceptance. Keep both previous originals and append-only history.
+    if intake and intake["supersedes_submission_id"]:
+        former = db.execute(text("""
+            SELECT s.id,s.qms_evidence_id,s.status,s.requirement_id,s.related_kind,s.related_id
+            FROM external_partner_evidence_submissions s
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=s.amo_id AND p.supplier_id=:supplier
+            WHERE s.amo_id=:amo AND s.id=:old FOR UPDATE
+        """), {"amo":ctx.amo_id,"supplier":provider_id,
+               "old":intake["supersedes_submission_id"]}).mappings().first()
+        if not former or former["requirement_id"] != intake["requirement_id"]:
+            raise HTTPException(status_code=409,detail="Replacement submission provenance no longer matches")
+        if former["qms_evidence_id"]:
+            db.execute(text("""
+                UPDATE quality_external_provider_evidence
+                SET status='SUPERSEDED',updated_at=NOW()
+                WHERE amo_id=:amo AND supplier_id=:supplier
+                AND id=:old_qms AND status IN ('PENDING','VERIFIED','EXPIRED')
+            """), {"amo":ctx.amo_id,"supplier":provider_id,
+                   "old_qms":former["qms_evidence_id"]})
+        if former["status"]=="ACCEPTED":
+            db.execute(text("""
+                UPDATE external_partner_evidence_submissions SET status='SUPERSEDED'
+                WHERE amo_id=:amo AND id=:old AND status='ACCEPTED'
+            """), {"amo":ctx.amo_id,"old":former["id"]})
+            db.execute(text("""
+                INSERT INTO external_provider_document_events
+                (id,amo_id,submission_id,actor_user_id,action,details_json)
+                VALUES(:id,:amo,:former,:actor,'SUPERSEDED_BY_VERIFIED',CAST(:details AS JSON))
+            """), {"id":str(uuid.uuid4()),"amo":ctx.amo_id,"former":former["id"],
+                  "actor":ctx.user_id,"details":__import__("json").dumps(
+                      {"replacement_submission_id":intake["id"],
+                       "replacement_qms_evidence_id":evidence_id})})
     audit_services.log_event(
         db,
         amo_id=ctx.amo_id,
