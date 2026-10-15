@@ -104,6 +104,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [reviewNote, setReviewNote] = useState("");
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewChecks, setReviewChecks] = useState({ source: false, engine: false, exposure: false });
+  const [profileApproval, setProfileApproval] = useState<Profile | null>(null);
+  const [profileApprovalNote, setProfileApprovalNote] = useState("");
+  const [profileDataConfirmed, setProfileDataConfirmed] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState("");
   const [newProfile, setNewProfile] = useState({ engine_serial_number: "", installation_ref: "", engine_model: "",
     limit_qt_per_fh: "", alert_increase_percent: "", technical_data_ref: "", technical_data_revision: "", effective_from: "" });
@@ -198,6 +202,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
 
   const prepareReview = async (item: Entry, decision: "VERIFIED" | "RETURNED") => {
     setReviewTarget(item); setReviewDecision(decision); setReviewNote(""); setReadiness(null);
+    setReviewChecks({ source: false, engine: false, exposure: false });
     setReviewLoading(true); setError("");
     try {
       const checked = await apiRequest<Readiness>("/reliability/octm/entries/" +
@@ -209,10 +214,13 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const submitReview = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!reviewTarget) return;
-    if (reviewDecision === "VERIFIED" && !readiness?.ready_for_verification) return;
+    if (reviewDecision === "VERIFIED" && (!readiness?.ready_for_verification ||
+      !reviewChecks.source || !reviewChecks.engine || !reviewChecks.exposure)) return;
     await run(() => apiRequest("/reliability/octm/entries/" + encodeURIComponent(reviewTarget.id) + "/review", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision: reviewDecision, note: reviewNote.trim() }),
+      body: JSON.stringify({ decision: reviewDecision, note: reviewNote.trim(),
+        source_checked: reviewChecks.source, engine_identity_checked: reviewChecks.engine,
+        exposure_checked: reviewChecks.exposure }),
     }), () => { setReviewTarget(null); setReadiness(null); setReviewNote(""); });
   };
 
@@ -412,9 +420,21 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               <label>Reason or source verification notes
                 <textarea required minLength={3} maxLength={2000} rows={3} value={reviewNote}
                   onChange={(event) => setReviewNote(event.target.value)} /></label>
+              {reviewDecision === "VERIFIED" && <div className="octm__attestations">
+                <label><input type="checkbox" checked={reviewChecks.source}
+                  onChange={(event) => setReviewChecks((previous) => ({ ...previous, source: event.target.checked }))} />
+                  I inspected the original techsheet and confirmed the source quantities and servicing event.</label>
+                <label><input type="checkbox" checked={reviewChecks.engine}
+                  onChange={(event) => setReviewChecks((previous) => ({ ...previous, engine: event.target.checked }))} />
+                  I checked the physical engine serial, position and installation against technical records.</label>
+                <label><input type="checkbox" checked={reviewChecks.exposure}
+                  onChange={(event) => setReviewChecks((previous) => ({ ...previous, exposure: event.target.checked }))} />
+                  I confirmed the flight-hour counter/sector exposure and checked duplicate servicing events.</label>
+              </div>}
               <div className="octm__row-actions">
                 <button type="submit" className="btn btn-primary" disabled={busy || reviewLoading ||
-                  reviewNote.trim().length < 3 || (reviewDecision === "VERIFIED" && !readiness?.ready_for_verification)}>
+                  reviewNote.trim().length < 3 || (reviewDecision === "VERIFIED" &&
+                    (!readiness?.ready_for_verification || !reviewChecks.source || !reviewChecks.engine || !reviewChecks.exposure))}>
                   {reviewDecision === "VERIFIED" ? "Confirm independent verification" : "Return for correction"}</button>
                 <button type="button" className="btn btn-secondary" onClick={() => { setReviewTarget(null); setReadiness(null); }}>Cancel</button>
               </div>
@@ -464,8 +484,28 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               <td>{profile.engine_serial_number}<small>{profile.installation_ref}</small></td><td>{profile.engine_model} · v{profile.version}</td>
               <td>{profile.limit_qt_per_fh}</td><td>{profile.technical_data_ref} · {profile.technical_data_revision}</td><td>{profile.status}</td>
               <td><button disabled={busy || profile.status !== "DRAFT" || !has("reliability.programme.approve")} onClick={() =>
-                void run(() => apiRequest("/reliability/octm/profiles/" + encodeURIComponent(profile.id) + "/approve", { method: "POST" }))}>Approve</button></td>
+                { setProfileApproval(profile); setProfileApprovalNote(""); setProfileDataConfirmed(false); }}>Review / approve</button></td>
             </tr>)}</tbody></table></div>
+          {profileApproval && <form className="octm__review" onSubmit={(event) => { event.preventDefault();
+            void run(() => apiRequest("/reliability/octm/profiles/" + encodeURIComponent(profileApproval.id) + "/approve", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ confirmed_current_technical_data: profileDataConfirmed, note: profileApprovalNote.trim() }),
+            }), () => { setProfileApproval(null); setProfileApprovalNote(""); setProfileDataConfirmed(false); });
+          }}>
+            <h3>Authorize engine limit — {profileApproval.engine_serial_number}, v{profileApproval.version}</h3>
+            <p>Manufacturer reference: {profileApproval.technical_data_ref}, revision {profileApproval.technical_data_revision}.
+              Limit: {profileApproval.limit_qt_per_fh} qt/FH.</p>
+            <label className="octm__continue"><input type="checkbox" checked={profileDataConfirmed}
+              onChange={(event) => setProfileDataConfirmed(event.target.checked)} />
+              I checked the cited manufacturer technical data and confirmed the current limit and applicability.</label>
+            <label>Independent approval basis<textarea required minLength={5} rows={2} value={profileApprovalNote}
+              onChange={(event) => setProfileApprovalNote(event.target.value)} /></label>
+            <div className="octm__row-actions">
+              <button className="btn btn-primary" disabled={busy || !profileDataConfirmed ||
+                profileApprovalNote.trim().length < 5}>Confirm profile approval</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setProfileApproval(null)}>Cancel</button>
+            </div>
+          </form>}
         </section>}
       </>}
     </main>
