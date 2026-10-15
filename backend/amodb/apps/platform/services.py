@@ -274,7 +274,14 @@ def _license_payload(row) -> dict[str, Any] | None:
 
 
 def _invoice_payload(row) -> dict[str, Any]:
-    return {"id": row.id, "amo_id": row.amo_id, "amount_cents": row.amount_cents, "currency": row.currency, "status": getattr(row.status, "value", str(row.status)), "description": row.description, "due_at": row.due_at, "paid_at": row.paid_at, "created_at": row.created_at}
+    return {
+        "id": row.id, "invoice_number": account_services.format_invoice_number(row),
+        "amo_id": row.amo_id, "amount_cents": row.amount_cents, "currency": row.currency,
+        "status": getattr(row.status, "value", str(row.status)),
+        "description": row.description, "issued_at": row.issued_at,
+        "due_at": row.due_at, "paid_at": row.paid_at, "created_at": row.created_at,
+        "license_id": row.license_id, "ledger_entry_id": row.ledger_entry_id,
+    }
 
 
 def latest_resource_snapshot(db: Session, tenant_id: str) -> dict[str, Any] | None:
@@ -612,24 +619,121 @@ def run_billing_maintenance_now(db: Session, *, actor_id: str, reason: str | Non
     return result
 
 
-def list_invoices(db: Session, *, data_mode: str | None = "REAL", limit: int = 50, offset: int = 0) -> dict[str, Any]:
+def list_invoices(
+    db: Session, *, data_mode: str | None = "REAL", limit: int = 50,
+    offset: int = 0, tenant_id: str | None = None,
+    status_filter: str | None = None, q: str | None = None,
+) -> dict[str, Any]:
+    """Filter and paginate invoices in the authoritative tenant scope."""
     mode = _normalise_data_mode(data_mode)
-    tenant_ids = _tenant_id_set(db, data_mode=mode)
-    q = db.query(account_models.BillingInvoice)
-    if tenant_ids:
-        q = q.filter(account_models.BillingInvoice.amo_id.in_(tenant_ids))
-    else:
-        q = q.filter(account_models.BillingInvoice.amo_id == "__none__")
-    q = q.order_by(account_models.BillingInvoice.created_at.desc())
-    total = q.count()
-    return {"items": [_invoice_payload(row) for row in q.offset(offset).limit(min(limit, 200)).all()], "total": total, "limit": limit, "offset": offset, "data_mode": mode}
+    query = db.query(account_models.BillingInvoice).join(
+        account_models.AMO,
+        account_models.BillingInvoice.amo_id == account_models.AMO.id,
+    )
+    query = _apply_data_mode_filter(query, mode)
+    if tenant_id:
+        query = query.filter(account_models.BillingInvoice.amo_id == tenant_id)
+    if status_filter:
+        state = status_filter.strip().upper()
+        if state not in {"PENDING", "PAID", "VOID", "OVERDUE"}:
+            raise ValueError("Unsupported invoice status filter")
+        if state == "OVERDUE":
+            query = query.filter(
+                account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
+                account_models.BillingInvoice.due_at < now_utc(),
+            )
+        else:
+            query = query.filter(account_models.BillingInvoice.status == account_models.InvoiceStatus(state))
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            (account_models.AMO.name.ilike(term))
+            | (account_models.AMO.amo_code.ilike(term))
+            | (account_models.BillingInvoice.description.ilike(term))
+        )
+    query = query.order_by(account_models.BillingInvoice.created_at.desc())
+    total = query.count()
+    items = [_invoice_payload(row) for row in query.offset(max(0, offset)).limit(min(max(1, limit), 200)).all()]
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "data_mode": mode}
 
 
-def mark_invoice_paid(db: Session, *, invoice_id: str, actor_id: str, reason: str) -> dict[str, Any]:
-    row = db.get(account_models.BillingInvoice, invoice_id)
-    if not row: raise ValueError("Invoice not found")
-    row.status = account_models.InvoiceStatus.PAID; row.paid_at = now_utc()
-    audit(db, actor_user_id=actor_id, action="billing.invoice.mark_paid", tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason)
+def mark_invoice_paid(
+    db: Session, *, invoice_id: str, actor_id: str, reason: str,
+    payment_reference: str | None = None,
+) -> dict[str, Any]:
+    """Record an *offline verified* payment, not an external Stripe simulation."""
+    if not reason or not reason.strip():
+        raise ValueError("A reason is required")
+    row = (
+        db.query(account_models.BillingInvoice)
+        .filter(account_models.BillingInvoice.id == invoice_id)
+        .with_for_update()
+        .first()
+    )
+    if not row:
+        raise ValueError("Invoice not found")
+    if row.status == account_models.InvoiceStatus.PAID:
+        return _invoice_payload(row)
+    if row.status != account_models.InvoiceStatus.PENDING:
+        raise ValueError("Only pending invoices may be marked paid")
+    key = f"invoice-offline-payment:{row.id}"
+    existing = db.query(account_models.LedgerEntry).filter(
+        account_models.LedgerEntry.amo_id == row.amo_id,
+        account_models.LedgerEntry.idempotency_key == key,
+    ).first()
+    if not existing:
+        db.add(account_models.LedgerEntry(
+            amo_id=row.amo_id, license_id=row.license_id,
+            amount_cents=-int(row.amount_cents), currency=row.currency,
+            entry_type=account_models.LedgerEntryType.PAYMENT,
+            description=f"Offline payment for {account_services.format_invoice_number(row)}",
+            idempotency_key=key, recorded_at=now_utc(),
+        ))
+    row.status = account_models.InvoiceStatus.PAID
+    row.paid_at = now_utc()
+    audit(
+        db, actor_user_id=actor_id, action="billing.invoice.offline_payment_recorded",
+        tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason,
+        details={"payment_reference": (payment_reference or "").strip()[:255], "amount_cents": row.amount_cents, "currency": row.currency},
+    )
+    db.commit()
+    return _invoice_payload(row)
+
+
+def void_invoice(db: Session, *, invoice_id: str, actor_id: str, reason: str) -> dict[str, Any]:
+    """Void an unpaid invoice and reverse its original ledger charge once."""
+    if not reason or not reason.strip():
+        raise ValueError("A reason is required")
+    row = db.query(account_models.BillingInvoice).filter(
+        account_models.BillingInvoice.id == invoice_id,
+    ).with_for_update().first()
+    if not row:
+        raise ValueError("Invoice not found")
+    if row.status == account_models.InvoiceStatus.VOID:
+        return _invoice_payload(row)
+    if row.status != account_models.InvoiceStatus.PENDING:
+        raise ValueError("Paid invoices cannot be voided; use a governed refund")
+    if row.ledger_entry_id:
+        original = db.get(account_models.LedgerEntry, row.ledger_entry_id)
+        if original and original.entry_type == account_models.LedgerEntryType.CHARGE:
+            reversal_key = f"invoice-void:{row.id}"
+            already_reversed = db.query(account_models.LedgerEntry).filter(
+                account_models.LedgerEntry.amo_id == row.amo_id,
+                account_models.LedgerEntry.idempotency_key == reversal_key,
+            ).first()
+            if not already_reversed:
+                db.add(account_models.LedgerEntry(
+                    amo_id=row.amo_id, license_id=row.license_id,
+                    amount_cents=-int(original.amount_cents), currency=original.currency,
+                    entry_type=account_models.LedgerEntryType.ADJUSTMENT,
+                    description=f"Void invoice {account_services.format_invoice_number(row)}",
+                    idempotency_key=reversal_key, recorded_at=now_utc(),
+                ))
+    row.status = account_models.InvoiceStatus.VOID
+    audit(
+        db, actor_user_id=actor_id, action="billing.invoice.voided",
+        tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason,
+    )
     db.commit()
     return _invoice_payload(row)
 
