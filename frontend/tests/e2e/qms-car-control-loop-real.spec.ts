@@ -60,8 +60,11 @@ async function authenticatedPost(page: Page, path: string, payload: unknown): Pr
       },
       body: JSON.stringify(body),
     });
-    let responseBody: unknown = null;
-    try { responseBody = await response.json(); } catch { responseBody = await response.text(); }
+    // A Fetch response is single-use. Read exactly once, then parse the
+    // buffered payload; JSON parse failures must not consume the stream twice.
+    const bodyText = await response.text();
+    let responseBody: unknown = bodyText;
+    try { responseBody = JSON.parse(bodyText); } catch { /* non-JSON error body */ }
     return { status: response.status, body: responseBody };
   }, { requestPath: path, body: payload });
 }
