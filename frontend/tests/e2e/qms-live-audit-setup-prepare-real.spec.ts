@@ -69,6 +69,9 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
+    // The controlled notice requires an enabled, deliverable auditee contact.
+    // Do not bypass the backend recipient gate in acceptance tests.
+    await setup.getByLabel("Notify auditee", { exact: true }).check();
     await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
     await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
     await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
