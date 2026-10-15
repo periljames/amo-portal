@@ -14,7 +14,7 @@ def observation(seq, *, engine="PT6-123", install="INSTALL-001", qty=1,
         installation_ref=install, aircraft_serial_number="AC-001",
         engine_position="1", event_date=date(2026, 10, day),
         event_sequence=seq, created_at=datetime(2026, 10, day, tzinfo=timezone.utc),
-        event_type=event, oil_quantity=qty, oil_unit="QT",
+        sector_ref=f"FLIGHT-{day}", event_type=event, oil_quantity=qty, oil_unit="QT",
         reference_method="DIPSTICK", reference_level=level, flight_hours=fh,
     )
 
