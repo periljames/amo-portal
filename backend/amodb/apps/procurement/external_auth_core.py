@@ -176,7 +176,7 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     if row["revoked_at"] or aware(row["expires_at"])<=now() or row["identity_state"]!="ACTIVE" or not row["verified_at"] or row["grant_state"]!="ACTIVE" or row["membership_state"]!="ACTIVE" or (row["locked_until"] and aware(row["locked_until"])>now()):
         raise HTTPException(401,"Provider account or session revoked")
     if row["portal_state"]!="ACTIVE":
-        if row["portal_state"]!="SUSPENDED" or required not in {None,"capa.respond","profile.read","profile.propose","sessions.manage"}:
+        if row["portal_state"]!="SUSPENDED" or required not in {None,"capa.respond","profile.read","profile.propose","sessions.manage","document.read"}:
             raise HTTPException(403,"Provider portal access suspended")
     caps=set(row["capabilities_json"] or [])
     if required and (required not in caps or required not in CAPABILITIES):
@@ -193,7 +193,8 @@ def active_session(db: Session, request: Request, required: str | None = None, w
         and supplier_state in {"APPROVED","CONDITIONALLY_APPROVED"}
     )
     if (row["restrict_new_work"] or not supplier_eligible) and required not in {
-        None,"capa.respond","profile.read","profile.propose","sessions.manage"
+        None,"capa.respond","profile.read","profile.propose","sessions.manage",
+        "document.read","document.submit"
     }:
         raise HTTPException(403,"Provider is restricted to account control and existing corrective actions")
     if write:
