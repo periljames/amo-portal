@@ -399,6 +399,86 @@ def download_my_original(tenant_slug:str,submission_id:str,request:Request,db:Se
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 
+class AgreementControls(BaseModel):
+    expected_version: int = Field(ge=1)
+    counterparties: list[str] = Field(min_length=2,max_length=8)
+    approved_sites: list[str] = Field(default_factory=list,max_length=100)
+    authority_acceptance_reference: str | None = Field(default=None,max_length=255)
+    controlled_document_id: str = Field(min_length=8,max_length=36)
+    controlled_document_revision: str = Field(min_length=8,max_length=36)
+    signed_evidence_submission_id: str = Field(min_length=8,max_length=36)
+    renewal_terms: str | None = Field(default=None,max_length=4000)
+    termination_notice_days: int | None = Field(default=None,ge=0,le=3650)
+
+
+@staff_documents_router.get("/contracts/{contract_id}/controls")
+def agreement_controls(amo_code:str,contract_id:str,db:Session=Depends(get_db),
+                       user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    row=_one(db,"""SELECT id,supplier_id,contract_number,status,version,scope_text,
+        effective_on,expires_on,counterparties_json,approved_sites_json,
+        authority_acceptance_reference,controlled_document_id,controlled_document_revision,
+        signed_evidence_submission_id,renewal_terms,termination_notice_days
+        FROM quality_external_provider_contracts WHERE amo_id=:amo AND id=:id""",
+        amo=amo,id=contract_id)
+    if not row:raise HTTPException(404,"Agreement not found")
+    return row
+
+
+@staff_documents_router.patch("/contracts/{contract_id}/controls")
+def update_agreement_controls(amo_code:str,contract_id:str,payload:AgreementControls,
+                              db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user,True)
+    row=_one(db,"""SELECT * FROM quality_external_provider_contracts
+        WHERE amo_id=:amo AND id=:id FOR UPDATE""",amo=amo,id=contract_id)
+    if not row:raise HTTPException(404,"Agreement not found")
+    if row["status"]!="DRAFT":
+        raise HTTPException(409,"Executed agreement records are immutable; create a controlled amendment or renewal")
+    if row["version"]!=payload.expected_version:
+        raise HTTPException(409,"Agreement version changed; reload before updating")
+    if any(not 2<=len(s.strip())<=150 for s in payload.counterparties):
+        raise HTTPException(422,"Two or more identified contracting parties are required")
+    if any(not 1<=len(s.strip())<=100 for s in payload.approved_sites):
+        raise HTTPException(422,"Invalid approved site identifier")
+    published=_published_revision(db,amo,payload.controlled_document_id,
+                                   payload.controlled_document_revision)
+    signed=_one(db,"""SELECT e.id,e.sha256,e.status,e.qms_evidence_id,
+           q.status AS quality_state
+           FROM external_partner_evidence_submissions e
+           JOIN external_tenant_providers p ON p.amo_id=e.amo_id AND p.id=e.tenant_provider_id
+           LEFT JOIN quality_external_provider_evidence q
+              ON q.amo_id=e.amo_id AND q.id=e.qms_evidence_id
+           WHERE e.amo_id=:amo AND e.id=:id AND p.supplier_id=:supplier
+             AND e.related_kind='CONTRACT' AND e.related_id=:contract""",
+             amo=amo,id=payload.signed_evidence_submission_id,
+             supplier=row["supplier_id"],contract=contract_id)
+    if not signed or signed["status"]!="ACCEPTED" or signed["sha256"]!=published["source_sha256"]:
+        raise HTTPException(409,"Signed agreement must be accepted controlled evidence with an exact DMS source hash")
+    db.execute(text("""UPDATE quality_external_provider_contracts
+       SET counterparties_json=CAST(:parties AS JSON),approved_sites_json=CAST(:sites AS JSON),
+           authority_acceptance_reference=:authority,
+           controlled_document_id=:manual,controlled_document_revision=:revision,
+           signed_evidence_submission_id=:signed,
+           renewal_terms=:renewal,termination_notice_days=:notice,
+           version=version+1,updated_at=NOW(),updated_by_user_id=:actor
+       WHERE amo_id=:amo AND id=:id"""),
+       {"parties":json.dumps([s.strip() for s in payload.counterparties]),
+        "sites":json.dumps(sorted(set(s.strip() for s in payload.approved_sites))),
+        "authority":payload.authority_acceptance_reference,"manual":payload.controlled_document_id,
+        "revision":payload.controlled_document_revision,"signed":payload.signed_evidence_submission_id,
+        "renewal":payload.renewal_terms,"notice":payload.termination_notice_days,
+        "actor":str(user.id),"amo":amo,"id":contract_id})
+    auth.event(db,amo=amo,identity=None,grant=None,actor_user=str(user.id),
+       action="PROVIDER_AGREEMENT_CONTROLS_UPDATED",
+       details={"contract_id":contract_id,"previous_version":row["version"],
+                "dms_revision":payload.controlled_document_revision,
+                "signed_submission":payload.signed_evidence_submission_id,
+                "evidence_quality_state":signed["quality_state"]})
+    db.commit()
+    return {"id":contract_id,"version":row["version"]+1,
+            "quality_authorization_conferred":False,"commercial_status":"DRAFT"}
+
+
 @staff_documents_router.get("/dms-options")
 def dms_options(amo_code:str,db:Session=Depends(get_db),
                 user=Depends(get_current_active_user),
