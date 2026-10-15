@@ -428,6 +428,37 @@ export default function PlatformDashboardPage() {
         {telemetry.error ? <ErrorState error={telemetry.error} retry={telemetry.reload} /> : null}
         {probeError ? <ErrorState error={probeError} retry={runProbe} /> : null}
 
+        <section className="platform-operator-actions" aria-label="Daily platform management">
+          <div className="platform-operator-actions__heading"><h2>Operate the platform</h2><p>Choose a task to open its guided workspace. Platform operations should not require manually calling backend APIs.</p></div>
+          <div className="platform-operator-actions__grid">
+            <Link to="/platform/tenants" className="platform-operator-action">
+              <span className="platform-operator-action__icon" aria-hidden="true">01</span>
+              <strong>Onboard an organization</strong><span>Create a tenant, assign its initial administrator and send setup access.</span>
+              <small>{Number(data.active_tenants ?? 0)} active tenants · Open tenant console →</small>
+            </Link>
+            <Link to="/platform/billing" className="platform-operator-action">
+              <span className="platform-operator-action__icon" aria-hidden="true">02</span>
+              <strong>Review billing</strong><span>Collect verified payments, issue invoices and manage plans.</span>
+              <small>{Number(data.overdue_invoices ?? 0)} overdue invoices · Open billing →</small>
+            </Link>
+            <Link to="/platform/users" className="platform-operator-action">
+              <span className="platform-operator-action__icon" aria-hidden="true">03</span>
+              <strong>Manage user access</strong><span>Review identities, revoke sessions and enforce account controls.</span>
+              <small>{Number(data.total_users ?? 0)} users · Open user hub →</small>
+            </Link>
+            <Link to="/platform/security" className="platform-operator-action">
+              <span className="platform-operator-action__icon" aria-hidden="true">04</span>
+              <strong>Resolve security alerts</strong><span>Work open alerts and inspect privileged audit records.</span>
+              <small>{Number(data.critical_security_alerts ?? 0)} critical alerts · Open security →</small>
+            </Link>
+            <Link to="/platform/integrations?tab=support" className="platform-operator-action">
+              <span className="platform-operator-action__icon" aria-hidden="true">05</span>
+              <strong>Handle customer support</strong><span>Review assistance requests and assigned platform interventions.</span>
+              <small>{openSupport} open requests · Open support →</small>
+            </Link>
+          </div>
+        </section>
+
         <section className="platform-dashboard-status" data-status={platformStatus.toLowerCase()}>
           <div className="platform-dashboard-status__main">
             <span className="platform-dashboard-status__pulse" />
