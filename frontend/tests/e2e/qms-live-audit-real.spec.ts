@@ -372,7 +372,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     const issuedPdfBytes = await issuedPdf.body();
     expect(issuedPdfBytes.subarray(0, 5).toString("utf8")).toBe("%PDF-");
     await auditeePage.getByRole("button", { name: "Acknowledge issued report" }).click();
-    await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision and checksum", { timeout: 30_000 });
+    await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision.", { timeout: 30_000 });
 
     const closeExecution = internalPage.getByRole("button", { name: "Close audit execution" });
     await expect(closeExecution).toBeEnabled();
