@@ -337,7 +337,11 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("status")).toContainText("ISSUE recorded", { timeout: 30_000 });
     await expect(internalPage.getByText(/Issued R1/i)).toBeVisible();
 
-    await internalPage.getByRole("button", { name: "Create public verification link" }).click();
+    const verificationLinkButton = internalPage.getByRole("button", { name: "Create public verification link" });
+    // The report is issued and passkey-signed; the public verification
+    // control must become available independently of execution closure.
+    await expect(verificationLinkButton).toBeEnabled({ timeout: 30_000 });
+    await verificationLinkButton.click();
     await expect(internalPage.getByRole("status")).toContainText("purpose-bound verification link was created", { timeout: 30_000 });
     const verificationHref = await internalPage.getByText("Verification URL").locator("..").getByRole("link").getAttribute("href");
     expect(verificationHref).toBeTruthy();
