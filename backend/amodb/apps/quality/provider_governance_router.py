@@ -993,6 +993,31 @@ def transition_provider_contract(
     if target not in _CONTRACT_TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Contract transition {current} → {target} is not allowed.")
     if target == "ACTIVE":
+        # The agreement is a separate commercial control. It can become
+        # ACTIVE only after an executed, exact DMS revision is linked to
+        # independently verified Quality evidence. It does not authorize work.
+        valid_executed = db.execute(text("""
+            SELECT 1 FROM quality_external_provider_contracts c
+            JOIN manuals m ON m.id=c.controlled_document_id
+            JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=c.amo_id
+            JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
+              AND (r.id=c.controlled_document_revision OR r.rev_number=c.controlled_document_revision)
+            JOIN external_partner_evidence_submissions s
+              ON s.id=c.signed_evidence_submission_id AND s.amo_id=c.amo_id
+              AND s.status='ACCEPTED' AND s.related_kind='CONTRACT'
+              AND s.related_id=c.id AND s.sha256=r.source_sha256
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id
+            JOIN quality_external_provider_evidence e ON e.id=s.qms_evidence_id
+              AND e.amo_id=c.amo_id AND e.supplier_id=c.supplier_id
+              AND e.status='VERIFIED'
+              AND (e.valid_until IS NULL OR e.valid_until >= CURRENT_DATE)
+            WHERE c.amo_id=:amo AND c.supplier_id=:supplier AND c.id=:contract
+              AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
+        """), {"amo":ctx.amo_id,"supplier":provider_id,"contract":contract_id}).first()
+        if not valid_executed:
+            raise HTTPException(status_code=409,
+                detail="Activate only an executed DMS-current agreement with a matching signed original independently verified in QMS")
         effective_on = row.get("effective_on")
         expires_on = row.get("expires_on")
         if expires_on and expires_on < _today():
