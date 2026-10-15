@@ -24,3 +24,14 @@
 .octm__error { color: #b91c1c; }
 .octm__message { color: #0f766e; }
 @media (max-width: 640px) { .octm__panel { padding: .75rem; } .octm__form { grid-template-columns: 1fr; } }
+
+.octm__readiness, .octm__review { border: 1px solid #94a3b8; border-radius: .6rem; padding: 1rem; margin-top: .85rem; }
+.octm__readiness { background: color-mix(in srgb, #f59e0b 9%, Canvas); }
+.octm__review { background: Canvas; }
+.octm__review form { display: grid; gap: .75rem; max-width: 720px; }
+.octm__readiness ul, .octm__review ul { margin: .5rem 0; padding-left: 1.5rem; }
+.octm__continue { flex-direction: row !important; align-items: center; gap: .5rem; font-weight: 400 !important; }
+.octm__continue input { width: 1.25rem !important; height: 1.25rem; min-height: 1.25rem !important; }
+.octm__row-actions .btn { padding: .55rem .75rem; }
+.octm__review h3 { margin-top: 0; }
+.octm__panel:focus-within { scroll-margin-top: 1rem; }
