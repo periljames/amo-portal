@@ -328,7 +328,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await internalPage.getByRole("button", { name: "Register passkey" }).click();
     await expect(internalPage.getByRole("status")).toContainText("Passkey registered for governed Quality approvals", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report with passkey" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Passkey approval recorded against the exact approved report SHA-256", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status")).toContainText("Report signed and ready to issue.", { timeout: 30_000 });
     await expect(internalPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
 
     const issue = internalPage.getByRole("button", { name: "Issue passkey-approved report" });
