@@ -65,7 +65,7 @@ def _all(db, sql, **kw):
 def _event(db, amo, submission, action, *, identity=None, actor=None, details=None):
     db.execute(text("""INSERT INTO external_provider_document_events
       (id,amo_id,submission_id,actor_identity_id,actor_user_id,action,details_json)
-      VALUES(:id,:amo,:submission,:identity,:actor,:action,:details)"""),
+      VALUES(:id,:amo,:submission,:identity,:actor,:action,CAST(:details AS JSON))"""),
       {"id":str(uuid4()),"amo":amo,"submission":submission,"identity":identity,
        "actor":actor,"action":action,"details":json.dumps(details or {})})
 
@@ -399,6 +399,19 @@ def download_my_original(tenant_slug:str,submission_id:str,request:Request,db:Se
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 
+@staff_documents_router.get("/dms-options")
+def dms_options(amo_code:str,db:Session=Depends(get_db),
+                user=Depends(get_current_active_user),
+                limit:int=Query(50,ge=1,le=100)):
+    amo=_staff(db,amo_code,user)
+    return {"items":_all(db,"""SELECT m.id,m.code,m.title,r.id AS revision_id,r.rev_number
+        FROM manuals m JOIN manual_tenants t ON t.id=m.tenant_id
+        JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
+        WHERE t.amo_id=:amo AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
+          AND r.source_storage_path IS NOT NULL
+        ORDER BY m.code,r.rev_number LIMIT :limit""",amo=amo,limit=limit)}
+
+
 @staff_documents_router.get("/submissions")
 def queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_active_user),
           limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
@@ -440,7 +453,9 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
     if payload.decision!="ACCEPTED" and payload.dms_manual_id:
         raise HTTPException(422,"A DMS attachment is only set at acceptance")
     if payload.dms_manual_id:
-        _published_revision(db,amo,payload.dms_manual_id,payload.dms_revision_id)
+        published=_published_revision(db,amo,payload.dms_manual_id,payload.dms_revision_id)
+        if published["source_sha256"]!=row["sha256"]:
+            raise HTTPException(409,"The controlled DMS revision must have the same original-file SHA-256 as the staged submission")
     qms_id=None
     if payload.decision=="ACCEPTED":
         # Quality evidence is only PENDING. Verification must pass separately
