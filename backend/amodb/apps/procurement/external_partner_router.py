@@ -869,6 +869,7 @@ def evidence_upload(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     file:UploadFile=File(...),evidence_type:str=Form(...),
     related_kind:Literal["PROVIDER","CONTRACT","ASSIGNMENT"]=Form("PROVIDER"),
     related_id:str=Form("")):
+    raise HTTPException(410,"Legacy unclassified uploads are retired. Use controlled document requirements and /documents/submissions.")
     user=_ctx(db,request,tenant_slug,cap="document.submit",write=True)
     ctx=_context(user)
     auth.auth_limit(request,str(user["identity_id"]),"partner-evidence-upload")
@@ -1029,6 +1030,8 @@ def quality_review_evidence(amo_code:str,submission_id:str,payload:EvidenceDecis
                             db:Session=Depends(get_db),
                             user=Depends(get_current_active_user)):
     from .external_auth_router import _quality_manager
+    if payload.status=="ACCEPTED":
+        raise HTTPException(409,"Accept through Phase 5 controlled document review to create the authoritative QMS evidence link")
     _quality_manager(user);amo=_quality_context(db,amo_code,user)
     evidence=_row("""SELECT * FROM external_partner_evidence_submissions
         WHERE amo_id=:amo AND id=:id FOR UPDATE""",db,amo=amo,id=submission_id)
