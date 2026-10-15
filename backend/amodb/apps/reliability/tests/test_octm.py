@@ -4,7 +4,7 @@ from types import SimpleNamespace as Row
 
 import pytest
 
-from amodb.apps.reliability.octm import EntryPayload, EntryReview, ProfileApproval, calculate_windows
+from amodb.apps.reliability.octm import EntryPayload, EntryReview, ProfileApproval, calculate_windows, summarize_daily_coverage
 
 
 def observation(seq, *, engine="PT6-123", install="INSTALL-001", qty=1,
@@ -178,3 +178,24 @@ def test_manufacturer_limit_requires_current_technical_data_confirmation():
         note="Confirmed current engine maintenance manual and installed engine applicability",
     )
     assert approved.confirmed_current_technical_data
+
+
+def test_daily_coverage_uses_snapshots_without_inventing_operational_completeness():
+    snapshots = [
+        Row(aircraft_serial_number="AC-001", engine_position="1", flight_leg="SL-001",
+            engine_serial_number="ENGINE-123"),
+        Row(aircraft_serial_number="AC-001", engine_position="1", flight_leg="SL-002",
+            engine_serial_number="ENGINE-123"),
+    ]
+    entries = [
+        Row(aircraft_serial_number="AC-001", engine_position="1", sector_ref="SL-001",
+            event_type="TOP_UP", review_status="DRAFT"),
+    ]
+    report = summarize_daily_coverage(snapshots, entries)
+    assert report["registered_snapshot_sectors"] == 2
+    assert report["matched_sectors"] == 1
+    assert report["unverified_observations"] == 1
+    assert report["unmatched_sectors"][0]["flight_leg"] == "SL-002"
+    empty = summarize_daily_coverage([], entries)
+    assert empty["registered_snapshot_sectors"] == 0
+    assert empty["coverage_basis"] == "RECORDED_ENGINE_FLIGHT_SNAPSHOTS_ONLY"
