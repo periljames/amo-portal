@@ -549,6 +549,12 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
     if not row:raise HTTPException(404,"Submission unavailable")
     if row["status"]!="PENDING_REVIEW":
         raise HTTPException(409,"Only unreviewed submissions can receive a new decision")
+    if not row["requirement_id"]:
+        raise HTTPException(409,"Historical unclassified submissions require manual migration into a configured, controlled requirement; no approval bypass")
+    req=_one(db,"""SELECT id,enabled,code FROM external_provider_document_requirements
+        WHERE amo_id=:amo AND id=:id""",amo=amo,id=row["requirement_id"])
+    if not req or (not req["enabled"] and payload.decision=="ACCEPTED"):
+        raise HTTPException(409,"Document requirement is no longer valid for acceptance")
     if bool(payload.dms_manual_id)!=bool(payload.dms_revision_id):
         raise HTTPException(422,"DMS references require both manual and exact revision IDs")
     if payload.decision!="ACCEPTED" and payload.dms_manual_id:
