@@ -425,6 +425,24 @@ def agreement_controls(amo_code:str,contract_id:str,db:Session=Depends(get_db),
     return row
 
 
+@staff_documents_router.get("/contracts/{contract_id}/candidate-evidence")
+def agreement_candidate_evidence(amo_code:str,contract_id:str,db:Session=Depends(get_db),
+                                 user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    agreement=_one(db,"""SELECT supplier_id FROM quality_external_provider_contracts
+       WHERE amo_id=:amo AND id=:id""",amo=amo,id=contract_id)
+    if not agreement:raise HTTPException(404,"Agreement unavailable")
+    return {"items":_all(db,"""SELECT e.id,e.filename,e.sha256,e.created_at,
+        e.status,q.status AS quality_status
+        FROM external_partner_evidence_submissions e
+        JOIN external_tenant_providers p ON p.id=e.tenant_provider_id AND p.amo_id=e.amo_id
+        LEFT JOIN quality_external_provider_evidence q ON q.amo_id=e.amo_id AND q.id=e.qms_evidence_id
+        WHERE e.amo_id=:amo AND p.supplier_id=:supplier AND e.related_kind='CONTRACT'
+          AND e.related_id=:contract AND e.status='ACCEPTED'
+        ORDER BY e.created_at DESC LIMIT 100""",amo=amo,supplier=agreement["supplier_id"],
+        contract=contract_id)}
+
+
 @staff_documents_router.patch("/contracts/{contract_id}/controls")
 def update_agreement_controls(amo_code:str,contract_id:str,payload:AgreementControls,
                               db:Session=Depends(get_db),user=Depends(get_current_active_user)):
