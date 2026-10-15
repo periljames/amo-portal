@@ -627,6 +627,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
     now = now_utc()
     status_counts = {"ACTIVE": 0, "TRIALING": 0, "EXPIRED": 0, "CANCELLED": 0, "LOCKED": 0, "NO_SUBSCRIPTION": 0}
     invoice_totals = {"PENDING": 0, "PAID": 0, "VOID": 0, "OVERDUE": 0, "pending_amount_cents": 0, "paid_amount_cents": 0}
+    invoice_currencies: dict[str, dict[str, int]] = {}
     tenant_rows: list[dict[str, Any]] = []
     for tenant in tenants:
         access = account_services.get_billing_access_status(db, amo_id=tenant.id, as_of=now)
@@ -642,10 +643,20 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             status_counts["LOCKED"] += 1
         else:
             status_counts["NO_SUBSCRIPTION"] += 1
+        tenant_currencies: dict[str, dict[str, int]] = {}
         for inv in invoices:
             key = getattr(inv.status, "value", str(inv.status))
             if key in invoice_totals:
                 invoice_totals[key] += 1
+            currency = str(inv.currency or "USD").upper()
+            platform_bucket = invoice_currencies.setdefault(currency, {"pending_amount_cents": 0, "paid_amount_cents": 0})
+            tenant_bucket = tenant_currencies.setdefault(currency, {"pending_amount_cents": 0, "paid_amount_cents": 0})
+            if key == "PENDING":
+                platform_bucket["pending_amount_cents"] += int(inv.amount_cents or 0)
+                tenant_bucket["pending_amount_cents"] += int(inv.amount_cents or 0)
+            elif key == "PAID":
+                platform_bucket["paid_amount_cents"] += int(inv.amount_cents or 0)
+                tenant_bucket["paid_amount_cents"] += int(inv.amount_cents or 0)
         invoice_totals["OVERDUE"] += overdue_count
         invoice_totals["pending_amount_cents"] += pending_amount
         invoice_totals["paid_amount_cents"] += paid_amount
@@ -664,6 +675,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             "pending_invoice_amount_cents": pending_amount,
             "paid_invoice_amount_cents": paid_amount,
             "actionable_invoice_id": access.actionable_invoice_id,
+            "invoice_currencies": tenant_currencies,
         })
     return {
         "data_mode": mode,
@@ -675,6 +687,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             **status_counts,
         },
         "invoices": invoice_totals,
+        "invoice_currencies": invoice_currencies,
         "tenants": tenant_rows,
         "rule": "Demo tenants are excluded unless data_mode=DEMO is requested. Live/REAL is the default.",
     }
