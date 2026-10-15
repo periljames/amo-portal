@@ -85,6 +85,10 @@ def upgrade():
         batch.add_column(sa.Column("authority_acceptance_reference", sa.String(255)))
         batch.add_column(sa.Column("signed_evidence_submission_id", sa.String(36)))
         batch.add_column(sa.Column("terminated_at", sa.DateTime(timezone=True)))
+        batch.add_column(sa.Column("supersedes_contract_id", sa.String(36)))
+        batch.add_column(sa.Column("change_reason", sa.Text()))
+        batch.create_foreign_key("fk_ext_agreement_prior", "quality_external_provider_contracts",
+                                 ["supersedes_contract_id"], ["id"], ondelete="RESTRICT")
     if op.get_bind().dialect.name == "postgresql":
         for table in ("external_provider_document_requirements", "external_provider_document_events"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
@@ -110,7 +114,8 @@ def downgrade():
         op.execute("DROP TRIGGER IF EXISTS ext_document_events_immutable ON external_provider_document_events")
         op.execute("DROP FUNCTION IF EXISTS external_document_events_append_only()")
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
-        for name in ("terminated_at", "signed_evidence_submission_id", "authority_acceptance_reference", "approved_sites_json", "counterparties_json"):
+        batch.drop_constraint("fk_ext_agreement_prior", type_="foreignkey")
+        for name in ("change_reason", "supersedes_contract_id", "terminated_at", "signed_evidence_submission_id", "authority_acceptance_reference", "approved_sites_json", "counterparties_json"):
             batch.drop_column(name)
     op.drop_index("ix_ext_doc_events_tenant_submission", table_name="external_provider_document_events")
     op.drop_table("external_provider_document_events")
