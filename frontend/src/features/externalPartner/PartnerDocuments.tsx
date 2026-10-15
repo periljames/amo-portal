@@ -4,7 +4,7 @@ import {friendlyDate,label,partnerRequest,partnerUrl,type Contract,type Page} fr
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
 type Requirement={id:string;code:string;title:string;description:string;mandatory:boolean;
-  expiry_required:boolean;form_manual_id:string|null;form_revision_id:string|null;
+  expiry_required:boolean;reminder_days:number;form_manual_id:string|null;form_revision_id:string|null;
   form_available:boolean;version:number};
 type Submission={id:string;filename:string;evidence_type:string;status:string;
   requirement_id:string|null;related_kind:string;related_id:string|null;
