@@ -203,7 +203,8 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
             <p>Exposure-normalised trends, operational consequences, technical recurrence and closed-loop effectiveness.</p>
           </div>
           <div className="reliability-v2__actions">
-            <Link className="btn btn-primary" to={`${basePath}/operations`}>Operational sources</Link>
+            <Link className="btn btn-primary" to={`${basePath}/octm`}>Oil consumption</Link>
+             <Link className="btn btn-secondary" to={`${basePath}/operations`}>Operational sources</Link>
             <Link className="btn btn-secondary" to={`${basePath}/workbook-registers`}>Workbook parity</Link>
             <Link className="btn btn-secondary" to={`${basePath}/events`}>Occurrence register</Link>
             <Link className="btn btn-secondary" to={`${basePath}/reports`}>Controlled reports</Link>
