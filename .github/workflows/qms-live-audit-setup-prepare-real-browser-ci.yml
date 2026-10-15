@@ -51,6 +51,7 @@ jobs:
       VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
       E2E_BASE_URL: http://127.0.0.1:4173
       E2E_QMS_LIVE_FIXTURE: /tmp/qms-live-audit-real-e2e.json
+      QMS_E2E_PREPARE_UNSTARTED: "1"
       # CI runner cannot write the production /srv/amo/uploads mount.
       # Keep generated signed notices in a writable, disposable local store.
       AMO_STORAGE_LOCAL_ROOT: /tmp/amo-qms-setup-prepare-uploads
