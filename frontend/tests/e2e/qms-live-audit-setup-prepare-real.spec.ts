@@ -156,10 +156,17 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const bearer = await page.evaluate(() => sessionStorage.getItem("amo_portal_token"));
     expect(bearer).toBeTruthy();
     const transitionPath = `${noticePath}/${encodeURIComponent(noticeDraft.id)}/transitions`;
+    // Final signed preview is itself a governed preparation operation. It
+    // submits, approves and generates the notice (with attributable events).
+    // Replaying SUBMIT on that already-GENERATED revision correctly returns 409.
+    // Continue with manual delivery and acknowledgement without bypassing state.
+    const afterPreview = await page.request.get(noticePath, {
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    expect(afterPreview.ok(), await afterPreview.text()).toBeTruthy();
+    const noticeList = await afterPreview.json() as { items: Array<{ id: string; status: string }> };
+    expect(noticeList.items.find((item) => item.id === noticeDraft.id)?.status).toBe("GENERATED");
     for (const { action, expectedStatus } of [
-      { action: "SUBMIT", expectedStatus: "UNDER_REVIEW" },
-      { action: "APPROVE", expectedStatus: "APPROVED" },
-      { action: "GENERATE", expectedStatus: "GENERATED" },
       { action: "DELIVER", expectedStatus: "DELIVERED" },
       { action: "ACKNOWLEDGE", expectedStatus: "ACKNOWLEDGED" },
     ]) {
