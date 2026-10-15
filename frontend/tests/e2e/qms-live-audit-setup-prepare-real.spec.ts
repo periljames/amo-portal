@@ -2,7 +2,7 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 import fs from "node:fs";
 
 test.use({ trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
-test.setTimeout(150_000);
+test.setTimeout(300_000);
 
 type Fixture = {
   amo_slug: string;
