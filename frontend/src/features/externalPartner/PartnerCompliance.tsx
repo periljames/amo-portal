@@ -1,6 +1,7 @@
-import React,{useEffect,useRef,useState} from "react";
+import React,{useState} from "react";
+import {Link} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
-import {friendlyDate,label,partnerRequest,partnerUpload,type Evidence,type Page} from "./partnerApi";
+import {friendlyDate,label,partnerRequest,type Evidence,type Page} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
 type Certificate={id:string;certificate_type:string;certificate_number:string;approval_rating:string|null;verification_state:string;valid_until:string|null};
@@ -15,23 +16,6 @@ export default function PartnerCompliance({tenant,csrf,capabilities}:PartnerProp
   const [renewalError,setRenewalError]=useState("");
   const query=usePartnerLoad((signal)=>partnerRequest<Compliance>(tenant,
     `compliance?limit=15&offset=${offset}`,{signal}),`${tenant}:${offset}`);
-  const [file,setFile]=useState<File|null>(null);
-  const [evidenceType,setEvidenceType]=useState("CERTIFICATE_RENEWAL");
-  const [progress,setProgress]=useState(0);const [busy,setBusy]=useState(false);
-  const [notice,setNotice]=useState("");const [error,setError]=useState("");
-  const abortRef=useRef<AbortController|null>(null);
-  useEffect(()=>()=>abortRef.current?.abort(),[]);
-  const upload=(event:React.FormEvent)=>{
-    event.preventDefault();if(!file)return;
-    setBusy(true);setProgress(0);setError("");setNotice("");
-    const controller=new AbortController();abortRef.current=controller;
-    void partnerUpload(tenant,csrf,file,{evidence_type:evidenceType,
-      related_kind:"PROVIDER",related_id:""},setProgress,controller.signal)
-      .then(result=>{setNotice(`${result.filename} received and awaiting controlled Quality review.`);
-        setFile(null);setProgress(100);query.reload();})
-      .catch(ex=>{if(!controller.signal.aborted)setError(ex instanceof Error?ex.message:"Upload failed; please retry");})
-      .finally(()=>{abortRef.current=null;setBusy(false);});
-  };
   const submitRenewal=(event:React.FormEvent)=>{
     event.preventDefault();
     if(!renewal||renewalReason.trim().length<12)return;
@@ -86,25 +70,10 @@ export default function PartnerCompliance({tenant,csrf,capabilities}:PartnerProp
             {row.review_note&&<small>Quality feedback: {row.review_note}</small>}</div><Status value={row.status}/>
         </div>):<p className="partner-empty">No evidence files submitted through the partner portal yet.</p>}
       </Section>
-      {capabilities.includes("document.submit")&&<Section title="Submit compliance evidence"
-        description="PDF, Word, image or text documents up to 20 MB. Uploads are held for Quality review; certification remains a separate decision.">
-        <form className="partner-form" onSubmit={upload}>
-          <label>Evidence type<select value={evidenceType} onChange={e=>setEvidenceType(e.target.value)}>
-            <option value="CERTIFICATE_RENEWAL">Certificate renewal</option>
-            <option value="INSURANCE">Insurance evidence</option>
-            <option value="QUALITY_SYSTEM">Quality system evidence</option>
-            <option value="CAPABILITY">Capability documentation</option>
-            <option value="CORRECTIVE_ACTION">Corrective-action evidence</option>
-            <option value="OTHER">Other supporting evidence</option>
-          </select></label>
-          <label>Evidence file<input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.txt"
-            required onChange={event=>setFile(event.target.files?.[0]||null)}/></label>
-          {busy&&<div className="partner-progress"><progress max={100} value={progress}/><span>{progress}% uploaded</span></div>}
-          <ActionNotice value={error} error/><ActionNotice value={notice}/>
-          <div className="partner-buttons"><button className="partner-primary" disabled={!file||busy}>Submit for Quality review</button>
-            {busy&&<button type="button" onClick={()=>abortRef.current?.abort()}>Cancel upload</button>}</div>
-        </form>
-      </Section>}
+      <Section title="Controlled document intake" description="Use the applicable tenant and category requirements, published forms, secure submission and revision history.">
+        <p className="partner-muted">The former unclassified evidence upload is retired. All new certificate, qualification, agreement and other governed submissions must select a controlled requirement.</p>
+        <Link to={`/partner/${encodeURIComponent(tenant)}/documents`}>Open controlled documents and forms</Link>
+      </Section>
       <Pager value={query.value.certificates} onChange={setOffset}/>
     </>}
   </div>;
