@@ -17,7 +17,11 @@ from amodb.database import Base
 from amodb.apps.accounts import models as accounts, session_service
 from amodb.apps.manuals import models as manuals
 from amodb.apps.manuals.core_router import transition_revision, transition_revision_lifecycle
-from amodb.apps.manuals.tenant_route_guard import require_manuals_tenant_access
+from amodb.apps.manuals.tenant_route_guard import (
+    require_manuals_tenant_access,
+    require_manuals_record_access,
+    require_manuals_export_access,
+)
 from amodb.security import get_current_active_user
 
 
@@ -33,6 +37,9 @@ def security_db():
         accounts.PortalRefreshSession.__table__,
         accounts.UserActiveContext.__table__,
         manuals.Tenant.__table__,
+        manuals.Manual.__table__,
+        manuals.ManualRevision.__table__,
+        manuals.PrintExport.__table__,
     ])
     db = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
@@ -98,6 +105,41 @@ def test_platform_manuals_access_requires_explicit_support_selection(security_db
         require_manuals_tenant_access(_request("target"), db=security_db, user=root)
     root.active_amo_id = target.id
     require_manuals_tenant_access(_request("target"), db=security_db, user=root)
+
+
+def test_manual_revision_and_export_identifiers_cannot_escape_tenant(security_db):
+    own = _amo(security_db, "alpha")
+    foreign = _amo(security_db, "bravo")
+    alice = _user(security_db, own, "alice")
+    foreign_tenant = (
+        security_db.query(manuals.Tenant).filter_by(amo_id=foreign.id).one()
+    )
+    manual = manuals.Manual(
+        tenant_id=foreign_tenant.id, code="MPM", title="Foreign MPM",
+        manual_type="MPM", owner_role="DOCUMENT_CONTROL_OFFICER",
+    )
+    security_db.add(manual)
+    security_db.flush()
+    rev = manuals.ManualRevision(manual_id=manual.id, rev_number="1")
+    security_db.add(rev)
+    security_db.flush()
+    export = manuals.PrintExport(
+        revision_id=rev.id, storage_uri="private", sha256="a" * 64,
+    )
+    security_db.add(export)
+    security_db.commit()
+
+    record_req = _request("alpha", path=f"/manuals/t/alpha/{manual.id}/rev/{rev.id}/read")
+    record_req.scope["path_params"].update({"manual_id": manual.id, "rev_id": rev.id})
+    with pytest.raises(HTTPException) as wrong_record:
+        require_manuals_record_access(record_req, db=security_db, user=alice)
+    assert wrong_record.value.status_code == 404
+
+    export_req = _request("alpha", path=f"/manuals/exports/{export.id}/print-log")
+    export_req.scope["path_params"] = {"export_id": export.id}
+    with pytest.raises(HTTPException) as wrong_export:
+        require_manuals_export_access(export_req, db=security_db, user=alice)
+    assert wrong_export.value.status_code == 404
 
 
 def test_refresh_cannot_survive_revocation_or_tenant_suspension(security_db):
