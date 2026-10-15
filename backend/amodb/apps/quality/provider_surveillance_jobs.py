@@ -87,7 +87,7 @@ def scan_due_provider_reviews() -> dict[str, int]:
                         WHERE e.amo_id=:amo AND e.status='VERIFIED'
                           AND req.enabled=true AND req.expiry_required=true
                           AND e.valid_until IS NOT NULL
-                          AND e.valid_until BETWEEN CURRENT_DATE AND CURRENT_DATE+INTERVAL '30 days'
+                          AND e.valid_until <= CURRENT_DATE+req.reminder_days*INTERVAL '1 day'
                         ORDER BY e.valid_until,e.id LIMIT 150
                     """),{"amo":str(amo_id)}).mappings().all()
                     # Once a contract's notice window opens, alert its owner.
