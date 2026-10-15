@@ -106,6 +106,36 @@ def revoke_user_sessions(db: Session, *, user: models.User, reason: str) -> date
     return now
 
 
+def revoke_tenant_sessions(db: Session, *, amo_id: str, reason: str) -> datetime:
+    """Suspend an AMO and end all tenant staff sessions in one transaction."""
+    from sqlalchemy import select
+
+    now = _utcnow()
+    session_ids = select(models.PortalAuthSession.id).where(
+        models.PortalAuthSession.amo_id == str(amo_id)
+    )
+    db.query(models.RefreshSessionToken).filter(
+        models.RefreshSessionToken.session_id.in_(session_ids),
+        models.RefreshSessionToken.revoked_at.is_(None),
+    ).update({"status": "REVOKED", "revoked_at": now}, synchronize_session=False)
+    db.query(models.PortalAuthSession).filter(
+        models.PortalAuthSession.amo_id == str(amo_id),
+        models.PortalAuthSession.revoked_at.is_(None),
+    ).update(
+        {"revoked_at": now, "revoked_reason": reason[:64]},
+        synchronize_session=False,
+    )
+    db.query(models.PortalRefreshSession).filter(
+        models.PortalRefreshSession.amo_id == str(amo_id),
+        models.PortalRefreshSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    db.query(models.User).filter(
+        models.User.amo_id == str(amo_id),
+        models.User.is_superuser.is_(False),
+    ).update({"token_revoked_at": now}, synchronize_session=False)
+    return now
+
+
 def _user_refresh_authorized(session: models.PortalAuthSession, user: models.User) -> bool:
     """Apply the same revocation and tenant-activity boundaries as access JWTs."""
     if not user.is_active:
