@@ -321,30 +321,69 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <label className="octm__full">Remarks<textarea rows={2} value={form.remarks} onChange={(event) => set("remarks", event.target.value)} /></label>
             {correcting && <label className="octm__full">Correction reason<input required minLength={5} value={correctionReason}
               onChange={(event) => setCorrectionReason(event.target.value)} /></label>}
+            <div className="octm__full octm__readiness" aria-live="polite">
+              <strong>Verification checklist</strong>
+              {formIssues.length ? <ul>{formIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+                : <p>All required source fields are present. A different authorized reviewer must still verify the source and installation.</p>}
+              <p>Drafts can be incomplete. They never enter official OCTM calculations until independently verified.</p>
+            </div>
             <div className="octm__full octm__actions">
-              <button className="btn btn-primary" disabled={busy || !has(correcting ? "reliability.data_quality.resolve" : "reliability.ingest")}>
+              <button className="btn btn-primary" disabled={busy || !(correcting ? has("reliability.ingest") || has("reliability.data_quality.resolve") : has("reliability.ingest"))}>
                 {correcting ? "Save correction for re-verification" : "Save as draft"}</button>
+              {!correcting && <label className="octm__continue"><input type="checkbox" checked={continueEntry}
+                onChange={(event) => setContinueEntry(event.target.checked)} />
+                Keep aircraft, engine, techsheet and date for next event</label>}
               {correcting && <button type="button" className="btn btn-secondary" onClick={() => { setCorrecting(null); setCorrectionReason(""); setForm(blankEntry()); }}>Cancel correction</button>}
             </div>
           </form>
         </section>}
-        {view === "review" && <section className="octm__panel">
-          <h2>Unverified source records</h2>
+        {(view === "review" || view === "register") && <section className="octm__panel">
+          <h2>{view === "review" ? "Unverified source records" : "Source register (most recent 200 entries)"}</h2>
           <p>Only verified observations enter official intervals. Crew closure does not substitute for maintenance completion.</p>
           <label>Find source or engine<input value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
           <div className="octm__table-wrap"><table><thead><tr><th>Date / sequence</th><th>Aircraft</th><th>Engine / installation</th><th>Techsheet</th><th>Event</th><th>Qty</th><th>FH</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>{queue.map((item) => <tr key={item.id}>
+            <tbody>{(view === "review" ? queue : filtered).map((item) => <tr key={item.id}>
               <td>{item.event_date} · {item.event_sequence}</td><td>{item.aircraft_serial_number}</td>
               <td>{item.engine_serial_number}<small>{item.installation_ref}</small></td><td>{item.techsheet_ref}</td>
               <td>{item.event_type}</td><td>{item.oil_quantity ?? "—"} {item.oil_unit ?? ""}</td>
               <td>{item.flight_hours ?? "—"}</td><td>{item.review_status}<small>{item.review_note}</small></td>
               <td><div className="octm__row-actions">
-                <button disabled={!has("reliability.data_quality.resolve") || busy} onClick={() => review(item, "VERIFIED")}>Verify</button>
-                <button disabled={!has("reliability.data_quality.resolve") || busy} onClick={() => review(item, "RETURNED")}>Return</button>
-                <button disabled={!has("reliability.data_quality.resolve") || busy} onClick={() => chooseCorrection(item)}>Correct</button>
+                <button disabled={!has("reliability.data_quality.resolve") || busy || item.review_status === "VERIFIED"}
+                  onClick={() => void prepareReview(item, "VERIFIED")}>Inspect / verify</button>
+                <button disabled={!has("reliability.data_quality.resolve") || busy || item.review_status === "VERIFIED"}
+                  onClick={() => void prepareReview(item, "RETURNED")}>Return</button>
+                <button disabled={busy || !(has("reliability.data_quality.resolve") ||
+                  (item.review_status !== "VERIFIED" && has("reliability.ingest")))}
+                  onClick={() => chooseCorrection(item)}>Correct</button>
               </div></td>
             </tr>)}</tbody></table></div>
-          {!queue.length && <p>No pending entries match the filter.</p>}
+          {!(view === "review" ? queue : filtered).length && <p>No source entries match the filter.</p>}
+          {reviewTarget && <div className="octm__review" role="region" aria-label="Source verification">
+            <h3>Review {reviewTarget.techsheet_ref} · {reviewTarget.engine_serial_number}</h3>
+            <p>Source evidence: <strong>{reviewTarget.source_evidence_ref || "Not provided"}</strong>.
+              Sector: {reviewTarget.sector_ref || "Not entered"}.
+              Oil reference: {reviewTarget.reference_method || "Not entered"} / {reviewTarget.reference_level || "Not entered"}.</p>
+            <p>Maintenance completed: {reviewTarget.maintenance_complete}.
+              Oil: {reviewTarget.oil_quantity ?? "not recorded"} {reviewTarget.oil_unit || ""}.
+              Flight hours: {reviewTarget.flight_hours ?? "not recorded"}.</p>
+            {reviewLoading ? <p>Checking source and existing engine records…</p> : readiness && <>
+              {readiness.errors.length > 0 && <div className="octm__error"><strong>Verification blocked:</strong>
+                <ul>{readiness.errors.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+              {readiness.warnings.length > 0 && <div className="octm__readiness">
+                <strong>Reviewer attention</strong><ul>{readiness.warnings.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+            </>}
+            <form onSubmit={(event) => void submitReview(event)}>
+              <label>Reason or source verification notes
+                <textarea required minLength={3} maxLength={2000} rows={3} value={reviewNote}
+                  onChange={(event) => setReviewNote(event.target.value)} /></label>
+              <div className="octm__row-actions">
+                <button type="submit" className="btn btn-primary" disabled={busy || reviewLoading ||
+                  reviewNote.trim().length < 3 || (reviewDecision === "VERIFIED" && !readiness?.ready_for_verification)}>
+                  {reviewDecision === "VERIFIED" ? "Confirm independent verification" : "Return for correction"}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => { setReviewTarget(null); setReadiness(null); }}>Cancel</button>
+              </div>
+            </form>
+          </div>}
         </section>}
         {view === "trends" && <section className="octm__panel">
           <h2>Verified engine monitoring intervals</h2>
