@@ -50,6 +50,7 @@ type Profile = { id: string; engine_serial_number: string; installation_ref: str
   version: number; status: string; limit_qt_per_fh: number; technical_data_ref: string; technical_data_revision: string };
 type Monitoring = { intervals: Interval[]; verified_source_count: number; truncated: boolean };
 type Caps = { capabilities: string[] };
+type StatusSummary = { total: number; unverified: number; status_counts: Record<string, number> };
 type View = "entry" | "review" | "register" | "trends" | "profiles";
 type AircraftOption = { serial_number: string; registration: string; is_active: boolean };
 type EngineHint = { engine_position: string; engine_serial_number: string; installation_ref: string;
@@ -87,6 +88,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [correcting, setCorrecting] = useState<string | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [pendingEntries, setPendingEntries] = useState<Entry[]>([]);
+  const [summary, setSummary] = useState<StatusSummary>({ total: 0, unverified: 0, status_counts: {} });
+  const [registerPage, setRegisterPage] = useState(0);
+  const [queuePage, setQueuePage] = useState(0);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [monitoring, setMonitoring] = useState<Monitoring>({ intervals: [], verified_source_count: 0, truncated: false });
   const [caps, setCaps] = useState<string[]>([]);
@@ -108,19 +113,23 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    const [items, rates, p, permissions, aircraft] = await Promise.all([
-      apiRequest<Entry[]>("/reliability/octm/entries"),
-      apiRequest<Monitoring>("/reliability/octm/monitoring"),
-      apiRequest<Profile[]>("/reliability/octm/profiles"),
+    const [items, pending, counts, rates, p, permissions, aircraft] = await Promise.all([
+      apiRequest<Entry[]>("/reliability/octm/entries?limit=200&offset=" + registerPage * 200, { cacheTtlMs: 0 }),
+      apiRequest<Entry[]>("/reliability/octm/entries?status=UNVERIFIED&limit=200&offset=" + queuePage * 200, { cacheTtlMs: 0 }),
+      apiRequest<StatusSummary>("/reliability/octm/status-summary", { cacheTtlMs: 0 }),
+      apiRequest<Monitoring>("/reliability/octm/monitoring", { cacheTtlMs: 0 }),
+      apiRequest<Profile[]>("/reliability/octm/profiles", { cacheTtlMs: 0 }),
       apiRequest<Caps>("/reliability/capabilities"),
       apiRequest<AircraftOption[]>("/reliability/octm/aircraft"),
     ]);
     setEntries(items);
+    setPendingEntries(pending);
+    setSummary(counts);
     setMonitoring(rates);
     setProfiles(p);
     setCaps(permissions.capabilities);
     setAircraftOptions(aircraft);
-  }, []);
+  }, [registerPage, queuePage]);
 
   useEffect(() => {
     let active = true;
@@ -208,8 +217,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   };
 
   const chooseCorrection = (item: Entry) => {
-    const { id, review_status, created_at, review_note, ...values } = item;
-    void review_status; void created_at; void review_note;
+    const base = blankEntry();
+    const raw = item as unknown as Record<string, unknown>;
+    const values = Object.fromEntries(Object.keys(base).map((field) =>
+      [field, raw[field] ?? (base as unknown as Record<string, unknown>)[field]])) as EntryPayload;
     setForm(values);
     setCorrecting(id);
     setView("entry");
@@ -219,7 +230,9 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const filtered = useMemo(() => entries.filter((entry) =>
     [entry.aircraft_serial_number, entry.engine_serial_number, entry.techsheet_ref, entry.installation_ref]
       .some((part) => part.toLowerCase().includes(filter.toLowerCase()))), [entries, filter]);
-  const queue = filtered.filter((item) => item.review_status !== "VERIFIED");
+  const queue = pendingEntries.filter((entry) =>
+    [entry.aircraft_serial_number, entry.engine_serial_number, entry.techsheet_ref, entry.installation_ref]
+      .some((part) => part.toLowerCase().includes(filter.toLowerCase())));
   const formIssues = [
     ...(!form.aircraft_serial_number ? ["Select a registered aircraft"] : []),
     ...(!form.engine_position || !form.engine_serial_number || !form.installation_ref
@@ -253,7 +266,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         {([["entry", "Daily entry"], ["review", "Review queue"], ["register", "Source register"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
           .map(([key, label]) => <button key={key} type="button" className={view === key ? "octm__tab active" : "octm__tab"}
             aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{label}
-            {key === "review" ? " (" + queue.length + ")" : ""}</button>)}
+            {key === "review" ? " (" + summary.unverified + ")" : ""}</button>)}
       </nav>
       {error && <p className="octm__error" role="alert">{error}</p>}
       {message && <p className="octm__message" role="status">{message}</p>}
@@ -338,7 +351,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
           </form>
         </section>}
         {(view === "review" || view === "register") && <section className="octm__panel">
-          <h2>{view === "review" ? "Unverified source records" : "Source register (most recent 200 entries)"}</h2>
+          <h2>{view === "review" ? "Unverified source records" : "Source register"}</h2>
           <p>Only verified observations enter official intervals. Crew closure does not substitute for maintenance completion.</p>
           <label>Find source or engine<input value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
           <div className="octm__table-wrap"><table><thead><tr><th>Date / sequence</th><th>Aircraft</th><th>Engine / installation</th><th>Techsheet</th><th>Event</th><th>Qty</th><th>FH</th><th>Status</th><th>Actions</th></tr></thead>
