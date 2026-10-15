@@ -266,8 +266,9 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
     key = (row.event_date, row.event_sequence)
     for other in verified:
         other_key = (other.event_date, other.event_sequence)
-        if other_key == key and other.aircraft_serial_number == row.aircraft_serial_number:
-            errors.append("Engine installation has another verified event with the same date and sequence")
+        if (other_key == key and other.techsheet_ref == row.techsheet_ref
+                and other.aircraft_serial_number == row.aircraft_serial_number):
+            errors.append("Duplicate verified event sequence within the same techsheet")
         if (row.sector_ref and other.sector_ref == row.sector_ref
                 and other.event_date == row.event_date
                 and other.aircraft_serial_number == row.aircraft_serial_number):
@@ -280,9 +281,15 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
             if row.event_type == "NO_OPERATION" or other.event_type == "NO_OPERATION":
                 errors.append("No-operation cannot coexist with servicing for the same sector")
         if row.engine_counter_hours is not None and other.engine_counter_hours is not None:
-            if other_key < key and other.engine_counter_hours > row.engine_counter_hours:
+            older = (other.event_date < row.event_date or (
+                other.event_date == row.event_date and other.techsheet_ref == row.techsheet_ref
+                and other.event_sequence < row.event_sequence))
+            newer = (other.event_date > row.event_date or (
+                other.event_date == row.event_date and other.techsheet_ref == row.techsheet_ref
+                and other.event_sequence > row.event_sequence))
+            if older and other.engine_counter_hours > row.engine_counter_hours:
                 errors.append("Engine counter is below an earlier verified counter")
-            if other_key > key and other.engine_counter_hours < row.engine_counter_hours:
+            if newer and other.engine_counter_hours < row.engine_counter_hours:
                 errors.append("Engine counter exceeds a later verified counter")
         if (other_key <= key and other.aircraft_serial_number == row.aircraft_serial_number
                 and other.engine_position != row.engine_position):
