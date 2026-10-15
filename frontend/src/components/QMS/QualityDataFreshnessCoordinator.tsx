@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiRequest, qmsPath } from "../../services/apiClient";
+import { apiRequest, qmsPath, clearQmsApiResponseCache } from "../../services/apiClient";
 import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
 import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
@@ -164,6 +164,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       onEvent: (event) => {
         if (!isQualityRealtimeEvent(event)) return;
         const currentMarkers = occurrenceMarkers();
+        // React Query invalidation alone can return a 30-second cached GET.
+        // Clear the HTTP response cache before refetching committed SSE state.
+        clearQmsApiResponseCache();
         if (event.event === "reset") {
           // Replay-window reset is scoped to the active Quality occurrence. It
           // must not refetch unrelated modules or every active query in the app.
