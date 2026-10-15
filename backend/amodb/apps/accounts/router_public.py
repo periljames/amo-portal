@@ -801,7 +801,10 @@ def create_first_superuser(
 ):
     # Initial ownership must be commissioned before the public reverse proxy
     # is enabled. An empty production database is not an authorization grant.
-    if _APP_ENV in {"prod", "production", "staging"}:
+    if (
+        _APP_ENV in {"prod", "production", "staging"}
+        or os.getenv("PORTAL_ALLOW_HTTP_BOOTSTRAP", "").strip().lower() not in {"1", "true", "yes"}
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     existing_user = db.query(models.User).first()
     if existing_user:
