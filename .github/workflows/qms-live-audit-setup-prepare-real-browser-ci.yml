@@ -116,6 +116,7 @@ jobs:
           from amodb.apps.quality.audit_checklist_template_models import QualityAuditChecklistBinding
           from amodb.apps.quality.audit_external_access_models import QualityAuditAccessGrant, QualityAuditParticipant, QualityExternalIdentity
           from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
+          from amodb.apps.quality.audit_guest_document_storage import resolve_guest_document
           from amodb.apps.quality.audit_occurrence_completion_models import QualityAuditMeeting
           from amodb.database import WriteSessionLocal, write_engine
 
@@ -159,7 +160,7 @@ jobs:
               assert "Evidence reviewed against the linked criterion" in (request.review_note or "")
               submission = db.query(QualityAuditDocumentSubmission).filter_by(amo_id=f["amo_id"], audit_id=audit_id, document_request_id=request.id).one()
               assert submission.filename == "authorization-competence-evidence.txt" and len(submission.sha256) == 64
-              stored = Path(submission.storage_ref)
+              stored = resolve_guest_document(submission.storage_ref)
               assert stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest() == submission.sha256
               participant = db.get(QualityAuditParticipant, submission.participant_id)
               identity = db.get(QualityExternalIdentity, participant.external_identity_id)
