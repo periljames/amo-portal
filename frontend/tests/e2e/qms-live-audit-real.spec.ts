@@ -350,13 +350,11 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     watchServerFailures(verificationPage, verificationFailures);
     await verificationPage.goto(verificationHref!, { waitUntil: "domcontentloaded" });
     await expect(verificationPage.getByRole("heading", { name: new RegExp(`${data.ceremony_audit_ref} · Same-day closing and archive browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
-    await expect(verificationPage.getByText("Valid governed record")).toBeVisible();
+    await expect(verificationPage.getByText("Verified", { exact: true }).first()).toBeVisible();
     await expect(verificationPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
-    const governedSha = (await verificationPage.locator("dt", { hasText: "Governed SHA-256" }).locator("..").locator("code").innerText()).trim();
-    expect(governedSha).toBe(draftSha);
-    await verificationPage.getByLabel("SHA-256").fill(governedSha);
-    await verificationPage.getByRole("button", { name: "Compare hash" }).click();
-    await expect(verificationPage.getByRole("status")).toContainText("Hash matches the governed artifact", { timeout: 30_000 });
+    await verificationPage.getByLabel("Verification code").fill(draftSha);
+    await verificationPage.getByRole("button", { name: "Check code" }).click();
+    await expect(verificationPage.getByRole("status")).toContainText("Verified — code matches this record.", { timeout: 30_000 });
 
     await auditeePage.getByRole("button", { name: "Refresh" }).click();
     await expect(auditeePage.getByLabel("Issued audit report")).toBeVisible({ timeout: 30_000 });
