@@ -86,7 +86,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   // editor is visible after an earlier submitted response.
   if (suffix === "rework") {
     await page.getByLabel("Corrective action response progress")
-      .getByRole("button", { name: /Root cause analysis/ }).click();
+      .getByRole("button", { name: "Root cause", exact: true }).click();
     await expect(page.getByText(/Return for rework: identify the missing management-control checkpoint/i))
       .toBeVisible({ timeout: 30_000 });
   }
