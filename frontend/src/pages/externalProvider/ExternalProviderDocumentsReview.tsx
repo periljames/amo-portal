@@ -4,6 +4,31 @@ import {authHeaders} from "../../services/auth";
 import {getApiBaseUrl} from "../../services/config";
 import "./external-provider-portal.css";
 
+const CLASSES=[
+  ["MAINTENANCE_AGREEMENT","Maintenance agreement"],
+  ["SERVICE_LEVEL_AGREEMENT","Service-level agreement"],
+  ["CONTRACT_AMENDMENT","Contract amendment"],
+  ["CONTRACT_RENEWAL","Contract renewal evidence"],
+  ["CONTRACT_TERMINATION","Contract termination or suspension record"],
+  ["REGULATORY_APPROVAL","Regulatory approval certificate"],
+  ["RATINGS_CAPABILITIES","Ratings and capability list"],
+  ["INSURANCE_STATUTORY","Insurance and statutory evidence"],
+  ["PROVIDER_QUALITY_MANUAL","Provider Quality manual and procedures"],
+  ["QUALIFICATION_QUESTIONNAIRE","Supplier qualification questionnaire"],
+  ["AUDIT_EVIDENCE","Audit evidence"],
+  ["CORRECTIVE_ACTION_EVIDENCE","Corrective-action evidence"],
+  ["PERSONNEL_TRAINING_EVIDENCE","Personnel training and qualification evidence"],
+  ["CALIBRATION_CERTIFICATE","Calibration certificate"],
+  ["TEST_CERTIFICATE","Test certificate"],
+  ["COMPONENT_RELEASE_CERTIFICATE","Component release certificate"],
+  ["CONFORMITY_DOCUMENT","Conformity document"],
+  ["REPAIR_OVERHAUL_REPORT","Repair or overhaul report"],
+  ["WORK_ORDER","Work order"],
+  ["SIGNED_TECHNICAL_INSTRUCTION","Signed technical instruction"],
+  ["AUTHORITY_CORRESPONDENCE","Authority correspondence and approval evidence"],
+  ["CONTROLLED_FORM","Controlled form"],
+  ["FORM_ACKNOWLEDGEMENT","Controlled acknowledgement"],
+] as const;
 const KINDS=["ALL","SUPPLIER","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
   "CONSULTANT","LABORATORY","CALIBRATION_PROVIDER","OTHER"];
 type Requirement={id:string;code:string;provider_kind:string;title:string;description:string;
@@ -108,6 +133,13 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
     </div>
     {manager&&<form className="vendor-form" onSubmit={e=>void saveRequirement(e)}>
       <h3>{version?"Edit existing requirement":"Add category-specific requirement"}</h3>
+      {!version&&<label className="vendor-field"><span>Start from a supported document class (optional)</span>
+        <select defaultValue="" onChange={e=>{
+          const selected=CLASSES.find(([code])=>code===e.target.value);
+          if(selected)setForm({...form,code:selected[0],title:selected[1]});
+        }}><option value="">Custom document class</option>
+          {CLASSES.map(([code,title])=><option key={code} value={code}>{title}</option>)}
+        </select></label>}
       <div className="vendor-fields">
         <label className="vendor-field"><span>Provider category</span><select value={form.provider_kind}
           disabled={Boolean(version)} onChange={e=>setForm({...form,provider_kind:e.target.value})}>
