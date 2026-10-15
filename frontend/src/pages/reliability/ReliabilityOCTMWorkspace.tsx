@@ -50,18 +50,32 @@ type Profile = { id: string; engine_serial_number: string; installation_ref: str
   version: number; status: string; limit_qt_per_fh: number; technical_data_ref: string; technical_data_revision: string };
 type Monitoring = { intervals: Interval[]; verified_source_count: number; truncated: boolean };
 type Caps = { capabilities: string[] };
-type View = "entry" | "review" | "trends" | "profiles";
+type View = "entry" | "review" | "register" | "trends" | "profiles";
+type AircraftOption = { serial_number: string; registration: string; is_active: boolean };
+type EngineHint = { engine_position: string; engine_serial_number: string; installation_ref: string;
+  last_observed: string; basis: "PREVIOUS_OCTM_ENTRY" };
+type Readiness = { errors: string[]; warnings: string[]; ready_for_verification: boolean };
 
 const blankEntry = (): EntryPayload => ({
   aircraft_serial_number: "", engine_position: "", engine_serial_number: "", installation_ref: "",
-  event_date: new Date().toISOString().slice(0, 10), event_sequence: 1, techsheet_ref: "",
+  event_date: new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10), event_sequence: 1, techsheet_ref: "",
   sector_ref: "", source_type: "PAPER_TECHSHEET", external_record_id: "", source_evidence_ref: "",
   maintenance_complete: "UNKNOWN", event_type: "TOP_UP", oil_quantity: null, oil_unit: "QT",
   oil_specification: "", reference_method: "", reference_level: "", engine_counter_hours: null,
   flight_hours: null, remarks: "",
 });
 const eventTypes: EventType[] = ["TOP_UP", "CHECK_ZERO", "MISSING", "NO_OPERATION", "OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING"];
-const safeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const safeError = (error: unknown): string => {
+  const body = error && typeof error === "object" && "body" in error ? (error as { body: unknown }).body : null;
+  if (body && typeof body === "object" && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object" && "validation_issues" in detail) {
+      return (detail as { validation_issues: string[] }).validation_issues.join("; ");
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+};
 const numeric = (value: string): number | null => value.trim() === "" ? null : Number(value);
 const trim = (text: string): string | null => text.trim() ? text.trim() : null;
 
@@ -77,6 +91,14 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [monitoring, setMonitoring] = useState<Monitoring>({ intervals: [], verified_source_count: 0, truncated: false });
   const [caps, setCaps] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
+  const [aircraftOptions, setAircraftOptions] = useState<AircraftOption[]>([]);
+  const [engineHints, setEngineHints] = useState<EngineHint[]>([]);
+  const [continueEntry, setContinueEntry] = useState(true);
+  const [reviewTarget, setReviewTarget] = useState<Entry | null>(null);
+  const [reviewDecision, setReviewDecision] = useState<"VERIFIED" | "RETURNED">("VERIFIED");
+  const [reviewNote, setReviewNote] = useState("");
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState("");
   const [newProfile, setNewProfile] = useState({ engine_serial_number: "", installation_ref: "", engine_model: "",
     limit_qt_per_fh: "", alert_increase_percent: "", technical_data_ref: "", technical_data_revision: "", effective_from: "" });
@@ -86,16 +108,18 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    const [items, rates, p, permissions] = await Promise.all([
+    const [items, rates, p, permissions, aircraft] = await Promise.all([
       apiRequest<Entry[]>("/reliability/octm/entries"),
       apiRequest<Monitoring>("/reliability/octm/monitoring"),
       apiRequest<Profile[]>("/reliability/octm/profiles"),
       apiRequest<Caps>("/reliability/capabilities"),
+      apiRequest<AircraftOption[]>("/reliability/octm/aircraft"),
     ]);
     setEntries(items);
     setMonitoring(rates);
     setProfiles(p);
     setCaps(permissions.capabilities);
+    setAircraftOptions(aircraft);
   }, []);
 
   useEffect(() => {
@@ -105,6 +129,16 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!form.aircraft_serial_number || !form.event_date) { setEngineHints([]); return; }
+    let active = true;
+    void apiRequest<EngineHint[]>("/reliability/octm/engine-hints?aircraft=" +
+      encodeURIComponent(form.aircraft_serial_number) + "&event_date=" + encodeURIComponent(form.event_date))
+      .then((items) => { if (active) setEngineHints(items); })
+      .catch(() => { if (active) setEngineHints([]); });
+    return () => { active = false; };
+  }, [form.aircraft_serial_number, form.event_date]);
 
   const has = (capability: string) => caps.includes(capability);
   const set = <K extends keyof EntryPayload>(name: K, value: EntryPayload[K]) =>
@@ -142,17 +176,35 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         : apiRequest("/reliability/octm/entries", {
             method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
           }),
-      () => { setForm(blankEntry()); setCorrecting(null); setCorrectionReason(""); }
+      () => {
+        setForm((previous) => correcting || !continueEntry ? blankEntry() : {
+          ...previous, event_sequence: previous.event_sequence + 1, sector_ref: "",
+          oil_quantity: null, oil_unit: "QT", flight_hours: null, engine_counter_hours: null,
+          remarks: "", maintenance_complete: "UNKNOWN", event_type: "TOP_UP",
+        });
+        setCorrecting(null); setCorrectionReason("");
+      }
     );
   };
 
-  const review = (item: Entry, decision: "VERIFIED" | "RETURNED") => {
-    const note = window.prompt(decision === "VERIFIED" ? "Verification basis / source checked:" : "Reason for return:");
-    if (!note || note.trim().length < 3) return;
-    void run(() => apiRequest("/reliability/octm/entries/" + encodeURIComponent(item.id) + "/review", {
+  const prepareReview = async (item: Entry, decision: "VERIFIED" | "RETURNED") => {
+    setReviewTarget(item); setReviewDecision(decision); setReviewNote(""); setReadiness(null);
+    setReviewLoading(true); setError("");
+    try {
+      const checked = await apiRequest<Readiness>("/reliability/octm/entries/" +
+        encodeURIComponent(item.id) + "/readiness");
+      setReadiness(checked);
+    } catch (cause) { setError(safeError(cause)); } finally { setReviewLoading(false); }
+  };
+
+  const submitReview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reviewTarget) return;
+    if (reviewDecision === "VERIFIED" && !readiness?.ready_for_verification) return;
+    await run(() => apiRequest("/reliability/octm/entries/" + encodeURIComponent(reviewTarget.id) + "/review", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, note: note.trim() }),
-    }));
+      body: JSON.stringify({ decision: reviewDecision, note: reviewNote.trim() }),
+    }), () => { setReviewTarget(null); setReadiness(null); setReviewNote(""); });
   };
 
   const chooseCorrection = (item: Entry) => {
@@ -168,6 +220,21 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     [entry.aircraft_serial_number, entry.engine_serial_number, entry.techsheet_ref, entry.installation_ref]
       .some((part) => part.toLowerCase().includes(filter.toLowerCase()))), [entries, filter]);
   const queue = filtered.filter((item) => item.review_status !== "VERIFIED");
+  const formIssues = [
+    ...(!form.aircraft_serial_number ? ["Select a registered aircraft"] : []),
+    ...(!form.engine_position || !form.engine_serial_number || !form.installation_ref
+      ? ["Confirm the physical engine serial, position and installation reference"] : []),
+    ...(!form.techsheet_ref || !form.source_evidence_ref
+      ? ["Record the techsheet and source evidence reference"] : []),
+    ...(form.maintenance_complete !== "YES" && form.event_type !== "NO_OPERATION"
+      ? ["Maintenance completion is not confirmed"] : []),
+    ...(form.event_type === "TOP_UP" && (!form.oil_quantity || !form.oil_specification)
+      ? ["Record positive uplift and oil specification"] : []),
+    ...(["TOP_UP", "CHECK_ZERO"].includes(form.event_type) &&
+      (!form.reference_method || !form.reference_level || form.flight_hours === null)
+      ? ["Reference level/method and flight-hour exposure are needed for verification"] : []),
+    ...(form.flight_hours && !form.sector_ref ? ["Sector reference required when flight hours are entered"] : []),
+  ];
   const engines = Array.from(new Set(monitoring.intervals.map((item) => item.engine_serial_number)));
   const trend = monitoring.intervals.filter((row) => row.status === "VALID" &&
     (!selectedEngine || row.engine_serial_number === selectedEngine)).slice().reverse();
