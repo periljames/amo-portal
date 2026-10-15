@@ -53,7 +53,11 @@ type Caps = { capabilities: string[] };
 type StatusSummary = { total: number; unverified: number; status_counts: Record<string, number> };
 type Revision = { changed_at: string; reason: string; before: Record<string, unknown>;
   after: Record<string, unknown> };
-type View = "entry" | "review" | "register" | "trends" | "profiles";
+type View = "entry" | "review" | "register" | "coverage" | "trends" | "profiles";
+type DailyCoverage = { operating_date: string; registered_snapshot_sectors: number; matched_sectors: number;
+  unmatched_sectors: Array<{ aircraft_serial_number: string; engine_position: string; flight_leg: string;
+    engine_serial_number: string | null }>; entered_octm_observations: number;
+  verified_observations: number; unverified_observations: number; truncated: boolean; important: string };
 type AircraftOption = { serial_number: string; registration: string; is_active: boolean };
 type EngineHint = { engine_position: string; engine_serial_number: string; installation_ref: string;
   last_observed: string; basis: "PREVIOUS_OCTM_ENTRY" };
@@ -93,6 +97,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [pendingEntries, setPendingEntries] = useState<Entry[]>([]);
   const [summary, setSummary] = useState<StatusSummary>({ total: 0, unverified: 0, status_counts: {} });
   const [registerPage, setRegisterPage] = useState(0);
+  const [coverageDate, setCoverageDate] = useState(blankEntry().event_date);
+  const [coverage, setCoverage] = useState<DailyCoverage | null>(null);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+  const [coverageRefresh, setCoverageRefresh] = useState(0);
   const [queuePage, setQueuePage] = useState(0);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [monitoring, setMonitoring] = useState<Monitoring>({ intervals: [], verified_source_count: 0, truncated: false });
@@ -157,6 +165,18 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     return () => { active = false; };
   }, [form.aircraft_serial_number, form.event_date]);
 
+  useEffect(() => {
+    if (view !== "coverage") return;
+    let active = true;
+    setCoverageLoading(true);
+    void apiRequest<DailyCoverage>("/reliability/octm/daily-coverage?operating_date=" +
+      encodeURIComponent(coverageDate), { cacheTtlMs: 0 })
+      .then((value) => { if (active) setCoverage(value); })
+      .catch((cause) => { if (active) setError(safeError(cause)); })
+      .finally(() => { if (active) setCoverageLoading(false); });
+    return () => { active = false; };
+  }, [view, coverageDate, coverageRefresh]);
+
   const has = (capability: string) => caps.includes(capability);
   const set = <K extends keyof EntryPayload>(name: K, value: EntryPayload[K]) =>
     setForm((prior) => ({ ...prior, [name]: value }));
@@ -167,6 +187,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       await operation();
       await refresh();
       onSuccess?.();
+      setCoverageRefresh((value) => value + 1);
       setMessage("Saved successfully.");
     } catch (cause) {
       setError(safeError(cause));
@@ -284,7 +305,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         <Link className="btn btn-secondary" to={home}>Reliability overview</Link>
       </header>
       <nav className="octm__tabs" aria-label="Oil consumption workspaces">
-        {([["entry", "Daily entry"], ["review", "Review queue"], ["register", "Source register"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
+        {([["entry", "Daily entry"], ["review", "Review queue"], ["register", "Source register"], ["coverage", "Daily coverage"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
           .map(([key, label]) => <button key={key} type="button" className={view === key ? "octm__tab active" : "octm__tab"}
             aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{label}
             {key === "review" ? " (" + summary.unverified + ")" : ""}</button>)}
@@ -468,6 +489,31 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               </div>
             </form>
           </div>}
+        </section>}
+        {view === "coverage" && <section className="octm__panel">
+          <h2>Daily data coverage reconciliation</h2>
+          <p>Compare Oil Consumption entries with the engine-flight sectors already recorded in Reliability.
+            This is a follow-up queue, not a substitute for actual techsheet receipt and utilization reconciliation.</p>
+          <label>Operating date<input type="date" value={coverageDate} max={blankEntry().event_date}
+            onChange={(event) => setCoverageDate(event.target.value)} /></label>
+          {coverageLoading ? <p>Comparing registered engine sectors…</p> : coverage && <>
+            <div className="octm__metrics">
+              <div><strong>{coverage.registered_snapshot_sectors}</strong><span>Recorded engine sectors</span></div>
+              <div><strong>{coverage.matched_sectors}</strong><span>Matched OCTM entries</span></div>
+              <div><strong>{coverage.unmatched_sectors.length}</strong><span>Unmatched source sectors</span></div>
+              <div><strong>{coverage.unverified_observations}</strong><span>Entries awaiting verification</span></div>
+            </div>
+            <p className="octm__hint">{coverage.important}</p>
+            {coverage.truncated && <p className="octm__error">Daily reconciliation is truncated. Review the complete source dataset.</p>}
+            <div className="octm__table-wrap"><table><thead><tr>
+              <th>Aircraft</th><th>Engine position</th><th>Engine serial (source)</th><th>Flight sector not matched</th>
+            </tr></thead><tbody>{coverage.unmatched_sectors.map((item, index) => <tr key={item.aircraft_serial_number + item.flight_leg + index}>
+              <td>{item.aircraft_serial_number}</td><td>{item.engine_position}</td>
+              <td>{item.engine_serial_number || "Not recorded"}</td><td>{item.flight_leg}</td>
+            </tr>)}</tbody></table></div>
+            {!coverage.registered_snapshot_sectors && <p>No engine-flight snapshots exist for this date.
+              This does not confirm that no aircraft operated.</p>}
+          </>}
         </section>}
         {view === "trends" && <section className="octm__panel">
           <h2>Verified engine monitoring intervals</h2>
