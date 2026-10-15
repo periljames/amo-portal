@@ -1569,22 +1569,9 @@ def _find_matching_reset_token(
     if token is not None:
         return token
 
-    # Temporary 24-hour migration bridge for issued Argon2 reset links. The
-    # bridge is bounded and filtered server-side; remove it after links expire.
-    old_candidates = (
-        db.query(models.PasswordResetToken)
-        .filter(
-            models.PasswordResetToken.used_at.is_(None),
-            models.PasswordResetToken.expires_at > now,
-            ~models.PasswordResetToken.token_hash.like("hmac-sha256:%"),
-        )
-        .order_by(models.PasswordResetToken.issued_at.desc())
-        .limit(100)
-        .all()
-    )
-    for candidate in old_candidates:
-        if verify_password(raw_token, candidate.token_hash):
-            return candidate
+    # Historical Argon2 reset hashes cannot be safely indexed by raw token.
+    # Those outstanding links are deliberately invalidated on deployment:
+    # users must request a new reset link; do not retain an O(N) scan.
     return None
 
 def redeem_password_reset_token(
