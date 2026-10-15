@@ -250,7 +250,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         <Link className="btn btn-secondary" to={home}>Reliability overview</Link>
       </header>
       <nav className="octm__tabs" aria-label="Oil consumption workspaces">
-        {([["entry", "Daily entry"], ["review", "Review queue"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
+        {([["entry", "Daily entry"], ["review", "Review queue"], ["register", "Source register"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
           .map(([key, label]) => <button key={key} type="button" className={view === key ? "octm__tab active" : "octm__tab"}
             aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{label}
             {key === "review" ? " (" + queue.length + ")" : ""}</button>)}
@@ -262,19 +262,41 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
           <h2>{correcting ? "Correct existing source record" : "Register technical-log oil entry"}</h2>
           <p>Every engine/sector event has a unique sequence. Enter zero only when oil was checked and none added. Missing data is not zero.</p>
           <form onSubmit={(event) => void save(event)} className="octm__form">
-            <label>Aircraft serial / ID<input required value={form.aircraft_serial_number} onChange={(event) => set("aircraft_serial_number", event.target.value)} /></label>
+            <label>Registered aircraft
+              <select required value={form.aircraft_serial_number} onChange={(event) => set("aircraft_serial_number", event.target.value)}>
+                <option value="">Select aircraft…</option>
+                {aircraftOptions.map((aircraft) => <option key={aircraft.serial_number} value={aircraft.serial_number}>
+                  {aircraft.registration} · {aircraft.serial_number}{!aircraft.is_active ? " (historical)" : ""}
+                </option>)}
+              </select>
+            </label>
+            <label>Previously recorded engines (hints, not installation proof)
+              <select value="" onChange={(event) => {
+                const hint = engineHints[Number(event.target.value)];
+                if (hint) setForm((previous) => ({ ...previous,
+                  engine_position: hint.engine_position,
+                  engine_serial_number: hint.engine_serial_number, installation_ref: hint.installation_ref }));
+              }}>
+                <option value="">Enter manually or select previous engine…</option>
+                {engineHints.map((hint, index) => <option key={hint.engine_serial_number + hint.installation_ref + index} value={index}>
+                  {hint.engine_position} · {hint.engine_serial_number} · {hint.installation_ref} (last seen {hint.last_observed})
+                </option>)}
+              </select>
+            </label>
             <label>Engine position<input required value={form.engine_position} onChange={(event) => set("engine_position", event.target.value)} /></label>
             <label>Engine serial number<input required value={form.engine_serial_number} onChange={(event) => set("engine_serial_number", event.target.value)} /></label>
             <label>Installation reference<input required value={form.installation_ref} onChange={(event) => set("installation_ref", event.target.value)} /></label>
-            <label>Event date<input type="date" required value={form.event_date} onChange={(event) => set("event_date", event.target.value)} /></label>
+            <label>Event date<input type="date" required max={blankEntry().event_date} value={form.event_date} onChange={(event) => set("event_date", event.target.value)} /></label>
             <label>Techsheet / TechLog number<input required value={form.techsheet_ref} onChange={(event) => set("techsheet_ref", event.target.value)} /></label>
-            <label>Sector reference<input value={form.sector_ref} onChange={(event) => set("sector_ref", event.target.value)} /></label>
+            <label>Sector / flight reference {form.flight_hours !== null && form.flight_hours > 0 ? "(required)" : ""}
+              <input required={form.flight_hours !== null && form.flight_hours > 0}
+                value={form.sector_ref} onChange={(event) => set("sector_ref", event.target.value)} />
+            </label>
             <label>Event sequence<input type="number" min="1" required value={form.event_sequence} onChange={(event) => set("event_sequence", Number(event.target.value))} /></label>
             <label>Oil event<select value={form.event_type} onChange={(event) => set("event_type", event.target.value as EventType)}>
               {eventTypes.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></label>
             <label>Source<select value={form.source_type} onChange={(event) => set("source_type", event.target.value as EntryPayload["source_type"])}>
-              <option value="PAPER_TECHSHEET">Paper techsheet</option><option value="REVIEWED_OCR">Reviewed OCR draft</option>
-              <option value="AVI_PRO_EXPORT">Avi Pro export</option><option value="AVI_PRO_API">Avi Pro feed</option></select></label>
+              <option value="PAPER_TECHSHEET">Paper techsheet</option><option value="REVIEWED_OCR">Reviewed OCR draft</option></select></label>
             <label>Maintenance information complete?<select value={form.maintenance_complete}
               onChange={(event) => set("maintenance_complete", event.target.value as EntryPayload["maintenance_complete"])}>
               <option value="UNKNOWN">Unknown</option><option value="NO">No</option><option value="YES">Yes</option></select></label>
@@ -284,7 +306,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <label>Original volume unit<select value={form.oil_unit ?? "QT"} disabled={["CHECK_ZERO", "MISSING", "NO_OPERATION"].includes(form.event_type)}
               onChange={(event) => set("oil_unit", event.target.value as EntryPayload["oil_unit"])}>
               <option value="QT">US quart</option><option value="L">Litre</option><option value="US_GAL">US gallon</option></select></label>
-            <label>Flight hours since prior entry<input type="number" min="0" max="100" step="any" value={form.flight_hours ?? ""}
+            <label>Flight hours for this sector (not block hours)
+              <input type="number" min="0" max="100" step="any" value={form.flight_hours ?? ""}
               onChange={(event) => set("flight_hours", numeric(event.target.value))} /></label>
             <label>Engine counter (hours)<input type="number" min="0" step="any" value={form.engine_counter_hours ?? ""}
               onChange={(event) => set("engine_counter_hours", numeric(event.target.value))} /></label>
@@ -292,7 +315,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               onChange={(event) => set("reference_method", event.target.value)} /></label>
             <label>Reference level<input value={form.reference_level} onChange={(event) => set("reference_level", event.target.value)} /></label>
             <label>Oil specification<input value={form.oil_specification} onChange={(event) => set("oil_specification", event.target.value)} /></label>
-            <label>Source evidence reference<input value={form.source_evidence_ref} placeholder="DMS / Tech Records reference"
+            <label>Source evidence reference (needed for verification)<input value={form.source_evidence_ref} placeholder="Scanned TechLog / DMS document reference"
               onChange={(event) => set("source_evidence_ref", event.target.value)} /></label>
             <label>External event ID<input value={form.external_record_id} onChange={(event) => set("external_record_id", event.target.value)} /></label>
             <label className="octm__full">Remarks<textarea rows={2} value={form.remarks} onChange={(event) => set("remarks", event.target.value)} /></label>
