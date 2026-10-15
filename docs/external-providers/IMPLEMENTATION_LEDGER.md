@@ -123,3 +123,17 @@ Phase 3 implementation handoff: `docs/external-providers/PHASE2_IDENTITY_ACCESS.
 - [ ] Validated signed final tenant procedures, State-of-Registry requirements, Safety source records, exact workbooks, antivirus/CDR, site-level regulatory limitation cases and full operational transition coverage remain Phase 10 acceptance inputs. Full trace in PHASE10_VERIFICATION_LEDGER.md (Phase 4 items 58–70).
 
 **Next permitted implementation:** only Phase 5 on a separate user instruction, still this same branch and PR. Do not merge until Phase 10.
+
+
+## Phase 5 controlled documents — source handoff, 15 October 2026
+
+- [x] Continued on original branch and the **same draft PR #560**; Phase 6 not started. Inspected Phase 4 QMS qualification/contract/evidence and DMS canonical revision, storage, access and retention sources by source review.
+- [x] Added `extprov_261015_docs` additive schema for tenant/provider-category requirements, current-form provenance, accepted/superseded submission linkage, idempotency, exact DMS/QMS pointer fields, contract source metadata and append-only event history under tenant isolation. Resubmission FK qualifies **tenant and provider**.
+- [x] Added controlled partner documents/forms page and Quality/Document Control review/policy page; UI prompts all requested document classes as **optional, non-mandatory tenant selections**, not universal certificate obligations.
+- [x] Added original-preserving, 20-MB bounded upload with magic/ZIP/MIME/filename checks, ClamAV fail-closed configuration, CSRF/capability/object checks, progress/cancel/retry, archival of unchanged original, actor/time/hash/form revision, Quality return/rejection with reason.
+- [x] Added accepted-intake -> canonical QMS **PENDING** evidence creation, independent QMS verification guard and supersession of previous source **only after verified replacement**. Existing provider and QMS authorization remain independent; legacy unclassified acceptance path blocked.
+- [x] Existing QMS agreements retain parties/sites/expiry/notice/authority reference and signed original. Activation and mandatory Procurement use gate require current published DMS, original matching accepted signed submission, independently VERIFIED QMS evidence and effective dates. PO override no longer bypasses mandatory maintenance agreement.
+- [x] Restricted DMS document profiles remain enforced in staff revision selectors and links; external accounts see only explicitly granted published forms/contract revisions. DMS original and retention/legal-hold status projected without duplicating disposition engine.
+- [x] Integrated into existing scheduled QMS notification worker with tenant-controlled evidence-expiry advance days and recorded agreement-notice period; no parallel job runner.
+- [ ] **NOT accepted / known gaps:** no Alembic or runtime verification, tests, CI, typecheck or browser workflows intentionally executed; ClamAV must be provisioned; 20 MB is not resumable multipart; a free-form retention reference is not a verified DMS retention-policy binding, and QMS-only staged evidence needs explicit canonical DMS hold/disposition lifecycle before production. Signatures and authority acceptance still require actual human/tenant verification. See Phase 5 guide and Phase 10 ledger.
+- [ ] Never merge or claim production readiness before Phase 10 evidence. Existing automatic GitHub CI may run but has not been used as acceptance. 
