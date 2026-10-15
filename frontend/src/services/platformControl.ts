@@ -40,6 +40,13 @@ export type PlatformBillingControl = {
   invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
   tenants: PlatformBillingTenant[];
 };
+export type PlatformLicensePlan = {
+  id: string; code: string; name: string; description?: string | null;
+  term: "MONTHLY" | "ANNUAL" | "BI_ANNUAL";
+  trial_days: number; amount_cents: number; currency: string;
+  is_active: boolean; min_usage_limit?: number | null; max_usage_limit?: number | null;
+};
+
 export type PlatformBillingInvoice = {
   id: string;
   invoice_number?: string;
@@ -310,6 +317,11 @@ export const platformApi = {
 
   billingSummary: (dataMode = "REAL") => request<Record<string, unknown>>(`/platform/billing/summary${qs({ data_mode: dataMode })}`),
   billingControl: (dataMode = "REAL") => request<PlatformBillingControl>(`/platform/billing/control${qs({ data_mode: dataMode })}`),
+  licensePlans: () => request<PlatformLicensePlan[]>("/billing/catalog?include_inactive=true"),
+  createLicensePlan: (payload: Record<string, unknown>) => request<PlatformLicensePlan>("/billing/catalog", { method: "POST", body: JSON.stringify(payload) }),
+  updateLicensePlan: (id: string, payload: Record<string, unknown>) => request<PlatformLicensePlan>(`/billing/catalog/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateTenantLicense: (tenantId: string, payload: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/accounts/admin/platform/tenants/${encodeURIComponent(tenantId)}/subscription`, { method: "POST", body: JSON.stringify(payload) }),
   runBillingMaintenance: (reason: string) => request<Record<string, unknown>>("/platform/billing/maintenance/run", { method: "POST", body: JSON.stringify({ reason }) }),
   invoices: (params: { data_mode?: string; tenant_id?: string; status?: string; q?: string; limit?: number; offset?: number } = {}) => request<PlatformList<PlatformBillingInvoice>>(`/platform/billing/invoices${qs(params)}`),
   invoiceDetail: (id: string) => request<PlatformBillingInvoice>(`/platform/billing/invoices/${encodeURIComponent(id)}`),
