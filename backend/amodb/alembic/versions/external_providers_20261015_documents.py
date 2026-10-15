@@ -88,7 +88,8 @@ def upgrade():
         batch.add_column(sa.Column("supersedes_contract_id", sa.String(36)))
         batch.add_column(sa.Column("change_reason", sa.Text()))
         batch.create_foreign_key("fk_ext_agreement_prior", "quality_external_provider_contracts",
-                                 ["supersedes_contract_id"], ["id"], ondelete="RESTRICT")
+                                 ["amo_id","supplier_id","supersedes_contract_id"],
+                                 ["amo_id","supplier_id","id"], ondelete="RESTRICT")
     if op.get_bind().dialect.name == "postgresql":
         for table in ("external_provider_document_requirements", "external_provider_document_events"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
