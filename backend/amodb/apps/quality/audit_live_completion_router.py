@@ -73,7 +73,13 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
 
 def _configured_webauthn(request: Request) -> tuple[str, str]:
     host = (request.url.hostname or "").strip().lower()
-    origin = f"{request.url.scheme}://{request.url.netloc}"
+    # The browser's Origin is the value embedded in WebAuthn clientDataJSON.
+    # When behind the Vite/reverse proxy, request.url refers to the private
+    # backend host/port, not the public relying-party origin. Validate the
+    # browser Origin against a configured strict allowlist before using it.
+    backend_origin = f"{request.url.scheme}://{request.url.netloc}"
+    browser_origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    origin = browser_origin or backend_origin
     production = os.getenv("APP_ENV", "").strip().lower() in {"prod", "production"}
     rp_id = (os.getenv("QMS_WEBAUTHN_RP_ID") or "").strip().lower()
     configured_origins = [item.strip().rstrip("/") for item in (os.getenv("QMS_WEBAUTHN_EXPECTED_ORIGINS") or "").split(",") if item.strip()]
@@ -82,12 +88,18 @@ def _configured_webauthn(request: Request) -> tuple[str, str]:
     if not rp_id:
         rp_id = host
     if not configured_origins:
-        configured_origins = [origin]
-    if not rp_id or origin.rstrip("/") not in configured_origins:
+        configured_origins = [backend_origin]
+    if not rp_id or origin not in configured_origins:
         raise HTTPException(status_code=403, detail="This origin is not authorized for QMS passkey ceremonies.")
-    if request.url.scheme != "https" and host not in {"localhost", "127.0.0.1", "::1"}:
+    from urllib.parse import urlsplit
+    parsed_origin = urlsplit(origin)
+    if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.hostname or parsed_origin.username or parsed_origin.password or parsed_origin.path or parsed_origin.query or parsed_origin.fragment:
+        raise HTTPException(status_code=403, detail="Invalid QMS WebAuthn origin.")
+    if parsed_origin.scheme != "https" and parsed_origin.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise HTTPException(status_code=403, detail="QMS passkey ceremonies require a secure HTTPS context.")
-    return rp_id, origin.rstrip("/")
+    if rp_id != parsed_origin.hostname and not parsed_origin.hostname.endswith("." + rp_id):
+        raise HTTPException(status_code=403, detail="QMS WebAuthn RP ID does not match the authorized browser origin.")
+    return rp_id, origin
 
 
 def _challenge_ttl() -> int:
