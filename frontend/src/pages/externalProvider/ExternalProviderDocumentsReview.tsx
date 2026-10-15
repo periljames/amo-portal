@@ -53,7 +53,7 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
   async function saveRequirement(event:React.FormEvent){
     event.preventDefault();setError("");setNotice("");
     const key=form.code.trim().toUpperCase();
-    if(!/^[A-Z][A-Z0-9_]{1,63}$/.test(key)){setError("Enter an uppercase requirement code, at least two characters.");return;}
+    if(!/^[A-Z][A-Z0-9_]{1,47}$/.test(key)){setError("Enter an uppercase requirement code, at least two characters.");return;}
     setBusy("policy");
     try{
       await apiRequest(`${path}/requirements/${encodeURIComponent(key)}`,{
