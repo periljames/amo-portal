@@ -51,6 +51,8 @@ type Profile = { id: string; engine_serial_number: string; installation_ref: str
 type Monitoring = { intervals: Interval[]; verified_source_count: number; truncated: boolean };
 type Caps = { capabilities: string[] };
 type StatusSummary = { total: number; unverified: number; status_counts: Record<string, number> };
+type Revision = { changed_at: string; reason: string; before: Record<string, unknown>;
+  after: Record<string, unknown> };
 type View = "entry" | "review" | "register" | "trends" | "profiles";
 type AircraftOption = { serial_number: string; registration: string; is_active: boolean };
 type EngineHint = { engine_position: string; engine_serial_number: string; installation_ref: string;
@@ -108,6 +110,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [profileApproval, setProfileApproval] = useState<Profile | null>(null);
   const [profileApprovalNote, setProfileApprovalNote] = useState("");
   const [profileDataConfirmed, setProfileDataConfirmed] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<Entry | null>(null);
+  const [revisions, setRevisions] = useState<Revision[]>([]);
   const [selectedEngine, setSelectedEngine] = useState("");
   const [newProfile, setNewProfile] = useState({ engine_serial_number: "", installation_ref: "", engine_model: "",
     limit_qt_per_fh: "", alert_increase_percent: "", technical_data_ref: "", technical_data_revision: "", effective_from: "" });
@@ -222,6 +226,15 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         source_checked: reviewChecks.source, engine_identity_checked: reviewChecks.engine,
         exposure_checked: reviewChecks.exposure }),
     }), () => { setReviewTarget(null); setReadiness(null); setReviewNote(""); });
+  };
+
+  const showHistory = async (item: Entry) => {
+    setHistoryTarget(item); setRevisions([]); setError("");
+    try {
+      const result = await apiRequest<Revision[]>("/reliability/octm/entries/" +
+        encodeURIComponent(item.id) + "/history", { cacheTtlMs: 0 });
+      setRevisions(result);
+    } catch (cause) { setError(safeError(cause)); }
   };
 
   const chooseCorrection = (item: Entry) => {
@@ -383,6 +396,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
                 <button disabled={busy || !(has("reliability.data_quality.resolve") ||
                   (item.review_status !== "VERIFIED" && has("reliability.ingest")))}
                   onClick={() => chooseCorrection(item)}>Correct</button>
+                <button onClick={() => void showHistory(item)}>History</button>
               </div></td>
             </tr>)}</tbody></table></div>
           {!(view === "review" ? queue : filtered).length && <p>No source entries match the filter.</p>}
@@ -402,6 +416,20 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               Next
             </button>
           </div>
+          {historyTarget && <div className="octm__review" role="region" aria-label="Source correction history">
+            <h3>Correction history — {historyTarget.techsheet_ref} / {historyTarget.engine_serial_number}</h3>
+            {!revisions.length && <p>No recorded corrections for this entry.</p>}
+            {revisions.map((revision, index) => <details key={revision.changed_at + index}>
+              <summary>{revision.changed_at} — {revision.reason}</summary>
+              <div className="octm__table-wrap"><table><thead><tr><th>Field</th><th>Original value</th><th>Replacement value</th></tr></thead>
+                <tbody>{Object.keys(revision.after).filter((name) =>
+                  JSON.stringify(revision.before[name]) !== JSON.stringify(revision.after[name])).map((field) =>
+                  <tr key={field}><td>{field.replaceAll("_", " ")}</td>
+                    <td>{String(revision.before[field] ?? "Not recorded")}</td>
+                    <td>{String(revision.after[field] ?? "Not recorded")}</td></tr>)}</tbody></table></div>
+            </details>)}
+            <button type="button" className="btn btn-secondary" onClick={() => setHistoryTarget(null)}>Close history</button>
+          </div>}
           {reviewTarget && <div className="octm__review" role="region" aria-label="Source verification">
             <h3>Review {reviewTarget.techsheet_ref} · {reviewTarget.engine_serial_number}</h3>
             <p>Source evidence: <strong>{reviewTarget.source_evidence_ref || "Not provided"}</strong>.
