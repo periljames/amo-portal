@@ -81,3 +81,78 @@ def test_unverified_rows_cannot_change_formal_monitoring():
     data = [observation(i, day=i) for i in range(1, 5)]
     data[0].review_status = "DRAFT"
     assert calculate_windows(data, []) == []
+
+
+def test_multiple_topups_same_sector_do_not_double_count_hours():
+    rows = [
+        observation(1, day=1, qty=1, fh=10),
+        observation(2, day=1, qty=2, fh=10),
+        observation(3, day=2, qty=1, fh=10),
+        observation(4, day=3, qty=1, fh=10),
+        observation(5, day=4, qty=1, fh=10),
+    ]
+    for row in rows:
+        row.sector_ref = f"FLIGHT-{row.event_date.day}"
+    result = calculate_windows(rows, [])
+    assert len(result) == 1
+    assert result[0]["flight_hours"] == 40
+    assert result[0]["oil_added_quarts"] == 6
+    assert result[0]["rate_qt_per_fh"] == 0.15
+    assert len(result[0]["source_ids"]) == 5
+
+
+def test_no_operation_day_does_not_break_continuous_interval():
+    rows = [observation(i, day=i) for i in range(1, 5)]
+    rows.append(observation(5, day=5, event="NO_OPERATION", fh=0, qty=None))
+    result = calculate_windows(rows, [])
+    assert len(result) == 1
+    assert result[0]["flight_hours"] == 40
+
+
+def test_nonroutine_oil_change_breaks_continuity():
+    rows = [
+        observation(1), observation(2, day=2),
+        observation(3, day=3, event="OIL_CHANGE", qty=None, fh=0),
+        observation(4, day=4), observation(5, day=5),
+    ]
+    assert calculate_windows(rows, []) == []
+
+
+def test_draft_may_be_incomplete_but_no_false_zero_or_future_date():
+    # Saving an unfinished draft is allowed, but the reviewer must fill the
+    # quantity before verifying; an empty oil field is not a zero reading.
+    entry = EntryPayload(
+        aircraft_serial_number="AC-001", engine_position="1",
+        engine_serial_number="E-1", installation_ref="INSTALL-001",
+        event_date=date(2026, 10, 1), event_sequence=1,
+        techsheet_ref="TS-002", event_type="TOP_UP",
+    )
+    assert entry.oil_quantity is None
+    with pytest.raises(ValueError):
+        EntryPayload(
+            aircraft_serial_number="AC-001", engine_position="1",
+            engine_serial_number="E-1", installation_ref="INSTALL-001",
+            event_date=date(2026, 10, 1), event_sequence=1,
+            techsheet_ref="TS-002", event_type="TOP_UP", oil_quantity=0,
+        )
+
+
+def test_invalid_flight_exposure_rejected_without_sector():
+    with pytest.raises(ValueError):
+        EntryPayload(
+            aircraft_serial_number="AC-001", engine_position="1",
+            engine_serial_number="E-1", installation_ref="INSTALL-001",
+            event_date=date(2026, 10, 1), event_sequence=1,
+            techsheet_ref="TS-003", event_type="TOP_UP", oil_quantity=1,
+            oil_unit="QT", flight_hours=1.2,
+        )
+
+
+def test_invalid_numeric_values_rejected():
+    with pytest.raises(ValueError):
+        EntryPayload(
+            aircraft_serial_number="AC-001", engine_position="1",
+            engine_serial_number="E-1", installation_ref="INSTALL-001",
+            event_date=date(2026, 10, 1), event_sequence=1,
+            techsheet_ref="TS-003", event_type="TOP_UP", oil_quantity=float("inf"), oil_unit="QT",
+        )
