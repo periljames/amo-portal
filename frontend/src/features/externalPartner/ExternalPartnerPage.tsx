@@ -8,6 +8,7 @@ import "./partner.css";
 const Home=lazy(()=>import("./PartnerHome"));
 const Organization=lazy(()=>import("./PartnerOrganization"));
 const Compliance=lazy(()=>import("./PartnerCompliance"));
+const Documents=lazy(()=>import("./PartnerDocuments"));
 const Commerce=lazy(()=>import("./PartnerCommerce"));
 const Quality=lazy(()=>import("./PartnerQuality"));
 const Qualification=lazy(()=>import("./PartnerQualification"));
@@ -18,6 +19,7 @@ const sections=[
   {id:"home",name:"Action center",cap:"profile.read"},
   {id:"organization",name:"My organization",cap:"profile.read"},
   {id:"compliance",name:"Compliance",cap:"profile.read"},
+  {id:"documents",name:"Controlled documents",cap:"document.read"},
   {id:"contracts",name:"Contracts",cap:"contract.read"},
   {id:"qualification",name:"Qualification",cap:"profile.read"},
   {id:"quality",name:"Quality",cap:"task.read"},
@@ -110,6 +112,7 @@ export default function ExternalPartnerPage(){
           {section==="home"&&<Home {...props}/>}
           {section==="organization"&&<Organization {...props}/>}
           {section==="compliance"&&<Compliance {...props}/>}
+          {section==="documents"&&<Documents {...props}/>}
           {(section==="contracts"||section==="procurement"||section==="work")&&<Commerce {...props} section={section}/>}
           {section==="qualification"&&<Qualification {...props}/>}
           {section==="quality"&&<Quality {...props}/>}
