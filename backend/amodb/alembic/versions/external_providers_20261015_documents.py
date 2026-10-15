@@ -25,6 +25,7 @@ def upgrade():
         sa.Column("description", sa.Text(), nullable=False, server_default=""),
         sa.Column("mandatory", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("expiry_required", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("reminder_days", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("form_manual_id", sa.String(36), sa.ForeignKey("manuals.id", ondelete="RESTRICT")),
         sa.Column("form_revision_id", sa.String(36), sa.ForeignKey("manual_revisions.id", ondelete="RESTRICT")),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -35,6 +36,7 @@ def upgrade():
         sa.UniqueConstraint("amo_id", "provider_kind", "code", name="uq_ext_doc_req_tenant_kind_code"),
         sa.UniqueConstraint("amo_id", "id", name="uq_ext_doc_req_tenant_id"),
         sa.CheckConstraint("version >= 1", name="ck_ext_doc_req_version"),
+        sa.CheckConstraint("reminder_days BETWEEN 0 AND 365", name="ck_ext_doc_req_reminder_days"),
         sa.CheckConstraint("provider_kind IN ('ALL','SUPPLIER','CONTRACTOR','SUBCONTRACTOR','SERVICE_PROVIDER','CONSULTANT','LABORATORY','CALIBRATION_PROVIDER','OTHER')", name="ck_ext_doc_req_kind"),
         sa.CheckConstraint("(form_manual_id IS NULL) = (form_revision_id IS NULL)", name="ck_ext_doc_req_form_pair"),
     )
