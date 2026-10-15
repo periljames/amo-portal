@@ -544,12 +544,16 @@ def queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_activ
       s.tenant_provider_id,s.requirement_id,s.supersedes_submission_id,s.form_revision_id,
       s.sha256,s.size_bytes,s.valid_until,s.dms_revision_id,s.qms_evidence_id,
       s.review_note,s.created_at,r.title AS requirement_title,p.supplier_id,
-      v.legal_name,i.email
+      v.legal_name,i.email,
+      d.status AS dms_retention_status,d.legal_hold AS dms_legal_hold,
+      d.retention_until AS dms_retention_until
       FROM external_partner_evidence_submissions s
       JOIN external_tenant_providers p ON p.id=s.tenant_provider_id AND p.amo_id=s.amo_id
       JOIN procurement_suppliers v ON v.amo_id=p.amo_id AND v.id=p.supplier_id
       JOIN external_identities i ON i.id=s.identity_id
       LEFT JOIN external_provider_document_requirements r ON r.amo_id=s.amo_id AND r.id=s.requirement_id
+      LEFT JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id
+        AND d.source_type='REVISION' AND d.source_id=s.dms_revision_id
       WHERE s.amo_id=:amo ORDER BY s.created_at DESC,s.id DESC
       LIMIT :limit OFFSET :offset""",amo=amo,limit=limit,offset=offset)
     return {"items":rows,"limit":limit,"offset":offset,"has_more":len(rows)==limit}
