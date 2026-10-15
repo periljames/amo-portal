@@ -423,11 +423,15 @@ class ContractCreate(BaseModel):
     controlled_document_id: str | None = Field(default=None, max_length=64)
     controlled_document_revision: str | None = Field(default=None, max_length=64)
     owner_user_id: str | None = None
+    supersedes_contract_id: str | None = Field(default=None,max_length=36)
+    change_reason: str | None = Field(default=None,max_length=2000)
 
     @model_validator(mode="after")
     def validate_dates(self) -> "ContractCreate":
         if self.effective_on and self.expires_on and self.expires_on < self.effective_on:
             raise ValueError("Contract expiry cannot be before its effective date.")
+        if self.supersedes_contract_id and len((self.change_reason or "").strip())<8:
+            raise ValueError("An amendment or renewal reason is required when referencing an earlier agreement.")
         return self
 
 
@@ -907,6 +911,15 @@ def create_provider_contract(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    if payload.supersedes_contract_id:
+        predecessor=db.execute(text("""
+            SELECT id,status FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier AND id=:prior
+        """),{"amo":ctx.amo_id,"supplier":provider_id,
+              "prior":payload.supersedes_contract_id}).mappings().first()
+        if not predecessor or predecessor["status"]=="DRAFT":
+            raise HTTPException(status_code=422,
+                detail="Only an earlier executed agreement for this provider can be renewed or amended.")
     contract_id = str(uuid.uuid4())
     try:
         db.execute(
@@ -916,11 +929,13 @@ def create_provider_contract(
                     id, amo_id, supplier_id, contract_number, title, status, scope_text,
                     effective_on, expires_on, termination_notice_days, renewal_terms,
                     controlled_document_id, controlled_document_revision, owner_user_id,
+                    supersedes_contract_id, change_reason,
                     version, created_by_user_id, updated_by_user_id, created_at, updated_at
                 ) VALUES (
                     :id, :amo_id, :supplier_id, :contract_number, :title, 'DRAFT', :scope_text,
                     :effective_on, :expires_on, :notice_days, :renewal_terms,
                     :controlled_document_id, :controlled_document_revision, :owner_user_id,
+                    :supersedes, :change_reason,
                     1, :actor, :actor, NOW(), NOW()
                 )
                 """
@@ -939,6 +954,8 @@ def create_provider_contract(
                 "controlled_document_id": payload.controlled_document_id,
                 "controlled_document_revision": payload.controlled_document_revision,
                 "owner_user_id": payload.owner_user_id,
+                "supersedes":payload.supersedes_contract_id,
+                "change_reason":payload.change_reason,
                 "actor": ctx.user_id,
             },
         )
@@ -992,6 +1009,17 @@ def transition_provider_contract(
     target = payload.target_status
     if target not in _CONTRACT_TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Contract transition {current} → {target} is not allowed.")
+    if target == "SUPERSEDED":
+        successor=db.execute(text("""
+            SELECT 1 FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier
+              AND supersedes_contract_id=:prior AND status='ACTIVE'
+              AND (expires_on IS NULL OR expires_on>=CURRENT_DATE)
+            LIMIT 1
+        """),{"amo":ctx.amo_id,"supplier":provider_id,"prior":contract_id}).first()
+        if not successor:
+            raise HTTPException(status_code=409,
+                detail="Supersession requires an active, controlled successor agreement")
     if target == "ACTIVE":
         # The agreement is a separate commercial control. It can become
         # ACTIVE only after an executed, exact DMS revision is linked to
