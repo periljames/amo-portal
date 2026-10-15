@@ -61,8 +61,8 @@ def _assert_required_contract_current(
     ).scalar()
     if not bool(contract_required):
         return
-    if allow_controlled_override:
-        return
+    # Contract-mandatory maintenance cannot be bypassed by a Procurement PO override.
+    # Overrides govern the commercial transaction, not the existence of the agreement.
 
     if not inspector.has_table(_PROVIDER_CONTRACT_TABLE):
         raise HTTPException(
@@ -75,12 +75,26 @@ def _assert_required_contract_current(
         text(
             """
             SELECT 1
-            FROM quality_external_provider_contracts
-            WHERE amo_id = :amo_id
-              AND supplier_id = :supplier_id
-              AND status = 'ACTIVE'
-              AND (effective_on IS NULL OR effective_on <= :today)
-              AND (expires_on IS NULL OR expires_on >= :today)
+            FROM quality_external_provider_contracts c
+            JOIN manuals m ON m.id=c.controlled_document_id
+            JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=c.amo_id
+            JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
+              AND (r.id=c.controlled_document_revision OR r.rev_number=c.controlled_document_revision)
+            JOIN external_partner_evidence_submissions s
+              ON s.id=c.signed_evidence_submission_id AND s.amo_id=c.amo_id
+              AND s.related_kind='CONTRACT' AND s.related_id=c.id
+              AND s.status='ACCEPTED' AND s.sha256=r.source_sha256
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id
+            JOIN quality_external_provider_evidence q ON q.id=s.qms_evidence_id
+              AND q.amo_id=c.amo_id AND q.supplier_id=c.supplier_id
+              AND q.status='VERIFIED'
+              AND (q.valid_until IS NULL OR q.valid_until>=:today)
+            WHERE c.amo_id = :amo_id AND c.supplier_id = :supplier_id
+              AND c.status = 'ACTIVE'
+              AND (c.effective_on IS NULL OR c.effective_on <= :today)
+              AND (c.expires_on IS NULL OR c.expires_on >= :today)
+              AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
             LIMIT 1
             """
         ),
