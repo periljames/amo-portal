@@ -186,7 +186,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
         <p key={x.car_number}>CAR {x.car_number} overdue since {x.due_date}</p>)}
       {manager&&<button disabled={busy||note.length<12} onClick={()=>void change(
         "/alerts/escalate",{supplier_id:supplierId,reason:note})}>
-        Record Quality escalation and notify provider</button>
+        Record Quality escalation and notify provider</button>}
       <p>These are existing audit occurrences, not a second audit engine.</p>
       {data?.audits.map(a=><p key={a.audit_id}>{a.audit_ref} · {a.audit_status} · {a.audit_id}</p>)}
       {!data?.audits.length&&<p>No linked audit occurrences.</p>}</section>}
