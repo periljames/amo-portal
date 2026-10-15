@@ -96,8 +96,15 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  await page.getByLabel("Target closure date").fill(futureDate(28));
-  await page.getByLabel("Due date").fill(futureDate(21));
+  // Initial deadlines are editable; after submission, governed deadlines are
+  // locked and any change requires the separate Quality extension workflow.
+  if (suffix === "rework") {
+    await expect(page.getByLabel("Target closure date")).toBeDisabled();
+    await expect(page.getByLabel("Due date")).toBeDisabled();
+  } else {
+    await page.getByLabel("Target closure date").fill(futureDate(28));
+    await page.getByLabel("Due date").fill(futureDate(21));
+  }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
