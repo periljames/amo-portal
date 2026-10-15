@@ -36,19 +36,27 @@ router = APIRouter(prefix="/workspace", tags=["Document Control Records Vault"])
 RECORD_ROOT = Path(os.getenv("DOCUMENT_RECORD_VAULT_DIR", "uploads/document-record-vault")).resolve()
 
 
-def _materialize_record_file(storage_path: str) -> Path:
+def _materialize_record_file(storage_path: str, *, expected_sha256: str | None = None) -> Path:
     """Read retained records from shared object storage or safeguarded legacy volumes."""
     if str(storage_path or "").startswith("s3://"):
         try:
             path = shared_storage.materialize(storage_path)
         except Exception as exc:
             raise HTTPException(status_code=404, detail="Retained record file is unavailable") from exc
-        if not path.is_file():
+    else:
+        path = Path(storage_path).resolve()
+        if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
             raise HTTPException(status_code=404, detail="Retained record file is unavailable")
-        return path
-    path = Path(storage_path).resolve()
-    if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    if expected_sha256:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise HTTPException(status_code=409, detail={
+                "code": "RECORD_FILE_CHECKSUM_MISMATCH",
+                "message": "Retained record does not match its original certified checksum.",
+            })
     return path
 MAX_RECORD_BYTES = int(os.getenv("DOCUMENT_RECORD_VAULT_MAX_BYTES", str(100 * 1024 * 1024)))
 DISPOSITIONS = {"REVIEW_AT_EXPIRY", "ARCHIVE", "TRANSFER", "DESTROY"}
@@ -646,7 +654,7 @@ def reindex_record(
         raise HTTPException(status_code=403, detail="Document Control privileges are required to reindex records")
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = _record(db, tenant.amo_id, record_id)
-    _materialize_record_file(row.storage_path)
+    _materialize_record_file(row.storage_path, expected_sha256=row.sha256)
     row.metadata_json = {**dict(row.metadata_json or {}), "text_index": {"status": "PENDING"}}
     job = db.query(rm.TenantRecordIndexJob).filter(
         rm.TenantRecordIndexJob.tenant_id == tenant.amo_id,
@@ -674,7 +682,7 @@ def download_record(
     row = _record(db, tenant.amo_id, record_id)
     series = _series(db, tenant.amo_id, row.series_id)
     _require_record_read(db, str(tenant.amo_id), current_user, series, row)
-    path = _materialize_record_file(row.storage_path)
+    path = _materialize_record_file(row.storage_path, expected_sha256=row.sha256)
     audit(db, tenant, request, "document.records.downloaded", "record_asset", row.id, {
         "record_number": row.record_number,
         "series_id": row.series_id,
