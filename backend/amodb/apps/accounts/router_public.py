@@ -799,6 +799,10 @@ def create_first_superuser(
     payload: schemas.FirstSuperuserCreate,
     db: Session = Depends(get_db),
 ):
+    # Initial ownership must be commissioned before the public reverse proxy
+    # is enabled. An empty production database is not an authorization grant.
+    if _APP_ENV in {"prod", "production", "staging"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     existing_user = db.query(models.User).first()
     if existing_user:
         raise HTTPException(
