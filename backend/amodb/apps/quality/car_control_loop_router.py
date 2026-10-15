@@ -406,7 +406,7 @@ def _assert_milestone(db: Session, *, amo_id: str, car_id: str, milestone_id: st
         QualityCARMilestone.id == milestone_id,
     )
     if lock:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityCARMilestone)
     row = query.first()
     if row is None:
         raise HTTPException(status_code=404, detail="CAR control milestone not found.")
