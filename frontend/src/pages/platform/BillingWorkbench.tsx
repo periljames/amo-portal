@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import {
   platformApi, type PlatformBillingInvoice, type PlatformBillingTenant,
-  type SaaSModulePrice, type TenantModuleSubscription,
+  type SaaSModulePrice, type TenantModuleSubscription, type PlatformLicensePlan,
 } from "../../services/platformControl";
 import { DataTable, EmptyState, ErrorState, MetricCard, PlatformShell, StatusBadge } from "./components/PlatformShared";
 import { usePlatformData } from "./components/usePlatformData";
@@ -87,6 +87,14 @@ export default function BillingWorkbench() {
   const [reason, setReason] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [selectedPriceId, setSelectedPriceId] = useState("");
+  const [editingPlanId, setEditingPlanId] = useState("");
+  const [planForm, setPlanForm] = useState({
+    code: "", name: "", term: "MONTHLY", amount: "", currency: "KES",
+    trial_days: 0, description: "",
+  });
+  const [licensePlanCode, setLicensePlanCode] = useState("");
+  const [licenseStatus, setLicenseStatus] = useState("TRIALING");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [priceEditId, setPriceEditId] = useState("");
   const [priceForm, setPriceForm] = useState<PriceDraft>(blankPrice);
   const [quantity, setQuantity] = useState(1);
@@ -106,6 +114,7 @@ export default function BillingWorkbench() {
     [mode, tenantId, invoiceSearch, invoiceStatus, invoiceOffset],
   );
   const prices = usePlatformData(() => platformApi.modulePrices({ include_inactive: true, limit: 200 }), []);
+  const licensePlans = usePlatformData(() => platformApi.licensePlans(), []);
   const modules = usePlatformData(
     () => tenantId ? platformApi.tenantModules(tenantId) : Promise.resolve({ items: [] as TenantModuleSubscription[] }),
     [tenantId],
@@ -114,7 +123,7 @@ export default function BillingWorkbench() {
   const jobs = usePlatformData(() => platformApi.saasJobs({ queue_name: "billing", tenant_id: tenantId || undefined, limit: 40 }), [tenantId]);
 
   const refresh = () => {
-    overview.reload(); summary.reload(); invoices.reload(); prices.reload(); modules.reload(); jobs.reload();
+    overview.reload(); summary.reload(); invoices.reload(); prices.reload(); licensePlans.reload(); modules.reload(); jobs.reload();
   };
   const act = async (job: () => Promise<unknown>, success: string) => {
     if (busy) return;
@@ -153,6 +162,39 @@ export default function BillingWorkbench() {
     external_price_ref: priceForm.external_price_ref.trim() || null,
     reason: reason.trim(),
   });
+  const editLicensePlan = (plan: PlatformLicensePlan) => {
+    setEditingPlanId(plan.id);
+    setPlanForm({
+      code: plan.code, name: plan.name, term: plan.term, amount: String(plan.amount_cents / 100),
+      currency: plan.currency, trial_days: plan.trial_days, description: plan.description || "",
+    });
+    setTab("pricing");
+  };
+  const saveLicensePlan = () => {
+    if (!reason.trim()) return setError("Provide a reason for changing commercial plans.");
+    const price = Math.round(Number(planForm.amount) * 100);
+    if (!planForm.code.trim() || !planForm.name.trim() || !Number.isSafeInteger(price) || price < 0
+      || !/^[A-Z]{3}$/.test(planForm.currency) || !Number.isInteger(planForm.trial_days)
+      || planForm.trial_days < 0 || planForm.trial_days > 365) {
+      return setError("Enter valid plan code/name, amount, currency and trial days.");
+    }
+    const payload = { code: planForm.code.trim().toUpperCase(), name: planForm.name.trim(),
+      term: planForm.term, amount_cents: price, currency: planForm.currency,
+      trial_days: planForm.trial_days, description: planForm.description + " [Platform operator reason: " + reason.trim() + "]",
+      is_active: true };
+    void act(() => editingPlanId ? platformApi.updateLicensePlan(editingPlanId, payload)
+      : platformApi.createLicensePlan(payload), "Commercial plan saved.");
+  };
+  const changeTenantLicense = () => {
+    if (!tenantId || !reason.trim()) return setError("Select a tenant and provide the written approval reason.");
+    if (!licensePlanCode && !tenant?.subscription?.id) return setError("Choose a commercial plan to activate.");
+    if (licenseStatus === "ACTIVE" && !window.confirm("This is a manual administrative subscription override, NOT a verified payment. Activate the account only with documented authorization. Continue?")) return;
+    const payload: Record<string, unknown> = { status: licenseStatus, notes: reason.trim(), clear_overdue_invoices: false };
+    if (licensePlanCode) payload.sku_code = licensePlanCode;
+    if (periodEnd) payload.current_period_end = new Date(periodEnd + "T23:59:59Z").toISOString();
+    void act(() => platformApi.updateTenantLicense(tenantId, payload), "Tenant subscription override committed to the audit record.");
+  };
+
   const savePrice = () => {
     if (!reason.trim()) return setError("Enter a reason for the catalog change.");
     const payload = pricePayload();
@@ -343,6 +385,29 @@ export default function BillingWorkbench() {
           cancel={() => { setPriceEditId(""); setPriceForm(blankPrice); }} />
         <label><span>Change justification</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       </div>
+      <div className="platform-card"><h2>Commercial subscription plans</h2>
+        <p>Manage the organization-level SKU used by tenant licenses. These are separate from individual module prices.</p>
+        <div className="platform-form">
+          <label><span>Plan code</span><input value={planForm.code} onChange={(e) => setPlanForm({...planForm, code: e.target.value.toUpperCase()})} /></label>
+          <label><span>Plan name</span><input value={planForm.name} onChange={(e) => setPlanForm({...planForm, name: e.target.value})} /></label>
+          <label><span>Period</span><select value={planForm.term} onChange={(e) => setPlanForm({...planForm, term: e.target.value})}>
+            <option value="MONTHLY">Monthly</option><option value="BI_ANNUAL">Biannual</option><option value="ANNUAL">Annual</option>
+          </select></label>
+          <label><span>Price</span><input type="number" min="0" step="0.01" value={planForm.amount} onChange={(e) => setPlanForm({...planForm, amount: e.target.value})} /></label>
+          <label><span>Currency</span><input maxLength={3} value={planForm.currency} onChange={(e) => setPlanForm({...planForm, currency: e.target.value.toUpperCase()})} /></label>
+          <label><span>Trial days</span><input type="number" min="0" max="365" value={planForm.trial_days} onChange={(e) => setPlanForm({...planForm, trial_days: Number(e.target.value)})} /></label>
+          <label><span>Plan description</span><textarea value={planForm.description} onChange={(e) => setPlanForm({...planForm, description: e.target.value})} /></label>
+          <label><span>Approval reason</span><textarea value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          <div className="platform-actions"><button className="platform-btn primary" disabled={busy} onClick={saveLicensePlan}>{editingPlanId ? "Save changes" : "Create plan"}</button>
+            {editingPlanId ? <button className="platform-btn" onClick={() => { setEditingPlanId(""); setPlanForm({code:"",name:"",term:"MONTHLY",amount:"",currency:"KES",trial_days:0,description:""}); }}>New plan</button> : null}</div>
+        </div>
+        {licensePlans.error ? <ErrorState error={licensePlans.error} retry={licensePlans.reload} /> : null}
+        {licensePlans.data?.length ? <DataTable><thead><tr><th>Plan</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>{licensePlans.data.map((plan) =>
+          <tr key={plan.id}><td><strong>{plan.name}</strong><br /><small>{plan.code} · {plan.term}</small></td>
+            <td>{money(plan.amount_cents, plan.currency)}</td><td><StatusBadge value={plan.is_active ? "ACTIVE" : "INACTIVE"} /></td>
+            <td><button className="platform-btn" onClick={() => editLicensePlan(plan)}>Edit</button></td></tr>
+        )}</tbody></DataTable> : <EmptyState label="No commercial plans configured." />}
+      </div>
       <div className="platform-card"><h2>Price register</h2>
         {prices.error ? <ErrorState error={prices.error} retry={prices.reload} /> : null}
         {prices.data?.items?.length ? <DataTable><thead><tr><th>Module / plan</th><th>Price</th><th>Status</th><th></th></tr></thead>
@@ -364,6 +429,20 @@ export default function BillingWorkbench() {
         {tenant ? <><p><strong>{tenant.name}</strong></p><p><StatusBadge value={tenant.access_state} /> {tenant.lock_reason || ""}</p>
           <p>Commercial plan: {tenant.subscription?.sku_code || "Not assigned"} · Period end: {date(tenant.subscription?.current_period_end)}</p>
           <p>Pending charges: {currencyTotals(tenant.invoice_currencies)} · Overdue: {tenant.overdue_invoice_count}</p>
+          <div className="platform-form">
+            <h3>Change commercial subscription</h3>
+            <p>Administrative overrides must be documented and do not mean a payment was received.</p>
+            <label><span>Commercial plan</span><select value={licensePlanCode} onChange={(e) => setLicensePlanCode(e.target.value)}>
+              <option value="">Keep current plan</option>
+              {licensePlans.data?.filter((plan) => plan.is_active).map((plan) =>
+                <option key={plan.id} value={plan.code}>{plan.name} · {plan.term} · {money(plan.amount_cents, plan.currency)}</option>)}
+            </select></label>
+            <label><span>Subscription status</span><select value={licenseStatus} onChange={(e) => setLicenseStatus(e.target.value)}>
+              <option value="TRIALING">Trial</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option><option value="CANCELLED">Cancelled</option>
+            </select></label>
+            <label><span>Current period ends (optional)</span><input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} /></label>
+            <button className="platform-btn primary" disabled={busy || !reason.trim()} onClick={changeTenantLicense}>Apply audited subscription override</button>
+          </div>
           <div className="platform-actions">
             <button className="platform-btn" disabled={busy || !reason.trim()} onClick={() => {
               if (!window.confirm("Lock this tenant to read-only access?")) return;
