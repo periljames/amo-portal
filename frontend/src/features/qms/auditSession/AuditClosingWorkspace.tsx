@@ -412,7 +412,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <p>Output policy: <strong>{policy?.artifact_policy || "Not configured"}</strong>{policy?.rationale ? ` · ${policy.rationale}` : ""}</p>
           <div className="qms-audit-closing__actions">
             {canGenerateAssurance && currentSignature ? <button type="button" className="is-primary" disabled={!stepAllowsActions(7) || assuranceArtifactMutation.isPending} onClick={() => assuranceArtifactMutation.mutate(currentSignature.id)}>{assuranceArtifactMutation.isPending ? "Generating…" : `Generate ${(policy?.artifact_policy || "assurance artifact").replaceAll("_", " ")}`}</button> : null}
-            {issuedRevision && currentSignature ? <button type="button" disabled={!canGovern || !stepAllowsActions(7) || ceremonyBusy !== null} onClick={() => void createVerification()}><ExternalLink size={15} /> {ceremonyBusy === "verify-link" ? "Creating…" : "Create public verification link"}</button> : null}
+            {issuedRevision && currentSignature ? <button type="button" disabled={!canGovern || ceremonyBusy !== null} onClick={() => void createVerification()}><ExternalLink size={15} /> {ceremonyBusy === "verify-link" ? "Creating…" : "Create public verification link"}</button> : null}
           </div>
           {currentAssuranceArtifact ? <dl className="qms-audit-closing__artifact"><div><dt>Artifact</dt><dd>{currentAssuranceArtifact.filename}</dd></div><div><dt>Type</dt><dd>{currentAssuranceArtifact.artifact_type.replaceAll("_", " ")}</dd></div></dl> : null}
           {verificationUrl ? <div className="qms-audit-closing__verification"><strong>Verification URL</strong><a href={verificationUrl} target="_blank" rel="noreferrer">{verificationUrl}</a></div> : null}
