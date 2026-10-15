@@ -71,7 +71,7 @@ def _event(db, amo, submission, action, *, identity=None, actor=None, details=No
 
 
 def _requirement(db, amo, supplier, requirement_id):
-    requirement = _one(db, """SELECT r.*, p.provider_kind FROM
+    requirement = _one(db, """SELECT r.*, p.provider_kind AS resolved_provider_kind FROM
       external_provider_document_requirements r
       LEFT JOIN quality_external_provider_profiles p
         ON p.amo_id=r.amo_id AND p.supplier_id=:supplier
@@ -117,7 +117,11 @@ def _scan_clamd(path: str):
     host = os.getenv("PROVIDER_DOCUMENT_CLAMD_HOST","").strip()
     if not host:
         raise HTTPException(503,"Provider intake requires a configured antivirus scanner")
-    port = int(os.getenv("PROVIDER_DOCUMENT_CLAMD_PORT","3310"))
+    try:
+        port=int(os.getenv("PROVIDER_DOCUMENT_CLAMD_PORT","3310"))
+        if not 1<=port<=65535:raise ValueError("Port out of range")
+    except ValueError as exc:
+        raise HTTPException(503,"Provider intake malware scanner configuration is invalid") from exc
     try:
         with socket.create_connection((host,port),timeout=8) as sock:
             sock.settimeout(30)
@@ -525,12 +529,14 @@ def dms_options(amo_code:str,db:Session=Depends(get_db),
         WHERE t.amo_id=:amo AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
           AND r.source_storage_path IS NOT NULL
         ORDER BY m.code,r.rev_number LIMIT 500""",amo=amo)
+    manual_ids=[manual["id"] for manual in raw]
+    profiles=db.query(dms_models.DocumentControlProfile).filter(
+        dms_models.DocumentControlProfile.tenant_id==amo,
+        dms_models.DocumentControlProfile.manual_id.in_(manual_ids)).all() if manual_ids else []
+    by_id={str(p.manual_id):p for p in profiles}
     accessible=[]
     for manual in raw:
-        profile=db.query(dms_models.DocumentControlProfile).filter(
-            dms_models.DocumentControlProfile.tenant_id==amo,
-            dms_models.DocumentControlProfile.manual_id==manual["id"]).first()
-        if can_read_manual(user,profile):
+        if can_read_manual(user,by_id.get(str(manual["id"]))):
             accessible.append(manual)
             if len(accessible)>=limit:break
     return {"items":accessible}
