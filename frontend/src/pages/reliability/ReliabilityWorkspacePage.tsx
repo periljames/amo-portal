@@ -6,6 +6,7 @@ import ReliabilityFormalGovernanceWorkspace from "./ReliabilityFormalGovernanceW
 import ReliabilityFormalReviewWorkspace from "./ReliabilityFormalReviewWorkspace";
 import ReliabilityWorkbookParityWorkspace from "./ReliabilityWorkbookParityWorkspace";
 import ReliabilityOperationsWorkspace from "./ReliabilityOperationsWorkspace";
+import ReliabilityOCTMWorkspace from "./ReliabilityOCTMWorkspace";
 
 const WORKBOOK_PARITY_ROUTES = new Set([
   "workbook-parity",
@@ -30,6 +31,7 @@ function reliabilitySurface(pathname: string): "analytics" | "formal-review" | "
 const ReliabilityWorkspacePage: React.FC = () => {
   const location = useLocation();
   const surface = reliabilitySurface(location.pathname);
+  if (location.pathname.split("/reliability/")[1]?.split("/")[0] === "octm") return <ReliabilityOCTMWorkspace />;
   if (surface === "analytics") return <ReliabilityAnalyticsWorkspace />;
   if (surface === "formal-review") return <ReliabilityFormalReviewWorkspace />;
   if (surface === "formal-governance") return <ReliabilityFormalGovernanceWorkspace />;
