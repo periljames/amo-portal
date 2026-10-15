@@ -25,6 +25,10 @@ const money = (amount?: number | null, currency = "KES") => {
   catch { return currency + " " + ((amount || 0) / 100).toFixed(2); }
 };
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString() : "—";
+const currencyTotals = (rows?: Record<string, { pending_amount_cents: number }>) => {
+  const totals = Object.entries(rows || {}).filter(([, entry]) => Number(entry.pending_amount_cents) > 0);
+  return totals.length ? totals.map(([currency, entry]) => money(entry.pending_amount_cents, currency)).join(" + ") : "—";
+};
 const tabNames: Record<Section, string> = {
   overview: "Accounts & receivables",
   invoices: "Invoices & payments",
@@ -244,9 +248,9 @@ export default function BillingWorkbench() {
     </section>
 
     <section className="platform-grid">
-      <MetricCard label="Monthly recurring revenue" value={money(Number(summary.data?.platform_mrr || 0), "USD")} caption="Based on available billing rollups" />
-      <MetricCard label="Annual recurring revenue" value={money(Number(summary.data?.platform_arr || 0), "USD")} />
-      <MetricCard label="Outstanding receivables" value={money(invoiceCounts.pending_amount_cents)} caption="All selected environment tenants" tone="amber" />
+      <MetricCard label="Monthly recurring revenue" value={summary.data?.platform_mrr != null ? String(summary.data.platform_mrr) + " minor units" : "Not available"} caption="Legacy rollups do not identify currency; do not treat mixed currencies as USD" />
+      <MetricCard label="Annual recurring revenue" value={summary.data?.platform_arr != null ? String(summary.data.platform_arr) + " minor units" : "Not available"} caption="Currency breakdown required for reliable revenue reporting" />
+      <MetricCard label="Outstanding receivables" value={currencyTotals(overview.data?.invoice_currencies)} caption="Unpaid invoices, separated by currency" tone="amber" />
       <MetricCard label="Overdue invoices" value={String(invoiceCounts.OVERDUE ?? 0)} tone="red" />
       <MetricCard label="Active accounts" value={String(counts.ACTIVE ?? 0)} tone="green" />
       <MetricCard label="Trials" value={String(counts.TRIALING ?? 0)} tone="purple" />
@@ -270,7 +274,7 @@ export default function BillingWorkbench() {
         <tbody>{[...tenants].sort((a,b) => b.overdue_invoice_count - a.overdue_invoice_count).map((t: PlatformBillingTenant) =>
           <tr key={t.id}><td><strong>{t.name}</strong><br /><small>{t.amo_code}</small></td>
           <td><StatusBadge value={t.access_state} /></td><td>{t.subscription?.sku_code || "Not subscribed"}</td>
-          <td>{money(t.pending_invoice_amount_cents)}</td><td>{t.overdue_invoice_count}</td>
+          <td>{currencyTotals(t.invoice_currencies)}</td><td>{t.overdue_invoice_count}</td>
           <td>{date(t.subscription?.current_period_end)}</td>
           <td><button className="platform-btn" onClick={() => { selectTenant(t.id); setTab("invoices"); }}>Review invoices</button></td></tr>)}
         </tbody></DataTable> : <EmptyState label="No tenant accounts in the selected environment." />}
@@ -359,7 +363,7 @@ export default function BillingWorkbench() {
         <h2>Tenant license & access</h2>
         {tenant ? <><p><strong>{tenant.name}</strong></p><p><StatusBadge value={tenant.access_state} /> {tenant.lock_reason || ""}</p>
           <p>Commercial plan: {tenant.subscription?.sku_code || "Not assigned"} · Period end: {date(tenant.subscription?.current_period_end)}</p>
-          <p>Pending charges: {money(tenant.pending_invoice_amount_cents)} · Overdue: {tenant.overdue_invoice_count}</p>
+          <p>Pending charges: {currencyTotals(tenant.invoice_currencies)} · Overdue: {tenant.overdue_invoice_count}</p>
           <div className="platform-actions">
             <button className="platform-btn" disabled={busy || !reason.trim()} onClick={() => {
               if (!window.confirm("Lock this tenant to read-only access?")) return;
