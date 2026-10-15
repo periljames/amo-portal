@@ -283,7 +283,7 @@ export default function PlatformTenantsPage() {
               <button className="platform-btn primary" onClick={() => void inviteOwner()}>Send owner invitation</button>
               {selected ? <Link className="platform-btn" to={`/platform/billing?tenant=${encodeURIComponent(selected)}`}>Manage billing</Link> : null}
               {integrationSetupPath ? <Link className="platform-btn" to={integrationSetupPath}>Integrations & setup</Link> : null}
-              <button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, access_level: "READ_ONLY", expires_in_hours: 1 }), "Read-only support session started.")}>Start support session</button>
+              <button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button>
               <button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button>
               <button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button>
             </div><p><small>Owner setup is sent to the organization's administrator. Account access is separate from commercial subscription and storage allocations.</small></p></> : <EmptyState label="Select a tenant to inspect details." />}
