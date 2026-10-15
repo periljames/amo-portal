@@ -350,8 +350,114 @@ def revenue_by_plan(db: Session = Depends(get_read_db), user=Depends(require_pla
 
 
 @router.get("/billing/invoices")
-def billing_invoices(data_mode: str = "REAL", limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.list_invoices(db, data_mode=data_mode, limit=limit, offset=offset)
+def billing_invoices(
+    data_mode: str = "REAL", tenant_id: str | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+    q: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    try:
+        return services.list_invoices(
+            db, data_mode=data_mode, tenant_id=tenant_id, status_filter=status_filter,
+            q=q, limit=limit, offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/billing/invoices/export")
+def export_platform_invoices(
+    tenant_id: str, data_mode: str = "REAL",
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    """Export one explicitly selected tenant without relying on browser-side pagination."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    if not db.get(account_models.AMO, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    rows = services.list_invoices(
+        db, data_mode=data_mode, tenant_id=tenant_id, limit=200, offset=0,
+    )
+    # The export queries the complete tenant history, not the first UI page.
+    from amodb.apps.accounts import services as account_services
+    invoice_rows = db.query(account_models.BillingInvoice).join(
+        account_models.AMO, account_models.BillingInvoice.amo_id == account_models.AMO.id,
+    ).filter(account_models.BillingInvoice.amo_id == tenant_id)
+    if str(data_mode).upper() == "REAL":
+        invoice_rows = invoice_rows.filter(account_models.AMO.is_demo.is_(False))
+    elif str(data_mode).upper() == "DEMO":
+        invoice_rows = invoice_rows.filter(account_models.AMO.is_demo.is_(True))
+    elif str(data_mode).upper() != "ALL":
+        raise HTTPException(status_code=422, detail="Invalid billing data mode")
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["invoice", "tenant_id", "amount_minor_units", "currency", "status", "issued_at", "due_at", "paid_at"])
+    for row in invoice_rows.order_by(account_models.BillingInvoice.created_at.desc()).yield_per(250):
+        writer.writerow([
+            account_services.format_invoice_number(row), row.amo_id, row.amount_cents,
+            row.currency, row.status.value, row.issued_at, row.due_at, row.paid_at,
+        ])
+    return Response(
+        output.getvalue(), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="venspera-tenant-invoices.csv"'},
+    )
+
+
+@router.get("/billing/invoices/{invoice_id}")
+def platform_invoice_detail(
+    invoice_id: str,
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    invoice = db.get(account_models.BillingInvoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return services._invoice_payload(invoice)
+
+
+@router.get("/billing/invoices/{invoice_id}/document")
+def platform_invoice_document(
+    invoice_id: str,
+    format: str = Query("pdf", pattern="^(pdf|html)$"),
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from fastapi.responses import HTMLResponse, Response
+    from amodb.apps.accounts import router_billing as renderer
+
+    invoice = db.get(account_models.BillingInvoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if format == "pdf":
+        return Response(
+            renderer._render_invoice_pdf(db, invoice), media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{renderer._invoice_filename(invoice, "pdf")}"'},
+        )
+    return HTMLResponse(
+        renderer._render_invoice_html(db, invoice),
+        headers={"Content-Disposition": f'attachment; filename="{renderer._invoice_filename(invoice, "html")}"'},
+    )
+
+
+@router.post("/billing/invoices/{invoice_id}/void")
+def platform_void_invoice(
+    invoice_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    try:
+        return services.void_invoice(
+            db, invoice_id=invoice_id, actor_id=_actor_id(user), reason=_reason(payload),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 
 @router.get("/billing/tenants/{tenant_id}")
@@ -361,8 +467,14 @@ def billing_tenant_detail(tenant_id: str, db: Session = Depends(get_read_db), us
 
 @router.post("/billing/invoices/{invoice_id}/mark-paid")
 def mark_invoice_paid(invoice_id: str, payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
-    try: return services.mark_invoice_paid(db, invoice_id=invoice_id, actor_id=_actor_id(user), reason=_reason(payload))
-    except Exception as exc: _bad(exc)
+    try:
+        return services.mark_invoice_paid(
+            db, invoice_id=invoice_id, actor_id=_actor_id(user),
+            reason=_reason(payload),
+            payment_reference=str(payload.get("payment_reference") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/billing/tenants/{tenant_id}/manual-invoice")
