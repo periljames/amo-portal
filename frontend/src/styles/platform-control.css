@@ -1041,3 +1041,68 @@ button.platform-list-row:hover { background: var(--platform-hover); }
   .platform-summary-strip > div:nth-child(-n+2) { border-bottom: 1px solid var(--platform-line); }
   .platform-provider-fields { grid-template-columns: 1fr; }
 }
+
+
+/* Commercial operator workspace: legible form controls and clear action hierarchy. */
+.platform-billing-workbench {
+  display: grid;
+  gap: 18px;
+}
+.platform-billing-workbench > .platform-toolbar[role="tablist"] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 12px;
+  border: 1px solid var(--platform-line);
+  background: var(--platform-surface, var(--platform-input));
+  border-radius: 12px;
+}
+.platform-billing-workbench .platform-form,
+.platform-billing-workbench .platform-card {
+  min-width: 0;
+}
+.platform-billing-workbench .platform-form label,
+.platform-billing-workbench .platform-card > label,
+.platform-billing-workbench .platform-toolbar label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.platform-billing-workbench .platform-form label > span,
+.platform-billing-workbench .platform-toolbar label > span {
+  color: var(--platform-copy);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: normal;
+}
+.platform-billing-workbench input,
+.platform-billing-workbench select,
+.platform-billing-workbench textarea {
+  min-height: 40px;
+  font-size: 13px;
+}
+.platform-billing-workbench .platform-btn {
+  min-height: 38px;
+  padding: 8px 13px;
+  font-size: 12px;
+  white-space: normal;
+}
+.platform-billing-workbench .platform-card h2 { font-size: 16px; }
+.platform-billing-workbench .platform-card p,
+.platform-billing-workbench .platform-card small { line-height: 1.5; }
+.platform-billing-workbench .platform-actions { gap: 8px; }
+.platform-billing-workbench .platform-section-title { flex-wrap: wrap; }
+.platform-billing-workbench .platform-form textarea { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .platform-billing-workbench > .platform-toolbar[role="tablist"] {
+    position: static;
+  }
+  .platform-billing-workbench .platform-form {
+    grid-template-columns: 1fr;
+  }
+  .platform-billing-workbench .platform-toolbar label {
+    width: 100%;
+  }
+}
