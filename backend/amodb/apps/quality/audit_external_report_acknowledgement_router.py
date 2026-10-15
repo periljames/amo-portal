@@ -11,6 +11,8 @@ from amodb.database import get_db
 from .audit_external_access_models import QualityAuditAccessEvent, QualityAuditAccessGrant
 from .audit_external_access_router import _GUEST_COOKIE, _active_grant, _append_access_event
 from .audit_report_governance_models import QualityAuditReportRevision
+from .audit_report_composition_models import QualityAuditReportArtifact
+from .audit_report_composition import resolve_report_artifact
 from .audit_report_governance_router import _safe_report_path, _sha256
 from .router import public_router
 
@@ -109,7 +111,25 @@ def download_issued_report(
     if report is None:
         raise HTTPException(status_code=404, detail="No issued audit report is available for this audit.")
 
-    path = _safe_report_path(report.file_ref)
+    # Adopted generated reports reside in the governed generated-artifact store,
+    # not in the legacy uploaded-report directory. Resolve only the exact
+    # tenant/audit-scoped canonical artifact and verify both immutable digests.
+    snapshot = report.report_snapshot if isinstance(report.report_snapshot, dict) else {}
+    generated_id = snapshot.get("generated_report_artifact_id")
+    if generated_id:
+        source = db.query(QualityAuditReportArtifact).filter(
+            QualityAuditReportArtifact.id == generated_id,
+            QualityAuditReportArtifact.amo_id == report.amo_id,
+            QualityAuditReportArtifact.audit_id == report.audit_id,
+            QualityAuditReportArtifact.sha256 == report.sha256,
+        ).first()
+        if source is None:
+            raise HTTPException(status_code=409, detail="The issued report's generated source cannot be verified.")
+        path = resolve_report_artifact(source.storage_ref, expected_sha256=report.sha256)
+        if str(path) != report.file_ref:
+            raise HTTPException(status_code=409, detail="The issued report no longer matches its controlled source path.")
+    else:
+        path = _safe_report_path(report.file_ref)
     if _sha256(path) != report.sha256:
         raise HTTPException(status_code=409, detail="The issued audit report failed integrity verification.")
 
