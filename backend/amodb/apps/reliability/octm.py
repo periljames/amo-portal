@@ -265,11 +265,17 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
         other_key = (other.event_date, other.event_sequence)
         if other_key == key and other.aircraft_serial_number == row.aircraft_serial_number:
             errors.append("Engine installation has another verified event with the same date and sequence")
-        if (row.sector_ref and row.flight_hours and other.sector_ref == row.sector_ref
+        if (row.sector_ref and other.sector_ref == row.sector_ref
                 and other.event_date == row.event_date
-                and other.aircraft_serial_number == row.aircraft_serial_number
-                and other.flight_hours and abs(other.flight_hours - row.flight_hours) > 0.00001):
-            errors.append("Flight hours conflict with an existing entry for the same engine/sector")
+                and other.aircraft_serial_number == row.aircraft_serial_number):
+            if (row.flight_hours and other.flight_hours
+                    and abs(other.flight_hours - row.flight_hours) > 0.00001):
+                errors.append("Flight hours conflict with an existing entry for the same engine/sector")
+            if (row.reference_method != other.reference_method
+                    or row.reference_level != other.reference_level):
+                errors.append("Reference method/level conflicts within the same engine/sector")
+            if row.event_type == "NO_OPERATION" or other.event_type == "NO_OPERATION":
+                errors.append("No-operation cannot coexist with servicing for the same sector")
         if row.engine_counter_hours is not None and other.engine_counter_hours is not None:
             if other_key < key and other.engine_counter_hours > row.engine_counter_hours:
                 errors.append("Engine counter is below an earlier verified counter")
@@ -283,7 +289,71 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
             errors.append("A positive oil uplift and original volume unit are required")
         if not row.oil_specification:
             errors.append("Oil specification is required for top-ups")
+    # A same-day source snapshot can disprove an operator-typed engine serial,
+    # but no old snapshot is treated as proof of the current installation.
+    snapshot = (db.query(EngineFlightSnapshot).filter(
+        EngineFlightSnapshot.amo_id == amo_id,
+        EngineFlightSnapshot.aircraft_serial_number == row.aircraft_serial_number,
+        EngineFlightSnapshot.engine_position == row.engine_position,
+        EngineFlightSnapshot.flight_date == row.event_date,
+        EngineFlightSnapshot.engine_serial_number.isnot(None),
+    ).order_by(EngineFlightSnapshot.id.desc()).first())
+    if snapshot and snapshot.engine_serial_number and (
+        snapshot.engine_serial_number.strip().upper() != row.engine_serial_number.strip().upper()
+    ):
+        errors.append("Engine serial conflicts with the same-day fleet engine snapshot; reconcile installation history")
     return sorted(set(errors))
+
+
+@router.get("/octm/aircraft")
+def aircraft_options(ctx=Depends(context)):
+    require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    rows = (db.query(Aircraft).filter_by(amo_id=amo_id)
+            .order_by(Aircraft.registration.asc()).limit(500).all())
+    return [{"serial_number": r.serial_number, "registration": r.registration,
+             "is_active": r.is_active} for r in rows]
+
+
+@router.get("/octm/engine-hints")
+def engine_hints(aircraft: str, event_date: date, ctx=Depends(context)):
+    """Hints only: source documents must confirm actual historical installation."""
+    require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=aircraft).first():
+        raise HTTPException(404, "Aircraft not registered for this tenant")
+    entries = (db.query(OCTMEntry).filter(
+        OCTMEntry.amo_id == amo_id, OCTMEntry.aircraft_serial_number == aircraft,
+        OCTMEntry.event_date <= event_date, OCTMEntry.review_status == "VERIFIED",
+    ).order_by(OCTMEntry.event_date.desc(), OCTMEntry.event_sequence.desc()).limit(300).all())
+    seen = set()
+    hints = []
+    for row in entries:
+        key = (row.engine_position, row.engine_serial_number, row.installation_ref)
+        if key not in seen:
+            seen.add(key)
+            hints.append({"engine_position": row.engine_position, "engine_serial_number": row.engine_serial_number,
+                          "installation_ref": row.installation_ref, "last_observed": row.event_date.isoformat(),
+                          "basis": "PREVIOUS_OCTM_ENTRY"})
+    return hints[:100]
+
+
+@router.get("/octm/entries/{entry_id}/readiness")
+def entry_readiness(entry_id: str, ctx=Depends(context)):
+    require(ctx, "reliability.read")
+    db, amo_id, actor = ctx
+    row = get_entry(ctx, entry_id)
+    errors = validate_review(row, db, amo_id)
+    if str(actor.id) in {str(row.created_by_user_id), str(row.last_changed_by_user_id)}:
+        errors.append("A different authorized person must verify this entry")
+    if row.review_status == "VERIFIED":
+        errors.append("Verified entries require a recorded correction before re-review")
+    warnings = []
+    if row.source_type != "PAPER_TECHSHEET":
+        warnings.append("Confirm extracted/imported values against the original source")
+    if row.event_type in {"OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING", "MISSING"}:
+        warnings.append("This event interrupts the formal consumption interval; review surrounding entries")
+    return {"errors": errors, "warnings": warnings, "ready_for_verification": not errors}
 
 
 @router.get("/octm/entries", response_model=list[EntryRead])
@@ -464,60 +534,89 @@ def approve_profile(profile_id: str, ctx=Depends(context)):
 
 
 def calculate_windows(rows: list[OCTMEntry], profiles: list[OCTMProfile]) -> list[dict]:
-    """Disjoint 30–50 FH monitoring intervals, targeting 40 FH.
+    """Calculate non-overlapping 30–50 FH observations targeting 40 FH.
 
-    Missing events, maintenance refills and reference changes break continuity.
-    No profile => still calculate an observation, but never invent an OEM limit.
+    First consolidate all servicing events against the same flight/sector,
+    then count each sector's utilization only once. Do not carry
+    incompleteness, oil changes or reference changes into a new interval.
     """
     from collections import defaultdict
-    groups = defaultdict(list)
+
+    grouped = defaultdict(list)
     for row in rows:
         if row.review_status == "VERIFIED":
-            groups[(row.engine_serial_number, row.installation_ref)].append(row)
+            grouped[(row.aircraft_serial_number, row.engine_serial_number, row.installation_ref)].append(row)
     output = []
-    for (engine, installation), events in groups.items():
-        events.sort(key=lambda r: (r.event_date, r.event_sequence, r.created_at))
-        active = []
-        qty = Decimal(0)
-        hours = Decimal(0)
-        prior_key = None
+    ordered_profiles = sorted(profiles, key=lambda p: (p.effective_from, p.version), reverse=True)
+    for (aircraft, engine, installation), events in grouped.items():
+        events.sort(key=lambda row: (row.event_date, row.event_sequence, row.created_at))
+        # A sector can have multiple top-ups/checked-zero events.
+        # No sector reference is only permitted for events with no flight exposure.
+        sectors = {}
+        for row in events:
+            sector_key = (row.event_date, row.sector_ref) if row.sector_ref else (row.event_date, "ENTRY:" + row.id)
+            sectors.setdefault(sector_key, []).append(row)
+        window_events = []
+        window_oil = Decimal("0")
+        window_hours = Decimal("0")
+        last_reference = None
         prev_rate = None
-        for event in events:
-            key = (event.reference_method, event.reference_level)
-            if event.event_type not in {"TOP_UP", "CHECK_ZERO"} or (prior_key and key != prior_key):
-                active, qty, hours, prior_key = [], Decimal(0), Decimal(0), None
+
+        def reset(*, clear_baseline: bool = False):
+            nonlocal window_events, window_oil, window_hours, last_reference, prev_rate
+            window_events = []
+            window_oil = Decimal("0")
+            window_hours = Decimal("0")
+            last_reference = None
+            if clear_baseline:
                 prev_rate = None
-                if event.event_type not in {"TOP_UP", "CHECK_ZERO"}:
-                    continue
-            if event.flight_hours is None or not event.reference_method or not event.reference_level:
-                active, qty, hours, prior_key = [], Decimal(0), Decimal(0), None
+
+        for segment in sectors.values():
+            relevant = [row for row in segment if row.event_type != "NO_OPERATION"]
+            if not relevant:
+                # No flying is not evidence of missing oil data.
                 continue
-            prior_key = key
-            active.append(event)
-            hours += Decimal(str(event.flight_hours))
-            if event.event_type == "TOP_UP" and event.oil_unit in QT_PER_UNIT:
-                qty += Decimal(str(event.oil_quantity)) * QT_PER_UNIT[event.oil_unit]
-            if hours < 40:
+            if any(row.event_type not in {"TOP_UP", "CHECK_ZERO"} for row in relevant):
+                reset(clear_baseline=True)
                 continue
-            accepted = Decimal("30") <= hours <= Decimal("50")
-            rate = qty / hours if accepted and hours > 0 else None
-            profile = next((p for p in sorted(profiles, key=lambda p: (p.effective_from, p.version), reverse=True)
+            reference = (relevant[0].reference_method, relevant[0].reference_level)
+            if not all((row.reference_method, row.reference_level) == reference for row in relevant):
+                reset(clear_baseline=True)
+                continue
+            if last_reference and reference != last_reference:
+                reset(clear_baseline=True)
+            last_reference = reference
+            exposures = {Decimal(str(row.flight_hours)) for row in relevant if row.flight_hours is not None and row.flight_hours > 0}
+            if len(exposures) > 1 or any(row.flight_hours is None for row in relevant):
+                reset(clear_baseline=True)
+                continue
+            segment_hours = next(iter(exposures), Decimal("0"))
+            window_hours += segment_hours
+            window_events.extend(relevant)
+            for row in relevant:
+                if row.event_type == "TOP_UP" and row.oil_quantity is not None and row.oil_unit in QT_PER_UNIT:
+                    window_oil += Decimal(str(row.oil_quantity)) * QT_PER_UNIT[row.oil_unit]
+            if window_hours < Decimal("40"):
+                continue
+            end = segment[-1]
+            accepted = Decimal("30") <= window_hours <= Decimal("50")
+            rate = window_oil / window_hours if accepted and window_hours > 0 else None
+            profile = next((p for p in ordered_profiles
                             if p.engine_serial_number == engine and p.installation_ref == installation
-                            and p.status == "APPROVED" and p.effective_from <= event.event_date), None)
+                            and p.status == "APPROVED" and p.effective_from <= end.event_date), None)
             limit = Decimal(str(profile.limit_qt_per_fh)) if profile else None
-            increase = (float((rate / prev_rate - 1) * 100) if rate is not None and prev_rate and prev_rate > 0 else None)
+            increase = float((rate / prev_rate - 1) * 100) if rate is not None and prev_rate and prev_rate > 0 else None
             output.append({
                 "engine_serial_number": engine, "installation_ref": installation,
-                "aircraft_serial_number": event.aircraft_serial_number,
-                "engine_position": event.engine_position,
-                "window_start": active[0].event_date.isoformat(),
-                "window_end": event.event_date.isoformat(),
-                "source_ids": [r.id for r in active],
-                "oil_added_quarts": round(float(qty), 5),
-                "flight_hours": round(float(hours), 5),
+                "aircraft_serial_number": aircraft, "engine_position": end.engine_position,
+                "window_start": window_events[0].event_date.isoformat(),
+                "window_end": end.event_date.isoformat(),
+                "source_ids": [row.id for row in window_events],
+                "oil_added_quarts": round(float(window_oil), 5),
+                "flight_hours": round(float(window_hours), 5),
                 "rate_qt_per_fh": round(float(rate), 6) if rate is not None else None,
                 "status": "VALID" if accepted else "OUT_OF_RANGE",
-                "manufacturer_limit_qt_per_fh": float(limit) if limit else None,
+                "manufacturer_limit_qt_per_fh": float(limit) if limit is not None else None,
                 "manufacturer_limit_exceeded": bool(rate > limit) if rate is not None and limit is not None else None,
                 "trend_increase_percent": round(increase, 3) if increase is not None else None,
                 "trend_alert": bool(increase > profile.alert_increase_percent) if
@@ -526,7 +625,7 @@ def calculate_windows(rows: list[OCTMEntry], profiles: list[OCTMProfile]) -> lis
             })
             if rate is not None:
                 prev_rate = rate
-            active, qty, hours, prior_key = [], Decimal(0), Decimal(0), None
+            reset()
     return sorted(output, key=lambda x: (x["window_end"], x["engine_serial_number"]), reverse=True)
 
 
