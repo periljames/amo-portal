@@ -185,10 +185,14 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     setBusy(true); setError(""); setMessage("");
     try {
       await operation();
-      await refresh();
       onSuccess?.();
       setCoverageRefresh((value) => value + 1);
-      setMessage("Saved successfully.");
+      setMessage("The action was saved successfully.");
+      try {
+        await refresh();
+      } catch (cause) {
+        setError("The action was saved, but the screen could not refresh: " + safeError(cause));
+      }
     } catch (cause) {
       setError(safeError(cause));
     } finally { setBusy(false); }
