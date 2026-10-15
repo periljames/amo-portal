@@ -97,6 +97,18 @@ def _published_revision(db, amo, manual_id, revision_id, *, current=True):
     return row
 
 
+def _staff_published_revision(db, amo, manual_id, revision_id, user):
+    # Quality staff may review provider evidence, but cannot bypass a
+    # restricted DMS document profile or acquire Document Control authority.
+    from amodb.apps.doc_control import domain_models as dms_models
+    from amodb.apps.doc_control.workspace_service import require_manual_access
+    profile=db.query(dms_models.DocumentControlProfile).filter(
+        dms_models.DocumentControlProfile.tenant_id==amo,
+        dms_models.DocumentControlProfile.manual_id==manual_id).first()
+    require_manual_access(user,profile)
+    return _published_revision(db,amo,manual_id,revision_id)
+
+
 def _scan_clamd(path: str):
     """Bounded streaming ClamAV scan. Fail closed if scanner is not configured.
 
@@ -204,7 +216,7 @@ def save_requirement(amo_code:str,code:str,payload:RequirementWrite,
     if bool(payload.form_manual_id)!=bool(payload.form_revision_id):
         raise HTTPException(422,"Form manual and exact revision must be supplied together")
     if payload.form_manual_id:
-        _published_revision(db,amo,payload.form_manual_id,payload.form_revision_id)
+        _staff_published_revision(db,amo,payload.form_manual_id,payload.form_revision_id,user)
     existing=_one(db,"""SELECT id,version FROM external_provider_document_requirements
         WHERE amo_id=:amo AND provider_kind=:kind AND code=:code FOR UPDATE""",
         amo=amo,kind=kind,code=key)
@@ -461,8 +473,8 @@ def update_agreement_controls(amo_code:str,contract_id:str,payload:AgreementCont
         raise HTTPException(422,"Two or more identified contracting parties are required")
     if any(not 1<=len(s.strip())<=100 for s in payload.approved_sites):
         raise HTTPException(422,"Invalid approved site identifier")
-    published=_published_revision(db,amo,payload.controlled_document_id,
-                                   payload.controlled_document_revision)
+    published=_staff_published_revision(db,amo,payload.controlled_document_id,
+                                   payload.controlled_document_revision,user)
     signed=_one(db,"""SELECT e.id,e.sha256,e.status,e.qms_evidence_id,
            q.status AS quality_state
            FROM external_partner_evidence_submissions e
@@ -505,12 +517,23 @@ def dms_options(amo_code:str,db:Session=Depends(get_db),
                 user=Depends(get_current_active_user),
                 limit:int=Query(50,ge=1,le=100)):
     amo=_staff(db,amo_code,user)
-    return {"items":_all(db,"""SELECT m.id,m.code,m.title,r.id AS revision_id,r.rev_number
+    from amodb.apps.doc_control import domain_models as dms_models
+    from amodb.apps.doc_control.workspace_service import can_read_manual
+    raw=_all(db,"""SELECT m.id,m.code,m.title,r.id AS revision_id,r.rev_number
         FROM manuals m JOIN manual_tenants t ON t.id=m.tenant_id
         JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
         WHERE t.amo_id=:amo AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
           AND r.source_storage_path IS NOT NULL
-        ORDER BY m.code,r.rev_number LIMIT :limit""",amo=amo,limit=limit)}
+        ORDER BY m.code,r.rev_number LIMIT 500""",amo=amo)
+    accessible=[]
+    for manual in raw:
+        profile=db.query(dms_models.DocumentControlProfile).filter(
+            dms_models.DocumentControlProfile.tenant_id==amo,
+            dms_models.DocumentControlProfile.manual_id==manual["id"]).first()
+        if can_read_manual(user,profile):
+            accessible.append(manual)
+            if len(accessible)>=limit:break
+    return {"items":accessible}
 
 
 @staff_documents_router.get("/submissions")
@@ -560,7 +583,7 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
     if payload.decision!="ACCEPTED" and payload.dms_manual_id:
         raise HTTPException(422,"A DMS attachment is only set at acceptance")
     if payload.dms_manual_id:
-        published=_published_revision(db,amo,payload.dms_manual_id,payload.dms_revision_id)
+        published=_staff_published_revision(db,amo,payload.dms_manual_id,payload.dms_revision_id,user)
         if published["source_sha256"]!=row["sha256"]:
             raise HTTPException(409,"The controlled DMS revision must have the same original-file SHA-256 as the staged submission")
     qms_id=None
