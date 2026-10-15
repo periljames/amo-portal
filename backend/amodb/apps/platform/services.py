@@ -376,6 +376,9 @@ def set_tenant_active(db: Session, *, tenant_id: str, active: bool, actor_id: st
     if not amo:
         raise ValueError("Tenant not found")
     amo.is_active = active
+    if not active:
+        from amodb.apps.accounts import session_service as account_sessions
+        account_sessions.revoke_tenant_sessions(db, amo_id=tenant_id, reason="TENANT_SUSPENDED")
     audit(db, actor_user_id=actor_id, action="tenant.reactivated" if active else "tenant.suspended", tenant_id=tenant_id, entity_type="tenant", entity_id=tenant_id, reason=reason)
     db.commit()
     return get_tenant_detail(db, tenant_id)
@@ -576,7 +579,11 @@ def set_user_active(db: Session, *, user_id: str, active: bool, actor_id: str, r
     user = db.get(account_models.User, user_id)
     if not user: raise ValueError("User not found")
     user.is_active = active
-    if not active: user.deactivated_at = now_utc(); user.deactivated_reason = reason
+    if not active:
+        user.deactivated_at = now_utc()
+        user.deactivated_reason = reason
+        from amodb.apps.accounts import session_service as account_sessions
+        account_sessions.revoke_user_sessions(db, user=user, reason="PLATFORM_DISABLE")
     audit(db, actor_user_id=actor_id, action="user.enabled" if active else "user.disabled", tenant_id=user.amo_id, entity_type="user", entity_id=user.id, reason=reason)
     db.commit()
     return {"id": user.id, "is_active": user.is_active}
@@ -585,7 +592,8 @@ def set_user_active(db: Session, *, user_id: str, active: bool, actor_id: str, r
 def revoke_user_sessions(db: Session, *, user_id: str, actor_id: str, reason: str) -> dict[str, Any]:
     user = db.get(account_models.User, user_id)
     if not user: raise ValueError("User not found")
-    user.token_revoked_at = now_utc()
+    from amodb.apps.accounts import session_service as account_sessions
+    account_sessions.revoke_user_sessions(db, user=user, reason="PLATFORM_REVOKE")
     audit(db, actor_user_id=actor_id, action="user.sessions.revoked", tenant_id=user.amo_id, entity_type="user", entity_id=user.id, reason=reason)
     db.commit()
     return {"id": user.id, "token_revoked_at": user.token_revoked_at}
