@@ -46,7 +46,11 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     try{
       const response=await fetch(partnerUrl(tenant,path),{credentials:"include",cache:"no-store"});
       if(!response.ok)throw new Error(`Controlled file access denied (${response.status})`);
-      saveBlob(await response.blob(),filename);
+      const mime=response.headers.get("Content-Type")||"";
+      const ext=mime.includes("wordprocessingml")?".docx":mime.includes("application/pdf")?".pdf":
+        mime.includes("image/png")?".png":mime.includes("image/jpeg")?".jpg":mime.includes("text/plain")?".txt":"";
+      const resolved=/\\.[a-z0-9]{2,5}$/i.test(filename)?filename:filename+ext;
+      saveBlob(await response.blob(),resolved);
     }catch(e){setError(e instanceof Error?e.message:"File could not be downloaded");}
   }
   function upload(e:React.FormEvent){
