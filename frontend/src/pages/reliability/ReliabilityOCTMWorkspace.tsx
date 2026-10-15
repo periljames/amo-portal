@@ -201,7 +201,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     setReviewLoading(true); setError("");
     try {
       const checked = await apiRequest<Readiness>("/reliability/octm/entries/" +
-        encodeURIComponent(item.id) + "/readiness");
+        encodeURIComponent(item.id) + "/readiness", { cacheTtlMs: 0 });
       setReadiness(checked);
     } catch (cause) { setError(safeError(cause)); } finally { setReviewLoading(false); }
   };
@@ -222,7 +222,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     const values = Object.fromEntries(Object.keys(base).map((field) =>
       [field, raw[field] ?? (base as unknown as Record<string, unknown>)[field]])) as EntryPayload;
     setForm(values);
-    setCorrecting(id);
+    setCorrecting(item.id);
     setView("entry");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -273,7 +273,11 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       {loading ? <p>Loading OCTM records…</p> : <>
         {view === "entry" && <section className="octm__panel">
           <h2>{correcting ? "Correct existing source record" : "Register technical-log oil entry"}</h2>
-          <p>Every engine/sector event has a unique sequence. Enter zero only when oil was checked and none added. Missing data is not zero.</p>
+          <p>Every engine/sector event has a unique sequence. Select <strong>Checked — zero added</strong> only when an actual oil check found no top-up necessary.
+             Use <strong>Missing</strong> when the record is unavailable, never to mean zero.</p>
+           <p className="octm__hint">Check engine serial, position and installation against technical records for the selected date.
+             Previously entered engine details are hints, not installation approvals. Flight hours belong to the flight sector
+             and must not be counted again for repeated oil servicing within the same sector.</p>
           <form onSubmit={(event) => void save(event)} className="octm__form">
             <label>Registered aircraft
               <select required value={form.aircraft_serial_number} onChange={(event) => set("aircraft_serial_number", event.target.value)}>
@@ -307,9 +311,12 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             </label>
             <label>Event sequence<input type="number" min="1" required value={form.event_sequence} onChange={(event) => set("event_sequence", Number(event.target.value))} /></label>
             <label>Oil event<select value={form.event_type} onChange={(event) => set("event_type", event.target.value as EventType)}>
-              {eventTypes.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></label>
+              {eventTypes.map((type) => <option key={type} value={type}>{
+                type === "CHECK_ZERO" ? "Checked — zero added" :
+                type === "MISSING" ? "Oil information missing" :
+                type === "NO_OPERATION" ? "Aircraft did not operate" : type.replaceAll("_", " ")}</option>)}</select></label>
             <label>Source<select value={form.source_type} onChange={(event) => set("source_type", event.target.value as EntryPayload["source_type"])}>
-              <option value="PAPER_TECHSHEET">Paper techsheet</option><option value="REVIEWED_OCR">Reviewed OCR draft</option></select></label>
+              <option value="PAPER_TECHSHEET">Paper techsheet</option><option value="REVIEWED_OCR">Manually checked OCR draft</option></select></label>
             <label>Maintenance information complete?<select value={form.maintenance_complete}
               onChange={(event) => set("maintenance_complete", event.target.value as EntryPayload["maintenance_complete"])}>
               <option value="UNKNOWN">Unknown</option><option value="NO">No</option><option value="YES">Yes</option></select></label>
@@ -371,6 +378,22 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               </div></td>
             </tr>)}</tbody></table></div>
           {!(view === "review" ? queue : filtered).length && <p>No source entries match the filter.</p>}
+          <div className="octm__pagination">
+            <span>{view === "review" ? summary.unverified : summary.total} source records · page
+              {" "}{(view === "review" ? queuePage : registerPage) + 1} · filter applies to current page
+            </span>
+            <button type="button" className="btn btn-secondary" disabled={busy ||
+                (view === "review" ? queuePage : registerPage) === 0}
+              onClick={() => (view === "review" ? setQueuePage : setRegisterPage)((page) => Math.max(0, page - 1))}>
+              Previous
+            </button>
+            <button type="button" className="btn btn-secondary" disabled={busy ||
+                ((view === "review" ? queuePage : registerPage) + 1) * 200 >=
+                 (view === "review" ? summary.unverified : summary.total)}
+              onClick={() => (view === "review" ? setQueuePage : setRegisterPage)((page) => page + 1)}>
+              Next
+            </button>
+          </div>
           {reviewTarget && <div className="octm__review" role="region" aria-label="Source verification">
             <h3>Review {reviewTarget.techsheet_ref} · {reviewTarget.engine_serial_number}</h3>
             <p>Source evidence: <strong>{reviewTarget.source_evidence_ref || "Not provided"}</strong>.
