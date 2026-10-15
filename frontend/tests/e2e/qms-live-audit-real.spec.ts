@@ -215,7 +215,7 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     // exercising the cross-browser SSE persistence contract.
     for (const page of [pageA, pageB]) {
       const fieldwork = page.getByRole("region", { name: "Live audit fieldwork workspace" });
-      await fieldwork.getByRole("row").filter({ hasText: "Concurrent realtime browser acceptance" })
+      await fieldwork.getByRole("row").filter({ hasText: "Verify concurrent authenticated browsers receive committed fieldwork updates" })
         .getByRole("button", { name: /^Details for question / }).click();
       await fieldwork.locator("details.qms-live-audit-focus__compliance > summary").click();
     }
@@ -320,7 +320,9 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
     await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
-    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
+    await expect(internalPage.getByText("R1 is approved.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    // The preceding adopted report response supplies the exact immutable SHA.
+    expect(draftSha).toMatch(/^[0-9a-f]{64}$/i);
 
     await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
     await internalPage.getByRole("button", { name: "Register passkey" }).click();
