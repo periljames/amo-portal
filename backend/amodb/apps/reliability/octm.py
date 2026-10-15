@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.fleet.models import Aircraft
 from amodb.utils.identifiers import generate_uuid7
 from . import advanced_services as access
+from .models import EngineFlightSnapshot
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -66,6 +67,7 @@ class OCTMEntry(Base):
     review_note = Column(Text)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
     reviewed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
+    last_changed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     reviewed_at = Column(DateTime(timezone=True))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
@@ -121,19 +123,33 @@ class EntryPayload(BaseModel):
     source_evidence_ref: str | None = Field(default=None, max_length=512)
     maintenance_complete: Literal["YES", "NO", "UNKNOWN"] = "UNKNOWN"
     event_type: Literal["TOP_UP", "CHECK_ZERO", "MISSING", "NO_OPERATION", "OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING"]
-    oil_quantity: float | None = Field(default=None, ge=0)
+    oil_quantity: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     oil_unit: Literal["QT", "L", "US_GAL"] | None = None
     oil_specification: str | None = Field(default=None, max_length=100)
     reference_method: str | None = Field(default=None, max_length=120)
     reference_level: str | None = Field(default=None, max_length=120)
-    engine_counter_hours: float | None = Field(default=None, ge=0)
-    flight_hours: float | None = Field(default=None, ge=0, le=100)
+    engine_counter_hours: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    flight_hours: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     remarks: str | None = None
+
+    @field_validator("aircraft_serial_number", "engine_position", "engine_serial_number", "installation_ref",
+                     "techsheet_ref")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("This field must not be blank")
+        return value.strip()
+
+    @field_validator("sector_ref", "source_evidence_ref", "reference_method", "reference_level", "oil_specification")
+    @classmethod
+    def clean_optional(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
     @model_validator(mode="after")
     def check_quantities(self):
-        if self.event_type == "TOP_UP" and (not self.oil_quantity or not self.oil_unit):
-            raise ValueError("TOP_UP requires positive oil quantity and a supported volume unit")
+        # Incomplete top-ups are permitted as drafts but never verifiable.
+        if self.event_type == "TOP_UP" and self.oil_quantity == 0:
+            raise ValueError("A top-up with zero oil must be recorded as CHECK_ZERO")
         if self.event_type == "CHECK_ZERO" and self.oil_quantity not in (None, 0):
             raise ValueError("CHECK_ZERO must not contain an uplift")
         if self.event_type in {"MISSING", "NO_OPERATION"} and self.oil_quantity is not None:
@@ -142,6 +158,15 @@ class EntryPayload(BaseModel):
             raise ValueError("NO_OPERATION cannot record positive flight hours")
         if self.oil_quantity is not None and not self.oil_unit:
             raise ValueError("Oil quantity requires an explicit unit")
+        if self.event_type == "CHECK_ZERO" and self.oil_quantity == 0:
+            self.oil_quantity = None
+            self.oil_unit = None
+        if self.event_type in {"MISSING", "NO_OPERATION"} and self.oil_unit:
+            raise ValueError("A missing/no-operation observation cannot specify an oil unit")
+        if self.flight_hours is not None and self.flight_hours > 0 and not self.sector_ref:
+            raise ValueError("Flight hours require a sector/flight reference to prevent duplicate exposure")
+        if self.event_date > utcnow().date():
+            raise ValueError("OCTM event date cannot be in the future")
         return self
 
 
@@ -168,8 +193,8 @@ class ProfilePayload(BaseModel):
     engine_serial_number: str = Field(min_length=1, max_length=100)
     installation_ref: str = Field(min_length=1, max_length=120)
     engine_model: str = Field(min_length=1, max_length=120)
-    limit_qt_per_fh: float = Field(gt=0)
-    alert_increase_percent: float | None = Field(default=None, gt=0, le=1000)
+    limit_qt_per_fh: float = Field(gt=0, allow_inf_nan=False)
+    alert_increase_percent: float | None = Field(default=None, gt=0, le=1000, allow_inf_nan=False)
     technical_data_ref: str = Field(min_length=3, max_length=200)
     technical_data_revision: str = Field(min_length=1, max_length=100)
     effective_from: date
@@ -200,9 +225,10 @@ def entry_dict(payload: EntryPayload):
     return payload.model_dump()
 
 
-def get_entry(ctx, entry_id: str) -> OCTMEntry:
+def get_entry(ctx, entry_id: str, *, for_update: bool = False) -> OCTMEntry:
     db, amo_id, _ = ctx
-    row = db.query(OCTMEntry).filter_by(id=entry_id, amo_id=amo_id).first()
+    query = db.query(OCTMEntry).filter_by(id=entry_id, amo_id=amo_id)
+    row = (query.with_for_update() if for_update else query).first()
     if row is None:
         raise HTTPException(404, "OCTM entry not found")
     return row
@@ -212,8 +238,16 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
     errors = []
     if not db.query(Aircraft).filter_by(serial_number=row.aircraft_serial_number, amo_id=amo_id).first():
         errors.append("Aircraft is not registered for this tenant")
-    if row.maintenance_complete != "YES":
+    if row.event_type != "NO_OPERATION" and row.maintenance_complete != "YES":
         errors.append("Maintenance completion must be confirmed; crew closure alone is insufficient")
+    if not row.source_evidence_ref:
+        errors.append("Source document reference is required before verification")
+    if row.event_type in {"TOP_UP", "CHECK_ZERO", "OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING"} and not row.techsheet_ref:
+        errors.append("Techsheet reference is required")
+    if row.event_type == "MISSING" and not row.remarks:
+        errors.append("Explain why the oil information is missing")
+    if row.event_type == "NO_OPERATION" and row.flight_hours not in (None, 0):
+        errors.append("A no-operation event cannot record flight hours")
     if row.event_type in {"TOP_UP", "CHECK_ZERO"}:
         if row.flight_hours is None:
             errors.append("Verified flight-hour exposure is required")
@@ -221,15 +255,35 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
             errors.append("Reference method and level are required")
     if row.event_type == "TOP_UP" and (row.oil_quantity is None or row.oil_quantity <= 0):
         errors.append("Positive oil uplift is required")
-    prior = (db.query(OCTMEntry).filter(
+    verified = (db.query(OCTMEntry).filter(
         OCTMEntry.amo_id == amo_id, OCTMEntry.engine_serial_number == row.engine_serial_number,
         OCTMEntry.installation_ref == row.installation_ref, OCTMEntry.review_status == "VERIFIED",
-        OCTMEntry.event_date <= row.event_date, OCTMEntry.id != row.id,
-    ).order_by(OCTMEntry.event_date.desc(), OCTMEntry.event_sequence.desc()).first())
-    if prior is not None and prior.engine_counter_hours is not None and row.engine_counter_hours is not None:
-        if row.engine_counter_hours < prior.engine_counter_hours:
-            errors.append("Engine counter is lower than the preceding verified observation")
-    return errors
+        OCTMEntry.id != row.id,
+    ).order_by(OCTMEntry.event_date.asc(), OCTMEntry.event_sequence.asc()).all())
+    key = (row.event_date, row.event_sequence)
+    for other in verified:
+        other_key = (other.event_date, other.event_sequence)
+        if other_key == key and other.aircraft_serial_number == row.aircraft_serial_number:
+            errors.append("Engine installation has another verified event with the same date and sequence")
+        if (row.sector_ref and row.flight_hours and other.sector_ref == row.sector_ref
+                and other.event_date == row.event_date
+                and other.aircraft_serial_number == row.aircraft_serial_number
+                and other.flight_hours and abs(other.flight_hours - row.flight_hours) > 0.00001):
+            errors.append("Flight hours conflict with an existing entry for the same engine/sector")
+        if row.engine_counter_hours is not None and other.engine_counter_hours is not None:
+            if other_key < key and other.engine_counter_hours > row.engine_counter_hours:
+                errors.append("Engine counter is below an earlier verified counter")
+            if other_key > key and other.engine_counter_hours < row.engine_counter_hours:
+                errors.append("Engine counter exceeds a later verified counter")
+        if (other_key <= key and other.aircraft_serial_number == row.aircraft_serial_number
+                and other.engine_position != row.engine_position):
+            errors.append("Engine position differs within the same installation history")
+    if row.event_type == "TOP_UP":
+        if row.oil_quantity is None or row.oil_quantity <= 0 or not row.oil_unit:
+            errors.append("A positive oil uplift and original volume unit are required")
+        if not row.oil_specification:
+            errors.append("Oil specification is required for top-ups")
+    return sorted(set(errors))
 
 
 @router.get("/octm/entries", response_model=list[EntryRead])
@@ -249,6 +303,8 @@ def entries(aircraft: str | None = None, status: str | None = None, limit: int =
 def create_entry(payload: EntryPayload, ctx=Depends(context)):
     require(ctx, "reliability.ingest")
     db, amo_id, actor = ctx
+    if payload.source_type not in {"PAPER_TECHSHEET", "REVIEWED_OCR"}:
+        raise HTTPException(422, "Direct entry supports paper techsheets or reviewed OCR only. Electronic EFB imports require a controlled adapter.")
     if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=payload.aircraft_serial_number).first():
         raise HTTPException(422, "Aircraft is not registered for this tenant")
     match = db.query(OCTMEntry).filter_by(
@@ -259,12 +315,11 @@ def create_entry(payload: EntryPayload, ctx=Depends(context)):
     if match:
         # Manual entry and later EFB import share one logical event. Never overwrite
         # a human-reviewed value silently with data from an external source.
-        if all(getattr(match, key) == value for key, value in entry_dict(payload).items()
-               if key not in {"source_type", "external_record_id", "source_evidence_ref"}):
+        if all(getattr(match, key) == value for key, value in entry_dict(payload).items()):
             return match
         raise HTTPException(409, "Conflicting OCTM event exists; send to Reliability for correction")
     entry = OCTMEntry(**entry_dict(payload), amo_id=amo_id,
-                      created_by_user_id=str(actor.id), review_status="DRAFT")
+                      created_by_user_id=str(actor.id), last_changed_by_user_id=str(actor.id), review_status="DRAFT")
     db.add(entry)
     db.flush()
     access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=entry.id,
@@ -279,9 +334,13 @@ def create_entry(payload: EntryPayload, ctx=Depends(context)):
 def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
     require(ctx, "reliability.data_quality.resolve")
     db, amo_id, actor = ctx
-    row = get_entry(ctx, entry_id)
+    row = get_entry(ctx, entry_id, for_update=True)
     if row.review_status == "VERIFIED":
         raise HTTPException(409, "Verified source records require a recorded correction")
+    if payload.decision == "VERIFIED" and str(actor.id) in {
+        str(row.created_by_user_id), str(row.last_changed_by_user_id)
+    }:
+        raise HTTPException(403, "A second authorized person must verify the source entry")
     if payload.decision == "VERIFIED":
         issues = validate_review(row, db, amo_id)
         if issues:
@@ -300,9 +359,18 @@ def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
 
 @router.post("/octm/entries/{entry_id}/correct", response_model=EntryRead)
 def correct_entry(entry_id: str, payload: EntryCorrection, ctx=Depends(context)):
-    require(ctx, "reliability.data_quality.resolve")
     db, amo_id, actor = ctx
-    row = get_entry(ctx, entry_id)
+    row = get_entry(ctx, entry_id, for_update=True)
+    codes = access.capabilities_for_user(db, actor)
+    is_resolver = "reliability.data_quality.resolve" in codes
+    is_owner_draft = ("reliability.ingest" in codes and row.review_status != "VERIFIED"
+                      and str(row.created_by_user_id) == str(actor.id))
+    if not (is_resolver or is_owner_draft):
+        raise HTTPException(403, "Only an authorized reviewer or the original entrant of an unverified record may correct it")
+    if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=payload.replacement.aircraft_serial_number).first():
+        raise HTTPException(422, "Replacement aircraft does not belong to this tenant")
+    if payload.replacement.source_type not in {"PAPER_TECHSHEET", "REVIEWED_OCR"}:
+        raise HTTPException(422, "Corrections to EFB imports require the controlled source adapter")
     before = {key: getattr(row, key) for key in EntryPayload.model_fields}
     after = entry_dict(payload.replacement)
     if before == after:
@@ -319,6 +387,7 @@ def correct_entry(entry_id: str, payload: EntryCorrection, ctx=Depends(context))
     for key, value in after.items():
         setattr(row, key, value)
     row.review_status = "DRAFT"
+    row.last_changed_by_user_id = str(actor.id)
     row.reviewed_by_user_id = None
     row.reviewed_at = None
     row.review_note = "Corrected; re-verification required"
