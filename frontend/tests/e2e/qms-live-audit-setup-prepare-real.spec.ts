@@ -247,7 +247,8 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
         data: { status: "ACCEPTED", file_ref: "unverified-manual-reference" },
       },
     );
-    expect(legacyBypass.status(), await legacyBypass.text()).toBe(409);
+    // The obsolete route is intentionally unavailable (404); it cannot bypass governed request acceptance.
+    expect(legacyBypass.status(), await legacyBypass.text()).toBe(404);
     await expect(prepare.getByText(/QMSM 5\.4/)).toBeVisible();
 
     await prepare.getByRole("button", { name: "Invite" }).click();
