@@ -4,7 +4,7 @@ from types import SimpleNamespace as Row
 
 import pytest
 
-from amodb.apps.reliability.octm import EntryPayload, calculate_windows
+from amodb.apps.reliability.octm import EntryPayload, EntryReview, ProfileApproval, calculate_windows
 
 
 def observation(seq, *, engine="PT6-123", install="INSTALL-001", qty=1,
@@ -156,3 +156,25 @@ def test_invalid_numeric_values_rejected():
             event_date=date(2026, 10, 1), event_sequence=1,
             techsheet_ref="TS-003", event_type="TOP_UP", oil_quantity=float("inf"), oil_unit="QT",
         )
+
+
+def test_review_attestation_required_for_verification():
+    with pytest.raises(ValueError):
+        EntryReview(decision="VERIFIED", note="Reviewed the techsheet")
+    reviewed = EntryReview(
+        decision="VERIFIED", note="Original techsheet and engine log checked",
+        source_checked=True, engine_identity_checked=True, exposure_checked=True,
+    )
+    assert reviewed.source_checked and reviewed.exposure_checked
+    returned = EntryReview(decision="RETURNED", note="Source is incomplete")
+    assert not returned.source_checked
+
+
+def test_manufacturer_limit_requires_current_technical_data_confirmation():
+    with pytest.raises(ValueError):
+        ProfileApproval(confirmed_current_technical_data=False, note="Unknown engine data")
+    approved = ProfileApproval(
+        confirmed_current_technical_data=True,
+        note="Confirmed current engine maintenance manual and installed engine applicability",
+    )
+    assert approved.confirmed_current_technical_data
