@@ -5,13 +5,13 @@ data enters the same draft/review flow as paper technical-log entries.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Session
 
 from amodb.database import Base, get_write_db
@@ -165,7 +165,7 @@ class EntryPayload(BaseModel):
             raise ValueError("A missing/no-operation observation cannot specify an oil unit")
         if self.flight_hours is not None and self.flight_hours > 0 and not self.sector_ref:
             raise ValueError("Flight hours require a sector/flight reference to prevent duplicate exposure")
-        if self.event_date > utcnow().date():
+        if self.event_date > utcnow().date() + timedelta(days=1):
             raise ValueError("OCTM event date cannot be in the future")
         return self
 
@@ -246,6 +246,8 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
         errors.append("Techsheet reference is required")
     if row.event_type == "MISSING" and not row.remarks:
         errors.append("Explain why the oil information is missing")
+    if row.event_type in {"OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING"} and not row.remarks:
+        errors.append("Record the reason and technical-log context of non-routine oil servicing")
     if row.event_type == "NO_OPERATION" and row.flight_hours not in (None, 0):
         errors.append("A no-operation event cannot record flight hours")
     if row.event_type in {"TOP_UP", "CHECK_ZERO"}:
@@ -358,15 +360,29 @@ def entry_readiness(entry_id: str, ctx=Depends(context)):
 
 @router.get("/octm/entries", response_model=list[EntryRead])
 def entries(aircraft: str | None = None, status: str | None = None, limit: int = Query(200, ge=1, le=500),
-            ctx=Depends(context)):
+            offset: int = Query(0, ge=0), ctx=Depends(context)):
     require(ctx, "reliability.read")
     db, amo_id, _ = ctx
     query = db.query(OCTMEntry).filter(OCTMEntry.amo_id == amo_id)
     if aircraft:
         query = query.filter(OCTMEntry.aircraft_serial_number == aircraft)
-    if status:
+    if status == "UNVERIFIED":
+        query = query.filter(OCTMEntry.review_status != "VERIFIED")
+    elif status:
         query = query.filter(OCTMEntry.review_status == status)
-    return query.order_by(OCTMEntry.event_date.desc(), OCTMEntry.event_sequence.desc()).limit(limit).all()
+    return query.order_by(OCTMEntry.event_date.desc(), OCTMEntry.event_sequence.desc(), OCTMEntry.id.desc()).offset(offset).limit(limit).all()
+
+
+@router.get("/octm/status-summary")
+def octm_status_summary(ctx=Depends(context)):
+    require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    rows = (db.query(OCTMEntry.review_status, func.count(OCTMEntry.id))
+            .filter(OCTMEntry.amo_id == amo_id).group_by(OCTMEntry.review_status).all())
+    counts = {str(code): int(count) for code, count in rows}
+    return {"total": sum(counts.values()), "unverified": sum(
+        amount for code, amount in counts.items() if code != "VERIFIED"),
+        "status_counts": counts}
 
 
 @router.post("/octm/entries", response_model=EntryRead, status_code=201)
