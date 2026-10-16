@@ -306,6 +306,14 @@ def download_form(tenant_slug:str,requirement_id:str,request:Request,db:Session=
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 
+@partner_documents_router.get("/assignment-scopes")
+def assignment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
+    """Expose only the audit assignment identifiers expressly granted to this member."""
+    user=partner._ctx(db,request,tenant_slug,cap="document.read")
+    allowed=sorted(partner._allowed(user,"assignments"))
+    return {"items":[{"id":value} for value in allowed[:100]]}
+
+
 @partner_documents_router.get("/submissions")
 def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                     limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
