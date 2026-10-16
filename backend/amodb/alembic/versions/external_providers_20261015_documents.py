@@ -126,9 +126,9 @@ def downgrade():
     op.drop_index("ix_ext_doc_requirement_history", table_name="external_partner_evidence_submissions")
     with op.batch_alter_table("external_partner_evidence_submissions") as batch:
         batch.drop_constraint("uq_ext_doc_idempotency", type_="unique")
-        batch.drop_constraint("uq_ext_doc_submission_tenant_provider", type_="unique")
         for fk in ("fk_ext_doc_qms_evidence", "fk_ext_doc_revision", "fk_ext_doc_manual", "fk_ext_doc_form_revision", "fk_ext_doc_supersedes", "fk_ext_doc_submission_req"):
             batch.drop_constraint(fk, type_="foreignkey")
+        batch.drop_constraint("uq_ext_doc_submission_tenant_provider", type_="unique")
         for col in ("idempotency_key", "qms_evidence_id", "dms_revision_id", "dms_manual_id", "valid_until", "form_revision_id", "supersedes_submission_id", "requirement_id"):
             batch.drop_column(col)
     op.drop_index("ix_ext_doc_req_tenant_kind", table_name="external_provider_document_requirements")
