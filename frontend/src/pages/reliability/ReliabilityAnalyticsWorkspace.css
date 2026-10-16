@@ -552,3 +552,11 @@
 .rel-chart-table__controls button:disabled { opacity: .5; }
 .rel-analytics-dashboard .reliability-analytics__chart-table { overflow: auto; max-height: 50vh; }
 .rel-analytics-dashboard .reliability-analytics__chart-table thead { position: sticky; top: 0; background: Canvas; z-index: 1; }
+
+.rel-analytics-dashboard__kpi-details{margin:.5rem 0 1rem;border:1px solid var(--reliability-border);border-radius:.65rem;background:Canvas}
+.rel-analytics-dashboard__kpi-details>summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem;cursor:pointer;
+  font-size:.83rem;font-weight:750;padding:.85rem 1rem;min-height:42px}
+.rel-analytics-dashboard__kpi-details>summary span{font-weight:450;font-size:.75rem;color:var(--reliability-muted)}
+.rel-analytics-dashboard__kpi-details[open]>summary{border-bottom:1px solid var(--reliability-border)}
+.rel-analytics-dashboard__kpi-details .reliability-analytics__metrics{padding:.75rem;margin:0}
+.rel-analytics-dashboard__kpi-details>summary:focus-visible{outline:2px solid #0f766e;outline-offset:2px}
