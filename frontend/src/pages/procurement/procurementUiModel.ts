@@ -3,6 +3,7 @@ import {
   ClipboardCheck,
   FileText,
   HandCoins,
+  MessagesSquare,
   Paperclip,
   ShieldCheck,
   ShoppingCart,
@@ -22,7 +23,7 @@ import type {
   ProcurementSupplier,
 } from "../../types/procurement";
 
-export type Section = "command" | "requests" | "sourcing" | "orders" | "receiving" | "suppliers" | "control" | "documents";
+export type Section = "command" | "requests" | "sourcing" | "orders" | "receiving" | "suppliers" | "control" | "documents" | "collaboration";
 export type Modal =
   | "requisition"
   | "supplier"
@@ -68,6 +69,7 @@ export const NAV: Array<{ id: Section; label: string; icon: ComponentType<{ size
   { id: "command", label: "Command", icon: ClipboardCheck },
   { id: "requests", label: "Requests", icon: FileText },
   { id: "sourcing", label: "Sourcing", icon: HandCoins },
+  { id: "collaboration", label: "Supplier Collaboration", icon: MessagesSquare },
   { id: "orders", label: "Orders", icon: ShoppingCart },
   { id: "receiving", label: "Receiving", icon: Truck },
   { id: "suppliers", label: "Suppliers", icon: UsersRound },
