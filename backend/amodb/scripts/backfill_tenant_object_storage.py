@@ -22,6 +22,7 @@ from amodb.apps.doc_control.evidence_models import DocumentEvidenceAsset
 from amodb.apps.doc_control.records_vault_models import TenantRecordAsset
 from amodb.apps.quality.audit_evidence_models import QualityAuditEvidenceArtifact
 from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
+from amodb.apps.quality.audit_report_composition_models import QualityAuditReportArtifact
 from amodb.apps.manuals import models as manuals_models
 from amodb.apps.platform import storage_quota_upload, storage_quota_service
 
@@ -45,6 +46,8 @@ SOURCES = (
            Path(os.getenv("QMS_AUDIT_EVIDENCE_DIR", "uploads/qms-audit-evidence")).resolve(), "content_type"),
     Source("qms-guest-documents", QualityAuditDocumentSubmission, "storage_ref", "amo_id",
            Path(os.getenv("QMS_AUDIT_GUEST_DOCUMENT_DIR", "uploads/qms-audit-guest-documents")).resolve(), "content_type"),
+    Source("qms-generated-reports", QualityAuditReportArtifact, "storage_ref", "amo_id",
+           Path(os.getenv("QMS_GENERATED_AUDIT_REPORT_DIR", "uploads/qms-generated-audit-reports")).resolve(), "content_type"),
     Source("manuals-originals", manuals_models.ManualRevision, "source_storage_path", "",
            Path(os.getenv("MANUAL_UPLOAD_DIR", "uploads/manuals")).resolve(), "source_mime_type"),
 )
