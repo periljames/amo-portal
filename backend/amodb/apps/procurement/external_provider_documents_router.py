@@ -922,6 +922,10 @@ class Review(BaseModel):
 def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_db),
            user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
+    # Quality owns acceptance/rejection and the transition into QMS evidence.
+    # Document Control may register a reviewed original but never decide Quality.
+    if str(getattr(user.role,"value",user.role)) not in {"QUALITY_MANAGER","QUALITY_OFFICER"}:
+        raise HTTPException(403,"Only appointed Quality staff may decide provider evidence intake")
     row=_one(db,"""SELECT s.*,p.supplier_id FROM external_partner_evidence_submissions s
       JOIN external_tenant_providers p ON p.id=s.tenant_provider_id AND p.amo_id=s.amo_id
       WHERE s.amo_id=:amo AND s.id=:id FOR UPDATE""",amo=amo,id=submission_id)
