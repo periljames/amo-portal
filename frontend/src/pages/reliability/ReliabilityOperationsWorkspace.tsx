@@ -6,12 +6,7 @@ import {
   getReliabilityAlert,
   getReliabilityEvent,
   getReliabilityWorkbench,
-  listEngineTrendStatuses,
   listFracasActions,
-  listFracasCases,
-  listReliabilityAlerts,
-  listReliabilityEvents,
-  type EngineTrend,
   type FracasAction,
   type FracasCase,
   type ReliabilityAlert,
@@ -22,6 +17,7 @@ import {
   type ReliabilityWorkbench,
 } from "../../services/reliability";
 import ReliabilityReportsView from "./ReliabilityReportsView";
+import ReliabilityBackendRegisters from "./ReliabilityBackendRegisters";
 import { ReliabilityRegisterControls } from "./ReliabilityRegisterControls";
 import ReliabilityOperationalControl from "./ReliabilityOperationalControl";
 import { FracasGovernancePanel, OccurrenceProvenancePanel, ReliabilityAdvancedView, type AdvancedReliabilityViewId } from "./ReliabilityAdvancedViews";
@@ -76,10 +72,6 @@ const ReliabilityWorkspacePage: React.FC = () => {
   const route = useMemo(() => routeState(location.pathname), [location.pathname]);
 
   const [workbench, setWorkbench] = useState<ReliabilityWorkbench | null>(null);
-  const [events, setEvents] = useState<ReliabilityEvent[]>([]);
-  const [alerts, setAlerts] = useState<ReliabilityAlert[]>([]);
-  const [cases, setCases] = useState<FracasCase[]>([]);
-  const [engines, setEngines] = useState<EngineTrend[]>([]);
   const [event, setEvent] = useState<ReliabilityEvent | null>(null);
   const [alert, setAlert] = useState<ReliabilityAlert | null>(null);
   const [fracasCase, setFracasCase] = useState<FracasCase | null>(null);
@@ -102,17 +94,11 @@ const ReliabilityWorkspacePage: React.FC = () => {
         if (route.entityId) {
           const data = await getReliabilityEvent(route.entityId);
           if (active) setEvent(data);
-        } else {
-          const data = await listReliabilityEvents({ limit: 150 });
-          if (active) setEvents(data);
         }
       } else if (route.view === "alerts") {
         if (route.entityId) {
           const data = await getReliabilityAlert(route.entityId);
           if (active) setAlert(data);
-        } else {
-          const data = await listReliabilityAlerts({ limit: 150 });
-          if (active) setAlerts(data);
         }
       } else if (route.view === "cases") {
         if (route.entityId) {
@@ -124,13 +110,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
             setFracasCase(caseData);
             setActions(actionData);
           }
-        } else {
-          const data = await listFracasCases({ limit: 150 });
-          if (active) setCases(data);
         }
-      } else if (route.view === "engines") {
-        const data = await listEngineTrendStatuses({ limit: 150 });
-        if (active) setEngines(data);
       }
     }
 
@@ -173,10 +153,6 @@ const ReliabilityWorkspacePage: React.FC = () => {
           route,
           basePath,
           workbench,
-          events,
-          alerts,
-          cases,
-          engines,
           event,
           alert,
           fracasCase,
@@ -190,10 +166,6 @@ type ViewProps = {
   route: RouteState;
   basePath: string;
   workbench: ReliabilityWorkbench | null;
-  events: ReliabilityEvent[];
-  alerts: ReliabilityAlert[];
-  cases: FracasCase[];
-  engines: EngineTrend[];
   event: ReliabilityEvent | null;
   alert: ReliabilityAlert | null;
   fracasCase: FracasCase | null;
@@ -204,10 +176,15 @@ function renderView(props: ViewProps): React.ReactNode {
   const { route, basePath } = props;
   if (route.view === "operations") return <ReliabilityOperationalControl />;
   if (route.view === "workbench") return props.workbench ? <Workbench data={props.workbench} basePath={basePath} /> : null;
-  if (route.view === "events") return props.event ? <><EventDetail item={props.event} basePath={basePath} /><OccurrenceProvenancePanel eventId={props.event.id} /></> : <EventRegister rows={props.events} basePath={basePath} />;
-  if (route.view === "alerts") return props.alert ? <AlertDetail item={props.alert} basePath={basePath} /> : <AlertRegister rows={props.alerts} basePath={basePath} />;
-  if (route.view === "cases") return props.fracasCase ? <><CaseDetail item={props.fracasCase} actions={props.actions} basePath={basePath} /><FracasGovernancePanel caseId={props.fracasCase.id} /></> : <CaseRegister rows={props.cases} basePath={basePath} />;
-  if (route.view === "engines") return <EngineRegister rows={props.engines} />;
+  if (route.view === "events") return route.entityId && props.event
+    ? <><EventDetail item={props.event} basePath={basePath} /><OccurrenceProvenancePanel eventId={props.event.id} /></>
+    : <ReliabilityBackendRegisters view="events" />;
+  if (route.view === "alerts") return route.entityId && props.alert ? <AlertDetail item={props.alert} basePath={basePath} />
+    : <ReliabilityBackendRegisters view="alerts" />;
+  if (route.view === "cases") return route.entityId && props.fracasCase
+    ? <><CaseDetail item={props.fracasCase} actions={props.actions} basePath={basePath} /><FracasGovernancePanel caseId={props.fracasCase.id} /></>
+    : <ReliabilityBackendRegisters view="cases" />;
+  if (route.view === "engines") return <ReliabilityBackendRegisters view="engines" />;
   if (route.view === "reports") return <ReliabilityReportsView />;
   if (ADVANCED_VIEWS.has(route.view as AdvancedReliabilityViewId)) return <ReliabilityAdvancedView view={route.view as AdvancedReliabilityViewId} basePath={basePath} />;
   return null;
@@ -253,10 +230,6 @@ function SectionHeading({ eyebrow, title, meta }: { eyebrow: string; title: stri
   return <div className="reliability-v2__section-heading"><div><p className="reliability-v2__eyebrow">{eyebrow}</p><h2>{title}</h2></div>{meta && <span>{meta}</span>}</div>;
 }
 
-function EventRegister({ rows, basePath }: { rows: ReliabilityEvent[]; basePath: string }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Canonical evidence" title="Occurrence register" meta={`${rows.length} loaded`} /><EventTable rows={rows} basePath={basePath} /></section>;
-}
-
 function EventTable({ rows, basePath }: { rows: ReliabilityEvent[]; basePath: string }) {
   return <ReliabilityRegisterControls rows={rows} label="occurrences" queryText={(item) => [item.aircraft_serial_number, item.event_type, item.ata_chapter, item.description, item.reference_code].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>When</th><th>Aircraft</th><th>Event</th><th>ATA</th><th>Summary</th></tr></thead><tbody>
     {visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/events/${row.id}`}>{displayDate(row.occurred_at)}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={severityClass(row.severity)}>{row.event_type}</span></td><td>{row.ata_chapter || "—"}</td><td>{row.description || row.reference_code || "No description"}</td></tr>)}
@@ -264,20 +237,8 @@ function EventTable({ rows, basePath }: { rows: ReliabilityEvent[]; basePath: st
   </tbody></table></div>}</ReliabilityRegisterControls>;
 }
 
-function AlertRegister({ rows, basePath }: { rows: ReliabilityAlert[]; basePath: string }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Technical disposition required" title="Alert register" meta={`${rows.length} loaded`} /><ReliabilityRegisterControls rows={rows} label="alerts" queryText={(item) => [item.alert_code, item.message, item.status, item.severity].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Alert</th><th>Severity</th><th>Status</th><th>Triggered</th><th>Message</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/alerts/${row.id}`}>{row.alert_code}</Link></td><td><span className={severityClass(row.severity)}>{row.severity}</span></td><td><span className={statusClass(row.status)}>{row.status}</span></td><td>{displayDate(row.triggered_at)}</td><td>{row.message || "—"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No alerts are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls></section>;
-}
-
-function CaseRegister({ rows, basePath }: { rows: FracasCase[]; basePath: string }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Failure reporting, analysis and corrective action" title="FRACAS register" meta={`${rows.length} loaded`} /><CaseTable rows={rows} basePath={basePath} /></section>;
-}
-
 function CaseTable({ rows, basePath }: { rows: FracasCase[]; basePath: string }) {
   return <ReliabilityRegisterControls rows={rows} label="FRACAS cases" queryText={(item) => [item.title, item.aircraft_serial_number, item.status, item.severity].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Case</th><th>Aircraft</th><th>Status</th><th>Severity</th><th>Updated</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/cases/${row.id}`}>{row.title}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={statusClass(row.status)}>{row.status.replaceAll("_", " ")}</span></td><td><span className={severityClass(row.severity)}>{row.severity || "UNRATED"}</span></td><td>{displayDate(row.updated_at)}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No FRACAS cases are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls>;
-}
-
-function EngineRegister({ rows }: { rows: EngineTrend[] }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Condition monitoring" title="Engine trend status" meta={`${rows.length} engines`} /><ReliabilityRegisterControls rows={rows} label="engine statuses" queryText={(item) => [item.aircraft_serial_number, item.engine_serial_number, item.engine_position, item.current_status].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Aircraft</th><th>Position</th><th>Engine S/N</th><th>Status</th><th>Last upload</th><th>Last review</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td>{row.aircraft_serial_number}</td><td>{row.engine_position}</td><td>{row.engine_serial_number || "—"}</td><td><span className={statusClass(row.current_status)}>{row.current_status || "Not evaluated"}</span></td><td>{row.last_upload_date || "—"}</td><td>{row.last_review_date || "Not reviewed"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={6}>No engine trend status records are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls></section>;
 }
 
 function EventDetail({ item, basePath }: { item: ReliabilityEvent; basePath: string }) {
