@@ -39,3 +39,21 @@
 .rel-table__workspace select:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
 @media (max-width: 650px) { .rel-table__toolbar label { width: 100%; } .rel-table__toolbar button { width: 100%; } }
 @media print { .rel-table__toolbar, .rel-table__pager { display: none; } .rel-table__viewport { max-height: none; overflow: visible; } }
+
+/* Evidence layout: table-first with a bounded source-backed record inspector. */
+.rel-table__summary-layout { display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,290px);gap:.85rem;align-items:start;min-width:0 }
+.rel-table__summary-layout>.reliability-analytics__register {min-width:0;margin-top:0;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:.7rem;overflow:hidden}
+.rel-table__inspector {position:sticky;top:.75rem;min-width:0;max-height:73dvh;overflow:auto;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:.7rem;padding:1rem;font-size:.8rem}
+.rel-table__inspector-head {border-bottom:1px solid color-mix(in srgb,CanvasText 10%,transparent);padding-bottom:.5rem}
+.rel-table__inspector h2 {font-size:1rem;line-height:1.35;margin:.35rem 0;overflow-wrap:anywhere}
+.rel-table__inspector dl {display:grid;gap:.45rem;margin:.65rem 0}
+.rel-table__inspector dl div {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:.5rem;padding:.35rem 0;border-bottom:1px solid color-mix(in srgb,CanvasText 8%,transparent)}
+.rel-table__inspector dt {opacity:.68}
+.rel-table__inspector dd {margin:0;font-weight:700;overflow-wrap:anywhere}
+.rel-table__inspector nav {display:grid;gap:.4rem;padding-top:.65rem;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent)}
+.rel-table__inspector a {color:#0f766e;font-weight:680}
+.rel-table__inspector-warning {border-left:3px solid #b45309;padding:.5rem;margin:.7rem 0;background:color-mix(in srgb,#f59e0b 7%,Canvas)}
+.rel-table__inspect {border:1px solid color-mix(in srgb,CanvasText 20%,transparent);border-radius:.35rem;background:Canvas;color:#0f766e;font-size:.72rem;cursor:pointer;padding:.2rem .4rem}
+.rel-table__inspect:hover {background:color-mix(in srgb,#14b8a6 9%,Canvas)}
+@media(max-width:1150px) {.rel-table__summary-layout {grid-template-columns:minmax(0,1fr)} .rel-table__inspector {position:static;max-height:none}}
+@media print {.rel-table__inspector {position:static;max-height:none}}
