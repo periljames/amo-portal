@@ -236,6 +236,10 @@ function responseIsReadinessNeutral(response: Response): boolean {
 
 export function notePortalResponse(response: Response): void {
   if (response.status === 503) {
+    // A module dependency can fail while the rest of the API remains healthy.
+    // Only an explicit shared-dependency signal or a readiness probe may
+    // change portal-wide connectivity.
+    if (!isSharedServiceUnavailable(response)) return;
     const delay = retryAfterMs(response) ?? nextDelay();
     const reason = response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE";
     const changed = snapshot.state !== "DEGRADED" || snapshot.reason !== reason;
@@ -261,6 +265,17 @@ export function notePortalResponse(response: Response): void {
       attempt: 0,
       reason: null,
     }, changed);
+  }
+}
+
+export function isSharedServiceUnavailable(response: Response): boolean {
+  if (response.status !== 503) return false;
+  const readiness = response.headers.get("X-Portal-Readiness");
+  if (readiness === "offline" || readiness === "degraded") return true;
+  try {
+    return ["/readyz", "/healthz"].includes(new URL(response.url).pathname);
+  } catch {
+    return false;
   }
 }
 

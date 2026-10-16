@@ -123,7 +123,7 @@ self.addEventListener("message", (event) => {
         if (!manifestResponse.ok) throw new Error("The offline application manifest was not available.");
         const manifest = await manifestResponse.json();
         const required = [...new Set(Array.isArray(manifest.qmsUrls) ? manifest.qmsUrls : [])]
-          .filter((url) => typeof url === "string" && /^\\/(assets|pdfjs)\\/[^?#]+$/.test(url));
+          .filter((url) => typeof url === "string" && /^\/(assets|pdfjs)\/[^?#]+$/.test(url));
         if (!required.length) throw new Error("No QMS application files were declared for offline use.");
         const assetCache = await caches.open(ASSET_CACHE);
         const shellCache = await caches.open(SHELL_CACHE);

@@ -1,8 +1,9 @@
 import { authHeaders, getCachedUser, getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
-import { offlineCommandRouteKey } from "./offlineCapabilities";
+import { classifyOfflineMutation, offlineCommandRouteKey } from "./offlineCapabilities";
 import {
   isPortalReady,
+  isSharedServiceUnavailable,
   notePortalResponse,
   recommendedRequestTimeoutMs,
 } from "./portalConnectivity";
@@ -972,6 +973,15 @@ function normaliseReplayError(detail: unknown, status: number): {
   };
 }
 
+function offlineReplayModule(entry: OfflineOutboxEntry): string {
+  const rule = classifyOfflineMutation(entry.path, entry.method);
+  if (rule.id.startsWith("qms-")) return "quality";
+  if (rule.id.startsWith("roster-")) return "rostering";
+  if (rule.id.startsWith("work-task-")) return "work";
+  if (rule.id.startsWith("attendance-")) return "workforce";
+  return entry.entityType || entry.path.split("/").filter(Boolean)[0] || "unknown";
+}
+
 function retryableReplayStatus(status: number): boolean {
   return status === 401 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -994,15 +1004,25 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
 
   const syncedPaths = new Set<string>();
   const syncedEntityTypes = new Set<string>();
+  const pausedModules = new Set<string>();
   let synced = 0;
 
   try {
     const replayStartedAt = Date.now();
-    const entries = (await listOfflineMutations(scope))
+    const pending = await listOfflineMutations(scope);
+    // Preserve ordering even when the first change is waiting for backoff or
+    // review. Later changes in other modules can still synchronise.
+    const entries = pending
       .filter((entry) => (
         (entry.status === "queued" || entry.status === "syncing")
         && (!entry.nextAttemptAt || entry.nextAttemptAt <= replayStartedAt)
       ));
+    for (const entry of pending) {
+      if (entry.status === "conflict" || entry.status === "failed"
+        || (entry.nextAttemptAt && entry.nextAttemptAt > replayStartedAt)) {
+        pausedModules.add(offlineReplayModule(entry));
+      }
+    }
     if (currentOfflineScope() !== scope) return getOfflineOutboxSummary(scope);
 
     notifyOfflineReplayProgress({
@@ -1016,6 +1036,8 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
 
     for (const [index, entry] of entries.entries()) {
       if (currentOfflineScope() !== scope || entry.scope !== scope) break;
+      const module = offlineReplayModule(entry);
+      if (pausedModules.has(module)) continue;
       if (!(await renewReplayLease(leaseOwner, scope))) break;
       notifyOfflineReplayProgress({
         scope,
@@ -1074,9 +1096,11 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
               currentPath: claimed.path,
               message: "Server command accepted; waiting for confirmation",
             });
-            break;
+            pausedModules.add(module);
+            continue;
           }
           if (resolution === "terminal-failure") {
+            pausedModules.add(module);
             await replaceOutboxEntry(claimed, {
               ...claimed,
               status: "conflict",
@@ -1124,11 +1148,13 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
             currentPath: claimed.path,
             message: "Server command accepted; waiting for confirmation",
           });
-          break;
+          pausedModules.add(module);
+          continue;
         }
         const revisionConflict = failure.retryable === true
           || Boolean(failure.errorCode?.includes("REVISION_CONFLICT"));
         if ((response.status === 409 || response.status === 412) && revisionConflict) {
+          pausedModules.add(module);
           await replaceOutboxEntry(claimed, {
             ...claimed,
             status: "conflict",
@@ -1174,9 +1200,12 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
               : "Server recovery in progress; retry scheduled",
           });
           if (response.status === 401) handleAuthFailure("outbox-replay-unauthorized");
-          break;
+          if (response.status === 401 || isSharedServiceUnavailable(response)) break;
+          pausedModules.add(module);
+          continue;
         }
 
+        pausedModules.add(module);
         await replaceOutboxEntry(claimed, {
           ...claimed,
           status: "failed",

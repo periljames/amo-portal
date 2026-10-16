@@ -695,7 +695,7 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "assessment": _assessment_dict(row),
         "entity_version": int(row.entity_version or 1),
         "answered_by_user_id": row.answered_by_user_id,
-        "answered_at": row.answered_at,
+        "answered_at": row.answered_at.isoformat() if row.answered_at else None,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -1751,7 +1751,7 @@ def mutate_live_fieldwork(
 ) -> dict[str, Any]:
     assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
     payload_hash = _mutation_hash(payload)
     existing = _existing_receipt_or_none(
         db,
@@ -1767,6 +1767,7 @@ def mutate_live_fieldwork(
             "row": existing.result_snapshot,
         }
 
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
     current_version = _assert_base_version(
@@ -1858,7 +1859,7 @@ def create_atomic_fieldwork_finding(
 ) -> dict[str, Any]:
     assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
     payload_hash = _mutation_hash(payload)
     existing = _existing_receipt_or_none(
         db,
@@ -1875,6 +1876,7 @@ def create_atomic_fieldwork_finding(
             **stored,
         }
 
+    audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     published_events: list[audit_models.AuditEvent] = []
     try:
         item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
