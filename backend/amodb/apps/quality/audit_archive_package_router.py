@@ -265,10 +265,15 @@ def _archive_readiness(db: Session, *, amo_id: str, audit_id: uuid.UUID, policy)
     ).first()
     if closure is None or closure.execution_status != "CLOSED":
         blockers.append({"type": "EXECUTION", "reason": "Issue the report and close audit execution in Closing."})
-    if closure is None or closure.follow_up_status != "COMPLETE":
-        blockers.append({"type": "FOLLOW_UP", "reason": "Complete all corrective-action and effectiveness requirements in Follow-up."})
-    else:
-        blockers.extend(_follow_up_readiness(db, amo_id=amo_id, audit_id=audit_id)["blockers"])
+    # Archive commencement follows the tenant's approved retention start event.
+    # EXECUTION_CLOSED records may be archived with open CAR/CAPA obligations;
+    # archiving must never mark those obligations complete or waive their gates.
+    # FOLLOW_UP_COMPLETE policies retain the full corrective-action gate.
+    if policy is not None and policy.retention_start_event == "FOLLOW_UP_COMPLETE":
+        if closure is None or closure.follow_up_status != "COMPLETE":
+            blockers.append({"type": "FOLLOW_UP", "reason": "Complete all corrective-action and effectiveness requirements in Follow-up."})
+        else:
+            blockers.extend(_follow_up_readiness(db, amo_id=amo_id, audit_id=audit_id)["blockers"])
     if policy is not None and closure is not None and not blockers:
         try:
             _retention_start(closure, policy)
@@ -347,8 +352,8 @@ def generate_archive_manifest_with_package(
     ).first()
     if closure is None:
         raise HTTPException(status_code=409, detail="Audit closure state is required before archive generation.")
-    if closure.follow_up_status != "COMPLETE":
-        raise HTTPException(status_code=409, detail="Assurance follow-up must be complete before the audit package can be archived.")
+    if policy.retention_start_event == "FOLLOW_UP_COMPLETE" and closure.follow_up_status != "COMPLETE":
+        raise HTTPException(status_code=409, detail="This policy starts retention at follow-up completion; complete assurance follow-up before archiving.")
 
     retention_start = _retention_start(closure, policy)
     retention_due = None if policy.indefinite else retention_start + __import__("datetime").timedelta(days=int(policy.duration_days or 0))
