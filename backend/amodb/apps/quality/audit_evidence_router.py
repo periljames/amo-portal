@@ -411,7 +411,7 @@ async def upload_internal_audit_evidence(
         ).first()
         if request_row is None:
             raise HTTPException(status_code=404, detail="Evidence request not found for this audit.")
-    stored = await store_audit_evidence(file, amo_id=ctx.amo_id, audit_id=str(audit_id), checklist_item_id=str(item_id))
+    stored = await store_audit_evidence(file, amo_id=ctx.amo_id, audit_id=str(audit_id), checklist_item_id=str(item_id), db=db, actor_id=str(ctx.user_id))
     artifact = QualityAuditEvidenceArtifact(
         amo_id=ctx.amo_id,
         audit_id=audit_id,

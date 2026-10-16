@@ -274,7 +274,14 @@ def _license_payload(row) -> dict[str, Any] | None:
 
 
 def _invoice_payload(row) -> dict[str, Any]:
-    return {"id": row.id, "amo_id": row.amo_id, "amount_cents": row.amount_cents, "currency": row.currency, "status": getattr(row.status, "value", str(row.status)), "description": row.description, "due_at": row.due_at, "paid_at": row.paid_at, "created_at": row.created_at}
+    return {
+        "id": row.id, "invoice_number": account_services.format_invoice_number(row),
+        "amo_id": row.amo_id, "amount_cents": row.amount_cents, "currency": row.currency,
+        "status": getattr(row.status, "value", str(row.status)),
+        "description": row.description, "issued_at": row.issued_at,
+        "due_at": row.due_at, "paid_at": row.paid_at, "created_at": row.created_at,
+        "license_id": row.license_id, "ledger_entry_id": row.ledger_entry_id,
+    }
 
 
 def latest_resource_snapshot(db: Session, tenant_id: str) -> dict[str, Any] | None:
@@ -285,23 +292,117 @@ def latest_resource_snapshot(db: Session, tenant_id: str) -> dict[str, Any] | No
 
 
 def create_tenant(db: Session, *, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
-    required = ["name", "amo_code", "login_slug"]
+    """Provision the AMO, first owner and access profiles in one transaction.
+
+    No administrator password or reset token is returned to the console.
+    The owner activates the account using the normal one-time reset flow.
+    No paid subscription is invented during provisioning.
+    """
+    from amodb.apps.accounts import access_control
+    from amodb.security import get_password_hash
+
+    required = ["name", "amo_code", "login_slug", "owner_email", "owner_full_name", "reason"]
     missing = [key for key in required if not str(payload.get(key) or "").strip()]
     if missing:
         raise ValueError("Missing required fields: " + ", ".join(missing))
-    amo = account_models.AMO(
-        name=str(payload["name"]).strip(),
-        amo_code=str(payload["amo_code"]).strip().upper(),
-        login_slug=str(payload["login_slug"]).strip().lower(),
-        contact_email=payload.get("owner_email") or payload.get("contact_email"),
-        country=payload.get("region") or payload.get("country"),
-        is_active=str(payload.get("initial_status") or "ACTIVE").upper() != "INACTIVE",
-    )
-    db.add(amo)
-    db.flush()
-    audit(db, actor_user_id=actor_id, action="tenant.provisioned", tenant_id=amo.id, entity_type="tenant", entity_id=amo.id, reason=payload.get("reason"), details={"name": amo.name, "plan": payload.get("plan")})
-    db.commit()
-    return get_tenant_detail(db, amo.id)
+    owner_email = str(payload["owner_email"]).strip().lower()
+    if "@" not in owner_email or len(owner_email) > 255:
+        raise ValueError("A valid owner email is required")
+    owner_name = str(payload["owner_full_name"]).strip()
+    if len(owner_name) < 3:
+        raise ValueError("Owner name must contain at least three characters")
+    code = str(payload["amo_code"]).strip().upper()
+    slug = str(payload["login_slug"]).strip().lower()
+    if not code or not slug or code == "ROOT" or slug in {"root", "system"}:
+        raise ValueError("Reserved or invalid tenant code / login slug")
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    if len(idempotency_key) > 128:
+        raise ValueError("Invalid provisioning idempotency key")
+    canonical = {
+        "name": str(payload["name"]).strip(), "amo_code": code, "login_slug": slug,
+        "owner_email": owner_email, "owner_full_name": owner_name,
+        "country": str(payload.get("country") or "").strip(),
+        "is_demo": bool(payload.get("is_demo", False)),
+        "time_zone": str(payload.get("time_zone") or "Africa/Nairobi").strip(),
+    }
+    if idempotency_key:
+        prior = db.query(account_models.IdempotencyKey).filter(
+            account_models.IdempotencyKey.scope == "tenant.provision",
+            account_models.IdempotencyKey.key == idempotency_key,
+        ).first()
+        if prior:
+            expected_hash = account_services._hash_payload(canonical)
+            if prior.payload_hash != expected_hash:
+                raise ValueError("Provisioning idempotency key was reused with different details")
+            found = db.query(account_models.AMO).filter(
+                account_models.AMO.amo_code == code,
+                account_models.AMO.login_slug == slug,
+                account_models.AMO.contact_email == owner_email,
+            ).first()
+            if not found:
+                raise ValueError("Provisioning request exists but the tenant requires recovery")
+            result = get_tenant_detail(db, found.id)
+            result["onboarding"] = {"status": "ALREADY_PROVISIONED", "idempotent_replay": True}
+            return result
+    if db.query(account_models.AMO.id).filter(
+        (account_models.AMO.amo_code == code) | (account_models.AMO.login_slug == slug)
+    ).first():
+        raise ValueError("Tenant code or login slug already exists")
+    pieces = owner_name.split(" ", 1)
+    first_name = pieces[0]
+    last_name = pieces[1] if len(pieces) > 1 else "-"
+    # A cryptographically random unrecoverable password is stored only as a
+    # verifier; ownership requires the email setup/reset verification process.
+    password = "V" + secrets.token_urlsafe(36) + "a1"
+    try:
+        if idempotency_key:
+            account_services.register_idempotency_key(
+                db, scope="tenant.provision", key=idempotency_key,
+                payload=canonical, commit=False,
+            )
+        tenant = account_models.AMO(
+            name=str(payload["name"]).strip(), amo_code=code, login_slug=slug,
+            contact_email=owner_email, country=str(payload.get("country") or "").strip() or None,
+            time_zone=str(payload.get("time_zone") or "Africa/Nairobi").strip(),
+            is_demo=bool(payload.get("is_demo", False)),
+            is_active=bool(payload.get("is_active", True)),
+        )
+        db.add(tenant)
+        db.flush()
+        owner = account_models.User(
+            amo_id=tenant.id, staff_code="OWNER-" + secrets.token_hex(5).upper(),
+            email=owner_email, first_name=first_name, last_name=last_name,
+            full_name=owner_name, role=account_models.AccountRole.USER,
+            hashed_password=get_password_hash(password),
+            is_active=True, is_superuser=False, is_amo_admin=True,
+            is_auditor=False, must_change_password=True,
+            approved_by_user_id=actor_id, approved_at=now_utc(),
+            approval_notes="Initial tenant administrator provisioned by platform superuser",
+        )
+        db.add(owner)
+        db.flush()
+        access_control.ensure_tenant_access_profiles(db, amo_id=tenant.id)
+        if access_control.primary_access_profile(db, user=owner) is None:
+            raise ValueError("Unable to assign initial owner's tenant access profile")
+        audit(
+            db, actor_user_id=actor_id, action="tenant.provisioned",
+            tenant_id=tenant.id, entity_type="tenant", entity_id=tenant.id,
+            reason=str(payload["reason"]).strip(),
+            details={"name": tenant.name, "owner_user_id": owner.id,
+                     "owner_email": owner.email, "status": "PASSWORD_SETUP_REQUIRED"},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    result = get_tenant_detail(db, tenant.id)
+    result["onboarding"] = {
+        "status": "PASSWORD_SETUP_REQUIRED",
+        "owner_user_id": owner.id, "owner_email": owner.email,
+        "setup_delivery": "Send secure owner invitation from the platform tenant controls",
+        "paid_subscription_active": False,
+    }
+    return result
 
 
 def set_tenant_active(db: Session, *, tenant_id: str, active: bool, actor_id: str, reason: str) -> dict[str, Any]:
@@ -309,6 +410,9 @@ def set_tenant_active(db: Session, *, tenant_id: str, active: bool, actor_id: st
     if not amo:
         raise ValueError("Tenant not found")
     amo.is_active = active
+    if not active:
+        from amodb.apps.accounts import session_service as account_sessions
+        account_sessions.revoke_tenant_sessions(db, amo_id=tenant_id, reason="TENANT_SUSPENDED")
     audit(db, actor_user_id=actor_id, action="tenant.reactivated" if active else "tenant.suspended", tenant_id=tenant_id, entity_type="tenant", entity_id=tenant_id, reason=reason)
     db.commit()
     return get_tenant_detail(db, tenant_id)
@@ -509,7 +613,11 @@ def set_user_active(db: Session, *, user_id: str, active: bool, actor_id: str, r
     user = db.get(account_models.User, user_id)
     if not user: raise ValueError("User not found")
     user.is_active = active
-    if not active: user.deactivated_at = now_utc(); user.deactivated_reason = reason
+    if not active:
+        user.deactivated_at = now_utc()
+        user.deactivated_reason = reason
+        from amodb.apps.accounts import session_service as account_sessions
+        account_sessions.revoke_user_sessions(db, user=user, reason="PLATFORM_DISABLE")
     audit(db, actor_user_id=actor_id, action="user.enabled" if active else "user.disabled", tenant_id=user.amo_id, entity_type="user", entity_id=user.id, reason=reason)
     db.commit()
     return {"id": user.id, "is_active": user.is_active}
@@ -518,7 +626,8 @@ def set_user_active(db: Session, *, user_id: str, active: bool, actor_id: str, r
 def revoke_user_sessions(db: Session, *, user_id: str, actor_id: str, reason: str) -> dict[str, Any]:
     user = db.get(account_models.User, user_id)
     if not user: raise ValueError("User not found")
-    user.token_revoked_at = now_utc()
+    from amodb.apps.accounts import session_service as account_sessions
+    account_sessions.revoke_user_sessions(db, user=user, reason="PLATFORM_REVOKE")
     audit(db, actor_user_id=actor_id, action="user.sessions.revoked", tenant_id=user.amo_id, entity_type="user", entity_id=user.id, reason=reason)
     db.commit()
     return {"id": user.id, "token_revoked_at": user.token_revoked_at}
@@ -552,6 +661,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
     now = now_utc()
     status_counts = {"ACTIVE": 0, "TRIALING": 0, "EXPIRED": 0, "CANCELLED": 0, "LOCKED": 0, "NO_SUBSCRIPTION": 0}
     invoice_totals = {"PENDING": 0, "PAID": 0, "VOID": 0, "OVERDUE": 0, "pending_amount_cents": 0, "paid_amount_cents": 0}
+    invoice_currencies: dict[str, dict[str, int]] = {}
     tenant_rows: list[dict[str, Any]] = []
     for tenant in tenants:
         access = account_services.get_billing_access_status(db, amo_id=tenant.id, as_of=now)
@@ -567,10 +677,20 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             status_counts["LOCKED"] += 1
         else:
             status_counts["NO_SUBSCRIPTION"] += 1
+        tenant_currencies: dict[str, dict[str, int]] = {}
         for inv in invoices:
             key = getattr(inv.status, "value", str(inv.status))
             if key in invoice_totals:
                 invoice_totals[key] += 1
+            currency = str(inv.currency or "USD").upper()
+            platform_bucket = invoice_currencies.setdefault(currency, {"pending_amount_cents": 0, "paid_amount_cents": 0})
+            tenant_bucket = tenant_currencies.setdefault(currency, {"pending_amount_cents": 0, "paid_amount_cents": 0})
+            if key == "PENDING":
+                platform_bucket["pending_amount_cents"] += int(inv.amount_cents or 0)
+                tenant_bucket["pending_amount_cents"] += int(inv.amount_cents or 0)
+            elif key == "PAID":
+                platform_bucket["paid_amount_cents"] += int(inv.amount_cents or 0)
+                tenant_bucket["paid_amount_cents"] += int(inv.amount_cents or 0)
         invoice_totals["OVERDUE"] += overdue_count
         invoice_totals["pending_amount_cents"] += pending_amount
         invoice_totals["paid_amount_cents"] += paid_amount
@@ -589,6 +709,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             "pending_invoice_amount_cents": pending_amount,
             "paid_invoice_amount_cents": paid_amount,
             "actionable_invoice_id": access.actionable_invoice_id,
+            "invoice_currencies": tenant_currencies,
         })
     return {
         "data_mode": mode,
@@ -600,6 +721,7 @@ def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> d
             **status_counts,
         },
         "invoices": invoice_totals,
+        "invoice_currencies": invoice_currencies,
         "tenants": tenant_rows,
         "rule": "Demo tenants are excluded unless data_mode=DEMO is requested. Live/REAL is the default.",
     }
@@ -612,24 +734,121 @@ def run_billing_maintenance_now(db: Session, *, actor_id: str, reason: str | Non
     return result
 
 
-def list_invoices(db: Session, *, data_mode: str | None = "REAL", limit: int = 50, offset: int = 0) -> dict[str, Any]:
+def list_invoices(
+    db: Session, *, data_mode: str | None = "REAL", limit: int = 50,
+    offset: int = 0, tenant_id: str | None = None,
+    status_filter: str | None = None, q: str | None = None,
+) -> dict[str, Any]:
+    """Filter and paginate invoices in the authoritative tenant scope."""
     mode = _normalise_data_mode(data_mode)
-    tenant_ids = _tenant_id_set(db, data_mode=mode)
-    q = db.query(account_models.BillingInvoice)
-    if tenant_ids:
-        q = q.filter(account_models.BillingInvoice.amo_id.in_(tenant_ids))
-    else:
-        q = q.filter(account_models.BillingInvoice.amo_id == "__none__")
-    q = q.order_by(account_models.BillingInvoice.created_at.desc())
-    total = q.count()
-    return {"items": [_invoice_payload(row) for row in q.offset(offset).limit(min(limit, 200)).all()], "total": total, "limit": limit, "offset": offset, "data_mode": mode}
+    query = db.query(account_models.BillingInvoice).join(
+        account_models.AMO,
+        account_models.BillingInvoice.amo_id == account_models.AMO.id,
+    )
+    query = _apply_data_mode_filter(query, mode)
+    if tenant_id:
+        query = query.filter(account_models.BillingInvoice.amo_id == tenant_id)
+    if status_filter:
+        state = status_filter.strip().upper()
+        if state not in {"PENDING", "PAID", "VOID", "OVERDUE"}:
+            raise ValueError("Unsupported invoice status filter")
+        if state == "OVERDUE":
+            query = query.filter(
+                account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING,
+                account_models.BillingInvoice.due_at < now_utc(),
+            )
+        else:
+            query = query.filter(account_models.BillingInvoice.status == account_models.InvoiceStatus(state))
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            (account_models.AMO.name.ilike(term))
+            | (account_models.AMO.amo_code.ilike(term))
+            | (account_models.BillingInvoice.description.ilike(term))
+        )
+    query = query.order_by(account_models.BillingInvoice.created_at.desc())
+    total = query.count()
+    items = [_invoice_payload(row) for row in query.offset(max(0, offset)).limit(min(max(1, limit), 200)).all()]
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "data_mode": mode}
 
 
-def mark_invoice_paid(db: Session, *, invoice_id: str, actor_id: str, reason: str) -> dict[str, Any]:
-    row = db.get(account_models.BillingInvoice, invoice_id)
-    if not row: raise ValueError("Invoice not found")
-    row.status = account_models.InvoiceStatus.PAID; row.paid_at = now_utc()
-    audit(db, actor_user_id=actor_id, action="billing.invoice.mark_paid", tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason)
+def mark_invoice_paid(
+    db: Session, *, invoice_id: str, actor_id: str, reason: str,
+    payment_reference: str | None = None,
+) -> dict[str, Any]:
+    """Record an *offline verified* payment, not an external Stripe simulation."""
+    if not reason or not reason.strip():
+        raise ValueError("A reason is required")
+    row = (
+        db.query(account_models.BillingInvoice)
+        .filter(account_models.BillingInvoice.id == invoice_id)
+        .with_for_update()
+        .first()
+    )
+    if not row:
+        raise ValueError("Invoice not found")
+    if row.status == account_models.InvoiceStatus.PAID:
+        return _invoice_payload(row)
+    if row.status != account_models.InvoiceStatus.PENDING:
+        raise ValueError("Only pending invoices may be marked paid")
+    key = f"invoice-offline-payment:{row.id}"
+    existing = db.query(account_models.LedgerEntry).filter(
+        account_models.LedgerEntry.amo_id == row.amo_id,
+        account_models.LedgerEntry.idempotency_key == key,
+    ).first()
+    if not existing:
+        db.add(account_models.LedgerEntry(
+            amo_id=row.amo_id, license_id=row.license_id,
+            amount_cents=-int(row.amount_cents), currency=row.currency,
+            entry_type=account_models.LedgerEntryType.PAYMENT,
+            description=f"Offline payment for {account_services.format_invoice_number(row)}",
+            idempotency_key=key, recorded_at=now_utc(),
+        ))
+    row.status = account_models.InvoiceStatus.PAID
+    row.paid_at = now_utc()
+    audit(
+        db, actor_user_id=actor_id, action="billing.invoice.offline_payment_recorded",
+        tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason,
+        details={"payment_reference": (payment_reference or "").strip()[:255], "amount_cents": row.amount_cents, "currency": row.currency},
+    )
+    db.commit()
+    return _invoice_payload(row)
+
+
+def void_invoice(db: Session, *, invoice_id: str, actor_id: str, reason: str) -> dict[str, Any]:
+    """Void an unpaid invoice and reverse its original ledger charge once."""
+    if not reason or not reason.strip():
+        raise ValueError("A reason is required")
+    row = db.query(account_models.BillingInvoice).filter(
+        account_models.BillingInvoice.id == invoice_id,
+    ).with_for_update().first()
+    if not row:
+        raise ValueError("Invoice not found")
+    if row.status == account_models.InvoiceStatus.VOID:
+        return _invoice_payload(row)
+    if row.status != account_models.InvoiceStatus.PENDING:
+        raise ValueError("Paid invoices cannot be voided; use a governed refund")
+    if row.ledger_entry_id:
+        original = db.get(account_models.LedgerEntry, row.ledger_entry_id)
+        if original and original.entry_type == account_models.LedgerEntryType.CHARGE:
+            reversal_key = f"invoice-void:{row.id}"
+            already_reversed = db.query(account_models.LedgerEntry).filter(
+                account_models.LedgerEntry.amo_id == row.amo_id,
+                account_models.LedgerEntry.idempotency_key == reversal_key,
+            ).first()
+            if not already_reversed:
+                db.add(account_models.LedgerEntry(
+                    amo_id=row.amo_id, license_id=row.license_id,
+                    amount_cents=-int(original.amount_cents), currency=original.currency,
+                    entry_type=account_models.LedgerEntryType.ADJUSTMENT,
+                    description=f"Void invoice {account_services.format_invoice_number(row)}",
+                    idempotency_key=reversal_key, recorded_at=now_utc(),
+                ))
+    row.status = account_models.InvoiceStatus.VOID
+    audit(
+        db, actor_user_id=actor_id, action="billing.invoice.voided",
+        tenant_id=row.amo_id, entity_type="billing_invoice", entity_id=row.id, reason=reason,
+    )
     db.commit()
     return _invoice_payload(row)
 

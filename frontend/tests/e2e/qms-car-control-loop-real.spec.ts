@@ -45,7 +45,7 @@ async function login(page: Page, data: Fixture): Promise<void> {
 }
 
 function structuredEditor(page: Page, label: string) {
-  return page.getByLabel(`${label} structured editor`, { exact: true }).locator("textarea");
+  return page.locator(`.car-invite-editor[aria-label="${label} structured editor"] textarea`);
 }
 
 async function authenticatedPost(page: Page, path: string, payload: unknown): Promise<{ status: number; body: unknown }> {

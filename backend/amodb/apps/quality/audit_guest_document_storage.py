@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
+from amodb import storage as shared_storage
+
 
 MAX_GUEST_DOCUMENT_BYTES = int(os.getenv("QMS_AUDIT_GUEST_DOCUMENT_MAX_BYTES", str(25 * 1024 * 1024)))
 _STORAGE_ROOT = Path(os.getenv("QMS_AUDIT_GUEST_DOCUMENT_DIR", "uploads/qms-audit-guest-documents")).resolve()
@@ -61,6 +63,7 @@ async def store_guest_document(
     amo_id: str,
     audit_id: str,
     request_id: str,
+    db=None,
 ) -> StoredAuditGuestDocument:
     filename = safe_filename(upload.filename)
     suffix = Path(filename).suffix.lower()
@@ -72,7 +75,9 @@ async def store_guest_document(
     await upload.seek(0)
 
     relative = Path(str(amo_id)) / str(audit_id) / str(request_id) / f"{uuid.uuid4().hex}_{filename}"
-    root = storage_root()
+    use_shared_storage = shared_storage.shared_storage_enabled()
+    root = shared_storage.cache_root() if use_shared_storage else storage_root()
+    root.mkdir(parents=True, exist_ok=True)
     destination = (root / relative).resolve()
     if root != destination and root not in destination.parents:
         raise HTTPException(status_code=400, detail="Invalid storage target.")
@@ -97,16 +102,45 @@ async def store_guest_document(
     finally:
         await upload.close()
 
+    reference = relative.as_posix()
+    if use_shared_storage:
+        try:
+            if db is None:
+                raise HTTPException(status_code=503, detail="Storage accounting context is required for shared evidence")
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_local_file(
+                db, tenant_id=str(amo_id), actor_id=None,
+                path=destination,
+                key=f"qms-audit-guest-documents/{reference}",
+                content_type=upload.content_type,
+            )
+            if int(stored.size_bytes) != total:
+                raise IOError("Shared storage size did not match uploaded evidence")
+            reference = stored.uri
+        except HTTPException:
+            # Preserve 413 quota exceeded and governed 409 conflicts for callers.
+            raise
+        except Exception:
+            raise HTTPException(status_code=503, detail="Evidence could not be retained in shared storage")
+        finally:
+            destination.unlink(missing_ok=True)
+
     return StoredAuditGuestDocument(
         filename=filename,
         content_type=upload.content_type,
         size_bytes=total,
         sha256=digest.hexdigest(),
-        storage_ref=relative.as_posix(),
+        storage_ref=reference,
     )
 
 
 def resolve_guest_document(storage_ref: str) -> Path:
+    if str(storage_ref or "").startswith("s3://"):
+        try:
+            return shared_storage.materialize(storage_ref)
+        except (OSError, ValueError, IOError):
+            raise HTTPException(status_code=404, detail="Evidence artifact not found.") from None
+    # Historical relative paths remain readable until an explicit backfill.
     root = storage_root()
     target = (root / str(storage_ref)).resolve()
     if root != target and root not in target.parents:

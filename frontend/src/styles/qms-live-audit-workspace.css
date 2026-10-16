@@ -1622,7 +1622,15 @@
 .qms-live-audit-focus__matrix-choices button:disabled { opacity: 0.65; cursor: not-allowed; }
 .qms-live-audit-focus__matrix-device { display: block; white-space: nowrap; font-size: 0.65rem; color: var(--qms-muted); }
 .qms-live-audit-focus__question { padding: 0; margin-top: 0.65rem; max-height: none; overflow: visible; }
-.qms-live-audit-focus__summary { display: none; }
+/* Keep critical progress, findings, release boundaries and synchronization
+   reachable beneath the table-first workspace, including at laptop widths. */
+.qms-live-audit-focus__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 0.5rem;
+  border-top: 1px solid var(--qms-line);
+  border-left: 0;
+}
 @media(max-width: 720px) {
   .qms-live-audit-focus__body { display: block; padding: 0.5rem; }
   .qms-live-audit-focus__matrix-toolbar label { width: 100%; }
@@ -1630,4 +1638,62 @@
   .qms-live-audit-focus__matrix-scroll { max-height: 66vh; }
   .qms-live-audit-focus__matrix-table { min-width: 650px; }
   .qms-live-audit-focus__question { padding: 0; }
+}
+
+
+/* Two-pane auditor layout: questions remain in view while verifying a row.
+   The secondary panel is shown only after the auditor opens a row. */
+.qms-live-audit-focus__body.is-detail-open {
+  display: grid;
+  grid-template-columns: minmax(500px, 1.18fr) minmax(400px, 1fr);
+  align-items: start;
+  gap: 0.7rem;
+}
+.qms-live-audit-focus__body.is-detail-open .qms-live-audit-focus__matrix {
+  min-width: 0;
+}
+.qms-live-audit-focus__body.is-detail-open .qms-live-audit-focus__matrix-table td:nth-child(2) {
+  width: 44%;
+}
+.qms-live-audit-focus__body.is-detail-open .qms-live-audit-focus__question {
+  position: sticky;
+  top: 1rem;
+  margin-top: 0;
+  max-height: min(86vh, 990px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
+  padding: 0.7rem;
+}
+.qms-live-audit-focus__question-head { gap: 0.45rem; }
+.qms-live-audit-focus__close-details {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 6px;
+  background: var(--qms-panel);
+  color: var(--qms-text);
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.76rem;
+}
+@media (max-width: 1080px) {
+  .qms-live-audit-focus__body.is-detail-open { display: block; }
+  .qms-live-audit-focus__body.is-detail-open .qms-live-audit-focus__question {
+    position: fixed;
+    top: 8vh;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 42;
+    width: 100%;
+    max-height: 92vh;
+    overflow-y: auto;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -9px 36px rgb(0 0 0 / 0.18);
+  }
 }

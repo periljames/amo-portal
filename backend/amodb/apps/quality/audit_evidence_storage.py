@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
+from amodb import storage as shared_storage
+
 
 MAX_EVIDENCE_BYTES = int(os.getenv("QMS_AUDIT_EVIDENCE_MAX_BYTES", str(50 * 1024 * 1024)))
 _STORAGE_ROOT = Path(os.getenv("QMS_AUDIT_EVIDENCE_DIR", "uploads/qms-audit-evidence")).resolve()
@@ -61,7 +63,7 @@ def storage_root() -> Path:
     return _STORAGE_ROOT
 
 
-async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str, checklist_item_id: str | None = None) -> StoredAuditEvidence:
+async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str, checklist_item_id: str | None = None, db=None, actor_id: str | None = None) -> StoredAuditEvidence:
     filename = safe_filename(upload.filename)
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
@@ -72,7 +74,9 @@ async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str
 
     scope = checklist_item_id or "audit"
     relative = Path(str(amo_id)) / str(audit_id) / str(scope) / f"{uuid.uuid4().hex}_{filename}"
-    root = storage_root()
+    use_shared_storage = shared_storage.shared_storage_enabled()
+    root = shared_storage.cache_root() if use_shared_storage else storage_root()
+    root.mkdir(parents=True, exist_ok=True)
     destination = (root / relative).resolve()
     if root != destination and root not in destination.parents:
         raise HTTPException(status_code=400, detail="Invalid evidence storage target.")
@@ -97,16 +101,45 @@ async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str
     finally:
         await upload.close()
 
+    reference = relative.as_posix()
+    if use_shared_storage:
+        try:
+            if db is None:
+                raise HTTPException(status_code=503, detail="Storage accounting context is required for shared evidence")
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_local_file(
+                db, tenant_id=str(amo_id), actor_id=actor_id,
+                path=destination,
+                key=f"qms-audit-evidence/{reference}",
+                content_type=upload.content_type,
+            )
+            if int(stored.size_bytes) != total:
+                raise IOError("Shared storage size did not match uploaded evidence")
+            reference = stored.uri
+        except HTTPException:
+            # Preserve 413 quota exceeded and governed 409 conflicts for callers.
+            raise
+        except Exception:
+            raise HTTPException(status_code=503, detail="Evidence could not be retained in shared storage")
+        finally:
+            destination.unlink(missing_ok=True)
+
     return StoredAuditEvidence(
         filename=filename,
         content_type=upload.content_type,
         size_bytes=total,
         sha256=digest.hexdigest(),
-        storage_ref=relative.as_posix(),
+        storage_ref=reference,
     )
 
 
 def resolve_audit_evidence(storage_ref: str) -> Path:
+    if str(storage_ref or "").startswith("s3://"):
+        try:
+            return shared_storage.materialize(storage_ref)
+        except (OSError, ValueError, IOError):
+            raise HTTPException(status_code=404, detail="Evidence artifact not found.") from None
+    # Historical relative paths remain readable until an explicit backfill.
     root = storage_root()
     target = (root / str(storage_ref)).resolve()
     if root != target and root not in target.parents:

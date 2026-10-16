@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
@@ -57,7 +58,15 @@ def _audit(
 
 
 def _integrity(row: km.DocumentationRecord) -> dict:
-    path = Path(row.artifact_storage_path).resolve()
+    try:
+        path = (shared_storage.materialize(
+            row.artifact_storage_path, expected_sha256=row.artifact_sha256,
+        ) if str(row.artifact_storage_path).startswith("s3://")
+            else Path(row.artifact_storage_path).resolve())
+    except IOError:
+        return {"status": "MISMATCH", "expected_sha256": row.artifact_sha256, "actual_sha256": None}
+    except Exception:
+        return {"status": "MISSING", "expected_sha256": row.artifact_sha256, "actual_sha256": None}
     if not path.exists() or not path.is_file():
         return {"status": "MISSING", "expected_sha256": row.artifact_sha256, "actual_sha256": None}
     digest = hashlib.sha256(path.read_bytes()).hexdigest()

@@ -146,6 +146,33 @@ def seed() -> None:
         db.add(amo)
         db.flush()
 
+        # Exercise real commercial access checks in the disposable browser CI.
+        # An AMO admin is not automatically licensed for DMS production routes.
+        ci_sku = account_models.CatalogSKU(
+            code="CI-DMS-GOVERNANCE", name="Governed DMS Browser Acceptance",
+            description="Disposable CI-only licensed tenant, no real charges.",
+            term=account_models.BillingTerm.MONTHLY, trial_days=0,
+            amount_cents=0, currency="USD", is_active=True,
+        )
+        db.add(ci_sku)
+        db.flush()
+        ci_license = account_models.TenantLicense(
+            amo_id=amo.id, sku_id=ci_sku.id,
+            term=account_models.BillingTerm.MONTHLY,
+            status=account_models.LicenseStatus.ACTIVE,
+            is_read_only=False,
+            current_period_start=datetime.now(timezone.utc) - timedelta(minutes=5),
+            current_period_end=datetime.now(timezone.utc) + timedelta(days=1),
+            notes="Disposable DMS browser CI entitlement.",
+        )
+        db.add(ci_license)
+        db.flush()
+        for key in ("aerodoc_hybrid_dms", "doc_control", "documents"):
+            db.add(account_models.LicenseEntitlement(
+                license_id=ci_license.id, key=key, is_unlimited=True,
+                description="CI-only governed document-control access",
+            ))
+
         # The route boundary intentionally requires a normal tenant user to have
         # an assigned department unless an Admin Profile session is actively
         # elevated. Seed a real Document Control department so browser acceptance

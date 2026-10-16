@@ -168,6 +168,9 @@ test.describe.serial("DMS authoritative role matrix", () => {
     const dialog = page.getByRole("dialog", { name: "Assigned document review" });
     await expect(dialog.getByRole("button", { name: "Approve for management", exact: true })).toBeVisible();
     await dialog.getByLabel("Review comments").fill("Management approval recorded against the retained reviewed revision.");
+    await dialog.getByLabel("Effective date and time").fill(
+      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+    );
     const result = await captureUiTransition(page, dialog.getByRole("button", { name: "Approve for management", exact: true }));
     expect(result.state).toBe("SCHEDULED_FOR_EFFECTIVITY");
     expect(result.version).toBe(6);

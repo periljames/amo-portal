@@ -16,6 +16,62 @@ export type PlatformTenant = {
   user_count?: number;
   created_at?: string;
 };
+export type PlatformBillingTenant = {
+  id: string;
+  amo_code: string;
+  name: string;
+  is_active: boolean;
+  is_demo: boolean;
+  access_state: string;
+  has_access: boolean;
+  lock_reason?: string | null;
+  subscription?: { id?: string; status?: string; sku_code?: string; current_period_end?: string | null; trial_ends_at?: string | null } | null;
+  overdue_invoice_count: number;
+  pending_invoice_amount_cents: number;
+  paid_invoice_amount_cents: number;
+  actionable_invoice_id?: string | null;
+  invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
+};
+export type PlatformBillingControl = {
+  data_mode: string;
+  generated_at: string;
+  counts: Record<string, number>;
+  invoices: Record<string, number>;
+  invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
+  tenants: PlatformBillingTenant[];
+};
+export type PlatformStorageQuota = {
+  tenant_id: string; quota_bytes: number; used_bytes: number; reserved_bytes: number;
+  remaining_bytes: number; integrity_state: string; generation?: number;
+  last_reconciled_at?: string | null;
+};
+export type PlatformActivationChecklist = {
+  tenant_id: string; ready: boolean;
+  storage: PlatformStorageQuota;
+  checks: Array<{ key: string; label: string; passed: boolean }>;
+};
+export type PlatformLicensePlan = {
+  id: string; code: string; name: string; description?: string | null;
+  term: "MONTHLY" | "ANNUAL" | "BI_ANNUAL";
+  trial_days: number; amount_cents: number; currency: string;
+  is_active: boolean; min_usage_limit?: number | null; max_usage_limit?: number | null;
+};
+
+export type PlatformBillingInvoice = {
+  id: string;
+  invoice_number?: string;
+  amo_id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  description?: string | null;
+  issued_at?: string | null;
+  due_at?: string | null;
+  paid_at?: string | null;
+  created_at?: string | null;
+  ledger_entry_id?: string | null;
+};
+
 export type PlatformUser = {
   id: string;
   email: string;
@@ -258,8 +314,18 @@ export const platformApi = {
   readNotification: (id: string) => request(`/platform/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
 
   tenants: (params: { q?: string; status?: string; data_mode?: string; limit?: number; offset?: number } = {}) => request<PlatformList<PlatformTenant>>(`/platform/tenants${qs(params)}`),
+  storageQuota: (tenantId: string) => request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota`),
+  allocateStorageQuota: (tenantId: string, quotaBytes: number, reason: string) =>
+    request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota`,
+      { method: "POST", body: JSON.stringify({ quota_bytes: quotaBytes, reason }) }),
+  reconcileStorageQuota: (tenantId: string, reason: string) =>
+    request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota/reconcile`,
+      { method: "POST", body: JSON.stringify({ reason }) }),
+  activationChecklist: (tenantId: string) =>
+    request<PlatformActivationChecklist>(`/platform/tenants/${encodeURIComponent(tenantId)}/activation-checklist`),
   tenantDetail: (id: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}`),
   createTenant: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/tenants", { method: "POST", body: JSON.stringify(payload) }),
+  sendTenantOwnerInvitation: (tenantId: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(tenantId)}/owner-invitation`, { method: "POST", body: "{}" }),
   tenantAction: (id: string, action: "suspend" | "reactivate" | "lock" | "unlock" | "read-only", payload: Record<string, unknown>) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}/${action}`, { method: "POST", body: JSON.stringify(payload) }),
   tenantEntitlements: (id: string, payload: Record<string, unknown>) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}/entitlements`, { method: "PATCH", body: JSON.stringify(payload) }),
   startSupportSession: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/support-sessions", { method: "POST", body: JSON.stringify(payload) }),
@@ -269,8 +335,27 @@ export const platformApi = {
   userAction: (id: string, action: "enable" | "disable" | "revoke-sessions" | "force-password-reset", reason: string) => request<Record<string, unknown>>(`/platform/users/${encodeURIComponent(id)}/${action}`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   billingSummary: (dataMode = "REAL") => request<Record<string, unknown>>(`/platform/billing/summary${qs({ data_mode: dataMode })}`),
-  invoices: (params: { data_mode?: string; limit?: number; offset?: number } = {}) => request<PlatformList<Record<string, unknown>>>(`/platform/billing/invoices${qs(params)}`),
-  markInvoicePaid: (id: string, reason: string) => request<Record<string, unknown>>(`/platform/billing/invoices/${encodeURIComponent(id)}/mark-paid`, { method: "POST", body: JSON.stringify({ reason }) }),
+  billingControl: (dataMode = "REAL") => request<PlatformBillingControl>(`/platform/billing/control${qs({ data_mode: dataMode })}`),
+  licensePlans: () => request<PlatformLicensePlan[]>("/billing/catalog?include_inactive=true"),
+  createLicensePlan: (payload: Record<string, unknown>) => request<PlatformLicensePlan>("/billing/catalog", { method: "POST", body: JSON.stringify(payload) }),
+  updateLicensePlan: (id: string, payload: Record<string, unknown>) => request<PlatformLicensePlan>(`/billing/catalog/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateTenantLicense: (tenantId: string, payload: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/accounts/admin/platform/tenants/${encodeURIComponent(tenantId)}/subscription`, { method: "POST", body: JSON.stringify(payload) }),
+  runBillingMaintenance: (reason: string) => request<Record<string, unknown>>("/platform/billing/maintenance/run", { method: "POST", body: JSON.stringify({ reason }) }),
+  invoices: (params: { data_mode?: string; tenant_id?: string; status?: string; q?: string; limit?: number; offset?: number } = {}) => request<PlatformList<PlatformBillingInvoice>>(`/platform/billing/invoices${qs(params)}`),
+  invoiceDetail: (id: string) => request<PlatformBillingInvoice>(`/platform/billing/invoices/${encodeURIComponent(id)}`),
+  markInvoicePaid: (id: string, reason: string, paymentReference = "") => request<PlatformBillingInvoice>(`/platform/billing/invoices/${encodeURIComponent(id)}/mark-paid`, { method: "POST", body: JSON.stringify({ reason, payment_reference: paymentReference }) }),
+  voidInvoice: (id: string, reason: string) => request<PlatformBillingInvoice>(`/platform/billing/invoices/${encodeURIComponent(id)}/void`, { method: "POST", body: JSON.stringify({ reason }) }),
+  invoiceDocument: async (id: string, format: "pdf" | "html" = "pdf") => {
+    const response = await rawRequest(`/platform/billing/invoices/${encodeURIComponent(id)}/document${qs({ format })}`, { method: "GET" });
+    if (!response.ok) throw new Error(`Invoice document unavailable (HTTP ${response.status}).`);
+    return response.blob();
+  },
+  exportTenantInvoices: async (tenantId: string, dataMode = "REAL") => {
+    const response = await rawRequest(`/platform/billing/invoices/export${qs({ tenant_id: tenantId, data_mode: dataMode })}`, { method: "GET" });
+    if (!response.ok) throw new Error(`Billing register export unavailable (HTTP ${response.status}).`);
+    return response.blob();
+  },
   revenueByPlan: () => request<PlatformList<Record<string, unknown>>>("/platform/billing/revenue-by-plan"),
 
   analyticsSummary: () => request<Record<string, unknown>>("/platform/analytics/summary"),

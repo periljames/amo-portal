@@ -210,8 +210,14 @@ test("two authenticated Quality browsers receive the same committed live-audit c
 
     await expect(pageA.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
     await expect(pageB.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
-    await expect(pageA.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
-    await expect(pageB.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
+    // The Fieldwork matrix is the default; open the exact same governed item
+    // on both browsers and expand its verification inputs before checking SSE.
+    for (const page of [pageA, pageB]) {
+      await expect(page.getByRole("table", { name: "Checklist assessment table" })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Details for question 1" }).click();
+      await page.locator("details.qms-live-audit-focus__compliance > summary").click();
+      await expect(page.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
+    }
 
     await expect(pageA.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
     await expect(pageB.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
@@ -222,13 +228,13 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     await pageA.getByLabel("Implementation status").selectOption("VERIFIED");
     await pageA.getByLabel("Field verification").selectOption("VERIFIED");
     await pageA.getByLabel("Auditor note").fill(note);
-    await pageA.getByRole("button", { name: "Compliant", exact: true }).click();
+    await pageA.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant", exact: true }).click();
     await expect(pageA.getByText("Saved to the authoritative audit record.")).toBeVisible({ timeout: 30_000 });
 
     // Browser B receives no click, focus, reload or explicit refresh. The only
     // admissible cause of this change is the authenticated audit-scoped SSE event
     // invalidating its occurrence-scoped React Query cache after A's DB commit.
-    await expect(pageB.getByRole("button", { name: "Compliant", exact: true })).toHaveClass(/is-active/, { timeout: 30_000 });
+    await expect(pageB.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant", exact: true })).toHaveClass(/is-active/, { timeout: 30_000 });
     await expect(pageB.getByLabel("Applicability")).toHaveValue("APPLICABLE", { timeout: 30_000 });
     await expect(pageB.getByLabel("Documentary status")).toHaveValue("DOCUMENTED", { timeout: 30_000 });
     await expect(pageB.getByLabel("Implementation status")).toHaveValue("VERIFIED", { timeout: 30_000 });
@@ -300,13 +306,13 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await auditeePage.getByRole("button", { name: "Record closing response" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
-    await internalPage.getByRole("button", { name: "Refresh" }).click();
+    await internalPage.getByRole("region", { name: "Audit closing meeting" }).getByRole("button", { name: "Refresh" }).click();
     await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
     await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
-    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
+    await expect(internalPage.getByText(/R1 is approved\./i)).toBeVisible();
 
     await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
     await internalPage.getByRole("button", { name: "Register passkey" }).click();

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
+from amodb import storage as shared_storage
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
@@ -603,8 +604,26 @@ def _ensure_upload_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
+def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes, db: Session | None = None, tenant_id: str | None = None, actor_id: str | None = None) -> tuple[str, str]:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
+    if shared_storage.shared_storage_enabled():
+        if db is None or tenant_id is None:
+            raise HTTPException(status_code=503, detail="Tenant storage reservation context is required")
+        digest = hashlib.sha256(content).hexdigest()
+        try:
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_bytes(
+                db, tenant_id=tenant_id, actor_id=actor_id,
+                content=content,
+                key=f"manuals/{tenant_id}/{re.sub(r'[^A-Za-z0-9._-]+', '_', manual_code or 'manual')}/{revision_id}/{safe_name}",
+                content_type=office_mime_type(safe_name) or "application/octet-stream",
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Manual original could not be persisted in shared storage") from exc
+        if int(stored.size_bytes) != len(content):
+            shared_storage.delete(stored.uri)
+            raise HTTPException(status_code=503, detail="Manual original retention size check failed")
+        return stored.uri, digest
     target_dir = MANUAL_UPLOAD_DIR / tenant_slug / re.sub(r"[^A-Za-z0-9._-]+", "_", manual_code or "manual") / revision_id
     _ensure_upload_dir(target_dir)
     target = (target_dir / safe_name).resolve()
@@ -1325,6 +1344,7 @@ async def upload_docx_revision(
     db.flush()
 
     storage_path, source_sha = _store_manual_source(
+        db=db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
         tenant_slug=tenant_slug,
         manual_code=manual_code,
         revision_id=rev.id,
@@ -1545,6 +1565,7 @@ async def upload_pdf_revision(
     db.flush()
 
     storage_path, source_sha = _store_manual_source(
+        db=db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
         tenant_slug=tenant_slug,
         manual_code=manual_code,
         revision_id=rev.id,
@@ -1733,48 +1754,13 @@ def create_revision(tenant_slug: str, manual_id: str, payload: RevisionCreate, r
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/workflow", response_model=WorkflowOut)
 def transition_revision(tenant_slug: str, manual_id: str, rev_id: str, payload: TransitionRequest, request: Request, db: Session = Depends(get_db)):
-    tenant = _tenant_by_slug(db, tenant_slug)
-    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
-    if not rev:
-        raise HTTPException(status_code=404, detail="Revision not found")
-
-    transitions = {
-        "submit_department_review": models.ManualRevisionStatus.DEPARTMENT_REVIEW,
-        "approve_quality": models.ManualRevisionStatus.QUALITY_APPROVAL,
-        "approve_regulator": models.ManualRevisionStatus.REGULATOR_SIGNOFF,
-        "archive": models.ManualRevisionStatus.ARCHIVED,
-    }
-    if payload.action == "publish":
-        if rev.requires_authority_approval_bool and rev.status_enum != models.ManualRevisionStatus.REGULATOR_SIGNOFF:
-            raise HTTPException(status_code=400, detail="Regulator sign-off required before publishing")
-        rev.status_enum = models.ManualRevisionStatus.PUBLISHED
-        rev.published_at = datetime.utcnow()
-        rev.immutable_locked = True
-        manual = db.query(models.Manual).filter(models.Manual.id == manual_id).first()
-        previous = None
-        if manual and manual.current_published_rev_id:
-            previous = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
-        if previous:
-            previous.status_enum = models.ManualRevisionStatus.SUPERSEDED
-            previous.superseded_by_rev_id = rev.id
-        if manual:
-            manual.current_published_rev_id = rev.id
-        due_days = int((tenant.settings_json or {}).get("ack_due_days", 10))
-        db.add(models.Acknowledgement(revision_id=rev.id, holder_user_id=rev.created_by, due_at=datetime.utcnow() + timedelta(days=due_days)))
-        db.add(models.ManualAIHookEvent(tenant_id=tenant.id, revision_id=rev.id, event_name="revision.published", payload_json={"manual_id": manual_id}))
-    else:
-        new_status = transitions.get(payload.action)
-        if not new_status:
-            raise HTTPException(status_code=400, detail="Unsupported action")
-        rev.status_enum = new_status
-
-    _audit(db, tenant.id, get_current_actor_id(), f"revision.workflow.{payload.action}", "manual_revision", rev.id, request, {"comment": payload.comment})
-    db.commit()
-
-    history = _query_audit_rows(db, models.ManualAuditLog.entity_id == rev.id, limit=20)
-    return WorkflowOut(revision_id=rev.id, status=rev.status_enum.value, requires_authority_approval=rev.requires_authority_approval_bool, history=[{"action": item.action, "at": item.at.isoformat(), "actor_id": item.actor_id} for item in history])
-
-
+    # Retired: this route used to write QUALITY_APPROVAL, REGULATOR_SIGNOFF
+    # and PUBLISHED directly, bypassing assignment and release evidence.
+    # Callers must use the governed Document Control workspace instead.
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy Manuals workflow is retired; use the governed DMS review and release workflow.",
+    )
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/lifecycle/transition", response_model=LifecycleTransitionOut)
@@ -1787,28 +1773,11 @@ def transition_revision_lifecycle(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_manual_control_user(current_user)
-    tenant = _tenant_by_slug(db, tenant_slug)
-    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
-    if not rev:
-        raise HTTPException(status_code=404, detail="Revision not found")
-    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
-
-    previous, reset = _apply_lifecycle_transition(
-        rev=rev,
-        manual=manual,
-        tenant=tenant,
-        action=payload.action,
-        actor_id=get_current_actor_id(),
-        db=db,
-    )
-    _audit(db, tenant.id, get_current_actor_id(), f"revision.lifecycle.{payload.action}", "manual_revision", rev.id, request, {"comment": payload.comment})
-    db.commit()
-    return LifecycleTransitionOut(
-        revision_id=rev.id,
-        state=rev.status_enum.value,
-        previous_state=previous.value,
-        approval_chain_reset=reset,
+    # Also retire the sibling lifecycle endpoint; its local transition
+    # helper is not the assignment/evidence-aware DMS decision engine.
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy Manuals lifecycle transition is retired; use the governed DMS workflow.",
     )
 
 
@@ -1855,7 +1824,12 @@ def read_revision(
     )
     source_type = rev.source_type_enum.value if getattr(rev, "source_type_enum", None) else None
     source_path = (rev.source_storage_path or "").strip() or None
-    source_exists = bool(source_path and Path(source_path).exists())
+    source_exists = bool(
+        source_path and (
+            shared_storage.exists(source_path)
+            if source_path.startswith("s3://") else Path(source_path).is_file()
+        )
+    )
 
     _audit(
         db,
@@ -2027,7 +2001,13 @@ def get_revision_source(
         raise HTTPException(status_code=403, detail="The current user is not permitted to download this source")
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
-    source_path = Path(rev.source_storage_path)
+    if str(rev.source_storage_path).startswith("s3://"):
+        try:
+            source_path = shared_storage.materialize(rev.source_storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Revision source file missing from storage") from exc
+    else:
+        source_path = Path(rev.source_storage_path)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
     download_name = rev.source_filename or source_path.name
@@ -2090,7 +2070,13 @@ def get_browser_office_source(
     if not rev.source_storage_path:
         raise HTTPException(status_code=404, detail="Revision source file not available")
 
-    source_path = Path(rev.source_storage_path)
+    if str(rev.source_storage_path).startswith("s3://"):
+        try:
+            source_path = shared_storage.materialize(rev.source_storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Revision source file missing from storage") from exc
+    else:
+        source_path = Path(rev.source_storage_path)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Revision source file missing from storage")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db, get_read_db
@@ -100,6 +100,169 @@ def create_tenant(payload: dict[str, Any], db: Session = Depends(get_db), user=D
         return services.create_tenant(db, payload=payload, actor_id=_actor_id(user))
     except Exception as exc:
         _bad(exc)
+
+
+@router.post("/tenants/{tenant_id}/owner-invitation")
+def send_tenant_owner_invitation(
+    tenant_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    """Send a one-time password setup link without revealing credentials."""
+    from amodb.apps.accounts import router_public as auth_router
+    from amodb.apps.accounts import services as account_services
+    from datetime import timedelta
+
+    tenant = db.get(account_models.AMO, tenant_id)
+    if tenant is None or not tenant.is_active:
+        raise HTTPException(status_code=404, detail="Active tenant not found")
+    if not auth_router.RESET_LINK_BASE_URL:
+        raise HTTPException(status_code=503, detail="PORTAL_BASE_URL must be configured before invitations can be sent")
+    owner = db.query(account_models.User).filter(
+        account_models.User.amo_id == tenant_id,
+        account_models.User.is_amo_admin.is_(True),
+        account_models.User.staff_code.like("OWNER-%"),
+        account_models.User.is_active.is_(True),
+    ).order_by(account_models.User.created_at.asc()).first()
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Initial tenant owner account not found")
+    recent = db.query(account_models.PasswordResetToken.id).filter(
+        account_models.PasswordResetToken.user_id == owner.id,
+        account_models.PasswordResetToken.issued_at >= datetime.now(timezone.utc) - timedelta(minutes=2),
+    ).first()
+    if recent:
+        raise HTTPException(status_code=429, detail="Please allow two minutes between owner invitations")
+    raw = account_services.create_password_reset_token(db, owner)
+    link = auth_router._build_reset_link(amo_slug=tenant.login_slug, token=raw)
+    if not link:
+        raise HTTPException(status_code=503, detail="Owner invitation link is not configured")
+    auth_router._maybe_send_email(
+        background_tasks, owner.email, "Set up your Venspera tenant administrator account",
+        "Your organization has been provisioned. Use the secure one-time link to set your password: " + link,
+        db=db, amo_id=tenant_id, user_id=str(owner.id), action_url=link,
+    )
+    services.audit(
+        db, actor_user_id=_actor_id(user), action="tenant.owner_invitation.sent",
+        tenant_id=tenant_id, entity_type="user", entity_id=owner.id,
+        reason="Initial tenant administrator password setup",
+        details={"delivery": "email", "email": owner.email},
+    )
+    db.commit()
+    return {"tenant_id": tenant_id, "owner_email": owner.email, "status": "INVITATION_REQUESTED"}
+
+
+@router.get("/tenants/{tenant_id}/storage-quota")
+def tenant_storage_quota(
+    tenant_id: str, db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    if not db.get(account_models.AMO, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return storage_quota_service.read_quota(db, tenant_id)
+
+
+@router.post("/tenants/{tenant_id}/storage-quota")
+def update_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        quota_bytes = payload.get("quota_bytes")
+        if type(quota_bytes) is not int:
+            raise ValueError("Provide an exact integer allocation in bytes")
+        result = storage_quota_service.allocate(
+            db, tenant_id=tenant_id, quota_bytes=quota_bytes,
+            actor_id=_actor_id(user), reason=_reason(payload),
+        )
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.changed",
+            tenant_id=tenant_id, reason=_reason(payload),
+            details={"quota_bytes": quota_bytes, "generation": result["generation"]})
+        db.commit()
+        return result
+    except (ValueError, TypeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/tenants/{tenant_id}/storage-quota/reconcile")
+def reconcile_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        result = storage_quota_service.reconcile(db, tenant_id=tenant_id, actor_id=_actor_id(user))
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.reconciled",
+            tenant_id=tenant_id, reason=_reason(payload), details={"drift": result["drift"]})
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/tenants/{tenant_id}/activation-checklist")
+def tenant_activation_checklist(
+    tenant_id: str,
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from amodb.apps.accounts import services as account_services
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    from amodb import storage as shared_storage
+
+    tenant = db.get(account_models.AMO, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    owner = db.query(account_models.User).filter(
+        account_models.User.amo_id == tenant_id,
+        account_models.User.staff_code.like("OWNER-%"),
+        account_models.User.is_amo_admin.is_(True),
+    ).order_by(account_models.User.created_at).first()
+    licensed = account_services.get_billing_access_status(db, amo_id=tenant_id)
+    quota = storage_quota_service.read_quota(db, tenant_id)
+    enabled_modules = db.query(account_models.ModuleSubscription).filter(
+        account_models.ModuleSubscription.amo_id == tenant_id,
+        account_models.ModuleSubscription.status.in_([
+            account_models.ModuleSubscriptionStatus.ENABLED, account_models.ModuleSubscriptionStatus.TRIAL,
+        ]),
+    ).all()
+    active_entitlements = account_services.resolve_entitlements(db, amo_id=tenant_id)
+    licensed_modules = [
+        item.module_code for item in enabled_modules
+        if item.module_code in active_entitlements and (
+            active_entitlements[item.module_code].is_unlimited
+            or int(active_entitlements[item.module_code].limit or 0) > 0
+        )
+    ]
+    checks = [
+        {"key": "organization", "label": "Tenant organization created", "passed": bool(tenant.id)},
+        {"key": "owner", "label": "Initial tenant administrator account assigned", "passed": owner is not None},
+        {"key": "owner_setup", "label": "Administrator completed password setup", "passed": bool(owner and not owner.must_change_password)},
+        {"key": "tenant_active", "label": "Organization is not suspended", "passed": bool(tenant.is_active)},
+        {"key": "subscription", "label": "Effective commercial subscription permits access", "passed": bool(licensed.has_access)},
+        {"key": "modules", "label": "At least one module is enabled", "passed": bool(enabled_modules)},
+        {"key": "module_entitlements", "label": "Enabled modules have effective paid license entitlements", "passed": bool(licensed_modules)},
+        {"key": "storage", "label": "Tenant byte quota explicitly allocated", "passed": quota["quota_bytes"] > 0},
+        {"key": "shared_storage", "label": "Shared object storage configured", "passed": shared_storage.shared_storage_enabled()},
+    ]
+    return {
+        "tenant_id": tenant_id, "ready": all(row["passed"] for row in checks),
+        "checks": checks, "storage": quota,
+    }
 
 
 @router.get("/tenants/{tenant_id}")
@@ -350,8 +513,114 @@ def revenue_by_plan(db: Session = Depends(get_read_db), user=Depends(require_pla
 
 
 @router.get("/billing/invoices")
-def billing_invoices(data_mode: str = "REAL", limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.list_invoices(db, data_mode=data_mode, limit=limit, offset=offset)
+def billing_invoices(
+    data_mode: str = "REAL", tenant_id: str | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+    q: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    try:
+        return services.list_invoices(
+            db, data_mode=data_mode, tenant_id=tenant_id, status_filter=status_filter,
+            q=q, limit=limit, offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/billing/invoices/export")
+def export_platform_invoices(
+    tenant_id: str, data_mode: str = "REAL",
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    """Export one explicitly selected tenant without relying on browser-side pagination."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    if not db.get(account_models.AMO, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    rows = services.list_invoices(
+        db, data_mode=data_mode, tenant_id=tenant_id, limit=200, offset=0,
+    )
+    # The export queries the complete tenant history, not the first UI page.
+    from amodb.apps.accounts import services as account_services
+    invoice_rows = db.query(account_models.BillingInvoice).join(
+        account_models.AMO, account_models.BillingInvoice.amo_id == account_models.AMO.id,
+    ).filter(account_models.BillingInvoice.amo_id == tenant_id)
+    if str(data_mode).upper() == "REAL":
+        invoice_rows = invoice_rows.filter(account_models.AMO.is_demo.is_(False))
+    elif str(data_mode).upper() == "DEMO":
+        invoice_rows = invoice_rows.filter(account_models.AMO.is_demo.is_(True))
+    elif str(data_mode).upper() != "ALL":
+        raise HTTPException(status_code=422, detail="Invalid billing data mode")
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["invoice", "tenant_id", "amount_minor_units", "currency", "status", "issued_at", "due_at", "paid_at"])
+    for row in invoice_rows.order_by(account_models.BillingInvoice.created_at.desc()).yield_per(250):
+        writer.writerow([
+            account_services.format_invoice_number(row), row.amo_id, row.amount_cents,
+            row.currency, row.status.value, row.issued_at, row.due_at, row.paid_at,
+        ])
+    return Response(
+        output.getvalue(), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="venspera-tenant-invoices.csv"'},
+    )
+
+
+@router.get("/billing/invoices/{invoice_id}")
+def platform_invoice_detail(
+    invoice_id: str,
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    invoice = db.get(account_models.BillingInvoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return services._invoice_payload(invoice)
+
+
+@router.get("/billing/invoices/{invoice_id}/document")
+def platform_invoice_document(
+    invoice_id: str,
+    format: str = Query("pdf", pattern="^(pdf|html)$"),
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from fastapi.responses import HTMLResponse, Response
+    from amodb.apps.accounts import router_billing as renderer
+
+    invoice = db.get(account_models.BillingInvoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if format == "pdf":
+        return Response(
+            renderer._render_invoice_pdf(db, invoice), media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{renderer._invoice_filename(invoice, "pdf")}"'},
+        )
+    return HTMLResponse(
+        renderer._render_invoice_html(db, invoice),
+        headers={"Content-Disposition": f'attachment; filename="{renderer._invoice_filename(invoice, "html")}"'},
+    )
+
+
+@router.post("/billing/invoices/{invoice_id}/void")
+def platform_void_invoice(
+    invoice_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    try:
+        return services.void_invoice(
+            db, invoice_id=invoice_id, actor_id=_actor_id(user), reason=_reason(payload),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 
 @router.get("/billing/tenants/{tenant_id}")
@@ -361,8 +630,14 @@ def billing_tenant_detail(tenant_id: str, db: Session = Depends(get_read_db), us
 
 @router.post("/billing/invoices/{invoice_id}/mark-paid")
 def mark_invoice_paid(invoice_id: str, payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
-    try: return services.mark_invoice_paid(db, invoice_id=invoice_id, actor_id=_actor_id(user), reason=_reason(payload))
-    except Exception as exc: _bad(exc)
+    try:
+        return services.mark_invoice_paid(
+            db, invoice_id=invoice_id, actor_id=_actor_id(user),
+            reason=_reason(payload),
+            payment_reference=str(payload.get("payment_reference") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/billing/tenants/{tenant_id}/manual-invoice")

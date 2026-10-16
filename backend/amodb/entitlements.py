@@ -83,6 +83,36 @@ def _has_module_entitlement(db: Session, amo_id: str, module_key: str) -> bool:
     return entitlement.limit is not None and entitlement.limit > 0
 
 
+def enforce_tenant_module(db: Session, *, amo_id: str, module_key: str) -> None:
+    """Shared fail-closed commercial gate for requests and background workers.
+
+    An ENABLED module record alone never creates a paid license entitlement.
+    The tenant, effective license, entitlement and module state must all pass.
+    """
+    tenant = db.get(account_models.AMO, amo_id)
+    if tenant is None or not tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant is suspended or unavailable.",
+        )
+    access = account_services.get_billing_access_status(db, amo_id=amo_id)
+    if not access.has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=access.lock_reason or "Tenant commercial access is unavailable.",
+        )
+    if not _has_module_entitlement(db, amo_id, module_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"No effective paid entitlement for module '{module_key}'.",
+        )
+    if _has_module_subscription(db, amo_id, module_key) is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Module '{module_key}' is disabled or outside its access period.",
+        )
+
+
 def require_module(module_key: str) -> Callable[[account_models.User, Session], account_models.User]:
     """
     FastAPI dependency that blocks access when a module is not entitled.
@@ -109,30 +139,7 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 detail="No AMO selected for the current session.",
             )
 
-        access_status = account_services.get_billing_access_status(db, amo_id=amo_id)
-        if not access_status.has_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=access_status.lock_reason or "Billing access is locked for this account.",
-            )
-
-        subscription_allowed = _has_module_subscription(db, amo_id, module_key)
-        entitlement_allowed = _has_module_entitlement(db, amo_id, module_key)
-
-        if subscription_allowed is False:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Module '{module_key}' is not enabled for this account.",
-            )
-
-        if subscription_allowed is not None and subscription_allowed:
-            return current_user
-
-        if not entitlement_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Module '{module_key}' is not enabled for this account.",
-            )
+        enforce_tenant_module(db, amo_id=str(amo_id), module_key=module_key)
 
         return current_user
 

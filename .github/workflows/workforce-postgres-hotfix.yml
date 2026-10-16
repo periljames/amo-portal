@@ -316,6 +316,9 @@ jobs:
         continue-on-error: true
         env:
           DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
+          DATABASE_MIGRATION_URL: postgresql+psycopg2://migration:migration@database.example.invalid:5432/amodb
+          AMO_STORAGE_S3_BUCKET: venspera-ci-example
+          FORWARDED_ALLOW_IPS: 127.0.0.1/32
           CORS_ALLOWED_ORIGINS: https://portal.example.invalid
           MQTT_BROKER_INTERNAL_URL: mqtt://broker.example.invalid:1883
           MQTT_BROKER_WS_URL: wss://broker.example.invalid/mqtt

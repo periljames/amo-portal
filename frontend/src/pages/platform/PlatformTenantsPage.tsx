@@ -26,7 +26,7 @@ type ModuleDraft = {
 };
 
 type TenantDetailView = {
-  tenant?: { name?: unknown; amo_code?: unknown; login_slug?: unknown } | null;
+  tenant?: { id?: unknown; name?: unknown; amo_code?: unknown; login_slug?: unknown } | null;
   subscription?: { status?: unknown; sku_code?: unknown } | null;
   users?: { total?: unknown } | null;
   assets?: { total?: unknown } | null;
@@ -42,6 +42,8 @@ export default function PlatformTenantsPage() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState("Platform support or subscription action");
+  const [quotaTbInput, setQuotaTbInput] = useState("5");
+  const [provisionKey, setProvisionKey] = useState(() => crypto.randomUUID());
   const [moduleOverrides, setModuleOverrides] = useState<Record<string, ModuleDraft>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -50,6 +52,9 @@ export default function PlatformTenantsPage() {
     amo_code: "",
     login_slug: "",
     owner_email: "",
+    owner_full_name: "",
+    country: "Kenya",
+    is_demo: false,
     reason: "Initial tenant provisioning",
   });
 
@@ -104,7 +109,29 @@ export default function PlatformTenantsPage() {
     });
   }, [catalog.data?.items, modules.data?.items, moduleOverrides]);
 
-  const selectedDetail = detail.data as TenantDetailView | null;
+  const quota = usePlatformData(
+    () => selected ? platformApi.storageQuota(selected) : Promise.resolve(null),
+    [selected], { pollMs: 0, live: false },
+  );
+  const activation = usePlatformData(
+    () => selected ? platformApi.activationChecklist(selected) : Promise.resolve(null),
+    [selected], { pollMs: 0, live: false },
+  );
+  const formatStorage = (bytes: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(bytes / 1_000_000_000_000) + " TB";
+  const refreshReadiness = () => { quota.reload(); activation.reload(); };
+  const changeQuota = async () => {
+    if (!selected || !reason.trim()) return setActionError("Select a tenant and enter an approval reason.");
+    const tb = Number(quotaTbInput);
+    const bytes = Math.round(tb * 1_000_000_000_000);
+    if (!Number.isFinite(tb) || tb < 0 || !Number.isSafeInteger(bytes)) {
+      return setActionError("Enter a valid decimal TB quota.");
+    }
+    if (!window.confirm(`Allocate ${tb} decimal TB (${bytes.toLocaleString()} bytes) to this tenant? This must match its approved commercial agreement.`)) return;
+    await execute(() => platformApi.allocateStorageQuota(selected, bytes, reason.trim()),
+      "Byte-accurate storage allowance updated and audited.");
+    refreshReadiness();
+  };
+    const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
   const enabledCount = useMemo(
@@ -134,6 +161,40 @@ export default function PlatformTenantsPage() {
       modules.reload();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const provisionTenant = async () => {
+    if (!form.name.trim() || !form.amo_code.trim() || !form.login_slug.trim() || !form.owner_email.trim() || !form.owner_full_name.trim() || !form.reason.trim()) {
+      setActionError("Enter company name, AMO code, login slug, administrator name/email and reason.");
+      return;
+    }
+    setActionError(null);
+    setNotice(null);
+    try {
+      const created = await platformApi.createTenant({ ...form, idempotency_key: provisionKey });
+      setProvisionKey(crypto.randomUUID());
+      const record = created.tenant as { id?: string } | undefined;
+      const id = String(record?.id || "");
+      if (id) selectTenant(id);
+      setNotice("Organization and initial administrator created. Send the owner invitation to activate the account.");
+      tenants.reload();
+      detail.reload();
+      tenantUsers.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const inviteOwner = async () => {
+    if (!selected) return;
+    setActionError(null);
+    setNotice(null);
+    try {
+      const invitation = await platformApi.sendTenantOwnerInvitation(selected);
+      setNotice("Owner invitation requested for " + String(invitation.owner_email || "the administrator") + ".");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -222,16 +283,65 @@ export default function PlatformTenantsPage() {
 
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Provision tenant</h2><p>Create the AMO and its initial owner through an audited platform action.</p></div></div>
-          <div className="platform-form"><input placeholder="Tenant name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><input placeholder="AMO code" value={form.amo_code} onChange={(event) => setForm({ ...form, amo_code: event.target.value })} /><input placeholder="Login slug" value={form.login_slug} onChange={(event) => setForm({ ...form, login_slug: event.target.value })} /><input placeholder="Owner email" value={form.owner_email} onChange={(event) => setForm({ ...form, owner_email: event.target.value })} /><textarea placeholder="Reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /><button className="platform-btn primary" onClick={() => execute(() => platformApi.createTenant(form), "Tenant provisioned.")}>Provision new tenant</button></div>
+          <div className="platform-form">
+            <p><strong>1. Organization profile</strong><br /><small>The organization code and login slug must be unique.</small></p>
+            <label><span>Organization name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+            <label><span>AMO code</span><input required value={form.amo_code} onChange={(event) => setForm({ ...form, amo_code: event.target.value.toUpperCase() })} /></label>
+            <label><span>Login URL slug</span><input required value={form.login_slug} onChange={(event) => setForm({ ...form, login_slug: event.target.value.toLowerCase() })} /></label>
+            <label><span>Country</span><input value={form.country} onChange={(event) => setForm({ ...form, country: event.target.value })} /></label>
+            <label><span>Demo account</span><input type="checkbox" checked={form.is_demo} onChange={(event) => setForm({ ...form, is_demo: event.target.checked })} /></label>
+            <p><strong>2. Initial administrator</strong><br /><small>The administrator receives a one-time password setup link. No password is shown in this console.</small></p>
+            <label><span>Administrator full name</span><input required value={form.owner_full_name} onChange={(event) => setForm({ ...form, owner_full_name: event.target.value })} /></label>
+            <label><span>Administrator email</span><input required type="email" value={form.owner_email} onChange={(event) => setForm({ ...form, owner_email: event.target.value })} /></label>
+            <p><strong>3. Approval record</strong></p>
+            <label><span>Provisioning reason</span><textarea required value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /></label>
+            <button className="platform-btn primary" onClick={() => void provisionTenant()}>Create organization and administrator</button>
+            <small>Billing plans and storage allowances must be activated separately; creating an account does not record payment.</small>
+          </div>
         </div>
       </section>
 
       <section className="platform-two">
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Tenant control</h2><p>Time-boxed support access and high-impact tenant state controls.</p></div></div>
-          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p><p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>{integrationSetupPath ? <Link className="platform-btn primary" to={integrationSetupPath}>Open integrations & pipeline</Link> : null}<button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button><button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button><button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button></div><details><summary>Advanced tenant record</summary><pre className="platform-json">{JSON.stringify(selectedDetail, null, 2)}</pre></details></> : <EmptyState label="Select a tenant to inspect details." />}
+          {tenantRecord ? <><p><strong>{String(tenantRecord.name ?? "Tenant")}</strong><br /><small>{String(tenantRecord.amo_code ?? "")} · {String(tenantRecord.login_slug ?? "")}</small></p><p><StatusBadge value={selectedDetail?.subscription?.status || "NO_SUBSCRIPTION"} /> {String(selectedDetail?.subscription?.sku_code || "")}</p><p>Users: {String(selectedDetail?.users?.total ?? 0)} · Assets: {String(selectedDetail?.assets?.total ?? selectedDetail?.asset_count ?? 0)}</p><textarea value={reason} onChange={(event) => setReason(event.target.value)} /><div className="platform-actions" style={{ marginTop: 8 }}>
+              <button className="platform-btn primary" onClick={() => void inviteOwner()}>Send owner invitation</button>
+              {selected ? <Link className="platform-btn" to={`/platform/billing?tenant=${encodeURIComponent(selected)}`}>Manage billing</Link> : null}
+              {integrationSetupPath ? <Link className="platform-btn" to={integrationSetupPath}>Integrations & setup</Link> : null}
+              <button className="platform-btn" onClick={() => selected && execute(() => platformApi.startSupportSession({ tenant_id: selected, reason, mode: "READ_ONLY", minutes: 30 }), "Read-only support session started.")}>Start support session</button>
+              <button className="platform-btn" onClick={() => selected && tenantAction(selected, "unlock")}>Unlock</button>
+              <button className="platform-btn danger" onClick={() => selected && tenantAction(selected, "lock")}>Set read-only</button>
+            </div><p><small>Owner setup is sent to the organization's administrator. Account access is separate from commercial subscription and storage allocations.</small></p></> : <EmptyState label="Select a tenant to inspect details." />}
         </div>
 
+        <div className="platform-card">
+          <div className="platform-section-title"><div><h2>Commercial activation readiness</h2><p>Requirements that must be satisfied before granting production access.</p></div>
+            {selected ? <StatusBadge value={activation.data?.ready ? "READY" : "BLOCKED"} /> : null}</div>
+          {!selected ? <EmptyState label="Select a tenant to review activation readiness." /> : null}
+          {activation.error ? <ErrorState error={activation.error} retry={activation.reload} /> : null}
+          {selected ? <><ul className="platform-activation-checklist">{activation.data?.checks.map((step) =>
+            <li key={step.key}><StatusBadge value={step.passed ? "PASSED" : "BLOCKED"} /> {step.label}</li>)}</ul>
+            <div className="platform-actions"><button className="platform-btn" onClick={refreshReadiness}>Recheck readiness</button>
+              <button className="platform-btn" onClick={() => void inviteOwner()}>Send owner setup link</button>
+              <Link className="platform-btn" to={`/platform/billing?tenant=${encodeURIComponent(selected)}`}>Complete billing setup</Link></div>
+          </> : null}
+        </div>
+        <div className="platform-card">
+          <div className="platform-section-title"><div><h2>Tenant storage allocation</h2><p>Storage is assigned only against an approved license; five decimal TB is 5,000,000,000,000 bytes.</p></div></div>
+          {!selected ? <EmptyState label="Select a tenant before allocating storage." /> : null}
+          {quota.error ? <ErrorState error={quota.error} retry={quota.reload} /> : null}
+          {selected && quota.data ? <>
+            <p><strong>Allocated:</strong> {formatStorage(quota.data.quota_bytes)}</p>
+            <p><strong>Stored:</strong> {formatStorage(quota.data.used_bytes)} · <strong>Reserved:</strong> {formatStorage(quota.data.reserved_bytes)}</p>
+            <p><strong>Available:</strong> {formatStorage(quota.data.remaining_bytes)} · <StatusBadge value={quota.data.integrity_state} /></p>
+            <div className="platform-form">
+              <label><span>Approved allocation (decimal TB)</span><input type="number" value={quotaTbInput} min={0} step={0.1} onChange={(event) => setQuotaTbInput(event.target.value)} /></label>
+              <label><span>Approval / change reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+              <button className="platform-btn primary" onClick={() => void changeQuota()}>Apply approved allocation</button>
+              <button className="platform-btn" onClick={() => void execute(() => platformApi.reconcileStorageQuota(selected, reason), "Storage ledger reconciled.")}>Check ledger integrity</button>
+            </div>
+          </> : null}
+        </div>
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Modules</h2></div>{selected ? <StatusBadge value={`${enabledCount} ON`} /> : null}</div>
           {!selected ? <EmptyState label="Select a tenant to manage modules." /> : null}
