@@ -315,6 +315,35 @@ def create_tenant(db: Session, *, payload: dict[str, Any], actor_id: str) -> dic
     slug = str(payload["login_slug"]).strip().lower()
     if not code or not slug or code == "ROOT" or slug in {"root", "system"}:
         raise ValueError("Reserved or invalid tenant code / login slug")
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    if len(idempotency_key) > 128:
+        raise ValueError("Invalid provisioning idempotency key")
+    canonical = {
+        "name": str(payload["name"]).strip(), "amo_code": code, "login_slug": slug,
+        "owner_email": owner_email, "owner_full_name": owner_name,
+        "country": str(payload.get("country") or "").strip(),
+        "is_demo": bool(payload.get("is_demo", False)),
+        "time_zone": str(payload.get("time_zone") or "Africa/Nairobi").strip(),
+    }
+    if idempotency_key:
+        prior = db.query(account_models.IdempotencyKey).filter(
+            account_models.IdempotencyKey.scope == "tenant.provision",
+            account_models.IdempotencyKey.key == idempotency_key,
+        ).first()
+        if prior:
+            expected_hash = account_services._hash_payload(canonical)
+            if prior.payload_hash != expected_hash:
+                raise ValueError("Provisioning idempotency key was reused with different details")
+            found = db.query(account_models.AMO).filter(
+                account_models.AMO.amo_code == code,
+                account_models.AMO.login_slug == slug,
+                account_models.AMO.contact_email == owner_email,
+            ).first()
+            if not found:
+                raise ValueError("Provisioning request exists but the tenant requires recovery")
+            result = get_tenant_detail(db, found.id)
+            result["onboarding"] = {"status": "ALREADY_PROVISIONED", "idempotent_replay": True}
+            return result
     if db.query(account_models.AMO.id).filter(
         (account_models.AMO.amo_code == code) | (account_models.AMO.login_slug == slug)
     ).first():
@@ -326,6 +355,11 @@ def create_tenant(db: Session, *, payload: dict[str, Any], actor_id: str) -> dic
     # verifier; ownership requires the email setup/reset verification process.
     password = "V" + secrets.token_urlsafe(36) + "a1"
     try:
+        if idempotency_key:
+            account_services.register_idempotency_key(
+                db, scope="tenant.provision", key=idempotency_key,
+                payload=canonical, commit=False,
+            )
         tenant = account_models.AMO(
             name=str(payload["name"]).strip(), amo_code=code, login_slug=slug,
             contact_email=owner_email, country=str(payload.get("country") or "").strip() or None,
