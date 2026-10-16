@@ -85,13 +85,13 @@ export async function getExternalSession(signal?:AbortSignal):Promise<{csrf:stri
   return response.json() as Promise<{csrf:string}>;
 }
 export function partnerUpload(tenant:string,csrf:string,file:File,
-  metadata:({evidence_type:string;related_kind:"PROVIDER"|"CONTRACT"|"ASSIGNMENT";related_id:string} |
+  metadata:({requirement_id:string;related_kind:"PROVIDER"|"CONTRACT"|"ASSIGNMENT";related_id:string} |
     {related_kind:"DOCUMENT_REQUEST";request_id:string;response_comment?:string}),
   onProgress:(percent:number)=>void,signal?:AbortSignal):Promise<{id:string;filename:string;sha256:string;status:string}> {
   return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();
     const uploadPath=metadata.related_kind==="DOCUMENT_REQUEST" ?
-      `quality/document-requests/${encodeURIComponent(metadata.request_id)}/submit` : "evidence";
+      `quality/document-requests/${encodeURIComponent(metadata.request_id)}/submit` : "documents/submissions";
     xhr.open("POST",partnerUrl(tenant,uploadPath));
     xhr.withCredentials=true;
     xhr.setRequestHeader("X-External-CSRF",csrf);
@@ -112,7 +112,8 @@ export function partnerUpload(tenant:string,csrf:string,file:File,
     if(metadata.related_kind==="DOCUMENT_REQUEST"){
       if(metadata.response_comment)data.append("response_comment",metadata.response_comment);
     }else{
-      data.append("evidence_type",metadata.evidence_type);
+      data.append("requirement_id",metadata.requirement_id);
+      data.append("idempotency_key",crypto.randomUUID().replace(/-/g,""));
       data.append("related_kind",metadata.related_kind);
       if(metadata.related_id)data.append("related_id",metadata.related_id);
     }
