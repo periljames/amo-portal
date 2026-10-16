@@ -279,6 +279,13 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
         errors.append("Maintenance completion must be confirmed; crew closure alone is insufficient")
     if not row.source_evidence_ref:
         errors.append("Source document reference is required before verification")
+    elif row.source_evidence_ref.startswith("OCTM_ASSET:"):
+        from .octm_source_assets import validate_source_reference
+        try:
+            validate_source_reference(db, amo_id, row.aircraft_serial_number,
+                                      row.techsheet_ref, row.source_evidence_ref)
+        except HTTPException:
+            errors.append("Retained source file no longer resolves to this tenant, aircraft and technical-log page")
     if row.event_type in {"TOP_UP", "CHECK_ZERO", "OIL_CHANGE", "MAINTENANCE_REFILL", "LEAK_SERVICING"} and not row.techsheet_ref:
         errors.append("Techsheet reference is required")
     if row.event_type == "MISSING" and not row.remarks:
@@ -498,6 +505,9 @@ def create_entry(payload: EntryPayload, ctx=Depends(context)):
         raise HTTPException(422, "Direct entry supports paper techsheets or reviewed OCR only. Electronic EFB imports require a controlled adapter.")
     if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=payload.aircraft_serial_number).first():
         raise HTTPException(422, "Aircraft is not registered for this tenant")
+    from .octm_source_assets import validate_source_reference
+    validate_source_reference(db, amo_id, payload.aircraft_serial_number,
+                              payload.techsheet_ref, payload.source_evidence_ref)
     match = db.query(OCTMEntry).filter_by(
         amo_id=amo_id, aircraft_serial_number=payload.aircraft_serial_number,
         techsheet_ref=payload.techsheet_ref, engine_serial_number=payload.engine_serial_number,
