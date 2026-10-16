@@ -1,5 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { useState } from "react";
+import {
+  Activity, AlertCircle, BarChart3, BookOpenCheck, CalendarClock, ChartNoAxesCombined,
+  ChevronDown, ChevronRight, CircleGauge, ClipboardCheck, ClipboardList,
+  CloudDownload, Database, FileBarChart2, FileCheck2, FileSpreadsheet,
+  FileText, Gauge, GitBranch, History, Layers3, ListChecks, Network,
+  PanelLeftClose, PanelLeftOpen, SearchCheck, Settings2, ShieldCheck,
+  SlidersHorizontal, TrendingUp, Wrench, type LucideIcon,
+} from "lucide-react";
 import { Link, NavLink, useLocation, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import "./ReliabilityModuleShell.css";
@@ -50,6 +58,24 @@ export const RELIABILITY_GROUPS: Array<{ label: string; items: ReliabilityArea[]
   ] },
 ];
 
+const RELIABILITY_ICONS: Record<string, LucideIcon> = {
+  "": Gauge, "analytics/operational": TrendingUp, "analytics/network": Network,
+  "analytics/components": Wrench, "analytics/engineering": Activity,
+  "analytics/oil": ChartNoAxesCombined, "analytics/deferrals": CalendarClock,
+  "analytics/fracas": GitBranch, "analytics/data": SearchCheck,
+  "analytics/evidence": Database, "operations": CircleGauge,
+  "events": ClipboardList, "alerts": AlertCircle, "cases": GitBranch,
+  "engines": Activity, "octm": ChartNoAxesCombined,
+  "workbook-registers": FileSpreadsheet, "workbook-mapping": Settings2,
+  "workbook-imports": CloudDownload, "workbook-csv": FileSpreadsheet,
+  "statistical-alerts": BarChart3, "data-quality": ShieldCheck,
+  "sources": Network, "ingestion": History,
+  "analytics/formulae": BookOpenCheck, "analytics/administration": SlidersHorizontal,
+  "analytics/governance": ClipboardCheck, "analytics/calculations": Layers3,
+  "formal-review": FileCheck2, "formal-reports": CalendarClock,
+  "programme-reports": ListChecks, "report-distribution": FileBarChart2,
+  "workbook-reports": FileText, "management-reports": FileBarChart2,
+};
 function activeLocation(pathname: string): string {
   const portion = pathname.split("/reliability/")[1];
   if (portion === undefined || portion === "" || portion === "workbench") return "";
@@ -66,34 +92,53 @@ export function ReliabilityModuleShell({ children }: { children: React.ReactNode
   const base = `/maintenance/${encodeURIComponent(amoCode)}/reliability`;
   const active = activeLocation(pathname);
   const [compact, setCompact] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const toggleGroup = (name: string) => setCollapsedGroups((current) =>
+    current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
   const selected = RELIABILITY_GROUPS.flatMap((group) => group.items).find((item) => item.path === active);
   return <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
     <div className={`rel-shell ${compact ? "rel-shell--focus" : ""}`}>
       <aside className="rel-shell__rail" aria-label="Reliability module workspaces">
         <div className="rel-shell__rail-top">
-          <Link to={base} className="rel-shell__brand">Reliability <span>workspace</span></Link>
+          <Link to={base} className="rel-shell__brand"><ChartNoAxesCombined size={22} aria-hidden="true" />
+            <span>Reliability <small>Intelligence workspace</small></span></Link>
           <button type="button" className="rel-shell__focus" onClick={() => setCompact((value) => !value)}
             aria-expanded={!compact} aria-controls="rel-shell-navigation">
-            {compact ? "Show navigation" : "Focus view"}
+            {compact ? <><PanelLeftOpen size={17} aria-hidden="true" /> Show navigation</> : <><PanelLeftClose size={17} aria-hidden="true" /> Focus view</>}
           </button>
         </div>
         <nav id="rel-shell-navigation" className="rel-shell__navigation" aria-label="Reliability navigation">
-          {RELIABILITY_GROUPS.map((group) => <section className="rel-shell__group" key={group.label}>
-            <h2>{group.label}</h2>
-            {group.items.map((item) => <NavLink
-              key={item.path} to={(item.path ? base + "/" + item.path : base) + (pathname.includes("/reliability/analytics/") && item.path.startsWith("analytics/") ? search : "")}
-              end={item.path === ""}
-              className={({ isActive }) => `rel-shell__link ${isActive || active === item.path ? "is-active" : ""}`}
-              title={item.description || item.label}
-            >{item.label}</NavLink>)}
-          </section>)}
+          {RELIABILITY_GROUPS.map((group) => {
+            const collapsed = collapsedGroups.includes(group.label);
+            const hasActive = group.items.some((item) => item.path === active);
+            const id = "reliability-group-" + group.label.replace(/[^a-zA-Z]/g, "");
+            return <section className="rel-shell__group" key={group.label}>
+              <h2><button type="button" onClick={() => toggleGroup(group.label)}
+                aria-expanded={!collapsed || hasActive} aria-controls={id}>
+                {group.label}{collapsed && !hasActive ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+              </button></h2>
+              <div id={id} hidden={collapsed && !hasActive}>
+                {group.items.map((item) => {
+                  const Icon = RELIABILITY_ICONS[item.path] || Layers3;
+                  return <NavLink key={item.path}
+                    to={(item.path ? base + "/" + item.path : base) + (pathname.includes("/reliability/analytics/") && item.path.startsWith("analytics/") ? search : "")}
+                    end={item.path === ""}
+                    className={({ isActive }) => `rel-shell__link ${isActive || active === item.path ? "is-active" : ""}`}
+                    title={item.description || item.label}>
+                    <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </NavLink>;
+                })}
+              </div>
+            </section>;
+          })}
         </nav>
       </aside>
       <div className="rel-shell__body">
         <div className="rel-shell__context" aria-label="Current Reliability workspace">
           <span>Reliability</span><span aria-hidden="true">/</span>
           <strong>{selected?.label || "Operational detail"}</strong>
-          <span className="rel-shell__context-hint">Data, analysis and governed evidence</span>
+          <span className="rel-shell__context-hint"><ShieldCheck size={14} aria-hidden="true" /> Governed source evidence</span>
         </div>
         <div className="rel-shell__canvas">{children}</div>
       </div>
