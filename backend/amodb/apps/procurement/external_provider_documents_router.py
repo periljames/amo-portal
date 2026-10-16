@@ -370,6 +370,8 @@ def _upload_parts(db,ctx,session_id):
 def start_resumable_upload(tenant_slug:str,payload:UploadStart,request:Request,
                            db:Session=Depends(get_db)):
     user=partner._ctx(db,request,tenant_slug,cap="document.submit",write=True)
+    if user["portal_state"]!="ACTIVE":
+        raise HTTPException(403,"Suspended provider account may not start document intake")
     ctx=partner._context(user)
     auth.auth_limit(request,ctx["person"],"partner-document-upload-init")
     requirement=_requirement(db,ctx["amo"],ctx["supplier"],payload.requirement_id)
