@@ -322,6 +322,261 @@ def download_form(tenant_slug:str,requirement_id:str,request:Request,db:Session=
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 
+# Object-backed resumable intake. Parts are isolated to a single member/provider,
+# retained until final checksum and ClamAV verification, then purged.
+PART_BYTES=8*1024*1024
+MAX_RESUMABLE_BYTES=512*1024*1024
+
+
+class UploadStart(BaseModel):
+    filename: str = Field(min_length=5,max_length=190)
+    content_type: str = Field(min_length=3,max_length=128)
+    size_bytes: int = Field(ge=1,le=MAX_RESUMABLE_BYTES)
+    sha256: str | None = Field(default=None,pattern=r"^[a-f0-9]{64}$")
+    requirement_id: str = Field(min_length=8,max_length=36)
+    related_kind: Literal["PROVIDER","CONTRACT","ASSIGNMENT"] = "PROVIDER"
+    related_id: str | None = None
+    supersedes_submission_id: str | None = None
+    valid_until: date | None = None
+    retry_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{12,64}$")
+
+
+def _upload_session(db,ctx,session_id,*,lock=False):
+    suffix=" FOR UPDATE" if lock and db.get_bind().dialect.name=="postgresql" else ""
+    session=_one(db,"""SELECT * FROM external_provider_upload_sessions
+      WHERE amo_id=:amo AND tenant_provider_id=:provider
+        AND identity_id=:person AND id=:id"""+suffix,
+        **ctx,id=session_id)
+    if not session:
+        raise HTTPException(404,"Resumable upload session not found")
+    created=session["created_at"]
+    if isinstance(created,str):
+        created=datetime.fromisoformat(created.replace("Z","+00:00"))
+    if created.tzinfo is None:
+        created=created.replace(tzinfo=timezone.utc)
+    if (datetime.now(timezone.utc)-created).total_seconds()>24*60*60 and session["state"]=="OPEN":
+        raise HTTPException(410,"Upload session expired. Begin a new secure transfer")
+    return session
+
+
+def _upload_parts(db,ctx,session_id):
+    return _all(db,"""SELECT part_number,sha256,size_bytes,object_uri
+      FROM external_provider_upload_parts WHERE amo_id=:amo
+      AND tenant_provider_id=:provider AND session_id=:id ORDER BY part_number""",
+      **ctx,id=session_id)
+
+
+@partner_documents_router.post("/uploads",status_code=201)
+def start_resumable_upload(tenant_slug:str,payload:UploadStart,request:Request,
+                           db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap="document.submit",write=True)
+    ctx=partner._context(user)
+    auth.auth_limit(request,ctx["person"],"partner-document-upload-init")
+    requirement=_requirement(db,ctx["amo"],ctx["supplier"],payload.requirement_id)
+    if requirement["expiry_required"] and not payload.valid_until:
+        raise HTTPException(422,"Expiry date required by tenant document policy")
+    if payload.valid_until and payload.valid_until<date.today():
+        raise HTTPException(422,"Expired evidence is not current")
+    if payload.related_kind!="PROVIDER":
+        partner._require_existing_related(db,user,payload.related_kind,payload.related_id or "")
+    elif payload.related_id:
+        raise HTTPException(422,"Provider-level evidence cannot refer to another record")
+    original=Path(payload.filename).name
+    if original!=payload.filename or not re.fullmatch(
+        r"[\w.() -]{1,190}\.(pdf|docx|png|jpg|jpeg|txt)",original,re.I):
+        raise HTTPException(415,"Invalid controlled original filename")
+    suffix=Path(original).suffix.lower()
+    if payload.content_type!=EXT_MIME.get(suffix):
+        raise HTTPException(415,"Declared document MIME and filename must match")
+    if payload.supersedes_submission_id:
+        prior=_one(db,"""SELECT requirement_id,related_kind,related_id
+          FROM external_partner_evidence_submissions WHERE amo_id=:amo
+          AND tenant_provider_id=:provider AND id=:id""",
+          **ctx,id=payload.supersedes_submission_id)
+        if not prior or str(prior["requirement_id"])!=payload.requirement_id or (
+            prior["related_kind"],prior["related_id"] or "")!=(
+                payload.related_kind,payload.related_id or ""):
+            raise HTTPException(422,"Replacement must match provider, scope and requirement")
+    if requirement["acknowledgement_required"]:
+        ack=_one(db,"""SELECT id FROM external_provider_form_acknowledgements
+          WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person
+          AND requirement_id=:req AND form_revision_id=:rev""",**ctx,
+          req=payload.requirement_id,rev=requirement["form_revision_id"])
+        if not ack:
+            raise HTTPException(409,"Acknowledge the current controlled form before transferring")
+    if requirement["form_revision_id"]:
+        _published_revision(db,ctx["amo"],requirement["form_manual_id"],requirement["form_revision_id"])
+    prior_session=_one(db,"""SELECT * FROM external_provider_upload_sessions
+       WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person
+       AND retry_key=:key""",**ctx,key=payload.retry_key)
+    if prior_session:
+        for field,expected in (("filename",original),("size_bytes",payload.size_bytes),
+              ("requirement_id",payload.requirement_id),("related_kind",payload.related_kind),
+              ("related_id",payload.related_id),("supersedes_submission_id",payload.supersedes_submission_id),
+              ("valid_until",payload.valid_until),("sha256",payload.sha256)):
+            if prior_session[field]!=expected:
+                raise HTTPException(409,"Retry key already belongs to a different upload")
+        return {"id":prior_session["id"],"state":prior_session["state"],
+                "chunk_size":PART_BYTES,"size_bytes":payload.size_bytes,
+                "completed_submission_id":prior_session["completed_submission_id"]}
+    session_id=str(uuid4())
+    db.execute(text("""INSERT INTO external_provider_upload_sessions
+      (id,amo_id,tenant_provider_id,identity_id,requirement_id,related_kind,related_id,
+       supersedes_submission_id,filename,content_type,size_bytes,sha256,valid_until,retry_key)
+      VALUES(:id,:amo,:provider,:person,:req,:kind,:related,:old,:filename,:mime,
+       :size,:sha,:expiry,:retry)"""),
+      {**ctx,"id":session_id,"req":payload.requirement_id,"kind":payload.related_kind,
+       "related":payload.related_id,"old":payload.supersedes_submission_id,
+       "filename":original,"mime":payload.content_type,"size":payload.size_bytes,
+       "sha":payload.sha256 or "","expiry":payload.valid_until,"retry":payload.retry_key})
+    auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+      action="EXTERNAL_DOCUMENT_RESUMABLE_STARTED",actor_identity=ctx["person"],
+      details={"session_id":session_id,"requirement_id":payload.requirement_id,"size_bytes":payload.size_bytes})
+    db.commit()
+    return {"id":session_id,"state":"OPEN","chunk_size":PART_BYTES,
+            "size_bytes":payload.size_bytes,"completed_submission_id":None}
+
+
+@partner_documents_router.get("/uploads/{session_id}")
+def upload_progress(tenant_slug:str,session_id:str,request:Request,db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap="document.read")
+    ctx=partner._context(user)
+    session=_upload_session(db,ctx,session_id)
+    parts=_upload_parts(db,ctx,session_id)
+    return {"id":session_id,"state":session["state"],"chunk_size":PART_BYTES,
+            "size_bytes":session["size_bytes"],"part_numbers":[p["part_number"] for p in parts],
+            "bytes_received":sum(p["size_bytes"] for p in parts),
+            "completed_submission_id":session["completed_submission_id"]}
+
+
+@partner_documents_router.put("/uploads/{session_id}/parts/{part_number}")
+async def upload_part(tenant_slug:str,session_id:str,part_number:int,request:Request,
+                      db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap="document.submit",write=True)
+    ctx=partner._context(user)
+    session=_upload_session(db,ctx,session_id)
+    if session["state"]!="OPEN":
+        raise HTTPException(409,"Upload session no longer accepts parts")
+    max_index=(session["size_bytes"]-1)//PART_BYTES
+    if part_number<0 or part_number>max_index or max_index>=64:
+        raise HTTPException(422,"Invalid upload part number")
+    required_bytes=min(PART_BYTES,session["size_bytes"]-part_number*PART_BYTES)
+    if request.headers.get("content-type","").split(";",1)[0].lower()!="application/octet-stream":
+        raise HTTPException(415,"Resumable parts must use application/octet-stream")
+    size=0;hashing=hashlib.sha256()
+    with tempfile.NamedTemporaryFile(prefix="external-part-",suffix=".part") as tmp:
+        async for chunk in request.stream():
+            size+=len(chunk)
+            if size>required_bytes:raise HTTPException(413,"Upload chunk exceeds its expected range")
+            hashing.update(chunk);tmp.write(chunk)
+        if size!=required_bytes:raise HTTPException(422,"Upload chunk length mismatch")
+        checksum=hashing.hexdigest()
+        existing=_one(db,"""SELECT sha256,size_bytes FROM external_provider_upload_parts
+           WHERE amo_id=:amo AND tenant_provider_id=:provider
+             AND session_id=:id AND part_number=:part""",
+           **ctx,id=session_id,part=part_number)
+        if existing:
+            if existing["sha256"]!=checksum or existing["size_bytes"]!=size:
+                raise HTTPException(409,"A different chunk already occupies this index")
+            return {"part_number":part_number,"sha256":checksum,"accepted":True,"reused":True}
+        tmp.flush()
+        stored=storage.put_file(tmp.name,
+           key=f"external-provider/uploads/{ctx['amo']}/{ctx['provider']}/{session_id}/{part_number}-{uuid4().hex}",
+           content_type="application/octet-stream")
+    try:
+        db.execute(text("""INSERT INTO external_provider_upload_parts
+          (id,amo_id,tenant_provider_id,session_id,part_number,object_uri,size_bytes,sha256)
+          VALUES(:id,:amo,:provider,:session,:part,:uri,:size,:sha)"""),
+          {**ctx,"id":str(uuid4()),"session":session_id,"part":part_number,
+           "uri":stored.uri,"size":size,"sha":checksum})
+        db.commit()
+    except Exception:
+        db.rollback()
+        storage.delete(stored.uri)
+        raise
+    return {"part_number":part_number,"sha256":checksum,"accepted":True,"reused":False}
+
+
+@partner_documents_router.post("/uploads/{session_id}/complete")
+def complete_resumable_upload(tenant_slug:str,session_id:str,request:Request,
+                              db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap="document.submit",write=True)
+    ctx=partner._context(user)
+    session=_upload_session(db,ctx,session_id,lock=True)
+    if session["state"]=="COMPLETED":
+        return {"id":session["completed_submission_id"],"status":"PENDING_REVIEW","retry":True}
+    if session["state"]!="OPEN":
+        raise HTTPException(409,"Upload session is not open")
+    requirement=_requirement(db,ctx["amo"],ctx["supplier"],session["requirement_id"])
+    if requirement["form_revision_id"]:
+        _published_revision(db,ctx["amo"],requirement["form_manual_id"],requirement["form_revision_id"])
+    if requirement["acknowledgement_required"]:
+        ack=_one(db,"""SELECT id FROM external_provider_form_acknowledgements
+          WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person
+          AND requirement_id=:req AND form_revision_id=:rev""",**ctx,
+          req=session["requirement_id"],rev=requirement["form_revision_id"])
+        if not ack:raise HTTPException(409,"Controlled form acknowledgement no longer valid")
+    if session["related_kind"]!="PROVIDER":
+        partner._require_existing_related(db,user,session["related_kind"],session["related_id"])
+    parts=_upload_parts(db,ctx,session_id)
+    expected_count=(session["size_bytes"]+PART_BYTES-1)//PART_BYTES
+    if len(parts)!=expected_count or [p["part_number"] for p in parts]!=list(range(expected_count)):
+        raise HTTPException(409,"Upload is incomplete; resume missing chunks")
+    sha=hashlib.sha256();size=0
+    suffix=Path(session["filename"]).suffix.lower()
+    stored=None
+    with tempfile.NamedTemporaryFile(prefix="external-reassembled-",suffix=suffix) as tmp:
+        for part in parts:
+            source=storage.materialize(part["object_uri"],expected_sha256=part["sha256"])
+            with open(source,"rb") as file:
+                while chunk:=file.read(1024*1024):
+                    size+=len(chunk);sha.update(chunk);tmp.write(chunk)
+        if size!=session["size_bytes"] or (session["sha256"] and sha.hexdigest()!=session["sha256"]):
+            raise HTTPException(409,"Reassembled file failed expected size or original checksum")
+        tmp.flush()
+        _validate_file(Path(tmp.name),session["filename"],session["content_type"])
+        _scan_clamd(tmp.name)
+        record=str(uuid4())
+        stored=storage.put_file(tmp.name,
+            key=f"external-provider/{ctx['amo']}/{ctx['supplier']}/{record}{suffix}",
+            content_type=session["content_type"])
+    try:
+        db.execute(text("""INSERT INTO external_partner_evidence_submissions
+          (id,amo_id,tenant_provider_id,identity_id,evidence_type,related_kind,related_id,
+           filename,content_type,object_uri,sha256,size_bytes,requirement_id,
+           supersedes_submission_id,form_revision_id,valid_until,idempotency_key)
+          VALUES(:id,:amo,:provider,:person,:type,:kind,:related,:filename,:mime,:uri,:sha,:size,
+           :req,:old,:form,:expiry,:retry)"""),
+           {**ctx,"id":record,"type":requirement["code"],"kind":session["related_kind"],
+            "related":session["related_id"],"filename":session["filename"],
+            "mime":session["content_type"],"uri":stored.uri,"sha":sha.hexdigest(),
+            "size":size,"req":session["requirement_id"],"old":session["supersedes_submission_id"],
+            "form":requirement["form_revision_id"],"expiry":session["valid_until"],
+            "retry":session["retry_key"]})
+        db.execute(text("""UPDATE external_provider_upload_sessions
+          SET state='COMPLETED',completed_submission_id=:submission,updated_at=NOW()
+          WHERE amo_id=:amo AND tenant_provider_id=:provider AND id=:id"""),
+          {**ctx,"id":session_id,"submission":record})
+        _event(db,ctx["amo"],record,"RECEIVED",identity=ctx["person"],
+            details={"sha256":sha.hexdigest(),"size":size,
+                "requirement_id":session["requirement_id"],"resumable_session_id":session_id,
+                "chunk_checksums":[p["sha256"] for p in parts]})
+        auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+          action="EXTERNAL_DOCUMENT_STAGED",actor_identity=ctx["person"],
+          details={"submission":record,"session_id":session_id,"sha256":sha.hexdigest()})
+        db.commit()
+    except Exception:
+        db.rollback()
+        if stored is not None:storage.delete(stored.uri)
+        raise
+    # The canonical object is intact; temporary remote chunks can be reclaimed.
+    for part in parts:
+        try:storage.delete(part["object_uri"])
+        except (OSError,RuntimeError):pass
+    return {"id":record,"status":"PENDING_REVIEW","sha256":sha.hexdigest(),
+            "size_bytes":size,"resumable_session_id":session_id}
+
+
 @partner_documents_router.get("/assignment-scopes")
 def assignment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     """Expose only the audit assignment identifiers expressly granted to this member."""
