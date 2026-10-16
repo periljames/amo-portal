@@ -31,6 +31,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const [acknowledgeChecked,setAcknowledgeChecked]=useState(false);
   const [acknowledging,setAcknowledging]=useState("");
   const pendingKey=useRef("");const xhrRef=useRef<XMLHttpRequest|null>(null);
+  const resumableAbort=useRef<AbortController|null>(null);
   const requirements=usePartnerLoad((signal)=>partnerRequest<{items:Requirement[]}>(tenant,
     "documents/requirements",{signal}),`${tenant}:${refresh}`);
   const submissions=usePartnerLoad((signal)=>partnerRequest<ResponsePage>(tenant,
@@ -40,7 +41,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const contracts=usePartnerLoad((signal)=>capabilities.includes("contract.read")?
     partnerRequest<Page<Contract>>(tenant,"contracts?limit=50",{signal}):
     Promise.resolve({items:[],limit:50,offset:0,has_more:false}),`${tenant}:${refresh}`);
-  useEffect(()=>()=>xhrRef.current?.abort(),[]);
+  useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();},[]);
   const current=requirements.value?.items.find(r=>r.id===requirementId);
   const prior=(submissions.value?.items||[]).filter(s=>s.requirement_id===requirementId &&
      s.related_kind===related && (s.related_id||"")===(relatedId||""));
@@ -71,6 +72,67 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     }catch(e){setError(e instanceof Error?e.message:"Acknowledgement was not recorded");}
     finally{setAcknowledging("");}
   }
+  async function largeUpload(selected:File,policy:Requirement,key:string){
+    const controller=new AbortController();resumableAbort.current=controller;
+    const storageKey=`provider-resumable:${tenant}`;
+    setBusy(true);setProgress(0);setError("");setNotice("");
+    try{
+      const ext=selected.name.split(".").pop()?.toLowerCase()||"";
+      const mime=selected.type||({
+        pdf:"application/pdf",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",txt:"text/plain"
+      } as Record<string,string>)[ext];
+      if(!mime||selected.size>512*1024*1024)throw new Error("Maximum supported resumable file size is 512 MiB.");
+      const signature=`${selected.name}:${selected.size}:${selected.lastModified}:${policy.id}:${related}:${relatedId}`;
+      const remembered=(()=>{try{return JSON.parse(localStorage.getItem(storageKey)||"null") as
+        {signature:string;retryKey:string}|null;}catch{return null;}})();
+      const retryKey=remembered?.signature===signature?remembered.retryKey:key;
+      pendingKey.current=retryKey;
+      const started=await partnerRequest<{id:string;state:string;chunk_size:number;
+        completed_submission_id:string|null}>(tenant,"documents/uploads",{
+        method:"POST",csrf,signal:controller.signal,body:{
+          filename:selected.name,content_type:mime,size_bytes:selected.size,
+          requirement_id:policy.id,related_kind:related,related_id:related==="PROVIDER"?null:relatedId,
+          supersedes_submission_id:supersedes||null,valid_until:validUntil||null,retry_key:retryKey,
+        },
+      });
+      try{localStorage.setItem(storageKey,JSON.stringify({signature,retryKey}));}catch{/* private browser */}
+      if(started.state!=="COMPLETED"){
+        const state=await partnerRequest<{part_numbers:number[];bytes_received:number}>(
+          tenant,`documents/uploads/${encodeURIComponent(started.id)}`,{signal:controller.signal});
+        const received=new Set(state.part_numbers);
+        setProgress(Math.floor(state.bytes_received*100/selected.size));
+        const total=Math.ceil(selected.size/started.chunk_size);
+        for(let index=0;index<total;index++){
+          if(controller.signal.aborted)throw new DOMException("Transfer cancelled","AbortError");
+          if(received.has(index))continue;
+          const slice=selected.slice(index*started.chunk_size,
+            Math.min(selected.size,(index+1)*started.chunk_size));
+          const response=await fetch(partnerUrl(tenant,`documents/uploads/${started.id}/parts/${index}`),{
+            method:"PUT",credentials:"include",signal:controller.signal,
+            headers:{"X-External-CSRF":csrf,"Content-Type":"application/octet-stream"},body:slice,
+          });
+          if(!response.ok){
+            const details=await response.json().catch(()=>({detail:"Part upload rejected"})) as {detail?:string};
+            throw new Error(details.detail||`Part ${index+1} rejected (${response.status})`);
+          }
+          setProgress(Math.floor(Math.min(99,(index+1)*started.chunk_size/selected.size*100)));
+        }
+        await partnerRequest(tenant,`documents/uploads/${started.id}/complete`,{
+          method:"POST",csrf,signal:controller.signal,
+        });
+      }
+      if(controller.signal.aborted)return;
+      try{localStorage.removeItem(storageKey);}catch{/* private browser */}
+      pendingKey.current="";setFile(null);setSupersedes("");setValidUntil("");
+      setProgress(100);setNotice("Original assembled, checksum-verified and scanned. Controlled Quality review is pending.");
+      setRefresh(v=>v+1);
+    }catch(e){
+      if(controller.signal.aborted)setError("Upload cancelled. Reselect the same file to resume the saved chunks.");
+      else setError((e instanceof Error?e.message:"Upload failed")+
+        " Reselect the same file and retry to resume existing verified chunks.");
+    }finally{resumableAbort.current=null;setBusy(false);}
+  }
   function upload(e:React.FormEvent){
     e.preventDefault();
     if(!file||!current||busy)return;
@@ -78,6 +140,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
       setError("Acknowledge the current controlled form before uploading this document.");return;
     }
     if(!pendingKey.current)pendingKey.current=crypto.randomUUID().replace(/-/g,"");
+    if(file.size>20*1024*1024){void largeUpload(file,current,pendingKey.current);return;}
     const key=pendingKey.current;
     const xhr=new XMLHttpRequest();xhrRef.current=xhr;
     setBusy(true);setError("");setNotice("");setProgress(0);
@@ -138,7 +201,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
       </div>)}
     </Section>
     {capabilities.includes("document.submit")&&<Section title="Submit a controlled response"
-      description="Attach a PDF, DOCX, JPEG, PNG or UTF-8 text file (maximum 20 MB). Your file is scanned and staged before Quality review.">
+      description="PDF, DOCX, JPEG, PNG or UTF-8 text (up to 512 MiB). Large originals transfer in recoverable 8 MiB chunks. Quality review remains separate.">
       <form className="partner-form" onSubmit={upload}>
         <label>Requirement
           <select required value={requirementId} onChange={e=>{setRequirementId(e.target.value);setSupersedes("");resetRetry();}}>
@@ -173,7 +236,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         <div className="partner-buttons"><button className="partner-primary" disabled={!current||!file||busy||(related!=="PROVIDER"&&!relatedId)||
              (current.acknowledgement_required&&!current.acknowledged_by_me)}>
           {busy?"Uploading…":"Submit for controlled review"}</button>
-          {busy&&<button type="button" onClick={()=>xhrRef.current?.abort()}>Cancel transfer</button>}
+          {busy&&<button type="button" onClick={()=>{xhrRef.current?.abort();resumableAbort.current?.abort();}}>Cancel transfer</button>}
           {!busy&&file&&error&&<button type="button" onClick={resetRetry}>Start a new upload attempt</button>}
         </div>
       </form>
