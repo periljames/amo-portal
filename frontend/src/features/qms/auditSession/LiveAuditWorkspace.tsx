@@ -241,7 +241,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  // Keep the first checklist question immediately actionable while retaining the
+  // paper-form style assessment table and per-question disclosure controls.
+  const [detailOpen, setDetailOpen] = useState(true);
   const [syncBusy, setSyncBusy] = useState(false);
   const [offlinePackBusy, setOfflinePackBusy] = useState(false);
   const [offlinePackReady, setOfflinePackReady] = useState(false);
