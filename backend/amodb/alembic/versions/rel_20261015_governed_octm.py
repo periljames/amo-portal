@@ -26,6 +26,8 @@ def upgrade():
         sa.Column("event_sequence", sa.Integer(), nullable=False),
         sa.Column("techsheet_ref", sa.String(160), nullable=False),
         sa.Column("sector_ref", sa.String(100)),
+        sa.Column("source_scope", sa.String(20), nullable=False, server_default="SECTOR"),
+        sa.Column("source_context", sa.JSON()),
         sa.Column("source_type", sa.String(32), nullable=False),
         sa.Column("external_record_id", sa.String(180)),
         sa.Column("source_evidence_ref", sa.String(512)),
