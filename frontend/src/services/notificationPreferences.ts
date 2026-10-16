@@ -60,9 +60,17 @@ function audioConstructor(): typeof AudioContext | null {
 
 function bindAudioUnlock(AudioCtx: typeof AudioContext): void {
   if (unlockBound || typeof window === "undefined") return;
-  const unlock = () => {
+  const unlock = (event: Event) => {
+    // AudioContext.resume() outside a real transient user activation causes
+    // Chrome's autoplay warning, including for synthetic events and Escape.
+    if (!event.isTrusted) return;
+    const activation = navigator.userActivation;
+    if (activation && !activation.isActive) return;
+    if (!getNotificationPreferences().audioEnabled) return;
     if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
-    if (sharedAudioCtx.state === "suspended") void sharedAudioCtx.resume().catch(() => undefined);
+    if (sharedAudioCtx.state === "suspended") {
+      void sharedAudioCtx.resume().catch(() => undefined);
+    }
   };
   window.addEventListener("pointerdown", unlock, { passive: true });
   window.addEventListener("keydown", unlock, { passive: true });
@@ -97,10 +105,9 @@ export function playNotificationCue(cue: NotificationCue = "info"): void {
   const AudioCtx = audioConstructor();
   if (!AudioCtx) return;
   prepareNotificationAudio();
-  if (!sharedAudioCtx || sharedAudioCtx.state !== "running") {
-    if (sharedAudioCtx?.state === "suspended") void sharedAudioCtx.resume().catch(() => undefined);
-    return;
-  }
+  // Notification events are asynchronous and cannot unlock audio. Drop the
+  // cue until a user gesture has successfully started the shared context.
+  if (!sharedAudioCtx || sharedAudioCtx.state !== "running") return;
 
   const ctx = sharedAudioCtx;
   const start = ctx.currentTime + 0.015;
