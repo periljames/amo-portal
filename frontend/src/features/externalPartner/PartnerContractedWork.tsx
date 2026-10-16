@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from "react";
 import {Link} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
-import {friendlyDate,partnerRequest} from "./partnerApi";
+import {friendlyDate,partnerRequest,partnerUrl} from "./partnerApi";
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
 type WorkRow={id:string;work_number:string;work_title:string;site_code:string;status:string;work_type:string;updated_at:string};
@@ -33,6 +33,7 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
   const [additional,setAdditional]=useState("");
   const [additionalData,setAdditionalData]=useState("");
   const [commercial,setCommercial]=useState("");
+  const [custodyReceipt,setCustodyReceipt]=useState("");
   const [action,setAction]=useState("");
   const canRespond=capabilities.includes("task.respond");
   const listing=usePartnerLoad(signal=>partnerRequest<{items:WorkRow[]}>(tenant,"maintenance-work",{signal}),tenant+":maintenance:"+revision);
@@ -50,6 +51,20 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
     finally{setBusy(false);}
   }
   const work=detail.value?.work;
+  async function downloadTechnicalData(){
+    if(!selected)return;
+    setError("");
+    try{
+      const response=await fetch(partnerUrl(tenant,"maintenance-work/"+encodeURIComponent(selected)+"/technical-data"),{
+        credentials:"include",cache:"no-store"
+      });
+      if(!response.ok)throw new Error("Current controlled technical data is not released to this member");
+      const blob=await response.blob();const url=URL.createObjectURL(blob);
+      const link=document.createElement("a");link.href=url;link.download="controlled-maintenance-data";link.click();
+      window.setTimeout(()=>URL.revokeObjectURL(url),2000);
+      setNotice("The exact authorized maintenance-data original was downloaded; revision and applicability remain mandatory.");
+    }catch(e){setError(e instanceof Error?e.message:"Maintenance data unavailable");}
+  }
   const allowed=work?next[work.status]||[]:[];
   return <div className="partner-stack">
     <Section title="Assigned contracted maintenance" description="Technical work orders are distinct from purchase orders. Contractor releases are issued only under the contractor's own aviation approval.">
@@ -70,7 +85,9 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
         <div className="partner-grid">
           <div><strong>Authorized scope</strong><p>{work.scope_text}</p><small>Internal work package: {work.internal_work_reference}</small><small>Agreement: {work.contract_id}</small>{work.purchase_order_id&&<small>Related commercial PO: {work.purchase_order_id}</small>}</div>
           <div><strong>Aircraft / component identity</strong><p>{[work.registration,work.part_number,work.serial_number].filter(Boolean).join(" · ")||"See work package"}</p><small>Location: {work.site_code}</small><small>Defect/requirement: {work.defect}</small></div>
-          <div><strong>Controlled technical data</strong><p>{work.data_reference} · revision {work.data_revision}</p><small>Do not substitute superseded data, processes or unapproved parts.</small></div>
+          <div><strong>Controlled technical data</strong><p>{work.data_reference} · revision {work.data_revision}</p>
+          {typeof work.requirements_json.data_manual_id==="string"&&<button type="button" onClick={()=>void downloadTechnicalData()}>Download assigned DMS technical original</button>}
+          <small>Do not substitute superseded data, processes or unapproved parts.</small></div>
           <div><strong>Mandatory inspection and release</strong>{work.inspections_json.map((x,i)=><p key={i}>{x}</p>)}<p>{work.required_release}</p></div>
         </div>
         {work.requirements_json.foreign&&<p role="note">Foreign maintenance: State-of-Registry, operator and authority conditions must be met independently of Kenyan supplier approval.</p>}
@@ -105,8 +122,17 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
         <Link to={`/partner/${encodeURIComponent(tenant)}/documents`}>Open governed work-document uploads</Link>
         {!detail.value?.evidence.length?<p>No accepted technical originals linked yet.</p>:<ul>{detail.value.evidence.map(x=><li key={x.id}>{x.category}: {x.filename} · {x.status} / {x.retention_status||"unregistered"}</li>)}</ul>}
         <h3>Safarilink property and custody</h3>
-        {!detail.value?.custody.length?<p>No Stores-controlled property transferred.</p>:<table><thead><tr><th>Item</th><th>Reference</th><th>Quantity</th><th>Custody</th></tr></thead>
-          <tbody>{detail.value.custody.map(x=><tr key={x.id}><td>{x.item_type}: {x.description}</td><td>{x.serial_batch||"—"}</td><td>{x.quantity} {x.uom}</td><td>{x.state}</td></tr>)}</tbody></table>}
+        {!detail.value?.custody.length?<p>No Stores-controlled property transferred.</p>:<table><thead><tr><th>Item</th><th>Reference</th><th>Quantity</th><th>Custody</th><th>Receipt</th></tr></thead>
+          <tbody>{detail.value.custody.map(x=><tr key={x.id}><td>{x.item_type}: {x.description}</td><td>{x.serial_batch||"—"}</td><td>{x.quantity} {x.uom}</td><td>{x.state}</td><td>{canRespond&&x.state==="DISPATCHED"?<button disabled={busy} onClick={()=>setCustodyReceipt(x.id)}>Acknowledge physical receipt</button>:null}</td></tr>)}</tbody></table>}
+        {custodyReceipt&&work&&<form className="partner-form" onSubmit={e=>{e.preventDefault();
+          void run("/custody/"+encodeURIComponent(custodyReceipt)+"/acknowledge",
+            {kind:"PROGRESS",message:reason,expected_version:work.version,idempotency_key:key()},
+            "Receipt acknowledgment recorded. Safarilink Stores retains reconciliation and Quality release responsibility.");
+          setCustodyReceipt("");
+        }}>
+          <label>Received quantity, condition and discrepancies<textarea required minLength={8} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+          <button disabled={busy||reason.trim().length<8}>Record provider receipt</button>
+        </form>}
         <h3>Additional work decisions</h3>
         {!detail.value?.additional_work.length?<p>No scope variations.</p>:detail.value.additional_work.map(x=><p key={x.id}>{x.state} · {x.description} · {x.decision_reason||"Decision pending; do not commence additional work"}</p>)}
         <h3>Technical closure readiness</h3>
