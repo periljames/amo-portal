@@ -130,7 +130,7 @@ class Ack(BaseModel):
 
 class QuoteLine(BaseModel):
     requisition_line_id: int
-    part_number: str = Field(min_length=1,max_length=64)
+    part_number: str | None = Field(default=None,max_length=64)
     manufacturer: str | None = Field(default=None,max_length=128)
     quantity: float = Field(gt=0)
     uom: str = Field(min_length=1,max_length=16)
@@ -169,7 +169,7 @@ class Message(BaseModel):
 class ShipmentLine(BaseModel):
     po_line_id: int
     quantity: float = Field(gt=0)
-    part_number: str = Field(min_length=1,max_length=64)
+    part_number: str | None = Field(default=None,max_length=64)
     serial_lot_batch: str | None = Field(default=None,max_length=255)
     manufacturer: str | None = Field(default=None,max_length=128)
     source: str | None = Field(default=None,max_length=255)
@@ -341,6 +341,20 @@ def purchase_orders(tenant_slug:str,request:Request,db:Session=Depends(get_db),
        amo=ctx["amo"],supplier=ctx["supplier"],limit=limit,offset=offset),
        "limit":limit,"offset":offset}
 
+@partner_router.get("/shipments")
+def shipment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
+    user,ctx=_session(db,request,tenant_slug)
+    # The member must also have received explicit scope for the underlying PO.
+    allowed=partner._allowed(user,"purchase_orders")
+    if not allowed:return {"items":[]}
+    candidates=_rows(db,"""SELECT sh.id,sh.po_id,sh.shipment_reference,sh.status
+       FROM external_procurement_shipments sh JOIN procurement_purchase_orders p
+       ON p.id=sh.po_id AND p.amo_id=sh.amo_id AND p.supplier_id=sh.supplier_id
+       WHERE sh.amo_id=:amo AND sh.supplier_id=:supplier AND p.sent_at IS NOT NULL
+       ORDER BY sh.created_at DESC LIMIT 250""",amo=ctx["amo"],supplier=ctx["supplier"])
+    return {"items":[item for item in candidates if str(item["po_id"]) in allowed][:100]}
+
+
 @partner_router.get("/purchase-orders/{po_id}")
 def purchase_order(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(get_db)):
     user,ctx=_session(db,request,tenant_slug)
@@ -486,7 +500,7 @@ def invoice_status(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(
     user,ctx=_session(db,request,tenant_slug)
     _po(db,ctx,po_id)
     # Invoice matching state only; never expose banking, remittance or approval actors.
-    return {"items":_rows(db,"""SELECT id,invoice_number,status,matched_at
+    return {"items":_rows(db,"""SELECT id,invoice_reference AS invoice_number,status,matched_at
         FROM procurement_invoice_matches WHERE amo_id=:amo AND purchase_order_id=:po
         ORDER BY id DESC""",amo=ctx["amo"],po=po_id)}
 
