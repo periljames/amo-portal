@@ -993,6 +993,9 @@ def transition_provider_contract(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    # Tenant-authorized Quality may inspect external staging under FORCE RLS.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
     lock_suffix = " FOR UPDATE" if db.get_bind().dialect.name == "postgresql" else ""
     row = db.execute(
         text(
@@ -1060,6 +1063,7 @@ def transition_provider_contract(
                 approved_by_user_id = CASE WHEN :target = 'ACTIVE' THEN :actor ELSE approved_by_user_id END,
                 approved_at = CASE WHEN :target = 'ACTIVE' THEN NOW() ELSE approved_at END,
                 transition_reason = :reason,
+                terminated_at = CASE WHEN :target = 'TERMINATED' THEN NOW() ELSE terminated_at END,
                 version = version + 1,
                 updated_by_user_id = :actor,
                 updated_at = NOW()
@@ -1189,6 +1193,9 @@ def decide_provider_evidence(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    # QMS verification needs explicit authorized visibility into staging.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
     row = db.execute(
         text("SELECT * FROM quality_external_provider_evidence WHERE amo_id = :amo_id AND supplier_id = :provider_id AND id = :id"),
         {"amo_id": ctx.amo_id, "provider_id": provider_id, "id": evidence_id},
