@@ -349,6 +349,7 @@ export function listReliabilityAlerts(filters: {
   severity?: ReliabilitySeverity;
   limit?: number;
   offset?: number;
+  q?: string;
   sortKey?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<ReliabilityAlert[]> {
@@ -357,6 +358,7 @@ export function listReliabilityAlerts(filters: {
     severity: filters.severity,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
     sort_key: filters.sortKey,
     sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 15_000, persistCache: true });
@@ -371,6 +373,7 @@ export function listFracasCases(filters: {
   severity?: ReliabilitySeverity;
   limit?: number;
   offset?: number;
+  q?: string;
   sortKey?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<FracasCase[]> {
@@ -379,6 +382,7 @@ export function listFracasCases(filters: {
     severity: filters.severity,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
     sort_key: filters.sortKey,
     sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 15_000, persistCache: true });
@@ -396,6 +400,7 @@ export function listEngineTrendStatuses(filters: {
   currentStatus?: EngineTrendStatus;
   limit?: number;
   offset?: number;
+  q?: string;
   sortKey?: string;
   sortDir?: "asc" | "desc";
 } = {}): Promise<EngineTrend[]> {
@@ -403,6 +408,7 @@ export function listEngineTrendStatuses(filters: {
     current_status: filters.currentStatus,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
     sort_key: filters.sortKey,
     sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 30_000, persistCache: true });
