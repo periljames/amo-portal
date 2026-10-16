@@ -43,6 +43,7 @@ export default function PlatformTenantsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState("Platform support or subscription action");
   const [quotaTbInput, setQuotaTbInput] = useState("5");
+  const [provisionKey, setProvisionKey] = useState(() => crypto.randomUUID());
   const [moduleOverrides, setModuleOverrides] = useState<Record<string, ModuleDraft>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -171,7 +172,8 @@ export default function PlatformTenantsPage() {
     setActionError(null);
     setNotice(null);
     try {
-      const created = await platformApi.createTenant(form);
+      const created = await platformApi.createTenant({ ...form, idempotency_key: provisionKey });
+      setProvisionKey(crypto.randomUUID());
       const record = created.tenant as { id?: string } | undefined;
       const id = String(record?.id || "");
       if (id) selectTenant(id);
