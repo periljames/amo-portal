@@ -441,7 +441,7 @@ def start_resumable_upload(tenant_slug:str,payload:UploadStart,request:Request,
 
 @partner_documents_router.get("/uploads/{session_id}")
 def upload_progress(tenant_slug:str,session_id:str,request:Request,db:Session=Depends(get_db)):
-    user=partner._ctx(db,request,tenant_slug,cap="document.read")
+    user=partner._ctx(db,request,tenant_slug,cap="document.submit")
     ctx=partner._context(user)
     session=_upload_session(db,ctx,session_id)
     parts=_upload_parts(db,ctx,session_id)
