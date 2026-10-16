@@ -125,8 +125,14 @@ def _scan_clamd(path: str):
     except ValueError as exc:
         raise HTTPException(503,"Provider intake malware scanner configuration is invalid") from exc
     try:
+        timeout=int(os.getenv("PROVIDER_DOCUMENT_CLAMD_SCAN_TIMEOUT_SECONDS","240"))
+        if not 30<=timeout<=900:
+            raise ValueError("scan timeout outside 30–900 seconds")
+    except ValueError as exc:
+        raise HTTPException(503,"Document scanner timeout configuration invalid") from exc
+    try:
         with socket.create_connection((host,port),timeout=8) as sock:
-            sock.settimeout(30)
+            sock.settimeout(timeout)
             sock.sendall(b"zINSTREAM\x00")
             with open(path,"rb") as file:
                 while chunk:=file.read(65536):
