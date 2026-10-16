@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const provider = readFileSync(
   fileURLToPath(new URL("./ToastProvider.tsx", import.meta.url)),
@@ -93,5 +93,80 @@ describe("portal notification policy", () => {
     expect(main).toContain('<PortalAuxiliaryBoundary surface="Connection and sync controls">');
     expect(auxiliaryBoundary).toContain("getDerivedStateFromError");
     expect(auxiliaryBoundary).toContain("return this.state.failed ? null : this.props.children");
+  });
+});
+
+
+// Real browser autoplay is controlled by transient activation: a pointerdown
+// that occurs while sound is disabled cannot unlock the context; the checked
+// change handler must save first and unlock during its own trusted activation.
+describe("notification audio activation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("unlocks after enabling within the same trusted checkbox gesture and plays the first cue", async () => {
+    vi.resetModules();
+    const storage = new Map<string, string>();
+    const events = new Map<string, (event: Event) => void>();
+    const start = vi.fn();
+    const oscillator = {
+      type: "sine", frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(), start, stop: vi.fn(),
+    };
+    const gain = {
+      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      connect: vi.fn(),
+    };
+    const context = {
+      state: "suspended", currentTime: 0, destination: {},
+      createOscillator: () => oscillator, createGain: () => gain,
+      resume: vi.fn(async () => { context.state = "running"; }),
+    };
+    const AudioCtx = vi.fn(() => context);
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => { storage.set(key, value); },
+      },
+      AudioContext: AudioCtx,
+      dispatchEvent: vi.fn(),
+      addEventListener: (name: string, callback: (event: Event) => void) => { events.set(name, callback); },
+    });
+    vi.stubGlobal("navigator", { userActivation: { isActive: true } });
+    const audio = await import("../../services/notificationPreferences");
+    audio.setNotificationPreferences({ audioEnabled: false });
+    audio.prepareNotificationAudio();
+    const realGesture = { isTrusted: true } as Event;
+    events.get("pointerdown")?.(realGesture); // runs before checkbox change
+    expect(AudioCtx).not.toHaveBeenCalled();
+    audio.setNotificationPreferences({ audioEnabled: true }); // checkbox change
+    await audio.unlockNotificationAudioFromUserGesture(realGesture);
+    expect(AudioCtx).toHaveBeenCalledTimes(1);
+    expect(context.resume).toHaveBeenCalledTimes(1);
+    audio.playNotificationCue("info");
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not resume or create audio for synthetic or inactive gestures", async () => {
+    vi.resetModules();
+    const storage = new Map<string, string>();
+    const AudioCtx = vi.fn();
+    const activation = { isActive: false };
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => { storage.set(key, value); },
+      },
+      AudioContext: AudioCtx,
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal("navigator", { userActivation: activation });
+    const audio = await import("../../services/notificationPreferences");
+    audio.setNotificationPreferences({ audioEnabled: true });
+    await audio.unlockNotificationAudioFromUserGesture({ isTrusted: false } as Event);
+    await audio.unlockNotificationAudioFromUserGesture({ isTrusted: true } as Event);
+    expect(AudioCtx).not.toHaveBeenCalled();
   });
 });

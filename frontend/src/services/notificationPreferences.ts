@@ -58,19 +58,38 @@ function audioConstructor(): typeof AudioContext | null {
   return audioWindow.AudioContext || audioWindow.webkitAudioContext || null;
 }
 
+/**
+ * Called synchronously from a trusted gesture, after audioEnabled is saved.
+ * Starting/resuming an AudioContext later (e.g. in a mutation callback or an
+ * incoming notification) would lose the browser's transient activation.
+ */
+function unlockAudioContext(AudioCtx: typeof AudioContext, event: Event): Promise<void> {
+  // Avoid Chrome's autoplay warning for synthetic events or inactive gestures.
+  if (!event.isTrusted) return Promise.resolve();
+  const activation = navigator.userActivation;
+  if (activation && !activation.isActive) return Promise.resolve();
+  if (!getNotificationPreferences().audioEnabled) return Promise.resolve();
+  try {
+    if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
+    if (sharedAudioCtx.state === "suspended") {
+      return sharedAudioCtx.resume().catch(() => undefined);
+    }
+  } catch {
+    // AudioContext may be unavailable or restricted by the browser.
+  }
+  return Promise.resolve();
+}
+
+/** Enable notification sound using the *same* user activation as its checkbox. */
+export function unlockNotificationAudioFromUserGesture(event: Event): Promise<void> {
+  const AudioCtx = audioConstructor();
+  return AudioCtx ? unlockAudioContext(AudioCtx, event) : Promise.resolve();
+}
+
 function bindAudioUnlock(AudioCtx: typeof AudioContext): void {
   if (unlockBound || typeof window === "undefined") return;
   const unlock = (event: Event) => {
-    // AudioContext.resume() outside a real transient user activation causes
-    // Chrome's autoplay warning, including for synthetic events and Escape.
-    if (!event.isTrusted) return;
-    const activation = navigator.userActivation;
-    if (activation && !activation.isActive) return;
-    if (!getNotificationPreferences().audioEnabled) return;
-    if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
-    if (sharedAudioCtx.state === "suspended") {
-      void sharedAudioCtx.resume().catch(() => undefined);
-    }
+    void unlockAudioContext(AudioCtx, event);
   };
   window.addEventListener("pointerdown", unlock, { passive: true });
   window.addEventListener("keydown", unlock, { passive: true });
