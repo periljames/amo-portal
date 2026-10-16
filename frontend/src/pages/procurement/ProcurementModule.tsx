@@ -9,6 +9,7 @@ import { getProcurementDashboard, getProcurementReferenceData, listProcurementPu
 import type { ProcurementDocumentEntityType, ProcurementRequisition } from "../../types/procurement";
 import { submitProcurementForm } from "./procurementActions";
 import ProcurementDocumentCenter from "./ProcurementDocumentCenter";
+import ProviderProcurementInbox from "./ProviderProcurementInbox";
 import { Command, Control, Orders, Receiving, Requests, Sourcing, Suppliers } from "./ProcurementSections";
 import { renderFields } from "./ProcurementForms";
 import { ModalShell } from "./procurementUiShared";
@@ -207,6 +208,7 @@ export default function ProcurementModule() {
         <main className="proc-content">
           {section === "command" ? <Command data={data} loading={loading} go={go} openModal={openModal} /> : null}
           {section === "requests" ? <Requests items={filtered(data.requisitions, (item) => `${item.requisition_number} ${item.title} ${item.requesting_department} ${item.status}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} act={act} /> : null}
+          {section === "collaboration" ? <ProviderProcurementInbox amoCode={amoCode} /> : null}
           {section === "sourcing" ? <Sourcing rfqs={filtered(data.rfqs, (item) => `${item.rfq_number} ${item.title} ${item.status}`)} quotes={filtered(data.quotes, (item) => `${item.quote_reference} ${item.status}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} /> : null}
           {section === "orders" ? <Orders items={filtered(data.orders, (item) => `${item.po_number} ${item.status} ${item.supplier_id}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} act={act} /> : null}
           {section === "receiving" ? <Receiving items={filtered(data.receipts, (item) => `${item.receipt_number} ${item.status} ${item.delivery_note_number || ""}`)} loading={loading} search={searchBox} canQuality={canQuality} openModal={openModal} linkDocument={linkDocument} /> : null}
