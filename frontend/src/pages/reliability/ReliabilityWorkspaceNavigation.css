@@ -1,0 +1,9 @@
+.rel-workspace-nav{display:flex;gap:1rem;align-items:stretch;min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;padding:.65rem .75rem;margin-bottom:1rem;border:1px solid color-mix(in srgb,currentColor 13%,transparent);background:Canvas;border-radius:.75rem}
+.rel-workspace-nav__group{display:grid;align-content:start;gap:.45rem;flex:0 0 auto;padding-right:1rem;border-right:1px solid color-mix(in srgb,currentColor 12%,transparent)}
+.rel-workspace-nav__group:last-child{border-right:0;padding-right:0}
+.rel-workspace-nav__label{color:color-mix(in srgb,CanvasText 60%,transparent);font-size:.69rem;font-weight:750;text-transform:uppercase;letter-spacing:.07em}
+.rel-workspace-nav__links{display:flex;gap:.3rem;align-items:center}
+.rel-workspace-nav__link{text-decoration:none;color:CanvasText;font-size:.8rem;white-space:nowrap;display:inline-flex;align-items:center;min-height:38px;padding:.4rem .7rem;border-radius:.45rem;border:1px solid transparent}
+.rel-workspace-nav__link:hover,.rel-workspace-nav__link:focus-visible{background:color-mix(in srgb,CanvasText 6%,Canvas);border-color:color-mix(in srgb,CanvasText 15%,transparent)}
+.rel-workspace-nav__link.active{background:#0f766e;color:#fff;font-weight:700}
+@media(max-width:720px){.rel-workspace-nav{margin-inline:0;padding:.5rem}.rel-workspace-nav__links{gap:.1rem}}
