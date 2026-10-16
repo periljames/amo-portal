@@ -7,6 +7,7 @@ import ReliabilityFormalReviewWorkspace from "./ReliabilityFormalReviewWorkspace
 import ReliabilityWorkbookParityWorkspace from "./ReliabilityWorkbookParityWorkspace";
 import ReliabilityOperationsWorkspace from "./ReliabilityOperationsWorkspace";
 import ReliabilityOCTMWorkspace from "./ReliabilityOCTMWorkspace";
+import { ReliabilityModuleShell } from "./ReliabilityModuleShell";
 
 const WORKBOOK_PARITY_ROUTES = new Set([
   "workbook-parity",
@@ -21,7 +22,7 @@ const FORMAL_GOVERNANCE_ROUTES = new Set(["formal-reports", "programme-reports"]
 
 function reliabilitySurface(pathname: string): "analytics" | "formal-review" | "formal-governance" | "parity" | "operations" {
   const parts = pathname.split("/reliability")[1]?.split("/").filter(Boolean) || [];
-  if (parts.length === 0 || parts[0] === "workbench") return "analytics";
+  if (parts.length === 0 || parts[0] === "workbench" || parts[0] === "analytics") return "analytics";
   if (FORMAL_REVIEW_ROUTES.has(parts[0])) return "formal-review";
   if (FORMAL_GOVERNANCE_ROUTES.has(parts[0])) return "formal-governance";
   if (WORKBOOK_PARITY_ROUTES.has(parts[0])) return "parity";
@@ -31,12 +32,14 @@ function reliabilitySurface(pathname: string): "analytics" | "formal-review" | "
 const ReliabilityWorkspacePage: React.FC = () => {
   const location = useLocation();
   const surface = reliabilitySurface(location.pathname);
-  if (location.pathname.split("/reliability/")[1]?.split("/")[0] === "octm") return <ReliabilityOCTMWorkspace />;
-  if (surface === "analytics") return <ReliabilityAnalyticsWorkspace />;
-  if (surface === "formal-review") return <ReliabilityFormalReviewWorkspace />;
-  if (surface === "formal-governance") return <ReliabilityFormalGovernanceWorkspace />;
-  if (surface === "parity") return <ReliabilityWorkbookParityWorkspace />;
-  return <ReliabilityOperationsWorkspace />;
+  const first = location.pathname.split("/reliability/")[1]?.split("/")[0];
+  const content = first === "octm" ? <ReliabilityOCTMWorkspace />
+    : surface === "analytics" ? <ReliabilityAnalyticsWorkspace />
+    : surface === "formal-review" ? <ReliabilityFormalReviewWorkspace />
+    : surface === "formal-governance" ? <ReliabilityFormalGovernanceWorkspace />
+    : surface === "parity" ? <ReliabilityWorkbookParityWorkspace />
+    : <ReliabilityOperationsWorkspace />;
+  return <ReliabilityModuleShell>{content}</ReliabilityModuleShell>;
 };
 
 export default ReliabilityWorkspacePage;
