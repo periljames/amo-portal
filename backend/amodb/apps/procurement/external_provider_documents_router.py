@@ -323,6 +323,42 @@ def assignment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)
     return {"items":[{"id":value} for value in allowed[:100]]}
 
 
+class FormAttestation(BaseModel):
+    accepted: Literal[True]
+    declaration: str = Field(min_length=12,max_length=500)
+
+
+@partner_documents_router.post("/requirements/{requirement_id}/acknowledge")
+def acknowledge_form(tenant_slug:str,requirement_id:str,payload:FormAttestation,
+                     request:Request,db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap="document.read",write=True)
+    ctx=partner._context(user)
+    requirement=_requirement(db,ctx["amo"],ctx["supplier"],requirement_id)
+    if not requirement["acknowledgement_required"] or not requirement["form_revision_id"]:
+        raise HTTPException(409,"No controlled-form acknowledgement is required")
+    partner._require_object(user,"documents",str(requirement["form_manual_id"]))
+    _published_revision(db,ctx["amo"],requirement["form_manual_id"],requirement["form_revision_id"])
+    prior=_one(db,"""SELECT id FROM external_provider_form_acknowledgements
+      WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person
+      AND requirement_id=:req AND form_revision_id=:revision""",
+      amo=ctx["amo"],provider=ctx["provider"],person=ctx["person"],
+      req=requirement_id,revision=requirement["form_revision_id"])
+    if prior:
+        return {"id":prior["id"],"acknowledged":True,"revision_id":requirement["form_revision_id"]}
+    ack_id=str(uuid4())
+    db.execute(text("""INSERT INTO external_provider_form_acknowledgements
+      (id,amo_id,tenant_provider_id,identity_id,requirement_id,form_revision_id,attestation)
+      VALUES(:id,:amo,:provider,:person,:req,:revision,:declaration)"""),
+      {**ctx,"id":ack_id,"req":requirement_id,"revision":requirement["form_revision_id"],
+       "declaration":payload.declaration.strip()})
+    auth.event(db,amo=ctx["amo"],identity=ctx["person"],grant=user["grant_id"],
+      action="CONTROLLED_FORM_ACKNOWLEDGED",actor_identity=ctx["person"],
+      details={"requirement_id":requirement_id,"revision_id":requirement["form_revision_id"],
+               "acknowledgement_id":ack_id})
+    db.commit()
+    return {"id":ack_id,"acknowledged":True,"revision_id":requirement["form_revision_id"]}
+
+
 @partner_documents_router.get("/submissions")
 def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                     limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
