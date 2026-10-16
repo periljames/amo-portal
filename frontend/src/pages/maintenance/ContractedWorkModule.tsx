@@ -44,7 +44,7 @@ export default function ContractedWorkModule(){
     scope_id:"",contract_id:"",internal_work_reference:"",technical_coordinator_id:"",
     asset_kind:"COMPONENT",registration:"",part_number:"",serial_number:"",asset_description:"",
     defect:"",data_reference:"",data_revision:"",inspections:"",required_release:"",
-    purchase_order_id:"",state_of_registry:"",foreign_approval_reference:"",
+    purchase_order_id:"",data_manual_id:"",data_revision_id:"",governed_repair_order_reference:"",state_of_registry:"",foreign_approval_reference:"",
     operator_requirements:"",release_wording:"",authority_acceptance_reference:"",
     safety_assessment_reference:"",operator_approval_reference:"",restriction_review_reference:"",
   });
@@ -113,8 +113,9 @@ export default function ContractedWorkModule(){
       inspections:form.inspections.split("\n").map(x=>x.trim()).filter(Boolean),
       required_release:form.required_release,
       purchase_order_id:form.purchase_order_id?Number(form.purchase_order_id):null,
+      data_manual_id:form.data_manual_id||null,data_revision_id:form.data_revision_id||null,
       requirements:{
-        foreign,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
+        foreign,governed_repair_order_reference:form.governed_repair_order_reference||null,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
         operator_requirements:form.operator_requirements,release_wording:form.release_wording,
         authority_approval_required:authorityRequired,authority_acceptance_reference:form.authority_acceptance_reference,
         safety_assessment_required:safetyRequired,safety_assessment_reference:form.safety_assessment_reference,
@@ -164,6 +165,9 @@ export default function ContractedWorkModule(){
       <label>Authorized scope<textarea required minLength={12} value={form.scope_text} onChange={field("scope_text")}/></label>
       <label>Approved maintenance-data reference<input required value={form.data_reference} onChange={field("data_reference")}/></label>
       <label>Exact technical-data revision<input required value={form.data_revision} onChange={field("data_revision")}/></label>
+      <label>Controlled DMS technical-data document ID (for assigned supplier download)<input value={form.data_manual_id} onChange={field("data_manual_id")}/></label>
+      <label>Exact currently published DMS revision ID<input value={form.data_revision_id} onChange={field("data_revision_id")}/></label>
+      <label>Governed MOPM 2.20 repair-order reference (where no internal work_orders record exists)<input value={form.governed_repair_order_reference} onChange={field("governed_repair_order_reference")}/></label>
       <label>Required inspections/tests/hold points, one per line<textarea required value={form.inspections} onChange={field("inspections")}/></label>
       <label>Required release/certification and approval reference<input required value={form.required_release} onChange={field("required_release")}/></label>
       <label>Related approved commercial PO ID (optional; not technical authorization)<input type="number" min={1} value={form.purchase_order_id} onChange={field("purchase_order_id")}/></label>
