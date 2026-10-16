@@ -14,7 +14,7 @@ const WORKBOOK_PARITY_ROUTES = new Set([
   "workbook-registers",
   "statistical-alerts",
   "workbook-mapping",
-  "workbook-reports",
+  "workbook-reports", "workbook-imports", "workbook-csv", "management-reports",
 ]);
 
 const FORMAL_REVIEW_ROUTES = new Set(["formal-review"]);
