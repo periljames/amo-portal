@@ -117,6 +117,9 @@ async def store_guest_document(
             if int(stored.size_bytes) != total:
                 raise IOError("Shared storage size did not match uploaded evidence")
             reference = stored.uri
+        except HTTPException:
+            # Preserve 413 quota exceeded and governed 409 conflicts for callers.
+            raise
         except Exception:
             raise HTTPException(status_code=503, detail="Evidence could not be retained in shared storage")
         finally:
