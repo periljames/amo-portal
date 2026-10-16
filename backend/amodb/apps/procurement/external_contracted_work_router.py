@@ -467,6 +467,20 @@ def staff_detail(amo_code:str,work_id:str,db:Session=Depends(get_db),user=Depend
 
 
 def _transition(db,work,payload,*,user=None,identity=None):
+    # Every retry key belongs to one exact work order, actor, action and request.
+    # A committed first attempt must be returned without applying a second event.
+    replay=_one(db,"""SELECT id,action,to_state,actor_user_id,actor_identity_id,reason
+         FROM external_contracted_work_events
+         WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:retry""",
+         amo=work["amo_id"],work=work["id"],retry=payload.idempotency_key)
+    if replay:
+        expected_actor=str(user.id) if user is not None else None
+        if (replay["action"]!=payload.action or replay["reason"]!=payload.reason
+            or replay["actor_user_id"]!=expected_actor
+            or replay["actor_identity_id"]!=identity):
+            raise HTTPException(409,"Idempotency key has already been used for a different decision")
+        return {"id":work["id"],"status":replay["to_state"],
+            "version":work["version"],"retry":True,"maintenance_release_issued":False}
     if work["version"]!=payload.expected_version:
         raise HTTPException(409,{"code":"STALE_WORK_ORDER","current_version":work["version"],"state":work["status"]})
     action=payload.action
@@ -486,13 +500,19 @@ def _transition(db,work,payload,*,user=None,identity=None):
     else:
         raise HTTPException(403,"Unauthorized transition")
     if action in {"SCOPE_APPROVED","QUALITY_ACCEPTED","AUTHORIZE","DISPATCH","PROVIDER_ACCEPT","START",
-                  "COMPLETE","SUBMIT_RELEASE","RETURN","RECEIVE","TECHNICAL_ACCEPT","CLOSE","RESUME","RESUME_REWORK"}:
+                  "COMPLETE","SUBMIT_RELEASE","RETURN","TECHNICAL_ACCEPT","CLOSE","RESUME","RESUME_REWORK"}:
         _eligibility(db,work)
     if action in {"AUTHORIZE","DISPATCH"}:
+        # A one-off component repair order is an alternative only when the
+        # manager recorded a specific same-order MOPM 2.20 instruction.
+        repair_ref=str((work["requirements_json"] or {}).get("governed_repair_order_reference") or "").strip()
+        if repair_ref and (work["work_type"] not in {"WORKSHOP","SPECIALISED"}
+                           or len(repair_ref)<6 or repair_ref==work["purchase_order_id"]):
+            raise HTTPException(409,"A controlled component repair order must be specifically referenced")
         reference=_one(db,"""SELECT id FROM work_orders WHERE amo_id=:amo
            AND (wo_number=:reference OR work_package_ref=:reference) LIMIT 1""",
            amo=work["amo_id"],reference=work["internal_work_reference"])
-        if not reference and not (work["requirements_json"] or {}).get("governed_repair_order_reference"):
+        if not reference and not repair_ref:
             raise HTTPException(409,"A canonical work package or governed MOPM 2.20 repair order reference is required")
     if action=="DISPATCH" and work["purchase_order_id"]:
         po=_one(db,"""SELECT sent_at FROM procurement_purchase_orders
@@ -523,7 +543,6 @@ def _transition(db,work,payload,*,user=None,identity=None):
           ORDER BY created_at DESC,id DESC LIMIT 1""",amo=work["amo_id"],id=work["id"])
         target=held["from_state"] if held and held["from_state"] in NEXT else "TECHNICAL_SCOPE_REVIEW"
         if target in {"CANCELLED","CLOSED","ON_HOLD"}:target="TECHNICAL_SCOPE_REVIEW"
-    fields={"TECHNICAL_SCOPE_REVIEW":None}
     updates=["status=:target","version=version+1","updated_at=NOW()"]
     bind=dict(amo=work["amo_id"],id=work["id"],target=target,version=payload.expected_version)
     if action=="SCOPE_APPROVED":
