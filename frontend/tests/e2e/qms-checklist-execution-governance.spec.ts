@@ -152,7 +152,7 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await expect(live).toBeVisible({ timeout: 30_000 });
   // The table-first layout keeps the detailed auditor panel collapsed until requested.
   await expect(live.getByRole("table", { name: "Checklist assessment table" })).toBeVisible();
-  await live.getByRole("button", { name: "Details for question 1" }).click();
+  await live.getByRole("button", { name: "Details for question 1", exact: true }).click();
   await expect(live.getByRole("heading", { name: "Verify authorization and competence records for sampled certifying staff." })).toBeVisible();
   await expect(live.getByText("NOT VERIFIED · v1").first()).toBeVisible();
 
