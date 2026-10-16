@@ -196,6 +196,17 @@ def _governed_procurement_upload(db,user,kind,item):
     restricted supplier cannot stage a new invoice, quotation or shipment.
     Restore the member RLS marker after the internal QMS lookup.
     """
+    if kind=="CONTRACTED_WORK":
+        partner._cap(user,"document.submit")
+        ctx=partner._context(user)
+        work=_one(db,"""SELECT id,status FROM external_contracted_work
+             WHERE amo_id=:amo AND supplier_id=:supplier AND provider_id=:provider AND id=:id""",
+             **ctx,id=item)
+        if not work or work["status"] not in ("AUTHORIZED","DISPATCHED","PROVIDER_ACCEPTED",
+            "IN_PROGRESS","ADDITIONAL_WORK_REQUESTED","WORK_COMPLETED",
+            "RELEASE_SUBMITTED","RETURNED","INSPECTION","REWORK_REQUIRED","ON_HOLD"):
+            raise HTTPException(409,"Contracted work is not authorized for evidence intake")
+        return
     if kind not in {"RFQ","PO","SHIPMENT"}:
         return
     partner._cap(user,"procurement.attach")
