@@ -119,9 +119,13 @@ def upgrade():
                       "external_provider_form_acknowledgements"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY'))
+            provider_clause = (""" AND (
+                tenant_provider_id = NULLIF(current_setting('app.external_provider_id',true),'')
+                OR current_setting('app.external_provider_id',true) = '__INTERNAL_QUALITY_REVIEW__'
+            )""" if table == "external_provider_form_acknowledgements" else "")
             op.execute(sa.text(f"""CREATE POLICY "{table}_tenant" ON "{table}"
-              USING (amo_id = NULLIF(current_setting('app.tenant_id',true), ''))
-              WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true), ''))"""))
+              USING (amo_id = NULLIF(current_setting('app.tenant_id',true), ''){provider_clause})
+              WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true), ''){provider_clause})"""))
         op.execute(sa.text("""
           CREATE FUNCTION external_document_events_append_only() RETURNS trigger
           LANGUAGE plpgsql AS $extdocev$
