@@ -12,7 +12,7 @@ type Event={id:string;action:string;message:string|null;created_at:string};
 type Quote={id:string;external_reference:string;revision_no:number;status:string;total_amount:string;currency:string};
 type RFQDetails=RFQ&{lines:Item[];terms:string|null;quality_clauses:string|null;my_quotes:Quote[];history:Event[]};
 type PO={id:number;po_number:string;status:string;promised_delivery_date:string|null;currency:string;acknowledged_at:string|null};
-type PODetails=PO&{lines:Item[];history:Event[];shipments:{id:string;shipment_reference:string;status:string}[];
+type PODetails=PO&{lines:Item[];history:Event[];shipments:{id:string;shipment_reference:string;status:string;receiving_status?:string|null}[];
   receipts:{id:number;receipt_number:string;status:string}[]};
 type QuoteLine={requisition_line_id:number;part_number:string;manufacturer:string;quantity:number;uom:string;
   unit_price:number;available_quantity:number;alternate_proposal:string;traceability_statement:string;promised_date:string};
@@ -50,6 +50,10 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
   const [message,setMessage]=useState("");const [action,setAction]=useState("CLARIFICATION");
   const [lineId,setLineId]=useState<number|null>(null);const [newDate,setNewDate]=useState("");
   const [documents,setDocuments]=useState<{id:number;title:string;revision:string|null}[]>([]);
+  const [invoiceRef,setInvoiceRef]=useState("");const [invoiceTotal,setInvoiceTotal]=useState(0);
+  const [invoiceOriginal,setInvoiceOriginal]=useState("");
+  const [invoiceCandidates,setInvoiceCandidates]=useState<{id:string;filename:string;status:string}[]>([]);
+  const [invoiceMatches,setInvoiceMatches]=useState<{id:number;invoice_number:string;status:string;matched_at:string}[]>([]);
   const canRespond=capabilities.includes("procurement.respond");
   const listing=usePartnerLoad(signal=>partnerRequest<{items:RFQ[]}>(tenant,"commerce/rfqs",{signal}),tenant+":rfqs:"+revision);
   const purchases=usePartnerLoad(signal=>partnerRequest<{items:PO[]}>(tenant,"commerce/purchase-orders",{signal}),tenant+":pos:"+revision);
@@ -70,6 +74,18 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
       quantity:Math.max(0,l.quantity-(l.received_quantity||0)),serial_lot_batch:"",
       manufacturer:"",traceability_reference:"",release_certificate_reference:"",
       shelf_life_expires_on:"",material_case:""})));
+    if(capabilities.includes("document.read")){
+      void partnerRequest<{items:{id:string;filename:string;status:string;related_kind:string;
+        related_id:string|null;evidence_type:string}[]}>(tenant,"documents/submissions?limit=50&offset=0")
+        .then(q=>setInvoiceCandidates(q.items.filter(item=>item.related_kind==="PO" &&
+          item.related_id===String(po.value!.id) &&
+          ["SUPPLIER_INVOICE","PROFORMA_INVOICE","CREDIT_NOTE"].includes(item.evidence_type) &&
+          item.status==="ACCEPTED")))
+        .catch(()=>setInvoiceCandidates([]));
+    }
+    void partnerRequest<{items:{id:number;invoice_number:string;status:string;matched_at:string}[]}>(tenant,
+      "commerce/purchase-orders/"+po.value.id+"/invoice-status")
+      .then(q=>setInvoiceMatches(q.items)).catch(()=>setInvoiceMatches([]));
     void partnerRequest<{items:{id:number;title:string;revision:string|null}[]}>(tenant,
       "commerce/purchase-orders/"+po.value.id+"/documents").then(r=>setDocuments(r.items)).catch(()=>setDocuments([]));
   },[po.value,tenant]);
@@ -105,6 +121,14 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
           shelf_life_expires_on:l.shelf_life_expires_on||null,
           material_case:l.material_case||null}))}}),
       "Advance shipment notice recorded. Stores receipt and Quality inspection remain internal.");
+  }
+  async function submitInvoiceNotice(e:React.FormEvent){
+    e.preventDefault();if(poId===null)return;
+    await execute(()=>partnerRequest(tenant,"commerce/purchase-orders/"+poId+"/invoice-notices",{
+      method:"POST",csrf,body:{invoice_reference:invoiceRef,invoice_total:invoiceTotal,
+        currency:po.value?.currency||"USD",source_submission_id:invoiceOriginal,
+        note:message,idempotency_key:retryKey()}}),
+      "Invoice recorded for Finance registration; no payment approval was granted.");
   }
   function qfield(id:number,field:keyof QuoteLine,value:string|number){
     setQuoteLines(a=>a.map(v=>v.requisition_line_id===id?{...v,[field]:value}:v));
@@ -227,8 +251,16 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
           </div></fieldset>)}
           <button disabled={busy||!shipmentRef||!shipLines.some(l=>l.quantity>0)}>Submit ASN — pending Stores receipt</button>
         </form>}
-        {po.value.shipments.map(sh=><div className="partner-row" key={sh.id}><strong>ASN {sh.shipment_reference}</strong>
-          <Status value={sh.status}/></div>)}
+        {po.value.shipments.map(sh=><div className="partner-row" key={sh.id}>
+          <div><strong>ASN {sh.shipment_reference}</strong>
+            <small>Stores receipt: {sh.receiving_status||"Not received"}</small></div>
+          <div><Status value={sh.status}/>
+            {canRespond&&sh.status==="ADVISED"&&<button type="button" disabled={busy} onClick={()=>void execute(
+              ()=>partnerRequest(tenant,"commerce/shipments/"+sh.id+"/cancel",{
+                method:"POST",csrf,body:{reference:null,
+                  note:message.length>=8?message:"Supplier withdraws the undelivered shipment notice.",
+                  idempotency_key:retryKey()}}),"Advance shipment notice cancelled before receiving.")}>Cancel undelivered ASN</button>}
+          </div></div>)}
         <Section title="Internal receiving and inspection" description="Supplier uploads never mark material serviceable.">
           {po.value.receipts.length?po.value.receipts.map(rc=><div className="partner-row" key={rc.id}>
             <strong>{rc.receipt_number}</strong><Status value={rc.status}/></div>):
@@ -247,6 +279,24 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
           <textarea rows={3} minLength={8} value={message} onChange={e=>setMessage(e.target.value)}/>
           <button type="button" disabled={busy||message.trim().length<8} onClick={()=>void sendMessage("purchase-orders",poId)}>Request internal decision</button>
         </div>}
+        {canRespond&&<form className="partner-form" onSubmit={e=>void submitInvoiceNotice(e)}>
+          <h3>Submit invoice to Finance (without payment authority)</h3>
+          <p>First upload the supplier invoice to the controlled Documents workspace against this PO and obtain Document Control retention registration.</p>
+          <label>Invoice original<select required value={invoiceOriginal}
+            onChange={e=>setInvoiceOriginal(e.target.value)}>
+            <option value="">Select accepted supplier invoice original</option>
+            {invoiceCandidates.map(i=><option key={i.id} value={i.id}>{i.filename}</option>)}
+          </select></label>
+          <label>Invoice number<input required minLength={2} maxLength={128} value={invoiceRef}
+            onChange={e=>setInvoiceRef(e.target.value)}/></label>
+          <label>Invoice total ({po.value.currency})<input required type="number" min=".01" step=".01"
+            value={invoiceTotal} onChange={e=>setInvoiceTotal(Number(e.target.value))}/></label>
+          <button disabled={busy||!invoiceOriginal||invoiceTotal<=0||invoiceRef.length<2}>Notify Finance of invoice</button>
+        </form>}
+        <details><summary>Permitted invoice matching status ({invoiceMatches.length})</summary>
+          {invoiceMatches.map(i=><p key={i.id}>{i.invoice_number}: {i.status}</p>)}
+          {!invoiceMatches.length&&<p>No Finance invoice matching record is available.</p>}
+        </details>
         <Link to={"/partner/"+encodeURIComponent(tenant)+"/documents"}>Upload invoice, packing list and conformity documents</Link>
       </>}
     </Section>}
