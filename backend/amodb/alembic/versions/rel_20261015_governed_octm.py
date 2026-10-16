@@ -50,6 +50,7 @@ def upgrade():
         sa.Column("reviewed_at", sa.DateTime(timezone=True)),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("amo_id", "aircraft_serial_number", "techsheet_ref", "engine_serial_number", "event_sequence", name="uq_octm_source_event"),
+        sa.UniqueConstraint("amo_id", "aircraft_serial_number", "techsheet_ref", "engine_position", "event_sequence", name="uq_octm_source_engine_position"),
     )
     op.create_index("ix_octm_engine_date", "reliability_octm_entries", ["amo_id", "engine_serial_number", "installation_ref", "event_date"])
     op.create_index("ix_octm_queue", "reliability_octm_entries", ["amo_id", "review_status"])
