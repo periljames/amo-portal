@@ -51,7 +51,6 @@ export default function ContractedWorkModule(){
   const [foreign,setForeign]=useState(false);const [authorityRequired,setAuthorityRequired]=useState(false);
   const [safetyRequired,setSafetyRequired]=useState(false);
   const [decision,setDecision]=useState("");const [reason,setReason]=useState("");
-  const [note,setNote]=useState("");
   const [variationId,setVariationId]=useState("");const [variationDecision,setVariationDecision]=useState("APPROVED");
   const [variationData,setVariationData]=useState("");const [amendment,setAmendment]=useState("");
   const [variationCommercial,setVariationCommercial]=useState("");
@@ -94,7 +93,7 @@ export default function ContractedWorkModule(){
     setBusy(true);setError("");setNotice("");
     try{
       const response=await apiRequest<{id?:string}>(root+endpoint,{method:"POST",body:JSON.stringify(body)});
-      setNotice(message);setReason("");setNote("");
+      setNotice(message);setReason("");
       if(endpoint==="")setSelected(response.id||"");
       await load();await reloadDetail();
     }catch(e){setError(e instanceof Error?e.message:"The governed maintenance transaction was rejected");}
