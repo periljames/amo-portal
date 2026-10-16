@@ -63,7 +63,7 @@ def storage_root() -> Path:
     return _STORAGE_ROOT
 
 
-async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str, checklist_item_id: str | None = None) -> StoredAuditEvidence:
+async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str, checklist_item_id: str | None = None, db=None, actor_id: str | None = None) -> StoredAuditEvidence:
     filename = safe_filename(upload.filename)
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
@@ -104,8 +104,14 @@ async def store_audit_evidence(upload: UploadFile, *, amo_id: str, audit_id: str
     reference = relative.as_posix()
     if use_shared_storage:
         try:
-            stored = shared_storage.put_file(
-                destination, key=f"qms-audit-evidence/{reference}", content_type=upload.content_type,
+            if db is None:
+                raise HTTPException(status_code=503, detail="Storage accounting context is required for shared evidence")
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_local_file(
+                db, tenant_id=str(amo_id), actor_id=actor_id,
+                path=destination,
+                key=f"qms-audit-evidence/{reference}",
+                content_type=upload.content_type,
             )
             if int(stored.size_bytes) != total:
                 raise IOError("Shared storage size did not match uploaded evidence")
