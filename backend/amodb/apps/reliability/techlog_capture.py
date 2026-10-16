@@ -168,6 +168,124 @@ def build_page_entries(page: TechlogPage) -> list[octm.EntryPayload]:
 router = APIRouter()
 
 
+
+class TechlogPageCorrection(BaseModel):
+    aircraft_serial_number: str = Field(min_length=1, max_length=50)
+    techsheet_ref: str = Field(min_length=1, max_length=160)
+    replacement: TechlogPage
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+def _source_page_rows(db, amo_id: str, aircraft: str, techsheet: str, lock: bool = False):
+    query = db.query(octm.OCTMEntry).filter(
+        octm.OCTMEntry.amo_id == amo_id,
+        octm.OCTMEntry.aircraft_serial_number == aircraft,
+        octm.OCTMEntry.techsheet_ref == techsheet,
+        octm.OCTMEntry.source_scope == "TECHLOG_PAGE",
+    ).order_by(octm.OCTMEntry.engine_position)
+    return (query.with_for_update() if lock else query).all()
+
+
+@router.get("/octm/techlog-pages/detail")
+def detail_techlog_page(aircraft: str, techsheet_ref: str, ctx=Depends(octm.context)):
+    octm.require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    rows = _source_page_rows(db, amo_id, aircraft, techsheet_ref)
+    if not rows:
+        raise HTTPException(404, "Original SL/MCM/1 technical-log page not found")
+    reference = rows[0]
+    page = reference.source_context or {}
+    return TechlogPage(
+        aircraft_serial_number=aircraft, techsheet_ref=techsheet_ref,
+        event_date=reference.event_date, source_evidence_ref=reference.source_evidence_ref,
+        source_type=reference.source_type,
+        legs=[TechlogLeg(**leg) for leg in page.get("original_legs", [])],
+        page_flight_hours=page.get("page_flight_hours"),
+        ttaf_brought_forward=page.get("ttaf_brought_forward"),
+        ttaf_updated=page.get("ttaf_updated"),
+        tcsn_brought_forward=page.get("tcsn_brought_forward"),
+        tcsn_updated=page.get("tcsn_updated"),
+        maintenance_complete=reference.maintenance_complete,
+        maintenance_release_ref=page.get("maintenance_release_ref"),
+        check_24h_ref=page.get("check_24h_ref"),
+        defect_references=page.get("defect_references", []),
+        deferred_defect_references=page.get("deferred_defect_references", []),
+        apu_oil_added=page.get("apu_oil_added"),
+        apu_oil_unit=page.get("apu_oil_unit"),
+        engines=[TechlogEngineOil(
+            position=row.engine_position, engine_serial_number=row.engine_serial_number,
+            installation_ref=row.installation_ref, observation=row.event_type,
+            quantity_added=row.oil_quantity, original_unit=row.oil_unit,
+            oil_specification=row.oil_specification,
+            reference_method=row.reference_method, reference_level=row.reference_level,
+        ) for row in rows],
+    ).model_dump(mode="json")
+
+
+@router.post("/octm/techlog-pages/correct")
+def correct_techlog_page(payload: TechlogPageCorrection, ctx=Depends(octm.context)):
+    db, amo_id, actor = ctx
+    original = _source_page_rows(db, amo_id, payload.aircraft_serial_number,
+                                 payload.techsheet_ref, lock=True)
+    if not original:
+        raise HTTPException(404, "Original SL/MCM/1 page not found")
+    rights = access.capabilities_for_user(db, actor)
+    resolver = "reliability.data_quality.resolve" in rights
+    author_of_drafts = "reliability.ingest" in rights and all(
+        row.review_status != "VERIFIED" and str(row.created_by_user_id) == str(actor.id)
+        for row in original
+    )
+    if not (resolver or author_of_drafts):
+        raise HTTPException(403, "Only an authorized reviewer or original entrant of draft records may correct the page")
+    page = payload.replacement
+    if (page.aircraft_serial_number != payload.aircraft_serial_number
+            or page.techsheet_ref != payload.techsheet_ref):
+        raise HTTPException(422, "Aircraft and page identity cannot be changed in-place")
+    if not db.query(Aircraft).filter_by(serial_number=page.aircraft_serial_number, amo_id=amo_id).first():
+        raise HTTPException(422, "Aircraft is not registered to this tenant")
+    candidates = build_page_entries(page)
+    by_position = {row.engine_position: row for row in original}
+    if set(by_position) != {candidate.engine_position for candidate in candidates}:
+        raise HTTPException(422, "Changing the number of engines requires supervised source supersession")
+    modifications = []
+    for candidate in candidates:
+        row = by_position[candidate.engine_position]
+        before = {field: getattr(row, field) for field in octm.EntryPayload.model_fields}
+        after = candidate.model_dump()
+        modifications.append((row, before, after))
+    if not any(before != after for _, before, after in modifications):
+        raise HTTPException(422, "The corrected page contains no changes")
+    # Page is an indivisible document source: a change to one engine's
+    # evidence invalidates BOTH engine verifications for this page.
+    for row, before, after in modifications:
+        for field, value in after.items():
+            setattr(row, field, value)
+        row.review_status = "DRAFT"
+        row.reviewed_by_user_id = None
+        row.reviewed_at = None
+        row.review_note = "Source page amended. Independent verification required."
+        row.last_changed_by_user_id = str(actor.id)
+        db.add(octm.OCTMRevision(
+            amo_id=amo_id, entry_id=row.id,
+            before_json={key: value.isoformat() if isinstance(value, date) else value for key, value in before.items()},
+            after_json={key: value.isoformat() if isinstance(value, date) else value for key, value in after.items()},
+            reason=payload.reason, actor_user_id=str(actor.id),
+        ))
+        access.append_audit(
+            db, amo_id=amo_id, entity_type="OCTM_ENTRY", entity_id=row.id,
+            action="PAGE_SOURCE_CORRECTED", payload={"reason": payload.reason,
+                "changed_fields": [key for key in after if before[key] != after[key]]},
+            actor_user_id=str(actor.id),
+        )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "A conflicting source entry prevents page correction") from exc
+    return {"saved_entry_ids": [row.id for row in original], "review_status": "DRAFT",
+            "note": "Page corrections preserved as revisions; all associated engine observations require re-review."}
+
+
 @router.post("/octm/techlog-pages/preview")
 def preview_techlog_page(payload: TechlogPage, ctx=Depends(octm.context)):
     octm.require(ctx, "reliability.read")
