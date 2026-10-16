@@ -795,9 +795,14 @@ def contracted_work(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
         AND s.status='ACTIVE'
         AND (s.expires_on IS NULL OR s.expires_on >= CURRENT_DATE)
         ORDER BY s.category,s.site_code LIMIT 30""",db,**ctx)
-    return {"approved_scopes":scopes,"assigned_work_count":len(_allowed(user,"assignments")),
-       "execution_enabled":False,
-       "message":"Technical work and maintenance release remain within Phase 7 governed interfaces. No certifying privileges are created."}
+    assigned=_allowed(user,"contracted_work")
+    issued=_rows("""SELECT id FROM external_contracted_work WHERE amo_id=:amo
+        AND supplier_id=:supplier AND provider_id=:provider AND authorized_at IS NOT NULL
+        ORDER BY updated_at DESC LIMIT 100""",db,**ctx)
+    assigned_count=sum(str(item["id"]) in assigned for item in issued)
+    return {"approved_scopes":scopes,"assigned_work_count":assigned_count,
+       "execution_enabled":assigned_count>0 and "task.respond" in (user["capabilities_json"] or []),
+       "message":"Technical work orders are governed by appointed Safarilink Maintenance Managers and independent Quality checks; provider certification remains under its own approval."}
 
 @router.get("/notifications")
 def notifications(tenant_slug:str,request:Request,db:Session=Depends(get_db),
