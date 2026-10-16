@@ -36,7 +36,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, fileBlob, title, 
     void (async () => {
       try {
         const [response, { renderAsync }] = await Promise.all([
-          fileBlob ? Promise.resolve({ok:true,arrayBuffer:()=>fileBlob.arrayBuffer()}) :
+          fileBlob ? Promise.resolve(new Response(fileBlob, { status: 200 })) :
             fetch(`${getApiBaseUrl()}${fileUrl}`, { headers: authHeaders(), signal: controller.signal }),
           import("docx-preview"),
         ]);
