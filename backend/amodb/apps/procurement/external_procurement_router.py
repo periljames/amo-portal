@@ -596,3 +596,70 @@ def staff_decision(amo_code:str,kind:str,entity_id:str,payload:StaffDecision,
     db.commit()
     return {"id":eid,"staff_decision_recorded":True,
         "internal_approval_preserved":True}
+
+
+def _technical_tenant(db,amo_code,user):
+    from .router import TECHNICAL_APPROVAL_ROLES
+    if user.role not in TECHNICAL_APPROVAL_ROLES:
+        raise HTTPException(403,"Appointed technical reviewer required")
+    amo=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
+    if db.get_bind().dialect.name=="postgresql":
+        db.execute(text("SELECT set_config('app.tenant_id',:amo,true)"),{"amo":amo})
+    return amo
+
+@staff_router.get("/technical-review")
+def technical_review_queue(amo_code:str,db:Session=Depends(get_db),
+                           user=Depends(get_current_active_user)):
+    amo=_technical_tenant(db,amo_code,user)
+    return {"items":_rows(db,"""SELECT e.id AS external_quote_id,q.id AS canonical_quote_id,
+        e.external_reference,e.revision_no,q.supplier_id,q.rfq_id,
+        l.id AS quote_line_id,l.requisition_line_id,l.supplier_part_number,l.manufacturer,
+        l.quantity,l.uom,l.traceability_statement,l.deviation,
+        r.part_number AS requested_part_number,r.description AS requested_description,
+        r.alternates_allowed,r.required_certification,r.approved_manufacturers
+      FROM external_procurement_quotes e
+      JOIN procurement_quotes q ON q.id=e.canonical_quote_id AND q.amo_id=e.amo_id
+      JOIN procurement_quote_lines l ON l.quote_id=q.id AND l.is_technically_compliant=false
+      JOIN procurement_requisition_lines r ON r.id=l.requisition_line_id
+      WHERE e.amo_id=:amo AND e.status='SUBMITTED' AND q.status IN ('RECEIVED','NONCOMPLIANT')
+      ORDER BY e.submitted_at,l.id LIMIT 100""",amo=amo)}
+
+class TechnicalAlternateDecision(BaseModel):
+    decision: str = Field(pattern="^(APPROVED|REJECTED)$")
+    rationale: str = Field(min_length=12,max_length=2500)
+    technical_reference: str = Field(min_length=3,max_length=160)
+    idempotency_key: str = Field(min_length=12,max_length=80)
+
+@staff_router.post("/technical-review/{quote_line_id}/decision")
+def technical_alternate_decision(amo_code:str,quote_line_id:int,
+             payload:TechnicalAlternateDecision,db:Session=Depends(get_db),
+             user=Depends(get_current_active_user)):
+    amo=_technical_tenant(db,amo_code,user)
+    row=_row(db,"""SELECT l.id,l.requisition_line_id,l.is_technically_compliant,
+          l.supplier_part_number,l.manufacturer,e.id AS external_quote_id,
+          e.supplier_id,e.status AS external_state,q.status AS quote_state,
+          r.alternates_allowed,r.part_number AS requested_part_number
+        FROM procurement_quote_lines l JOIN procurement_quotes q ON q.id=l.quote_id
+        JOIN external_procurement_quotes e ON e.canonical_quote_id=q.id AND e.amo_id=q.amo_id
+        JOIN procurement_requisition_lines r ON r.id=l.requisition_line_id
+        WHERE q.amo_id=:amo AND l.id=:id FOR UPDATE""",amo=amo,id=quote_line_id)
+    if not row:raise HTTPException(404,"External alternate quote line unavailable")
+    if row["external_state"]!="SUBMITTED" or row["quote_state"] not in ("RECEIVED","NONCOMPLIANT"):
+        raise HTTPException(409,"Only current unevaluated revisions accept technical decisions")
+    if payload.decision=="APPROVED" and not row["alternates_allowed"]:
+        raise HTTPException(409,"Requisition does not permit alternate parts; create a governed technical amendment first")
+    ctx={"amo":amo,"supplier":row["supplier_id"]}
+    already=_row(db,"""SELECT id FROM external_procurement_events WHERE amo_id=:amo
+      AND supplier_id=:supplier AND idempotency_key=:key""",
+      amo=amo,supplier=row["supplier_id"],key=payload.idempotency_key)
+    if already:return {"id":already["id"],"retry":True}
+    db.execute(text("""UPDATE procurement_quote_lines SET is_technically_compliant=:approved
+        WHERE id=:line"""),{"approved":payload.decision=="APPROVED","line":quote_line_id})
+    eid,_=_event(db,ctx,"QUOTE",row["external_quote_id"],
+       "ALTERNATE_TECHNICAL_"+payload.decision,actor=str(user.id),message=payload.rationale,
+       details={"quote_line_id":quote_line_id,"original_pn":row["requested_part_number"],
+       "offered_pn":row["supplier_part_number"],"reference":payload.technical_reference},
+       key=payload.idempotency_key)
+    db.commit()
+    return {"id":eid,"decision":payload.decision,"quality_approval_conferred":False,
+      "purchase_order_approved":False}
