@@ -16,7 +16,7 @@ type PODetails=PO&{lines:Item[];history:Event[];shipments:{id:string;shipment_re
   receipts:{id:number;receipt_number:string;status:string}[]};
 type QuoteLine={requisition_line_id:number;part_number:string;manufacturer:string;quantity:number;uom:string;
   unit_price:number;available_quantity:number;alternate_proposal:string;traceability_statement:string;promised_date:string};
-type ShipLine={po_line_id:number;part_number:string;quantity:number;serial_lot_batch:string;manufacturer:string;
+type ShipLine={po_line_id:number;part_number:string;quantity:number;serial_lot_batch:string;manufacturer:string;source:string;
   traceability_reference:string;release_certificate_reference:string;shelf_life_expires_on:string;material_case:string};
 const retryKey=()=>crypto.randomUUID().replace(/-/g,"");
 const errmsg=(e:unknown)=>e instanceof Error?e.message:"Transaction failed";
@@ -72,7 +72,7 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
   useEffect(()=>{if(!po.value)return;
     setShipLines(po.value.lines.map(l=>({po_line_id:l.id,part_number:l.part_number||"",
       quantity:Math.max(0,l.quantity-(l.received_quantity||0)),serial_lot_batch:"",
-      manufacturer:"",traceability_reference:"",release_certificate_reference:"",
+      manufacturer:"",source:"",traceability_reference:"",release_certificate_reference:"",
       shelf_life_expires_on:"",material_case:""})));
     if(capabilities.includes("document.read")){
       void partnerRequest<{items:{id:string;filename:string;status:string;related_kind:string;
@@ -115,7 +115,7 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
       method:"POST",csrf,body:{shipment_reference:shipmentRef,dispatch_date:dispatch,
         estimated_arrival:arrival||null,airway_bill:airwayBill||null,packing_list_reference:packingList||null,
         notes:message,lines:shipLines.filter(l=>l.quantity>0).map(l=>({...l,
-          manufacturer:l.manufacturer||null,serial_lot_batch:l.serial_lot_batch||null,
+          manufacturer:l.manufacturer||null,source:l.source||null,serial_lot_batch:l.serial_lot_batch||null,
           traceability_reference:l.traceability_reference||null,
           release_certificate_reference:l.release_certificate_reference||null,
           shelf_life_expires_on:l.shelf_life_expires_on||null,
@@ -241,6 +241,7 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
             <label>Part number<input required value={l.part_number} onChange={e=>sfield(l.po_line_id,"part_number",e.target.value)}/></label>
             <label>Qty<input type="number" min={0} step="any" value={l.quantity} onChange={e=>sfield(l.po_line_id,"quantity",Number(e.target.value))}/></label>
             <label>Manufacturer<input value={l.manufacturer} onChange={e=>sfield(l.po_line_id,"manufacturer",e.target.value)}/></label>
+            <label>Manufacturer / vendor source<input value={l.source} onChange={e=>sfield(l.po_line_id,"source",e.target.value)}/></label>
             <label>Serial/lot/batch<input value={l.serial_lot_batch} onChange={e=>sfield(l.po_line_id,"serial_lot_batch",e.target.value)}/></label>
             <label>Traceability<input value={l.traceability_reference} onChange={e=>sfield(l.po_line_id,"traceability_reference",e.target.value)}/></label>
             <label>Release/conformity ref<input value={l.release_certificate_reference} onChange={e=>sfield(l.po_line_id,"release_certificate_reference",e.target.value)}/></label>
