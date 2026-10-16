@@ -19,6 +19,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from reportlab.lib import colors
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
@@ -75,6 +76,15 @@ def _replication_key(storage_ref: str) -> str:
 
 
 def resolve_report_artifact(storage_ref: str, *, expected_sha256: str | None = None) -> Path:
+    if str(storage_ref).startswith("s3://"):
+        try:
+            target = shared_storage.materialize(storage_ref)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Generated audit report not found in shared storage.") from exc
+        if expected_sha256 and hashlib.sha256(target.read_bytes()).hexdigest().lower() != expected_sha256.lower():
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail="Generated audit report checksum mismatch.")
+        return target
     root = _storage_root()
     target = (root / str(storage_ref)).resolve()
     if root != target and root not in target.parents:
@@ -506,8 +516,18 @@ def generate_report_artifact(
         raise HTTPException(status_code=409, detail=f"Complete the governed closing narrative before report generation: {', '.join(missing_narrative)}.")
 
     source_hash = _canonical_hash(snapshot)
+    existing = db.query(QualityAuditReportArtifact).filter(
+        QualityAuditReportArtifact.amo_id == amo_id,
+        QualityAuditReportArtifact.audit_id == audit_id,
+        QualityAuditReportArtifact.source_snapshot_hash == source_hash,
+        QualityAuditReportArtifact.template_version == TEMPLATE_VERSION,
+        QualityAuditReportArtifact.renderer_version == RENDERER_VERSION,
+    ).order_by(QualityAuditReportArtifact.created_at.desc()).first()
+    if existing is not None:
+        path = resolve_report_artifact(existing.storage_ref, expected_sha256=existing.sha256)
+        return GeneratedAuditReport(artifact=existing, absolute_path=path, snapshot=snapshot)
     configured_targets = configured_replication_targets()
-    if os.getenv("APP_ENV", "").strip().lower() in {"production", "prod"} and not configured_targets:
+    if os.getenv("APP_ENV", "").strip().lower() in {"production", "prod"} and not configured_targets and not shared_storage.shared_storage_enabled():
         raise HTTPException(
             status_code=503,
             detail="Production audit report generation requires at least one configured durable replication target.",
@@ -537,14 +557,24 @@ def generate_report_artifact(
             os.replace(temporary, destination)
 
         storage_ref = (relative_dir / filename).as_posix()
-        replication = replicate_file(str(destination), _replication_key(storage_ref))
-        replicated_targets = successful_configured_targets(replication)
-        if configured_targets and not replicated_targets:
-            destination.unlink(missing_ok=True)
-            raise HTTPException(
-                status_code=503,
-                detail="Generated report could not be committed to any configured durable storage target.",
+        if shared_storage.shared_storage_enabled():
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_local_file(
+                db, tenant_id=str(amo_id), actor_id=actor_user_id,
+                path=destination, content_type="application/pdf",
+                key=f"qms-generated-reports/{amo_id}/{audit_id}/{filename}",
+                operation_id=f"qms-report:{amo_id}:{audit_id}:{source_hash}",
             )
+            storage_ref = stored.uri
+        else:
+            replication = replicate_file(str(destination), _replication_key(storage_ref))
+            replicated_targets = successful_configured_targets(replication)
+            if configured_targets and not replicated_targets:
+                destination.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Generated report could not be committed to any configured durable storage target.",
+                )
     finally:
         temporary.unlink(missing_ok=True)
 
