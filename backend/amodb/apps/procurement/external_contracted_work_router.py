@@ -648,7 +648,21 @@ def acknowledge_provider_custody(tenant_slug:str,work_id:str,item_id:str,payload
 @partner_router.get("/{work_id}")
 def partner_detail(tenant_slug:str,work_id:str,request:Request,db:Session=Depends(get_db)):
     session,ctx=_partner(db,request,tenant_slug)
-    return _details(db,_partner_work(db,session,ctx,work_id))
+    result=_details(db,_partner_work(db,session,ctx,work_id))
+    # Never serialize the raw maintenance ORM/SQL record to an external session:
+    # it includes internal identities, unreleased approvals and financial links.
+    allowed_fields={"id","work_number","work_title","work_type","function","scope_text",
+        "site_code","status","version","internal_work_reference","asset_kind",
+        "registration","part_number","serial_number","asset_description","defect",
+        "data_reference","data_revision","inspections_json","required_release",
+        "contract_id","purchase_order_id","requirements_json","authorized_at","updated_at"}
+    result["work"]={k:v for k,v in result["work"].items() if k in allowed_fields}
+    for item in result["additional_work"]:
+        for field in ("requested_by_identity_id","reviewed_by_user_id"):
+            item.pop(field,None)
+    result["history"]=[{k:v for k,v in item.items() if k not in
+        {"actor_user_id","actor_identity_id"}} for item in result["history"]]
+    return result
 
 
 @partner_router.post("/{work_id}/transitions")
