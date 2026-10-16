@@ -663,3 +663,121 @@ def technical_alternate_decision(amo_code:str,quote_line_id:int,
     db.commit()
     return {"id":eid,"decision":payload.decision,"quality_approval_conferred":False,
       "purchase_order_approved":False}
+
+
+class InvoiceNotice(BaseModel):
+    invoice_reference: str = Field(min_length=2,max_length=128)
+    invoice_total: Decimal = Field(gt=0,max_digits=14,decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    source_submission_id: str = Field(min_length=36,max_length=36)
+    note: str = Field(default="",max_length=1500)
+    idempotency_key: str = Field(min_length=12,max_length=80)
+
+@partner_router.post("/purchase-orders/{po_id}/invoice-notices")
+def submit_invoice_notice(tenant_slug:str,po_id:int,payload:InvoiceNotice,
+                          request:Request,db:Session=Depends(get_db)):
+    user,ctx=_session(db,request,tenant_slug,True)
+    _po(db,ctx,po_id,True)
+    _gate(db,ctx,{"PART" if l["part_number"] else "SERVICE" for l in _po_lines(db,po_id)})
+    original=_row(db,"""SELECT s.id,s.status,s.evidence_type,s.dms_retention_id,
+         d.status AS retention_status
+       FROM external_partner_evidence_submissions s
+       LEFT JOIN document_retention_dispositions d ON d.id=s.dms_retention_id
+         AND d.tenant_id=s.amo_id
+       WHERE s.amo_id=:amo AND s.tenant_provider_id=:provider AND s.id=:id
+         AND s.related_kind='PO' AND s.related_id=:po""",
+       amo=ctx["amo"],provider=ctx["provider"],id=payload.source_submission_id,po=str(po_id))
+    if not original or original["status"]!="ACCEPTED" or not original["dms_retention_id"] or original["retention_status"]=="DISPOSED":
+        raise HTTPException(409,"Invoice original must first be accepted and registered in governed DMS retention")
+    if original["evidence_type"] not in ("SUPPLIER_INVOICE","PROFORMA_INVOICE","CREDIT_NOTE"):
+        raise HTTPException(422,"Select a classified supplier invoice or credit note")
+    existing=_row(db,"""SELECT id FROM external_procurement_events WHERE amo_id=:amo
+         AND supplier_id=:supplier AND idempotency_key=:key""",
+         amo=ctx["amo"],supplier=ctx["supplier"],key=payload.idempotency_key)
+    if existing:return {"id":existing["id"],"retry":True}
+    eid,_=_event(db,ctx,"PO",po_id,"INVOICE_SUBMITTED",identity=ctx["person"],message=payload.note,
+      details={"invoice_reference":payload.invoice_reference,"total":str(payload.invoice_total),
+        "currency":payload.currency,"source_submission_id":payload.source_submission_id},
+      key=payload.idempotency_key)
+    db.commit()
+    return {"id":eid,"status":"PENDING_FINANCE_REGISTRATION",
+        "payment_approved":False,"finance_ownership_preserved":True}
+
+
+class ImportProviderDocument(BaseModel):
+    reason: str = Field(min_length=8,max_length=2000)
+
+@staff_router.post("/documents/{submission_id}/import")
+def import_governed_supplier_document(amo_code:str,submission_id:str,
+             payload:ImportProviderDocument,db:Session=Depends(get_db),
+             user=Depends(get_current_active_user)):
+    """Reference the same DMS-retained original in canonical Procurement documents."""
+    from . import document_models
+    amo=_staff(db,amo_code,user)
+    stage=_row(db,"""SELECT s.*,p.supplier_id,
+          a.storage_path AS dms_path,a.sha256 AS dms_hash,
+          d.status AS retention_status
+        FROM external_partner_evidence_submissions s
+        JOIN external_tenant_providers p ON p.id=s.tenant_provider_id AND p.amo_id=s.amo_id
+        JOIN document_evidence_assets a ON a.id=s.dms_evidence_asset_id AND a.tenant_id=s.amo_id
+        JOIN document_retention_dispositions d ON d.id=s.dms_retention_id AND d.tenant_id=s.amo_id
+          AND d.source_type='EVIDENCE_ASSET' AND d.source_id=a.id
+        WHERE s.amo_id=:amo AND s.id=:id FOR UPDATE""",amo=amo,id=submission_id)
+    if not stage or stage["status"]!="ACCEPTED" or stage["retention_status"]=="DISPOSED":
+        raise HTTPException(409,"Only DMS-retained and accepted provider originals may enter Procurement")
+    if stage["sha256"]!=stage["dms_hash"]:
+        raise HTTPException(409,"Original hash and DMS custody evidence do not match")
+    kind=stage["related_kind"]
+    if kind not in ("RFQ","PO","SHIPMENT"):
+        raise HTTPException(422,"Only supplier transaction evidence belongs in Procurement")
+    if kind=="SHIPMENT":
+        shipment=_row(db,"""SELECT po_id FROM external_procurement_shipments
+          WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id""",
+          amo=amo,supplier=stage["supplier_id"],id=stage["related_id"])
+        if not shipment:raise HTTPException(404,"Shipment is not assigned to this supplier")
+        entity_type=document_models.ProcurementDocumentEntityType.PURCHASE_ORDER
+        entity_id=str(shipment["po_id"])
+    else:
+        entity_type=(document_models.ProcurementDocumentEntityType.RFQ if kind=="RFQ"
+            else document_models.ProcurementDocumentEntityType.PURCHASE_ORDER)
+        entity_id=stage["related_id"]
+    canonical = ("procurement_rfqs" if entity_type==document_models.ProcurementDocumentEntityType.RFQ
+             else "procurement_purchase_orders")
+    extra = (" AND supplier_id=:supplier" if kind!="RFQ" else "")
+    if kind=="RFQ":
+        eligible=_row(db,"""SELECT r.id FROM procurement_rfqs r JOIN procurement_rfq_suppliers i
+           ON i.rfq_id=r.id WHERE r.amo_id=:amo AND i.supplier_id=:supplier
+             AND CAST(r.id AS TEXT)=:item""",amo=amo,supplier=stage["supplier_id"],item=entity_id)
+    else:
+        eligible=_row(db,"""SELECT id FROM procurement_purchase_orders WHERE amo_id=:amo
+           AND supplier_id=:supplier AND CAST(id AS TEXT)=:item""",
+           amo=amo,supplier=stage["supplier_id"],item=entity_id)
+    if not eligible:raise HTTPException(409,"Original was not assigned to this canonical supplier transaction")
+    existing=db.query(document_models.ProcurementDocument).filter(
+        document_models.ProcurementDocument.amo_id==amo,
+        document_models.ProcurementDocument.source==document_models.ProcurementDocumentSource.SUPPLIER_PORTAL,
+        document_models.ProcurementDocument.external_reference==submission_id).first()
+    if existing:return {"id":existing.id,"already_imported":True}
+    quality_type=stage["evidence_type"] in {
+        "COMPONENT_RELEASE_CERTIFICATE","CONFORMITY_DOCUMENT","CALIBRATION_CERTIFICATE",
+        "TEST_CERTIFICATE","SHIPMENT_RELEASE"}
+    rec=document_models.ProcurementDocument(
+        amo_id=amo,entity_type=entity_type,entity_id=entity_id,
+        document_type=stage["evidence_type"],title=stage["filename"],
+        source=document_models.ProcurementDocumentSource.SUPPLIER_PORTAL,
+        original_filename=stage["filename"],stored_path=stage["dms_path"],
+        mime_type=stage["content_type"],size_bytes=stage["size_bytes"],
+        sha256=stage["sha256"],external_reference=submission_id,
+        dms_document_id=stage["dms_manual_id"],dms_revision_id=stage["dms_revision_id"],
+        is_quality_evidence=quality_type,
+        verification_status=(document_models.ProcurementDocumentVerificationStatus.PENDING
+            if quality_type else document_models.ProcurementDocumentVerificationStatus.NOT_REQUIRED),
+        notes=payload.reason,uploaded_by_user_id=str(user.id))
+    db.add(rec);db.flush()
+    # No physical receiving/stock change, no QMS verification, no Finance payment.
+    _event(db,{"amo":amo,"supplier":stage["supplier_id"]},"PO" if kind!="RFQ" else "RFQ",
+       entity_id,"SUPPORTING_DOCUMENT_LINKED",actor=str(user.id),
+       details={"document_id":rec.id,"submission_id":submission_id,"dms_retention_id":stage["dms_retention_id"]})
+    db.commit()
+    return {"id":rec.id,"canonical_procurement_document":True,"stores_released":False,
+            "finance_payment_authorized":False}
