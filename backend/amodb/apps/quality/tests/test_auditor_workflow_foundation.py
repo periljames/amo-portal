@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -205,3 +207,18 @@ def test_dms_binding_success_requires_post_commit_authoritative_readback() -> No
     assert commit_index < readback_index < return_index
     assert "CHECKLIST_BINDING_COMMIT_NOT_VISIBLE" in source
 
+
+
+def test_answered_fieldwork_snapshot_is_json_serializable_for_event_receipt() -> None:
+    """A committed checklist answer must not fail the JSON audit-event insert."""
+    answered_at = datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)
+    governance = QualityAuditChecklistExecutionGovernance(
+        canonical_response_status="COMPLIANT",
+        answered_at=answered_at,
+        updated_at=answered_at,
+        entity_version=1,
+    )
+    snapshot = checklist_execution_router._governance_snapshot(governance)
+    assert snapshot["answered_at"] == answered_at.isoformat()
+    assert snapshot["updated_at"] == answered_at.isoformat()
+    assert json.loads(json.dumps(snapshot))["answered_at"] == answered_at.isoformat()
