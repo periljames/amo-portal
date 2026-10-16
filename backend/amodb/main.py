@@ -48,6 +48,7 @@ from .apps.procurement.external_provider_documents_router import (
 from .apps.procurement.external_procurement_router import (
     partner_router as partner_commerce_router, staff_router as staff_commerce_router,
 )
+from .apps.procurement.external_contracted_work_router import (partner_router as partner_maintenance_work_router, staff_router as staff_maintenance_work_router)
 from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
@@ -732,6 +733,8 @@ app.include_router(partner_documents_router)
 app.include_router(staff_documents_router)
 app.include_router(partner_commerce_router)
 app.include_router(staff_commerce_router, dependencies=[Depends(require_any_module_access("procurement", "finance_inventory"))])
+app.include_router(partner_maintenance_work_router)
+app.include_router(staff_maintenance_work_router, dependencies=[Depends(require_module_access("maintenance"))])
 app.include_router(platform_router)
 app.include_router(training_workbook_support_router)
 app.include_router(ai_router)
