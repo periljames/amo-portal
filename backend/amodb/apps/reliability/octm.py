@@ -37,6 +37,8 @@ class OCTMEntry(Base):
     __table_args__ = (
         UniqueConstraint("amo_id", "aircraft_serial_number", "techsheet_ref", "engine_serial_number",
                          "event_sequence", name="uq_octm_source_event"),
+        UniqueConstraint("amo_id", "aircraft_serial_number", "techsheet_ref", "engine_position",
+                         "event_sequence", name="uq_octm_source_engine_position"),
         Index("ix_octm_engine_date", "amo_id", "engine_serial_number", "installation_ref", "event_date"),
         Index("ix_octm_queue", "amo_id", "review_status"),
     )
@@ -335,6 +337,9 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
         not row.source_context or row.source_context.get("document_type") != "SL/MCM/1"
     ):
         errors.append("Verified page-scope uplift requires source technical-log page context")
+    if (row.source_scope == "TECHLOG_PAGE" and row.maintenance_complete == "YES"
+            and not (row.source_context or {}).get("maintenance_release_ref")):
+        errors.append("Confirm the signed technical-log maintenance-release reference before page verification")
     if row.event_type == "TOP_UP":
         if row.oil_quantity is None or row.oil_quantity <= 0 or not row.oil_unit:
             errors.append("A positive oil uplift and original volume unit are required")
