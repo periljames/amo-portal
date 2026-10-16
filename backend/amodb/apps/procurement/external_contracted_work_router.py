@@ -557,6 +557,63 @@ def partner_queue(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
         "authority":"The contracted AMO certifies solely under its own applicable approval"}
 
 
+@partner_router.get("/{work_id}/technical-data")
+def download_work_data(tenant_slug:str,work_id:str,request:Request,db:Session=Depends(get_db)):
+    session,ctx=_partner(db,request,tenant_slug)
+    if "document.read" not in (session["capabilities_json"] or []):
+        raise HTTPException(403,"Controlled technical-data read privilege is required")
+    work=_partner_work(db,session,ctx,work_id)
+    if work["status"] in {"DRAFT","TECHNICAL_SCOPE_REVIEW","QUALIFICATION_AGREEMENT_CHECK",
+                          "AWAITING_AUTHORIZATION","CANCELLED"}:
+        raise HTTPException(403,"Technical data cannot be released before authorization")
+    req=work["requirements_json"] or {}
+    manual_id,revision_id=req.get("data_manual_id"),req.get("data_revision_id")
+    if not manual_id or not revision_id:
+        raise HTTPException(404,"The work cites approved technical data but has no released DMS original")
+    partner._require_object(session,"documents",str(manual_id))
+    row=_one(db,"""SELECT r.id,r.source_filename,r.source_mime_type,r.source_storage_path,r.source_sha256
+       FROM manuals m JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=:amo
+       JOIN manual_revisions r ON r.manual_id=m.id
+       WHERE m.id=:manual AND r.id=:revision AND r.published_at IS NOT NULL
+        AND r.status_enum IN ('PUBLISHED','SUPERSEDED','ARCHIVED')""",
+       amo=ctx["amo"],manual=manual_id,revision=revision_id)
+    if not row or not row["source_storage_path"]:
+        raise HTTPException(404,"Controlled technical-data original is not accessible")
+    try:
+        filepath=storage.materialize(row["source_storage_path"],expected_sha256=row["source_sha256"])
+    except (OSError,ValueError,RuntimeError) as exc:
+        raise HTTPException(409,"Controlled technical-data source is unavailable") from exc
+    _event(db,work,"TECHNICAL_DATA_READ","Exact granted maintenance-data original accessed",
+        identity=ctx["person"],details={"manual_id":manual_id,"revision_id":revision_id})
+    db.commit()
+    return FileResponse(filepath,filename=Path(row["source_filename"] or "maintenance-data.pdf").name,
+         media_type=row["source_mime_type"] or "application/octet-stream",
+         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
+@partner_router.post("/{work_id}/custody/{item_id}/acknowledge")
+def acknowledge_provider_custody(tenant_slug:str,work_id:str,item_id:str,payload:ProviderNote,
+                                 request:Request,db:Session=Depends(get_db)):
+    session,ctx=_partner(db,request,tenant_slug,True)
+    work=_partner_work(db,session,ctx,work_id,lock=True)
+    if work["version"]!=payload.expected_version:raise HTTPException(409,"Work changed; reload custody")
+    if payload.kind!="PROGRESS":raise HTTPException(422,"Receipt acknowledgement is distinct from a technical finding")
+    item=_one(db,"""SELECT id,state,stores_reference FROM external_contracted_custody
+      WHERE amo_id=:amo AND work_id=:work AND id=:item FOR UPDATE""",
+      amo=ctx["amo"],work=work_id,item=item_id)
+    if not item or item["state"]!="DISPATCHED":raise HTTPException(409,"Stores must dispatch the item before provider custody receipt")
+    if len(payload.message.strip())<8:raise HTTPException(422,"Record receiving condition and count")
+    db.execute(text("""UPDATE external_contracted_custody
+       SET state='RECEIVED_BY_PROVIDER',updated_at=NOW()
+       WHERE amo_id=:amo AND work_id=:work AND id=:item""",
+       {"amo":ctx["amo"],"work":work_id,"item":item_id})
+    _event(db,work,"PROPERTY_RECEIVED_BY_PROVIDER",payload.message,
+      identity=ctx["person"],details={"item_id":item_id,"stores_reference":item["stores_reference"]},
+      retry=payload.idempotency_key)
+    db.commit()
+    return {"id":item_id,"state":"RECEIVED_BY_PROVIDER","stores_release":False,"quality_release":False}
+
+
 @partner_router.get("/{work_id}")
 def partner_detail(tenant_slug:str,work_id:str,request:Request,db:Session=Depends(get_db)):
     session,ctx=_partner(db,request,tenant_slug)
