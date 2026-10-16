@@ -37,6 +37,7 @@ from . import formal_reporting_supersession  # noqa: E402,F401
 from . import formal_reporting_publication_hardening  # noqa: E402,F401
 from . import workbook_rbac_hardening  # noqa: E402,F401
 from . import octm  # noqa: E402,F401
+from . import techlog_capture  # noqa: E402,F401
 
 workpack_integration.register(router)
 operational_hardening.apply(operational_sources)
@@ -67,3 +68,4 @@ formal_reporting_history.register(router)
 workbook_rbac_hardening.apply(router)
 octm_router = octm.router
 router.include_router(octm_router)
+router.include_router(techlog_capture.router)
