@@ -534,3 +534,21 @@
 @media print {
   .rel-analytics-dashboard__categories, .rel-analytics-dashboard__filters, .rel-analytics-dashboard__shortcuts { display: none; }
 }
+
+.rel-chart-table__controls {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; gap: .6rem; flex-wrap: wrap; align-items: center;
+  background: Canvas; padding: .7rem;
+  border-bottom: 1px solid var(--reliability-border);
+  font-size: .77rem;
+}
+.rel-chart-table__controls label { display: flex; align-items: center; gap: .3rem; }
+.rel-chart-table__controls input, .rel-chart-table__controls select {
+  min-height: 2.35rem; background: Canvas; color: CanvasText; font: inherit;
+  border: 1px solid var(--reliability-border); border-radius: .4rem; padding: .4rem .55rem;
+}
+.rel-chart-table__controls button { background: Canvas; color: CanvasText; font: inherit;
+  border-radius: .4rem; border: 1px solid var(--reliability-border); padding: .4rem .55rem; }
+.rel-chart-table__controls button:disabled { opacity: .5; }
+.rel-analytics-dashboard .reliability-analytics__chart-table { overflow: auto; max-height: 50vh; }
+.rel-analytics-dashboard .reliability-analytics__chart-table thead { position: sticky; top: 0; background: Canvas; z-index: 1; }
