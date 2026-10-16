@@ -695,7 +695,9 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "assessment": _assessment_dict(row),
         "entity_version": int(row.entity_version or 1),
         "answered_by_user_id": row.answered_by_user_id,
-        "answered_at": row.answered_at,
+        # Audit-event snapshots are JSON, unlike the typed timestamp column.
+        # A raw datetime here makes every answered fieldwork mutation fail at flush.
+        "answered_at": row.answered_at.isoformat() if row.answered_at else None,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
