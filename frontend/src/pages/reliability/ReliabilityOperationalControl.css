@@ -1029,3 +1029,21 @@ button.rel-ops__attention-item:hover {
     text-align: left;
   }
 }
+
+.rel-ops__capture {
+  padding: .2rem; border: 1px solid var(--border-subtle, #cbd5e1);
+  border-radius: .6rem; background: var(--surface, Canvas);
+}
+.rel-ops__capture > summary {
+  cursor: pointer; display: flex; justify-content: space-between; gap: .75rem;
+  align-items: center; padding: .75rem .9rem; font-weight: 750; font-size: .88rem;
+}
+.rel-ops__capture > summary span { font-weight: 450; font-size: .75rem; opacity: .7; }
+.rel-ops__capture[open] > summary { border-bottom: 1px solid var(--border-subtle, #cbd5e1); }
+.rel-ops__capture > .rel-ops__editor { padding: 1rem; }
+.rel-ops__table-wrap {
+  max-height: min(64vh, 790px); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border-subtle, #cbd5e1); border-radius: .5rem;
+}
+.rel-ops__table-wrap thead { position: sticky; top: 0; background: var(--surface, Canvas); z-index: 2; }
+.rel-ops__table-wrap th, .rel-ops__table-wrap td { font-variant-numeric: tabular-nums; }
