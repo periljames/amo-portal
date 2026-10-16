@@ -27,7 +27,9 @@ export const RELIABILITY_GROUPS: Array<{ label: string; items: ReliabilityArea[]
   ] },
   { label: "Programme data", items: [
     { label: "Data registers", path: "workbook-registers" },
-    { label: "Source mapping & imports", path: "workbook-mapping" },
+    { label: "Source field mapping", path: "workbook-mapping" },
+    { label: "Workbook intake", path: "workbook-imports" },
+    { label: "CSV staging", path: "workbook-csv" },
     { label: "Statistical alerts", path: "statistical-alerts" },
     { label: "Data quality", path: "data-quality" },
     { label: "Source connectors", path: "sources" },
@@ -39,8 +41,11 @@ export const RELIABILITY_GROUPS: Array<{ label: string; items: ReliabilityArea[]
     { label: "Approval & effectivity", path: "analytics/governance" },
     { label: "Calculation evidence", path: "analytics/calculations" },
     { label: "Controlled reporting", path: "formal-review" },
-    { label: "Report programme", path: "formal-reports" },
-    { label: "Management report layouts", path: "workbook-reports" },
+    { label: "Reporting obligations", path: "formal-reports" },
+    { label: "AMP recommendations", path: "programme-reports" },
+    { label: "Report distribution", path: "report-distribution" },
+    { label: "Report layouts", path: "workbook-reports" },
+    { label: "Management reports", path: "management-reports" },
   ] },
 ];
 
