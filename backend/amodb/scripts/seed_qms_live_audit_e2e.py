@@ -265,6 +265,16 @@ def seed() -> None:
         ))
         db.flush()
 
+        # A module toggle does not grant an effective paid entitlement. Seed
+        # explicit license entitlements so real-browser CI exercises the same
+        # commercial gate as production without weakening require_module().
+        for key in ("quality", "aerodoc_hybrid_dms"):
+            db.add(account_models.LicenseEntitlement(
+                license_id=TENANT_LICENSE_ID,
+                key=key, is_unlimited=True,
+                description="Disposable real-browser QMS acceptance entitlement.",
+            ))
+
         db.add(account_models.ModuleSubscription(
             id=QUALITY_MODULE_SUBSCRIPTION_ID,
             amo_id=amo.id,
