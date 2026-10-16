@@ -118,7 +118,7 @@ def _expire_reservations(db: Session, account: TenantStorageQuota):
 
 def reserve(db: Session, *, tenant_id: str, object_key: str, size_bytes: int,
             idempotency_key: str, actor_id: str | None = None, ttl_minutes: int = 60):
-    if not object_key.strip() or ".." in object_key.replace("\\\\", "/").split("/"):
+    if not object_key.strip() or ".." in object_key.replace("\\", "/").split("/"):
         raise ValueError("Unsafe or empty storage object key")
     # The ledger must use the *same canonical key* as the S3 adapter.
     # Otherwise a//b and a/b can be billed twice while overwriting one object.
