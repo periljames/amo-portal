@@ -32,7 +32,7 @@ const CLASSES=[
 const KINDS=["ALL","SUPPLIER","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
   "CONSULTANT","LABORATORY","CALIBRATION_PROVIDER","OTHER"];
 type Requirement={id:string;code:string;provider_kind:string;title:string;description:string;
-  mandatory:boolean;expiry_required:boolean;reminder_days:number;form_manual_id:string|null;form_revision_id:string|null;
+  mandatory:boolean;acknowledgement_required:boolean;expiry_required:boolean;reminder_days:number;form_manual_id:string|null;form_revision_id:string|null;
   enabled:boolean;retention_policy_ref:string|null;version:number};
 type Submission={id:string;filename:string;status:string;evidence_type:string;
   related_kind:string;related_id:string|null;requirement_title:string|null;
@@ -44,7 +44,7 @@ type Submission={id:string;filename:string;status:string;evidence_type:string;
 type DmsOption={id:string;code:string;title:string;revision_id:string;rev_number:string};
 type Decision="ACCEPTED"|"RETURNED"|"REJECTED";
 const blank={code:"",provider_kind:"ALL",title:"",description:"",
-  mandatory:false,expiry_required:false,reminder_days:0,form_manual_id:"",
+  mandatory:false,acknowledgement_required:false,expiry_required:false,reminder_days:0,form_manual_id:"",
   form_revision_id:"",enabled:true,retention_policy_ref:""};
 function errorText(error:unknown){return error instanceof Error?error.message:"Request failed";}
 export default function ExternalProviderDocumentsReview({amoCode,manager}:{
@@ -81,7 +81,8 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
   useEffect(()=>{void refresh().catch(e=>setError(errorText(e)));},[refresh]);
   function loadRequirement(r:Requirement){
     setForm({code:r.code,provider_kind:r.provider_kind,title:r.title,
-      description:r.description||"",mandatory:r.mandatory,expiry_required:r.expiry_required,reminder_days:r.reminder_days||0,
+      description:r.description||"",mandatory:r.mandatory,acknowledgement_required:r.acknowledgement_required,
+       expiry_required:r.expiry_required,reminder_days:r.reminder_days||0,
       form_manual_id:r.form_manual_id||"",form_revision_id:r.form_revision_id||"",
       enabled:r.enabled,retention_policy_ref:r.retention_policy_ref||""});
     setVersion(r.version);setSelectedDms(r.form_revision_id||"");
@@ -189,6 +190,9 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       </div>
       <div className="vendor-actions">
         <label><input type="checkbox" checked={form.mandatory} onChange={e=>setForm({...form,mandatory:e.target.checked})}/> Required for this category</label>
+        <label><input type="checkbox" checked={form.acknowledgement_required}
+          onChange={e=>setForm({...form,acknowledgement_required:e.target.checked})}/>
+          Require explicit read-and-understood attestation for the exact published form revision</label>
         <label><input type="checkbox" checked={form.expiry_required} onChange={e=>setForm({...form,expiry_required:e.target.checked})}/> Needs expiry</label>
         <label><input type="checkbox" checked={form.enabled} onChange={e=>setForm({...form,enabled:e.target.checked})}/> Enabled</label>
       </div>
