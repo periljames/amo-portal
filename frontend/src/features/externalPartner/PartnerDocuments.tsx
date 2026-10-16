@@ -45,6 +45,15 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const contracts=usePartnerLoad((signal)=>capabilities.includes("contract.read")?
     partnerRequest<Page<Contract>>(tenant,"contracts?limit=50",{signal}):
     Promise.resolve({items:[],limit:50,offset:0,has_more:false}),`${tenant}:${refresh}`);
+  const rfqs=usePartnerLoad((signal)=>capabilities.includes("procurement.read")?
+    partnerRequest<{items:{id:number;rfq_number:string}[]}>(tenant,"commerce/rfqs",{signal}):
+    Promise.resolve({items:[] as {id:number;rfq_number:string}[]}),tenant+":rfqDocs:"+refresh);
+  const orders=usePartnerLoad((signal)=>capabilities.includes("procurement.read")?
+    partnerRequest<{items:{id:number;po_number:string}[]}>(tenant,"commerce/purchase-orders",{signal}):
+    Promise.resolve({items:[] as {id:number;po_number:string}[]}),tenant+":poDocs:"+refresh);
+  const shipments=usePartnerLoad((signal)=>capabilities.includes("procurement.read")?
+    partnerRequest<{items:{id:string;po_id:number;shipment_reference:string}[]}>(tenant,"commerce/shipments",{signal}):
+    Promise.resolve({items:[] as {id:string;po_id:number;shipment_reference:string}[]}),tenant+":shipmentDocs:"+refresh);
   useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();
     if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);
   const current=requirements.value?.items.find(r=>r.id===requirementId);
@@ -235,6 +244,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           <option value="PROVIDER">Provider-level record</option>
           {contracts.value?.items.length?<option value="CONTRACT">Assigned agreement</option>:null}
           {assignments.value?.items.length?<option value="ASSIGNMENT">Assigned audit or QMS work</option>:null}
+          {rfqs.value?.items.length?<option value="RFQ">Procurement RFQ</option>:null}
+          {orders.value?.items.length?<option value="PO">Issued purchase order</option>:null}
+          {shipments.value?.items.length?<option value="SHIPMENT">Advance shipment notice</option>:null}
         </select></label>
         {related==="CONTRACT"&&<label>Assigned agreement<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
           <option value="">Choose assigned agreement</option>
@@ -244,6 +256,18 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
           <option value="">Choose authorized audit assignment</option>
           {assignments.value?.items.map(a=><option key={a.id} value={a.id}>{a.id}</option>)}
+        </select></label>}
+        {related==="RFQ"&&<label>Invited RFQ<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
+          <option value="">Select RFQ (explicit member document scope required)</option>
+          {rfqs.value?.items.map(x=><option key={x.id} value={x.id}>{x.rfq_number}</option>)}
+        </select></label>}
+        {related==="PO"&&<label>Issued PO<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
+          <option value="">Select PO (explicit member document scope required)</option>
+          {orders.value?.items.map(x=><option key={x.id} value={x.id}>{x.po_number}</option>)}
+        </select></label>}
+        {related==="SHIPMENT"&&<label>Advance shipment notice<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
+          <option value="">Select shipment (issued PO document scope required)</option>
+          {shipments.value?.items.map(x=><option key={x.id} value={x.id}>{x.shipment_reference}</option>)}
         </select></label>}
         <label>Replace earlier submission (optional)<select value={supersedes} onChange={e=>{setSupersedes(e.target.value);resetRetry();}}>
           <option value="">First submission</option>
