@@ -7,9 +7,14 @@ export type ReliabilityArea = { label: string; path: string; description?: strin
 export const RELIABILITY_GROUPS: Array<{ label: string; items: ReliabilityArea[] }> = [
   { label: "Command & analysis", items: [
     { label: "Overview", path: "", description: "Exceptions and priorities" },
-    { label: "Operational charts", path: "analytics/operational", description: "Events, delays and fleet comparisons" },
-    { label: "Engineering trends", path: "analytics/engineering", description: "Engines, components and health" },
-    { label: "Statistical controls", path: "analytics/control", description: "Control limits and triggers" },
+    { label: "Fleet trends", path: "analytics/operational", description: "Measured rates, ATA and aircraft comparisons" },
+    { label: "Network delays", path: "analytics/network", description: "Station and route delay burden" },
+    { label: "Component reliability", path: "analytics/components", description: "Removals, NFF and shop returns" },
+    { label: "Engine health", path: "analytics/engineering", description: "EHM parameters and engine status" },
+    { label: "Oil consumption graphs", path: "analytics/oil", description: "Engine uplift and OCR trends" },
+    { label: "Deferral controls", path: "analytics/deferrals", description: "MEL/CDL expiry and recurrence" },
+    { label: "FRACAS analysis", path: "analytics/fracas", description: "Cases, actions and effectiveness" },
+    { label: "Source confidence", path: "analytics/data", description: "Freshness and data-quality exceptions" },
     { label: "Analytical evidence", path: "analytics/evidence", description: "Drill-down and ranked registers" },
   ] },
   { label: "Operations & investigations", items: [
