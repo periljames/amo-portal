@@ -7,6 +7,8 @@ export type QmsAuditRealtimeEvent = {
 export const QMS_REALTIME_EVENT = "amo:qms:realtime";
 export const QMS_REALTIME_STATE_EVENT = "amo:qms:realtime-state";
 
+let lastQmsRealtimeState: "connected" | "reconnecting" | "offline" = "offline";
+
 export function parseQmsSseBlock(block: string): QmsAuditRealtimeEvent | null {
   let event = "message";
   let id: string | undefined;
@@ -38,7 +40,8 @@ type StreamHandlers = {
  * long-held DB session cost per audit tab.
  */
 export function startQmsAuditRealtimeStream(handlers: StreamHandlers): () => void {
-  handlers.onState?.("connected");
+  // Report the actual shell stream state, not a fabricated connected state.
+  handlers.onState?.(lastQmsRealtimeState);
   const onBridge = (raw: Event) => {
     const detail = (raw as CustomEvent<QmsAuditRealtimeEvent>).detail;
     if (!detail || typeof detail !== "object") return;
@@ -65,5 +68,6 @@ export function publishQmsRealtimeEvent(event: QmsAuditRealtimeEvent): void {
 }
 
 export function publishQmsRealtimeState(state: "connected" | "reconnecting" | "offline"): void {
+  lastQmsRealtimeState = state;
   window.dispatchEvent(new CustomEvent(QMS_REALTIME_STATE_EVENT, { detail: state }));
 }
