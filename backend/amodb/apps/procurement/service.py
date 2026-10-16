@@ -666,6 +666,15 @@ def create_rfq(
     if len(suppliers) != len(set(payload.supplier_ids)):
         raise HTTPException(status_code=400, detail="One or more suppliers are invalid or inactive.")
 
+    # Revalidate every invited provider against current canonical supplier scope,
+    # QMS restrictions, active holds and mandatory agreement controls at sourcing.
+    # A prior supplier-selection snapshot is never a substitute for this gate.
+    from .supplier_quality_control import assert_supplier_usage_allowed
+    categories = {"PART" if line.part_number else "SERVICE" for line in requisition.lines}
+    for supplier_id in sorted(set(payload.supplier_ids)):
+        assert_supplier_usage_allowed(db, amo_id=amo_id, supplier_id=supplier_id,
+                                      categories=categories or {"GENERAL"})
+
     rfq = models.ProcurementRFQ(
         amo_id=amo_id,
         rfq_number=payload.rfq_number.strip().upper(),
