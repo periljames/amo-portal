@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import inspect, text
 
+from amodb import storage
 from amodb.database import SessionLocal
 from amodb.apps.accounts import models as accounts
 from amodb.apps.quality import models as quality
@@ -21,7 +22,7 @@ LOG = logging.getLogger(__name__)
 
 def scan_due_provider_reviews() -> dict[str, int]:
     """Send at most one reminder per Quality Manager, case, and seven days."""
-    result={"tenants":0,"due_reviews":0,"due_documents":0,"due_contracts":0,"notifications":0}
+    result={"tenants":0,"due_reviews":0,"due_documents":0,"due_contracts":0,"notifications":0,"expired_uploads":0}
     with SessionLocal() as db:
         if not inspect(db.get_bind()).has_table("quality_provider_qualification_cases"):
             return result
@@ -31,6 +32,10 @@ def scan_due_provider_reviews() -> dict[str, int]:
         for amo_id, amo_code in tenants:
             try:
                 set_postgres_tenant_context(db,amo_id=str(amo_id),user_id="")
+                if db.get_bind().dialect.name=="postgresql":
+                    # Internal scheduled Quality governance requires explicit
+                    # provider staging FORCE-RLS visibility after tenant scoping.
+                    db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
                 cases=db.execute(text("""
                     SELECT q.id,q.supplier_id,q.category,s.legal_name,q.next_review_due_on
                     FROM quality_provider_qualification_cases q JOIN procurement_suppliers s
@@ -127,6 +132,35 @@ def scan_due_provider_reviews() -> dict[str, int]:
                                     action_label="Review governed provider records",
                                     entity_type=kind,entity_id=str(row["id"])))
                                 result["notifications"]+=1
+                # Recoverable transfer fragments are temporary. Expired
+                # manifests remain for traceability, but orphaned part objects
+                # must not consume tenants' storage indefinitely.
+                if inspect(db.get_bind()).has_table("external_provider_upload_sessions"):
+                    expired=db.execute(text("""
+                        SELECT id FROM external_provider_upload_sessions
+                        WHERE amo_id=:amo AND state='OPEN'
+                          AND created_at < NOW()-INTERVAL '24 hours'
+                        ORDER BY created_at,id LIMIT 100 FOR UPDATE SKIP LOCKED
+                    """),{"amo":str(amo_id)}).mappings().all()
+                    for upload in expired:
+                        part_rows=db.execute(text("""
+                            SELECT object_uri FROM external_provider_upload_parts
+                            WHERE amo_id=:amo AND session_id=:id
+                        """),{"amo":str(amo_id),"id":upload["id"]}).mappings().all()
+                        try:
+                            for part in part_rows:
+                                storage.delete(part["object_uri"])
+                        except Exception:
+                            LOG.exception("Unable to clean expired provider upload %s",upload["id"])
+                            continue
+                        db.execute(text("""DELETE FROM external_provider_upload_parts
+                            WHERE amo_id=:amo AND session_id=:id"""),
+                            {"amo":str(amo_id),"id":upload["id"]})
+                        db.execute(text("""UPDATE external_provider_upload_sessions
+                            SET state='EXPIRED',updated_at=NOW()
+                            WHERE amo_id=:amo AND id=:id AND state='OPEN'"""),
+                            {"amo":str(amo_id),"id":upload["id"]})
+                        result["expired_uploads"]+=1
                 db.commit()
                 result["tenants"]+=1
             except Exception:
