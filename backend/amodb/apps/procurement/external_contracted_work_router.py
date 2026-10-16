@@ -99,7 +99,7 @@ def _assigned(session,work_id):
 def _partner_work(db,session,ctx,work_id,lock=False):
     _assigned(session,work_id)
     row=_work(db,ctx["amo"],work_id,lock=lock)
-    if row["supplier_id"]!=ctx["supplier"] or row["provider_id"]!=ctx["provider"]:
+    if not row["authorized_at"] or row["supplier_id"]!=ctx["supplier"] or row["provider_id"]!=ctx["provider"]:
         raise HTTPException(404,"Contracted work is not assigned to this provider")
     return row
 
@@ -559,7 +559,7 @@ def partner_queue(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     return {"items":[dict(row) for row in db.execute(
         text("""SELECT id,work_number,work_title,site_code,status,work_type,updated_at
             FROM external_contracted_work WHERE amo_id=:amo AND supplier_id=:supplier
-            AND provider_id=:provider AND id IN :ids ORDER BY updated_at DESC""")
+            AND provider_id=:provider AND authorized_at IS NOT NULL AND id IN :ids ORDER BY updated_at DESC""")
         .bindparams(bindparam("ids",expanding=True)),
         {**ctx,"ids":sorted(ids)}).mappings()],
         "authority":"The contracted AMO certifies solely under its own applicable approval"}
@@ -782,6 +782,9 @@ def attach_verified_evidence(amo_code:str,work_id:str,payload:LinkEvidence,db:Se
       JOIN external_tenant_providers p ON p.amo_id=s.amo_id AND p.id=s.tenant_provider_id
       JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id
         AND d.id=s.dms_retention_id AND d.status!='DISPOSED'
+      JOIN quality_external_provider_evidence q ON q.id=s.qms_evidence_id
+        AND q.amo_id=s.amo_id AND q.supplier_id=p.supplier_id
+        AND q.status='VERIFIED' AND (q.valid_until IS NULL OR q.valid_until>=CURRENT_DATE)
       WHERE s.amo_id=:amo AND p.id=:provider AND p.supplier_id=:supplier
         AND s.id=:submission AND s.status='ACCEPTED' AND s.dms_evidence_asset_id IS NOT NULL
         AND s.related_kind='CONTRACTED_WORK' AND s.related_id=:work""",
