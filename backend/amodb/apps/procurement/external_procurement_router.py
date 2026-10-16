@@ -579,7 +579,21 @@ def staff_inbox(amo_code:str,db:Session=Depends(get_db),
     shipments=_rows(db,"""SELECT id,po_id,supplier_id,shipment_reference,status,created_at
        FROM external_procurement_shipments WHERE amo_id=:amo
        ORDER BY created_at DESC LIMIT :limit""",amo=amo,limit=limit)
+    candidates=_rows(db,"""SELECT s.id,s.filename,s.evidence_type,s.related_kind,s.related_id,
+       p.supplier_id,v.legal_name,s.dms_evidence_asset_id,s.dms_retention_id
+       FROM external_partner_evidence_submissions s
+       JOIN external_tenant_providers p ON p.amo_id=s.amo_id AND p.id=s.tenant_provider_id
+       JOIN procurement_suppliers v ON v.amo_id=p.amo_id AND v.id=p.supplier_id
+       JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id
+         AND d.id=s.dms_retention_id AND d.status!='DISPOSED'
+       WHERE s.amo_id=:amo AND s.status='ACCEPTED' AND s.dms_evidence_asset_id IS NOT NULL
+         AND s.related_kind IN ('RFQ','PO','SHIPMENT')
+         AND NOT EXISTS (SELECT 1 FROM procurement_documents docs
+           WHERE docs.amo_id=s.amo_id AND docs.source='SUPPLIER_PORTAL'
+             AND docs.external_reference=s.id)
+       ORDER BY s.created_at DESC LIMIT :limit""",amo=amo,limit=limit)
     return {"events":items,"quotes":quotes,"shipments":shipments,
+        "document_candidates":candidates,
         "boundary":"No provider action authorizes award, PO, Stores receiving, Quality release or Finance payment"}
 
 class StaffDecision(BaseModel):
