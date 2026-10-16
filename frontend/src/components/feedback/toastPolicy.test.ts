@@ -50,6 +50,14 @@ describe("portal notification policy", () => {
     expect(notificationPreferences).toContain("export function prepareNotificationAudio");
   });
 
+  it("does not resume Web Audio from asynchronous notification callbacks", () => {
+    const cue = notificationPreferences.split("export function playNotificationCue")[1]?.split("export function playNotificationChirp")[0] || "";
+    expect(notificationPreferences).toContain("if (!event.isTrusted) return");
+    expect(notificationPreferences).toContain("activation && !activation.isActive");
+    expect(cue).not.toContain(".resume(");
+    expect(cue).toContain('sharedAudioCtx.state !== "running"');
+  });
+
   it("pauses auto-close while a user hovers or interacts", () => {
     expect(provider).toContain("onMouseEnter={pauseTimer}");
     expect(provider).toContain("onMouseLeave={resumeTimer}");
