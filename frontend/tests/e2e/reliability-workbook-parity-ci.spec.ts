@@ -231,9 +231,9 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
 
     await page.getByRole("button", { name: /Mapping & imports/ }).click();
     await expect(page.getByRole("heading", { name: "Field mapping and parity" })).toBeVisible();
-    await page.getByRole("link", { name: "Workbook intake", exact: true }).click();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "Workbook intake", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Controlled workbook import" })).toBeVisible();
-    await page.getByRole("link", { name: "CSV staging", exact: true }).click();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "CSV staging", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Structured CSV / TSV import" })).toBeVisible();
     await page.getByLabel("CSV / TSV file").setInputFiles({ name: "daily-au.csv", mimeType: "text/csv", buffer: Buffer.from("event_date,aircraft_serial_number,title,flight_hours\n2026-08-07,5Y-SLK,Daily utilisation,6.25\n") });
     await page.getByRole("button", { name: "Audit and preview CSV" }).click();
@@ -245,7 +245,7 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     await expect(page.getByRole("heading", { name: "Report layouts" })).toBeVisible();
     await expect(page.getByRole("button", { name: /C208B-RP Cessna 208B Reliability Programme Report/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /DHC8-RP DHC8 Reliability Programme Report/ })).toBeVisible();
-    await page.getByRole("link", { name: "Management reports", exact: true }).click();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "Management reports", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Reliability management period report" })).toBeVisible();
     await page.getByRole("button", { name: "Q1" }).click();
     await page.getByRole("button", { name: "Full programme" }).click();
