@@ -164,6 +164,23 @@ async def upload_techlog_asset(
     return _details(asset)
 
 
+
+@router.get("/octm/source-assets")
+def list_techlog_source_assets(
+    aircraft: str, techsheet_ref: str, ctx=Depends(octm.context),
+):
+    octm.require(ctx, "reliability.read")
+    db, amo_id, _ = ctx
+    if not aircraft.strip() or not techsheet_ref.strip():
+        raise HTTPException(422, "Aircraft and technical-log page are required")
+    rows = db.query(OCTMSourceAsset).filter(
+        OCTMSourceAsset.amo_id == amo_id,
+        OCTMSourceAsset.aircraft_serial_number == aircraft.strip(),
+        OCTMSourceAsset.techsheet_ref == techsheet_ref.strip(),
+    ).order_by(OCTMSourceAsset.created_at.desc(), OCTMSourceAsset.id.desc()).limit(20).all()
+    return {"items": [_details(row) for row in rows], "truncated": len(rows) == 20}
+
+
 @router.get("/octm/source-assets/{asset_id}")
 def get_source_asset(asset_id: str, ctx=Depends(octm.context)):
     octm.require(ctx, "reliability.read")
