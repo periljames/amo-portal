@@ -77,23 +77,39 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   }
 
   const containmentEditor = structuredEditor(page, "Immediate containment action");
-  if (await containmentEditor.isVisible().catch(() => false)) {
-    await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
-    await page.getByRole("button", { name: "Save containment and continue" }).click();
+  // Do not silently skip a mandatory governed stage when the React wizard is
+  // still transitioning from responder identity to containment.
+  if (!(await containmentEditor.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: "Containment", exact: true }).click();
   }
-  // The public CAR form is a governed stepper, not a long form: a prior
-  // saved draft may leave a different completed step selected on reload.
+  await expect(containmentEditor).toBeVisible({ timeout: 30_000 });
+  await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
+  await page.getByRole("button", { name: "Save containment and continue" }).click();
+  // The rework invitation may reopen with another completed wizard stage.
+  // Enter root-cause explicitly before asserting the structured editor.
   const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
     .getByRole("button", { name: /Root cause$/i });
   await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
   await rootCauseStep.click();
-  await expect(structuredEditor(page, "Root cause analysis")).toBeVisible({ timeout: 30_000 });
-  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  const rootCauseEditor = structuredEditor(page, "Root cause analysis");
+  await expect(rootCauseEditor).toBeVisible({ timeout: 30_000 });
+  await rootCauseEditor.fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  await page.getByLabel("Target closure date").fill(futureDate(28));
-  await page.getByLabel("Due date").fill(futureDate(21));
+  const closureDate = page.getByLabel("Target closure date");
+  const dueDate = page.getByLabel("Due date");
+  // Agreed CAR deadlines are governed, not editable from a responder's CAP.
+  // Assert the lock instead of bypassing Quality's deadline-change workflow.
+  if (await closureDate.isDisabled()) {
+    await expect(dueDate).toBeDisabled();
+    await expect(page.getByText("These are agreed deadlines. Contact Quality to request an extension", { exact: false })).toBeVisible();
+    await expect(closureDate).not.toHaveValue("");
+    await expect(dueDate).not.toHaveValue("");
+  } else {
+    await closureDate.fill(futureDate(28));
+    await dueDate.fill(futureDate(21));
+  }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({

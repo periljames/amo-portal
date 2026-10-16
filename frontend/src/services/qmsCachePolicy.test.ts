@@ -11,6 +11,15 @@ describe("QMS offline cache boundaries", () => {
       expect(withoutQmsAuthority(cached)?.clientState.queries).toEqual([]);
     },
   );
+  it.each(["checklist-execution-governance", "report-revisions", "closure-state"])(
+    "bypasses response/IDB caches for live audit %s so SSE refetch sees committed state", (resource) => {
+      const path = `/api/maintenance/tenant-a/quality/audits/a1/${resource}`;
+      expect(isQmsLiveAuthority(path)).toBe(true);
+      expect(isPortalCacheablePath(path)).toBe(false);
+      const client = { clientState: { queries: [{ queryKey: ["qms", `audits/a1/${resource}`] }] } };
+      expect(withoutQmsAuthority(client)?.clientState.queries).toEqual([]);
+    },
+  );
   it("keeps operational records cacheable but rechecks authority live", () => {
     expect(isPortalCacheablePath("/api/quality/audits/a1/session")).toBe(false);
     expect(isPortalCacheablePath("/api/maintenance/t/quality/audits/a1")).toBe(true);

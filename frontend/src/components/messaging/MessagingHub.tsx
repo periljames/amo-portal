@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { useToast } from "../feedback/ToastProvider";
+import { setNotificationPreferences, unlockNotificationAudioFromUserGesture } from "../../services/notificationPreferences";
 import { getCachedUser, getToken } from "../../services/auth";
 import { assistDocumentation, type DocumentationAssistResponse } from "../../services/documentationAssistant";
 import { messagingApi } from "../../services/messaging";
@@ -578,7 +579,15 @@ export function MessagingHub() {
                 if (event.target.checked && "Notification" in window && Notification.permission === "default") void Notification.requestPermission();
                 updatePreferences.mutate({ desktop_enabled: event.target.checked });
               }} /> Desktop alerts</label>
-              <label><input type="checkbox" checked={preferences.sound_enabled} onChange={(event) => updatePreferences.mutate({ sound_enabled: event.target.checked })} /> Sound</label>
+              <label><input type="checkbox" checked={preferences.sound_enabled} onChange={(event) => {
+                const enabled = event.currentTarget.checked;
+                // The pointerdown listener saw the old (disabled) preference.
+                // Persist first, then unlock *synchronously* in this real
+                // checkbox activation, before the backend mutation awaits.
+                setNotificationPreferences({ audioEnabled: enabled });
+                if (enabled) void unlockNotificationAudioFromUserGesture(event.nativeEvent);
+                updatePreferences.mutate({ sound_enabled: enabled });
+              }} /> Sound</label>
               <label><input type="checkbox" checked={preferences.email_enabled} onChange={(event) => updatePreferences.mutate({ email_enabled: event.target.checked })} /> Routine operational email</label>
               <label><input type="checkbox" checked={preferences.receipt_email_enabled} onChange={(event) => updatePreferences.mutate({ receipt_email_enabled: event.target.checked })} /> Workflow receipts</label>
               <div className="messaging-settings__required"><strong>Essential and critical compliance email</strong><small>Always active and cannot be disabled.</small></div>

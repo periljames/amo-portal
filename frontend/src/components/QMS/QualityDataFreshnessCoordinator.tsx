@@ -106,7 +106,12 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       const candidate = root.audit && typeof root.audit === "object" ? root.audit as Record<string, unknown> : root;
       const id = typeof candidate.id === "string" ? candidate.id : typeof candidate.audit_id === "string" ? candidate.audit_id : null;
       const ref = typeof candidate.audit_ref === "string" ? candidate.audit_ref : null;
-      if (id && (id === occurrenceKey || (ref && auditOccurrenceResolverKey(ref) === auditOccurrenceResolverKey(occurrenceKey)))) markers.add(id);
+      // Audit routes use slash-normalised references (e.g. qar-mo-26-015),
+      // while the canonical occurrence carries QAR/MO/26/015 and SSE carries
+      // its UUID. Match the same resolver slug so the UUID is in our markers.
+      if (id && (id === occurrenceKey || (ref && auditOccurrenceResolverKey(ref) === auditOccurrenceResolverKey(occurrenceKey)))) {
+        markers.add(id);
+      }
     }
     return markers;
   };

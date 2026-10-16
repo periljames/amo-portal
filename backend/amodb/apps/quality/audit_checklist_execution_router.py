@@ -695,7 +695,9 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "assessment": _assessment_dict(row),
         "entity_version": int(row.entity_version or 1),
         "answered_by_user_id": row.answered_by_user_id,
-        "answered_at": row.answered_at,
+        # Audit-event snapshots are JSON, unlike the typed timestamp column.
+        # A raw datetime here makes every answered fieldwork mutation fail at flush.
+        "answered_at": row.answered_at.isoformat() if row.answered_at else None,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -709,12 +711,13 @@ def _event_dict(row: QualityAuditChecklistExecutionEvent) -> dict[str, Any]:
         "before_snapshot": row.before_snapshot,
         "after_snapshot": row.after_snapshot,
         "actor_user_id": row.actor_user_id,
-        "created_at": row.created_at,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
 def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditChecklistExecutionGovernance | None) -> dict[str, Any]:
     canonical = governance.canonical_response_status if governance else _canonical_from_legacy(item.response_status)
+    updated_at = governance.updated_at if governance else item.updated_at
     return {
         "checklist_item_id": str(item.id),
         "audit_id": str(item.audit_id),
@@ -753,7 +756,7 @@ def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditCh
         "governance_id": str(governance.id) if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
         "updated_by_user_id": governance.updated_by_user_id if governance else item.completed_by_user_id,
-        "updated_at": governance.updated_at if governance else item.updated_at,
+        "updated_at": updated_at.isoformat() if updated_at else None,
         "events": [_event_dict(event) for event in list(governance.events or [])] if governance else [],
     }
 

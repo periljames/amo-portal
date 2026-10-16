@@ -439,7 +439,15 @@
 
 @media (max-width: 1050px) {
   .qms-live-audit-focus__body { grid-template-columns: 220px minmax(0, 1fr); }
-  .qms-live-audit-focus__summary { display: none; }
+  .qms-live-audit-focus__summary {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 0.75rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
+}
   .qms-live-audit-focus__responses { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
@@ -1622,15 +1630,7 @@
 .qms-live-audit-focus__matrix-choices button:disabled { opacity: 0.65; cursor: not-allowed; }
 .qms-live-audit-focus__matrix-device { display: block; white-space: nowrap; font-size: 0.65rem; color: var(--qms-muted); }
 .qms-live-audit-focus__question { padding: 0; margin-top: 0.65rem; max-height: none; overflow: visible; }
-.qms-live-audit-focus__summary {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  margin-top: 0.75rem;
-  border: 1px solid var(--qms-line);
-  border-radius: 10px;
-  background: var(--qms-panel);
-}
+.qms-live-audit-focus__summary { display: none; }
 @media(max-width: 720px) {
   .qms-live-audit-focus__body { display: block; padding: 0.5rem; }
   .qms-live-audit-focus__matrix-toolbar label { width: 100%; }
@@ -1696,4 +1696,21 @@
     border-radius: 12px 12px 0 0;
     box-shadow: 0 -9px 36px rgb(0 0 0 / 0.18);
   }
+}
+
+
+/* Keep authoritative finding counts, auditee presence and release boundaries
+   available during table-first fieldwork. Hiding this whole section blocked
+   auditors from reviewing the CAR/finding consequence of an atomic response. */
+.qms-live-audit-focus__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-column: 1 / -1;
+  gap: 0.6rem;
+  overflow: visible;
+  border-top: 1px solid var(--qms-line);
+  border-left: 0;
+}
+@media (max-width: 720px) {
+  .qms-live-audit-focus__summary { grid-template-columns: minmax(0, 1fr); }
 }

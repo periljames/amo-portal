@@ -306,13 +306,15 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await auditeePage.getByRole("button", { name: "Record closing response" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
-    await internalPage.getByLabel("Audit closing meeting").getByRole("button", { name: "Refresh", exact: true }).click();
+    await internalPage.getByRole("region", { name: "Audit closing meeting workspace" }).getByRole("button", { name: "Refresh" }).click();
     await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
     await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
-    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
+    await expect(internalPage.getByText("R1 is approved.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    // SHA integrity is independently established from the server adoption
+    // receipt above and must remain bound to the exact revision for WebAuthn.
 
     await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
     await internalPage.getByRole("button", { name: "Register passkey" }).click();

@@ -87,6 +87,73 @@ describe("portal offline mutation policy", () => {
     })).rejects.toBeInstanceOf(OfflineQueuedError);
   });
 
+  it("durably queues an exact idempotent checklist command when its API request times out", async () => {
+    globalThis.fetch = vi.fn((_url, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        reject(new Error("The fieldwork request must include an abort signal"));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })) as typeof fetch;
+
+    const clientMutationId = "test-fieldwork-timeout-12345";
+    const command = JSON.stringify({
+      client_mutation_id: clientMutationId,
+      device_id: "test-device-12345",
+      device_sequence: 1,
+      client_timestamp: "2026-10-16T07:00:00.000Z",
+      base_version: 1,
+      operation: "CHECKLIST_UPDATE",
+      reason: "Offline continuity",
+      canonical_response_status: "COMPLIANT",
+    });
+    await expect(portalFetch("/api/maintenance/tenant-a/quality/audits/audit-1/checklist-items/item-1/fieldwork-mutations", {
+      method: "POST",
+      body: command,
+      timeoutMs: 10,
+      offline: {
+        queueMutation: true,
+        requireDurable: true,
+        entityType: "qms-audit-checklist-item",
+        entityId: "item-1",
+        idempotencyKey: clientMutationId,
+      },
+    })).rejects.toBeInstanceOf(OfflineQueuedError);
+  });
+
+  it("recognizes the API client timeout signal but never queues a user cancellation", async () => {
+    globalThis.fetch = vi.fn((_url, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        reject(new Error("Expected abortable fieldwork fetch"));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })) as typeof fetch;
+
+    const payload = JSON.stringify({
+      client_mutation_id: "test-fieldwork-caller-timeout-12345",
+      device_id: "test-device-12345", device_sequence: 2,
+      client_timestamp: "2026-10-16T08:00:00.000Z", base_version: 1,
+      operation: "CHECKLIST_UPDATE", reason: "Continue fieldwork after timeout",
+      canonical_response_status: "COMPLIANT",
+    });
+    const caller = new AbortController();
+    const timeout = setTimeout(() => caller.abort(new DOMException("Request timed out after 1 seconds", "AbortError")), 10);
+    try {
+      await expect(portalFetch("/api/maintenance/tenant-a/quality/audits/audit-1/checklist-items/item-1/fieldwork-mutations", {
+        method: "POST", body: payload, signal: caller.signal, timeoutMs: 10_000,
+        offline: { queueMutation: true, requireDurable: true,
+          entityType: "qms-audit-checklist-item", entityId: "item-1",
+          idempotencyKey: "test-fieldwork-caller-timeout-12345",
+        },
+      })).rejects.toBeInstanceOf(OfflineQueuedError);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("queues a mutation after a genuine transport failure", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError("Failed to fetch");

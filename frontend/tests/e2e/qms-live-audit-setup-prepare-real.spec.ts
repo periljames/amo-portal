@@ -65,11 +65,16 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(setup).toBeVisible({ timeout: 30_000 });
 
     await setup.getByRole("textbox", { name: "Scope", exact: true }).fill("Real browser setup scope covering controlled maintenance and Quality records.");
+    await setup.getByRole("textbox", { name: "Title", exact: true }).fill("Concurrent realtime browser acceptance");
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
     await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
     await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
+    // Authoritative setup requires a valid 09:00–17:00 tenant-local window.
+    // Fix both time inputs explicitly rather than relying on a seeded fixture.
+    await setup.getByLabel("Planned start time", { exact: true }).fill("10:00");
+    await setup.getByLabel("Planned end time", { exact: true }).fill("16:00");
     await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
     const rescheduleReason = setup.getByLabel("Reason for rescheduling", { exact: true });
     if (await rescheduleReason.isVisible().catch(() => false)) {
@@ -81,7 +86,9 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     if (!(await definitionTile.evaluate((element) => (element as HTMLDetailsElement).open))) {
       await definitionTile.locator("summary").click();
     }
-    await setup.getByRole("button", { name: "Save definition", exact: true }).click();
+    const saveDefinition = definitionTile.getByRole("button", { name: "Save definition", exact: true });
+    await expect(saveDefinition).toBeEnabled({ timeout: 15_000 });
+    await saveDefinition.click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
     const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
@@ -91,8 +98,8 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await openingCard.getByRole("button", { name: "On site", exact: true }).click();
     await openingCard.getByLabel("Customize", { exact: true }).check();
-    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T08:00`);
-    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T09:00`);
+    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T09:00`);
+    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T10:00`);
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
     await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
@@ -101,8 +108,8 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const closingCard = setup.getByText("Closing", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await closingCard.getByRole("button", { name: "On site", exact: true }).click();
     await closingCard.getByLabel("Customize", { exact: true }).check();
-    await closingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(31)}T17:00`);
-    await closingCard.getByLabel("End", { exact: true }).fill(`${futureDate(31)}T18:00`);
+    await closingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(31)}T16:00`);
+    await closingCard.getByLabel("End", { exact: true }).fill(`${futureDate(31)}T17:00`);
     await closingCard.getByLabel("Location", { exact: true }).fill("Quality conference room");
     await closingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Findings, report acknowledgement, corrective-action handoff and closing decisions.");
     await closingCard.getByRole("button", { name: "Save meeting" }).click();

@@ -476,9 +476,10 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
-  // The approved 2026 programme fixture schedules 15 August; freeze only Date
-  // so its actual HTML min/max validation remains exercised after August 2026.
-  await page.clock.setFixedTime(new Date("2026-08-08T12:00:00Z"));
+  // The governed programme fixture dates are in August 2026. Freeze only the
+  // browser wall clock inside that period so HTML date min/max validation
+  // doesn't silently reject form submission as the real calendar advances.
+  await page.clock.setFixedTime(new Date("2026-08-10T10:00:00Z"));
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
@@ -495,10 +496,18 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await expect(page.getByRole("region", { name: "Planner conflicts" })).toBeVisible();
   await expect(page.getByText("Hangar surveillance", { exact: true })).toBeVisible();
   await page.getByLabel("Conflict override reason").fill("Activities are operationally separated with independent coverage.");
+  // The parent scheduling queue closes its embedded panel on success. Verify
+  // the authoritative POST receipt before that controlled panel unmounts,
+  // rather than expecting the internal schedule ID to remain painted in it.
+  const scheduleReceipt = page.waitForResponse((response) =>
+    response.url().includes("/audit-programmes/programme-1/items/programme-item-1/schedule")
+    && response.request().method() === "POST"
+    && response.status() === 201,
+  );
   await page.getByRole("button", { name: "Create with governed override" }).click();
-
+  const committed = await (await scheduleReceipt).json() as { id: string };
+  expect(committed.id).toBe("schedule-1");
   await expect(page.getByText("Schedule created", { exact: false })).toBeVisible();
-  await expect(page.getByText("schedule-1", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open in Planner" })).toBeVisible();
 });
 
