@@ -507,8 +507,6 @@ def require_module_access(
         # Standing AMO administrators are a tenant privilege assigned by the
         # platform superuser. Their module administration is broad by default;
         # module-specific regulated decision gates still apply downstream.
-        if is_tenant_admin(current_user):
-            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user
@@ -522,6 +520,12 @@ def require_module_access(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unknown portal module access boundary",
             )
+        from amodb.entitlements import enforce_tenant_module
+        enforce_tenant_module(db, amo_id=str(current_user.amo_id), module_key=normalized_module)
+        # An AMO administrator can manage every *licensed* module; this
+        # standing role is not a substitute for a subscription.
+        if is_tenant_admin(current_user):
+            return current_user
         required = f"portal.{normalized_module}.{normalized_level}"
         if access_control.user_has_capability(db, user=current_user, capability_code=required):
             return current_user
@@ -561,8 +565,6 @@ def require_any_module_access(
         # and configure every licensed tenant module until the platform
         # superuser removes their standing overlay. Operational decision gates
         # inside each module remain authoritative.
-        if is_tenant_admin(current_user):
-            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user
@@ -577,7 +579,23 @@ def require_any_module_access(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unknown portal module access boundary",
             )
+        from amodb.entitlements import enforce_tenant_module
+        licensed_modules = []
         for module_code in normalized_modules:
+            try:
+                enforce_tenant_module(db, amo_id=str(current_user.amo_id), module_key=module_code)
+                licensed_modules.append(module_code)
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_403_FORBIDDEN:
+                    raise
+        if not licensed_modules:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="None of the requested modules is commercially entitled for this tenant.",
+            )
+        if is_tenant_admin(current_user):
+            return current_user
+        for module_code in licensed_modules:
             if access_control.user_has_capability(
                 db, user=current_user, capability_code=f"portal.{module_code}.{normalized_level}"
             ):
