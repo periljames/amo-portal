@@ -243,6 +243,9 @@ def correct_techlog_page(payload: TechlogPageCorrection, ctx=Depends(octm.contex
         raise HTTPException(422, "Aircraft and page identity cannot be changed in-place")
     if not db.query(Aircraft).filter_by(serial_number=page.aircraft_serial_number, amo_id=amo_id).first():
         raise HTTPException(422, "Aircraft is not registered to this tenant")
+    from .octm_source_assets import validate_source_reference
+    validate_source_reference(db, amo_id, page.aircraft_serial_number, page.techsheet_ref,
+                              page.source_evidence_ref)
     candidates = build_page_entries(page)
     by_position = {row.engine_position: row for row in original}
     if set(by_position) != {candidate.engine_position for candidate in candidates}:
@@ -292,6 +295,9 @@ def preview_techlog_page(payload: TechlogPage, ctx=Depends(octm.context)):
     db, amo_id, _ = ctx
     if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=payload.aircraft_serial_number).first():
         raise HTTPException(422, "Aircraft is not registered to this tenant")
+    from .octm_source_assets import validate_source_reference
+    validate_source_reference(db, amo_id, payload.aircraft_serial_number,
+                              payload.techsheet_ref, payload.source_evidence_ref)
     candidates = build_page_entries(payload)
     return {
         "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
@@ -311,6 +317,9 @@ def create_techlog_page(payload: TechlogPage, ctx=Depends(octm.context)):
     db, amo_id, actor = ctx
     if not db.query(Aircraft).filter_by(amo_id=amo_id, serial_number=payload.aircraft_serial_number).first():
         raise HTTPException(422, "Aircraft is not registered to this tenant")
+    from .octm_source_assets import validate_source_reference
+    validate_source_reference(db, amo_id, payload.aircraft_serial_number,
+                              payload.techsheet_ref, payload.source_evidence_ref)
     candidates = build_page_entries(payload)
     for candidate in candidates:
         original = db.query(octm.OCTMEntry).filter_by(
