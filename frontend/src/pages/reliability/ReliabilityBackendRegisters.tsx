@@ -74,10 +74,10 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
     const request: Promise<Row[]> = view === "events"
       ? listReliabilityEvents({ limit, offset, q: query || undefined, sortKey, sortDir })
       : view === "alerts"
-        ? listReliabilityAlerts({ limit, offset, status: (status || undefined) as ReliabilityAlertStatus | undefined, sortKey, sortDir })
+        ? listReliabilityAlerts({ limit, offset, status: (status || undefined) as ReliabilityAlertStatus | undefined, q: query || undefined, sortKey, sortDir })
         : view === "cases"
-          ? listFracasCases({ limit, offset, status: (status || undefined) as FracasStatus | undefined, sortKey, sortDir })
-          : listEngineTrendStatuses({ limit, offset, currentStatus: (status || undefined) as EngineTrendStatus | undefined, sortKey, sortDir });
+          ? listFracasCases({ limit, offset, status: (status || undefined) as FracasStatus | undefined, q: query || undefined, sortKey, sortDir })
+          : listEngineTrendStatuses({ limit, offset, currentStatus: (status || undefined) as EngineTrendStatus | undefined, q: query || undefined, sortKey, sortDir });
     void request.then((items) => {
       if (active) { setHasNext(items.length > PAGE_SIZE); setRows(items.slice(0, PAGE_SIZE)); setLoading(false); }
     }).catch((cause: unknown) => {
@@ -127,12 +127,14 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
         <RefreshCw size={15} aria-hidden="true" /> Refresh</button>
     </header>
     <div className="rel-backend-register__tools">
-      {view === "events" && <form onSubmit={(event) => { event.preventDefault(); if (page !== 0 || query !== typedQuery.trim()) startLoading(); setPage(0); setQuery(typedQuery.trim()); }}>
-        <label><Search size={16} aria-hidden="true" /><span className="sr-only">Search all occurrence records</span>
-          <input type="search" placeholder="Search source occurrences…" value={typedQuery}
+      <form onSubmit={(event) => { event.preventDefault(); if (page !== 0 || query !== typedQuery.trim()) startLoading(); setPage(0); setQuery(typedQuery.trim()); }}>
+        <label><Search size={16} aria-hidden="true" /><span className="sr-only">Search all {names[view]} records</span>
+          <input type="search" placeholder={view === "events" ? "Search source occurrences…" : view === "alerts" ?
+            "Search alert code or message…" : view === "cases" ? "Search FRACAS case, aircraft or classification…" :
+            "Search aircraft or engine serial…"} value={typedQuery}
             onChange={(event) => setTypedQuery(event.target.value)} /></label>
         <button type="submit">Search all records</button>
-      </form>}
+      </form>
       {view !== "events" && <label className="rel-backend-register__status"><SlidersHorizontal size={16} aria-hidden="true" />
         <span>Filter status</span><select value={status} onChange={(event) => { startLoading(); setStatus(event.target.value); setPage(0); }}>
           <option value="">All statuses</option>
