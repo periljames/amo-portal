@@ -711,7 +711,7 @@ def _event_dict(row: QualityAuditChecklistExecutionEvent) -> dict[str, Any]:
         "before_snapshot": row.before_snapshot,
         "after_snapshot": row.after_snapshot,
         "actor_user_id": row.actor_user_id,
-        "created_at": row.created_at,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
@@ -755,7 +755,7 @@ def _row_dict(item: models.QualityAuditChecklistItem, governance: QualityAuditCh
         "governance_id": str(governance.id) if governance else None,
         "entity_version": int(governance.entity_version or 1) if governance else 0,
         "updated_by_user_id": governance.updated_by_user_id if governance else item.completed_by_user_id,
-        "updated_at": governance.updated_at if governance else item.updated_at,
+        "updated_at": (governance.updated_at if governance else item.updated_at).isoformat() if (governance.updated_at if governance else item.updated_at) else None,
         "events": [_event_dict(event) for event in list(governance.events or [])] if governance else [],
     }
 
