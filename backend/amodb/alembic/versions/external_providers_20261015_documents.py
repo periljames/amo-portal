@@ -24,6 +24,7 @@ def upgrade():
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("description", sa.Text(), nullable=False, server_default=""),
         sa.Column("mandatory", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("acknowledgement_required", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("expiry_required", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("reminder_days", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("form_manual_id", sa.String(36), sa.ForeignKey("manuals.id", ondelete="RESTRICT")),
@@ -82,6 +83,25 @@ def upgrade():
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_ext_doc_events_tenant_submission", "external_provider_document_events", ["amo_id", "submission_id", "occurred_at"])
+    op.create_table(
+        "external_provider_form_acknowledgements",
+        sa.Column("id",sa.String(36),primary_key=True),
+        sa.Column("amo_id",sa.String(36),sa.ForeignKey("amos.id",ondelete="RESTRICT"),nullable=False),
+        sa.Column("tenant_provider_id",sa.String(36),nullable=False),
+        sa.Column("identity_id",sa.String(36),sa.ForeignKey("external_identities.id",ondelete="RESTRICT"),nullable=False),
+        sa.Column("requirement_id",sa.String(36),nullable=False),
+        sa.Column("form_revision_id",sa.String(36),sa.ForeignKey("manual_revisions.id",ondelete="RESTRICT"),nullable=False),
+        sa.Column("attestation",sa.Text(),nullable=False),
+        sa.Column("occurred_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["amo_id","tenant_provider_id"],
+            ["external_tenant_providers.amo_id","external_tenant_providers.id"],ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id","requirement_id"],
+            ["external_provider_document_requirements.amo_id","external_provider_document_requirements.id"],ondelete="RESTRICT"),
+        sa.UniqueConstraint("amo_id","tenant_provider_id","identity_id","requirement_id","form_revision_id",
+            name="uq_ext_provider_form_ack_exact_actor_revision"),
+    )
+    op.create_index("ix_ext_form_ack_tenant_req",
+                    "external_provider_form_acknowledgements",["amo_id","requirement_id","occurred_at"])
     # Commercial lifecycle remains in existing QMS contract table.
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
         batch.add_column(sa.Column("counterparties_json", sa.JSON()))
@@ -95,7 +115,8 @@ def upgrade():
                                  ["amo_id","supplier_id","supersedes_contract_id"],
                                  ["amo_id","supplier_id","id"], ondelete="RESTRICT")
     if op.get_bind().dialect.name == "postgresql":
-        for table in ("external_provider_document_requirements", "external_provider_document_events"):
+        for table in ("external_provider_document_requirements", "external_provider_document_events",
+                      "external_provider_form_acknowledgements"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY'))
             op.execute(sa.text(f"""CREATE POLICY "{table}_tenant" ON "{table}"
@@ -109,6 +130,9 @@ def upgrade():
           END;
           $extdocev$;
         """))
+        op.execute(sa.text("""CREATE TRIGGER ext_form_ack_immutable
+            BEFORE UPDATE OR DELETE ON external_provider_form_acknowledgements
+            FOR EACH ROW EXECUTE FUNCTION external_document_events_append_only()"""))
         op.execute(sa.text("""CREATE TRIGGER ext_document_events_immutable
             BEFORE UPDATE OR DELETE ON external_provider_document_events
             FOR EACH ROW EXECUTE FUNCTION external_document_events_append_only()"""))
@@ -116,8 +140,11 @@ def upgrade():
 
 def downgrade():
     if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP TRIGGER IF EXISTS ext_form_ack_immutable ON external_provider_form_acknowledgements")
         op.execute("DROP TRIGGER IF EXISTS ext_document_events_immutable ON external_provider_document_events")
         op.execute("DROP FUNCTION IF EXISTS external_document_events_append_only()")
+    op.drop_index("ix_ext_form_ack_tenant_req",table_name="external_provider_form_acknowledgements")
+    op.drop_table("external_provider_form_acknowledgements")
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
         batch.drop_constraint("fk_ext_agreement_prior", type_="foreignkey")
         for name in ("change_reason", "supersedes_contract_id", "terminated_at", "signed_evidence_submission_id", "authority_acceptance_reference", "approved_sites_json", "counterparties_json"):
