@@ -42,6 +42,7 @@ export default function PlatformTenantsPage() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState("Platform support or subscription action");
+  const [quotaTbInput, setQuotaTbInput] = useState("5");
   const [moduleOverrides, setModuleOverrides] = useState<Record<string, ModuleDraft>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -107,7 +108,29 @@ export default function PlatformTenantsPage() {
     });
   }, [catalog.data?.items, modules.data?.items, moduleOverrides]);
 
-  const selectedDetail = detail.data as TenantDetailView | null;
+  const quota = usePlatformData(
+    () => selected ? platformApi.storageQuota(selected) : Promise.resolve(null),
+    [selected], { pollMs: 0, live: false },
+  );
+  const activation = usePlatformData(
+    () => selected ? platformApi.activationChecklist(selected) : Promise.resolve(null),
+    [selected], { pollMs: 0, live: false },
+  );
+  const formatStorage = (bytes: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(bytes / 1_000_000_000_000) + " TB";
+  const refreshReadiness = () => { quota.reload(); activation.reload(); };
+  const changeQuota = async () => {
+    if (!selected || !reason.trim()) return setActionError("Select a tenant and enter an approval reason.");
+    const tb = Number(quotaTbInput);
+    const bytes = Math.round(tb * 1_000_000_000_000);
+    if (!Number.isFinite(tb) || tb < 0 || !Number.isSafeInteger(bytes)) {
+      return setActionError("Enter a valid decimal TB quota.");
+    }
+    if (!window.confirm(`Allocate ${tb} decimal TB (${bytes.toLocaleString()} bytes) to this tenant? This must match its approved commercial agreement.`)) return;
+    await execute(() => platformApi.allocateStorageQuota(selected, bytes, reason.trim()),
+      "Byte-accurate storage allowance updated and audited.");
+    refreshReadiness();
+  };
+    const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
   const enabledCount = useMemo(
@@ -289,6 +312,34 @@ export default function PlatformTenantsPage() {
             </div><p><small>Owner setup is sent to the organization's administrator. Account access is separate from commercial subscription and storage allocations.</small></p></> : <EmptyState label="Select a tenant to inspect details." />}
         </div>
 
+        <div className="platform-card">
+          <div className="platform-section-title"><div><h2>Commercial activation readiness</h2><p>Requirements that must be satisfied before granting production access.</p></div>
+            {selected ? <StatusBadge value={activation.data?.ready ? "READY" : "BLOCKED"} /> : null}</div>
+          {!selected ? <EmptyState label="Select a tenant to review activation readiness." /> : null}
+          {activation.error ? <ErrorState error={activation.error} retry={activation.reload} /> : null}
+          {selected ? <><ul className="platform-activation-checklist">{activation.data?.checks.map((step) =>
+            <li key={step.key}><StatusBadge value={step.passed ? "PASSED" : "BLOCKED"} /> {step.label}</li>)}</ul>
+            <div className="platform-actions"><button className="platform-btn" onClick={refreshReadiness}>Recheck readiness</button>
+              <button className="platform-btn" onClick={() => void inviteOwner()}>Send owner setup link</button>
+              <Link className="platform-btn" to={`/platform/billing?tenant=${encodeURIComponent(selected)}`}>Complete billing setup</Link></div>
+          </> : null}
+        </div>
+        <div className="platform-card">
+          <div className="platform-section-title"><div><h2>Tenant storage allocation</h2><p>Storage is assigned only against an approved license; five decimal TB is 5,000,000,000,000 bytes.</p></div></div>
+          {!selected ? <EmptyState label="Select a tenant before allocating storage." /> : null}
+          {quota.error ? <ErrorState error={quota.error} retry={quota.reload} /> : null}
+          {selected && quota.data ? <>
+            <p><strong>Allocated:</strong> {formatStorage(quota.data.quota_bytes)}</p>
+            <p><strong>Stored:</strong> {formatStorage(quota.data.used_bytes)} · <strong>Reserved:</strong> {formatStorage(quota.data.reserved_bytes)}</p>
+            <p><strong>Available:</strong> {formatStorage(quota.data.remaining_bytes)} · <StatusBadge value={quota.data.integrity_state} /></p>
+            <div className="platform-form">
+              <label><span>Approved allocation (decimal TB)</span><input type="number" value={quotaTbInput} min={0} step={0.1} onChange={(event) => setQuotaTbInput(event.target.value)} /></label>
+              <label><span>Approval / change reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+              <button className="platform-btn primary" onClick={() => void changeQuota()}>Apply approved allocation</button>
+              <button className="platform-btn" onClick={() => void execute(() => platformApi.reconcileStorageQuota(selected, reason), "Storage ledger reconciled.")}>Check ledger integrity</button>
+            </div>
+          </> : null}
+        </div>
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Modules</h2></div>{selected ? <StatusBadge value={`${enabledCount} ON`} /> : null}</div>
           {!selected ? <EmptyState label="Select a tenant to manage modules." /> : null}
