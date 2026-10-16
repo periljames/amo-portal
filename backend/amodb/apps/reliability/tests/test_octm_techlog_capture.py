@@ -84,9 +84,9 @@ def test_duplicate_leg_numbers_and_engine_positions_rejected():
         ])
     with pytest.raises(ValueError, match="position"):
         page(engines=[
-            {"position": "1", "engine_serial_number": "PCE-AAA", "installation_ref": "A",
+            {"position": "1", "engine_serial_number": "PCE-AAA", "installation_ref": "INST-A",
              "observation": "MISSING"},
-            {"position": "1", "engine_serial_number": "PCE-BBB", "installation_ref": "B",
+            {"position": "1", "engine_serial_number": "PCE-BBB", "installation_ref": "INST-B",
              "observation": "MISSING"},
         ])
 
