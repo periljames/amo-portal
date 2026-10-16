@@ -413,7 +413,7 @@ def start_resumable_upload(tenant_slug:str,payload:UploadStart,request:Request,
         for field,expected in (("filename",original),("size_bytes",payload.size_bytes),
               ("requirement_id",payload.requirement_id),("related_kind",payload.related_kind),
               ("related_id",payload.related_id),("supersedes_submission_id",payload.supersedes_submission_id),
-              ("valid_until",payload.valid_until),("sha256",payload.sha256)):
+              ("valid_until",payload.valid_until),("sha256",payload.sha256 or "")):
             if prior_session[field]!=expected:
                 raise HTTPException(409,"Retry key already belongs to a different upload")
         return {"id":prior_session["id"],"state":prior_session["state"],
