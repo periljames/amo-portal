@@ -78,7 +78,12 @@ def allocate(db: Session, *, tenant_id: str, quota_bytes: int, actor_id: str, re
         raise ValueError("Quota change requires a recorded reason")
     if not isinstance(quota_bytes, int) or quota_bytes < 0 or quota_bytes > 9_000_000_000_000_000_000:
         raise ValueError("Invalid byte quota")
-    if not db.get(AMO, tenant_id):
+    # Serialize first allocation as well as subsequent changes. Locking only a
+    # quota row cannot protect its creation while that row does not exist yet.
+    tenant_query = db.query(AMO).filter(AMO.id == tenant_id)
+    if db.get_bind().dialect.name == "postgresql":
+        tenant_query = tenant_query.with_for_update()
+    if tenant_query.one_or_none() is None:
         raise ValueError("Tenant not found")
     q = db.query(TenantStorageQuota).filter(TenantStorageQuota.tenant_id == tenant_id)
     if db.get_bind().dialect.name == "postgresql":
