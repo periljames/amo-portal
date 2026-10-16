@@ -142,6 +142,13 @@ def reserve(db: Session, *, tenant_id: str, object_key: str, size_bytes: int,
         if existing.state not in {"RESERVED", "FINALIZED"}:
             raise ValueError("Upload idempotency key expired or was cancelled")
         return existing
+    pending_key = db.query(TenantStorageReservation.id).filter(
+        TenantStorageReservation.tenant_id == tenant_id,
+        TenantStorageReservation.object_key == object_key,
+        TenantStorageReservation.state == "RESERVED",
+    ).first()
+    if pending_key:
+        raise ValueError("Object key already exists in another pending reservation")
     stored = db.query(TenantStorageObject.id).filter(
         TenantStorageObject.tenant_id == tenant_id,
         TenantStorageObject.object_key == object_key,
