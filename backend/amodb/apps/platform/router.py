@@ -152,6 +152,102 @@ def send_tenant_owner_invitation(
     return {"tenant_id": tenant_id, "owner_email": owner.email, "status": "INVITATION_REQUESTED"}
 
 
+@router.get("/tenants/{tenant_id}/storage-quota")
+def tenant_storage_quota(
+    tenant_id: str, db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    if not db.get(account_models.AMO, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return storage_quota_service.read_quota(db, tenant_id)
+
+
+@router.post("/tenants/{tenant_id}/storage-quota")
+def update_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    try:
+        quota_bytes = payload.get("quota_bytes")
+        if type(quota_bytes) is not int:
+            raise ValueError("Provide an exact integer allocation in bytes")
+        result = storage_quota_service.allocate(
+            db, tenant_id=tenant_id, quota_bytes=quota_bytes,
+            actor_id=_actor_id(user), reason=_reason(payload),
+        )
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.changed",
+            tenant_id=tenant_id, reason=_reason(payload),
+            details={"quota_bytes": quota_bytes, "generation": result["generation"]})
+        db.commit()
+        return result
+    except (ValueError, TypeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/tenants/{tenant_id}/storage-quota/reconcile")
+def reconcile_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    try:
+        result = storage_quota_service.reconcile(db, tenant_id=tenant_id, actor_id=_actor_id(user))
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.reconciled",
+            tenant_id=tenant_id, reason=_reason(payload), details={"drift": result["drift"]})
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/tenants/{tenant_id}/activation-checklist")
+def tenant_activation_checklist(
+    tenant_id: str,
+    db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from amodb.apps.accounts import services as account_services
+    from . import storage_quota_service
+    from amodb import storage as shared_storage
+
+    tenant = db.get(account_models.AMO, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    owner = db.query(account_models.User).filter(
+        account_models.User.amo_id == tenant_id,
+        account_models.User.staff_code.like("OWNER-%"),
+        account_models.User.is_amo_admin.is_(True),
+    ).order_by(account_models.User.created_at).first()
+    licensed = account_services.get_billing_access_status(db, amo_id=tenant_id)
+    quota = storage_quota_service.read_quota(db, tenant_id)
+    modules = db.query(account_models.ModuleSubscription).filter(
+        account_models.ModuleSubscription.amo_id == tenant_id,
+        account_models.ModuleSubscription.status.in_([
+            account_models.ModuleSubscriptionStatus.ENABLED, account_models.ModuleSubscriptionStatus.TRIAL,
+        ]),
+    ).count()
+    checks = [
+        {"key": "organization", "label": "Tenant organization created", "passed": bool(tenant.id)},
+        {"key": "owner", "label": "Initial tenant administrator account assigned", "passed": owner is not None},
+        {"key": "owner_setup", "label": "Administrator completed password setup", "passed": bool(owner and not owner.must_change_password)},
+        {"key": "tenant_active", "label": "Organization is not suspended", "passed": bool(tenant.is_active)},
+        {"key": "subscription", "label": "Effective commercial subscription permits access", "passed": bool(licensed.has_access)},
+        {"key": "modules", "label": "At least one module is enabled", "passed": modules > 0},
+        {"key": "storage", "label": "Tenant byte quota explicitly allocated", "passed": quota["quota_bytes"] > 0},
+        {"key": "shared_storage", "label": "Shared object storage configured", "passed": shared_storage.shared_storage_enabled()},
+    ]
+    return {
+        "tenant_id": tenant_id, "ready": all(row["passed"] for row in checks),
+        "checks": checks, "storage": quota,
+    }
+
+
 @router.get("/tenants/{tenant_id}")
 def tenant_detail(tenant_id: str, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
     try:
