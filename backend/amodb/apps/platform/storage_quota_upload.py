@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from amodb import storage
 from . import storage_quota_service
+from .storage_quota_models import TenantStorageObject
 
 
 def _quota_error(exc: ValueError) -> HTTPException:
@@ -22,6 +23,26 @@ def _quota_error(exc: ValueError) -> HTTPException:
     return HTTPException(
         status_code=413 if "quota exceeded" in detail.lower() else 409,
         detail=detail,
+    )
+
+
+def _finalized_replay(db, reservation, *, digest: str):
+    """Never overwrite an already-finalized object on a retried request."""
+    if reservation.state != "FINALIZED":
+        return None
+    obj = db.query(TenantStorageObject).filter(
+        TenantStorageObject.tenant_id == reservation.tenant_id,
+        TenantStorageObject.reservation_id == reservation.id,
+        TenantStorageObject.state == "ACTIVE",
+    ).one_or_none()
+    if obj is None or obj.checksum_sha256 != digest:
+        raise HTTPException(
+            status_code=409,
+            detail="Upload replay conflicts with previously finalized object content",
+        )
+    return storage.StoredObject(
+        uri=obj.storage_uri, key=obj.object_key, backend="s3",
+        size_bytes=int(obj.size_bytes),
     )
 
 
@@ -41,6 +62,9 @@ def put_bytes(db, *, tenant_id: str, key: str, content: bytes,
         )
     except ValueError as exc:
         raise _quota_error(exc) from exc
+    replay = _finalized_replay(db, reservation, digest=digest)
+    if replay is not None:
+        return replay
     retained = None
     try:
         retained = storage.put_stream(BytesIO(content), key=key, content_type=content_type)
@@ -80,6 +104,9 @@ def put_local_file(db, *, tenant_id: str, key: str, path: Path,
         )
     except ValueError as exc:
         raise _quota_error(exc) from exc
+    replay = _finalized_replay(db, reservation, digest=digest.hexdigest())
+    if replay is not None:
+        return replay
     retained = None
     try:
         retained = storage.put_file(path, key=key, content_type=content_type)
