@@ -86,6 +86,16 @@ def _assert_required_contract_current(
               ON s.id=c.signed_evidence_submission_id AND s.amo_id=c.amo_id
               AND s.related_kind='CONTRACT' AND s.related_id=c.id
               AND s.status='ACCEPTED' AND s.sha256=r.source_sha256
+              AND s.dms_evidence_asset_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM document_evidence_assets a
+                JOIN document_retention_dispositions d
+                  ON d.source_type='EVIDENCE_ASSET' AND d.source_id=a.id
+                  AND d.tenant_id=a.tenant_id
+                WHERE a.tenant_id=s.amo_id AND a.id=s.dms_evidence_asset_id
+                  AND a.sha256=s.sha256 AND d.id=s.dms_retention_id
+                  AND d.status!='DISPOSED'
+              )
             JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
               AND p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id
             JOIN quality_external_provider_evidence q ON q.id=s.qms_evidence_id
