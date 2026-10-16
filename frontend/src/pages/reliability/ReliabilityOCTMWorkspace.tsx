@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import ReliabilityTechlogPageEntry from "./ReliabilityTechlogPageEntry";
 import { apiRequest } from "../../services/apiClient";
 import "../../styles/reliability-v2.css";
@@ -316,8 +315,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const trend = monitoring.intervals.filter((row) => row.status === "VALID" &&
     (!selectedEngine || row.engine_serial_number === selectedEngine)).slice().reverse();
 
-  return <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-    <main className="reliability-v2 octm">
+  return <main className="reliability-v2 octm">
       <header className="reliability-v2__header">
         <div>
           <p className="reliability-v2__eyebrow">Reliability / Engine monitoring</p>
@@ -627,6 +625,5 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
           </form>}
         </section>}
       </>}
-    </main>
-  </DepartmentLayout>;
+  </main>;
 }
