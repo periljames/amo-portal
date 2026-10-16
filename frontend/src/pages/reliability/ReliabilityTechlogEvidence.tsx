@@ -43,10 +43,11 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const id = assetId(reference.trim());
+  const allowSelection = !!onReference;
 
   useEffect(() => {
     let active = true;
-    if (!onReference || !aircraft.trim() || !techsheet.trim()) return;
+    if (!allowSelection || !aircraft.trim() || !techsheet.trim()) return;
     const params = new URLSearchParams({ aircraft: aircraft.trim(), techsheet_ref: techsheet.trim() });
     void fetch(basePath() + "?" + params.toString(), { headers: authHeaders(), credentials: "same-origin" })
       .then(async (response) => {
@@ -55,7 +56,7 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
       }).then((result) => { if (active) setAvailable(result.items); })
       .catch(() => { if (active) setAvailable([]); });
     return () => { active = false; };
-  }, [aircraft, techsheet, onReference, listVersion]);
+  }, [aircraft, techsheet, allowSelection, listVersion]);
 
   useEffect(() => {
     let active = true;
