@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
+import PartnerContractedWork from "./PartnerContractedWork";
 import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 import PartnerProcurementWorkspace from "./PartnerProcurementWorkspace";
@@ -106,5 +107,5 @@ function WorkPreview({tenant}:PartnerProps){
 export default function PartnerCommerce(props:PartnerProps&{section:"contracts"|"procurement"|"work"}){
   if(props.section==="contracts")return <Contracts {...props}/>;
   if(props.section==="procurement")return <PartnerProcurementWorkspace {...props}/>;
-  return <WorkPreview {...props}/>;
+  return <PartnerContractedWork {...props}/>;
 }
