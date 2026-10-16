@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiRequest } from "../../services/apiClient";
 import type { DashboardFilters, DashboardResponse, DrilldownDescriptor, DrilldownResponse, EngineSeriesResponse, SavedView } from "./reliabilityAnalyticsTypes";
@@ -17,11 +17,48 @@ import "../../styles/reliability-v2.css";
 import "./ReliabilityAnalyticsWorkspace.css";
 import "./ReliabilityFormulaWorkbench.css";
 
+type Area = "overview" | "operational" | "network" | "components" | "oil" | "engineering"
+  | "deferrals" | "fracas" | "data" | "evidence" | "formulae" | "administration" | "governance" | "calculations";
+const AREA_LABELS: Record<Area, string> = {
+  overview: "Fleet reliability overview", operational: "Fleet performance trends",
+  network: "Network delay analysis", components: "Component reliability",
+  oil: "Oil consumption trends", engineering: "Engine health monitoring",
+  deferrals: "Deferred defect controls", fracas: "FRACAS analysis",
+  data: "Source confidence", evidence: "Analytical evidence register",
+  formulae: "Formula library", administration: "Metric administration",
+  governance: "Approval and effectivity", calculations: "Calculation snapshots",
+};
+const CHART_AREAS: Array<{ key: Area; label: string }> = [
+  { key: "operational", label: "Fleet" }, { key: "network", label: "Network" },
+  { key: "components", label: "Components" }, { key: "oil", label: "Oil" },
+  { key: "engineering", label: "Engines" }, { key: "deferrals", label: "Deferrals" },
+  { key: "fracas", label: "FRACAS" }, { key: "data", label: "Source health" },
+];
+function filtersFromUrl(): DashboardFilters {
+  const defaults = defaultFilters();
+  const search = new URLSearchParams(window.location.search);
+  const result = { ...defaults };
+  const fields: Array<[keyof DashboardFilters, string]> = [
+    ["periodStart", "period_start"], ["periodEnd", "period_end"], ["bucket", "bucket"],
+    ["aircraft", "aircraft"], ["aircraftType", "aircraft_types"], ["ataChapter", "ata_chapters"],
+    ["station", "stations"], ["eventType", "event_types"], ["severity", "severities"],
+    ["sourceSystem", "source_systems"],
+  ];
+  fields.forEach(([name, key]) => { if (search.has(key)) result[name] = search.get(key) || ""; });
+  return result.periodStart <= result.periodEnd ? result : defaults;
+}
+
 const ReliabilityAnalyticsWorkspace: React.FC = () => {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeKey = location.pathname.split("/reliability/analytics/")[1]?.split("/")[0] || "overview";
+  const area: Area = Object.prototype.hasOwnProperty.call(AREA_LABELS, routeKey) ? routeKey as Area : "overview";
+  const isChartArea = CHART_AREAS.some((item) => item.key === area);
+  const dashboardRequired = area !== "calculations" && area !== "governance";
   const basePath = `/maintenance/${encodeURIComponent(amoCode)}/reliability`;
-  const [filters, setFilters] = useState<DashboardFilters>(() => defaultFilters());
-  const [appliedFilters, setAppliedFilters] = useState<DashboardFilters>(() => defaultFilters());
+  const [filters, setFilters] = useState<DashboardFilters>(filtersFromUrl);
+  const [appliedFilters, setAppliedFilters] = useState<DashboardFilters>(filtersFromUrl);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +98,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    if (!engineMetric) {
+    if (!engineMetric || area !== "engineering") {
       setEngineSeries(null);
       return () => { active = false; };
     }
@@ -84,11 +121,12 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
     };
     void load();
     return () => { active = false; };
-  }, [appliedFilters.aircraft, appliedFilters.periodEnd, appliedFilters.periodStart, engineMetric]);
+  }, [appliedFilters.aircraft, appliedFilters.periodEnd, appliedFilters.periodStart, engineMetric, area]);
 
   const applyFilters = () => {
     setDrilldown(null);
     setAppliedFilters(filters);
+    navigate({ pathname: location.pathname, search: buildSearch(filters).toString() }, { replace: true });
   };
 
   const applyRange = (days: number) => {
@@ -99,6 +137,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
     setFilters(next);
     setAppliedFilters(next);
     setDrilldown(null);
+    navigate({ pathname: location.pathname, search: buildSearch(next).toString() }, { replace: true });
   };
 
   const resetFilters = () => {
@@ -107,6 +146,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
     setAppliedFilters(next);
     setSelectedViewId("");
     setDrilldown(null);
+    navigate({ pathname: location.pathname, search: "" }, { replace: true });
   };
 
   const saveView = () => {
@@ -157,13 +197,13 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
       params.set("limit", "200");
       const response = await apiRequest<DrilldownResponse>(`/reliability/analytics-dashboard/drilldown?${params.toString()}`, { cacheTtlMs: 0 });
       setDrilldown(response);
-      window.requestAnimationFrame(() => document.getElementById("reliability-dashboard-evidence")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      navigate({ pathname: basePath + "/analytics/evidence", search: buildSearch(appliedFilters).toString() });
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "The supporting records could not be loaded.");
     } finally {
       setDrilldownLoading(false);
     }
-  }, [appliedFilters]);
+  }, [appliedFilters, basePath, navigate]);
 
   const handleChartClick = (value: unknown, title: string) => {
     const point = chartPointFromEvent(value);
