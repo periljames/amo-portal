@@ -15,6 +15,23 @@ depends_on = None
 
 def upgrade():
     op.create_table(
+        "reliability_octm_source_assets",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("aircraft_serial_number", sa.String(50), nullable=False),
+        sa.Column("techsheet_ref", sa.String(160), nullable=False),
+        sa.Column("filename", sa.String(255), nullable=False),
+        sa.Column("mime_type", sa.String(64), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("sha256", sa.String(64), nullable=False),
+        sa.Column("object_uri", sa.String(2048), nullable=False),
+        sa.Column("uploaded_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_octm_source_asset_page", "reliability_octm_source_assets",
+                    ["amo_id", "aircraft_serial_number", "techsheet_ref"])
+    op.create_index("ix_octm_source_asset_checksum", "reliability_octm_source_assets", ["amo_id", "sha256"])
+    op.create_table(
         "reliability_octm_entries",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
@@ -96,3 +113,4 @@ def downgrade():
     op.drop_table("reliability_octm_profiles")
     op.drop_table("reliability_octm_revisions")
     op.drop_table("reliability_octm_entries")
+    op.drop_table("reliability_octm_source_assets")
