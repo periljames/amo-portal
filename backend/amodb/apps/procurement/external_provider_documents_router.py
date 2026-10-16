@@ -222,7 +222,9 @@ def document_permissions(amo_code:str,db:Session=Depends(get_db),
                          user=Depends(get_current_active_user)):
     _staff(db,amo_code,user)
     from amodb.apps.doc_control.workspace_service import is_control_user
-    return {"quality_manager":str(getattr(user.role,"value",user.role))=="QUALITY_MANAGER",
+    role=str(getattr(user.role,"value",user.role))
+    return {"quality_manager":role=="QUALITY_MANAGER",
+            "quality_reviewer":role in {"QUALITY_MANAGER","QUALITY_OFFICER"},
             "document_controller":is_control_user(user)}
 
 
