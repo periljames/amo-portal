@@ -54,6 +54,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const shipments=usePartnerLoad((signal)=>capabilities.includes("procurement.read")?
     partnerRequest<{items:{id:string;po_id:number;shipment_reference:string}[]}>(tenant,"commerce/shipments",{signal}):
     Promise.resolve({items:[] as {id:string;po_id:number;shipment_reference:string}[]}),tenant+":shipmentDocs:"+refresh);
+  const maintenance=usePartnerLoad((signal)=>capabilities.includes("task.read")?
+    partnerRequest<{items:{id:string;work_number:string;work_title:string}[]}>(tenant,"maintenance-work",{signal}):
+    Promise.resolve({items:[] as {id:string;work_number:string;work_title:string}[]}),tenant+":maintenanceDocs:"+refresh);
   useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();
     if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);
   const current=requirements.value?.items.find(r=>r.id===requirementId);
@@ -247,6 +250,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           {rfqs.value?.items.length?<option value="RFQ">Procurement RFQ</option>:null}
           {orders.value?.items.length?<option value="PO">Issued purchase order</option>:null}
           {shipments.value?.items.length?<option value="SHIPMENT">Advance shipment notice</option>:null}
+          {maintenance.value?.items.length?<option value="CONTRACTED_WORK">Assigned contracted maintenance work</option>:null}
         </select></label>
         {related==="CONTRACT"&&<label>Assigned agreement<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
           <option value="">Choose assigned agreement</option>
@@ -268,6 +272,10 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         {related==="SHIPMENT"&&<label>Advance shipment notice<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
           <option value="">Select shipment (issued PO document scope required)</option>
           {shipments.value?.items.map(x=><option key={x.id} value={x.id}>{x.shipment_reference}</option>)}
+        </select></label>}
+        {related==="CONTRACTED_WORK"&&<label>Authorized contracted work<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
+          <option value="">Choose your assigned work order</option>
+          {maintenance.value?.items.map(x=><option key={x.id} value={x.id}>{x.work_number} · {x.work_title}</option>)}
         </select></label>}
         <label>Replace earlier submission (optional)<select value={supersedes} onChange={e=>{setSupersedes(e.target.value);resetRetry();}}>
           <option value="">First submission</option>
