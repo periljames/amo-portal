@@ -17,7 +17,7 @@ function exportVisibleCsv(filename: string, headers: string[], values: Array<Arr
   // Prevent spreadsheet formula evaluation when a source field is opened in Excel.
   const safe = (cell: string | number | null | undefined): string => {
     let value = cell == null ? "" : String(cell);
-    if (/^[\s]*[=+\-@]/.test(value)) value = "'" + value;
+    if (typeof cell === "string" && /^[\s]*[=+\-@]/.test(value)) value = "'" + value;
     return '"' + value.replaceAll('"', '""') + '"';
   };
   const content = [headers.map(safe).join(","), ...values.map((row) => row.map(safe).join(","))].join("\r\n");
