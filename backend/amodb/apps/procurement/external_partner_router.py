@@ -115,7 +115,7 @@ def _require_existing_related(db:Session,user,kind:str,value:str):
         _require_object(user,"contracted_work",value)
         found=_row("""SELECT id FROM external_contracted_work
             WHERE amo_id=:amo AND supplier_id=:supplier AND provider_id=:provider
-              AND id=:item AND status NOT IN ('DRAFT','CANCELLED')""",
+              AND id=:item AND authorized_at IS NOT NULL AND status!='CANCELLED'""",
               db,**_context(user),item=value)
     elif kind=="SHIPMENT":
         # The shipment must be connected to an explicitly scoped issued PO.
