@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -222,3 +223,25 @@ def test_answered_fieldwork_snapshot_is_json_serializable_for_event_receipt() ->
     assert snapshot["answered_at"] == answered_at.isoformat()
     assert snapshot["updated_at"] == answered_at.isoformat()
     assert json.loads(json.dumps(snapshot))["answered_at"] == answered_at.isoformat()
+
+def test_fieldwork_receipt_contains_no_raw_python_datetimes() -> None:
+    """The idempotency receipt is persisted as JSON, not as typed SQL timestamps."""
+    now = datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)
+    item = SimpleNamespace(
+        id="item-id", audit_id="audit-id", section="Stores", checklist_ref="CHK-01",
+        requirement_ref=None, prompt="Check stock traceability", response_status="PENDING",
+        objective_evidence=None, finding_id=None, completed_by_user_id=None,
+        updated_at=now,
+    )
+    row = checklist_execution_router._row_dict(item, None)
+    assert row["updated_at"] == now.isoformat()
+    assert json.loads(json.dumps(row))["updated_at"] == now.isoformat()
+
+    event = SimpleNamespace(
+        id="event-id", event_type="UPDATED", reason="Fieldwork update",
+        before_snapshot={"entity_version": 1}, after_snapshot={"entity_version": 2},
+        actor_user_id="auditor-1", created_at=now,
+    )
+    event_row = checklist_execution_router._event_dict(event)
+    assert event_row["created_at"] == now.isoformat()
+    assert json.loads(json.dumps(event_row))["created_at"] == now.isoformat()
