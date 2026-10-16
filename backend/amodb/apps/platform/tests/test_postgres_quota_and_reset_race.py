@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from amodb.database import Base
-from amodb.apps.accounts.models import AMO, Department, User, PasswordResetToken
+from amodb.apps.accounts.models import AMO, AMOAsset, Department, User, PasswordResetToken
 from amodb.apps.platform import storage_quota_service as quota
 from amodb.apps.platform.storage_quota_models import (
     TenantStorageQuota, TenantStorageReservation, TenantStorageObject, TenantStorageLedgerEvent,
@@ -29,7 +29,7 @@ def postgres_schema():
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     scoped = engine.execution_options(schema_translate_map={None: schema})
     tables = [
-        AMO.__table__, Department.__table__, User.__table__,
+        AMO.__table__, Department.__table__, User.__table__, AMOAsset.__table__,
         PasswordResetToken.__table__, TenantStorageQuota.__table__,
         TenantStorageReservation.__table__, TenantStorageObject.__table__,
         TenantStorageLedgerEvent.__table__,
