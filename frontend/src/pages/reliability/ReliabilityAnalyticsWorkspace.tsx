@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest } from "../../services/apiClient";
 import type { DashboardFilters, DashboardResponse, DrilldownDescriptor, DrilldownResponse, EngineSeriesResponse, SavedView } from "./reliabilityAnalyticsTypes";
 import { buildSearch, chartLabelFromEvent, chartPointFromEvent, dateInput, defaultFilters, exportDashboardCsv, flattenEngineSeries, formatDate, formatMetric, formatNumber, readSavedViews, SAVED_VIEW_KEY, statusClass } from "./reliabilityAnalyticsUtils";
@@ -194,8 +193,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
   const engineSeriesNames = engineSeries ? Object.keys(engineSeries.series) : [];
 
   return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-      <main className="reliability-v2 reliability-analytics">
+    <main className="reliability-v2 reliability-analytics">
         <header className="reliability-v2__header reliability-analytics__header">
           <div>
             <p className="reliability-v2__eyebrow">Measured fleet performance</p>
@@ -288,8 +286,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
             openDrilldown={openDrilldown}
           />
         </>}
-      </main>
-    </DepartmentLayout>
+    </main>
   );
 };
 
