@@ -1,7 +1,7 @@
 """Add per-tenant BIGINT storage accounting and immutable object ledger.
 
 Revision ID: plat_20261016_storage_bytes
-Revises: saas_20260731_route_latency_hist
+Revises: quality_261003_evidence_context
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "plat_20261016_storage_bytes"
-down_revision = "saas_20260731_route_latency_hist"
+down_revision = "quality_261003_evidence_context"
 branch_labels = None
 depends_on = None
 
