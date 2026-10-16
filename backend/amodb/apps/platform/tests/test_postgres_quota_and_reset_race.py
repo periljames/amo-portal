@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from amodb.database import Base
-from amodb.apps.accounts.models import AMO, AMOAsset, Department, User, PasswordResetToken
+from amodb.apps.accounts.models import AMO, AMOAsset, Department, User, PasswordResetToken, PortalAuthSession, RefreshSessionToken, PortalRefreshSession
 from amodb.apps.platform import storage_quota_service as quota
 from amodb.apps.platform.storage_quota_models import (
     TenantStorageQuota, TenantStorageReservation, TenantStorageObject, TenantStorageLedgerEvent,
@@ -30,7 +30,7 @@ def postgres_schema():
     scoped = engine.execution_options(schema_translate_map={None: schema})
     tables = [
         AMO.__table__, Department.__table__, User.__table__, AMOAsset.__table__,
-        PasswordResetToken.__table__, TenantStorageQuota.__table__,
+        PasswordResetToken.__table__, PortalAuthSession.__table__, RefreshSessionToken.__table__, PortalRefreshSession.__table__, TenantStorageQuota.__table__,
         TenantStorageReservation.__table__, TenantStorageObject.__table__,
         TenantStorageLedgerEvent.__table__,
     ]
@@ -113,3 +113,51 @@ def test_password_reset_one_use_conditional_update_under_postgres(postgres_schem
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(worker, (1, 2)))
     assert sorted(results) == [0, 1]
+
+
+def test_two_device_refresh_tokens_are_revoked_on_tenant_suspension(postgres_schema):
+    from datetime import datetime, timedelta, timezone
+    from amodb.apps.accounts import session_service
+    engine, _ = postgres_schema
+    with Session(engine) as db:
+        tenant = AMO(id="pg-suspended", amo_code="PG_SUSPENDED", name="Suspend Tenant", login_slug="pg-suspended")
+        user = User(
+            id="pg-suspended-user", amo_id=tenant.id, staff_code="PG-SUSP-1",
+            email="suspension@example.test", first_name="Tenant", last_name="Employee",
+            full_name="Tenant Employee", hashed_password="not-a-usable-password", is_active=True,
+        )
+        db.add_all([tenant, user])
+        db.commit()
+        issued_one = session_service.create_session(db, user=user, ip_address="127.0.0.1", user_agent="Browser A")
+        issued_two = session_service.create_session(db, user=user, ip_address="127.0.0.2", user_agent="Browser B")
+        db.add(PortalRefreshSession(
+            user_id=user.id, amo_id=tenant.id, auth_session_id=issued_one.session_id,
+            token_hash="f" * 64, expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+        db.commit()
+        tenant.is_active = False
+        session_service.revoke_tenant_sessions(db, amo_id=tenant.id, reason="PLATFORM_SUSPEND")
+        db.commit()
+
+    with Session(engine) as worker_a, Session(engine) as worker_b:
+        for db, issued in [(worker_a, issued_one), (worker_b, issued_two)]:
+            with pytest.raises(session_service.RefreshRejected):
+                session_service.rotate_session(db, raw_token=issued.refresh_token)
+            session_row = db.get(PortalAuthSession, issued.session_id)
+            assert session_row.revoked_at is not None
+            token_row = db.query(RefreshSessionToken).filter(
+                RefreshSessionToken.session_id == issued.session_id,
+            ).first()
+            assert token_row is not None and token_row.status == "REVOKED"
+        legacy = worker_a.query(PortalRefreshSession).filter(
+            PortalRefreshSession.user_id == "pg-suspended-user"
+        ).one()
+        assert legacy.revoked_at is not None
+
+    with Session(engine) as db:
+        tenant = db.get(AMO, "pg-suspended")
+        tenant.is_active = True
+        db.commit()
+        # Reactivation must not restore a previously revoked login.
+        with pytest.raises(session_service.RefreshRejected):
+            session_service.rotate_session(db, raw_token=issued_one.refresh_token)
