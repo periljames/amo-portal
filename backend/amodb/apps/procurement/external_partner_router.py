@@ -448,6 +448,8 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
             db,**ctx,contract=contract_id)
     if not contract or contract["status"]=="DRAFT":
         raise HTTPException(404,"No executed controlled agreement available")
+    if contract["status"]=="ACTIVE" and contract["effective_on"] and contract["effective_on"]>date.today():
+        raise HTTPException(403,"Agreement has not reached its effective date")
     historical = contract["status"]!="ACTIVE" or (
         contract["expires_on"] is not None and contract["expires_on"]<date.today())
     # Historical originals remain readable by expressly assigned members,
