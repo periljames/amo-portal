@@ -1,0 +1,23 @@
+.rel-techlog-evidence {min-width:0;display:grid;gap:.6rem;border:1px solid color-mix(in srgb,CanvasText 15%,transparent);border-radius:.7rem;background:Canvas;padding:.9rem}
+.rel-techlog-evidence__heading{display:flex;gap:.55rem;align-items:center}
+.rel-techlog-evidence__heading svg{color:#0f766e;flex:0 0 auto}
+.rel-techlog-evidence__heading>div{display:grid;gap:.1rem}
+.rel-techlog-evidence__heading small{font-size:.72rem;opacity:.7}
+.rel-techlog-evidence__upload{display:flex!important;align-items:center;justify-content:center;gap:.5rem;
+  border:1px dashed #0f766e;background:color-mix(in srgb,#0f766e 8%,Canvas);color:CanvasText;
+  border-radius:.55rem;min-height:44px;padding:.5rem .7rem;font-size:.84rem;font-weight:730;cursor:pointer}
+.rel-techlog-evidence__upload input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.rel-techlog-evidence__upload:focus-within{outline:2px solid #0f766e;outline-offset:2px}
+.rel-techlog-evidence__metadata{display:flex;gap:.4rem;align-items:start;font-size:.78rem}
+.rel-techlog-evidence__metadata small{display:block;font-size:.7rem;opacity:.75}
+.rel-techlog-evidence__metadata svg{color:#0f766e;flex:0 0 auto}
+.rel-techlog-evidence__buttons{display:flex;flex-wrap:wrap;gap:.45rem}
+.rel-techlog-evidence__buttons :is(button,a){display:inline-flex;align-items:center;gap:.35rem;font:inherit;
+  font-size:.78rem;min-height:35px;border-radius:.4rem;background:Canvas;color:CanvasText;
+  border:1px solid color-mix(in srgb,CanvasText 20%,transparent);padding:.45rem .65rem;text-decoration:none}
+.rel-techlog-evidence__buttons button:disabled{opacity:.6}
+.rel-techlog-evidence__preview{max-height:min(70dvh,760px);overflow:auto;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);background:#f1f5f9;border-radius:.4rem}
+.rel-techlog-evidence__preview iframe{display:block;width:100%;height:min(64dvh,700px);border:0}
+.rel-techlog-evidence__preview img{max-width:100%;height:auto;display:block;margin:auto}
+.rel-techlog-evidence__error{font-size:.78rem;background:#fee2e2;color:#991b1b;padding:.55rem;border-radius:.4rem}
+.rel-techlog-evidence__note{font-size:.76rem;opacity:.73;margin:0;line-height:1.5}
