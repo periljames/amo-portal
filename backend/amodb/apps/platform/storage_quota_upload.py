@@ -30,6 +30,8 @@ def put_bytes(db, *, tenant_id: str, key: str, content: bytes,
               operation_id: str | None = None):
     if not storage.shared_storage_enabled():
         raise HTTPException(status_code=503, detail="Shared object storage must be enabled")
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=actor_id or "")
     digest = hashlib.sha256(content).hexdigest()
     try:
         reservation = storage_quota_service.reserve(
@@ -63,6 +65,8 @@ def put_local_file(db, *, tenant_id: str, key: str, path: Path,
                    operation_id: str | None = None):
     if not storage.shared_storage_enabled():
         raise HTTPException(status_code=503, detail="Shared object storage must be enabled")
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=actor_id or "")
     size = path.stat().st_size
     digest = hashlib.sha256()
     with path.open("rb") as source:
