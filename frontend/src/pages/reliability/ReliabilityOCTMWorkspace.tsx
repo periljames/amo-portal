@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import ReliabilityTechlogPageEntry from "./ReliabilityTechlogPageEntry";
+import ReliabilityTechlogEvidence from "./ReliabilityTechlogEvidence";
 import { apiRequest } from "../../services/apiClient";
 import "../../styles/reliability-v2.css";
 import "./ReliabilityOCTMWorkspace.css";
@@ -501,6 +502,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <p>Source evidence: <strong>{reviewTarget.source_evidence_ref || "Not provided"}</strong>.
               Sector: {reviewTarget.sector_ref || "Not entered"}.
               Oil reference: {reviewTarget.reference_method || "Not entered"} / {reviewTarget.reference_level || "Not entered"}.</p>
+            {reviewTarget.source_evidence_ref?.startsWith("OCTM_ASSET:") &&
+              <ReliabilityTechlogEvidence aircraft={reviewTarget.aircraft_serial_number}
+                techsheet={reviewTarget.techsheet_ref}
+                reference={reviewTarget.source_evidence_ref} />}
             <p>Maintenance completed: {reviewTarget.maintenance_complete}.
               Oil: {reviewTarget.oil_quantity ?? "not recorded"} {reviewTarget.oil_unit || ""}.
               Flight hours: {reviewTarget.flight_hours ?? "not recorded"}.</p>
