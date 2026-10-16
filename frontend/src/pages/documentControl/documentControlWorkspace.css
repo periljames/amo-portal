@@ -6,6 +6,12 @@
   --dc-border: var(--border-subtle, #d8e0ea);
   --dc-accent: var(--brand-primary, #1d4ed8);
   --dc-accent-soft: color-mix(in srgb, var(--dc-accent) 10%, var(--dc-paper));
+  /* Theme-adaptive recessed surface used by DMS tab/nav active + hover states.
+     --surface-muted is otherwise undefined app-wide, so these controls fell
+     back to a hardcoded light fill and turned into glaring light pills (with
+     invisible white text) in dark mode. Derive it from the theme-scoped
+     --dc-ink/--dc-paper so it tracks light and dark automatically. */
+  --surface-muted: color-mix(in srgb, var(--dc-ink) 9%, var(--dc-paper));
   min-height: 100%;
   width: min(100%, 92rem);
   margin-inline: auto;
