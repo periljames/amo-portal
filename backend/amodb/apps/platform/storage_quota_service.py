@@ -141,7 +141,6 @@ def reserve(db: Session, *, tenant_id: str, object_key: str, size_bytes: int,
     stored = db.query(TenantStorageObject.id).filter(
         TenantStorageObject.tenant_id == tenant_id,
         TenantStorageObject.object_key == object_key,
-        TenantStorageObject.state == "ACTIVE",
     ).first()
     if stored:
         raise ValueError("Object key already exists; use a unique immutable object key")
