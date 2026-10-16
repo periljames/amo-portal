@@ -339,3 +339,11 @@ jobs:
           done
           curl -fsS http://127.0.0.1:4173 >/dev/null
           npx playwright test tests/e2e/reliability-workbook-parity-ci.spec.ts tests/e2e/reliability-formal-reporting-ci.spec.ts
+      - name: Retain rendered Reliability browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-ui-screenshots-${{ github.sha }}
+          path: frontend/test-results/reliability-*.png
+          if-no-files-found: ignore
+          retention-days: 14
