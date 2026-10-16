@@ -88,22 +88,6 @@ function Contracts({tenant,csrf,capabilities}:PartnerProps){
     {query.value&&<Pager value={query.value} onChange={setOffset}/>}
   </Section>;
 }
-type Work={approved_scopes:Array<{category:string;site_code:string;product_family:string;status:string;restrictions:string|null;expires_on:string|null}>;assigned_work_count:number;execution_enabled:boolean;message:string};
-function WorkPreview({tenant}:PartnerProps){
-  const query=usePartnerLoad((signal)=>partnerRequest<Work>(tenant,"contracted-work",{signal}),tenant);
-  return <Section title="Approved work boundaries" description="A scoped read projection, not a maintenance execution or release screen.">
-    <State pending={query.pending} error={query.error} retry={query.reload}/>
-    {query.value&&<>
-      <div className="partner-inline"><span>Explicitly assigned references</span><strong>{query.value.assigned_work_count}</strong></div>
-      {query.value.approved_scopes.map((row,i)=><div key={i} className="partner-row">
-        <div><strong>{row.category} / {row.site_code}</strong>
-          <small>{row.product_family} · Ends {friendlyDate(row.expires_on)}</small>
-          {row.restrictions&&<small>Limits: {row.restrictions}</small>}</div><Status value={row.status}/>
-      </div>)}
-      <p className="partner-muted">{query.value.message}</p>
-    </>}
-  </Section>;
-}
 export default function PartnerCommerce(props:PartnerProps&{section:"contracts"|"procurement"|"work"}){
   if(props.section==="contracts")return <Contracts {...props}/>;
   if(props.section==="procurement")return <PartnerProcurementWorkspace {...props}/>;
