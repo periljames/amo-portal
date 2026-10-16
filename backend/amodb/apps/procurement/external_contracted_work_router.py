@@ -7,17 +7,20 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 from . import external_partner_router as partner
 from . import service, supplier_quality_control
+from amodb import storage
 
 staff_router = APIRouter(prefix="/api/maintenance/{amo_code}/contracted-work", tags=["Contracted maintenance"])
 partner_router = APIRouter(prefix="/api/external-provider/partner/{tenant_slug}/maintenance-work", tags=["Contracted maintenance partner"])
@@ -263,10 +266,14 @@ class NewWork(BaseModel):
     inspections: list[str] = Field(min_length=1,max_length=100)
     required_release: str = Field(min_length=4,max_length=255)
     requirements: dict[str,str|bool|None] = Field(default_factory=dict)
+    data_manual_id: str | None = Field(default=None,max_length=36)
+    data_revision_id: str | None = Field(default=None,max_length=36)
     purchase_order_id: int | None = None
 
     @model_validator(mode="after")
     def valid(self):
+        if bool(self.data_manual_id) != bool(self.data_revision_id):
+            raise ValueError("Controlled maintenance data requires a document and an exact revision")
         if not any([self.registration,self.part_number,self.serial_number,self.asset_description]):
             raise ValueError("Identify the aircraft, engine, component or specialised service")
         return self
@@ -401,6 +408,14 @@ def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
        WHERE amo_id=:amo AND supplier_id=:supplier AND id=:provider""",
        amo=amo,supplier=payload.supplier_id,provider=payload.provider_id)
     if not provider:raise HTTPException(422,"Provider must belong to the selected tenant supplier")
+    if payload.data_manual_id:
+        published=_one(db,"""SELECT r.id FROM manuals m
+            JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=:amo
+            JOIN manual_revisions r ON r.manual_id=m.id AND r.id=m.current_published_rev_id
+            WHERE m.id=:manual AND r.id=:revision AND r.status_enum='PUBLISHED'
+              AND r.published_at IS NOT NULL AND r.source_storage_path IS NOT NULL""",
+            amo=amo,manual=payload.data_manual_id,revision=payload.data_revision_id)
+        if not published:raise HTTPException(409,"Technical data must be current controlled DMS revision")
     if payload.purchase_order_id:
         po=_one(db,"""SELECT id FROM procurement_purchase_orders WHERE
             id=:po AND amo_id=:amo AND supplier_id=:supplier""",
@@ -424,7 +439,8 @@ def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
         "serial":payload.serial_number,"asset_desc":payload.asset_description,"defect":payload.defect,
         "data":payload.data_reference,"revision":payload.data_revision,
         "inspections":json.dumps(payload.inspections),"release":payload.required_release,
-        "requirements":json.dumps(payload.requirements),"actor":str(user.id)})
+        "requirements":json.dumps({**payload.requirements,"data_manual_id":payload.data_manual_id,
+          "data_revision_id":payload.data_revision_id}),"actor":str(user.id)})
     work=_work(db,amo,work_id)
     _event(db,work,"CREATE","Maintenance Manager initiated defined contracted function",
            staff=str(user.id),target="DRAFT")
@@ -460,6 +476,12 @@ def _transition(db,work,payload,*,user=None,identity=None):
     if action in {"SCOPE_APPROVED","QUALITY_ACCEPTED","AUTHORIZE","DISPATCH","PROVIDER_ACCEPT","START",
                   "COMPLETE","SUBMIT_RELEASE","RETURN","RECEIVE","TECHNICAL_ACCEPT","CLOSE","RESUME","RESUME_REWORK"}:
         _eligibility(db,work)
+    if action in {"AUTHORIZE","DISPATCH"}:
+        reference=_one(db,"""SELECT id FROM work_orders WHERE amo_id=:amo
+           AND (wo_number=:reference OR work_package_ref=:reference) LIMIT 1""",
+           amo=work["amo_id"],reference=work["internal_work_reference"])
+        if not reference and not (work["requirements_json"] or {}).get("governed_repair_order_reference"):
+            raise HTTPException(409,"A canonical work package or governed MOPM 2.20 repair order reference is required")
     if action=="DISPATCH" and work["purchase_order_id"]:
         po=_one(db,"""SELECT sent_at FROM procurement_purchase_orders
           WHERE amo_id=:amo AND supplier_id=:supplier AND id=:po""",
@@ -530,7 +552,7 @@ def partner_queue(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
         text("""SELECT id,work_number,work_title,site_code,status,work_type,updated_at
             FROM external_contracted_work WHERE amo_id=:amo AND supplier_id=:supplier
             AND provider_id=:provider AND id IN :ids ORDER BY updated_at DESC""")
-        .bindparams(__import__("sqlalchemy").bindparam("ids",expanding=True)),
+        .bindparams(bindparam("ids",expanding=True)),
         {**ctx,"ids":sorted(ids)}).mappings()],
         "authority":"The contracted AMO certifies solely under its own applicable approval"}
 
