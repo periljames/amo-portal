@@ -45,7 +45,7 @@ jobs:
             -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=minio-local-ci \
             -e MINIO_ROOT_PASSWORD=minio-ci-test-only-not-production \
-            quay.io/minio/minio:RELEASE.2024-09-22T00-33-43Z server /data
+            cgr.dev/chainguard/minio:latest server /data
           for i in {1..40}; do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
             sleep 2
