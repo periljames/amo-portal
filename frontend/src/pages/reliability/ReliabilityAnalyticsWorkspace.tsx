@@ -94,7 +94,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
     }
   }, [appliedFilters, refreshToken]);
 
-  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+  useEffect(() => { if (dashboardRequired) void loadDashboard(); }, [loadDashboard, dashboardRequired]);
 
   useEffect(() => {
     let active = true;
@@ -174,6 +174,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
     setFilters(view.filters);
     setAppliedFilters(view.filters);
     setDrilldown(null);
+    navigate({ pathname: location.pathname, search: buildSearch(view.filters).toString() }, { replace: true });
   };
 
   const deleteSavedView = () => {
