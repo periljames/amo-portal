@@ -272,6 +272,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
       </details>}
       {loading && dashboardRequired && <div className="reliability-analytics__loading" role="status"><span /><strong>Loading Reliability analysis…</strong></div>}
       {error && <div className="reliability-v2__error" role="alert"><strong>Reliability request failed.</strong><span>{error}</span><button type="button" className="btn btn-secondary" onClick={() => setRefreshToken((value) => value + 1)}>Retry</button></div>}
+      {area === "overview" && <ReliabilityCommandOverview />}
       {area === "calculations" && <ReliabilityCalculationEvidence />}
       {area === "governance" && <ReliabilityFormulaLifecycleControls />}
       {!loading && data && dashboardRequired && <>
@@ -286,6 +287,9 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
           {data.warnings.map((warning) => <p key={warning}>{warning}</p>)}
         </section>}
         {area === "overview" && <>
+          <details className="rel-analytics-dashboard__kpi-details">
+            <summary>Measured period indicators — {data.summary.length} exposure-normalised metrics
+              <span>Expand to inspect values and source evidence</span></summary>
           <section className="reliability-analytics__metrics" aria-label="Reliability KPIs">
             {data.summary.map((metric) => <button type="button" className={statusClass(metric.status)}
               key={metric.code} onClick={() => void openDrilldown(metric.drilldown, metric.label)}>
@@ -295,7 +299,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
               {metric.formula_code && <em>Formula: {metric.formula_code}</em>}
             </button>)}
           </section>
-          <ReliabilityCommandOverview />
+          </details>
           <nav className="rel-analytics-dashboard__shortcuts" aria-label="Analysis workspaces">
             <Link to={basePath + "/analytics/operational"}>Fleet trends <span>Rates and ATA</span></Link>
             <Link to={basePath + "/analytics/engineering"}>Engine monitoring <span>EHM parameters</span></Link>
