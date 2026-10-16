@@ -14,6 +14,15 @@ const PAGE_SIZE = 75;
 const ALERT_STATES: ReliabilityAlertStatus[] = ["OPEN", "ACKNOWLEDGED", "CLOSED"];
 const CASE_STATES: FracasStatus[] = ["OPEN", "IN_ANALYSIS", "ACTIONS", "MONITORING", "CLOSED"];
 const ENGINE_STATES: EngineTrendStatus[] = ["Trend Normal", "Trend Shift"];
+const SORT_COLUMNS: Record<View, Array<string | null>> = {
+  events: ["occurred_at", "aircraft", "severity", "ata", "source", null, null],
+  alerts: ["code", "severity", "status", "triggered_at", null],
+  cases: ["title", "aircraft", "severity", "status", "opened_at", null],
+  engines: ["aircraft", null, "engine_serial", "status", "last_upload", "last_review"],
+};
+const DEFAULT_SORT: Record<View, string> = {
+  events: "occurred_at", alerts: "triggered_at", cases: "updated_at", engines: "status",
+};
 const names: Record<View, string> = {
   events: "Occurrence register", alerts: "Technical alerts", cases: "FRACAS case register", engines: "Engine trend status",
 };
@@ -50,6 +59,8 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
   const [typedQuery, setTypedQuery] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [sortKey, setSortKey] = useState(DEFAULT_SORT[view]);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [rows, setRows] = useState<Row[]>([]);
   const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -61,22 +72,28 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
     const offset = page * PAGE_SIZE;
     const limit = PAGE_SIZE + 1;
     const request: Promise<Row[]> = view === "events"
-      ? listReliabilityEvents({ limit, offset, q: query || undefined })
+      ? listReliabilityEvents({ limit, offset, q: query || undefined, sortKey, sortDir })
       : view === "alerts"
-        ? listReliabilityAlerts({ limit, offset, status: (status || undefined) as ReliabilityAlertStatus | undefined })
+        ? listReliabilityAlerts({ limit, offset, status: (status || undefined) as ReliabilityAlertStatus | undefined, sortKey, sortDir })
         : view === "cases"
-          ? listFracasCases({ limit, offset, status: (status || undefined) as FracasStatus | undefined })
-          : listEngineTrendStatuses({ limit, offset, currentStatus: (status || undefined) as EngineTrendStatus | undefined });
+          ? listFracasCases({ limit, offset, status: (status || undefined) as FracasStatus | undefined, sortKey, sortDir })
+          : listEngineTrendStatuses({ limit, offset, currentStatus: (status || undefined) as EngineTrendStatus | undefined, sortKey, sortDir });
     void request.then((items) => {
       if (active) { setHasNext(items.length > PAGE_SIZE); setRows(items.slice(0, PAGE_SIZE)); setLoading(false); }
     }).catch((cause: unknown) => {
       if (active) { setError(cause instanceof Error ? cause.message : "Register could not be loaded"); setLoading(false); }
     });
     return () => { active = false; };
-  }, [view, page, query, status, refresh]);
+  }, [view, page, query, status, sortKey, sortDir, refresh]);
 
   const results = useMemo(() => rows, [rows]);
   const startLoading = () => { setLoading(true); setError(""); };
+  const setSort = (key: string) => {
+    startLoading();
+    setPage(0);
+    setSortDir((current) => sortKey === key ? (current === "asc" ? "desc" : "asc") : "asc");
+    setSortKey(key);
+  };
   const columns = view === "events" ? ["Recorded", "Aircraft", "Event / severity", "ATA", "Source", "Description", "Reference"]
     : view === "alerts" ? ["Alert", "Severity", "Status", "Triggered", "Disposition"]
       : view === "cases" ? ["Case", "Aircraft", "Severity", "Status", "Opened", "Classification"]
@@ -127,15 +144,25 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
         <ArrowDownToLine size={16} aria-hidden="true" /> Export loaded page
       </button>
     </div>
-    <p className="rel-backend-register__scope"><strong>Database pagination</strong> · Up to {PAGE_SIZE} source records per page.
-      Search and status filters are applied by the server. CSV exports only the visible loaded page.
+    <p className="rel-backend-register__scope"><strong>Database pagination and sorting</strong> · Up to {PAGE_SIZE} source records per page.
+      Search, status filters and column ordering are applied by the server. CSV exports only the visible loaded page.
       There is no inferred total record count.</p>
     {error && <div className="rel-backend-register__error" role="alert">{error}
       <button type="button" onClick={() => { startLoading(); setRefresh((v) => v + 1); }}>Retry</button></div>}
     {loading && <p role="status" className="rel-backend-register__loading">Loading source records…</p>}
     {!loading && !error && <>
       <div className="rel-backend-register__viewport" role="region" aria-label={"Scrollable " + names[view]} tabIndex={0}>
-        <table><thead><tr>{columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
+        <table><thead><tr>{columns.map((column, index) => {
+          const key = SORT_COLUMNS[view][index];
+          return <th key={column} scope="col" aria-sort={key && key === sortKey ?
+            (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+            {key ? <button type="button" className="rel-backend-register__sort"
+              onClick={() => setSort(key)} disabled={loading}
+              aria-label={"Sort all " + names[view] + " by " + column}>
+              {column}{key === sortKey ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+            </button> : column}
+          </th>;
+        })}</tr></thead>
           <tbody>{results.map((row, i) => <tr key={row.id}>
             {tableRows[i].map((value, column) => <td key={columns[column]}>
               {column === 0 && view !== "engines" ?
