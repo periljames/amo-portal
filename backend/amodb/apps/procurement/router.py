@@ -312,6 +312,13 @@ def quote_evaluate(
         payload=payload,
         actor_user_id=current_user.id,
     )
+    if payload.status == models.QuoteStatus.AWARDED:
+        # Notify only after the canonical staff award transition and QMS gate.
+        from .external_procurement_router import record_internal_supplier_notice
+        record_internal_supplier_notice(
+            db, amo_id=amo_id, entity="QUOTE", internal_id=quote_id,
+            action="AWARD_NOTIFIED", actor_user_id=str(current_user.id),
+        )
     return _commit_refresh(db, quote)
 
 
@@ -396,6 +403,11 @@ def purchase_order_send(
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     supplier_quality_control.assert_purchase_order_allowed(db, amo_id=amo_id, po_id=po_id)
     po = service.send_purchase_order(db, amo_id=amo_id, po_id=po_id, actor_user_id=current_user.id)
+    from .external_procurement_router import record_internal_supplier_notice
+    record_internal_supplier_notice(
+        db, amo_id=amo_id, entity="PO", internal_id=po_id,
+        action="PO_ISSUED", actor_user_id=str(current_user.id),
+    )
     return _commit_refresh(db, po)
 
 
