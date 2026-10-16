@@ -56,4 +56,20 @@ describe("Venspera production same-origin edge", () => {
     expect(result.headers.get("cache-control")).toBe("private, no-store");
     expect(await result.json()).toEqual({ ok: true });
   });
+  it("rewrites an upstream login redirect to the public edge origin", async () => {
+    const fetcher = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: "https://private-api.venspera.com/auth/login?next=%2Fquality" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    const request = new Request("https://app.venspera.com/auth/session", {
+      headers: { accept: "application/json" },
+    });
+    const response = await onRequest({ request, env });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location"))
+      .toBe("https://app.venspera.com/auth/login?next=%2Fquality");
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
 });
