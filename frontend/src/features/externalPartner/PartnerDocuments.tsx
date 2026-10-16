@@ -83,7 +83,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",txt:"text/plain"
       } as Record<string,string>)[ext];
       if(!mime||selected.size>512*1024*1024)throw new Error("Maximum supported resumable file size is 512 MiB.");
-      const signature=`${selected.name}:${selected.size}:${selected.lastModified}:${policy.id}:${related}:${relatedId}`;
+      const signature=`${selected.name}:${selected.size}:${selected.lastModified}:${policy.id}:${related}:${relatedId}:${supersedes}:${validUntil}`;
       const remembered=(()=>{try{return JSON.parse(localStorage.getItem(storageKey)||"null") as
         {signature:string;retryKey:string}|null;}catch{return null;}})();
       const retryKey=remembered?.signature===signature?remembered.retryKey:key;
