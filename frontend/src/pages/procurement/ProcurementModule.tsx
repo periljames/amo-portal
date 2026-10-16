@@ -130,6 +130,7 @@ export default function ProcurementModule() {
     command: 0,
     requests: data.requisitions.length,
     sourcing: data.rfqs.length + data.quotes.length,
+    collaboration: 0, // The live supplier-collaboration inbox loads its own authorized count.
     orders: data.orders.length,
     receiving: data.receipts.length,
     suppliers: data.suppliers.length,
