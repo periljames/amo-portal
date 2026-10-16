@@ -232,7 +232,7 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlReportsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlAdministrationPage /></WorkspaceRequireAuth>} />
-        <Route path="*" element={<DocumentControlFallback />} />
+        <Route path="/maintenance/:amoCode/document-control/*" element={<DocumentControlFallback />} />
       </Routes>
     </Suspense>
   );
