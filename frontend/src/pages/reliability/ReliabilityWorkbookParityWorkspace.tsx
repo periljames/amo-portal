@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { listWorkbookCatalog } from "./reliabilityWorkbookParityApi";
 import { ReliabilityManagementReports } from "./ReliabilityManagementReports";
 import { ReliabilityMappingParity, ReliabilityStatisticalAlerts } from "./ReliabilityWorkbookGovernance";
@@ -66,8 +65,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
   };
 
   return <ReliabilityWorkbenchProvider>
-    <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-      <main className="rel-wp" data-testid="reliability-workbook-parity">
+    <main className="rel-wp" data-testid="reliability-workbook-parity">
         <header className="rel-wp__header">
           <div>
             <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
@@ -98,8 +96,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
           {section === "mapping" && <div className="rel-wp__stack"><ReliabilityStructuredCsvImport catalog={catalog} /><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
           {section === "reports" && <div className="rel-wp__stack"><ReliabilityManagementReports /><ReliabilityWorkbookReports /></div>}
         </>}
-      </main>
-    </DepartmentLayout>
+    </main>
   </ReliabilityWorkbenchProvider>;
 };
 
