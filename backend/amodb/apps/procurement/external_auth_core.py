@@ -112,8 +112,11 @@ def redeem_token(db, raw: str, kind: str):
     if not separator or len(tenant_hint) != 36:
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,tenant_hint)
-    row=one("""SELECT * FROM external_identity_tokens
-        WHERE amo_id=:amo AND token_hash=:hash AND kind=:kind FOR UPDATE""",db,amo=tenant_hint,hash=digest(raw),kind=kind)
+    row=one("""SELECT tok.*, amo.is_active AS tenant_active
+        FROM external_identity_tokens tok
+        JOIN amos amo ON amo.id=tok.amo_id
+        WHERE tok.amo_id=:amo AND tok.token_hash=:hash AND tok.kind=:kind
+        FOR UPDATE OF tok""",db,amo=tenant_hint,hash=digest(raw),kind=kind)
     if not row or row["used_at"] or row["revoked_at"] or aware(row["expires_at"]) <= now():
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
