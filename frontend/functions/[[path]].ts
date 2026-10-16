@@ -78,6 +78,22 @@ export async function onRequest(context: PagesContext): Promise<Response> {
     redirect: "manual",
   });
   const responseHeaders = new Headers(upstream.headers);
+  // An API auth endpoint may issue a redirect using the private upstream host.
+  // Keep internal infrastructure names and auth cookies off browser navigations.
+  const location = responseHeaders.get("Location");
+  if (location) {
+    try {
+      const destination = new URL(location, target);
+      if (destination.origin === target.origin) {
+        responseHeaders.set("Location",
+          new URL(destination.pathname + destination.search + destination.hash, url.origin).toString());
+      }
+    } catch {
+      return new Response("Invalid upstream redirect", {
+        status: 502, headers: { "Cache-Control": "no-store" },
+      });
+    }
+  }
   responseHeaders.set("Cache-Control", "private, no-store");
   responseHeaders.set("X-Content-Type-Options", "nosniff");
   // Stream EventSource, large responses and downloads without buffering.
