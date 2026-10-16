@@ -164,6 +164,10 @@ def upgrade():
         batch.add_column(sa.Column("terminated_at", sa.DateTime(timezone=True)))
         batch.add_column(sa.Column("supersedes_contract_id", sa.String(36)))
         batch.add_column(sa.Column("change_reason", sa.Text()))
+        # The predecessor FK references all three columns: PostgreSQL requires
+        # this exact combination to be uniquely constrained, not just id PK.
+        batch.create_unique_constraint("uq_ext_agreement_tenant_supplier_id",
+                                       ["amo_id","supplier_id","id"])
         batch.create_foreign_key("fk_ext_agreement_prior", "quality_external_provider_contracts",
                                  ["amo_id","supplier_id","supersedes_contract_id"],
                                  ["amo_id","supplier_id","id"], ondelete="RESTRICT")
@@ -210,6 +214,7 @@ def downgrade():
     op.drop_table("external_provider_form_acknowledgements")
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
         batch.drop_constraint("fk_ext_agreement_prior", type_="foreignkey")
+        batch.drop_constraint("uq_ext_agreement_tenant_supplier_id", type_="unique")
         for name in ("change_reason", "supersedes_contract_id", "terminated_at", "signed_evidence_submission_id", "authority_acceptance_reference", "approved_sites_json", "counterparties_json"):
             batch.drop_column(name)
     op.drop_index("ix_ext_doc_events_tenant_submission", table_name="external_provider_document_events")
