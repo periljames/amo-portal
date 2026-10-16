@@ -44,7 +44,7 @@ export default function ContractedWorkModule(){
     scope_id:"",contract_id:"",internal_work_reference:"",technical_coordinator_id:"",
     asset_kind:"COMPONENT",registration:"",part_number:"",serial_number:"",asset_description:"",
     defect:"",data_reference:"",data_revision:"",inspections:"",required_release:"",
-    purchase_order_id:"",data_manual_id:"",data_revision_id:"",governed_repair_order_reference:"",state_of_registry:"",foreign_approval_reference:"",
+    purchase_order_id:"",data_manual_id:"",data_revision_id:"",governed_repair_order_reference:"",product_family:"",contract_function_approval_reference:"",state_of_registry:"",foreign_approval_reference:"",
     operator_requirements:"",release_wording:"",authority_acceptance_reference:"",
     safety_assessment_reference:"",operator_approval_reference:"",restriction_review_reference:"",
   });
@@ -115,7 +115,9 @@ export default function ContractedWorkModule(){
       purchase_order_id:form.purchase_order_id?Number(form.purchase_order_id):null,
       data_manual_id:form.data_manual_id||null,data_revision_id:form.data_revision_id||null,
       requirements:{
-        foreign,governed_repair_order_reference:form.governed_repair_order_reference||null,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
+        foreign,governed_repair_order_reference:form.governed_repair_order_reference||null,
+        product_family:form.product_family||null,
+        contract_function_approval_reference:form.contract_function_approval_reference||null,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
         operator_requirements:form.operator_requirements,release_wording:form.release_wording,
         authority_approval_required:authorityRequired,authority_acceptance_reference:form.authority_acceptance_reference,
         safety_assessment_required:safetyRequired,safety_assessment_reference:form.safety_assessment_reference,
@@ -151,6 +153,8 @@ export default function ContractedWorkModule(){
       <label>Unique repair/work order<input required minLength={3} value={form.work_number} onChange={field("work_number")}/></label>
       <label>Work title<input required minLength={5} value={form.work_title} onChange={field("work_title")}/></label>
       <label>Defined contracted maintenance function<input required minLength={8} value={form.function} onChange={field("function")}/></label>
+      <label>Exact approved aircraft/engine/component product family<input value={form.product_family} onChange={field("product_family")} placeholder="Must match Quality-approved capability where restricted"/></label>
+      <label>Agreement-specific contracted function reference<input value={form.contract_function_approval_reference} onChange={field("contract_function_approval_reference")} placeholder="Required if the exact function is not explicitly written in contract scope"/></label>
       <label>Controlling internal work-package / maintenance request reference<input required value={form.internal_work_reference} onChange={field("internal_work_reference")}/></label>
       <label>Responsible technical coordinator<select required value={form.technical_coordinator_id} onChange={field("technical_coordinator_id")}>
         <option value="">Select appointed person</option>{options?.coordinators.map(x=><option key={x.id} value={x.id}>{x.full_name} · {x.role}</option>)}
