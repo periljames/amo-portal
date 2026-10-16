@@ -205,20 +205,20 @@ def create_techlog_page(payload: TechlogPage, ctx=Depends(octm.context)):
         if original:
             raise HTTPException(409, "A record already exists for this technical-log page and engine. Use the controlled correction workflow.")
     records = []
-    for candidate in candidates:
-        row = octm.OCTMEntry(
-            **candidate.model_dump(), amo_id=amo_id, review_status="DRAFT",
-            created_by_user_id=str(actor.id), last_changed_by_user_id=str(actor.id),
-        )
-        db.add(row)
-        db.flush()
-        access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY",
-                            entity_id=row.id, action="PAGE_SOURCE_REGISTERED",
-                            payload={"techsheet": row.techsheet_ref, "position": row.engine_position,
-                                     "source_scope": "TECHLOG_PAGE"},
-                            actor_user_id=str(actor.id))
-        records.append(row)
     try:
+        for candidate in candidates:
+            row = octm.OCTMEntry(
+                **candidate.model_dump(), amo_id=amo_id, review_status="DRAFT",
+                created_by_user_id=str(actor.id), last_changed_by_user_id=str(actor.id),
+            )
+            db.add(row)
+            db.flush()
+            access.append_audit(db, amo_id=amo_id, entity_type="OCTM_ENTRY",
+                                entity_id=row.id, action="PAGE_SOURCE_REGISTERED",
+                                payload={"techsheet": row.techsheet_ref, "position": row.engine_position,
+                                         "source_scope": "TECHLOG_PAGE"},
+                                actor_user_id=str(actor.id))
+            records.append(row)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
