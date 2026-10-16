@@ -611,7 +611,7 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Add Flight Operations occurrence <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New controlled occurrence</p><h3>Record the operational event once</h3></div><span>Delay is calculated from scheduled and actual departure.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Event classification" detail="Choose the operational outcome first. The form only asks for timing that applies to that event.">
@@ -647,7 +647,7 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving || timingInvalid || (isDelay && calculatedDelay == null)}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
     <RegisterSection title="Flight Operations register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "APPROVED", "CLOSED"]}>
       <table className="reliability-v2__table rel-ops__table rel-ops__table--flight"><thead><tr><th>Event</th><th>Flight</th><th>Timing</th><th>Technical context</th><th>Status</th><th>Action</th></tr></thead><tbody>
@@ -702,7 +702,7 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Record MEL/CDL deferral <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New controlled deferral</p><h3>Apply the approved MEL / CDL control</h3></div><span>Expiry is taken from the approved control basis, not guessed from a generic category.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Defect and approved item">
@@ -731,7 +731,7 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
     <RegisterSection title="MEL / CDL register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "OPEN", "EXTENDED", "EXPIRED", "CLOSED"]}>
       <table className="reliability-v2__table rel-ops__table"><thead><tr><th>Deferral</th><th>Aircraft / defect</th><th>Control window</th><th>Status</th><th>Action</th></tr></thead><tbody>
@@ -783,7 +783,7 @@ function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Register component shop finding <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New shop outcome</p><h3>Record the test conclusion, not an assumed failure</h3></div><span>Release data is captured later, when the component is actually released.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Component identity">
@@ -810,7 +810,7 @@ function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
     <RegisterSection title="Component-shop register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "APPROVED", "RELEASED"]}>
       <table className="reliability-v2__table rel-ops__table"><thead><tr><th>Shop order</th><th>Component</th><th>Conclusion</th><th>Disposition</th><th>Status</th><th>Action</th></tr></thead><tbody>
