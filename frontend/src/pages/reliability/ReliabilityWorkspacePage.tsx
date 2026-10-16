@@ -7,7 +7,6 @@ import ReliabilityFormalReviewWorkspace from "./ReliabilityFormalReviewWorkspace
 import ReliabilityWorkbookParityWorkspace from "./ReliabilityWorkbookParityWorkspace";
 import ReliabilityOperationsWorkspace from "./ReliabilityOperationsWorkspace";
 import ReliabilityOCTMWorkspace from "./ReliabilityOCTMWorkspace";
-import ReliabilityOCTMWorkspace from "./ReliabilityOCTMWorkspace";
 import { ReliabilityModuleShell } from "./ReliabilityModuleShell";
 
 const WORKBOOK_PARITY_ROUTES = new Set([
