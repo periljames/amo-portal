@@ -56,6 +56,8 @@ describe("portal notification policy", () => {
     expect(notificationPreferences).toContain("activation && !activation.isActive");
     expect(cue).not.toContain(".resume(");
     expect(cue).toContain('sharedAudioCtx.state !== "running"');
+    expect(messaging).toContain("setNotificationPreferences({ audioEnabled: enabled })");
+    expect(messaging).toContain("unlockNotificationAudioFromUserGesture(event.nativeEvent)");
   });
 
   it("pauses auto-close while a user hovers or interacts", () => {
@@ -119,18 +121,22 @@ describe("notification audio activation", () => {
       gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
       connect: vi.fn(),
     };
-    const context = {
-      state: "suspended", currentTime: 0, destination: {},
-      createOscillator: () => oscillator, createGain: () => gain,
-      resume: vi.fn(async () => { context.state = "running"; }),
-    };
-    const AudioCtx = vi.fn(() => context);
+    const instances: FakeAudioContext[] = [];
+    class FakeAudioContext {
+      state = "suspended";
+      currentTime = 0;
+      destination = {};
+      createOscillator = () => oscillator;
+      createGain = () => gain;
+      resume = vi.fn(async () => { this.state = "running"; });
+      constructor() { instances.push(this); }
+    }
     vi.stubGlobal("window", {
       localStorage: {
         getItem: (key: string) => storage.get(key) ?? null,
         setItem: (key: string, value: string) => { storage.set(key, value); },
       },
-      AudioContext: AudioCtx,
+      AudioContext: FakeAudioContext,
       dispatchEvent: vi.fn(),
       addEventListener: (name: string, callback: (event: Event) => void) => { events.set(name, callback); },
     });
@@ -140,11 +146,12 @@ describe("notification audio activation", () => {
     audio.prepareNotificationAudio();
     const realGesture = { isTrusted: true } as Event;
     events.get("pointerdown")?.(realGesture); // runs before checkbox change
-    expect(AudioCtx).not.toHaveBeenCalled();
+    expect(instances).toHaveLength(0);
     audio.setNotificationPreferences({ audioEnabled: true }); // checkbox change
     await audio.unlockNotificationAudioFromUserGesture(realGesture);
-    expect(AudioCtx).toHaveBeenCalledTimes(1);
-    expect(context.resume).toHaveBeenCalledTimes(1);
+    expect(instances).toHaveLength(1);
+    expect(instances[0].resume).toHaveBeenCalledTimes(1);
+    expect(instances[0].state).toBe("running");
     audio.playNotificationCue("info");
     expect(start).toHaveBeenCalledTimes(1);
   });
