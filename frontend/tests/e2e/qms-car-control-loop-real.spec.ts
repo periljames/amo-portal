@@ -91,8 +91,19 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  await page.getByLabel("Target closure date").fill(futureDate(28));
-  await page.getByLabel("Due date").fill(futureDate(21));
+  const closureDate = page.getByLabel("Target closure date");
+  const dueDate = page.getByLabel("Due date");
+  // Agreed CAR deadlines are governed, not editable from a responder's CAP.
+  // Assert the lock instead of bypassing Quality's deadline-change workflow.
+  if (await closureDate.isDisabled()) {
+    await expect(dueDate).toBeDisabled();
+    await expect(page.getByText("These are agreed deadlines. Contact Quality to request an extension", { exact: false })).toBeVisible();
+    await expect(closureDate).not.toHaveValue("");
+    await expect(dueDate).not.toHaveValue("");
+  } else {
+    await closureDate.fill(futureDate(28));
+    await dueDate.fill(futureDate(21));
+  }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
