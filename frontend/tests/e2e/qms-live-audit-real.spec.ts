@@ -377,7 +377,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     const closeExecution = internalPage.getByRole("button", { name: "Close audit execution" });
     await expect(closeExecution).toBeEnabled();
     await closeExecution.click();
-    await expect(internalPage.getByRole("status")).toContainText("Execution closed. CAR/CAPA follow-up remains open", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Execution closed. CAR/CAPA follow-up remains open" })).toBeVisible({ timeout: 30_000 });
     await expect(internalPage.getByText(/CAR status is OPEN/i)).toBeVisible();
 
     const archivePath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.ceremony_audit_ref)}/archive?tab=evidence`;
@@ -385,7 +385,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("region", { name: "Audit archive and retention workspace" })).toBeVisible({ timeout: 30_000 });
     await expect(internalPage.getByText("QMS-AUDIT-7Y", { exact: true })).toBeVisible();
     await internalPage.getByRole("button", { name: "Generate governed archive" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Immutable archive manifest and package generated", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Immutable archive manifest and package generated" })).toBeVisible({ timeout: 30_000 });
     await expect(internalPage.getByText("CAR · 1", { exact: true })).toBeVisible();
     await expect(internalPage.getByText("SIGNATURE EVIDENCE · 1", { exact: true })).toBeVisible();
     await expect(internalPage.getByText("REPORT REVISION · 1", { exact: true })).toBeVisible();
