@@ -47,6 +47,7 @@ export default function DocumentControlReviewerLifecycleActions({
     .map((action) => REVIEWER_ACTIONS[action])
     .filter((action): action is ReviewerAction => Boolean(action));
   const [comments, setComments] = useState("");
+  const [effectiveAt, setEffectiveAt] = useState("");
   const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +74,10 @@ export default function DocumentControlReviewerLifecycleActions({
         : "Record the correction reason before returning the revision.");
       return;
     }
+    if (item.action === "APPROVE_ACCOUNTABLE_MANAGER" && !effectiveAt) {
+      setError("Set the accountable document effectivity date and time before approving.");
+      return;
+    }
     if (isApproval && !retainsSourceChecksum && !retainedEvidence.length) {
       setError("This revision has no retained source checksum. Upload supporting controlled evidence before approving.");
       return;
@@ -86,6 +91,7 @@ export default function DocumentControlReviewerLifecycleActions({
         comments: decisionComments,
         evidence: isApproval ? retainedEvidence : [],
         expected_version: workflow.version,
+        effective_at: item.action === "APPROVE_ACCOUNTABLE_MANAGER" ? new Date(effectiveAt).toISOString() : undefined,
       });
       onChanged();
     } catch (caught) {
@@ -120,6 +126,11 @@ export default function DocumentControlReviewerLifecycleActions({
         ? "The reviewed revision ID and source checksum will be appended to the decision by the server."
         : "This revision has no retained source checksum; supporting controlled evidence is required before approval."}
     </div>
+    {actions.some((action) => action.action === "APPROVE_ACCOUNTABLE_MANAGER") ? (
+      <label className="wide"><span>Effective date and time</span>
+        <input type="datetime-local" required value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
+      </label>
+    ) : null}
     {error ? <div className="dc-form__error">{error}</div> : null}
     <div className="dc-form__actions">
       {actions.map((item) => <button
