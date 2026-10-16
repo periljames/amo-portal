@@ -254,6 +254,7 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     await expect(page).toHaveURL(/snapshot=42/);
     await expect(page.getByRole("button", { name: "Copy manager link" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Download controlled PDF" })).toBeVisible();
+    await page.screenshot({ path: "test-results/reliability-management-report-desktop.png", fullPage: true });
 
     const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
     expect(widths.document).toBeLessThanOrEqual(widths.viewport + 2);
@@ -265,5 +266,6 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
     expect(widths.document).toBeLessThanOrEqual(widths.viewport + 2);
     await expect(page.getByRole("button", { name: /^AU\b/ })).toBeVisible();
+    await page.screenshot({ path: "test-results/reliability-workbook-mobile.png", fullPage: true });
   });
 });
