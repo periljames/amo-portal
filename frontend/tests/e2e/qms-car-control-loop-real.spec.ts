@@ -85,6 +85,12 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await expect(containmentEditor).toBeVisible({ timeout: 30_000 });
   await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
   await page.getByRole("button", { name: "Save containment and continue" }).click();
+  // The rework invitation may reopen with another completed wizard stage.
+  // Enter root-cause explicitly before asserting the structured editor.
+  const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
+    .getByRole("button", { name: "Root cause", exact: true });
+  await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
+  await rootCauseStep.click();
   const rootCauseEditor = structuredEditor(page, "Root cause analysis");
   await expect(rootCauseEditor).toBeVisible({ timeout: 30_000 });
   await rootCauseEditor.fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);

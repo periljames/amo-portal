@@ -439,7 +439,15 @@
 
 @media (max-width: 1050px) {
   .qms-live-audit-focus__body { grid-template-columns: 220px minmax(0, 1fr); }
-  .qms-live-audit-focus__summary { display: none; }
+  .qms-live-audit-focus__summary {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 0.75rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
+}
   .qms-live-audit-focus__responses { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
