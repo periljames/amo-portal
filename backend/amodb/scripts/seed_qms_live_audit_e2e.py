@@ -268,7 +268,7 @@ def seed() -> None:
         # A module toggle does not grant an effective paid entitlement. Seed
         # explicit license entitlements so real-browser CI exercises the same
         # commercial gate as production without weakening require_module().
-        for key in ("quality", "aerodoc_hybrid_dms"):
+        for key in ("quality", "aerodoc_hybrid_dms", "documents"):
             db.add(account_models.LicenseEntitlement(
                 license_id=TENANT_LICENSE_ID,
                 key=key, is_unlimited=True,
