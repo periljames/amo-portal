@@ -734,13 +734,14 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => window.removeEventListener("beforeunload", warnBeforeReload);
   }, [unsavedDraftCount, findingDraft, evidenceCapture]);
 
-  const selectItem = (itemId: string) => {
-    if (itemId === selected?.checklist_item_id) return;
+  const selectItem = (itemId: string): boolean => {
+    if (itemId === selected?.checklist_item_id) return true;
     if (evidenceCapture.busy || evidenceCapture.hasDraft) {
       setLocalError(evidenceCapture.busy ? "Wait for the evidence upload to finish before changing questions." : "Attach or clear the selected evidence file before changing questions.");
-      return;
+      return false;
     }
     setSelectedId(itemId);
+    return true;
   };
   const move = (offset: number) => {
     if (!visibleItems.length || selectedIndex < 0) return;
@@ -1017,7 +1018,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <ul>{completionBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
       </details> : null}
 
-      <div className="qms-live-audit-focus__body">
+      <div className={`qms-live-audit-focus__body${detailOpen && selected ? " is-detail-open" : ""}`}>
         <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
           <div className="qms-live-audit-focus__matrix-toolbar">
             <div><strong>Checklist assessment</strong><small>{completed} of {items.length} server-confirmed · {localAnswers.size} device changes</small></div>
@@ -1025,7 +1026,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <label><Filter size={15} aria-hidden="true" /><span className="sr-only">Filter checklist</span><select value={checklistFilter} onChange={(event) => setChecklistFilter(event.target.value as typeof checklistFilter)}><option value="ALL">All questions</option><option value="UNANSWERED">Unanswered</option><option value="VERIFIED">Server-confirmed</option><option value="FINDINGS">Findings</option><option value="EVIDENCE_REQUIRED">Evidence required</option></select></label>
           </div>
           <div className="qms-live-audit-focus__matrix-scroll">
-            <table className="qms-live-audit-focus__matrix-table">
+            <table className="qms-live-audit-focus__matrix-table" aria-label="Checklist assessment table">
               <thead><tr><th scope="col">№</th><th scope="col">Verification question / requirement</th><th scope="col">Assessment</th><th scope="col">Details</th></tr></thead>
               <tbody>
                 {visibleItems.map((item, index) => {
@@ -1043,7 +1044,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                       <td><div className="qms-live-audit-focus__matrix-choices" role="group" aria-label={`Assessment for question ${number}`}>
                         {choices.map((option) => <button key={option.value} type="button" aria-pressed={value === option.value} className={value === option.value ? "is-selected" : ""} title={option.label} disabled={!canExecute || updateMutation.isPending || findingMutation.isPending} onClick={() => selectResponse(item, option)}>{option.label}</button>)}
                       </div></td>
-                      <td><button type="button" aria-expanded={expanded} onClick={() => { selectItem(item.checklist_item_id); setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
+                      <td><button type="button" aria-expanded={expanded} onClick={() => { if (selectItem(item.checklist_item_id)) setDetailOpen(!expanded); }} aria-label={`Details for question ${number}`}><ChevronDown size={15}/></button>
                         {local ? <small className="qms-live-audit-focus__matrix-device" title="Not yet server-confirmed">{local.status === "conflict" || local.status === "failed" ? "Review sync" : "On device"}</small> : null}
                       </td>
                     </tr>
@@ -1060,6 +1061,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <>
               <div className="qms-live-audit-focus__question-head">
                 <div><span title={selected.section || "Checklist"}>SECTION · {selected.section || "Checklist"}</span><h2>{selected.prompt}</h2></div>
+                <button type="button" className="qms-live-audit-focus__close-details" onClick={() => setDetailOpen(false)} aria-label="Close question details">Close details <X size={15} /></button>
                 <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
               </div>
               <div className="qms-live-audit-focus__question-subline">

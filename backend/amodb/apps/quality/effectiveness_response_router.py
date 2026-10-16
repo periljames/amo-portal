@@ -345,7 +345,7 @@ def _reopen_car_for_ineffective_action(
                 ),
             )
             .order_by(QualityCARMilestone.phase_order.asc())
-            .with_for_update()
+            .with_for_update(of=QualityCARMilestone)
             .all()
         )
         reset_status = {
