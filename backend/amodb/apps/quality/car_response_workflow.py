@@ -28,7 +28,7 @@ def sync_response_milestones(db: Session, car, *, actor_user_id: str | None, rec
             QualityCARMilestone.car_id == car.id,
             QualityCARMilestone.profile_id == profile.id,
             QualityCARMilestone.milestone_key == key,
-        ).with_for_update().first()
+        ).enable_eagerloads(False).with_for_update(of=QualityCARMilestone).first()
         if milestone is None or milestone.status == status:
             continue
         previous = milestone.status
