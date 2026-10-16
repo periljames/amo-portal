@@ -88,7 +88,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   // The rework invitation may reopen with another completed wizard stage.
   // Enter root-cause explicitly before asserting the structured editor.
   const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
-    .getByRole("button", { name: "Root cause", exact: true });
+    .getByRole("button", { name: /Root cause$/i });
   await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
   await rootCauseStep.click();
   const rootCauseEditor = structuredEditor(page, "Root cause analysis");
