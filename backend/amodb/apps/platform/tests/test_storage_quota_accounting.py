@@ -59,6 +59,10 @@ def test_reservation_is_idempotent_and_blocks_overbooking(storage_db):
         quota.reserve(storage_db, tenant_id="tenant-1", object_key="other.pdf",
                       size_bytes=80, idempotency_key="id-a")
     assert quota.read_quota(storage_db, "tenant-1")["reserved_bytes"] == 80
+    with pytest.raises(ValueError, match="already exists"):
+        quota.reserve(storage_db, tenant_id="tenant-1",
+                      object_key="one//file.pdf", size_bytes=1,
+                      idempotency_key="aliased-key")
 
 
 def test_finalize_and_delete_have_exact_balances(storage_db):
