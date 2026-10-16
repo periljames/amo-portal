@@ -98,8 +98,8 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     const openingCard = setup.getByText("Opening", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'qms-audit-setup-stage__meeting')][1]");
     await openingCard.getByRole("button", { name: "On site", exact: true }).click();
     await openingCard.getByLabel("Customize", { exact: true }).check();
-    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T10:00`);
-    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T09:00`);
+    await openingCard.getByLabel("Start", { exact: true }).fill(`${futureDate(30)}T09:00`);
+    await openingCard.getByLabel("End", { exact: true }).fill(`${futureDate(30)}T10:00`);
     await openingCard.getByLabel("Location", { exact: true }).fill("Hangar briefing room");
     await openingCard.getByLabel("Agenda / interview plan", { exact: true }).fill("Opening briefing, scope confirmation, safety requirements and evidence access.");
     await openingCard.getByRole("button", { name: "Save meeting" }).click();
