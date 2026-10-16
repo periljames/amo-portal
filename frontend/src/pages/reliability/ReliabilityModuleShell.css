@@ -1,0 +1,95 @@
+.rel-shell {
+  --rel-rail-width: 13.75rem;
+  display: grid;
+  grid-template-columns: var(--rel-rail-width) minmax(0, 1fr);
+  gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  padding: .6rem clamp(.6rem, 1.5vw, 1.35rem) 1.5rem;
+  box-sizing: border-box;
+}
+.rel-shell__rail {
+  min-width: 0;
+  position: sticky;
+  top: .6rem;
+  align-self: start;
+  max-height: calc(100dvh - 1.2rem);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: .8rem;
+  background: Canvas;
+  overflow: hidden;
+}
+.rel-shell__rail-top {
+  display: grid; gap: .5rem; padding: .85rem .85rem .75rem;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+}
+.rel-shell__brand { color: inherit; font-weight: 790; text-decoration: none; }
+.rel-shell__brand span { display: block; color: color-mix(in srgb, CanvasText 58%, transparent); font-size: .78rem; font-weight: 500; }
+.rel-shell__focus {
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: .35rem; padding: .35rem .5rem; background: Canvas;
+  color: CanvasText; font: inherit; font-size: .75rem; cursor: pointer;
+}
+.rel-shell__navigation { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: .3rem .45rem 1rem; }
+.rel-shell__group { margin-top: .6rem; }
+.rel-shell__group h2 {
+  margin: .7rem .55rem .35rem; font-size: .67rem; text-transform: uppercase;
+  letter-spacing: .075em; color: color-mix(in srgb, CanvasText 56%, transparent);
+}
+.rel-shell__link {
+  display: block; color: inherit; font-size: .83rem; font-weight: 560;
+  text-decoration: none; padding: .49rem .55rem; border-radius: .42rem;
+  border-left: 3px solid transparent;
+}
+.rel-shell__link:hover { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+.rel-shell__link.is-active {
+  background: color-mix(in srgb, #0f766e 11%, Canvas);
+  border-left-color: #0f766e; color: CanvasText; font-weight: 760;
+}
+.rel-shell__focus:focus-visible, .rel-shell__link:focus-visible, .rel-shell__brand:focus-visible {
+  outline: 3px solid #0f766e; outline-offset: 2px;
+}
+.rel-shell__body { min-width: 0; width: 100%; }
+.rel-shell__canvas { min-width: 0; width: 100%; }
+.rel-shell__canvas > main, .rel-shell__canvas > div { min-width: 0; max-width: none; }
+.rel-shell__context {
+  display: flex; gap: .55rem; align-items: center; flex-wrap: wrap;
+  font-size: .76rem; color: color-mix(in srgb, CanvasText 65%, transparent);
+  padding: .65rem .1rem 1rem;
+}
+.rel-shell__context strong { color: CanvasText; }
+.rel-shell__context-hint { margin-left: auto; }
+.rel-shell--focus { grid-template-columns: minmax(0, 1fr); }
+.rel-shell--focus .rel-shell__rail { position: static; max-height: none; }
+.rel-shell--focus .rel-shell__rail-top { display: flex; justify-content: space-between; align-items: center; }
+.rel-shell--focus .rel-shell__brand span, .rel-shell--focus .rel-shell__navigation { display: none; }
+.rel-shell__canvas .reliability-v2, .rel-shell__canvas .rel-wp { padding: .2rem 0 2rem; }
+.rel-shell__canvas .reliability-v2__header { margin-bottom: .8rem; }
+.rel-shell__canvas .reliability-v2__table-wrap,
+.rel-shell__canvas .reliability-analytics__register-table,
+.rel-shell__canvas .rel-wp__table-wrap,
+.rel-shell__canvas .rel-ops__table-wrap {
+  max-width: 100%; overflow: auto; overscroll-behavior: contain;
+  border-radius: .5rem;
+}
+.rel-shell__canvas table { font-variant-numeric: tabular-nums; }
+@media (min-width: 1600px) {
+  .rel-shell { --rel-rail-width: 15rem; }
+}
+@media (max-width: 1050px) {
+  .rel-shell { grid-template-columns: minmax(0, 1fr); }
+  .rel-shell__rail { position: static; max-height: none; }
+  .rel-shell__rail-top { display: flex; justify-content: space-between; align-items: center; }
+  .rel-shell__navigation { max-height: 14rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+}
+@media (max-width: 620px) {
+  .rel-shell { padding: .5rem; }
+  .rel-shell__navigation { grid-template-columns: minmax(0, 1fr); max-height: 12rem; }
+  .rel-shell__context-hint { display: none; }
+}
+@media print {
+  .rel-shell { display: block; }
+  .rel-shell__rail, .rel-shell__context { display: none; }
+}
