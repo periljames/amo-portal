@@ -81,7 +81,7 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
       setError("Select a registered aircraft and enter the technical-log page before uploading its scan.");
       return;
     }
-    if (!acceptedFileTypes.has(file.type) || file.size > maxFileBytes || file.size === 0) {
+    if ((file.type && !acceptedFileTypes.has(file.type)) || file.size > maxFileBytes || file.size === 0) {
       setError("Use a nonempty PDF, PNG or JPEG scan no larger than 20 MB.");
       return;
     }
@@ -108,7 +108,7 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Evidence upload failed."); }
     finally { setUploading(false); }
   };
-  const matches = !!asset && asset.aircraft_serial_number === aircraft && asset.techsheet_ref === techsheet;
+  const matches = !!asset && asset.id === id && asset.aircraft_serial_number === aircraft && asset.techsheet_ref === techsheet;
 
   return <section className="rel-techlog-evidence" aria-label="Controlled technical-log source scan">
     <div className="rel-techlog-evidence__heading"><FileImage size={19} aria-hidden="true" />
