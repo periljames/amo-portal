@@ -13,6 +13,7 @@ from typing import Iterable
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
 from amodb.database import WriteSessionLocal
@@ -221,7 +222,10 @@ def _has_acroform(revision: manual_models.ManualRevision | None) -> bool:
     path_value = str(getattr(revision, "source_storage_path", "") or "") if revision else ""
     if not path_value or str(getattr(revision, "source_type_enum", "")).upper().endswith("DOCX"):
         return False
-    path = Path(path_value).resolve()
+    try:
+        path = shared_storage.materialize(path_value, expected_sha256=revision.source_sha256) if path_value.startswith("s3://") else Path(path_value).resolve()
+    except Exception:
+        return False
     if not path.exists() or path.suffix.lower() != ".pdf":
         return False
     try:
@@ -557,7 +561,10 @@ def _source_pdf(revision: manual_models.ManualRevision):
     path_value = str(revision.source_storage_path or "")
     if not path_value or str(getattr(revision.source_type_enum, "value", revision.source_type_enum or "")).upper() != "PDF":
         return None
-    path = Path(path_value).resolve()
+    try:
+        path = shared_storage.materialize(path_value, expected_sha256=revision.source_sha256) if path_value.startswith("s3://") else Path(path_value).resolve()
+    except Exception:
+        return None
     if not path.exists():
         return None
     try:
