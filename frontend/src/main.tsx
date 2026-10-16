@@ -14,7 +14,9 @@ import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator"
 import { MessagingHub } from "./components/messaging/MessagingHub";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
+import { queryMatchesRealtimeMarkers, realtimeQueryMarkers } from "./services/portalRealtimeInvalidation";
 import { registerPortalQueryClient } from "./services/portalQueryClient";
+import { schedulePortalOfflineWarmup } from "./services/qmsOfflineWarmup";
 import {
   flushPendingSessionRevocation,
   hasRecoverableSession,
@@ -29,10 +31,9 @@ import {
   clearAllPortalApiCaches,
   currentOfflineScope,
   onOfflineSyncComplete,
-  replayOfflineMutations,
 } from "./services/offlinePersistence";
 import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
-import { requestAuditOfflineSync, startAuditOfflineSync } from "./services/qmsAuditOfflineSync";
+import { requestPortalOfflineSync, startPortalOfflineSync, synchronizePortalOfflineNow } from "./services/portalOfflineSync";
 import {
   isPortalReady,
   getPortalConnectivity,
@@ -180,7 +181,7 @@ installActiveAmoStorageGuard();
 ensureManifest();
 onlineManager.setOnline(false);
 startPortalConnectivity();
-startAuditOfflineSync();
+startPortalOfflineSync();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -261,6 +262,7 @@ async function configurePortalServiceWorker(): Promise<void> {
   await navigator.serviceWorker.ready
     .then((ready) => {
       ready.active?.postMessage({ type: "PRECACHE_STATIC_SHELL" });
+        schedulePortalOfflineWarmup();
     })
     .catch(() => undefined);
 }
@@ -301,8 +303,7 @@ if (typeof window !== "undefined") {
       }
       onlineManager.setOnline(true);
       await queryClient.resumePausedMutations();
-      await replayOfflineMutations();
-      requestAuditOfflineSync(true); // synchronize encrypted QMS evidence after checklist replay
+      await synchronizePortalOfflineNow();
       await queryClient.invalidateQueries();
     })().finally(() => {
       recoverySequence = null;
@@ -314,7 +315,7 @@ if (typeof window !== "undefined") {
     if (detail.type === "authenticated") {
       clearIfTenantScopeChanged();
       void queryClient.invalidateQueries({ queryKey: ["workforce", "permissions"] });
-      if (!recoverySequence) void replayOfflineMutations().finally(() => requestAuditOfflineSync(true));
+      if (!recoverySequence) requestPortalOfflineSync(true);
       if (detail.reason === "session-recovered") void queryClient.invalidateQueries();
       return;
     }
@@ -340,13 +341,14 @@ if (typeof window !== "undefined") {
   });
 
   onOfflineSyncComplete((detail) => {
-    const rosterChanged = detail.entityTypes.includes("roster-assignment")
-      || detail.paths.some((path) => path.startsWith("/rostering/"));
-    if (rosterChanged) {
-      void queryClient.invalidateQueries({ queryKey: ["rostering"] });
-      return;
-    }
-    void queryClient.invalidateQueries();
+    if (detail.scope !== currentOfflineScope()) return;
+    const markers = [...new Set([...detail.entityTypes, ...detail.paths].flatMap((entityType) =>
+      realtimeQueryMarkers({ type: "synced", entityType })))];
+    clearApiResponseCache();
+    void queryClient.invalidateQueries({
+      predicate: (query) => !markers.length || queryMatchesRealtimeMarkers(query.queryKey, markers),
+      refetchType: "active",
+    });
   });
 
   window.addEventListener("load", () => {
@@ -355,7 +357,7 @@ if (typeof window !== "undefined") {
 
   navigator.serviceWorker?.addEventListener("message", (event) => {
     if (event.data?.type === "PORTAL_CONNECTIVITY_RECHECK" || event.data?.type === "PORTAL_SYNC_REQUESTED") {
-      void probePortalReadiness(true).then(() => requestAuditOfflineSync(true));
+      void probePortalReadiness(true).then(() => requestPortalOfflineSync(true));
     }
   });
 }

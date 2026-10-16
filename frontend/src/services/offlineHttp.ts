@@ -93,7 +93,6 @@ const SENSITIVE_PATH_PARTS = [
   "password",
   "token",
   "/billing",
-  "/invoices",
   "/email-logs",
   "/email-settings",
   "/security",
@@ -235,7 +234,7 @@ async function queueRequest(
     entityId: init.offline?.entityId,
     idempotencyKey,
     scope: requestScope,
-    requireDurable: init.offline?.requireDurable === true,
+    requireDurable: true,
   });
   throw new OfflineQueuedError(operation);
 }
@@ -249,6 +248,19 @@ function combineAbortSignals(controller: AbortController, caller?: AbortSignal |
 }
 
 export async function portalFetch(path: string, init: PortalFetchInit = {}): Promise<Response> {
+  const capability = classifyOfflineMutation(normalizedCachePath(path), (init.method || "GET").toUpperCase());
+  const shouldQueue = init.offline?.queueMutation ?? capability.autoQueue === true;
+  if (shouldQueue) {
+    // The first network attempt and every replay must share the same receipt
+    // key. Generating it only after a transport failure loses that guarantee.
+    const headers = new Headers(init.headers);
+    const idempotencyKey = init.offline?.idempotencyKey || headers.get("Idempotency-Key")
+      || newOfflineIdempotencyKey("mutation");
+    headers.set("Idempotency-Key", idempotencyKey);
+    if (capability.autoQueue) headers.set("X-AMO-Offline-Command", "1");
+    headers.set("X-AMO-Silent-Error", "1");
+    init = { ...init, headers, offline: { ...init.offline, queueMutation: true, idempotencyKey, requireDurable: true } };
+  }
   const { timeoutMs, offline, signal, ...requestInit } = init;
   const method = (requestInit.method || "GET").toUpperCase();
   const isGet = method === "GET";
@@ -311,12 +323,13 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
           const value = await response.clone().json().catch(() => undefined);
           assertRequestScope(requestScope);
           if (value !== undefined) {
-            void writeApiCache(
+            await writeApiCache(
               cachePath,
               value,
               offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
               requestScope,
             );
+            assertRequestScope(requestScope);
           }
         }
       }
@@ -345,15 +358,15 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   } catch (error) {
     if (isAbortError(error)) {
       // The browser may remain connected to Wi-Fi while the API is unreachable.
-      // A timed-out governed checklist command may already have been committed;
-      // queue ONLY the exact idempotent command (unchanged mutation ID/body).
-      // The backend's fieldwork replay guard must resolve duplicates on recovery.
+      // A timed-out guarded command may already have been committed. Persist
+      // the exact original key/body so its server receipt resolves the outcome.
       // Caller-initiated cancellation and all other aborts remain real errors.
       const timedOut = controller.signal.aborted
         && String(controller.signal.reason?.message || "").startsWith("Request timed out");
-      if (timedOut && queueMutation && offline?.entityType === "qms-audit-checklist-item"
-        && offline.requireDurable === true && Boolean(offline.idempotencyKey)) {
-        notePortalNetworkFailure("audit-fieldwork-timeout");
+      if (timedOut && queueMutation && isReplaySafeMutation(cachePath, method)
+        && offline?.requireDurable === true && Boolean(offline.idempotencyKey)) {
+        // A slow module is not proof of a portal-wide outage.
+        void probePortalReadiness();
         assertRequestScope(requestScope);
         return queueRequest(cachePath, method, init, requestScope);
       }

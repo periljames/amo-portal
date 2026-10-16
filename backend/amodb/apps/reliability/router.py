@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 import hashlib
 import os
 from datetime import date, datetime, time, timezone
@@ -164,6 +166,7 @@ def upsert_recurring(
     response_model=schemas.ReliabilityRecommendationRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/recommendations', schemas.ReliabilityRecommendationRead, status_code=status.HTTP_201_CREATED)
 def create_recommendation(
     payload: schemas.ReliabilityRecommendationCreate,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -182,6 +185,7 @@ def create_recommendation(
     response_model=schemas.ReliabilityEventRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/events', schemas.ReliabilityEventRead, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: schemas.ReliabilityEventCreate,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -507,6 +511,7 @@ def evaluate_alerts(
     response_model=schemas.FRACASCaseRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/fracas/cases', schemas.FRACASCaseRead, status_code=status.HTTP_201_CREATED)
 def create_fracas_case(
     payload: schemas.FRACASCaseCreate,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -623,6 +628,7 @@ def get_fracas_case_actions(
     response_model=schemas.FRACASActionRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/fracas/actions', schemas.FRACASActionRead, status_code=status.HTTP_201_CREATED)
 def create_fracas_action(
     payload: schemas.FRACASActionCreate,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -686,6 +692,7 @@ def export_fracas_evidence_pack(
     response_model=schemas.EngineFlightSnapshotRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/engine-snapshots', schemas.EngineFlightSnapshotRead, status_code=status.HTTP_201_CREATED)
 def create_engine_snapshot(
     payload: schemas.EngineFlightSnapshotCreate,
     current_user: account_models.User = Depends(get_current_active_user),
@@ -825,6 +832,7 @@ def ingest_engine_snapshots(
     response_model=schemas.OilUpliftRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/reliability/oil-uplifts', schemas.OilUpliftRead, status_code=status.HTTP_201_CREATED)
 def create_oil_uplift(
     payload: schemas.OilUpliftCreate,
     current_user: account_models.User = Depends(get_current_active_user),

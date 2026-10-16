@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from datetime import datetime
 from typing import List, Optional
 from uuid import uuid4
@@ -31,6 +33,7 @@ def list_my_tasks(
 
 
 @router.post("/tasks/personal", response_model=schemas.TaskRead, status_code=201)
+@offline_create('/tasks/personal', schemas.TaskRead, status_code=201)
 def create_personal_task(
     payload: schemas.PersonalTaskCreate,
     db: Session = Depends(get_db),

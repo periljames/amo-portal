@@ -180,11 +180,15 @@ const portalPrecacheManifestPlugin = (): Plugin => {
       const outputRoot = path.resolve(resolvedConfig.root, resolvedConfig.build.outDir)
       const urls = new Set<string>(['/', '/index.html', '/portal.webmanifest'])
       let qmsUrls: string[] = []
+      let portalUrls: string[] = []
       const manifestPath = path.join(outputRoot, '.vite', 'manifest.json')
       if (fs.existsSync(manifestPath)) {
         type ManifestEntry = { file?: string; imports?: string[]; css?: string[]; assets?: string[] }
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, ManifestEntry>
         qmsUrls = collectQmsPrecacheUrls(manifest)
+        portalUrls = [...new Set(Object.values(manifest).flatMap((entry) =>
+          [entry.file, ...(entry.css || []), ...(entry.assets || [])].filter((file): file is string => Boolean(file))
+            .map((file) => `/${file}`)))].sort()
         const visited = new Set<string>()
         const includeEntryGraph = (key: string) => {
           if (visited.has(key)) return
@@ -200,7 +204,7 @@ const portalPrecacheManifestPlugin = (): Plugin => {
       }
       fs.writeFileSync(
         path.join(outputRoot, 'portal-precache.json'),
-        `${JSON.stringify({ version: Date.now(), urls: [...urls].sort(), qmsUrls }, null, 2)}\n`,
+        `${JSON.stringify({ version: Date.now(), urls: [...urls].sort(), qmsUrls, portalUrls }, null, 2)}\n`,
         'utf8',
       )
     },

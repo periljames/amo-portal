@@ -1,6 +1,6 @@
 import { authHeaders, getCachedUser, getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
-import { classifyOfflineMutation, offlineCommandRouteKey } from "./offlineCapabilities";
+import { assertOfflineReplayAllowed, classifyOfflineMutation, offlineCommandRouteKey } from "./offlineCapabilities";
 import {
   isPortalReady,
   isSharedServiceUnavailable,
@@ -26,6 +26,8 @@ export type OfflineOutboxStatus = "queued" | "syncing" | "conflict" | "failed";
 export type OfflineOutboxEntry = {
   id: string;
   scope: string;
+  /** Original stored status when decryption failed; used only for safe discard. */
+  storageStatus?: OfflineOutboxStatus;
   path: string;
   method: string;
   headers: Record<string, string>;
@@ -171,7 +173,11 @@ async function openDatabase(): Promise<IDBDatabase | null> {
     };
     request.onsuccess = () => {
       const database = request.result;
-      database.onversionchange = () => database.close();
+      database.onversionchange = () => {
+        database.close();
+        databasePromise = null;
+        deviceKeyPromise = null;
+      };
       resolve(database);
     };
     request.onerror = () => {
@@ -179,6 +185,9 @@ async function openDatabase(): Promise<IDBDatabase | null> {
       resolve(null);
     };
     request.onblocked = () => console.warn("[offline] IndexedDB upgrade blocked by another portal tab");
+  }).then((database) => {
+    if (!database) databasePromise = null;
+    return database;
   });
 
   return databasePromise;
@@ -213,18 +222,18 @@ async function deviceEncryptionKey(): Promise<CryptoKey | null> {
     if (existing?.key) return existing.key;
     const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     // Another tab may have created the device key while WebCrypto was running.
-    const recheckTransaction = database.transaction(KEY_STORE, "readonly");
+    // A single read/write transaction serializes competing tabs even on
+    // browsers without Web Locks. Separate read and write transactions let
+    // two tabs overwrite the key and strand each other's encrypted drafts.
+    const recheckTransaction = database.transaction(KEY_STORE, "readwrite");
+    const done = transactionDone(recheckTransaction);
     const recheck = await requestResult(recheckTransaction.objectStore(KEY_STORE).get("portal-device")) as {
       id: string;
       key: CryptoKey;
     } | undefined;
-    await transactionDone(recheckTransaction);
-    if (recheck?.key) return recheck.key;
-    const writeTransaction = database.transaction(KEY_STORE, "readwrite");
-    const done = transactionDone(writeTransaction);
-    writeTransaction.objectStore(KEY_STORE).put({ id: "portal-device", key, createdAt: Date.now() });
+    if (!recheck?.key) recheckTransaction.objectStore(KEY_STORE).put({ id: "portal-device", key, createdAt: Date.now() });
     await done;
-    return key;
+    return recheck?.key || key;
   };
   deviceKeyPromise = (async () => {
     const lockManager = typeof navigator === "undefined"
@@ -235,7 +244,13 @@ async function deviceEncryptionKey(): Promise<CryptoKey | null> {
     return lockManager
       ? lockManager.request("amo-portal-device-key", loadOrCreate)
       : loadOrCreate();
-  })().catch(() => null);
+  })().then((key) => {
+    if (!key) deviceKeyPromise = null;
+    return key;
+  }).catch(() => {
+    deviceKeyPromise = null;
+    return null;
+  });
   return deviceKeyPromise;
 }
 
@@ -286,6 +301,16 @@ async function restoreOutboxEntry(entry: StoredOfflineOutboxEntry): Promise<Offl
   const rest = { ...entry };
   delete rest.encryptedBody;
   return { ...rest, body };
+}
+
+async function restoreOutboxEntryForDisplay(entry: StoredOfflineOutboxEntry): Promise<OfflineOutboxEntry> {
+  try {
+    return await restoreOutboxEntry(entry);
+  } catch {
+    return { ...entry, body: undefined, status: "failed", storageStatus: entry.status, retryable: false,
+      errorCode: "OFFLINE_STORAGE_UNREADABLE",
+      error: "This device cannot unlock this saved change. Its encrypted copy is retained; restore device storage before retrying." };
+  }
 }
 
 function randomId(prefix: string): string {
@@ -498,6 +523,7 @@ export async function removeApiCache(path: string, scope = currentOfflineScope()
 }
 
 export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput): Promise<OfflineOutboxEntry> {
+  assertOfflineReplayAllowed(input.path, input.method, input.body);
   const scope = input.scope || currentOfflineScope();
   const idempotencyKey = input.idempotencyKey || randomId("offline-operation");
   const headers = new Headers(input.headers);
@@ -550,8 +576,8 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
     }
   }
   if (!(await openDatabase())) {
-    if (input.requireDurable) {
-      throw new Error("Durable offline storage is unavailable on this device. This governed change was not queued; reconnect or enable browser storage before continuing.");
+    if (input.requireDurable !== false) {
+      throw new Error("Durable offline storage is unavailable on this device. This change was not queued; reconnect or enable browser storage before continuing.");
     }
     // Memory-only fallback is allowed only for non-governed portal drafts.
     // Governed audit fieldwork explicitly requires durable device persistence.
@@ -584,9 +610,8 @@ export async function listOfflineMutations(scope = currentOfflineScope()): Promi
       .sort((left, right) => left.createdAt - right.createdAt);
   }
 
-  const restoredEntries = (await Promise.all(
-    result.value.map((entry) => restoreOutboxEntry(entry).catch(() => null)),
-  )).filter((entry): entry is OfflineOutboxEntry => entry !== null);
+  // Keep unreadable encrypted originals visible instead of claiming "Up to date".
+  const restoredEntries = await Promise.all(result.value.map(restoreOutboxEntryForDisplay));
   const storedIds = new Set(restoredEntries.map((entry) => entry.id));
   [...memoryOutbox.entries()].forEach(([id, entry]) => {
     if (entry.scope === scope && !storedIds.has(id)) memoryOutbox.delete(id);
@@ -613,7 +638,7 @@ async function findOutboxEntry(id: string): Promise<OfflineOutboxEntry | undefin
     value: undefined,
   }));
   if (stored.available) {
-    const restored = stored.value ? await restoreOutboxEntry(stored.value).catch(() => undefined) : undefined;
+    const restored = stored.value ? await restoreOutboxEntryForDisplay(stored.value) : undefined;
     if (restored) memoryOutbox.set(id, restored);
     else memoryOutbox.delete(id);
     return restored;
@@ -669,7 +694,7 @@ async function removeOutboxEntry(
     const done = transactionDone(transaction);
     const store = transaction.objectStore(OUTBOX_STORE);
     const current = await requestResult(store.get(expected.id)) as StoredOfflineOutboxEntry | undefined;
-    if (!current || current.updatedAt !== expected.updatedAt || current.status !== expected.status) {
+    if (!current || current.updatedAt !== expected.updatedAt || current.status !== (expected.storageStatus || expected.status)) {
       await done;
       if (!current) memoryOutbox.delete(expected.id);
       else {
@@ -783,9 +808,16 @@ export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEnt
     throw new Error("Switch back to the AMO where this change was created before retrying it.");
   }
   const body = await rebaseConflictBody(entry);
+  const rebased = entry.status === "conflict";
+  const idempotencyKey = rebased ? randomId("offline-reapply") : entry.idempotencyKey;
+  const headers = new Headers(entry.headers);
+  headers.set("Idempotency-Key", idempotencyKey);
   const queued: OfflineOutboxEntry = {
     ...entry,
     body,
+    idempotencyKey,
+    headers: Object.fromEntries(headers.entries()),
+    attempts: rebased ? 0 : entry.attempts,
     status: "queued",
     updatedAt: Date.now(),
     error: undefined,
@@ -919,6 +951,13 @@ async function parseReplayError(response: Response): Promise<unknown> {
 }
 
 type CommandResolution = "not-found" | "processing" | "succeeded" | "terminal-failure";
+class ReceiptCheckError extends Error {
+  readonly response: Response;
+  constructor(response: Response) {
+    super(`Could not verify the earlier command (${response.status}).`);
+    this.response = response;
+  }
+}
 
 async function resolveServerCommand(entry: OfflineOutboxEntry): Promise<CommandResolution> {
   const routeKey = offlineCommandRouteKey(entry.path, entry.method);
@@ -941,7 +980,7 @@ async function resolveServerCommand(entry: OfflineOutboxEntry): Promise<CommandR
     );
     notePortalResponse(response);
     if (response.status === 404) return "not-found";
-    if (!response.ok) throw new Error(`Could not verify the earlier command (${response.status}).`);
+    if (!response.ok) throw new ReceiptCheckError(response);
     const payload = await response.json() as { status?: string };
     if (payload.status === "SUCCEEDED") return "succeeded";
     if (payload.status === "PROCESSING" || payload.status === "RECEIVED") return "processing";
@@ -960,7 +999,7 @@ function normaliseReplayError(detail: unknown, status: number): {
   const nested = outer?.detail && typeof outer.detail === "object"
     ? outer.detail as Record<string, unknown>
     : outer;
-  const messageValue = nested?.detail ?? outer?.detail;
+  const messageValue = nested?.message ?? nested?.detail ?? outer?.message ?? outer?.detail;
   const message = typeof messageValue === "string" && messageValue.trim()
     ? messageValue.trim()
     : typeof detail === "string" && detail.trim()
@@ -968,13 +1007,15 @@ function normaliseReplayError(detail: unknown, status: number): {
       : `The server rejected this change (${status}).`;
   return {
     message,
-    errorCode: typeof nested?.error_code === "string" ? nested.error_code : undefined,
+    errorCode: typeof nested?.error_code === "string" ? nested.error_code
+      : typeof nested?.code === "string" ? nested.code : undefined,
     retryable: typeof nested?.retryable === "boolean" ? nested.retryable : undefined,
   };
 }
 
 function offlineReplayModule(entry: OfflineOutboxEntry): string {
   const rule = classifyOfflineMutation(entry.path, entry.method);
+  if (rule.module) return rule.module;
   if (rule.id.startsWith("qms-")) return "quality";
   if (rule.id.startsWith("roster-")) return "rostering";
   if (rule.id.startsWith("work-task-")) return "work";
@@ -1006,6 +1047,12 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   const syncedEntityTypes = new Set<string>();
   const pausedModules = new Set<string>();
   let synced = 0;
+  let stopReplay = false;
+  const leaseHeartbeat = globalThis.setInterval(() => {
+    void renewReplayLease(leaseOwner, scope).then((owned) => {
+      if (!owned) stopReplay = true;
+    }).catch(() => { stopReplay = true; });
+  }, 10_000);
 
   try {
     const replayStartedAt = Date.now();
@@ -1034,41 +1081,107 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
       message: entries.length > 0 ? `Sending 0 of ${entries.length}` : "No local changes are waiting",
     });
 
-    for (const [index, entry] of entries.entries()) {
-      if (currentOfflineScope() !== scope || entry.scope !== scope) break;
+    let processed = 0;
+    const moduleQueues = new Map<string, OfflineOutboxEntry[]>();
+    for (const entry of entries) {
       const module = offlineReplayModule(entry);
-      if (pausedModules.has(module)) continue;
-      if (!(await renewReplayLease(leaseOwner, scope))) break;
-      notifyOfflineReplayProgress({
-        scope,
-        phase: "sending",
-        current: index + 1,
-        total: entries.length,
-        synced,
-        currentPath: entry.path,
-        message: `Sending ${index + 1} of ${entries.length}`,
-      });
-      const syncing: OfflineOutboxEntry = {
-        ...entry,
-        status: "syncing",
-        updatedAt: Date.now(),
-        error: undefined,
-        responseStatus: undefined,
-        errorCode: undefined,
-        retryable: undefined,
-        serverDetail: undefined,
-        lastAttemptAt: Date.now(),
-        nextAttemptAt: undefined,
-      };
-      const claimed = await replaceOutboxEntry(entry, syncing);
-      if (!claimed) continue;
+      const group = moduleQueues.get(module) || [];
+      group.push(entry);
+      moduleQueues.set(module, group);
+    }
+    const replayModule = async (group: OfflineOutboxEntry[]) => {
+      for (const entry of group) {
+        if (stopReplay || currentOfflineScope() !== scope || entry.scope !== scope) break;
+        const module = offlineReplayModule(entry);
+        if (pausedModules.has(module)) continue;
+        try {
+          assertOfflineReplayAllowed(entry.path, entry.method, entry.body);
+        } catch (error) {
+          await replaceOutboxEntry(entry, { ...entry, status: "failed", retryable: false,
+            errorCode: "OFFLINE_REPLAY_UNSUPPORTED", updatedAt: Date.now(),
+            error: error instanceof Error ? error.message : String(error) });
+          pausedModules.add(module);
+          continue;
+        }
+        if (!(await renewReplayLease(leaseOwner, scope))) { stopReplay = true; break; }
+        const index = processed++;
+        notifyOfflineReplayProgress({
+          scope,
+          phase: "sending",
+          current: index + 1,
+          total: entries.length,
+          synced,
+          currentPath: entry.path,
+          message: `Sending ${index + 1} of ${entries.length}`,
+        });
+        const syncing: OfflineOutboxEntry = {
+          ...entry,
+          status: "syncing",
+          updatedAt: Date.now(),
+          error: undefined,
+          responseStatus: undefined,
+          errorCode: undefined,
+          retryable: undefined,
+          serverDetail: undefined,
+          lastAttemptAt: Date.now(),
+          nextAttemptAt: undefined,
+        };
+        const claimed = await replaceOutboxEntry(entry, syncing);
+        if (!claimed) continue;
 
-      try {
-        // A timeout is ambiguous: the server may have committed after the
-        // browser stopped waiting. Resolve the durable receipt before resend.
-        if (claimed.attempts > 0 || entry.status === "syncing") {
-          const resolution = await resolveServerCommand(claimed);
-          if (resolution === "succeeded") {
+        try {
+          // A timeout is ambiguous: the server may have committed after the
+          // browser stopped waiting. Resolve the durable receipt before resend.
+          if (claimed.attempts > 0 || entry.status === "syncing") {
+            const resolution = await resolveServerCommand(claimed);
+            if (resolution === "succeeded") {
+              if (await removeOutboxEntry(claimed)) {
+                synced += 1;
+                syncedPaths.add(claimed.path);
+                if (claimed.entityType) syncedEntityTypes.add(claimed.entityType);
+              }
+              continue;
+            }
+            if (resolution === "processing") {
+              const attempts = claimed.attempts + 1;
+              await replaceOutboxEntry(claimed, {
+                ...claimed,
+                status: "queued",
+                attempts,
+                updatedAt: Date.now(),
+                error: "The server accepted this command and is still confirming it.",
+                retryable: true,
+                nextAttemptAt: Date.now() + replayDelayMs(attempts),
+              });
+              notifyOfflineReplayProgress({
+                scope,
+                phase: "paused",
+                current: index + 1,
+                total: entries.length,
+                synced,
+                currentPath: claimed.path,
+                message: "Server command accepted; waiting for confirmation",
+              });
+              pausedModules.add(module);
+              continue;
+            }
+            if (resolution === "terminal-failure") {
+              pausedModules.add(module);
+              await replaceOutboxEntry(claimed, {
+                ...claimed,
+                status: "conflict",
+                attempts: claimed.attempts + 1,
+                updatedAt: Date.now(),
+                error: "The earlier server command needs review before it can be retried.",
+                retryable: false,
+                nextAttemptAt: undefined,
+              });
+              continue;
+            }
+          }
+          const response = await fetchForReplay(claimed);
+          if (!(await renewReplayLease(leaseOwner, scope))) { stopReplay = true; break; }
+          if (response.ok) {
             if (await removeOutboxEntry(claimed)) {
               synced += 1;
               syncedPaths.add(claimed.path);
@@ -1076,16 +1189,21 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
             }
             continue;
           }
-          if (resolution === "processing") {
+
+          const detail = await parseReplayError(response);
+          const failure = normaliseReplayError(detail, response.status);
+          if (response.status === 409 && failure.errorCode === "COMMAND_IN_PROGRESS") {
             const attempts = claimed.attempts + 1;
             await replaceOutboxEntry(claimed, {
               ...claimed,
               status: "queued",
               attempts,
               updatedAt: Date.now(),
-              error: "The server accepted this command and is still confirming it.",
+              error: "The server is still confirming this command.",
+              responseStatus: response.status,
+              errorCode: failure.errorCode,
               retryable: true,
-              nextAttemptAt: Date.now() + replayDelayMs(attempts),
+              nextAttemptAt: Date.now() + replayDelayMs(attempts, response),
             });
             notifyOfflineReplayProgress({
               scope,
@@ -1099,94 +1217,86 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
             pausedModules.add(module);
             continue;
           }
-          if (resolution === "terminal-failure") {
+          const revisionConflict = failure.retryable === true
+            || Boolean(failure.errorCode?.includes("REVISION_CONFLICT"));
+          if ((response.status === 409 || response.status === 412) && revisionConflict) {
             pausedModules.add(module);
             await replaceOutboxEntry(claimed, {
               ...claimed,
               status: "conflict",
               attempts: claimed.attempts + 1,
               updatedAt: Date.now(),
-              error: "The earlier server command needs review before it can be retried.",
-              retryable: false,
+              error: failure.message,
+              responseStatus: response.status,
+              errorCode: failure.errorCode,
+              retryable: true,
+              serverDetail: failure.message,
+              conflict: detail,
               nextAttemptAt: undefined,
             });
             continue;
           }
-        }
-        const response = await fetchForReplay(claimed);
-        if (!(await renewReplayLease(leaseOwner, scope))) break;
-        if (response.ok) {
-          if (await removeOutboxEntry(claimed)) {
-            synced += 1;
-            syncedPaths.add(claimed.path);
-            if (claimed.entityType) syncedEntityTypes.add(claimed.entityType);
-          }
-          continue;
-        }
 
-        const detail = await parseReplayError(response);
-        const failure = normaliseReplayError(detail, response.status);
-        if (response.status === 409 && failure.errorCode === "COMMAND_IN_PROGRESS") {
-          const attempts = claimed.attempts + 1;
+          if (retryableReplayStatus(response.status)) {
+            const attempts = claimed.attempts + 1;
+            const nextAttemptAt = Date.now() + replayDelayMs(attempts, response);
+            await replaceOutboxEntry(claimed, {
+              ...claimed,
+              status: "queued",
+              attempts,
+              updatedAt: Date.now(),
+              error: response.status === 401
+                ? "Session expired. This change will retry after sign-in."
+                : failure.message,
+              responseStatus: response.status,
+              errorCode: failure.errorCode,
+              retryable: true,
+              serverDetail: failure.message,
+              nextAttemptAt,
+            });
+            notifyOfflineReplayProgress({
+              scope,
+              phase: "paused",
+              current: index + 1,
+              total: entries.length,
+              synced,
+              currentPath: claimed.path,
+              message: response.status === 401
+                ? "Sign in to continue synchronising"
+                : "Server recovery in progress; retry scheduled",
+            });
+            if (response.status === 401) handleAuthFailure("outbox-replay-unauthorized");
+            if (response.status === 401 || isSharedServiceUnavailable(response)) { stopReplay = true; break; }
+            pausedModules.add(module);
+            continue;
+          }
+
+          pausedModules.add(module);
           await replaceOutboxEntry(claimed, {
             ...claimed,
-            status: "queued",
-            attempts,
-            updatedAt: Date.now(),
-            error: "The server is still confirming this command.",
-            responseStatus: response.status,
-            errorCode: failure.errorCode,
-            retryable: true,
-            nextAttemptAt: Date.now() + replayDelayMs(attempts, response),
-          });
-          notifyOfflineReplayProgress({
-            scope,
-            phase: "paused",
-            current: index + 1,
-            total: entries.length,
-            synced,
-            currentPath: claimed.path,
-            message: "Server command accepted; waiting for confirmation",
-          });
-          pausedModules.add(module);
-          continue;
-        }
-        const revisionConflict = failure.retryable === true
-          || Boolean(failure.errorCode?.includes("REVISION_CONFLICT"));
-        if ((response.status === 409 || response.status === 412) && revisionConflict) {
-          pausedModules.add(module);
-          await replaceOutboxEntry(claimed, {
-            ...claimed,
-            status: "conflict",
+            status: "failed",
             attempts: claimed.attempts + 1,
             updatedAt: Date.now(),
             error: failure.message,
             responseStatus: response.status,
             errorCode: failure.errorCode,
-            retryable: true,
+            retryable: false,
             serverDetail: failure.message,
-            conflict: detail,
             nextAttemptAt: undefined,
           });
-          continue;
-        }
-
-        if (retryableReplayStatus(response.status)) {
+        } catch (error) {
           const attempts = claimed.attempts + 1;
-          const nextAttemptAt = Date.now() + replayDelayMs(attempts, response);
+          const receiptResponse = error instanceof ReceiptCheckError ? error.response : undefined;
+          const retryable = !receiptResponse || retryableReplayStatus(receiptResponse.status);
           await replaceOutboxEntry(claimed, {
             ...claimed,
-            status: "queued",
+            status: retryable ? "queued" : "failed",
             attempts,
             updatedAt: Date.now(),
-            error: response.status === 401
-              ? "Session expired. This change will retry after sign-in."
-              : failure.message,
-            responseStatus: response.status,
-            errorCode: failure.errorCode,
-            retryable: true,
-            serverDetail: failure.message,
-            nextAttemptAt,
+            error: error instanceof Error ? error.message : String(error),
+            retryable,
+            responseStatus: receiptResponse?.status,
+            nextAttemptAt: retryable ? Date.now() + replayDelayMs(attempts, receiptResponse) : undefined,
           });
           notifyOfflineReplayProgress({
             scope,
@@ -1195,53 +1305,30 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
             total: entries.length,
             synced,
             currentPath: claimed.path,
-            message: response.status === 401
-              ? "Sign in to continue synchronising"
-              : "Server recovery in progress; retry scheduled",
+            message: "Connection interrupted; retry scheduled",
           });
-          if (response.status === 401) handleAuthFailure("outbox-replay-unauthorized");
-          if (response.status === 401 || isSharedServiceUnavailable(response)) break;
+          if (receiptResponse?.status === 401) handleAuthFailure("outbox-receipt-unauthorized");
+          stopReplay = !receiptResponse || receiptResponse.status === 401 || isSharedServiceUnavailable(receiptResponse);
           pausedModules.add(module);
-          continue;
+          break;
         }
-
-        pausedModules.add(module);
-        await replaceOutboxEntry(claimed, {
-          ...claimed,
-          status: "failed",
-          attempts: claimed.attempts + 1,
-          updatedAt: Date.now(),
-          error: failure.message,
-          responseStatus: response.status,
-          errorCode: failure.errorCode,
-          retryable: false,
-          serverDetail: failure.message,
-          nextAttemptAt: undefined,
-        });
-      } catch (error) {
-        const attempts = claimed.attempts + 1;
-        await replaceOutboxEntry(claimed, {
-          ...claimed,
-          status: "queued",
-          attempts,
-          updatedAt: Date.now(),
-          error: error instanceof Error ? error.message : String(error),
-          retryable: true,
-          nextAttemptAt: Date.now() + replayDelayMs(attempts),
-        });
-        notifyOfflineReplayProgress({
-          scope,
-          phase: "paused",
-          current: index + 1,
-          total: entries.length,
-          synced,
-          currentPath: claimed.path,
-          message: "Connection interrupted; retry scheduled",
-        });
-        break;
       }
-    }
+    };
+    // Independent modules progress together; commands within each module keep
+    // their original order. Three requests leave room for interactive traffic.
+    const groups = [...moduleQueues.values()];
+    let nextGroup = 0;
+    const results = await Promise.allSettled(Array.from({ length: Math.min(3, groups.length) }, async () => {
+      while (!stopReplay && nextGroup < groups.length) {
+        await replayModule(groups[nextGroup++]);
+      }
+    }));
+    // Keep ownership until every in-flight module has settled, even if one
+    // module's storage transaction fails before its HTTP request can start.
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failed) throw failed.reason;
   } finally {
+    globalThis.clearInterval(leaseHeartbeat);
     await releaseReplayLease(leaseOwner, scope);
   }
 
@@ -1255,11 +1342,13 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   const finalSummary = await getOfflineOutboxSummary(scope);
   notifyOfflineReplayProgress({
     scope,
-    phase: finalSummary.queued > 0 ? "paused" : "complete",
+    phase: finalSummary.total > 0 ? "paused" : "complete",
     current: synced,
     total: synced + finalSummary.total,
     synced,
-    message: finalSummary.queued > 0
+    message: finalSummary.failed + finalSummary.conflict > 0
+      ? `${finalSummary.failed + finalSummary.conflict} local change(s) need review`
+      : finalSummary.queued > 0
       ? `${finalSummary.queued} local change${finalSummary.queued === 1 ? "" : "s"} waiting for retry`
       : synced > 0 ? `${synced} change${synced === 1 ? "" : "s"} confirmed` : "Up to date",
   });

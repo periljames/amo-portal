@@ -15,6 +15,7 @@ from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
+from amodb.apps.resilience.offline_commands import offline_create
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
@@ -734,7 +735,21 @@ def list_change_requests(
     return [_change_payload(row, users) for row in rows]
 
 
+def _authorize_offline_change(arguments):
+    db, user, payload = arguments["db"], arguments["current_user"], arguments["payload"]
+    tenant = resolve_tenant(db, arguments["tenant_slug"], user)
+    manual = get_manual(db, tenant, payload.manual_id)
+    require_manual_access(user, get_profile(db, tenant, manual.id))
+
+
+def _authorize_offline_review(arguments):
+    require_control_user(arguments["current_user"])
+    tenant = resolve_tenant(arguments["db"], arguments["tenant_slug"], arguments["current_user"])
+    get_manual(arguments["db"], tenant, arguments["payload"].manual_id)
+
+
 @router.post("/t/{tenant_slug}/change-requests")
+@offline_create("/doc-control/workspace/t/{tenant_slug}/change-requests", dict, status_code=200, authorize=_authorize_offline_change)
 def create_change_request(
     tenant_slug: str,
     payload: schemas.ChangeRequestCreate,
@@ -1298,6 +1313,7 @@ def list_reviews(
 
 
 @router.post("/t/{tenant_slug}/reviews")
+@offline_create("/doc-control/workspace/t/{tenant_slug}/reviews", dict, status_code=200, authorize=_authorize_offline_review)
 def create_review(
     tenant_slug: str,
     payload: schemas.ReviewPlanCreate,

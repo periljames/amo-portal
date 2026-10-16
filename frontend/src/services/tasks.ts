@@ -1,5 +1,5 @@
 import { getToken, handleAuthFailure } from "./auth";
-import { getApiBaseUrl } from "./config";
+import { portalFetch } from "./offlineHttp";
 
 export type TaskStatus = "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELLED";
 
@@ -22,11 +22,10 @@ export interface TaskItem {
   updated_at: string;
 }
 
-const API_BASE = getApiBaseUrl();
 
 export async function listMyTasks(): Promise<TaskItem[]> {
   const token = getToken();
-  const resp = await fetch(`${API_BASE}/tasks/my`, {
+  const resp = await portalFetch("/tasks/my", {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) {
@@ -52,7 +51,7 @@ export async function listTasks(params?: {
   if (params?.entity_type) qs.set("entity_type", params.entity_type);
   if (params?.due_before) qs.set("due_before", params.due_before);
   const query = qs.toString();
-  const resp = await fetch(`${API_BASE}/tasks${query ? `?${query}` : ""}`, {
+  const resp = await portalFetch(`/tasks${query ? `?${query}` : ""}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) {
@@ -69,7 +68,7 @@ export async function listTasks(params?: {
 
 export async function updateTask(taskId: string, payload: { status?: TaskStatus }): Promise<TaskItem> {
   const token = getToken();
-  const resp = await fetch(`${API_BASE}/tasks/${taskId}`, {
+  const resp = await portalFetch(`/tasks/${taskId}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",

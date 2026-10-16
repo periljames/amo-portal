@@ -88,7 +88,7 @@ async function request<T>(
         cache: offline?.cache ?? method === "GET",
         cacheTtlMs: offline?.cacheTtlMs ?? 5 * 60_000,
         allowStaleFallback: offline?.allowStaleFallback ?? true,
-        queueMutation: offline?.queueMutation === true,
+        queueMutation: offline?.queueMutation,
         entityType: offline?.entityType,
         entityId: offline?.entityId,
         idempotencyKey: offline?.idempotencyKey,

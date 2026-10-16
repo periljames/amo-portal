@@ -386,6 +386,29 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
   font-size: 0.82rem;
 }
 
+.portal-offline-recovery__modules {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-offline-recovery__modules li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  font-size: 0.8rem;
+}
+
+.portal-offline-recovery__device-note {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .portal-offline-recovery__list {
   display: grid;
   gap: 0.4rem;

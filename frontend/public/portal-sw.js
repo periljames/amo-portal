@@ -19,6 +19,7 @@ const SHELL_URLS = ["/", "/portal.webmanifest", "/login-illustration-placeholder
 // Keep release warming bounded while preserving the same offline cache coverage.
 const PRECACHE_CONCURRENCY = 4;
 let qmsWarmup = null;
+let portalWarmup = null;
 let staticShellWarmup = null;
 
 async function precacheQms() {
@@ -33,6 +34,20 @@ async function precacheQms() {
     await precacheWithBoundedConcurrency(urls, shellCache, assetCache, 2);
   })().finally(() => { qmsWarmup = null; });
   return qmsWarmup;
+}
+
+async function precachePortal() {
+  if (portalWarmup) return portalWarmup;
+  portalWarmup = (async () => {
+    const response = await fetch("/portal-precache.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    const urls = [...new Set(Array.isArray(manifest.portalUrls) ? manifest.portalUrls : [])]
+      .filter((url) => typeof url === "string" && /^\/(assets|pdfjs)\/[^?#]+$/.test(url));
+    const [shellCache, assetCache] = await Promise.all([caches.open(SHELL_CACHE), caches.open(ASSET_CACHE)]);
+    await precacheWithBoundedConcurrency(urls, shellCache, assetCache, 2);
+  })().finally(() => { portalWarmup = null; });
+  return portalWarmup;
 }
 
 async function cacheReleaseUrl(url, shellCache, assetCache) {
@@ -112,6 +127,7 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "PRECACHE_PORTAL") event.waitUntil(precachePortal().catch(() => undefined));
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
   if (event.data?.type === "PREPARE_AUDIT_SHELL") {
     const port = event.ports?.[0];

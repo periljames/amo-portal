@@ -4,6 +4,7 @@ import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
 import { readApiCache, writeApiCache } from "./offlinePersistence";
 import { getPdfReaderPerformanceProfile } from "./pdfPerformance";
+import { portalFetch } from "./offlineHttp";
 
 export type PublicationUploadPreview = {
   filename: string;
@@ -218,7 +219,7 @@ export async function readPersistedPublicationBootstrap(
   const key = readerCacheKey(tenantSlug, manualId, revisionId);
   const memory = publicationBootstrapMemory.get(key);
   if (memory) return memory;
-  const cached = await readApiCache<PublicationReaderBootstrap>(key).catch(() => null);
+  const cached = await readApiCache<PublicationReaderBootstrap>(key, true).catch(() => null);
   if (!cached?.value) return null;
   publicationBootstrapMemory.set(key, cached.value);
   return cached.value;
@@ -257,7 +258,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
   const headers = new Headers(authHeaders());
   if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
-  const response = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers, credentials: "same-origin" });
+  const response = await portalFetch(path, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {

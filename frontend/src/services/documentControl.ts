@@ -1,5 +1,5 @@
 import { authHeaders } from "./auth";
-import { getApiBaseUrl } from "./config";
+import { portalFetch } from "./offlineHttp";
 
 export type DocumentControlCapabilities = {
   read: boolean;
@@ -373,7 +373,7 @@ function buildQuery(values: Record<string, QueryValue>): string {
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(authHeaders());
   if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+  const response = await portalFetch(path, {
     ...init,
     headers,
     credentials: "same-origin",

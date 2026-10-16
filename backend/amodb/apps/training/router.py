@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 import hashlib
 import hmac
 import html
@@ -2458,6 +2460,7 @@ def get_course(
     status_code=status.HTTP_201_CREATED,
     summary="Create a training course (Quality / AMO admin only)",
 )
+@offline_create('/training/courses', training_schemas.TrainingCourseRead, status_code=status.HTTP_201_CREATED)
 def create_course(
     payload: training_schemas.TrainingCourseCreate,
     db: Session = Depends(get_db),
@@ -2756,6 +2759,7 @@ def page_requirements(
     status_code=status.HTTP_201_CREATED,
     summary="Create a training requirement rule (Quality / AMO admin only)",
 )
+@offline_create('/training/requirements', training_schemas.TrainingRequirementRead, status_code=status.HTTP_201_CREATED)
 def create_requirement(
     payload: training_schemas.TrainingRequirementCreate,
     db: Session = Depends(get_db),
@@ -3209,6 +3213,7 @@ def list_event_participants(
     status_code=status.HTTP_201_CREATED,
     summary="Create a training event (Quality / AMO admin only)",
 )
+@offline_create('/training/events', training_schemas.TrainingEventRead, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: training_schemas.TrainingEventCreate,
     db: Session = Depends(get_db),
@@ -4751,6 +4756,7 @@ def verify_training_record(
     status_code=status.HTTP_201_CREATED,
     summary="Request a training deferral",
 )
+@offline_create('/training/deferrals', training_schemas.TrainingDeferralRequestRead, status_code=status.HTTP_201_CREATED)
 def create_deferral_request(
     payload: training_schemas.TrainingDeferralRequestCreate,
     db: Session = Depends(get_db),

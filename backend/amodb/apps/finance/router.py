@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, status
@@ -29,6 +31,7 @@ FINANCE_WRITE_ROLES = [
     response_model=schemas.InvoiceRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/finance/invoices', schemas.InvoiceRead, status_code=status.HTTP_201_CREATED)
 def create_invoice(
     payload: schemas.InvoiceCreate,
     db: Session = Depends(get_db),

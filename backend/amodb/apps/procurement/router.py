@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 
 from typing import List, Optional
@@ -106,6 +108,7 @@ def suppliers_list(
 
 
 @router.post("/suppliers", response_model=schemas.SupplierRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/suppliers', schemas.SupplierRead, status_code=status.HTTP_201_CREATED)
 def supplier_create(
     amo_code: str,
     payload: schemas.SupplierCreate,
@@ -196,6 +199,7 @@ def requisitions_list(
 
 
 @router.post("/requisitions", response_model=schemas.RequisitionRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/requisitions', schemas.RequisitionRead, status_code=status.HTTP_201_CREATED)
 def requisition_create(
     amo_code: str,
     payload: schemas.RequisitionCreate,
@@ -249,6 +253,7 @@ def rfqs_list(
 
 
 @router.post("/rfqs", response_model=schemas.RFQRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/rfqs', schemas.RFQRead, status_code=status.HTTP_201_CREATED)
 def rfq_create(
     amo_code: str,
     payload: schemas.RFQCreate,
@@ -277,6 +282,7 @@ def quotes_list(
 
 
 @router.post("/quotes", response_model=schemas.QuoteRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/quotes', schemas.QuoteRead, status_code=status.HTTP_201_CREATED)
 def quote_create(
     amo_code: str,
     payload: schemas.QuoteCreate,

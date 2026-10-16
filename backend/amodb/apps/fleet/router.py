@@ -1,3 +1,5 @@
+
+from amodb.apps.resilience.offline_commands import offline_create
 # backend/amodb/apps/fleet/router.py
 
 from datetime import date, datetime, time as dt_time, timedelta, timezone
@@ -1230,6 +1232,7 @@ def list_maintenance_history(
     response_model=schemas.DefectReportRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/aircraft/{serial_number}/defects', schemas.DefectReportRead, status_code=status.HTTP_201_CREATED)
 def create_defect_report(
     serial_number: str,
     payload: schemas.DefectReportCreate,

@@ -172,7 +172,7 @@ async function sendJson<T>(
     body: JSON.stringify(body ?? {}),
     credentials: "include",
     offline: {
-      queueMutation: false,
+      queueMutation: undefined,
     },
   });
 
