@@ -250,7 +250,21 @@ function AlertDetail({ item, basePath }: { item: ReliabilityAlert; basePath: str
 }
 
 function CaseDetail({ item, actions, basePath }: { item: FracasCase; actions: FracasAction[]; basePath: string }) {
+  const stages = [
+    ["OPEN", "Registered"], ["IN_ANALYSIS", "Investigating"],
+    ["ACTIONS", "Corrective actions"], ["MONITORING", "Effectiveness"], ["CLOSED", "Closed"],
+  ] as const;
+  const current = stages.findIndex(([state]) => state === item.status);
   return <>
+    <section className="rel-fracas-progress" aria-label="FRACAS governance lifecycle">
+      <header><strong>Investigation lifecycle</strong><span>Current stage: {item.status.replaceAll("_", " ")}</span></header>
+      <ol>{stages.map(([state, label], index) => <li key={state}
+        className={index < current ? "is-complete" : index === current ? "is-current" : "is-pending"}
+        aria-current={index === current ? "step" : undefined}>
+        <span aria-hidden="true">{index + 1}</span>{label}
+      </li>)}</ol>
+      <p>Stage labels summarize the case's authoritative status. Approvals and case transitions remain controlled by FRACAS governance.</p>
+    </section>
     <DetailSurface back={`${basePath}/cases`} title={item.title} status={<><span className={severityClass(item.severity)}>{item.severity || "UNRATED"}</span><span className={statusClass(item.status)}>{item.status.replaceAll("_", " ")}</span></>} fields={[["Aircraft", item.aircraft_serial_number || "Fleet"], ["Classification", item.classification || "Unclassified"], ["Opened", displayDate(item.opened_at)], ["Failure definition", item.description || "Not recorded"], ["Root cause", item.root_cause || "Not yet approved"], ["Corrective action", item.corrective_action_summary || "Not yet approved"], ["Verification", item.verification_notes || "Effectiveness not yet verified"]]} />
     <section className="reliability-v2__section"><SectionHeading eyebrow="Implementation and effectiveness" title="Case actions" meta={`${actions.length} actions`} /><div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Action</th><th>Status</th><th>Owner</th><th>Due</th><th>Verified</th></tr></thead><tbody>{actions.map((action) => <tr key={action.id}><td>{action.description}</td><td><span className={statusClass(action.status)}>{action.status.replaceAll("_", " ")}</span></td><td>{action.owner_user_id || "Unassigned"}</td><td>{action.due_date || "—"}</td><td>{displayDate(action.verified_at)}</td></tr>)}{actions.length === 0 && <tr><td colSpan={5}>No corrective or preventive actions have been recorded.</td></tr>}</tbody></table></div></section>
   </>;
