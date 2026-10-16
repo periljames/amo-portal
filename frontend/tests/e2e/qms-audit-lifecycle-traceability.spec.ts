@@ -141,7 +141,7 @@ test("MD scenarios 11 and 13 — records a structured finding atomically from Li
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
   await expect(live).toBeVisible({ timeout: 30_000 });
   await expect(live.getByRole("table", { name: "Checklist assessment table" })).toBeVisible();
-  await live.getByRole("button", { name: "Details for question 1" }).click();
+  await live.getByRole("button", { name: "Details for question 1", exact: true }).click();
   await expect(live.getByRole("heading", { name: "Verify sampled supplier approvals were current at the time of purchase." })).toBeVisible();
   await live.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "NCR" }).click();
 
@@ -162,6 +162,8 @@ test("MD scenarios 11 and 13 — records a structured finding atomically from Li
     objective_evidence: "Purchase order PO-017 and supplier approval register revision 4.",
   });
   await expect(live.getByText(/Finding, checklist response and governed CAR\/task consequences committed as one authoritative transaction/i)).toBeVisible();
+  // Exit the checklist detail pane before operating the summary sidebar.
+  await live.getByRole("button", { name: "Close question details" }).click();
   // Findings remain in a collapsed progress disclosure until requested.
   const findingsDisclosure = live.locator("#audit-occurrence-findings");
   await findingsDisclosure.locator("summary").click();
