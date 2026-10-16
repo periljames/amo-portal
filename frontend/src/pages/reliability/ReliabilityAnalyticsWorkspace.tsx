@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiRequest } from "../../services/apiClient";
 import ReliabilityCommandOverview from "./ReliabilityCommandOverview";
+import ReliabilityEngineSpotlight from "./ReliabilityEngineSpotlight";
 import type { DashboardFilters, DashboardResponse, DrilldownDescriptor, DrilldownResponse, EngineSeriesResponse, SavedView } from "./reliabilityAnalyticsTypes";
 import { buildSearch, chartLabelFromEvent, chartPointFromEvent, dateInput, defaultFilters, exportDashboardCsv, flattenEngineSeries, formatDate, formatMetric, formatNumber, readSavedViews, SAVED_VIEW_KEY, statusClass } from "./reliabilityAnalyticsUtils";
 import { ReliabilityAnalyticsControlCharts } from "./ReliabilityAnalyticsControlCharts";
@@ -336,6 +337,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
                 onEnginePoint={handleEngineChartClick} engineMetric={engineMetric} setEngineMetric={setEngineMetric}
                 engineSeries={engineSeries} engineRows={engineRows} engineSeriesNames={engineSeriesNames} engineLoading={engineLoading} />}
           </div>
+          {area === "engineering" && <ReliabilityEngineSpotlight />}
         </section>}
         {area === "formulae" && <ReliabilityFormulaLibrary formulae={data.formulae} />}
         {area === "administration" && <ReliabilityFormulaAdministration formulae={data.formulae} />}
