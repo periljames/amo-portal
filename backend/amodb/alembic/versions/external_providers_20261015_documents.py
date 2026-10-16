@@ -50,6 +50,8 @@ def upgrade():
         batch.add_column(sa.Column("dms_revision_id", sa.String(36)))
         batch.add_column(sa.Column("qms_evidence_id", sa.String(36)))
         batch.add_column(sa.Column("idempotency_key", sa.String(64)))
+        batch.add_column(sa.Column("dms_evidence_asset_id", sa.String(36)))
+        batch.add_column(sa.Column("dms_retention_id", sa.String(36)))
         batch.create_foreign_key("fk_ext_doc_submission_req", "external_provider_document_requirements", ["amo_id", "requirement_id"], ["amo_id", "id"], ondelete="RESTRICT")
         batch.create_unique_constraint("uq_ext_doc_submission_tenant_provider", ["amo_id","tenant_provider_id","id"])
         batch.create_foreign_key("fk_ext_doc_supersedes", "external_partner_evidence_submissions",
@@ -59,6 +61,8 @@ def upgrade():
         batch.create_foreign_key("fk_ext_doc_manual", "manuals", ["dms_manual_id"], ["id"], ondelete="RESTRICT")
         batch.create_foreign_key("fk_ext_doc_revision", "manual_revisions", ["dms_revision_id"], ["id"], ondelete="RESTRICT")
         batch.create_foreign_key("fk_ext_doc_qms_evidence", "quality_external_provider_evidence", ["qms_evidence_id"], ["id"], ondelete="RESTRICT")
+        batch.create_foreign_key("fk_ext_doc_dms_asset", "document_evidence_assets", ["dms_evidence_asset_id"], ["id"], ondelete="RESTRICT")
+        batch.create_foreign_key("fk_ext_doc_dms_retention", "document_retention_dispositions", ["dms_retention_id"], ["id"], ondelete="RESTRICT")
         batch.create_unique_constraint("uq_ext_doc_idempotency", ["amo_id", "tenant_provider_id", "idempotency_key"])
     op.create_index("ix_ext_doc_requirement_history", "external_partner_evidence_submissions", ["amo_id", "tenant_provider_id", "requirement_id", "created_at"])
     # Replace only the original staging-state constraint. File rows and decisions
@@ -126,10 +130,10 @@ def downgrade():
     op.drop_index("ix_ext_doc_requirement_history", table_name="external_partner_evidence_submissions")
     with op.batch_alter_table("external_partner_evidence_submissions") as batch:
         batch.drop_constraint("uq_ext_doc_idempotency", type_="unique")
-        for fk in ("fk_ext_doc_qms_evidence", "fk_ext_doc_revision", "fk_ext_doc_manual", "fk_ext_doc_form_revision", "fk_ext_doc_supersedes", "fk_ext_doc_submission_req"):
+        for fk in ("fk_ext_doc_dms_retention", "fk_ext_doc_dms_asset", "fk_ext_doc_qms_evidence", "fk_ext_doc_revision", "fk_ext_doc_manual", "fk_ext_doc_form_revision", "fk_ext_doc_supersedes", "fk_ext_doc_submission_req"):
             batch.drop_constraint(fk, type_="foreignkey")
         batch.drop_constraint("uq_ext_doc_submission_tenant_provider", type_="unique")
-        for col in ("idempotency_key", "qms_evidence_id", "dms_revision_id", "dms_manual_id", "valid_until", "form_revision_id", "supersedes_submission_id", "requirement_id"):
+        for col in ("dms_retention_id", "dms_evidence_asset_id", "idempotency_key", "qms_evidence_id", "dms_revision_id", "dms_manual_id", "valid_until", "form_revision_id", "supersedes_submission_id", "requirement_id"):
             batch.drop_column(col)
     op.drop_index("ix_ext_doc_req_tenant_kind", table_name="external_provider_document_requirements")
     op.drop_table("external_provider_document_requirements")
