@@ -28,15 +28,15 @@ SESSION_HOURS = 8
 CAPABILITIES = frozenset({
     "profile.read", "document.read", "document.submit", "capa.respond",
     "task.read", "task.respond", "contract.read", "contract.acknowledge",
-    "profile.propose", "members.read", "procurement.read", "procurement.respond",
+    "profile.propose", "members.read", "procurement.read", "procurement.respond", "procurement.attach",
     "members.manage", "sessions.manage",
 })
 ROLE_CAPS = {
     "PROVIDER_ADMIN": CAPABILITIES,
-    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage","procurement.read"}),
-    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage","procurement.read"}),
-    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","contract.read","contract.acknowledge","task.read","sessions.manage","procurement.read","procurement.respond"}),
-    "DOCUMENT_SUBMITTER": frozenset({"profile.read","document.read","document.submit","task.read","sessions.manage","procurement.read"}),
+    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage","procurement.read","procurement.attach"}),
+    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage","procurement.read","procurement.attach"}),
+    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","contract.read","contract.acknowledge","task.read","sessions.manage","procurement.read","procurement.respond","procurement.attach","document.submit"}),
+    "DOCUMENT_SUBMITTER": frozenset({"profile.read","document.read","document.submit","task.read","sessions.manage","procurement.read","procurement.attach"}),
     "READ_ONLY": frozenset({"profile.read","document.read","task.read","sessions.manage","procurement.read"}),
 }
 APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").lower()
