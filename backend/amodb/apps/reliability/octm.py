@@ -51,6 +51,8 @@ class OCTMEntry(Base):
     event_sequence = Column(Integer, nullable=False)
     techsheet_ref = Column(String(160), nullable=False)
     sector_ref = Column(String(100))
+    source_scope = Column(String(20), nullable=False, default="SECTOR")
+    source_context = Column(JSON)
     source_type = Column(String(32), nullable=False)
     external_record_id = Column(String(180))
     source_evidence_ref = Column(String(512))
@@ -119,6 +121,8 @@ class EntryPayload(BaseModel):
     event_sequence: int = Field(ge=1, le=99999)
     techsheet_ref: str = Field(min_length=1, max_length=160)
     sector_ref: str | None = Field(default=None, max_length=100)
+    source_scope: Literal["SECTOR", "TECHLOG_PAGE"] = "SECTOR"
+    source_context: dict | None = None
     source_type: Literal["PAPER_TECHSHEET", "REVIEWED_OCR", "AVI_PRO_EXPORT", "AVI_PRO_API"] = "PAPER_TECHSHEET"
     external_record_id: str | None = Field(default=None, max_length=180)
     source_evidence_ref: str | None = Field(default=None, max_length=512)
@@ -148,6 +152,14 @@ class EntryPayload(BaseModel):
 
     @model_validator(mode="after")
     def check_quantities(self):
+        from json import dumps
+        if self.source_context is not None and len(dumps(self.source_context, default=str)) > 12000:
+            raise ValueError("Source context exceeds the maximum supported structured data size")
+        if self.source_scope == "TECHLOG_PAGE":
+            if not self.sector_ref or not self.sector_ref.startswith("TECHLOG_PAGE:"):
+                raise ValueError("Page-scope observations must identify their original technical-log page")
+            if not self.source_context or self.source_context.get("document_type") != "SL/MCM/1":
+                raise ValueError("Page-scope entries require linked SL/MCM/1 page context")
         # Incomplete top-ups are permitted as drafts but never verifiable.
         if self.event_type == "TOP_UP" and self.oil_quantity == 0:
             raise ValueError("A top-up with zero oil must be recorded as CHECK_ZERO")
@@ -287,6 +299,9 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
     ).order_by(OCTMEntry.event_date.asc(), OCTMEntry.event_sequence.asc()).all())
     key = (row.event_date, row.event_sequence)
     for other in verified:
+        if other.event_date == row.event_date and other.aircraft_serial_number == row.aircraft_serial_number:
+            if other.source_scope != row.source_scope:
+                errors.append("Source granularity conflict: page-total and sector records cannot both be verified for this engine/date")
         other_key = (other.event_date, other.event_sequence)
         if (other_key == key and other.techsheet_ref == row.techsheet_ref
                 and other.aircraft_serial_number == row.aircraft_serial_number):
@@ -316,6 +331,10 @@ def validate_review(row: OCTMEntry, db: Session, amo_id: str) -> list[str]:
         if (other_key <= key and other.aircraft_serial_number == row.aircraft_serial_number
                 and other.engine_position != row.engine_position):
             errors.append("Engine position differs within the same installation history")
+    if row.source_scope == "TECHLOG_PAGE" and (
+        not row.source_context or row.source_context.get("document_type") != "SL/MCM/1"
+    ):
+        errors.append("Verified page-scope uplift requires source technical-log page context")
     if row.event_type == "TOP_UP":
         if row.oil_quantity is None or row.oil_quantity <= 0 or not row.oil_unit:
             errors.append("A positive oil uplift and original volume unit are required")
@@ -664,6 +683,10 @@ def calculate_windows(rows: list[OCTMEntry], profiles: list[OCTMProfile]) -> lis
     output = []
     ordered_profiles = sorted(profiles, key=lambda p: (p.effective_from, p.version), reverse=True)
     for (aircraft, engine, installation), events in grouped.items():
+        scopes_by_date = defaultdict(set)
+        for row in events:
+            scopes_by_date[row.event_date].add(getattr(row, "source_scope", "SECTOR"))
+        mixed_dates = {day for day, scopes in scopes_by_date.items() if len(scopes) > 1}
         events.sort(key=lambda row: (row.event_date, row.event_sequence, row.created_at))
         # A sector can have multiple top-ups/checked-zero events.
         # No sector reference is only permitted for events with no flight exposure.
@@ -687,6 +710,9 @@ def calculate_windows(rows: list[OCTMEntry], profiles: list[OCTMProfile]) -> lis
                 prev_rate = None
 
         for segment in sectors.values():
+            if segment[0].event_date in mixed_dates:
+                reset(clear_baseline=True)
+                continue
             relevant = [row for row in segment if row.event_type != "NO_OPERATION"]
             if not relevant:
                 # No flying is not evidence of missing oil data.
