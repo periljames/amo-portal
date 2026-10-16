@@ -1047,3 +1047,16 @@ button.rel-ops__attention-item:hover {
 }
 .rel-ops__table-wrap thead { position: sticky; top: 0; background: var(--surface, Canvas); z-index: 2; }
 .rel-ops__table-wrap th, .rel-ops__table-wrap td { font-variant-numeric: tabular-nums; }
+
+.rel-ops__pager {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+  gap: .65rem; font-size: .8rem; padding: .7rem .1rem 1rem;
+}
+.rel-ops__pager > span:first-child { margin-right: auto; }
+.rel-ops__pager label { display: flex; gap: .3rem; align-items: center; }
+.rel-ops__pager select, .rel-ops__pager button {
+  background: Canvas; color: CanvasText; font: inherit;
+  border: 1px solid var(--border-subtle, #cbd5e1);
+  border-radius: .4rem; padding: .35rem .55rem; min-height: 2.3rem;
+}
+.rel-ops__pager button:disabled { opacity: .48; }
