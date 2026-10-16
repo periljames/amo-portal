@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { useState } from "react";
 import { Link, NavLink, useLocation, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
