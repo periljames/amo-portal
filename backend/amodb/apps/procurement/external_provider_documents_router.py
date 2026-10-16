@@ -641,6 +641,103 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
             "quality_verified":False,"dms_revision_id":payload.dms_revision_id}
 
 
+class DmsRegistration(BaseModel):
+    manual_id: str = Field(min_length=8,max_length=36)
+    retention_class: str = Field(min_length=1,max_length=64)
+    retention_until: datetime | None = None
+    reason: str = Field(min_length=8,max_length=2000)
+
+
+@staff_documents_router.post("/submissions/{submission_id}/register-dms")
+def register_dms_evidence(amo_code:str,submission_id:str,payload:DmsRegistration,
+                          request:Request,db:Session=Depends(get_db),
+                          user=Depends(get_current_active_user)):
+    """DCO-only handoff of the exact original into existing DMS asset/retention controls."""
+    amo=_staff(db,amo_code,user)
+    from amodb.apps.doc_control import evidence_models as em, retention_models as rm
+    from amodb.apps.doc_control import workspace_evidence_router as wer
+    from amodb.apps.doc_control.workspace_service import (
+        require_control_user, resolve_tenant, get_manual, get_profile,
+        require_manual_access, audit)
+    require_control_user(user)
+    tenant_row=_one(db,"SELECT slug FROM manual_tenants WHERE amo_id=:amo",amo=amo)
+    if not tenant_row:
+        raise HTTPException(404,"Tenant Document Control workspace unavailable")
+    dms_tenant=resolve_tenant(db,tenant_row["slug"],user)
+    manual=get_manual(db,dms_tenant,payload.manual_id)
+    require_manual_access(user,get_profile(db,dms_tenant,manual.id))
+    revision=_one(db,"""SELECT r.id FROM manual_revisions r JOIN manuals m
+      ON m.id=r.manual_id WHERE m.id=:manual AND r.id=m.current_published_rev_id
+      AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL""",manual=manual.id)
+    if not revision:
+        raise HTTPException(409,"Select a DMS manual with a current published revision")
+    row=_one(db,"""SELECT s.*,p.supplier_id FROM external_partner_evidence_submissions s
+      JOIN external_tenant_providers p ON p.amo_id=s.amo_id AND p.id=s.tenant_provider_id
+      WHERE s.amo_id=:amo AND s.id=:id FOR UPDATE""",amo=amo,id=submission_id)
+    if not row:
+        raise HTTPException(404,"Provider evidence unavailable")
+    if row["dms_evidence_asset_id"] or row["dms_retention_id"]:
+        raise HTTPException(409,"Original already governed by Document Control")
+    if row["status"]=="PENDING_REVIEW":
+        raise HTTPException(409,"Complete intake review before registration")
+    source=storage.materialize(row["object_uri"],expected_sha256=row["sha256"])
+    asset_id=str(uuid4());retention_id=str(uuid4())
+    root=wer.EVIDENCE_ROOT
+    destination=(root / str(dms_tenant.slug).lower() / str(manual.id) /
+                 "provider-evidence" / (asset_id+"_"+Path(row["filename"]).name)).resolve()
+    if root not in destination.parents:
+        raise HTTPException(500,"Invalid Document Control evidence path")
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    try:
+        shutil.copyfile(source,destination)
+        if hashlib.sha256(destination.read_bytes()).hexdigest()!=row["sha256"]:
+            raise HTTPException(409,"Retained DMS original failed checksum verification")
+        until=payload.retention_until
+        retention_state="DUE" if until and until<=datetime.now(timezone.utc) else "ACTIVE"
+        db.add(em.DocumentEvidenceAsset(
+            id=asset_id,tenant_id=amo,manual_id=manual.id,revision_id=revision["id"],
+            category="EXTERNAL_SOURCE",purpose="External provider controlled submission",
+            filename=row["filename"],mime_type=row["content_type"],
+            size_bytes=row["size_bytes"],sha256=row["sha256"],storage_path=str(destination),
+            description=payload.reason,uploaded_by_user_id=str(user.id),
+            source_context_json={"external_provider_submission_id":submission_id,
+                "tenant_provider_id":row["tenant_provider_id"],
+                "supplier_id":row["supplier_id"],"requirement_id":row["requirement_id"],
+                "source_sha256":row["sha256"]}))
+        db.add(rm.DocumentRetentionDisposition(
+            id=retention_id,tenant_id=amo,manual_id=manual.id,revision_id=revision["id"],
+            source_type="EVIDENCE_ASSET",source_id=asset_id,
+            source_label=row["filename"],retention_class=payload.retention_class.strip().upper(),
+            retention_until=until,status=retention_state,legal_hold=False,
+            created_by_user_id=str(user.id),
+            metadata_json={"provider_submission_id":submission_id,
+                           "source_sha256":row["sha256"],"reason":payload.reason}))
+        db.flush()
+        db.execute(text("""UPDATE external_partner_evidence_submissions
+            SET dms_evidence_asset_id=:asset,dms_retention_id=:retention
+            WHERE amo_id=:amo AND id=:id"""),
+            {"asset":asset_id,"retention":retention_id,"amo":amo,"id":submission_id})
+        _event(db,amo,submission_id,"DMS_RETENTION_REGISTERED",actor=str(user.id),
+            details={"asset_id":asset_id,"retention_id":retention_id,
+                     "manual_id":manual.id,"retention_class":payload.retention_class,
+                     "retention_until":until.isoformat() if until else None})
+        audit(db,dms_tenant,request,"document.evidence.provider_registered",
+              "document_evidence_asset",asset_id,
+              {"provider_submission_id":submission_id,"sha256":row["sha256"],
+               "retention_id":retention_id,"manual_id":manual.id})
+        audit(db,dms_tenant,request,"document.retention.created",
+              "document_retention_disposition",retention_id,
+              {"source_type":"EVIDENCE_ASSET","source_id":asset_id,
+               "provider_submission_id":submission_id})
+        db.commit()
+    except Exception:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    return {"submission_id":submission_id,"dms_evidence_asset_id":asset_id,
+            "dms_retention_id":retention_id,"retention_state":retention_state}
+
+
 @staff_documents_router.get("/submissions/{submission_id}/original")
 def staff_original(amo_code:str,submission_id:str,db:Session=Depends(get_db),
                    user=Depends(get_current_active_user)):
