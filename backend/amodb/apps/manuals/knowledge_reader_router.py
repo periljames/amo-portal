@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.doc_control import knowledge_models as km
 from amodb.apps.doc_control.knowledge_service import (
@@ -451,9 +452,17 @@ def download_documentation_record(
         raise HTTPException(status_code=404, detail="Retained record not found")
     if not is_control_user(current_user) and row.submitted_by_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the submitter or Document Control may open this retained record")
-    path = Path(row.artifact_storage_path).resolve()
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="The retained record artifact is unavailable")
+    if str(row.artifact_storage_path).startswith("s3://"):
+        try:
+            path = shared_storage.materialize(
+                row.artifact_storage_path, expected_sha256=row.artifact_sha256,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail="The retained record artifact failed shared-storage integrity verification") from exc
+    else:
+        path = Path(row.artifact_storage_path).resolve()
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="The retained record artifact is unavailable")
     return FileResponse(
         path,
         media_type=row.artifact_mime_type,
