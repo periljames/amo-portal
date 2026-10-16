@@ -77,11 +77,17 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   }
 
   const containmentEditor = structuredEditor(page, "Immediate containment action");
-  if (await containmentEditor.isVisible().catch(() => false)) {
-    await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
-    await page.getByRole("button", { name: "Save containment and continue" }).click();
+  // Do not silently skip a mandatory governed stage when the React wizard is
+  // still transitioning from responder identity to containment.
+  if (!(await containmentEditor.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: "Containment", exact: true }).click();
   }
-  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  await expect(containmentEditor).toBeVisible({ timeout: 30_000 });
+  await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
+  await page.getByRole("button", { name: "Save containment and continue" }).click();
+  const rootCauseEditor = structuredEditor(page, "Root cause analysis");
+  await expect(rootCauseEditor).toBeVisible({ timeout: 30_000 });
+  await rootCauseEditor.fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
