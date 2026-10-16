@@ -158,6 +158,8 @@ def tenant_storage_quota(
     user=Depends(require_platform_superuser),
 ):
     from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
     if not db.get(account_models.AMO, tenant_id):
         raise HTTPException(status_code=404, detail="Tenant not found")
     return storage_quota_service.read_quota(db, tenant_id)
@@ -170,6 +172,8 @@ def update_tenant_storage_quota(
     user=Depends(require_platform_superuser),
 ):
     from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
     try:
         quota_bytes = payload.get("quota_bytes")
         if type(quota_bytes) is not int:
@@ -195,6 +199,8 @@ def reconcile_tenant_storage_quota(
     user=Depends(require_platform_superuser),
 ):
     from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
     try:
         result = storage_quota_service.reconcile(db, tenant_id=tenant_id, actor_id=_actor_id(user))
         services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.reconciled",
@@ -214,6 +220,8 @@ def tenant_activation_checklist(
 ):
     from amodb.apps.accounts import services as account_services
     from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
     from amodb import storage as shared_storage
 
     tenant = db.get(account_models.AMO, tenant_id)
