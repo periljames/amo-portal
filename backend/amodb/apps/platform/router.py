@@ -234,19 +234,28 @@ def tenant_activation_checklist(
     ).order_by(account_models.User.created_at).first()
     licensed = account_services.get_billing_access_status(db, amo_id=tenant_id)
     quota = storage_quota_service.read_quota(db, tenant_id)
-    modules = db.query(account_models.ModuleSubscription).filter(
+    enabled_modules = db.query(account_models.ModuleSubscription).filter(
         account_models.ModuleSubscription.amo_id == tenant_id,
         account_models.ModuleSubscription.status.in_([
             account_models.ModuleSubscriptionStatus.ENABLED, account_models.ModuleSubscriptionStatus.TRIAL,
         ]),
-    ).count()
+    ).all()
+    active_entitlements = account_services.resolve_entitlements(db, amo_id=tenant_id)
+    licensed_modules = [
+        item.module_code for item in enabled_modules
+        if item.module_code in active_entitlements and (
+            active_entitlements[item.module_code].is_unlimited
+            or int(active_entitlements[item.module_code].limit or 0) > 0
+        )
+    ]
     checks = [
         {"key": "organization", "label": "Tenant organization created", "passed": bool(tenant.id)},
         {"key": "owner", "label": "Initial tenant administrator account assigned", "passed": owner is not None},
         {"key": "owner_setup", "label": "Administrator completed password setup", "passed": bool(owner and not owner.must_change_password)},
         {"key": "tenant_active", "label": "Organization is not suspended", "passed": bool(tenant.is_active)},
         {"key": "subscription", "label": "Effective commercial subscription permits access", "passed": bool(licensed.has_access)},
-        {"key": "modules", "label": "At least one module is enabled", "passed": modules > 0},
+        {"key": "modules", "label": "At least one module is enabled", "passed": bool(enabled_modules)},
+        {"key": "module_entitlements", "label": "Enabled modules have effective paid license entitlements", "passed": bool(licensed_modules)},
         {"key": "storage", "label": "Tenant byte quota explicitly allocated", "passed": quota["quota_bytes"] > 0},
         {"key": "shared_storage", "label": "Shared object storage configured", "passed": shared_storage.shared_storage_enabled()},
     ]
