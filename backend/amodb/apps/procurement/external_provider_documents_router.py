@@ -940,6 +940,11 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
         WHERE amo_id=:amo AND id=:id""",amo=amo,id=row["requirement_id"])
     if not req or (not req["enabled"] and payload.decision=="ACCEPTED"):
         raise HTTPException(409,"Document requirement is no longer valid for acceptance")
+    # A document that expired while queued must not enter the accepted QMS register.
+    # Reviewers may still return or reject it and preserve the original and history.
+    if (payload.decision=="ACCEPTED" and row["valid_until"] is not None
+            and row["valid_until"] < date.today()):
+        raise HTTPException(409,"Expired evidence cannot be accepted; request a current replacement")
     if bool(payload.dms_manual_id)!=bool(payload.dms_revision_id):
         raise HTTPException(422,"DMS references require both manual and exact revision IDs")
     if payload.decision!="ACCEPTED" and payload.dms_manual_id:
