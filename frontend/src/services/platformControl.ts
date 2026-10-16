@@ -40,6 +40,16 @@ export type PlatformBillingControl = {
   invoice_currencies?: Record<string, { pending_amount_cents: number; paid_amount_cents: number }>;
   tenants: PlatformBillingTenant[];
 };
+export type PlatformStorageQuota = {
+  tenant_id: string; quota_bytes: number; used_bytes: number; reserved_bytes: number;
+  remaining_bytes: number; integrity_state: string; generation?: number;
+  last_reconciled_at?: string | null;
+};
+export type PlatformActivationChecklist = {
+  tenant_id: string; ready: boolean;
+  storage: PlatformStorageQuota;
+  checks: Array<{ key: string; label: string; passed: boolean }>;
+};
 export type PlatformLicensePlan = {
   id: string; code: string; name: string; description?: string | null;
   term: "MONTHLY" | "ANNUAL" | "BI_ANNUAL";
@@ -304,6 +314,15 @@ export const platformApi = {
   readNotification: (id: string) => request(`/platform/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
 
   tenants: (params: { q?: string; status?: string; data_mode?: string; limit?: number; offset?: number } = {}) => request<PlatformList<PlatformTenant>>(`/platform/tenants${qs(params)}`),
+  storageQuota: (tenantId: string) => request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota`),
+  allocateStorageQuota: (tenantId: string, quotaBytes: number, reason: string) =>
+    request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota`,
+      { method: "POST", body: JSON.stringify({ quota_bytes: quotaBytes, reason }) }),
+  reconcileStorageQuota: (tenantId: string, reason: string) =>
+    request<PlatformStorageQuota>(`/platform/tenants/${encodeURIComponent(tenantId)}/storage-quota/reconcile`,
+      { method: "POST", body: JSON.stringify({ reason }) }),
+  activationChecklist: (tenantId: string) =>
+    request<PlatformActivationChecklist>(`/platform/tenants/${encodeURIComponent(tenantId)}/activation-checklist`),
   tenantDetail: (id: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(id)}`),
   createTenant: (payload: Record<string, unknown>) => request<Record<string, unknown>>("/platform/tenants", { method: "POST", body: JSON.stringify(payload) }),
   sendTenantOwnerInvitation: (tenantId: string) => request<Record<string, unknown>>(`/platform/tenants/${encodeURIComponent(tenantId)}/owner-invitation`, { method: "POST", body: "{}" }),
