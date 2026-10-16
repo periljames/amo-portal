@@ -8,7 +8,7 @@ type Quote={id:string;supplier_id:number;rfq_id:number;canonical_quote_id:number
   revision_no:number;status:string;submitted_at:string};
 type Shipment={id:string;po_id:number;supplier_id:number;shipment_reference:string;status:string;created_at:string};
 type Inbox={events:Event[];quotes:Quote[];shipments:Shipment[];boundary:string};
-type Decision="REPLY"|"ACCEPT_DATE_PROPOSAL"|"REJECT_PROPOSAL"|"ACKNOWLEDGE"|"TECHNICAL_ALTERNATE_REVIEW";
+type Decision="REPLY"|"ACCEPT_DATE_PROPOSAL"|"REJECT_PROPOSAL"|"ACKNOWLEDGE"|"REFER_ALTERNATE_TO_TECHNICAL";
 export default function ProviderProcurementInbox({amoCode}:{amoCode:string}){
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/procurement/partner-collaboration";
   const [view,setView]=useState<"inbox"|"quotes"|"shipments">("inbox");
@@ -89,7 +89,7 @@ export default function ProviderProcurementInbox({amoCode}:{amoCode:string}){
         {selected.entity_type==="PO"&&selected.action==="DELIVERY_CHANGE"&&
           <option value="ACCEPT_DATE_PROPOSAL">Accept proposed delivery date (Procurement only)</option>}
         {selected.entity_type==="RFQ"&&selected.action==="ALTERNATE_REQUEST"&&
-          <option value="TECHNICAL_ALTERNATE_REVIEW">Refer alternate for technical approval</option>}
+          <option value="REFER_ALTERNATE_TO_TECHNICAL">Refer alternate for technical approval</option>}
       </select></label>
       <label>Decision rationale / response<textarea required minLength={8} maxLength={3000} rows={3}
         value={message} onChange={e=>setMessage(e.target.value)}/></label>
