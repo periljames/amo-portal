@@ -28,16 +28,16 @@ SESSION_HOURS = 8
 CAPABILITIES = frozenset({
     "profile.read", "document.read", "document.submit", "capa.respond",
     "task.read", "task.respond", "contract.read", "contract.acknowledge",
-    "profile.propose", "members.read",
+    "profile.propose", "members.read", "procurement.read", "procurement.respond",
     "members.manage", "sessions.manage",
 })
 ROLE_CAPS = {
     "PROVIDER_ADMIN": CAPABILITIES,
-    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage"}),
-    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage"}),
-    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","contract.read","contract.acknowledge","task.read","sessions.manage"}),
-    "DOCUMENT_SUBMITTER": frozenset({"profile.read","document.read","document.submit","task.read","sessions.manage"}),
-    "READ_ONLY": frozenset({"profile.read","document.read","task.read","sessions.manage"}),
+    "QUALITY_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","members.read","sessions.manage","procurement.read"}),
+    "TECHNICAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","document.submit","capa.respond","task.read","task.respond","sessions.manage","procurement.read"}),
+    "COMMERCIAL_REPRESENTATIVE": frozenset({"profile.read","profile.propose","document.read","contract.read","contract.acknowledge","task.read","sessions.manage","procurement.read","procurement.respond"}),
+    "DOCUMENT_SUBMITTER": frozenset({"profile.read","document.read","document.submit","task.read","sessions.manage","procurement.read"}),
+    "READ_ONLY": frozenset({"profile.read","document.read","task.read","sessions.manage","procurement.read"}),
 }
 APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").lower()
 SECURE = APP_ENV in {"production", "prod"}
@@ -183,7 +183,7 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     if row["revoked_at"] or aware(row["expires_at"])<=now() or row["identity_state"]!="ACTIVE" or not row["verified_at"] or row["grant_state"]!="ACTIVE" or row["membership_state"]!="ACTIVE" or (row["locked_until"] and aware(row["locked_until"])>now()):
         raise HTTPException(401,"Provider account or session revoked")
     if row["portal_state"]!="ACTIVE":
-        if row["portal_state"]!="SUSPENDED" or required not in {None,"capa.respond","profile.read","profile.propose","sessions.manage","document.read"}:
+        if row["portal_state"]!="SUSPENDED" or required not in {None,"capa.respond","profile.read","profile.propose","sessions.manage","document.read","procurement.read"}:
             raise HTTPException(403,"Provider portal access suspended")
     caps=set(row["capabilities_json"] or [])
     if required and (required not in caps or required not in CAPABILITIES):
@@ -201,7 +201,7 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     )
     if (row["restrict_new_work"] or not supplier_eligible) and required not in {
         None,"capa.respond","profile.read","profile.propose","sessions.manage",
-        "document.read","document.submit"
+        "document.read","document.submit","procurement.read"
     }:
         raise HTTPException(403,"Provider is restricted to account control and existing corrective actions")
     if write:
