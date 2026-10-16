@@ -444,6 +444,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
           <h2>{view === "review" ? "Unverified source records" : "Source register"}</h2>
           <p>Only verified observations enter official intervals. Crew closure does not substitute for maintenance completion.</p>
           <label>Find source or engine<input value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
+          <div className={"octm__review-layout " + (reviewTarget || historyTarget ? "octm__review-layout--open" : "")}>
+            <div className="octm__review-register">
           <div className="octm__table-wrap"><table><thead><tr><th>Date / sequence</th><th>Aircraft</th><th>Engine / installation</th><th>Techsheet</th><th>Event</th><th>Qty</th><th>FH</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{(view === "review" ? queue : filtered).map((item) => <tr key={item.id}>
               <td>{item.event_date} · {item.event_sequence}</td><td>{item.aircraft_serial_number}</td>
@@ -478,6 +480,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               Next
             </button>
           </div>
+            </div>
+            {(historyTarget || reviewTarget) && <aside className="octm__review-aside" aria-label="Selected OCTM record">
           {historyTarget && <div className="octm__review" role="region" aria-label="Source correction history">
             <h3>Correction history — {historyTarget.techsheet_ref} / {historyTarget.engine_serial_number}</h3>
             {!revisions.length && <p>No recorded corrections for this entry.</p>}
@@ -547,6 +551,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
               </div>
             </form>
           </div>}
+            </aside>}
+          </div>
         </section>}
         {view === "coverage" && <section className="octm__panel">
           <h2>Daily data coverage reconciliation</h2>
