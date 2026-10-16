@@ -281,6 +281,16 @@ def create_reliability_events_bulk(
     return created
 
 
+def _reliability_order(query, model, key: str, direction: str, available: dict):
+    """Allowlisted SQL sort with deterministic primary key tie-break."""
+    if key not in available or direction not in {"asc", "desc"}:
+        raise ValueError("Unsupported reliability sort requested")
+    column = available[key]
+    primary = column.asc() if direction == "asc" else column.desc()
+    tie = model.id.asc() if direction == "asc" else model.id.desc()
+    return query.order_by(primary) if key == "id" else query.order_by(primary, tie)
+
+
 def list_reliability_events(
     db: Session,
     *,
@@ -289,6 +299,8 @@ def list_reliability_events(
     severity: Optional[models.ReliabilitySeverityEnum] = None,
     aircraft_serial_number: Optional[str] = None,
     query_text: Optional[str] = None,
+    sort_key: str | None = None,
+    sort_dir: str = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> Sequence[models.ReliabilityEvent]:
@@ -308,7 +320,15 @@ def list_reliability_events(
             models.ReliabilityEvent.aircraft_serial_number.ilike(pattern),
         ))
     return (
-        query.order_by(models.ReliabilityEvent.occurred_at.desc(), models.ReliabilityEvent.id.desc())
+        (_reliability_order(query, models.ReliabilityEvent, sort_key, sort_dir, {
+            "occurred_at": models.ReliabilityEvent.occurred_at,
+            "aircraft": models.ReliabilityEvent.aircraft_serial_number,
+            "severity": models.ReliabilityEvent.severity,
+            "ata": models.ReliabilityEvent.ata_chapter,
+            "event_type": models.ReliabilityEvent.event_type,
+            "source": models.ReliabilityEvent.source_system,
+            "id": models.ReliabilityEvent.id,
+        }) if sort_key else query.order_by(models.ReliabilityEvent.occurred_at.desc(), models.ReliabilityEvent.id.desc()))
         .offset(max(offset, 0))
         .limit(min(max(limit, 1), 200))
         .all()
@@ -481,6 +501,8 @@ def list_alerts(
     *,
     amo_id: str,
     alert_status: Optional[models.ReliabilityAlertStatusEnum] = None,
+    sort_key: str | None = None,
+    sort_dir: str = "desc",
     severity: Optional[models.ReliabilitySeverityEnum] = None,
     limit: int = 50,
     offset: int = 0,
@@ -491,7 +513,13 @@ def list_alerts(
     if severity is not None:
         query = query.filter(models.ReliabilityAlert.severity == severity)
     return (
-        query.order_by(models.ReliabilityAlert.triggered_at.desc(), models.ReliabilityAlert.id.desc())
+        (_reliability_order(query, models.ReliabilityAlert, sort_key, sort_dir, {
+            "triggered_at": models.ReliabilityAlert.triggered_at,
+            "severity": models.ReliabilityAlert.severity,
+            "status": models.ReliabilityAlert.status,
+            "code": models.ReliabilityAlert.alert_code,
+            "id": models.ReliabilityAlert.id,
+        }) if sort_key else query.order_by(models.ReliabilityAlert.triggered_at.desc(), models.ReliabilityAlert.id.desc()))
         .offset(max(offset, 0))
         .limit(min(max(limit, 1), 200))
         .all()
@@ -652,6 +680,8 @@ def list_fracas_cases(
     *,
     amo_id: str,
     case_status: Optional[models.FRACASStatusEnum] = None,
+    sort_key: str | None = None,
+    sort_dir: str = "desc",
     severity: Optional[models.ReliabilitySeverityEnum] = None,
     limit: int = 50,
     offset: int = 0,
@@ -662,7 +692,15 @@ def list_fracas_cases(
     if severity is not None:
         query = query.filter(models.FRACASCase.severity == severity)
     return (
-        query.order_by(models.FRACASCase.updated_at.desc(), models.FRACASCase.id.desc())
+        (_reliability_order(query, models.FRACASCase, sort_key, sort_dir, {
+            "updated_at": models.FRACASCase.updated_at,
+            "opened_at": models.FRACASCase.opened_at,
+            "aircraft": models.FRACASCase.aircraft_serial_number,
+            "severity": models.FRACASCase.severity,
+            "status": models.FRACASCase.status,
+            "title": models.FRACASCase.title,
+            "id": models.FRACASCase.id,
+        }) if sort_key else query.order_by(models.FRACASCase.updated_at.desc(), models.FRACASCase.id.desc()))
         .offset(max(offset, 0))
         .limit(min(max(limit, 1), 200))
         .all()
@@ -1159,6 +1197,8 @@ def list_engine_trend_statuses(
     *,
     amo_id: str,
     current_status: Optional[models.EngineTrendStatusEnum] = None,
+    sort_key: str | None = None,
+    sort_dir: str = "desc",
     limit: int = 100,
     offset: int = 0,
 ) -> Sequence[models.EngineTrendStatus]:
@@ -1166,11 +1206,18 @@ def list_engine_trend_statuses(
     if current_status is not None:
         query = query.filter(models.EngineTrendStatus.current_status == current_status)
     return (
-        query.order_by(
+        (_reliability_order(query, models.EngineTrendStatus, sort_key, sort_dir, {
+            "status": models.EngineTrendStatus.current_status,
+            "aircraft": models.EngineTrendStatus.aircraft_serial_number,
+            "engine_serial": models.EngineTrendStatus.engine_serial_number,
+            "last_upload": models.EngineTrendStatus.last_upload_date,
+            "last_review": models.EngineTrendStatus.last_review_date,
+            "id": models.EngineTrendStatus.id,
+        }) if sort_key else query.order_by(
             models.EngineTrendStatus.current_status.desc(),
             models.EngineTrendStatus.aircraft_serial_number.asc(),
             models.EngineTrendStatus.engine_position.asc(),
-        )
+        ))
         .offset(max(offset, 0))
         .limit(min(max(limit, 1), 200))
         .all()
