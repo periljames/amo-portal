@@ -137,8 +137,8 @@ def scan_due_provider_reviews() -> dict[str, int]:
                 # must not consume tenants' storage indefinitely.
                 if inspect(db.get_bind()).has_table("external_provider_upload_sessions"):
                     expired=db.execute(text("""
-                        SELECT id FROM external_provider_upload_sessions
-                        WHERE amo_id=:amo AND state='OPEN'
+                        SELECT id,state FROM external_provider_upload_sessions
+                        WHERE amo_id=:amo AND state IN ('OPEN','COMPLETED')
                           AND created_at < NOW()-INTERVAL '24 hours'
                         ORDER BY created_at,id LIMIT 100 FOR UPDATE SKIP LOCKED
                     """),{"amo":str(amo_id)}).mappings().all()
@@ -156,11 +156,12 @@ def scan_due_provider_reviews() -> dict[str, int]:
                         db.execute(text("""DELETE FROM external_provider_upload_parts
                             WHERE amo_id=:amo AND session_id=:id"""),
                             {"amo":str(amo_id),"id":upload["id"]})
-                        db.execute(text("""UPDATE external_provider_upload_sessions
-                            SET state='EXPIRED',updated_at=NOW()
-                            WHERE amo_id=:amo AND id=:id AND state='OPEN'"""),
-                            {"amo":str(amo_id),"id":upload["id"]})
-                        result["expired_uploads"]+=1
+                        if upload["state"]=="OPEN":
+                            db.execute(text("""UPDATE external_provider_upload_sessions
+                                SET state='EXPIRED',updated_at=NOW()
+                                WHERE amo_id=:amo AND id=:id AND state='OPEN'"""),
+                                {"amo":str(amo_id),"id":upload["id"]})
+                            result["expired_uploads"]+=1
                 db.commit()
                 result["tenants"]+=1
             except Exception:
