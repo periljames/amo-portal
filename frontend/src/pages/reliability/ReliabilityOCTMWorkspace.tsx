@@ -31,7 +31,7 @@ type EntryPayload = {
   flight_hours: number | null;
   remarks: string;
 };
-type Entry = EntryPayload & { id: string; review_status: string; created_at: string; review_note: string | null };
+type Entry = EntryPayload & { id: string; review_status: string; created_at: string; review_note: string | null; source_scope?: "SECTOR" | "TECHLOG_PAGE" };
 type Interval = {
   engine_serial_number: string;
   installation_ref: string;
@@ -93,6 +93,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [view, setView] = useState<View>("entry");
   const [form, setForm] = useState<EntryPayload>(blankEntry);
   const [correcting, setCorrecting] = useState<string | null>(null);
+  const [editingPage, setEditingPage] = useState<{ aircraft: string; techsheet: string } | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [pendingEntries, setPendingEntries] = useState<Entry[]>([]);
@@ -264,6 +265,11 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   };
 
   const chooseCorrection = (item: Entry) => {
+    if (item.source_scope === "TECHLOG_PAGE") {
+      setEditingPage({ aircraft: item.aircraft_serial_number, techsheet: item.techsheet_ref });
+      setView("techlog");
+      return;
+    }
     const base = blankEntry();
     const raw = item as unknown as Record<string, unknown>;
     const values = Object.fromEntries(Object.keys(base).map((field) =>
@@ -319,7 +325,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       {message && <p className="octm__message" role="status">{message}</p>}
       {loading ? <p>Loading OCTM records…</p> : <>
         {view === "techlog" && <ReliabilityTechlogPageEntry aircraftOptions={aircraftOptions}
-          canCreate={has("reliability.ingest")} onSaved={refresh} />}
+          canCreate={has("reliability.ingest") || (!!editingPage && has("reliability.data_quality.resolve"))}
+          editPage={editingPage} onExitEdit={() => { setEditingPage(null); setView("register"); }} onSaved={refresh} />}
         {view === "entry" && <section className="octm__panel">
           <h2>{correcting ? "Correct existing source record" : "Register sector-level oil event"}</h2>
           <p>Use the <strong>Techlog page</strong> tab for the paper SL/MCM/1 format:
@@ -417,7 +424,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <tbody>{(view === "review" ? queue : filtered).map((item) => <tr key={item.id}>
               <td>{item.event_date} · {item.event_sequence}</td><td>{item.aircraft_serial_number}</td>
               <td>{item.engine_serial_number}<small>{item.installation_ref}</small></td><td>{item.techsheet_ref}</td>
-              <td>{item.event_type}</td><td>{item.oil_quantity ?? "—"} {item.oil_unit ?? ""}</td>
+<td>{item.event_type}<small>{item.source_scope === "TECHLOG_PAGE" ? "Page total" : "Sector event"}</small></td><td>{item.oil_quantity ?? "—"} {item.oil_unit ?? ""}</td>
               <td>{item.flight_hours ?? "—"}</td><td>{item.review_status}<small>{item.review_note}</small></td>
               <td><div className="octm__row-actions">
                 <button disabled={!has("reliability.data_quality.resolve") || busy || item.review_status === "VERIFIED"}
@@ -426,7 +433,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
                   onClick={() => void prepareReview(item, "RETURNED")}>Return</button>
                 <button disabled={busy || !(has("reliability.data_quality.resolve") ||
                   (item.review_status !== "VERIFIED" && has("reliability.ingest")))}
-                  onClick={() => chooseCorrection(item)}>Correct</button>
+                  onClick={() => chooseCorrection(item)}>{item.source_scope === "TECHLOG_PAGE" ? "Correct page" : "Correct"}</button>
                 <button onClick={() => void showHistory(item)}>History</button>
               </div></td>
             </tr>)}</tbody></table></div>
