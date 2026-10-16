@@ -446,12 +446,12 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
             effective_on,expires_on FROM quality_external_provider_contracts
             WHERE amo_id=:amo AND supplier_id=:supplier AND id=:contract""",
             db,**ctx,contract=contract_id)
-    if not contract or contract["status"]!="ACTIVE":
-        raise HTTPException(404,"No active controlled agreement available")
-    if contract["effective_on"] and contract["effective_on"]>date.today():
-        raise HTTPException(403,"Agreement is not effective")
-    if contract["expires_on"] and contract["expires_on"]<date.today():
-        raise HTTPException(403,"Agreement has expired")
+    if not contract or contract["status"]=="DRAFT":
+        raise HTTPException(404,"No executed controlled agreement available")
+    historical = contract["status"]!="ACTIVE" or (
+        contract["expires_on"] is not None and contract["expires_on"]<date.today())
+    # Historical originals remain readable by expressly assigned members,
+    # without implying that the agreement permits current maintenance work.
     manual_id=contract["controlled_document_id"]
     desired_revision=contract["controlled_document_revision"]
     if not manual_id or not desired_revision:
@@ -461,15 +461,16 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
            r.stamped_export_uri,r.source_storage_path,r.source_mime_type,r.source_sha256
         FROM manuals m
         JOIN manual_tenants t ON t.id=m.tenant_id
-        JOIN manual_revisions r ON r.id=m.current_published_rev_id
-           AND r.manual_id=m.id
+        JOIN manual_revisions r ON r.manual_id=m.id
         WHERE t.amo_id=:amo AND m.id=:manual
-        AND r.status_enum='PUBLISHED'
+        AND r.status_enum IN ('PUBLISHED','SUPERSEDED','ARCHIVED')
         AND (r.id=:revision OR r.rev_number=:revision)
+        AND (:historical OR r.id=m.current_published_rev_id)
         AND r.published_at IS NOT NULL""",
-        db,amo=ctx["amo"],manual=str(manual_id),revision=str(desired_revision))
+        db,amo=ctx["amo"],manual=str(manual_id),revision=str(desired_revision),
+         historical=historical)
     if not revision:
-        raise HTTPException(409,"The assigned DMS revision is not the current published revision")
+        raise HTTPException(409,"The linked original is no longer a valid controlled revision for this agreement")
     uri=revision["stamped_export_uri"] or revision["source_storage_path"]
     if not uri:
         raise HTTPException(409,"The published document has no secured source attachment")
@@ -491,7 +492,8 @@ def download_controlled_agreement(tenant_slug:str,contract_id:str,
         details={"contract_id":contract_id,"manual_id":manual_id,"revision_id":revision["id"]})
     db.commit()
     return FileResponse(filepath,media_type=content_type,filename=filename,
-        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
+                  "X-Agreement-Historical-Record":"true" if historical else "false"})
 
 @router.post("/contracts/{contract_id}/receipt",status_code=201)
 def contract_receipt(tenant_slug:str,contract_id:str,payload:ContractReceipt,
