@@ -604,14 +604,16 @@ def _ensure_upload_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
+def _store_manual_source(*, db: Session, tenant_id: str, actor_id: str | None, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
     if shared_storage.shared_storage_enabled():
         digest = hashlib.sha256(content).hexdigest()
         try:
-            stored = shared_storage.put_stream(
-                BytesIO(content),
-                key=f"manuals/{tenant_slug}/{re.sub(r'[^A-Za-z0-9._-]+', '_', manual_code or 'manual')}/{revision_id}/{safe_name}",
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_bytes(
+                db, tenant_id=tenant_id, actor_id=actor_id,
+                content=content,
+                key=f"manuals/{tenant_id}/{re.sub(r'[^A-Za-z0-9._-]+', '_', manual_code or 'manual')}/{revision_id}/{safe_name}",
                 content_type=office_mime_type(safe_name) or "application/octet-stream",
             )
         except Exception as exc:
@@ -1340,6 +1342,7 @@ async def upload_docx_revision(
     db.flush()
 
     storage_path, source_sha = _store_manual_source(
+        db=db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
         tenant_slug=tenant_slug,
         manual_code=manual_code,
         revision_id=rev.id,
@@ -1560,6 +1563,7 @@ async def upload_pdf_revision(
     db.flush()
 
     storage_path, source_sha = _store_manual_source(
+        db=db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
         tenant_slug=tenant_slug,
         manual_code=manual_code,
         revision_id=rev.id,
