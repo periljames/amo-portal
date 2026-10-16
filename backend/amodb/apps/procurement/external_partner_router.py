@@ -99,6 +99,28 @@ def _require_existing_related(db:Session,user,kind:str,value:str):
         found=_row("""SELECT id FROM qms_audits
             WHERE amo_id=:amo AND CAST(id AS TEXT)=:item""",
             db,amo=user["amo_id"],item=value)
+    elif kind=="RFQ":
+        _require_object(user,"rfqs",value)
+        found=_row("""SELECT r.id FROM procurement_rfqs r JOIN procurement_rfq_suppliers i
+            ON i.rfq_id=r.id AND i.supplier_id=:supplier
+            WHERE r.amo_id=:amo AND CAST(r.id AS TEXT)=:item
+            AND r.issued_at IS NOT NULL AND r.status NOT IN ('DRAFT','CANCELLED')""",
+            db,**_context(user),item=value)
+    elif kind=="PO":
+        _require_object(user,"purchase_orders",value)
+        found=_row("""SELECT id FROM procurement_purchase_orders
+            WHERE amo_id=:amo AND supplier_id=:supplier AND CAST(id AS TEXT)=:item
+            AND sent_at IS NOT NULL""",db,**_context(user),item=value)
+    elif kind=="SHIPMENT":
+        # The shipment must be connected to an explicitly scoped issued PO.
+        shipment=_row("""SELECT sh.po_id FROM external_procurement_shipments sh
+            JOIN procurement_purchase_orders po ON po.id=sh.po_id
+             AND po.amo_id=sh.amo_id AND po.supplier_id=sh.supplier_id
+            WHERE sh.amo_id=:amo AND sh.supplier_id=:supplier AND sh.id=:item
+             AND po.sent_at IS NOT NULL""",db,**_context(user),item=value)
+        if shipment:
+            _require_object(user,"purchase_orders",str(shipment["po_id"]))
+        found=shipment
     else:
         raise HTTPException(422,"Unsupported related record type")
     if not found:
