@@ -278,7 +278,7 @@ export const AppRouter: React.FC = () => {
     qmsRoute.kind === "unknown" &&
     !isSupportedDocumentReaderPath(location.pathname)
   ) return <QmsNotFoundRouteSurface />;
-  if (/^\\/maintenance\\/[^/]+\\/contracted-work(?:\\/|$)/.test(location.pathname)) return <Suspense fallback={<div className="page-loading" role="status">Loading contracted maintenance…</div>}><WorkspaceRequireAuth><ContractedWorkModule /></WorkspaceRequireAuth></Suspense>;
+  if (pathSegments(location.pathname)[0] === "maintenance" && pathSegments(location.pathname)[2] === "contracted-work") return <Suspense fallback={<div className="page-loading" role="status">Loading contracted maintenance…</div>}><WorkspaceRequireAuth><ContractedWorkModule /></WorkspaceRequireAuth></Suspense>
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
