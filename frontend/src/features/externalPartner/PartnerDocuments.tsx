@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
+import PublicationDocxLayoutViewer from "../../pages/manuals/PublicationDocxLayoutViewer";
 import {friendlyDate,label,partnerRequest,partnerUrl,type Contract,type Page} from "./partnerApi";
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
@@ -30,6 +31,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const [notice,setNotice]=useState("");const [error,setError]=useState("");
   const [acknowledgeChecked,setAcknowledgeChecked]=useState(false);
   const [acknowledging,setAcknowledging]=useState("");
+  const [preview,setPreview]=useState<{url:string;blob:Blob;name:string;mime:string}|null>(null);
+  const [previewText,setPreviewText]=useState("");
+  const previewUrl=useRef("");
   const pendingKey=useRef("");const xhrRef=useRef<XMLHttpRequest|null>(null);
   const resumableAbort=useRef<AbortController|null>(null);
   const requirements=usePartnerLoad((signal)=>partnerRequest<{items:Requirement[]}>(tenant,
@@ -41,12 +45,26 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const contracts=usePartnerLoad((signal)=>capabilities.includes("contract.read")?
     partnerRequest<Page<Contract>>(tenant,"contracts?limit=50",{signal}):
     Promise.resolve({items:[],limit:50,offset:0,has_more:false}),`${tenant}:${refresh}`);
-  useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();},[]);
+  useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();
+    if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);
   const current=requirements.value?.items.find(r=>r.id===requirementId);
   const prior=(submissions.value?.items||[]).filter(s=>s.requirement_id===requirementId &&
      s.related_kind===related && (s.related_id||"")===(relatedId||""));
   const supersededIds=new Set((submissions.value?.items||[]).map(s=>s.supersedes_submission_id).filter(Boolean));
 
+  async function readOriginal(path:string,filename:string){
+    setError("");setNotice("");
+    try{
+      const response=await fetch(partnerUrl(tenant,path),{credentials:"include",cache:"no-store"});
+      if(!response.ok)throw new Error(`Document reader access denied (${response.status})`);
+      const blob=await response.blob();
+      if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);
+      const url=URL.createObjectURL(blob);previewUrl.current=url;
+      const mime=blob.type||response.headers.get("Content-Type")||"";
+      setPreview({url,blob,name:filename,mime});
+      setPreviewText(mime.includes("text/plain")?await blob.text():"");
+    }catch(e){setError(e instanceof Error?e.message:"Unable to read document");}
+  }
   async function getOriginal(path:string,filename:string){
     setError("");setNotice("");
     try{
@@ -185,6 +203,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
             {r.acknowledged_by_me?" Recorded for this revision":" Required before submission"}</small>}
           {r.form_revision_id&&<small>Approved form revision: {r.form_revision_id}</small>}
         </div><div className="partner-buttons">
+          {r.form_available&&<button type="button" onClick={()=>void readOriginal(
+            `documents/requirements/${encodeURIComponent(r.id)}/form`,`${r.code}-approved-form`)}>
+            Read current form</button>}
           {r.form_available&&<button type="button" onClick={()=>void getOriginal(
             `documents/requirements/${encodeURIComponent(r.id)}/form`,`${r.code}-approved-form`)}>
             Download current form</button>}
@@ -253,7 +274,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           {s.review_note&&<small>Review: {s.review_note}</small>}
         </div><div className="partner-buttons"><Status value={s.status}/>
           <button type="button" onClick={()=>void getOriginal(
-            `documents/submissions/${encodeURIComponent(s.id)}/original`,s.filename)}>Original</button>
+            `documents/submissions/${encodeURIComponent(s.id)}/original`,s.filename)}>Download original</button>
+          <button type="button" onClick={()=>void readOriginal(
+            `documents/submissions/${encodeURIComponent(s.id)}/original`,s.filename)}>Read original</button>
         </div>
       </div>)}
       {submissions.value&&!submissions.value.items.length&&<p className="partner-empty">No document submissions have been recorded.</p>}
@@ -263,6 +286,22 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         <button type="button" onClick={refreshAll}>Refresh</button>
       </div>
     </Section>
+    {preview&&<Section title={`Controlled reader — ${preview.name}`}
+       description="Read-only original. Reading does not approve a document or authorize work.">
+       <div className="partner-buttons"><button type="button" onClick={()=>{
+         if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);
+         previewUrl.current="";setPreview(null);setPreviewText("");
+       }}>Close reader</button></div>
+       {preview.mime.includes("wordprocessingml")?
+         <PublicationDocxLayoutViewer fileUrl="" fileBlob={preview.blob} title={preview.name}
+           zoom="fit" onTextFallback={()=>setError("Word rendering unavailable. Download the original instead.")}/>:
+         preview.mime.includes("application/pdf")?
+           <iframe src={preview.url} title={preview.name} style={{width:"100%",minHeight:"70vh"}}/>:
+         preview.mime.includes("image/")?
+           <img src={preview.url} alt={preview.name} style={{maxWidth:"100%"}}/>:
+         preview.mime.includes("text/plain")?<pre style={{whiteSpace:"pre-wrap"}}>{previewText}</pre>:
+           <p>Use the original download to read this document.</p>}
+    </Section>}
     <ActionNotice value={error} error/><ActionNotice value={notice}/>
   </div>;
 }
