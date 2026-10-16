@@ -198,6 +198,17 @@ def _eligibility(db,work):
                           WHERE amo_id=:amo AND id=:contract""",**ctx)
         if work["site_code"] not in (sites["approved_sites_json"] or []):
             raise HTTPException(409,"Contract does not approve this contracted maintenance location")
+        req=work["requirements_json"] or {}
+        if req.get("data_manual_id"):
+            current=_one(db,"""SELECT r.id FROM manuals m
+                JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=:amo
+                JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
+                WHERE m.id=:manual AND r.id=:revision
+                  AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
+                  AND r.source_storage_path IS NOT NULL""",
+                amo=work["amo_id"],manual=req["data_manual_id"],revision=req.get("data_revision_id"))
+            if not current:
+                raise HTTPException(409,"Controlled technical-data revision changed or is no longer published; obtain reviewed current instructions")
         return scope
     finally:
         if db.get_bind().dialect.name=="postgresql":
@@ -509,7 +520,9 @@ def _transition(db,work,payload,*,user=None,identity=None):
             raise HTTPException(403,"Appointed responsible Maintenance Manager decision required")
     else:
         raise HTTPException(403,"Unauthorized transition")
-    if action in {"SCOPE_APPROVED","QUALITY_ACCEPTED","AUTHORIZE","DISPATCH","PROVIDER_ACCEPT","START",
+    if action=="SCOPE_APPROVED":
+        _technical_requirements(work)
+    if action in {"QUALITY_ACCEPTED","AUTHORIZE","DISPATCH","PROVIDER_ACCEPT","START",
                   "COMPLETE","SUBMIT_RELEASE","RETURN","TECHNICAL_ACCEPT","CLOSE","RESUME","RESUME_REWORK"}:
         _eligibility(db,work)
     if action in {"AUTHORIZE","DISPATCH"}:
@@ -517,7 +530,7 @@ def _transition(db,work,payload,*,user=None,identity=None):
         # manager recorded a specific same-order MOPM 2.20 instruction.
         repair_ref=str((work["requirements_json"] or {}).get("governed_repair_order_reference") or "").strip()
         if repair_ref and (work["work_type"] not in {"WORKSHOP","SPECIALISED"}
-                           or len(repair_ref)<6 or repair_ref==work["purchase_order_id"]):
+                           or len(repair_ref)<6 or repair_ref==str(work["purchase_order_id"] or "")):
             raise HTTPException(409,"A controlled component repair order must be specifically referenced")
         reference=_one(db,"""SELECT id FROM work_orders WHERE amo_id=:amo
            AND (wo_number=:reference OR work_package_ref=:reference) LIMIT 1""",
