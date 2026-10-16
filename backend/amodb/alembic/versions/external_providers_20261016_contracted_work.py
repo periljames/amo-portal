@@ -122,6 +122,10 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("amo_id","work_id","source_submission_id", name="uq_external_work_evidence"),
     )
+    with op.batch_alter_table("external_partner_evidence_submissions") as batch:
+        batch.drop_constraint("ck_ext_partner_upload_relation", type_="check")
+        batch.create_check_constraint("ck_ext_partner_upload_relation",
+            "related_kind IN ('PROVIDER','CONTRACT','ASSIGNMENT','RFQ','PO','SHIPMENT','CONTRACTED_WORK')")
     if op.get_bind().dialect.name == "postgresql":
         for table in ("external_contracted_work","external_contracted_work_events","external_contracted_additional_work","external_contracted_custody","external_contracted_evidence_links"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
@@ -142,6 +146,10 @@ def downgrade():
     if op.get_bind().dialect.name == "postgresql":
         op.execute("DROP TRIGGER IF EXISTS external_contracted_event_no_edit ON external_contracted_work_events")
         op.execute("DROP FUNCTION IF EXISTS external_contracted_event_immutable()")
+    with op.batch_alter_table("external_partner_evidence_submissions") as batch:
+        batch.drop_constraint("ck_ext_partner_upload_relation", type_="check")
+        batch.create_check_constraint("ck_ext_partner_upload_relation",
+            "related_kind IN ('PROVIDER','CONTRACT','ASSIGNMENT','RFQ','PO','SHIPMENT')")
     for table in ("external_contracted_evidence_links","external_contracted_custody","external_contracted_additional_work",
                   "external_contracted_work_events","external_contracted_work"):
         op.drop_table(table)
