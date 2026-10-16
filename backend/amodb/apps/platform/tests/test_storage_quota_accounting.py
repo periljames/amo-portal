@@ -158,3 +158,14 @@ def test_finalized_upload_replay_returns_receipt_without_rewriting_object(storag
         )
     assert exc.value.status_code == 409
     assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 5
+
+
+def test_upload_paths_must_keep_physical_tenant_namespace_separate():
+    from fastapi import HTTPException
+    from amodb.apps.platform.storage_quota_upload import _tenant_scoped_key
+
+    assert _tenant_scoped_key("tenant-1", "evidence/tenant-1/report.pdf") == "evidence/tenant-1/report.pdf"
+    assert _tenant_scoped_key("tenant-1", "evidence//tenant-1/report.pdf") == "evidence/tenant-1/report.pdf"
+    with pytest.raises(HTTPException) as exc:
+        _tenant_scoped_key("tenant-1", "evidence/tenant-2/report.pdf")
+    assert exc.value.status_code == 403
