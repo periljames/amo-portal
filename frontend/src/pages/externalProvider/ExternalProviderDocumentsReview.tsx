@@ -37,7 +37,7 @@ type Requirement={id:string;code:string;provider_kind:string;title:string;descri
 type Submission={id:string;filename:string;status:string;evidence_type:string;
   related_kind:string;related_id:string|null;requirement_title:string|null;
   legal_name:string;supplier_id:number;email:string;sha256:string;size_bytes:number;
-  valid_until:string|null;form_revision_id:string|null;dms_revision_id:string|null;
+  valid_until:string|null;form_revision_id:string|null;form_acknowledged_at:string|null;dms_revision_id:string|null;
   qms_evidence_id:string|null;review_note:string|null;created_at:string;
   dms_evidence_asset_id:string|null;dms_retention_id:string|null;
   dms_retention_status:string|null;dms_legal_hold:boolean|null;dms_retention_until:string|null};
@@ -243,6 +243,8 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       <small>Submitted by {s.email} · {new Date(s.created_at).toLocaleDateString()}</small>
       <p>Original SHA-256: <code>{s.sha256}</code></p>
       <p>Validity until {s.valid_until||"not provided"} · Original form revision {s.form_revision_id||"not used"}</p>
+      {s.form_revision_id&&<p>Member's acknowledgement of exact form revision:
+        {s.form_acknowledged_at?new Date(s.form_acknowledged_at).toLocaleString():"Not recorded / not required by policy"}</p>}
       {s.review_note&&<p>Review: {s.review_note}</p>}
       {s.qms_evidence_id&&<p>Canonical QMS evidence ID: {s.qms_evidence_id} (separate verification required)</p>}
       {s.dms_revision_id&&<p>Exact linked DMS revision: {s.dms_revision_id}</p>}
