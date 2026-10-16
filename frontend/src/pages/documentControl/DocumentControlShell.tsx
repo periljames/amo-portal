@@ -147,6 +147,10 @@ export default function DocumentControlShell({
             </button>
           );
         })}
+        {canControl&&amoCode&&<button type="button"
+          onClick={()=>navigate(`/maintenance/${encodeURIComponent(amoCode)}/doc-control/provider-evidence`)}>
+          Provider evidence & retention
+        </button>}
       </nav>
 
       <main className="dc-workspace__content">{children}</main>
