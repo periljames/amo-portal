@@ -18,8 +18,8 @@ export default function ExternalProviderDmsPage(){
     </main>;
   }
   return <main className="external-provider-dms">
-    <nav aria-label="Document Control"><Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts`}>
-      Provider Quality workspace</Link></nav>
+    <nav aria-label="Document Control"><Link to={`/maintenance/${encodeURIComponent(amoCode)}/document-control`}>
+      Document Control workspace</Link></nav>
     <h1>External provider controlled evidence</h1>
     <p>Register a reviewed original under the authoritative DMS evidence and retention lifecycle.
       DMS legal hold and disposition remain governed in Document Control.</p>
