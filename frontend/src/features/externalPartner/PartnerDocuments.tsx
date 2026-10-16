@@ -4,7 +4,8 @@ import {friendlyDate,label,partnerRequest,partnerUrl,type Contract,type Page} fr
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 
 type Requirement={id:string;code:string;title:string;description:string;mandatory:boolean;
-  expiry_required:boolean;reminder_days:number;form_manual_id:string|null;form_revision_id:string|null;
+  expiry_required:boolean;acknowledgement_required:boolean;acknowledged_by_me:boolean;
+  reminder_days:number;form_manual_id:string|null;form_revision_id:string|null;
   form_available:boolean;version:number};
 type Submission={id:string;filename:string;evidence_type:string;status:string;
   requirement_id:string|null;related_kind:string;related_id:string|null;
@@ -27,6 +28,8 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const [supersedes,setSupersedes]=useState("");const [validUntil,setValidUntil]=useState("");
   const [busy,setBusy]=useState(false);const [progress,setProgress]=useState(0);
   const [notice,setNotice]=useState("");const [error,setError]=useState("");
+  const [acknowledgeChecked,setAcknowledgeChecked]=useState(false);
+  const [acknowledging,setAcknowledging]=useState("");
   const pendingKey=useRef("");const xhrRef=useRef<XMLHttpRequest|null>(null);
   const requirements=usePartnerLoad((signal)=>partnerRequest<{items:Requirement[]}>(tenant,
     "documents/requirements",{signal}),`${tenant}:${refresh}`);
@@ -55,9 +58,25 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
       saveBlob(await response.blob(),resolved);
     }catch(e){setError(e instanceof Error?e.message:"File could not be downloaded");}
   }
+  async function acknowledgeForm(item:Requirement){
+    if(!acknowledgeChecked||!item.form_available){setError("Open the granted form and confirm the declaration.");return;}
+    setAcknowledging(item.id);setError("");setNotice("");
+    try{
+      await partnerRequest(tenant,`documents/requirements/${encodeURIComponent(item.id)}/acknowledge`,{
+        method:"POST",csrf,body:{accepted:true,declaration:
+          "I confirm that I have read and understood the controlled form identified by this exact published revision."},
+      });
+      setAcknowledgeChecked(false);setNotice("Read-and-understood acknowledgement recorded for the exact form revision.");
+      setRefresh(v=>v+1);
+    }catch(e){setError(e instanceof Error?e.message:"Acknowledgement was not recorded");}
+    finally{setAcknowledging("");}
+  }
   function upload(e:React.FormEvent){
     e.preventDefault();
     if(!file||!current||busy)return;
+    if(current.acknowledgement_required&&!current.acknowledged_by_me){
+      setError("Acknowledge the current controlled form before uploading this document.");return;
+    }
     if(!pendingKey.current)pendingKey.current=crypto.randomUUID().replace(/-/g,"");
     const key=pendingKey.current;
     const xhr=new XMLHttpRequest();xhrRef.current=xhr;
@@ -99,12 +118,22 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         <div><strong>{r.title}{r.mandatory?" · Required":""}</strong>
           <small>{r.code} · Policy version {r.version}{r.expiry_required?" · Expiry date required":""}</small>
           {r.description&&<small>{r.description}</small>}
+          {r.acknowledgement_required&&<small>Form acknowledgement:
+            {r.acknowledged_by_me?" Recorded for this revision":" Required before submission"}</small>}
           {r.form_revision_id&&<small>Approved form revision: {r.form_revision_id}</small>}
         </div><div className="partner-buttons">
           {r.form_available&&<button type="button" onClick={()=>void getOriginal(
             `documents/requirements/${encodeURIComponent(r.id)}/form`,`${r.code}-approved-form`)}>
             Download current form</button>}
           {!r.form_available&&r.form_revision_id&&<small>Form access not granted</small>}
+          {r.acknowledgement_required&&!r.acknowledged_by_me&&r.form_available&&<div>
+            <label><input type="checkbox" checked={acknowledgeChecked}
+              onChange={e=>setAcknowledgeChecked(e.target.checked)}/>
+              I have opened, read and understood the controlled form revision shown.</label>
+            <button type="button" disabled={!acknowledgeChecked||acknowledging===r.id}
+              onClick={()=>void acknowledgeForm(r)}>
+              {acknowledging===r.id?"Recording…":"Record read-and-understood acknowledgement"}</button>
+          </div>}
         </div>
       </div>)}
     </Section>
@@ -141,7 +170,8 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           accept=".pdf,.docx,.png,.jpg,.jpeg,.txt"
           onChange={e=>{setFile(e.target.files?.[0]||null);resetRetry();}}/></label>
         {busy&&<div className="partner-progress"><progress max={100} value={progress}/><span>{progress}% uploaded</span></div>}
-        <div className="partner-buttons"><button className="partner-primary" disabled={!current||!file||busy||(related!=="PROVIDER"&&!relatedId)}>
+        <div className="partner-buttons"><button className="partner-primary" disabled={!current||!file||busy||(related!=="PROVIDER"&&!relatedId)||
+             (current.acknowledgement_required&&!current.acknowledged_by_me)}>
           {busy?"Uploading…":"Submit for controlled review"}</button>
           {busy&&<button type="button" onClick={()=>xhrRef.current?.abort()}>Cancel transfer</button>}
           {!busy&&file&&error&&<button type="button" onClick={resetRetry}>Start a new upload attempt</button>}
