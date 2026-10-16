@@ -87,6 +87,32 @@ claim manufacturer limits or Avi Pro vendor interfaces have been verified.
 listing have server-side pagination (200 rows per page); filters apply to
 the loaded page. Correction history is available for source entries.
 
+## Source-faithful SL/MCM/1 page capture
+
+The extra supplied source samples are mapped in
+`docs/reliability/OCTM_TECHLOG_WINAIR_SOURCE_MAPPING.md`.
+
+The **Techlog page** screen accepts up to nine flight legs and preserves
+their oil **levels** without falsely treating these readings as oil **added**.
+L/H and R/H oil added appear on the source at page level, while APU servicing
+is retained as context and excluded from engine OCTM calculations.
+
+The workflow previews then creates page-linked, per-engine draft observations
+in a single transaction. Entered Flight Time must reconcile with the original
+page total and recorded TTAF movement, when present. Engine ETSN is **not**
+inferred from aircraft TTAF. Page and sector sources cannot overlap in
+verified records for one engine/date and are withheld defensively by
+the calculation if earlier records contain such a conflict.
+
+The **Correct page** action loads the whole source page, requires a reason,
+retains before/after revision history for each engine, and reopens **all**
+associated engine observations for independent verification, even when only
+one engine's uplift amount changes.
+
+Maintenance release, 24-hour checks, original defects and ADD numbers are
+referenced for review; no technical-log certification, MEL approval or
+deferred-defect clearance is issued by this OCTM workflow.
+
 ## Important boundaries and follow-on integration
 
 - The workbook \`OCTM.xlsm\` has 23 worksheets and must be treated as a
