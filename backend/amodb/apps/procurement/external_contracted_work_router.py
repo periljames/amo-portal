@@ -451,7 +451,15 @@ def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
 @staff_router.get("/{work_id}")
 def staff_detail(amo_code:str,work_id:str,db:Session=Depends(get_db),user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
-    return _details(db,_work(db,amo,work_id))
+    work=_work(db,amo,work_id)
+    allowed=[]
+    for action in NEXT.get(work["status"],{}):
+        role=_role(user)
+        if action in QUALITY_ACTIONS and role in QUALITY:allowed.append(action)
+        elif action in STORES_ACTIONS and role in STORES:allowed.append(action)
+        elif action in MANAGER_ACTIONS and role==MANAGERS[work["work_type"]]:
+            allowed.append(action)
+    return {**_details(db,work),"allowed_actions":allowed}
 
 
 def _transition(db,work,payload,*,user=None,identity=None):
