@@ -117,6 +117,8 @@ def redeem_token(db, raw: str, kind: str):
     if not row or row["used_at"] or row["revoked_at"] or aware(row["expires_at"]) <= now():
         raise HTTPException(400,"Invalid or expired verification code")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
+    if row["tenant_active"] is not True:
+        raise HTTPException(403,"The parent AMO tenant is suspended")
     run("UPDATE external_identity_tokens SET used_at=:at WHERE id=:id",db,at=now(),id=row["id"])
     return row
 
@@ -160,8 +162,10 @@ def active_session(db: Session, request: Request, required: str | None = None, w
           p.organization_id, p.supplier_id, m.status membership_state,
           i.status identity_state, i.verified_at, c.locked_until,
           supplier.status supplier_lifecycle, supplier.is_active supplier_active,
-          supplier.external_import_pending_activation import_pending
+          supplier.external_import_pending_activation import_pending,
+          amo.is_active tenant_active
         FROM external_sessions s
+        JOIN amos amo ON amo.id=s.amo_id
         JOIN external_tenant_grants g ON g.id=s.grant_id AND g.amo_id=s.amo_id
         JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=s.amo_id
         JOIN external_organization_memberships m ON m.id=g.membership_id AND m.identity_id=s.identity_id AND m.organization_id=p.organization_id
