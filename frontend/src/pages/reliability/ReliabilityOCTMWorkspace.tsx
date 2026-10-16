@@ -31,7 +31,18 @@ type EntryPayload = {
   flight_hours: number | null;
   remarks: string;
 };
-type Entry = EntryPayload & { id: string; review_status: string; created_at: string; review_note: string | null; source_scope?: "SECTOR" | "TECHLOG_PAGE" };
+type SourcePageContext = {
+  document_type?: string; page_flight_hours?: number;
+  ttaf_brought_forward?: number | null; ttaf_updated?: number | null;
+  apu_oil_added?: number | null; apu_oil_unit?: string | null;
+  original_legs?: Array<{ number: number; from_airport: string | null; to_airport: string | null;
+    flight_hours: number; left_oil_level: string | null; right_oil_level: string | null }>;
+  deferred_defect_references?: string[]; defect_references?: string[];
+  maintenance_release_ref?: string | null;
+};
+type Entry = EntryPayload & { id: string; review_status: string; created_at: string;
+  review_note: string | null; source_scope?: "SECTOR" | "TECHLOG_PAGE";
+  source_context?: SourcePageContext | null };
 type Interval = {
   engine_serial_number: string;
   installation_ref: string;
@@ -476,6 +487,23 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <p>Maintenance completed: {reviewTarget.maintenance_complete}.
               Oil: {reviewTarget.oil_quantity ?? "not recorded"} {reviewTarget.oil_unit || ""}.
               Flight hours: {reviewTarget.flight_hours ?? "not recorded"}.</p>
+            {reviewTarget.source_scope === "TECHLOG_PAGE" && reviewTarget.source_context && <div className="octm__review">
+              <h4>Original SL/MCM/1 page details — distinct from sector oil uplift</h4>
+              <p>Source Flight Time total: {reviewTarget.source_context.page_flight_hours ?? "not recorded"} FH.
+                TTAF: {reviewTarget.source_context.ttaf_brought_forward ?? "—"} to
+                {" "}{reviewTarget.source_context.ttaf_updated ?? "—"}.
+                APU oil: {reviewTarget.source_context.apu_oil_added ?? "not recorded"}
+                {" "}{reviewTarget.source_context.apu_oil_unit ?? ""} (excluded from engine OCR).</p>
+              <p>Maintenance release reference: {reviewTarget.source_context.maintenance_release_ref || "Not provided"}.
+                ADD links: {reviewTarget.source_context.deferred_defect_references?.join(", ") || "None entered"}.</p>
+              <div className="octm__table-wrap"><table><thead><tr><th>Leg</th><th>From</th><th>To</th>
+                <th>Flight time (FH)</th><th>L/H oil level</th><th>R/H oil level</th></tr></thead>
+                <tbody>{reviewTarget.source_context.original_legs?.map((leg) => <tr key={leg.number}>
+                  <td>{leg.number}</td><td>{leg.from_airport || "—"}</td><td>{leg.to_airport || "—"}</td>
+                  <td>{leg.flight_hours}</td><td>{leg.left_oil_level || "Not recorded"}</td>
+                  <td>{leg.right_oil_level || "Not recorded"}</td>
+                </tr>)}</tbody></table></div>
+            </div>}
             {reviewLoading ? <p>Checking source and existing engine records…</p> : readiness && <>
               {readiness.errors.length > 0 && <div className="octm__error"><strong>Verification blocked:</strong>
                 <ul>{readiness.errors.map((item) => <li key={item}>{item}</li>)}</ul></div>}
