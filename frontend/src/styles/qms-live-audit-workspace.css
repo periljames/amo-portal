@@ -1689,3 +1689,20 @@
     box-shadow: 0 -9px 36px rgb(0 0 0 / 0.18);
   }
 }
+
+
+/* Keep authoritative finding counts, auditee presence and release boundaries
+   available during table-first fieldwork. Hiding this whole section blocked
+   auditors from reviewing the CAR/finding consequence of an atomic response. */
+.qms-live-audit-focus__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-column: 1 / -1;
+  gap: 0.6rem;
+  overflow: visible;
+  border-top: 1px solid var(--qms-line);
+  border-left: 0;
+}
+@media (max-width: 720px) {
+  .qms-live-audit-focus__summary { grid-template-columns: minmax(0, 1fr); }
+}
