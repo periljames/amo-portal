@@ -492,8 +492,10 @@ async def upload_record(
         mime_type = validate_record_file(temporary, filename)
         os.replace(temporary, destination)
         if use_shared_storage:
-            persisted = shared_storage.put_file(
-                destination,
+            from amodb.apps.platform import storage_quota_upload
+            persisted = storage_quota_upload.put_local_file(
+                db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
+                path=destination,
                 key=f"document-record-vault/{tenant.amo_id}/{series.id}/{record_id}/{filename}",
                 content_type=mime_type,
             )
