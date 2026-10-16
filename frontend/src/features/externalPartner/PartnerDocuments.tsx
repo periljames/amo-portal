@@ -29,7 +29,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
   const [supersedes,setSupersedes]=useState("");const [validUntil,setValidUntil]=useState("");
   const [busy,setBusy]=useState(false);const [progress,setProgress]=useState(0);
   const [notice,setNotice]=useState("");const [error,setError]=useState("");
-  const [acknowledgeChecked,setAcknowledgeChecked]=useState(false);
+  const [acknowledgeCheckedId,setAcknowledgeCheckedId]=useState("");
   const [acknowledging,setAcknowledging]=useState("");
   const [preview,setPreview]=useState<{url:string;blob:Blob;name:string;mime:string}|null>(null);
   const [previewText,setPreviewText]=useState("");
@@ -78,14 +78,14 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     }catch(e){setError(e instanceof Error?e.message:"File could not be downloaded");}
   }
   async function acknowledgeForm(item:Requirement){
-    if(!acknowledgeChecked||!item.form_available){setError("Open the granted form and confirm the declaration.");return;}
+    if(acknowledgeCheckedId!==item.id||!item.form_available){setError("Open the granted form and confirm the declaration.");return;}
     setAcknowledging(item.id);setError("");setNotice("");
     try{
       await partnerRequest(tenant,`documents/requirements/${encodeURIComponent(item.id)}/acknowledge`,{
         method:"POST",csrf,body:{accepted:true,declaration:
           "I confirm that I have read and understood the controlled form identified by this exact published revision."},
       });
-      setAcknowledgeChecked(false);setNotice("Read-and-understood acknowledgement recorded for the exact form revision.");
+      setAcknowledgeCheckedId("");setNotice("Read-and-understood acknowledgement recorded for the exact form revision.");
       setRefresh(v=>v+1);
     }catch(e){setError(e instanceof Error?e.message:"Acknowledgement was not recorded");}
     finally{setAcknowledging("");}
@@ -211,10 +211,10 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
             Download current form</button>}
           {!r.form_available&&r.form_revision_id&&<small>Form access not granted</small>}
           {r.acknowledgement_required&&!r.acknowledged_by_me&&r.form_available&&<div>
-            <label><input type="checkbox" checked={acknowledgeChecked}
-              onChange={e=>setAcknowledgeChecked(e.target.checked)}/>
+            <label><input type="checkbox" checked={acknowledgeCheckedId===r.id}
+              onChange={e=>setAcknowledgeCheckedId(e.target.checked?r.id:"")}/>
               I have opened, read and understood the controlled form revision shown.</label>
-            <button type="button" disabled={!acknowledgeChecked||acknowledging===r.id}
+            <button type="button" disabled={acknowledgeCheckedId!==r.id||acknowledging===r.id}
               onClick={()=>void acknowledgeForm(r)}>
               {acknowledging===r.id?"Recording…":"Record read-and-understood acknowledgement"}</button>
           </div>}
