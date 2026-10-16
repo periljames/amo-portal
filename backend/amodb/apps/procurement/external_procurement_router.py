@@ -347,9 +347,12 @@ def shipment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
 def purchase_order(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(get_db)):
     user,ctx=_session(db,request,tenant_slug)
     po=_po(db,ctx,po_id)
-    shipments=_rows(db,"""SELECT id,shipment_reference,status,details_json,lines_json,created_at
-       FROM external_procurement_shipments
-       WHERE amo_id=:amo AND supplier_id=:supplier AND po_id=:po ORDER BY created_at DESC""",
+    shipments=_rows(db,"""SELECT sh.id,sh.shipment_reference,sh.status,sh.details_json,sh.lines_json,sh.created_at,
+         (SELECT r.status FROM procurement_receipts r WHERE r.amo_id=sh.amo_id
+          AND r.purchase_order_id=sh.po_id AND r.supplier_shipment_reference=sh.shipment_reference
+          ORDER BY r.received_at DESC LIMIT 1) AS receiving_status
+       FROM external_procurement_shipments sh
+       WHERE sh.amo_id=:amo AND sh.supplier_id=:supplier AND sh.po_id=:po ORDER BY sh.created_at DESC""",
        amo=ctx["amo"],supplier=ctx["supplier"],po=po_id)
     receipts=_rows(db,"""SELECT id,receipt_number,status,received_at,delivery_note_number
        FROM procurement_receipts WHERE amo_id=:amo AND purchase_order_id=:po
@@ -452,6 +455,19 @@ def advise_shipment(tenant_slug:str,po_id:int,payload:Shipment,request:Request,d
     lines={l["id"]:l for l in _po_lines(db,po_id)}
     types={"PART" if l["part_number"] else "SERVICE" for l in lines.values()}
     _gate(db,ctx,types)
+    # Lock the canonical PO before comparing unreceived quantity against
+    # already-advised shipments; otherwise simultaneous ASNs can over-book it.
+    db.execute(text("""SELECT id FROM procurement_purchase_orders
+        WHERE amo_id=:amo AND supplier_id=:supplier AND id=:po FOR UPDATE"""),
+        {"amo":ctx["amo"],"supplier":ctx["supplier"],"po":po_id})
+    previous_advices=_rows(db,"""SELECT lines_json FROM external_procurement_shipments
+        WHERE amo_id=:amo AND supplier_id=:supplier AND po_id=:po AND status='ADVISED'""",
+        amo=ctx["amo"],supplier=ctx["supplier"],po=po_id)
+    advised={}
+    for earlier in previous_advices:
+        for part in earlier["lines_json"] or []:
+            identity=int(part["po_line_id"])
+            advised[identity]=advised.get(identity,0.0)+float(part["quantity"])
     if len({l.po_line_id for l in payload.lines})!=len(payload.lines):
         raise HTTPException(422,"Each PO line may occur once in one shipment notice")
     for item in payload.lines:
@@ -459,7 +475,7 @@ def advise_shipment(tenant_slug:str,po_id:int,payload:Shipment,request:Request,d
         if not source:raise HTTPException(422,"Shipment line not on issued PO")
         if (item.part_number or None)!=(source["part_number"] or None):
             raise HTTPException(409,"Unapproved alternate part: request technical approval before shipment")
-        if item.quantity>float(source["quantity"])-float(source["received_quantity"] or 0):
+        if item.quantity+advised.get(item.po_line_id,0)>float(source["quantity"])-float(source["received_quantity"] or 0)+1e-8:
             raise HTTPException(409,"Shipment exceeds outstanding PO quantity")
         if item.shelf_life_expires_on and item.shelf_life_expires_on<date.today():
             raise HTTPException(409,"Expired shelf-life item cannot be advised as current")
@@ -482,6 +498,35 @@ def advise_shipment(tenant_slug:str,po_id:int,payload:Shipment,request:Request,d
        details={"po_id":po_id,"reference":payload.shipment_reference})
     db.commit()
     return {"id":sid,"status":"ADVISED","receiving_status":"AWAITING_INTERNAL_RECEIVING_AND_INSPECTION"}
+
+@partner_router.post("/shipments/{shipment_id}/cancel")
+def cancel_undelivered_shipment(tenant_slug:str,shipment_id:str,payload:Ack,
+                               request:Request,db:Session=Depends(get_db)):
+    user,ctx=_session(db,request,tenant_slug,True)
+    sh=_row(db,"""SELECT id,po_id,shipment_reference,status
+         FROM external_procurement_shipments
+         WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id FOR UPDATE""",
+         amo=ctx["amo"],supplier=ctx["supplier"],id=shipment_id)
+    if not sh:raise HTTPException(404,"Shipment unavailable")
+    _po(db,ctx,sh["po_id"],True)
+    _gate(db,ctx,{"PART" if l["part_number"] else "SERVICE" for l in _po_lines(db,sh["po_id"])})
+    if sh["status"]!="ADVISED":raise HTTPException(409,"Shipment notice already cancelled")
+    if len(payload.note.strip())<8:raise HTTPException(422,"Cancellation reason required")
+    physical=_row(db,"""SELECT id FROM procurement_receipts
+        WHERE amo_id=:amo AND purchase_order_id=:po
+          AND supplier_shipment_reference=:ref LIMIT 1""",
+          amo=ctx["amo"],po=sh["po_id"],ref=sh["shipment_reference"])
+    if physical:raise HTTPException(409,"Stores already received this shipment; use the internal RMA/return workflow")
+    db.execute(text("""UPDATE external_procurement_shipments SET status='CANCELLED'
+         WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id""",
+         amo=ctx["amo"],supplier=ctx["supplier"],id=shipment_id)
+    eid,_=_event(db,ctx,"SHIPMENT",shipment_id,"CANCELLED",identity=ctx["person"],
+       message=payload.note,details={"po_id":sh["po_id"]},key=payload.idempotency_key)
+    _event(db,ctx,"PO",sh["po_id"],"SHIPMENT_CANCELLED",identity=ctx["person"],
+       details={"shipment_id":shipment_id,"reference":sh["shipment_reference"]})
+    db.commit()
+    return {"id":shipment_id,"status":"CANCELLED","event_id":eid}
+
 
 @partner_router.get("/purchase-orders/{po_id}/invoice-status")
 def invoice_status(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(get_db)):
