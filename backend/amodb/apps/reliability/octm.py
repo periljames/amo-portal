@@ -590,6 +590,9 @@ def correct_entry(entry_id: str, payload: EntryCorrection, ctx=Depends(context))
         raise HTTPException(422, "Replacement aircraft does not belong to this tenant")
     if payload.replacement.source_type not in {"PAPER_TECHSHEET", "REVIEWED_OCR"}:
         raise HTTPException(422, "Corrections to EFB imports require the controlled source adapter")
+    from .octm_source_assets import validate_source_reference
+    validate_source_reference(db, amo_id, payload.replacement.aircraft_serial_number,
+                              payload.replacement.techsheet_ref, payload.replacement.source_evidence_ref)
     before = {key: getattr(row, key) for key in EntryPayload.model_fields}
     after = entry_dict(payload.replacement)
     if before == after:
