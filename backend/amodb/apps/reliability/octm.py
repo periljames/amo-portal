@@ -563,6 +563,8 @@ def review_entry(entry_id: str, payload: EntryReview, ctx=Depends(context)):
 def correct_entry(entry_id: str, payload: EntryCorrection, ctx=Depends(context)):
     db, amo_id, actor = ctx
     row = get_entry(ctx, entry_id, for_update=True)
+    if row.source_scope == "TECHLOG_PAGE":
+        raise HTTPException(422, "A paper-page source must be corrected through the full Techlog Page workflow")
     codes = access.capabilities_for_user(db, actor)
     is_resolver = "reliability.data_quality.resolve" in codes
     is_owner_draft = ("reliability.ingest" in codes and row.review_status != "VERIFIED"
