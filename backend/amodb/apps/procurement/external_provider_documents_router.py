@@ -1022,7 +1022,9 @@ def register_dms_evidence(amo_code:str,submission_id:str,payload:DmsRegistration
     destination.parent.mkdir(parents=True,exist_ok=True)
     try:
         shutil.copyfile(source,destination)
-        if hashlib.sha256(destination.read_bytes()).hexdigest()!=row["sha256"]:
+        with destination.open("rb") as checked:
+            retained_hash=hashlib.file_digest(checked,"sha256").hexdigest()
+        if retained_hash!=row["sha256"]:
             raise HTTPException(409,"Retained DMS original failed checksum verification")
         until=payload.retention_until
         retention_state="DUE" if until and until<=datetime.now(timezone.utc) else "ACTIVE"
