@@ -27,14 +27,14 @@ def _utc(value):
     return value
 
 
-def _locked(db: Session, tenant_id: str) -> TenantStorageQuota:
+def _locked(db: Session, tenant_id: str, *, allow_drift: bool = False) -> TenantStorageQuota:
     q = db.query(TenantStorageQuota).filter(TenantStorageQuota.tenant_id == tenant_id)
     if db.get_bind().dialect.name == "postgresql":
         q = q.with_for_update()
     account = q.one_or_none()
     if not account:
         raise ValueError("Tenant has no activated storage allocation")
-    if account.integrity_state != "OK":
+    if account.integrity_state != "OK" and not allow_drift:
         raise ValueError("Storage ledger reconciliation required; quota operations paused")
     return account
 
@@ -234,7 +234,7 @@ def recorded_delete(db: Session, *, tenant_id: str, object_key: str, actor_id: s
 
 
 def reconcile(db: Session, *, tenant_id: str, actor_id: str | None = None):
-    account = _locked(db, tenant_id)
+    account = _locked(db, tenant_id, allow_drift=True)
     _expire_reservations(db, account)
     active_bytes = int(db.query(func.coalesce(func.sum(TenantStorageObject.size_bytes), 0)).filter(
         TenantStorageObject.tenant_id == tenant_id, TenantStorageObject.state == "ACTIVE",
@@ -244,8 +244,7 @@ def reconcile(db: Session, *, tenant_id: str, actor_id: str | None = None):
         TenantStorageReservation.state == "RESERVED",
     ).scalar() or 0)
     mismatch = (active_bytes != int(account.used_bytes) or pending_bytes != int(account.reserved_bytes))
-    if mismatch:
-        account.integrity_state = "DRIFT"
+    account.integrity_state = "DRIFT" if mismatch else "OK"
     account.last_reconciled_at = _now()
     _event(db, account, "RECONCILIATION_CHECKED", actor_id,
            metadata={"object_bytes": active_bytes, "pending_bytes": pending_bytes, "drift": mismatch})
