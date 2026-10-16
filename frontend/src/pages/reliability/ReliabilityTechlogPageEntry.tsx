@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../../services/apiClient";
+import ReliabilityTechlogEvidence from "./ReliabilityTechlogEvidence";
 
 type Aircraft = { serial_number: string; registration: string; is_active: boolean };
 type EngineHint = { engine_position: string; engine_serial_number: string; installation_ref: string; last_observed: string };
@@ -286,6 +287,9 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
           <label>24-hour checks signature/reference<input value={check24h}
             onChange={(event) => { invalidate(); setCheck24h(event.target.value); }} /></label>
         </div>
+        <ReliabilityTechlogEvidence aircraft={aircraft} techsheet={pageNumber}
+          reference={sourceEvidence} canUpload={canCreate}
+          onReference={(reference) => { invalidate(); setSourceEvidence(reference); }} />
       </fieldset>
       <fieldset>
         <legend>2. Flight leg grid (up to nine legs on the original page)</legend>
