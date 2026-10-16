@@ -407,6 +407,14 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <header><ShieldAlert size={19} /><div><h3>6 · Close execution without erasing follow-up</h3><small>Execution closure and CAR/CAPA completion are separate controls.</small></div></header>
           {lockedReason(6) ? <div className="qms-audit-closing__locked">{lockedReason(6)}</div> : null}
           {closure?.execution_readiness?.blockers?.length ? <ul>{closure.execution_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : null}
+          {closure?.execution_status === "CLOSED" && closure.follow_up_readiness?.blockers?.length ? (
+            <div className="qms-audit-closing__blocker" role="region" aria-label="Open CAR and follow-up obligations">
+              <strong>Audit execution is closed; the following CAR/CAPA and assurance records remain independently open:</strong>
+              <ul>{closure.follow_up_readiness.blockers.map((blocker, index) => (
+                <li key={`${blocker.type}-${blocker.id || index}`}>{blocker.ref ? `${blocker.ref}: ` : ""}{blocker.reason}</li>
+              ))}</ul>
+            </div>
+          ) : null}
           <div className="qms-audit-closing__actions">
             <button type="button" className={canExecutionClose ? "is-primary" : undefined} disabled={!canExecutionClose || !stepAllowsActions(6) || executionCloseMutation.isPending} onClick={() => executionCloseMutation.mutate()}>{executionCloseMutation.isPending ? "Closing execution…" : closure?.execution_status === "CLOSED" ? "Execution closed" : "Close audit execution"}</button>
           </div>
