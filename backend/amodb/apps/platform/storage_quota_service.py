@@ -118,8 +118,12 @@ def _expire_reservations(db: Session, account: TenantStorageQuota):
 
 def reserve(db: Session, *, tenant_id: str, object_key: str, size_bytes: int,
             idempotency_key: str, actor_id: str | None = None, ttl_minutes: int = 60):
-    if not object_key.strip() or ".." in object_key.split("/"):
+    if not object_key.strip() or ".." in object_key.replace("\\\\", "/").split("/"):
         raise ValueError("Unsafe or empty storage object key")
+    # The ledger must use the *same canonical key* as the S3 adapter.
+    # Otherwise a//b and a/b can be billed twice while overwriting one object.
+    from amodb import storage
+    object_key = storage.normalise_key(object_key)
     if not idempotency_key or len(idempotency_key) > 160:
         raise ValueError("A valid upload idempotency key is required")
     if type(size_bytes) is not int or size_bytes < 1:
