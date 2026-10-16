@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiRequest } from "../../services/apiClient";
+import ReliabilityCommandOverview from "./ReliabilityCommandOverview";
 import type { DashboardFilters, DashboardResponse, DrilldownDescriptor, DrilldownResponse, EngineSeriesResponse, SavedView } from "./reliabilityAnalyticsTypes";
 import { buildSearch, chartLabelFromEvent, chartPointFromEvent, dateInput, defaultFilters, exportDashboardCsv, flattenEngineSeries, formatDate, formatMetric, formatNumber, readSavedViews, SAVED_VIEW_KEY, statusClass } from "./reliabilityAnalyticsUtils";
 import { ReliabilityAnalyticsControlCharts } from "./ReliabilityAnalyticsControlCharts";
@@ -293,6 +294,7 @@ const ReliabilityAnalyticsWorkspace: React.FC = () => {
               {metric.formula_code && <em>Formula: {metric.formula_code}</em>}
             </button>)}
           </section>
+          <ReliabilityCommandOverview />
           <nav className="rel-analytics-dashboard__shortcuts" aria-label="Analysis workspaces">
             <Link to={basePath + "/analytics/operational"}>Fleet trends <span>Rates and ATA</span></Link>
             <Link to={basePath + "/analytics/engineering"}>Engine monitoring <span>EHM parameters</span></Link>
