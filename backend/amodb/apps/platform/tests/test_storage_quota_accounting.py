@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from amodb.database import Base
-from amodb.apps.accounts.models import AMO
+from amodb.apps.accounts.models import AMO, AMOAsset, Department, User
 from amodb.apps.platform import storage_quota_service as quota
 from amodb.apps.platform.storage_quota_models import (
     DEFAULT_PAID_QUOTA_BYTES, TenantStorageLedgerEvent,
@@ -19,7 +19,8 @@ from amodb.apps.platform.storage_quota_models import (
 def storage_db():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[
-        AMO.__table__, TenantStorageQuota.__table__, TenantStorageReservation.__table__,
+        AMO.__table__, Department.__table__, User.__table__, AMOAsset.__table__,
+        TenantStorageQuota.__table__, TenantStorageReservation.__table__,
         TenantStorageObject.__table__, TenantStorageLedgerEvent.__table__,
     ])
     with Session(engine) as db:
