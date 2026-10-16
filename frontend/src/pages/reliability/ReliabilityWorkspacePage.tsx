@@ -18,7 +18,7 @@ const WORKBOOK_PARITY_ROUTES = new Set([
 ]);
 
 const FORMAL_REVIEW_ROUTES = new Set(["formal-review"]);
-const FORMAL_GOVERNANCE_ROUTES = new Set(["formal-reports", "programme-reports"]);
+const FORMAL_GOVERNANCE_ROUTES = new Set(["formal-reports", "programme-reports", "report-distribution"]);
 
 function reliabilitySurface(pathname: string): "analytics" | "formal-review" | "formal-governance" | "parity" | "operations" {
   const parts = pathname.split("/reliability")[1]?.split("/").filter(Boolean) || [];
