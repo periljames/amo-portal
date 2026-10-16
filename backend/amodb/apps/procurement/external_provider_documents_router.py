@@ -6,6 +6,7 @@ in the canonical QMS evidence register, never an independent approval.
 """
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import os
@@ -167,9 +168,15 @@ def _validate_file(path: Path, original: str, declared: str):
                 valid=False
     else:
         try:
-            raw=path.read_bytes()
-            valid=b"\x00" not in raw
-            raw.decode("utf-8-sig")
+            decoder=codecs.getincrementaldecoder("utf-8-sig")()
+            valid=True
+            with path.open("rb") as stream:
+                while chunk:=stream.read(1024*1024):
+                    if b"\x00" in chunk:
+                        valid=False
+                        break
+                    decoder.decode(chunk,final=False)
+                decoder.decode(b"",final=True)
         except UnicodeDecodeError:
             valid=False
     if not valid:
