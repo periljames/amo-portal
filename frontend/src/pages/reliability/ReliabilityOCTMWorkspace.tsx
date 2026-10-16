@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import ReliabilityTechlogPageEntry from "./ReliabilityTechlogPageEntry";
 import { apiRequest } from "../../services/apiClient";
@@ -99,8 +99,14 @@ const trim = (text: string): string | null => text.trim() ? text.trim() : null;
 
 export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const home = "/maintenance/" + encodeURIComponent(amoCode) + "/reliability";
-  const [view, setView] = useState<View>("entry");
+  const routeTab = location.pathname.split("/reliability/octm/")[1]?.split("/")[0] || "trends";
+  const validTabs: View[] = ["entry", "techlog", "review", "register", "coverage", "trends", "profiles"];
+  const currentTab = validTabs.includes(routeTab as View) ? routeTab as View : "trends";
+  const [view, setView] = useState<View>(currentTab);
+  useEffect(() => { setView(currentTab); }, [currentTab]);
   const [form, setForm] = useState<EntryPayload>(blankEntry);
   const [correcting, setCorrecting] = useState<string | null>(null);
   const [editingPage, setEditingPage] = useState<{ aircraft: string; techsheet: string } | null>(null);
@@ -133,6 +139,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const [historyTarget, setHistoryTarget] = useState<Entry | null>(null);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [selectedEngine, setSelectedEngine] = useState("");
+  const [trendPage, setTrendPage] = useState(0);
+  const [trendPageSize, setTrendPageSize] = useState(50);
   const [newProfile, setNewProfile] = useState({ engine_serial_number: "", installation_ref: "", engine_model: "",
     limit_qt_per_fh: "", alert_increase_percent: "", technical_data_ref: "", technical_data_revision: "", effective_from: "" });
   const [busy, setBusy] = useState(false);
@@ -278,6 +286,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     if (item.source_scope === "TECHLOG_PAGE") {
       setEditingPage({ aircraft: item.aircraft_serial_number, techsheet: item.techsheet_ref });
       setView("techlog");
+      navigate(home + "/octm/techlog");
       return;
     }
     const base = blankEntry();
@@ -287,6 +296,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
     setForm(values);
     setCorrecting(item.id);
     setView("entry");
+    navigate(home + "/octm/entry");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -314,6 +324,10 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
   const engines = Array.from(new Set(monitoring.intervals.map((item) => item.engine_serial_number)));
   const trend = monitoring.intervals.filter((row) => row.status === "VALID" &&
     (!selectedEngine || row.engine_serial_number === selectedEngine)).slice().reverse();
+  const trendChart = trend.slice(-180);
+  const trendTable = monitoring.intervals.filter((row) => !selectedEngine ||
+    row.engine_serial_number === selectedEngine);
+  const visibleTrendTable = trendTable.slice(trendPage * trendPageSize, (trendPage + 1) * trendPageSize);
 
   return <main className="reliability-v2 octm">
       <header className="reliability-v2__header">
@@ -327,7 +341,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       <nav className="octm__tabs" aria-label="Oil consumption workspaces">
         {([["entry", "Sector entry"], ["techlog", "Techlog page"], ["review", "Review queue"], ["register", "Source register"], ["coverage", "Daily coverage"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
           .map(([key, label]) => <button key={key} type="button" className={view === key ? "octm__tab active" : "octm__tab"}
-            aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{label}
+            aria-current={view === key ? "page" : undefined} onClick={() => { setView(key); navigate(home + "/octm/" + key); }}>{label}
             {key === "review" ? " (" + summary.unverified + ")" : ""}</button>)}
       </nav>
       {error && <p className="octm__error" role="alert">{error}</p>}
@@ -335,7 +349,8 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       {loading ? <p>Loading OCTM records…</p> : <>
         {view === "techlog" && <ReliabilityTechlogPageEntry aircraftOptions={aircraftOptions}
           canCreate={has("reliability.ingest") || (!!editingPage && has("reliability.data_quality.resolve"))}
-          editPage={editingPage} onExitEdit={() => { setEditingPage(null); setView("register"); }} onSaved={refresh} />}
+          editPage={editingPage} onExitEdit={() => { setEditingPage(null); setView("register"); navigate(home + "/octm/register"); }}
+          onSaved={refresh} />}
         {view === "entry" && <section className="octm__panel">
           <h2>{correcting ? "Correct existing source record" : "Register sector-level oil event"}</h2>
           <p>Use the <strong>Techlog page</strong> tab for the paper SL/MCM/1 format:
@@ -562,20 +577,34 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
           <h2>Verified engine monitoring intervals</h2>
           <p>{monitoring.verified_source_count} verified source entries. Rates are recomputed from matched quantities and flight hours, not an average of spreadsheet rates.</p>
           {monitoring.truncated && <p role="alert">Results are truncated at 20,000 observations. Do not use for formal reporting until the complete period is retrieved.</p>}
-          <label>Engine <select value={selectedEngine} onChange={(event) => setSelectedEngine(event.target.value)}>
+          <label>Engine <select value={selectedEngine} onChange={(event) => { setSelectedEngine(event.target.value); setTrendPage(0); }}>
             <option value="">All engines</option>{engines.map((e) => <option value={e} key={e}>{e}</option>)}</select></label>
-          {!!trend.length && <div className="octm__chart"><ResponsiveContainer width="100%" height={300}>
-            <LineChart data={trend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="window_end" /><YAxis />
+          <p className="octm__hint">Trend chart shows up to the latest 180 complete intervals. The paged table below covers all loaded verified intervals.
+            Open the source register to review individual techsheets and corrections.</p>
+          {!!trendChart.length && <div className="octm__chart"><ResponsiveContainer width="100%" height={320}>
+            <LineChart data={trendChart}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="window_end" /><YAxis />
               <Tooltip /><Legend /><Line dataKey="rate_qt_per_fh" name="Oil qt / FH" stroke="#0f766e" />
               <Line dataKey="manufacturer_limit_qt_per_fh" name="Approved limit qt / FH" stroke="#b45309" strokeDasharray="5 5" connectNulls={false} /></LineChart>
           </ResponsiveContainer></div>}
           <div className="octm__table-wrap"><table><thead><tr><th>Engine</th><th>Installation</th><th>Interval</th><th>Oil qt</th><th>FH</th><th>Rate qt/FH</th><th>Approved limit</th><th>Result</th></tr></thead>
-            <tbody>{monitoring.intervals.filter((item) => !selectedEngine || item.engine_serial_number === selectedEngine).map((item, index) => <tr key={item.engine_serial_number + item.window_end + index}>
+            <tbody>{visibleTrendTable.map((item, index) => <tr key={item.engine_serial_number + item.window_end + index}>
               <td>{item.engine_serial_number}</td><td>{item.installation_ref}</td>
               <td>{item.window_start} – {item.window_end}</td><td>{item.oil_added_quarts}</td><td>{item.flight_hours}</td>
               <td>{item.rate_qt_per_fh ?? "Withheld"}</td><td>{item.manufacturer_limit_qt_per_fh ?? "Not approved"}</td>
               <td>{item.status === "OUT_OF_RANGE" ? "Interval outside 30–50 FH" : item.manufacturer_limit_exceeded ? "Manufacturer limit exceeded" : item.trend_alert ? "Trend alert" : item.manufacturer_limit_exceeded === null ? "Limit unverified" : "Within limit"}</td>
             </tr>)}</tbody></table></div>
+          <div className="octm__pagination" aria-label="Oil consumption interval pagination">
+            <span>{trendTable.length} verified interval records ·
+              page {trendPage + 1} / {Math.max(1, Math.ceil(trendTable.length / trendPageSize))}</span>
+            <label>Rows per page <select value={trendPageSize}
+              onChange={(event) => { setTrendPageSize(Number(event.target.value)); setTrendPage(0); }}>
+              <option value="25">25</option><option value="50">50</option><option value="100">100</option>
+            </select></label>
+            <button type="button" className="btn btn-secondary" disabled={trendPage === 0}
+              onClick={() => setTrendPage((value) => Math.max(0, value - 1))}>Previous</button>
+            <button type="button" className="btn btn-secondary" disabled={(trendPage + 1) * trendPageSize >= trendTable.length}
+              onClick={() => setTrendPage((value) => value + 1)}>Next</button>
+          </div>
           {!monitoring.intervals.length && <p>No completed verified 40 ± 10 FH intervals. Verify source observations first.</p>}
         </section>}
         {view === "profiles" && <section className="octm__panel">
