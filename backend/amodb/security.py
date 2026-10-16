@@ -303,6 +303,10 @@ def get_current_user(
             session_expiry = session_expiry.replace(tzinfo=timezone.utc)
         if (
             str(auth_session.user_id) != str(user.id)
+            or (
+                not bool(getattr(user, "is_superuser", False))
+                and str(auth_session.amo_id or "") != str(user.amo_id or "")
+            )
             or auth_session.revoked_at is not None
             or session_expiry is None
             or session_expiry <= datetime.now(timezone.utc)
