@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import ReliabilityTechlogPageEntry from "./ReliabilityTechlogPageEntry";
 import { apiRequest } from "../../services/apiClient";
 import "../../styles/reliability-v2.css";
 import "./ReliabilityOCTMWorkspace.css";
@@ -53,7 +54,7 @@ type Caps = { capabilities: string[] };
 type StatusSummary = { total: number; unverified: number; status_counts: Record<string, number> };
 type Revision = { changed_at: string; reason: string; before: Record<string, unknown>;
   after: Record<string, unknown> };
-type View = "entry" | "review" | "register" | "coverage" | "trends" | "profiles";
+type View = "entry" | "techlog" | "review" | "register" | "coverage" | "trends" | "profiles";
 type DailyCoverage = { operating_date: string; registered_snapshot_sectors: number; matched_sectors: number;
   unmatched_sectors: Array<{ aircraft_serial_number: string; engine_position: string; flight_leg: string;
     engine_serial_number: string | null }>; entered_octm_observations: number;
@@ -309,7 +310,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
         <Link className="btn btn-secondary" to={home}>Reliability overview</Link>
       </header>
       <nav className="octm__tabs" aria-label="Oil consumption workspaces">
-        {([["entry", "Daily entry"], ["review", "Review queue"], ["register", "Source register"], ["coverage", "Daily coverage"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
+        {([["entry", "Sector entry"], ["techlog", "Techlog page"], ["review", "Review queue"], ["register", "Source register"], ["coverage", "Daily coverage"], ["trends", "Engine trends"], ["profiles", "Limit profiles"]] as const)
           .map(([key, label]) => <button key={key} type="button" className={view === key ? "octm__tab active" : "octm__tab"}
             aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>{label}
             {key === "review" ? " (" + summary.unverified + ")" : ""}</button>)}
@@ -317,8 +318,13 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       {error && <p className="octm__error" role="alert">{error}</p>}
       {message && <p className="octm__message" role="status">{message}</p>}
       {loading ? <p>Loading OCTM records…</p> : <>
+        {view === "techlog" && <ReliabilityTechlogPageEntry aircraftOptions={aircraftOptions}
+          canCreate={has("reliability.ingest")} onSaved={refresh} />}
         {view === "entry" && <section className="octm__panel">
-          <h2>{correcting ? "Correct existing source record" : "Register technical-log oil entry"}</h2>
+          <h2>{correcting ? "Correct existing source record" : "Register sector-level oil event"}</h2>
+          <p>Use the <strong>Techlog page</strong> tab for the paper SL/MCM/1 format:
+          its Oil Added values are PAGE totals, not flight-leg totals. Only use this sector
+          screen where a separate source identifies individual sector oil quantities.</p>
           <p>Every engine/sector event has a unique sequence. Select <strong>Checked — zero added</strong> only when an actual oil check found no top-up necessary.
              Use <strong>Missing</strong> when the record is unavailable, never to mean zero.</p>
            <p className="octm__hint">Check engine serial, position and installation against technical records for the selected date.
