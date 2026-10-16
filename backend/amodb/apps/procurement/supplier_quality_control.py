@@ -22,6 +22,8 @@ def _set_provider_tenant_context(db: Session, *, amo_id: str) -> None:
         text("SELECT set_config('app.tenant_id', :amo_id, true)"),
         {"amo_id": str(amo_id)},
     )
+    # Scoped internal Procurement check; external sessions cannot set this marker.
+    db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
 
 
 def _assert_required_contract_current(
