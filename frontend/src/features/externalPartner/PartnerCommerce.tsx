@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
-import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page,type ProcurementPage} from "./partnerApi";
+import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
 import PartnerProcurementWorkspace from "./PartnerProcurementWorkspace";
 
@@ -86,32 +86,6 @@ function Contracts({tenant,csrf,capabilities}:PartnerProps){
     <ActionNotice value={error} error/><ActionNotice value={message}/>
     {query.value&&<Pager value={query.value} onChange={setOffset}/>}
   </Section>;
-}
-function Procurement({tenant}:PartnerProps){
-  const [offset,setOffset]=useState(0);
-  const query=usePartnerLoad((signal)=>partnerRequest<ProcurementPage>(tenant,
-    `procurement?limit=20&offset=${offset}`,{signal}),`${tenant}:${offset}`);
-  return <div className="partner-stack">
-    <State pending={query.pending} error={query.error} retry={query.reload}/>
-    {query.value&&<>
-      <Section title="Invited quotations (RFQs)" description="Only RFQs issued to the canonical supplier. Quotation transactions are reserved for Phase 6.">
-        {query.value.rfqs.items.length?query.value.rfqs.items.map(q=><div className="partner-row" key={q.id}>
-          <div><strong>{q.rfq_number} · {q.title}</strong>
-            <small>Response due {friendlyDate(q.response_due_at)}</small></div><Status value={q.status}/>
-        </div>):<p className="partner-empty">No current invited RFQs for this supplier.</p>}
-      </Section>
-      <Section title="Issued purchase orders" description="Only purchase orders sent to your organization are visible. Acknowledgement and delivery transactions remain governed by Procurement.">
-        {query.value.purchase_orders.items.length?query.value.purchase_orders.items.map(q=><div className="partner-row" key={q.id}>
-          <div><strong>{q.po_number}</strong>
-            <small>Delivery commitment {friendlyDate(q.promised_delivery_date)}</small>
-            <small>{q.acknowledged_at?"Acknowledged by Procurement":"Acknowledgement pending"}</small></div>
-          <Status value={q.status}/>
-        </div>):<p className="partner-empty">No issued purchase orders at present.</p>}
-      </Section>
-      <Section title="Transactional boundaries"><p className="partner-muted">This is a live Procurement read projection. RFQ responses, supplier quotations, purchase-order acknowledgements and shipment commitments require the Phase 6 authorized transaction workflows. No simulated submission controls are displayed.</p></Section>
-      <Pager value={query.value.rfqs} onChange={setOffset}/>
-    </>}
-  </div>;
 }
 type Work={approved_scopes:Array<{category:string;site_code:string;product_family:string;status:string;restrictions:string|null;expires_on:string|null}>;assigned_work_count:number;execution_enabled:boolean;message:string};
 function WorkPreview({tenant}:PartnerProps){
