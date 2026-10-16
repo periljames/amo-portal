@@ -827,3 +827,62 @@ def import_governed_supplier_document(amo_code:str,submission_id:str,
     db.commit()
     return {"id":rec.id,"canonical_procurement_document":True,"stores_released":False,
             "finance_payment_authorized":False}
+
+
+def record_internal_supplier_notice(db, *, amo_id:str, entity:str, internal_id:int,
+                                    action:str, actor_user_id:str):
+    """Emit supplier-visible facts ONLY after the authoritative Procurement decision.
+
+    Called from the existing quote award and PO issue endpoints, inside their
+    transaction. Never creates an award, approval, invoice match or PO.
+    """
+    from . import external_auth_core as auth_core
+    if entity=="QUOTE":
+        source=_row(db,"""SELECT e.id,e.supplier_id,e.rfq_id,q.status AS quote_state
+           FROM external_procurement_quotes e JOIN procurement_quotes q
+           ON q.id=e.canonical_quote_id AND q.amo_id=e.amo_id
+           WHERE e.amo_id=:amo AND e.canonical_quote_id=:id""",
+           amo=amo_id,id=internal_id)
+        if not source or source["quote_state"]!="AWARDED":
+            return None
+        entity_type="RFQ";entity_id=str(source["rfq_id"])
+        title="Your quotation was awarded"
+        message="Procurement recorded the award of your submitted quotation. A purchase order must be issued and approved separately."
+        supplier=source["supplier_id"]
+        detail={"canonical_quote_id":internal_id,"external_quote_id":source["id"]}
+    elif entity=="PO":
+        source=_row(db,"""SELECT supplier_id,po_number,status FROM procurement_purchase_orders
+             WHERE amo_id=:amo AND id=:id AND sent_at IS NOT NULL
+               AND status IN ('SENT','ACKNOWLEDGED','PARTIALLY_SHIPPED','SHIPPED',
+                              'PARTIALLY_RECEIVED','RECEIVED_PENDING_INSPECTION','FULFILLED','CLOSED')""",
+             amo=amo_id,id=internal_id)
+        if not source:return None
+        entity_type="PO";entity_id=str(internal_id)
+        title="Purchase order issued by Procurement"
+        message="An authorized purchase order has been issued to your supplier organization."
+        supplier=source["supplier_id"];detail={"po_number":source["po_number"]}
+    else:raise ValueError("Unknown supplier notice entity")
+    ctx={"amo":amo_id,"supplier":supplier}
+    key="internal-"+action+"-"+str(internal_id)
+    eid,created=_event(db,ctx,entity_type,entity_id,action,
+       actor=actor_user_id,message=message,details=detail,key=key)
+    if not created:return eid
+    grants=_rows(db,"""SELECT p.id AS provider_id,g.identity_id,g.capabilities_json
+        FROM external_tenant_providers p JOIN external_tenant_grants g
+          ON g.amo_id=p.amo_id AND g.tenant_provider_id=p.id
+        JOIN external_organization_memberships m ON m.id=g.membership_id
+          AND m.identity_id=g.identity_id AND m.status='ACTIVE'
+        WHERE p.amo_id=:amo AND p.supplier_id=:supplier
+           AND p.portal_state='ACTIVE' AND g.status='ACTIVE'""",
+           amo=amo_id,supplier=supplier)
+    for grant in grants:
+        if "procurement.read" not in set(grant["capabilities_json"] or []):
+            continue
+        db.execute(text("""INSERT INTO external_partner_notifications
+            (id,amo_id,tenant_provider_id,identity_id,category,title,message,
+             resource_kind,resource_id)
+            VALUES(:id,:amo,:provider,:identity,'PROCUREMENT',:title,:message,:kind,:resource)"""),
+            {"id":str(uuid4()),"amo":amo_id,"provider":grant["provider_id"],
+             "identity":grant["identity_id"],"title":title,"message":message,
+             "kind":entity_type,"resource":entity_id})
+    return eid
