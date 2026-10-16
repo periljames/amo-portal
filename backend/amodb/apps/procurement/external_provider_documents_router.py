@@ -203,6 +203,15 @@ class RequirementWrite(BaseModel):
     expected_version: int | None = Field(default=None,ge=1)
 
 
+@staff_documents_router.get("/permissions")
+def document_permissions(amo_code:str,db:Session=Depends(get_db),
+                         user=Depends(get_current_active_user)):
+    _staff(db,amo_code,user)
+    from amodb.apps.doc_control.workspace_service import is_control_user
+    return {"quality_manager":str(getattr(user.role,"value",user.role))=="QUALITY_MANAGER",
+            "document_controller":is_control_user(user)}
+
+
 @staff_documents_router.get("/requirements")
 def staff_requirements(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
