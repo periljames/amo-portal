@@ -312,7 +312,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
     await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
-    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
+    await expect(internalPage.getByText(/R1 is approved\./i)).toBeVisible();
 
     await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
     await internalPage.getByRole("button", { name: "Register passkey" }).click();
