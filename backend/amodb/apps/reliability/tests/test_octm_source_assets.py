@@ -63,3 +63,52 @@ def test_malformed_source_asset_ref_cannot_access_file():
     with pytest.raises(HTTPException) as exc:
         _checked_asset(MagicMock(), "tenant-a", "not-a-uuid")
     assert exc.value.status_code == 404
+
+
+def test_upload_retains_scanned_pdf_in_tenant_storage(monkeypatch):
+    import asyncio
+    from io import BytesIO
+    from fastapi import UploadFile
+    from amodb.apps.fleet.models import Aircraft
+    from amodb.apps.reliability import octm_source_assets as source
+
+    db = MagicMock()
+    aircraft_query = MagicMock()
+    aircraft_query.filter.return_value.first.return_value = SimpleNamespace(serial_number="5Y-SLC")
+    asset_query = MagicMock()
+    asset_query.filter_by.return_value.first.return_value = None
+    db.query.side_effect = lambda model: aircraft_query if model is Aircraft else asset_query
+    monkeypatch.setattr(source.access, "capabilities_for_user", lambda _db, _user: {"reliability.ingest"})
+    monkeypatch.setattr(source.access, "append_audit", lambda *args, **kwargs: None)
+    persisted = []
+    def store(stream, *, key, content_type):
+        data = stream.read()
+        persisted.append((data, key, content_type))
+        return SimpleNamespace(uri="s3://private/tenants/a/reliability/octm/test.pdf")
+    monkeypatch.setattr(source.storage, "put_stream", store)
+    uploaded = UploadFile(file=BytesIO(b"%PDF-1.7\ntechsheet scan"), filename="SL-MCM1-012.pdf")
+    result = asyncio.run(source.upload_techlog_asset(
+        aircraft_serial_number="5Y-SLC", techsheet_ref="SL-MCM1-012",
+        file=uploaded, ctx=(db, "tenant-a", SimpleNamespace(id="person-01")),
+    ))
+    assert result["source_evidence_ref"].startswith(PREFIX)
+    assert result["sha256"] == __import__("hashlib").sha256(b"%PDF-1.7\ntechsheet scan").hexdigest()
+    assert persisted[0][0] == b"%PDF-1.7\ntechsheet scan"
+    assert persisted[0][1].startswith("tenants/tenant-a/reliability/octm/techlogs/")
+    assert persisted[0][2] == "application/pdf"
+    assert db.commit.call_count == 1
+
+
+def test_non_entrant_cannot_upload_source_asset(monkeypatch):
+    import asyncio
+    from io import BytesIO
+    from fastapi import UploadFile
+    from amodb.apps.reliability import octm_source_assets as source
+    monkeypatch.setattr(source.access, "capabilities_for_user", lambda _db, _user: {"reliability.read"})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(source.upload_techlog_asset(
+            aircraft_serial_number="5Y-SLC", techsheet_ref="SL-MCM1-012",
+            file=UploadFile(file=BytesIO(b"%PDF-1.4\n"), filename="form.pdf"),
+            ctx=(MagicMock(), "tenant-a", SimpleNamespace(id="viewer")),
+        ))
+    assert exc.value.status_code == 403
