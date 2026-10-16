@@ -38,7 +38,7 @@ class Source:
 
 SOURCES = (
     Source("dms-evidence", DocumentEvidenceAsset, "storage_path", "tenant_id",
-           Path(os.getenv("DOCUMENT_CONTROL_EVIDENCE_DIR", "uploads/document-control-evidence")).resolve(), "mime_type"),
+           Path(os.getenv("DOCUMENT_EVIDENCE_DIR", "uploads/document-control-evidence")).resolve(), "mime_type"),
     Source("dms-record-vault", TenantRecordAsset, "storage_path", "tenant_id",
            Path(os.getenv("DOCUMENT_RECORD_VAULT_DIR", "uploads/document-record-vault")).resolve(), "mime_type"),
     Source("qms-checklist-evidence", QualityAuditEvidenceArtifact, "file_ref", "amo_id",
@@ -108,12 +108,19 @@ def migrate_one(db: Session, *, source: Source, tenant_id: str, row, apply: bool
         operation_id=f"legacy-backfill:{source.kind}:{row.id}",
     )
     # Read independently via the public adapter before changing legal references.
-    remote_copy = shared_storage.materialize(persisted.uri)
-    remote_size, remote_hash = digest_file(remote_copy)
-    if remote_size != size or remote_hash != digest:
-        raise IOError("Restored object checksum failed; original reference remains unchanged")
-    setattr(row, source.column, persisted.uri)
-    db.flush()
+    try:
+        remote_copy = shared_storage.materialize(persisted.uri)
+        remote_size, remote_hash = digest_file(remote_copy)
+        if remote_size != size or remote_hash != digest:
+            raise IOError("Restored object checksum failed; original reference remains unchanged")
+        setattr(row, source.column, persisted.uri)
+        db.flush()
+    except Exception:
+        try:
+            shared_storage.delete(persisted.uri)
+        except Exception:
+            pass
+        raise
     result["status"] = "MIGRATED_AND_VERIFIED"
     result["object_uri"] = persisted.uri
     return result
