@@ -21,9 +21,27 @@ const blankLeg = (number: number): Leg => ({ number, from_airport: "", to_airpor
 const numeric = (v: string): number | null => v.trim() ? Number(v) : null;
 const nonempty = (v: string): string | null => v.trim() || null;
 const sourceError = (e: unknown) => e instanceof Error ? e.message : String(e);
-type Props = { aircraftOptions: Aircraft[]; canCreate: boolean; onSaved: () => Promise<unknown> | void };
+type PageEdit = { aircraft: string; techsheet: string };
+type RestoredPage = {
+  aircraft_serial_number: string; techsheet_ref: string; event_date: string;
+  source_evidence_ref: string; source_type: SourceType;
+  legs: Array<{ number: number; from_airport: string | null; to_airport: string | null;
+    flight_hours: number; left_oil_level: string | null; right_oil_level: string | null; comment: string | null }>;
+  page_flight_hours: number;
+  ttaf_brought_forward: number | null; ttaf_updated: number | null;
+  tcsn_brought_forward: number | null; tcsn_updated: number | null;
+  maintenance_complete: "YES" | "NO" | "UNKNOWN"; maintenance_release_ref: string | null;
+  check_24h_ref: string | null; defect_references: string[]; deferred_defect_references: string[];
+  apu_oil_added: number | null; apu_oil_unit: string | null;
+  engines: Array<{ position: "1" | "2"; engine_serial_number: string; installation_ref: string;
+    observation: "TOP_UP" | "CHECK_ZERO" | "MISSING"; quantity_added: number | null;
+    original_unit: string | null; oil_specification: string | null;
+    reference_method: string | null; reference_level: string | null }>;
+};
+type Props = { aircraftOptions: Aircraft[]; canCreate: boolean; onSaved: () => Promise<unknown> | void;
+  editPage: PageEdit | null; onExitEdit: () => void };
 
-export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate, onSaved }: Props): React.ReactElement {
+export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate, onSaved, editPage, onExitEdit }: Props): React.ReactElement {
   const [aircraft, setAircraft] = useState("");
   const [pageNumber, setPageNumber] = useState("");
   const [eventDate, setEventDate] = useState(today);
@@ -51,6 +69,52 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [sourceLoading, setSourceLoading] = useState(false);
+
+  useEffect(() => {
+    if (!editPage) return;
+    let active = true;
+    setSourceLoading(true); setError(""); setPreview(null); setConfirmed(false);
+    void apiRequest<RestoredPage>("/reliability/octm/techlog-pages/detail?aircraft=" +
+      encodeURIComponent(editPage.aircraft) + "&techsheet_ref=" + encodeURIComponent(editPage.techsheet),
+      { cacheTtlMs: 0 })
+      .then((page) => {
+        if (!active) return;
+        setAircraft(page.aircraft_serial_number); setPageNumber(page.techsheet_ref);
+        setEventDate(page.event_date); setSourceEvidence(page.source_evidence_ref);
+        setSourceType(page.source_type);
+        setLegs(page.legs.map((leg) => ({
+          number: leg.number, from_airport: leg.from_airport || "", to_airport: leg.to_airport || "",
+          flight_hours: String(leg.flight_hours), left_oil_level: leg.left_oil_level || "",
+          right_oil_level: leg.right_oil_level || "", comment: leg.comment || "",
+        })));
+        setTotalFlightHours(String(page.page_flight_hours));
+        setTtafBefore(page.ttaf_brought_forward === null ? "" : String(page.ttaf_brought_forward));
+        setTtafAfter(page.ttaf_updated === null ? "" : String(page.ttaf_updated));
+        setTcsnBefore(page.tcsn_brought_forward === null ? "" : String(page.tcsn_brought_forward));
+        setTcsnAfter(page.tcsn_updated === null ? "" : String(page.tcsn_updated));
+        setMaintenanceComplete(page.maintenance_complete);
+        setMaintenanceRelease(page.maintenance_release_ref || "");
+        setCheck24h(page.check_24h_ref || "");
+        setDefectRefs(page.defect_references.join(", "));
+        setDeferredRefs(page.deferred_defect_references.join(", "));
+        setApuOil(page.apu_oil_added === null ? "" : String(page.apu_oil_added));
+        setApuOilUnit(page.apu_oil_unit || "");
+        setTwinEngine(page.engines.some((engine) => engine.position === "2"));
+        for (const record of page.engines) {
+          const result: Engine = {
+            ...record, quantity_added: record.quantity_added === null ? "" : String(record.quantity_added),
+            original_unit: record.original_unit || "", oil_specification: record.oil_specification || "",
+            reference_method: record.reference_method || "", reference_level: record.reference_level || "",
+          };
+          if (record.position === "1") setLeft(result);
+          else setRight(result);
+        }
+      }).catch((cause) => { if (active) setError(sourceError(cause)); })
+      .finally(() => { if (active) setSourceLoading(false); });
+    return () => { active = false; };
+  }, [editPage]);
 
   const invalidate = () => { setPreview(null); setConfirmed(false); setError(""); setSuccess(""); };
   const patchLeg = (index: number, key: keyof Leg, value: string) => {
@@ -110,14 +174,21 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
     } catch (cause) { setError(sourceError(cause)); } finally { setBusy(false); }
   };
   const savePage = async () => {
-    if (!preview || !confirmed) return;
+    if (!preview || !confirmed || (editPage && correctionReason.trim().length < 8)) return;
     setBusy(true); setError("");
     try {
-      await apiRequest("/reliability/octm/techlog-pages", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(build()),
+      await apiRequest(editPage ? "/reliability/octm/techlog-pages/correct" : "/reliability/octm/techlog-pages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editPage ? {
+          aircraft_serial_number: editPage.aircraft, techsheet_ref: editPage.techsheet,
+          replacement: build(), reason: correctionReason.trim(),
+        } : build()),
       });
-      setSuccess("Both source and engine data were saved as draft observations. They are not verified or included in formal trends.");
+      setSuccess(editPage
+        ? "All affected engine observations were returned to draft; original values are retained in correction history."
+        : "Page-level engine observations saved as drafts; these are not verified or included in formal trends.");
       setPreview(null); setConfirmed(false);
+      if (editPage) onExitEdit();
       try { await onSaved(); } catch { setError("Entries were saved, but the main register could not refresh. Check the source register before retrying."); }
     } catch (cause) { setError(sourceError(cause)); } finally { setBusy(false); }
   };
@@ -165,7 +236,10 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
   </fieldset>;
 
   return <section className="octm__panel">
-    <h2>Technical Logbook page entry — SL/MCM/1</h2>
+    <h2>{editPage ? "Correct SL/MCM/1 source page" : "Technical Logbook page entry — SL/MCM/1"}</h2>
+    {sourceLoading && <p>Loading original page and engine records…</p>}
+    {editPage && <p className="octm__hint">All linked engine records will be returned to draft
+      if this page is corrected, including an engine with unchanged oil values.</p>}
     <p>Copy the original paper page. Its flight legs have individual engine <strong>oil LEVEL</strong> fields,
       but <strong>OIL ADDED</strong> is one total per engine for the whole page. Do not allocate that oil to a specific leg.
       A blank oil-added box is not a confirmed zero.</p>
@@ -175,12 +249,12 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
       <fieldset>
         <legend>1. Source technical-log page</legend>
         <div className="octm__form">
-          <label>Registered aircraft<select required value={aircraft}
+          <label>Registered aircraft<select required disabled={!!editPage} value={aircraft}
             onChange={(event) => { invalidate(); setAircraft(event.target.value); }}>
             <option value="">Choose aircraft…</option>
             {aircraftOptions.map((item) => <option key={item.serial_number} value={item.serial_number}>
               {item.registration} · {item.serial_number}{item.is_active ? "" : " (historical)"}</option>)}</select></label>
-          <label>Page / techsheet number<input required maxLength={160} value={pageNumber}
+          <label>Page / techsheet number<input required readOnly={!!editPage} maxLength={160} value={pageNumber}
             onChange={(event) => { invalidate(); setPageNumber(event.target.value); }} /></label>
           <label>Date on original page<input type="date" required max={today()} value={eventDate}
             onChange={(event) => { invalidate(); setEventDate(event.target.value); }} /></label>
@@ -270,6 +344,13 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
           {busy ? "Validating…" : "Review calculated source drafts"}</button>
       </div>
     </form>
+    {editPage && <div className="octm__review">
+      <label>Reason for correcting the original page (required)
+        <textarea minLength={8} required rows={2} value={correctionReason}
+          onChange={(event) => { invalidate(); setCorrectionReason(event.target.value); }} />
+      </label>
+      <button type="button" className="btn btn-secondary" onClick={onExitEdit}>Cancel page correction</button>
+    </div>}
     {preview && <div className="octm__review" role="region" aria-label="Page import confirmation">
       <h3>Page-level draft preview</h3>
       <div className="octm__table-wrap"><table><thead><tr><th>Engine</th><th>Observation</th><th>Oil added</th>
@@ -283,8 +364,9 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
         onChange={(event) => setConfirmed(event.target.checked)} />
         I compared this preview with SL/MCM/1 and understand that these are unverified page-level records,
         not individual sector oil additions or a signed maintenance release.</label>
-      <button type="button" className="btn btn-primary" disabled={busy || !canCreate || !confirmed}
-        onClick={() => void savePage()}>Save page as draft for Reliability review</button>
+      <button type="button" className="btn btn-primary" disabled={busy || !canCreate || !confirmed || (editPage !== null && correctionReason.trim().length < 8)}
+        onClick={() => void savePage()}>{editPage ? "Record page correction and reopen both engine reviews"
+          : "Save page as draft for Reliability review"}</button>
     </div>}
   </section>;
 }
