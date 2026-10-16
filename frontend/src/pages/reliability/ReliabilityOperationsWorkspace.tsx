@@ -178,13 +178,13 @@ function renderView(props: ViewProps): React.ReactNode {
   if (route.view === "workbench") return props.workbench ? <Workbench data={props.workbench} basePath={basePath} /> : null;
   if (route.view === "events") return route.entityId && props.event
     ? <><EventDetail item={props.event} basePath={basePath} /><OccurrenceProvenancePanel eventId={props.event.id} /></>
-    : <ReliabilityBackendRegisters view="events" />;
+    : <ReliabilityBackendRegisters key="events" view="events" />;
   if (route.view === "alerts") return route.entityId && props.alert ? <AlertDetail item={props.alert} basePath={basePath} />
-    : <ReliabilityBackendRegisters view="alerts" />;
+    : <ReliabilityBackendRegisters key="alerts" view="alerts" />;
   if (route.view === "cases") return route.entityId && props.fracasCase
     ? <><CaseDetail item={props.fracasCase} actions={props.actions} basePath={basePath} /><FracasGovernancePanel caseId={props.fracasCase.id} /></>
-    : <ReliabilityBackendRegisters view="cases" />;
-  if (route.view === "engines") return <ReliabilityBackendRegisters view="engines" />;
+    : <ReliabilityBackendRegisters key="cases" view="cases" />;
+  if (route.view === "engines") return <ReliabilityBackendRegisters key="engines" view="engines" />;
   if (route.view === "reports") return <ReliabilityReportsView />;
   if (ADVANCED_VIEWS.has(route.view as AdvancedReliabilityViewId)) return <ReliabilityAdvancedView view={route.view as AdvancedReliabilityViewId} basePath={basePath} />;
   return null;
