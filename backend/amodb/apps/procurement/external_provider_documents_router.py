@@ -395,7 +395,7 @@ class UploadStart(BaseModel):
     size_bytes: int = Field(ge=1,le=MAX_RESUMABLE_BYTES)
     sha256: str | None = Field(default=None,pattern=r"^[a-f0-9]{64}$")
     requirement_id: str = Field(min_length=8,max_length=36)
-    related_kind: Literal["PROVIDER","CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT"] = "PROVIDER"
+    related_kind: Literal["PROVIDER","CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT","CONTRACTED_WORK"] = "PROVIDER"
     related_id: str | None = None
     supersedes_submission_id: str | None = None
     valid_until: date | None = None
@@ -694,7 +694,8 @@ def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     scopes={"contracts":sorted(partner._allowed(user,"contracts")),
             "assignments":sorted(partner._allowed(user,"assignments")),
             "rfqs":sorted(partner._allowed(user,"rfqs")),
-            "pos":sorted(partner._allowed(user,"purchase_orders"))}
+            "pos":sorted(partner._allowed(user,"purchase_orders")),
+            "work":sorted(partner._allowed(user,"contracted_work"))}
     sql=text("""SELECT s.id,s.filename,s.evidence_type,s.status,s.related_kind,s.related_id,
        s.requirement_id,s.form_revision_id,s.supersedes_submission_id,s.valid_until,
        s.created_at,s.review_note,s.reviewed_at,s.qms_evidence_id,s.dms_revision_id,s.sha256
@@ -703,6 +704,7 @@ def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
        AND (s.related_kind='PROVIDER' OR
            (s.related_kind='CONTRACT' AND s.related_id IN :contracts) OR
            (s.related_kind='ASSIGNMENT' AND s.related_id IN :assignments) OR
+           (s.related_kind='CONTRACTED_WORK' AND s.related_id IN :work) OR
            (s.related_kind='RFQ' AND s.related_id IN :rfqs) OR
            (s.related_kind='PO' AND s.related_id IN :pos) OR
            (s.related_kind='SHIPMENT' AND EXISTS (
@@ -711,7 +713,8 @@ def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                AND CAST(sh.po_id AS TEXT) IN :pos)))
        ORDER BY s.created_at DESC,s.id DESC LIMIT :limit OFFSET :offset""").bindparams(
            bindparam("contracts",expanding=True),bindparam("assignments",expanding=True),
-           bindparam("rfqs",expanding=True),bindparam("pos",expanding=True))
+           bindparam("rfqs",expanding=True),bindparam("pos",expanding=True),
+           bindparam("work",expanding=True))
     items=[dict(x) for x in db.execute(sql,{**ctx,**scopes,"limit":limit,"offset":offset}).mappings()]
     return {"items":items,"limit":limit,"offset":offset,"has_more":len(items)==limit}
 
@@ -719,7 +722,7 @@ def my_submissions(tenant_slug:str,request:Request,db:Session=Depends(get_db),
 @partner_documents_router.post("/submissions",status_code=201)
 def submit_document(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                     file:UploadFile=File(...),requirement_id:str=Form(...),
-                    related_kind:Literal["PROVIDER","CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT"]=Form("PROVIDER"),
+                    related_kind:Literal["PROVIDER","CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT","CONTRACTED_WORK"]=Form("PROVIDER"),
                     related_id:str=Form(""),supersedes_submission_id:str=Form(""),
                     valid_until:date|None=Form(None),
                     idempotency_key:str=Form(...)):
@@ -819,7 +822,7 @@ def download_my_original(tenant_slug:str,submission_id:str,request:Request,db:Se
        WHERE amo_id=:amo AND tenant_provider_id=:provider AND id=:id""",
        amo=ctx["amo"],provider=ctx["provider"],id=submission_id)
     if not row:raise HTTPException(404,"Submission unavailable")
-    if row["related_kind"] in {"CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT"}:
+    if row["related_kind"] in {"CONTRACT","ASSIGNMENT","RFQ","PO","SHIPMENT","CONTRACTED_WORK"}:
         partner._require_existing_related(db,user,row["related_kind"],row["related_id"])
     file=storage.materialize(row["object_uri"],expected_sha256=row["sha256"])
     return FileResponse(file,filename=row["filename"],media_type=row["content_type"],
