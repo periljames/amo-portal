@@ -891,6 +891,10 @@ def queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_activ
       s.tenant_provider_id,s.requirement_id,s.supersedes_submission_id,s.form_revision_id,
       s.sha256,s.size_bytes,s.valid_until,s.dms_revision_id,s.qms_evidence_id,
       s.review_note,s.created_at,s.dms_evidence_asset_id,s.dms_retention_id,
+      (SELECT MAX(a.occurred_at) FROM external_provider_form_acknowledgements a
+       WHERE a.amo_id=s.amo_id AND a.tenant_provider_id=s.tenant_provider_id
+         AND a.identity_id=s.identity_id AND a.requirement_id=s.requirement_id
+         AND a.form_revision_id=s.form_revision_id) AS form_acknowledged_at,
       r.title AS requirement_title,p.supplier_id,
       v.legal_name,i.email,
       d.status AS dms_retention_status,d.legal_hold AS dms_legal_hold,
