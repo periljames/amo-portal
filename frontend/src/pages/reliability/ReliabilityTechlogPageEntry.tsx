@@ -19,6 +19,15 @@ const blankEngine = (position: "1" | "2"): Engine => ({
 const blankLeg = (number: number): Leg => ({ number, from_airport: "", to_airport: "", flight_hours: "",
   left_oil_level: "", right_oil_level: "", comment: "" });
 const numeric = (v: string): number | null => v.trim() ? Number(v) : null;
+const durationHours = (value: string): number | null => {
+  const text = value.trim();
+  if (!text) return null;
+  const match = /^(\d+):([0-5]\d)$/.exec(text);
+  if (match) return Number(match[1]) + Number(match[2]) / 60;
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+};
 const nonempty = (v: string): string | null => v.trim() || null;
 const sourceError = (e: unknown) => e instanceof Error ? e.message : String(e);
 type PageEdit = { aircraft: string; techsheet: string };
@@ -136,18 +145,22 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
     return () => { active = false; };
   }, [aircraft, eventDate]);
 
-  const sumHours = useMemo(() => legs.reduce((sum, leg) => sum + (numeric(leg.flight_hours) || 0), 0), [legs]);
-  const pageHoursMismatch = totalFlightHours.trim() !== "" && Math.abs(sumHours - Number(totalFlightHours)) > 0.02;
+  const sumHours = useMemo(() => legs.reduce((sum, leg) => sum +
+    (durationHours(leg.flight_hours) ?? 0), 0), [legs]);
+  const invalidDuration = legs.some((leg) => durationHours(leg.flight_hours) === null) ||
+    (totalFlightHours.trim() !== "" && durationHours(totalFlightHours) === null);
+  const pageHoursMismatch = totalFlightHours.trim() !== "" && durationHours(totalFlightHours) !== null &&
+    Math.abs(sumHours - (durationHours(totalFlightHours) ?? 0)) > 0.02;
   const build = () => ({
     aircraft_serial_number: aircraft, techsheet_ref: pageNumber.trim(), event_date: eventDate,
     source_evidence_ref: sourceEvidence.trim(), source_type: sourceType,
     legs: legs.map((leg) => ({
-      ...leg, flight_hours: Number(leg.flight_hours),
+      ...leg, flight_hours: durationHours(leg.flight_hours),
       from_airport: nonempty(leg.from_airport), to_airport: nonempty(leg.to_airport),
       left_oil_level: nonempty(leg.left_oil_level), right_oil_level: nonempty(leg.right_oil_level),
       comment: nonempty(leg.comment),
     })),
-    page_flight_hours: Number(totalFlightHours),
+    page_flight_hours: durationHours(totalFlightHours),
     ttaf_brought_forward: numeric(ttafBefore), ttaf_updated: numeric(ttafAfter),
     tcsn_brought_forward: numeric(tcsnBefore), tcsn_updated: numeric(tcsnAfter),
     maintenance_complete: maintenanceComplete, maintenance_release_ref: nonempty(maintenanceRelease),
@@ -277,13 +290,14 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
       <fieldset>
         <legend>2. Flight leg grid (up to nine legs on the original page)</legend>
         <div className="octm__table-wrap"><table><thead><tr><th>Leg</th><th>From</th><th>To</th>
-          <th>Flight time (FH)</th><th>L/H oil level</th><th>R/H oil level</th><th>Comments</th><th></th>
+          <th>Flight Time (HH:MM or decimal FH)</th><th>L/H oil level</th><th>R/H oil level</th><th>Comments</th><th></th>
         </tr></thead><tbody>{legs.map((leg, index) => <tr key={leg.number}>
           <td>{leg.number}</td>
           {(["from_airport", "to_airport", "flight_hours", "left_oil_level", "right_oil_level", "comment"] as const)
             .map((field) => <td key={field}><input aria-label={"Leg " + leg.number + " " + field.replaceAll("_", " ")}
-              type={field === "flight_hours" ? "number" : "text"} min={field === "flight_hours" ? "0" : undefined}
-              step={field === "flight_hours" ? "any" : undefined} required={field === "flight_hours"}
+              type="text" inputMode={field === "flight_hours" ? "decimal" : undefined}
+              placeholder={field === "flight_hours" ? "01:30 or 1.5" : undefined}
+              required={field === "flight_hours"}
               value={leg[field]} onChange={(event) => patchLeg(index, field, event.target.value)} /></td>)}
           <td><button type="button" disabled={legs.length === 1}
             onClick={() => { invalidate(); setLegs((rows) => rows.filter((_, i) => i !== index)); }}>Remove</button></td>
@@ -297,7 +311,7 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
         <p>Entered Flight Time sum: <strong>{sumHours.toFixed(2)} FH</strong>.
           Do not substitute Airtime, and never infer oil uplift from oil levels.</p>
         <div className="octm__form">
-          <label>Page TOTAL flight time (independently copied)<input required type="number" min="0" max="100" step="any"
+          <label>Page TOTAL Flight Time (HH:MM or decimal FH)<input required type="text" inputMode="decimal" placeholder="03:15 or 3.25"
             value={totalFlightHours} onChange={(event) => { invalidate(); setTotalFlightHours(event.target.value); }} /></label>
           <label>TTAF brought forward<input type="number" min="0" step="any" value={ttafBefore}
             onChange={(event) => { invalidate(); setTtafBefore(event.target.value); }} /></label>
@@ -308,6 +322,7 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
           <label>Updated TCSN<input type="number" min="0" step="any" value={tcsnAfter}
             onChange={(event) => { invalidate(); setTcsnAfter(event.target.value); }} /></label>
         </div>
+        {invalidDuration && <p role="alert" className="octm__error">Use HH:MM (minutes 00–59) or nonnegative decimal flight hours for every Flight Time.</p>}
         {pageHoursMismatch && <p role="alert" className="octm__error">Leg Flight Time sum does not match page TOTAL.
           Reconcile against the original technical log.</p>}
       </fieldset>
@@ -340,7 +355,7 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
         </div>
       </fieldset>
       <div className="octm__actions">
-        <button type="submit" className="btn btn-primary" disabled={busy || !canCreate || pageHoursMismatch}>
+        <button type="submit" className="btn btn-primary" disabled={busy || !canCreate || pageHoursMismatch || invalidDuration || totalFlightHours.trim() === ""}>
           {busy ? "Validating…" : "Review calculated source drafts"}</button>
       </div>
     </form>
