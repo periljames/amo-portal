@@ -107,7 +107,7 @@ def _caps(role,proposed=None,bound=None):
     return sorted(requested)
 
 def _scope(value):
-    if set(value)-{"contracts","documents","assignments"}:
+    if set(value)-{"contracts","documents","assignments","rfqs","purchase_orders"}:
         raise HTTPException(422,"Unknown object scope type")
     if sum(len(v) for v in value.values())>500 or any(
         not isinstance(v,list) or any(not isinstance(x,str) or len(x)>128 for x in v)
