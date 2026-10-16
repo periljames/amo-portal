@@ -809,7 +809,7 @@ def import_governed_supplier_document(amo_code:str,submission_id:str,
         amo_id=amo,entity_type=entity_type,entity_id=entity_id,
         document_type=stage["evidence_type"],title=stage["filename"],
         source=document_models.ProcurementDocumentSource.SUPPLIER_PORTAL,
-        original_filename=stage["filename"],stored_path=stage["dms_path"],
+        original_filename=stage["filename"],stored_path=stage["object_uri"],
         mime_type=stage["content_type"],size_bytes=stage["size_bytes"],
         sha256=stage["sha256"],external_reference=submission_id,
         # Staging originals are governed DMS *evidence assets*, not published manual
