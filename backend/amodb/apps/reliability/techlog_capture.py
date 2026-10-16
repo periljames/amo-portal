@@ -317,7 +317,7 @@ def create_techlog_page(payload: TechlogPage, ctx=Depends(octm.context)):
             amo_id=amo_id,
             aircraft_serial_number=candidate.aircraft_serial_number,
             techsheet_ref=candidate.techsheet_ref,
-            engine_serial_number=candidate.engine_serial_number,
+            engine_position=candidate.engine_position,
             event_sequence=candidate.event_sequence,
         ).first()
         if original:
