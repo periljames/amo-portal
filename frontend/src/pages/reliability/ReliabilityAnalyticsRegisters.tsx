@@ -53,6 +53,7 @@ export function ReliabilityAnalyticsRegisters({ data, basePath, drilldown, drill
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourcePage, setSourcePage] = useState(0);
   const [sourcePageSize, setSourcePageSize] = useState(50);
+  const [selectedRecord, setSelectedRecord] = useState<number | null>(null);
   const aircraftRows = useMemo(() => data.aircraft_performance
     .filter((point) => point.label.toLowerCase().includes(aircraftQuery.toLowerCase()))
     .slice().sort((a, b) => {
@@ -78,7 +79,9 @@ export function ReliabilityAnalyticsRegisters({ data, basePath, drilldown, drill
     ["event_rate_per_100_fh", "Rate /100 FH"], ["dispatch_reliability_pct", "Dispatch reliability"],
     ["repeat_defects", "Repeat defects"], ["unscheduled_removals", "Unscheduled removals"],
   ];
+  const inspected = drilldown?.records[selectedRecord ?? 0];
   return <div className="rel-table__workspace">
+    <div className="rel-table__summary-layout">
     <section className="reliability-analytics__register">
       <div className="reliability-analytics__register-heading">
         <div><p className="reliability-v2__eyebrow">Ranked fleet evidence</p><h2>Aircraft performance matrix</h2></div>
@@ -116,6 +119,33 @@ export function ReliabilityAnalyticsRegisters({ data, basePath, drilldown, drill
       <PageControls page={aircraftPage} pageSize={aircraftPageSize} total={aircraftRows.length}
         setPage={setAircraftPage} setPageSize={setAircraftPageSize} />
     </section>
+    <aside className="rel-table__inspector" aria-label="Selected evidence summary">
+      <div className="rel-table__inspector-head"><span className="reliability-v2__eyebrow">Evidence inspector</span>
+        <h2>{drilldownTitle || "No evidence selected"}</h2></div>
+      {drilldown ? <>
+        <dl>
+          <div><dt>Matching source records</dt><dd>{drilldown.total.toLocaleString()}</dd></div>
+          <div><dt>Currently loaded</dt><dd>{drilldown.records.length.toLocaleString()}</dd></div>
+          {inspected && <>
+            <div><dt>Record reference</dt><dd>{inspected.reference || inspected.id}</dd></div>
+            <div><dt>Record type</dt><dd>{inspected.record_type.replaceAll("_", " ")}</dd></div>
+            <div><dt>Aircraft</dt><dd>{inspected.aircraft_serial_number || "Fleet-level"}</dd></div>
+            <div><dt>ATA chapter</dt><dd>{inspected.ata_chapter || "Not recorded"}</dd></div>
+            <div><dt>Status / severity</dt><dd>{inspected.status || inspected.severity || "Not classified"}</dd></div>
+          </>}
+        </dl>
+        {drilldown.total > drilldown.records.length && <p className="rel-table__inspector-warning">
+          This view contains a bounded subset. Open the canonical register for full history.
+        </p>}
+        {inspected?.route && <Link to={basePath + "/" + inspected.route}>Open original source record →</Link>}
+      </> : <p>Choose a fleet metric, chart point or aircraft row to retrieve the source-backed drilldown.
+        Only data returned by the backend is displayed.</p>}
+      <nav aria-label="Source record shortcuts">
+        <Link to={basePath + "/events"}>Occurrence register</Link>
+        <Link to={basePath + "/workbook-registers"}>Controlled datasets</Link>
+      </nav>
+    </aside>
+    </div>
     <section className="reliability-analytics__register" id="reliability-dashboard-evidence">
       <div className="reliability-analytics__register-heading">
         <div><p className="reliability-v2__eyebrow">Chart-to-source lineage</p><h2>{drilldownTitle || "Supporting controlled records"}</h2></div>
@@ -153,7 +183,10 @@ export function ReliabilityAnalyticsRegisters({ data, basePath, drilldown, drill
               <td>{row.aircraft_serial_number || "Fleet"}</td>
               <td>{row.category?.replaceAll("_", " ") || "—"}</td><td>{row.ata_chapter || "—"}</td>
               <td><span className={badgeClass(row.status || row.severity)}>{row.status || row.severity || "—"}</span></td>
-              <td>{row.summary}</td>
+              <td><button type="button" className="rel-table__inspect" onClick={() =>
+                setSelectedRecord(drilldown?.records.indexOf(row) ?? null)}
+                aria-label={"Inspect evidence " + (row.reference || row.id)}>Inspect</button>
+                {" "}{row.summary}</td>
             </tr>)}
             {!displayedSources.length && <tr><td colSpan={7}>No loaded records match this search.</td></tr>}</tbody>
           </table>
