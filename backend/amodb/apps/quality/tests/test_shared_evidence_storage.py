@@ -26,7 +26,7 @@ async def test_new_quality_evidence_is_shared_and_readable_on_another_worker(
 ):
     monkeypatch.setattr(module.shared_storage, "shared_storage_enabled", lambda: True)
     monkeypatch.setattr(module.shared_storage, "cache_root", lambda: tmp_path)
-    uploaded: dict[str, object] = {}
+    uploaded: dict[str, object] = {}\n    from unittest.mock import MagicMock
 
     def put_file(source, *, key: str, content_type: str | None = None):
         assert Path(source).read_bytes() == content
@@ -34,11 +34,10 @@ async def test_new_quality_evidence_is_shared_and_readable_on_another_worker(
         uploaded["key"] = key
         return SimpleNamespace(uri="s3://test-bucket/" + key, size_bytes=len(content))
 
-    monkeypatch.setattr(module.shared_storage, "put_file", put_file)
+    from amodb.apps.platform import storage_quota_upload\n    monkeypatch.setattr(storage_quota_upload, "put_local_file", lambda db, *, tenant_id, actor_id, path, key, content_type: put_file(path, key=key, content_type=content_type))
     saved = await store(
         UploadFile(io.BytesIO(content), filename="evidence.pdf", headers=None),
-        **kwargs,
-    )
+        db=MagicMock(),\n        **kwargs,\n    )
     assert saved.storage_ref == "s3://test-bucket/" + str(uploaded["key"])
     assert saved.size_bytes == len(content)
     assert not list(tmp_path.rglob("*.pdf")), "Temporary upload must not survive S3 transfer"
