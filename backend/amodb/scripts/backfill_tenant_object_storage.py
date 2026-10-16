@@ -20,6 +20,7 @@ from amodb import storage as shared_storage
 from amodb.database import WriteSessionLocal
 from amodb.apps.doc_control.evidence_models import DocumentEvidenceAsset
 from amodb.apps.doc_control.records_vault_models import TenantRecordAsset
+from amodb.apps.doc_control.knowledge_models import DocumentationRecord
 from amodb.apps.quality.audit_evidence_models import QualityAuditEvidenceArtifact
 from amodb.apps.quality.audit_guest_document_models import QualityAuditDocumentSubmission
 from amodb.apps.quality.audit_report_composition_models import QualityAuditReportArtifact
@@ -42,6 +43,8 @@ SOURCES = (
            Path(os.getenv("DOCUMENT_EVIDENCE_DIR", "uploads/document-control-evidence")).resolve(), "mime_type"),
     Source("dms-record-vault", TenantRecordAsset, "storage_path", "tenant_id",
            Path(os.getenv("DOCUMENT_RECORD_VAULT_DIR", "uploads/document-record-vault")).resolve(), "mime_type"),
+    Source("documentation-generated-records", DocumentationRecord, "artifact_storage_path", "tenant_id",
+           Path(os.getenv("DOCUMENT_RECORD_DIR", "uploads/documentation-records")).resolve(), "artifact_mime_type"),
     Source("qms-checklist-evidence", QualityAuditEvidenceArtifact, "file_ref", "amo_id",
            Path(os.getenv("QMS_AUDIT_EVIDENCE_DIR", "uploads/qms-audit-evidence")).resolve(), "content_type"),
     Source("qms-guest-documents", QualityAuditDocumentSubmission, "storage_ref", "amo_id",
@@ -91,7 +94,7 @@ def migrate_one(db: Session, *, source: Source, tenant_id: str, row, apply: bool
     try:
         source_file = resolve_local(source, reference)
         size, digest = digest_file(source_file)
-        expected = str(getattr(row, "sha256", None) or getattr(row, "source_sha256", None) or "").lower()
+        expected = str(getattr(row, "sha256", None) or getattr(row, "source_sha256", None) or getattr(row, "artifact_sha256", None) or "").lower()
         if expected and digest != expected:
             raise ValueError("Stored source SHA-256 differs from the authoritative database checksum")
         declared = getattr(row, "size_bytes", None)
