@@ -161,13 +161,15 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await live.locator("details.qms-live-audit-focus__compliance > summary").click();
   await page.screenshot({ path: "test-results/fieldwork-compliance-expanded-proof.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await live.getByRole("button", { name: "Open question list" }).click();
+  // Mobile retains the horizontally scrollable paper-style checklist matrix;
+  // its per-question details controls replace the superseded list drawer.
+  await expect(live.getByRole("region", { name: "Checklist assessment table" })).toBeVisible();
+  await expect(live.getByRole("button", { name: "Details for question 1" })).toBeVisible();
   await page.screenshot({ path: "test-results/fieldwork-mobile-proof.png", fullPage: true });
-  await live.getByRole("button", { name: "Close question list" }).click();
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await live.getByLabel("Auditor note").fill("Authorization and competence records were current for the sampled certifying staff member.");
-  await live.getByRole("button", { name: "Compliant" }).click();
+  await live.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant" }).click();
 
   await expect.poll(() => state.mutationBody).not.toBeNull();
   expect(state.mutationBody).toMatchObject({
