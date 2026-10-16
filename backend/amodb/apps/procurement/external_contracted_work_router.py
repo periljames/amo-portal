@@ -335,6 +335,58 @@ def staff_queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current
           WHERE amo_id=:amo ORDER BY updated_at DESC LIMIT :limit""",amo=amo,limit=limit)}
 
 
+@staff_router.get("/options")
+def work_options(amo_code:str,db:Session=Depends(get_db),
+                 user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    return {
+      "providers":_all(db,"""SELECT p.id,p.supplier_id,s.legal_name
+         FROM external_tenant_providers p JOIN procurement_suppliers s
+           ON s.amo_id=p.amo_id AND s.id=p.supplier_id
+         WHERE p.amo_id=:amo ORDER BY s.legal_name LIMIT 200""",amo=amo),
+      "scopes":_all(db,"""SELECT id,supplier_id,category,site_code,product_family,
+              approval_number,authority,effective_on,expires_on
+         FROM procurement_supplier_approval_scopes WHERE amo_id=:amo
+          AND status='ACTIVE' AND category IN ('MAINTENANCE','CONTRACTED_MAINTENANCE')
+         ORDER BY supplier_id,site_code LIMIT 300""",amo=amo),
+      "contracts":_all(db,"""SELECT id,supplier_id,contract_number,title,status,
+             effective_on,expires_on FROM quality_external_provider_contracts
+         WHERE amo_id=:amo AND status='ACTIVE' ORDER BY contract_number LIMIT 200""",amo=amo),
+      "coordinators":_all(db,"""SELECT id,full_name,staff_code,CAST(role AS TEXT) AS role FROM users
+         WHERE amo_id=:amo AND is_active=TRUE AND role IN
+           ('BASE_MAINTENANCE_MANAGER','LINE_MAINTENANCE_MANAGER','WORKSHOP_MANAGER')
+         ORDER BY full_name LIMIT 100""",amo=amo),
+    }
+
+
+@staff_router.get("/{work_id}/available-evidence")
+def evidence_candidates(amo_code:str,work_id:str,db:Session=Depends(get_db),
+                        user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    work=_work(db,amo,work_id)
+    return {"items":_all(db,"""SELECT s.id,s.filename,s.evidence_type,s.status,
+       s.created_at,s.dms_retention_id FROM external_partner_evidence_submissions s
+       WHERE s.amo_id=:amo AND s.tenant_provider_id=:provider
+         AND s.related_kind='CONTRACTED_WORK' AND s.related_id=:work
+       ORDER BY s.created_at DESC LIMIT 150""",
+       amo=amo,provider=work["provider_id"],work=work_id)}
+
+
+@staff_router.get("/{work_id}/grants")
+def assignable_grants(amo_code:str,work_id:str,db:Session=Depends(get_db),
+                      user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    work=_work(db,amo,work_id)
+    if _role(user)!=MANAGERS[work["work_type"]]:
+        raise HTTPException(403,"Responsible Maintenance Manager required")
+    return {"items":_all(db,"""SELECT g.id,g.role_code,g.capabilities_json,g.object_scope_json,
+        i.email FROM external_tenant_grants g
+        JOIN external_organization_memberships m ON m.id=g.membership_id
+        JOIN external_identities i ON i.id=m.identity_id
+        WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider AND g.status='ACTIVE'
+        ORDER BY i.email""",amo=amo,provider=work["provider_id"])}
+
+
 @staff_router.post("",status_code=201)
 def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
                 user=Depends(get_current_active_user)):
