@@ -421,6 +421,12 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
             <label>Oil specification<input value={form.oil_specification} onChange={(event) => set("oil_specification", event.target.value)} /></label>
             <label>Source evidence reference (needed for verification)<input value={form.source_evidence_ref} placeholder="Scanned TechLog / DMS document reference"
               onChange={(event) => set("source_evidence_ref", event.target.value)} /></label>
+            <div className="octm__full">
+              <ReliabilityTechlogEvidence aircraft={form.aircraft_serial_number}
+                techsheet={form.techsheet_ref} reference={form.source_evidence_ref || ""}
+                canUpload={has("reliability.ingest") || has("reliability.data_quality.resolve")}
+                onReference={(reference) => set("source_evidence_ref", reference)} />
+            </div>
             <label>External event ID<input value={form.external_record_id} onChange={(event) => set("external_record_id", event.target.value)} /></label>
             <label className="octm__full">Remarks<textarea rows={2} value={form.remarks} onChange={(event) => set("remarks", event.target.value)} /></label>
             {correcting && <label className="octm__full">Correction reason<input required minLength={5} value={correctionReason}
