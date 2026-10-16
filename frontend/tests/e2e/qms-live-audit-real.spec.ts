@@ -214,7 +214,7 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     // on both browsers and expand its verification inputs before checking SSE.
     for (const page of [pageA, pageB]) {
       await expect(page.getByRole("table", { name: "Checklist assessment table" })).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: "Details for question 1" }).click();
+      await page.getByRole("button", { name: "Details for question 1", exact: true }).click();
       await page.locator("details.qms-live-audit-focus__compliance > summary").click();
       await expect(page.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
     }
@@ -306,7 +306,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await auditeePage.getByRole("button", { name: "Record closing response" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
-    await internalPage.getByRole("button", { name: "Refresh" }).click();
+    await internalPage.getByLabel("Audit closing meeting").getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
