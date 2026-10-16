@@ -28,6 +28,15 @@ const CLASSES=[
   ["AUTHORITY_CORRESPONDENCE","Authority correspondence and approval evidence"],
   ["CONTROLLED_FORM","Controlled form"],
   ["FORM_ACKNOWLEDGEMENT","Controlled acknowledgement"],
+  ["RFQ_SPECIFICATION","Invited RFQ technical specification"],
+  ["SUPPLIER_QUOTATION","Supplier quotation and revision"],
+  ["PROFORMA_INVOICE","Supplier proforma invoice"],
+  ["SUPPLIER_INVOICE","Supplier commercial invoice"],
+  ["PACKING_LIST","Advance shipment packing list"],
+  ["SHIPMENT_RELEASE","Shipment release and conformity certificate"],
+  ["CREDIT_NOTE","Supplier credit or replacement note"],
+  ["WARRANTY_CLAIM","Warranty claim record"],
+  ["RMA_CORRESPONDENCE","Returns and RMA correspondence"],
 ] as const;
 const KINDS=["ALL","SUPPLIER","CONTRACTOR","SUBCONTRACTOR","SERVICE_PROVIDER",
   "CONSULTANT","LABORATORY","CALIBRATION_PROVIDER","OTHER"];
