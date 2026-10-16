@@ -10,11 +10,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import struct
 import tempfile
 import zipfile
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -549,7 +550,8 @@ def queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_activ
     rows=_all(db,"""SELECT s.id,s.filename,s.status,s.evidence_type,s.related_kind,s.related_id,
       s.tenant_provider_id,s.requirement_id,s.supersedes_submission_id,s.form_revision_id,
       s.sha256,s.size_bytes,s.valid_until,s.dms_revision_id,s.qms_evidence_id,
-      s.review_note,s.created_at,r.title AS requirement_title,p.supplier_id,
+      s.review_note,s.created_at,s.dms_evidence_asset_id,s.dms_retention_id,
+      r.title AS requirement_title,p.supplier_id,
       v.legal_name,i.email,
       d.status AS dms_retention_status,d.legal_hold AS dms_legal_hold,
       d.retention_until AS dms_retention_until
@@ -559,7 +561,7 @@ def queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_activ
       JOIN external_identities i ON i.id=s.identity_id
       LEFT JOIN external_provider_document_requirements r ON r.amo_id=s.amo_id AND r.id=s.requirement_id
       LEFT JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id
-        AND d.source_type='REVISION' AND d.source_id=s.dms_revision_id
+        AND d.id=s.dms_retention_id
       WHERE s.amo_id=:amo ORDER BY s.created_at DESC,s.id DESC
       LIMIT :limit OFFSET :offset""",amo=amo,limit=limit,offset=offset)
     return {"items":rows,"limit":limit,"offset":offset,"has_more":len(rows)==limit}
