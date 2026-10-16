@@ -47,3 +47,27 @@
 .octm__metrics > div { display: flex; flex-direction: column; padding: .8rem; border: 1px solid #94a3b855; border-radius: .5rem; }
 .octm__metrics strong { font-size: 1.65rem; font-variant-numeric: tabular-nums; }
 .octm__metrics span { font-size: .85rem; opacity: .8; }
+
+/* Production workflow layout: source table remains visible during verification. */
+.octm__review-layout {display:grid;grid-template-columns:minmax(0,1fr);gap:.9rem;min-width:0;align-items:start}
+.octm__review-layout--open {grid-template-columns:minmax(0,1fr) minmax(320px,39%)}
+.octm__review-register {min-width:0}
+.octm__review-register>.octm__table-wrap {max-height:calc(100dvh - 335px);min-height:260px;overflow:auto;scrollbar-gutter:stable}
+.octm__review-register table {min-width:950px;border-collapse:separate;border-spacing:0}
+.octm__review-register thead th {position:sticky;top:0;z-index:2;background:Canvas;
+  box-shadow:0 1px 0 color-mix(in srgb,CanvasText 15%,transparent);white-space:nowrap}
+.octm__review-aside {position:sticky;top:1rem;max-height:calc(100dvh - 140px);
+  min-width:0;overflow:auto;scrollbar-gutter:stable;background:Canvas;
+  border:1px solid color-mix(in srgb,CanvasText 16%,transparent);border-radius:.7rem;padding:.85rem}
+.octm__review-aside>.octm__review {margin:0;min-width:0;border:0;padding:0}
+.octm__review-aside .octm__table-wrap {max-height:240px;overflow:auto}
+.octm__review-aside .octm__review h3 {font-size:1.05rem}
+.octm__review-aside .octm__attestations {max-height:230px;overflow:auto}
+.octm__review-aside textarea {max-width:100%;resize:vertical}
+.octm__panel {box-shadow:0 .2rem .9rem color-mix(in srgb,#0f172a 5%,transparent)}
+.octm__tabs {position:sticky;top:0;z-index:5;background:Canvas;padding:.55rem 0;border-bottom:1px solid color-mix(in srgb,CanvasText 13%,transparent)}
+.octm__tab {min-height:40px}
+.octm__chart {background:Canvas;border-radius:.7rem;border:1px solid color-mix(in srgb,CanvasText 13%,transparent);padding:1rem .4rem}
+@media(max-width:1340px) {.octm__review-layout--open {grid-template-columns:minmax(0,1fr)}.octm__review-aside {position:static;max-height:none}}
+@media(max-width:650px){.octm__review-register>.octm__table-wrap {max-height:58dvh}.octm__tabs {position:static}}
+@media print{.octm__review-register>.octm__table-wrap,.octm__review-aside{max-height:none;overflow:visible}}
