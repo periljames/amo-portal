@@ -36,11 +36,26 @@ function basePath(id?: string) {
 
 export default function ReliabilityTechlogEvidence({ aircraft, techsheet, reference, onReference, canUpload = false }: Props): React.ReactElement {
   const [asset, setAsset] = useState<Asset | null>(null);
+  const [available, setAvailable] = useState<Asset[]>([]);
+  const [listVersion, setListVersion] = useState(0);
   const [previewUrl, setPreviewUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const id = assetId(reference.trim());
+
+  useEffect(() => {
+    let active = true;
+    if (!onReference || !aircraft.trim() || !techsheet.trim()) return;
+    const params = new URLSearchParams({ aircraft: aircraft.trim(), techsheet_ref: techsheet.trim() });
+    void fetch(basePath() + "?" + params.toString(), { headers: authHeaders(), credentials: "same-origin" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Retained source file list unavailable.");
+        return response.json() as Promise<{ items: Asset[] }>;
+      }).then((result) => { if (active) setAvailable(result.items); })
+      .catch(() => { if (active) setAvailable([]); });
+    return () => { active = false; };
+  }, [aircraft, techsheet, onReference, listVersion]);
 
   useEffect(() => {
     let active = true;
@@ -104,6 +119,7 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
       }
       const retained = await response.json() as Asset;
       setAsset(retained);
+      setAvailable((old) => [retained, ...old.filter((value) => value.id !== retained.id)]);
       onReference(retained.source_evidence_ref);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Evidence upload failed."); }
     finally { setUploading(false); }
@@ -119,6 +135,19 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
       <input type="file" accept=".pdf,.png,.jpg,.jpeg" disabled={uploading || !aircraft || !techsheet}
         onChange={(event) => { void upload(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
     </label>}
+    {canUpload && onReference && !!aircraft.trim() && !!techsheet.trim() && <div className="rel-techlog-evidence__existing">
+      <label>Previously retained scans for this aircraft and page
+        <select value={id || ""} onChange={(event) => {
+          const selected = available.find((entry) => entry.id === event.target.value);
+          if (selected) { setAsset(selected); onReference(selected.source_evidence_ref); }
+        }}>
+          <option value="">Select a retained scan…</option>
+          {id && !available.some((entry) => entry.id === id) &&
+            <option value={id}>Current reference (checking library)</option>}
+          {available.map((entry) => <option key={entry.id} value={entry.id}>{entry.filename} · {entry.sha256.slice(0, 12)}</option>)}
+        </select></label>
+      <button type="button" onClick={() => setListVersion((v) => v + 1)}>Refresh retained scans</button>
+    </div>}
     {id && matches && <div className="rel-techlog-evidence__metadata">
       <ShieldCheck size={15} aria-hidden="true" />
       <span><strong>{asset.filename}</strong><small>{(asset.size_bytes / 1024).toFixed(1)} KB · SHA-256 {asset.sha256.slice(0, 16)}…</small></span>
