@@ -81,7 +81,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     if (!(await definitionTile.evaluate((element) => (element as HTMLDetailsElement).open))) {
       await definitionTile.locator("summary").click();
     }
-    await setup.getByRole("button", { name: "Save audit definition" }).click();
+    await setup.getByRole("button", { name: "Save definition", exact: true }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Definition saved.", { timeout: 30_000 });
 
     const meetingsTile = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Meetings" });
