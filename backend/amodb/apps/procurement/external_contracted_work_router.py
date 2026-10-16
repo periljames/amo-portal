@@ -201,13 +201,17 @@ def _closure_blockers(db,work):
          WHERE amo_id=:amo AND work_id=:id""",amo=amo,id=work_id)
     custody=_all(db,"""SELECT id,state FROM external_contracted_custody WHERE amo_id=:amo AND work_id=:id""",amo=amo,id=work_id)
     evidence=_all(db,"""SELECT l.category,s.status,s.dms_retention_id,d.status AS retention_status,
-         s.qms_evidence_id
+         s.qms_evidence_id,q.status AS qms_status,q.valid_until AS qms_valid_until
          FROM external_contracted_evidence_links l
          JOIN external_partner_evidence_submissions s ON s.id=l.source_submission_id AND s.amo_id=l.amo_id
          LEFT JOIN document_retention_dispositions d ON d.id=s.dms_retention_id AND d.tenant_id=s.amo_id
-         WHERE l.amo_id=:amo AND l.work_id=:id""",amo=amo,id=work_id)
+         LEFT JOIN quality_external_provider_evidence q ON q.id=s.qms_evidence_id
+              AND q.amo_id=s.amo_id AND q.supplier_id=:supplier
+         WHERE l.amo_id=:amo AND l.work_id=:id""",amo=amo,id=work_id,supplier=work["supplier_id"])
     valid={x["category"] for x in evidence if x["status"]=="ACCEPTED" and
-           x["dms_retention_id"] and x["retention_status"]!="DISPOSED"}
+           x["dms_retention_id"] and x["retention_status"]!="DISPOSED" and
+           x["qms_status"]=="VERIFIED" and
+           (x["qms_valid_until"] is None or x["qms_valid_until"]>=date.today())}
     blocked=[f"Additional work {x['id']} awaits controlled decision" for x in additional if x["state"]=="REQUESTED"]
     blocked.extend(f"Property item {x['id']} not reconciled" for x in custody if x["state"]!="RECONCILED")
     for kind in ("MAINTENANCE_RELEASE","WORK_RECORD","TEST_RESULT"):
