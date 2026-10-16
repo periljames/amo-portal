@@ -21,7 +21,7 @@ from amodb.security import get_current_active_user, require_roles
 from . import models, schemas, service, supplier_quality_control
 from . import external_partner_router as partner
 from .external_provider_documents_router import _published_revision
-from amodb.storage import storage
+from amodb import storage
 
 partner_router = APIRouter(prefix="/api/external-provider/partner/{tenant_slug}/commerce",tags=["external procurement"])
 staff_router = APIRouter(prefix="/api/maintenance/{amo_code}/procurement/partner-collaboration",tags=["procurement collaboration"])
