@@ -1218,11 +1218,19 @@ def decide_provider_evidence(
             JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
               AND p.amo_id=s.amo_id AND p.supplier_id=:supplier
             WHERE s.amo_id=:amo AND s.id=:submission AND s.qms_evidence_id=:qms
-              AND s.status='ACCEPTED'
+              AND s.status='ACCEPTED' AND s.dms_evidence_asset_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM document_retention_dispositions d
+                JOIN document_evidence_assets a ON a.id=d.source_id
+                  AND a.tenant_id=d.tenant_id AND a.sha256=s.sha256
+                WHERE d.tenant_id=s.amo_id AND d.id=s.dms_retention_id
+                  AND d.source_type='EVIDENCE_ASSET'
+                  AND d.source_id=s.dms_evidence_asset_id AND d.status!='DISPOSED'
+              )
         """), {"amo":ctx.amo_id,"supplier":provider_id,
                "submission":row["source_id"],"qms":evidence_id}).mappings().first()
         if not intake:
-            raise HTTPException(status_code=409, detail="Provider original has not completed the controlled intake review")
+            raise HTTPException(status_code=409, detail="Provider original requires accepted intake and governed DMS retention before QMS verification")
     db.execute(
         text(
             """
