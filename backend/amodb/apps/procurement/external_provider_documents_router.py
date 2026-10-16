@@ -198,7 +198,7 @@ def _governed_procurement_upload(db,user,kind,item):
     """
     if kind not in {"RFQ","PO","SHIPMENT"}:
         return
-    partner._cap(user,"procurement.respond")
+    partner._cap(user,"procurement.attach")
     from .supplier_quality_control import assert_supplier_usage_allowed
     ctx=partner._context(user)
     if kind=="RFQ":
