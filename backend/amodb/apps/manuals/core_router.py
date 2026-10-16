@@ -604,9 +604,11 @@ def _ensure_upload_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _store_manual_source(*, db: Session, tenant_id: str, actor_id: str | None, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
+def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes, db: Session | None = None, tenant_id: str | None = None, actor_id: str | None = None) -> tuple[str, str]:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
     if shared_storage.shared_storage_enabled():
+        if db is None or tenant_id is None:
+            raise HTTPException(status_code=503, detail="Tenant storage reservation context is required")
         digest = hashlib.sha256(content).hexdigest()
         try:
             from amodb.apps.platform import storage_quota_upload
