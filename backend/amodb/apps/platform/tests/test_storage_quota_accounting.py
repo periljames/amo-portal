@@ -78,6 +78,10 @@ def test_finalize_and_delete_have_exact_balances(storage_db):
     assert quota.recorded_delete(storage_db, tenant_id="tenant-1", object_key="one/file.pdf")
     assert not quota.recorded_delete(storage_db, tenant_id="tenant-1", object_key="one/file.pdf")
     assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 0
+    with pytest.raises(ValueError, match="already exists"):
+        quota.reserve(storage_db, tenant_id="tenant-1",
+                      object_key="one/file.pdf", size_bytes=1,
+                      idempotency_key="new-operation-after-delete")
 
 
 def test_cancel_and_tenant_boundaries(storage_db):
