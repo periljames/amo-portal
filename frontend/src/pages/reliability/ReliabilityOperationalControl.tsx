@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { listAircraft, type AircraftRead } from "../../services/fleet";
 import { apiRequest } from "../../services/apiClient";
@@ -291,7 +292,17 @@ function fieldText(value: unknown): string {
 }
 
 export default function ReliabilityOperationalControl(): React.ReactElement {
-  const [view, setView] = useState<View>("overview");
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeView = location.pathname.split("/reliability/operations/")[1]?.split("/")[0] || "overview";
+  const initialView = VIEW_DEFINITIONS.some((item) => item.id === routeView) ? routeView as View : "overview";
+  const [view, setView] = useState<View>(initialView);
+  const navigateView = (next: View) => {
+    setView(next);
+    navigate("/maintenance/" + encodeURIComponent(amoCode) + "/reliability/operations/" + next);
+  };
+  useEffect(() => { setView(initialView); }, [initialView]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [aircraft, setAircraft] = useState<AircraftRead[]>([]);
@@ -423,7 +434,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
         type="button"
         className={view === item.id ? "is-active" : ""}
         aria-current={view === item.id ? "page" : undefined}
-        onClick={() => setView(item.id)}
+        onClick={() => navigateView(item.id)}
       >
         <span>{item.shortLabel}</span>
         <strong>{viewCount(item.id, summary)}</strong>
@@ -438,7 +449,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
     {pageLoading && <div className="reliability-v2__loading" role="status">Loading Reliability source controls…</div>}
     {!pageLoading && viewLoading && <div className="rel-ops__view-loading" role="status">Loading {activeDefinition.label.toLowerCase()}…</div>}
 
-    {!pageLoading && view === "overview" && <Overview summary={summary} readiness={readiness} onNavigate={setView} />}
+    {!pageLoading && view === "overview" && <Overview summary={summary} readiness={readiness} onNavigate={navigateView} />}
     {!pageLoading && !viewLoading && view === "flight" && <FlightView rows={flights} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
     {!pageLoading && !viewLoading && view === "deferrals" && <DeferralView rows={deferrals} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
     {!pageLoading && !viewLoading && view === "shop" && <ShopView rows={shop} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
