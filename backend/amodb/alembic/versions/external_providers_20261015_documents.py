@@ -70,6 +70,8 @@ def upgrade():
     # are never deleted/superseded in place; each resubmission is new.
     with op.batch_alter_table("external_partner_evidence_submissions") as batch:
         batch.drop_constraint("ck_ext_partner_upload_state", type_="check")
+        batch.drop_constraint("ck_ext_partner_upload_limit", type_="check")
+        batch.create_check_constraint("ck_ext_partner_upload_limit", "size_bytes BETWEEN 1 AND 536870912")
         batch.create_check_constraint("ck_ext_partner_upload_state", "status IN ('PENDING_REVIEW','RETURNED','ACCEPTED','REJECTED','WITHDRAWN','SUPERSEDED')")
     op.create_table(
         "external_provider_document_events",
@@ -214,6 +216,8 @@ def downgrade():
     op.drop_table("external_provider_document_events")
     with op.batch_alter_table("external_partner_evidence_submissions") as batch:
         batch.drop_constraint("ck_ext_partner_upload_state", type_="check")
+        batch.drop_constraint("ck_ext_partner_upload_limit", type_="check")
+        batch.create_check_constraint("ck_ext_partner_upload_limit", "size_bytes BETWEEN 1 AND 20971520")
         batch.create_check_constraint("ck_ext_partner_upload_state", "status IN ('PENDING_REVIEW','ACCEPTED','REJECTED','WITHDRAWN')")
     op.drop_index("ix_ext_doc_requirement_history", table_name="external_partner_evidence_submissions")
     with op.batch_alter_table("external_partner_evidence_submissions") as batch:
