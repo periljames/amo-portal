@@ -32,6 +32,8 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     "documents/requirements",{signal}),`${tenant}:${refresh}`);
   const submissions=usePartnerLoad((signal)=>partnerRequest<ResponsePage>(tenant,
     `documents/submissions?limit=25&offset=${offset}`,{signal}),`${tenant}:${offset}:${refresh}`);
+  const assignments=usePartnerLoad((signal)=>partnerRequest<{items:{id:string}[]}>(tenant,
+    "documents/assignment-scopes",{signal}),`${tenant}:${refresh}:assignments`);
   const contracts=usePartnerLoad((signal)=>capabilities.includes("contract.read")?
     partnerRequest<Page<Contract>>(tenant,"contracts?limit=50",{signal}):
     Promise.resolve({items:[],limit:50,offset:0,has_more:false}),`${tenant}:${refresh}`);
@@ -117,10 +119,16 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
         <label>Linked scope<select value={related} onChange={e=>{setRelated(e.target.value);setRelatedId("");setSupersedes("");resetRetry();}}>
           <option value="PROVIDER">Provider-level record</option>
           {contracts.value?.items.length?<option value="CONTRACT">Assigned agreement</option>:null}
+          {assignments.value?.items.length?<option value="ASSIGNMENT">Assigned audit or QMS work</option>:null}
         </select></label>
         {related==="CONTRACT"&&<label>Assigned agreement<select required value={relatedId} onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
           <option value="">Choose assigned agreement</option>
           {contracts.value?.items.map(c=><option key={c.id} value={c.id}>{c.contract_number} · {c.title}</option>)}
+        </select></label>}
+        {related==="ASSIGNMENT"&&<label>Assigned audit<select required value={relatedId}
+          onChange={e=>{setRelatedId(e.target.value);setSupersedes("");resetRetry();}}>
+          <option value="">Choose authorized audit assignment</option>
+          {assignments.value?.items.map(a=><option key={a.id} value={a.id}>{a.id}</option>)}
         </select></label>}
         <label>Replace earlier submission (optional)<select value={supersedes} onChange={e=>{setSupersedes(e.target.value);resetRetry();}}>
           <option value="">First submission</option>
@@ -133,7 +141,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
           accept=".pdf,.docx,.png,.jpg,.jpeg,.txt"
           onChange={e=>{setFile(e.target.files?.[0]||null);resetRetry();}}/></label>
         {busy&&<div className="partner-progress"><progress max={100} value={progress}/><span>{progress}% uploaded</span></div>}
-        <div className="partner-buttons"><button className="partner-primary" disabled={!current||!file||busy||(related==="CONTRACT"&&!relatedId)}>
+        <div className="partner-buttons"><button className="partner-primary" disabled={!current||!file||busy||(related!=="PROVIDER"&&!relatedId)}>
           {busy?"Uploading…":"Submit for controlled review"}</button>
           {busy&&<button type="button" onClick={()=>xhrRef.current?.abort()}>Cancel transfer</button>}
           {!busy&&file&&error&&<button type="button" onClick={resetRetry}>Start a new upload attempt</button>}
