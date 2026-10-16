@@ -476,6 +476,9 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
 });
 
 test("programme requirement uses planner conflict gate before schedule lineage is committed", async ({ page }) => {
+  // The approved 2026 programme fixture schedules 15 August; freeze only Date
+  // so its actual HTML min/max validation remains exercised after August 2026.
+  await page.clock.setFixedTime(new Date("2026-08-08T12:00:00Z"));
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/audits/program", { waitUntil: "domcontentloaded" });
 
