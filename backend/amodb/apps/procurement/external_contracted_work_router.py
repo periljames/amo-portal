@@ -158,41 +158,51 @@ def _eligibility(db,work):
         raise HTTPException(409,"Contracted AMO must have a verified aviation-authority approval reference")
     if scope.get("restrictions") and not (work["requirements_json"] or {}).get("restriction_review_reference"):
         raise HTTPException(409,"Capability limitations require documented technical disposition")
-    supplier_quality_control.assert_supplier_usage_allowed(
-        db,amo_id=work["amo_id"],supplier_id=work["supplier_id"],
-        categories={scope["category"]},allow_controlled_override=False,
-        site_code=work["site_code"],product_family=scope["product_family"],
-        capability=str(scope["id"]),contracted_function=work["function"],contract_id=work["contract_id"])
-    contract=_one(db,"""SELECT c.id FROM quality_external_provider_contracts c
-      JOIN external_tenant_providers p ON p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id AND p.id=:provider
-      JOIN external_partner_evidence_submissions s
-        ON s.amo_id=c.amo_id AND s.id=c.signed_evidence_submission_id
-        AND s.related_kind='CONTRACT' AND s.related_id=c.id AND s.status='ACCEPTED'
-        AND s.dms_evidence_asset_id IS NOT NULL AND s.dms_retention_id IS NOT NULL
-      JOIN document_retention_dispositions d
-        ON d.tenant_id=s.amo_id AND d.id=s.dms_retention_id AND d.status!='DISPOSED'
-      JOIN quality_external_provider_evidence e
-        ON e.amo_id=c.amo_id AND e.supplier_id=c.supplier_id AND e.id=s.qms_evidence_id
-        AND e.status='VERIFIED' AND (e.valid_until IS NULL OR e.valid_until>=CURRENT_DATE)
-      JOIN manuals m ON m.id=c.controlled_document_id
-      JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=c.amo_id
-      JOIN manual_revisions r ON r.manual_id=m.id AND r.id=m.current_published_rev_id
-        AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
-        AND s.sha256=r.source_sha256
-        AND (r.id=c.controlled_document_revision OR r.rev_number=c.controlled_document_revision)
-      WHERE c.amo_id=:amo AND c.supplier_id=:supplier AND c.id=:contract
-        AND c.status='ACTIVE'
-        AND (c.effective_on IS NULL OR c.effective_on<=CURRENT_DATE)
-        AND (c.expires_on IS NULL OR c.expires_on>=CURRENT_DATE)
-        AND c.approved_sites_json IS NOT NULL
-      """,**ctx)
-    if not contract:
-        raise HTTPException(409,"The exact maintenance agreement is not current, DMS-retained and independently Quality-verified")
-    sites=_one(db,"""SELECT approved_sites_json,scope_text FROM quality_external_provider_contracts
-                      WHERE amo_id=:amo AND id=:contract""",**ctx)
-    if work["site_code"] not in (sites["approved_sites_json"] or []):
-        raise HTTPException(409,"Contract does not approve this contracted maintenance location")
-    return scope
+    # QMS performs an internal-privilege cross-domain check. Restore the
+    # incoming member's PostgreSQL RLS marker even if the eligibility gate fails.
+    previous_marker=None
+    if db.get_bind().dialect.name=="postgresql":
+        previous_marker=db.execute(text("SELECT current_setting('app.external_provider_id',true)")).scalar()
+    try:
+        supplier_quality_control.assert_supplier_usage_allowed(
+            db,amo_id=work["amo_id"],supplier_id=work["supplier_id"],
+            categories={scope["category"]},allow_controlled_override=False,
+            site_code=work["site_code"],product_family=scope["product_family"],
+            capability=str(scope["id"]),contracted_function=work["function"],contract_id=work["contract_id"])
+        contract=_one(db,"""SELECT c.id FROM quality_external_provider_contracts c
+          JOIN external_tenant_providers p ON p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id AND p.id=:provider
+          JOIN external_partner_evidence_submissions s
+            ON s.amo_id=c.amo_id AND s.id=c.signed_evidence_submission_id
+            AND s.related_kind='CONTRACT' AND s.related_id=c.id AND s.status='ACCEPTED'
+            AND s.dms_evidence_asset_id IS NOT NULL AND s.dms_retention_id IS NOT NULL
+          JOIN document_retention_dispositions d
+            ON d.tenant_id=s.amo_id AND d.id=s.dms_retention_id AND d.status!='DISPOSED'
+          JOIN quality_external_provider_evidence e
+            ON e.amo_id=c.amo_id AND e.supplier_id=c.supplier_id AND e.id=s.qms_evidence_id
+            AND e.status='VERIFIED' AND (e.valid_until IS NULL OR e.valid_until>=CURRENT_DATE)
+          JOIN manuals m ON m.id=c.controlled_document_id
+          JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=c.amo_id
+          JOIN manual_revisions r ON r.manual_id=m.id AND r.id=m.current_published_rev_id
+            AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
+            AND s.sha256=r.source_sha256
+            AND (r.id=c.controlled_document_revision OR r.rev_number=c.controlled_document_revision)
+          WHERE c.amo_id=:amo AND c.supplier_id=:supplier AND c.id=:contract
+            AND c.status='ACTIVE'
+            AND (c.effective_on IS NULL OR c.effective_on<=CURRENT_DATE)
+            AND (c.expires_on IS NULL OR c.expires_on>=CURRENT_DATE)
+            AND c.approved_sites_json IS NOT NULL
+          """,**ctx)
+        if not contract:
+            raise HTTPException(409,"The exact maintenance agreement is not current, DMS-retained and independently Quality-verified")
+        sites=_one(db,"""SELECT approved_sites_json,scope_text FROM quality_external_provider_contracts
+                          WHERE amo_id=:amo AND id=:contract""",**ctx)
+        if work["site_code"] not in (sites["approved_sites_json"] or []):
+            raise HTTPException(409,"Contract does not approve this contracted maintenance location")
+        return scope
+    finally:
+        if db.get_bind().dialect.name=="postgresql":
+            db.execute(text("SELECT set_config('app.external_provider_id',:marker,true)"),
+                       {"marker":previous_marker or ""})
 
 
 def _closure_blockers(db,work):
