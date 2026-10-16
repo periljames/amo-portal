@@ -496,10 +496,18 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await expect(page.getByRole("region", { name: "Planner conflicts" })).toBeVisible();
   await expect(page.getByText("Hangar surveillance", { exact: true })).toBeVisible();
   await page.getByLabel("Conflict override reason").fill("Activities are operationally separated with independent coverage.");
+  // The parent scheduling queue closes its embedded panel on success. Verify
+  // the authoritative POST receipt before that controlled panel unmounts,
+  // rather than expecting the internal schedule ID to remain painted in it.
+  const scheduleReceipt = page.waitForResponse((response) =>
+    response.url().includes("/audit-programmes/programme-1/items/programme-item-1/schedule")
+    && response.request().method() === "POST"
+    && response.status() === 201,
+  );
   await page.getByRole("button", { name: "Create with governed override" }).click();
-
+  const committed = await (await scheduleReceipt).json() as { id: string };
+  expect(committed.id).toBe("schedule-1");
   await expect(page.getByText("Schedule created", { exact: false })).toBeVisible();
-  await expect(page.getByText("schedule-1", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open in Planner" })).toBeVisible();
 });
 
