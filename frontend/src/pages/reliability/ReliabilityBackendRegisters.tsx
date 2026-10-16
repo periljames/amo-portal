@@ -58,8 +58,6 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError("");
     const offset = page * PAGE_SIZE;
     const limit = PAGE_SIZE + 1;
     const request: Promise<Row[]> = view === "events"
@@ -78,6 +76,7 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
   }, [view, page, query, status, refresh]);
 
   const results = useMemo(() => rows, [rows]);
+  const startLoading = () => { setLoading(true); setError(""); };
   const columns = view === "events" ? ["Recorded", "Aircraft", "Event / severity", "ATA", "Source", "Description", "Reference"]
     : view === "alerts" ? ["Alert", "Severity", "Status", "Triggered", "Disposition"]
       : view === "cases" ? ["Case", "Aircraft", "Severity", "Status", "Opened", "Classification"]
@@ -107,18 +106,18 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
     <header className="rel-backend-register__header">
       <div><p className="reliability-v2__eyebrow">Reliability / Authoritative register</p>
         <h1>{names[view]}</h1><p>{descriptions[view]}</p></div>
-      <button type="button" onClick={() => setRefresh((v) => v + 1)} disabled={loading}>
+      <button type="button" onClick={() => { startLoading(); setRefresh((v) => v + 1); }} disabled={loading}>
         <RefreshCw size={15} aria-hidden="true" /> Refresh</button>
     </header>
     <div className="rel-backend-register__tools">
-      {view === "events" && <form onSubmit={(event) => { event.preventDefault(); setPage(0); setQuery(typedQuery.trim()); }}>
+      {view === "events" && <form onSubmit={(event) => { event.preventDefault(); if (page !== 0 || query !== typedQuery.trim()) startLoading(); setPage(0); setQuery(typedQuery.trim()); }}>
         <label><Search size={16} aria-hidden="true" /><span className="sr-only">Search all occurrence records</span>
           <input type="search" placeholder="Search source occurrences…" value={typedQuery}
             onChange={(event) => setTypedQuery(event.target.value)} /></label>
         <button type="submit">Search all records</button>
       </form>}
       {view !== "events" && <label className="rel-backend-register__status"><SlidersHorizontal size={16} aria-hidden="true" />
-        <span>Filter status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(0); }}>
+        <span>Filter status</span><select value={status} onChange={(event) => { startLoading(); setStatus(event.target.value); setPage(0); }}>
           <option value="">All statuses</option>
           {(view === "alerts" ? ALERT_STATES : view === "cases" ? CASE_STATES : ENGINE_STATES).map((value) =>
             <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
@@ -132,7 +131,7 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
       Search and status filters are applied by the server. CSV exports only the visible loaded page.
       There is no inferred total record count.</p>
     {error && <div className="rel-backend-register__error" role="alert">{error}
-      <button type="button" onClick={() => setRefresh((v) => v + 1)}>Retry</button></div>}
+      <button type="button" onClick={() => { startLoading(); setRefresh((v) => v + 1); }}>Retry</button></div>}
     {loading && <p role="status" className="rel-backend-register__loading">Loading source records…</p>}
     {!loading && !error && <>
       <div className="rel-backend-register__viewport" role="region" aria-label={"Scrollable " + names[view]} tabIndex={0}>
@@ -149,9 +148,9 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
       </div>
       <footer className="rel-backend-register__pager">
         <span>{results.length ? page * PAGE_SIZE + 1 : 0}–{page * PAGE_SIZE + results.length} loaded · Page {page + 1}</span>
-        <div><button type="button" disabled={page === 0} onClick={() => setPage((v) => Math.max(0, v - 1))}>
+        <div><button type="button" disabled={page === 0} onClick={() => { startLoading(); setPage((v) => Math.max(0, v - 1)); }}>
           <ArrowLeft size={16} aria-hidden="true" /> Previous</button>
-          <button type="button" disabled={!hasNext} onClick={() => setPage((v) => v + 1)}>
+          <button type="button" disabled={!hasNext} onClick={() => { startLoading(); setPage((v) => v + 1); }}>
             Next page <ArrowRight size={16} aria-hidden="true" /></button></div>
       </footer>
     </>}
