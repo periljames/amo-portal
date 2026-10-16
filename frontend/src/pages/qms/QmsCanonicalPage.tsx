@@ -11,6 +11,7 @@ const QmsCarControlLoopPage = lazy(qmsPageLoaders.carControl);
 const QmsCarPerformanceReportPage = lazy(qmsPageLoaders.carReport);
 const QmsExternalProvidersPage = lazy(qmsPageLoaders.providers);
 const QmsRegisterPage = lazy(qmsPageLoaders.register);
+const QualityAuditRegisterPage = lazy(() => import("../qualityAudits/QualityAuditRegisterPage"));
 const QmsPlannerLivePage = lazy(qmsPageLoaders.planner);
 
 export default function QmsCanonicalPage(): React.ReactElement {
@@ -88,6 +89,13 @@ function QmsCanonicalContent(): React.ReactElement {
   // The controlled checklist library is mounted as the workspace content itself.
   // QualityEnhancementsHost stays mounted for shared Quality support but omits its
   // duplicate checklist-template child on this route.
+  // Findings/closeout are served by the bounded authoritative audit register.
+  // The generic QMS module workspace calls the legacy collection endpoint and
+  // must not own this audited route or perform per-audit fan-out.
+  if (/\/quality\/audits\/register\/?$/i.test(location.pathname)) {
+    return <QualityAuditRegisterPage />;
+  }
+
   if (/\/quality\/audits\/checklists\/?$/i.test(location.pathname)) {
     return assuranceWorkspace(
       "Audit checklists",
