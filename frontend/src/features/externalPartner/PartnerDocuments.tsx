@@ -189,7 +189,9 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     xhr.send(payload);
   }
   const refreshAll=()=>setRefresh(v=>v+1);
-  const resetRetry=()=>{pendingKey.current="";setProgress(0);};
+  const resetRetry=()=>{pendingKey.current="";setProgress(0);
+    try{localStorage.removeItem(`provider-resumable:${tenant}`);}catch{/* private browser */}
+  };
   return <div className="partner-stack">
     <Section title="Required documents and approved forms"
       description="Your AMO controls these requirements by provider category. Only documents released to your account are downloadable.">
